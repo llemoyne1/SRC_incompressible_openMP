@@ -1,0 +1,45 @@
+# Builds
+build/
+build_*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Objets et binaires
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+
+# CUDA
+*.ptx
+*.cubin
+*.fatbin
+
+# Logs
+*.log
+slurm-*.out
+
+# Données et sorties de simulation
+data/
+runs/
+results/
+outputs/
+runout/
+dump/
+dumps/
+
+# Fichiers binaires de simulation
+*.bin
+
+# MATLAB temporaires
+*.asv
+
+# Système
+.DS_Store
+Thumbs.db
