@@ -1,0 +1,153 @@
+#include "params_io.h"
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_map>
+
+namespace mpcd {
+namespace {
+
+std::string trim(const std::string& s) {
+    std::size_t b = 0;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) { ++b; }
+    std::size_t e = s.size();
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) { --e; }
+    return s.substr(b, e - b);
+}
+
+std::unordered_map<std::string, std::string> read_kv_map(const std::string& filepath) {
+    std::ifstream fin(filepath);
+    if (!fin) {
+        throw std::runtime_error("Cannot open params file: " + filepath);
+    }
+    std::unordered_map<std::string, std::string> kv;
+    std::string line;
+    while (std::getline(fin, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        const auto pos = line.find('=');
+        if (pos == std::string::npos) {
+            throw std::runtime_error("Invalid key=value line in params file: " + line);
+        }
+        const std::string key = trim(line.substr(0, pos));
+        const std::string value = trim(line.substr(pos + 1));
+        kv[key] = value;
+    }
+    return kv;
+}
+
+template <typename T>
+T parse_number(const std::string& s);
+
+template <>
+int parse_number<int>(const std::string& s) {
+    return std::stoi(s);
+}
+
+template <>
+double parse_number<double>(const std::string& s) {
+    return std::stod(s);
+}
+
+bool parse_bool(const std::string& s) {
+    if (s == "true" || s == "1") return true;
+    if (s == "false" || s == "0") return false;
+    throw std::runtime_error("Invalid boolean value: " + s);
+}
+
+const std::string& require_key(const std::unordered_map<std::string, std::string>& kv,
+                               const std::string& key) {
+    auto it = kv.find(key);
+    if (it == kv.end()) {
+        throw std::runtime_error("Missing required params key: " + key);
+    }
+    return it->second;
+}
+
+} // namespace
+
+Params read_params_kv(const std::string& filepath) {
+    const auto kv = read_kv_map(filepath);
+    Params p{};
+
+    p.Nx = parse_number<int>(require_key(kv, "Nx"));
+    p.Ny = parse_number<int>(require_key(kv, "Ny"));
+    p.Nc = parse_number<int>(require_key(kv, "Nc"));
+    p.n = parse_number<int>(require_key(kv, "n"));
+    p.Lx = parse_number<double>(require_key(kv, "Lx"));
+    p.Ly = parse_number<double>(require_key(kv, "Ly"));
+    p.dt = parse_number<double>(require_key(kv, "dt"));
+    p.a0 = parse_number<double>(require_key(kv, "a0"));
+
+    p.alpha = parse_number<double>(require_key(kv, "alpha"));
+    p.kBT = parse_number<double>(require_key(kv, "kBT"));
+    p.g = parse_number<double>(require_key(kv, "g"));
+    p.bodyForceX = parse_number<double>(require_key(kv, "bodyForceX"));
+    p.useThermostat = parse_bool(require_key(kv, "useThermostat"));
+    p.keepMeanFlow = parse_bool(require_key(kv, "keepMeanFlow"));
+
+    p.boundary_left = require_key(kv, "boundary_left");
+    p.boundary_right = require_key(kv, "boundary_right");
+    p.boundary_bottom = require_key(kv, "boundary_bottom");
+    p.boundary_top = require_key(kv, "boundary_top");
+    p.Utop = parse_number<double>(require_key(kv, "Utop"));
+    p.Ubottom = parse_number<double>(require_key(kv, "Ubottom"));
+    p.wallSigma = parse_number<double>(require_key(kv, "wallSigma"));
+
+    p.noSurfaceCase = parse_bool(require_key(kv, "noSurfaceCase"));
+    p.redistributionEnableSurfaceTopology = parse_bool(require_key(kv, "redistributionEnableSurfaceTopology"));
+    p.redistributionWallWettingEnabled = parse_bool(require_key(kv, "redistributionWallWettingEnabled"));
+    p.useInterfaceVelocityReorientation = parse_bool(require_key(kv, "useInterfaceVelocityReorientation"));
+    p.useIncompressibleRedistribution = parse_bool(require_key(kv, "useIncompressibleRedistribution"));
+    p.redistribAfterCollision = parse_bool(require_key(kv, "redistribAfterCollision"));
+    p.useZoneRedistribution = parse_bool(require_key(kv, "useZoneRedistribution"));
+    p.zoneTileNx = parse_number<int>(require_key(kv, "zoneTileNx"));
+    p.zoneTileNy = parse_number<int>(require_key(kv, "zoneTileNy"));
+    p.zoneUseShiftedSecondPass = parse_bool(require_key(kv, "zoneUseShiftedSecondPass"));
+    p.zonePassthroughMode = parse_bool(require_key(kv, "zonePassthroughMode"));
+    p.zoneSingleFullDomainMode = parse_bool(require_key(kv, "zoneSingleFullDomainMode"));
+    p.enableMomentumCorrectionPostRedistribution = parse_bool(require_key(kv, "enableMomentumCorrectionPostRedistribution"));
+    p.gamma = parse_number<double>(require_key(kv, "gamma"));
+    p.coef = parse_number<double>(require_key(kv, "coef"));
+    p.highMode = require_key(kv, "highMode");
+    p.lowMode = require_key(kv, "lowMode");
+    p.maxRedistribPasses = parse_number<int>(require_key(kv, "maxRedistribPasses"));
+    p.useLocalFluidFractionThresholds = parse_bool(require_key(kv, "useLocalFluidFractionThresholds"));
+    p.fluidFracGain = parse_number<double>(require_key(kv, "fluidFracGain"));
+    p.lowThrFloor = parse_number<double>(require_key(kv, "lowThrFloor"));
+    p.highThrFloor = parse_number<double>(require_key(kv, "highThrFloor"));
+    p.lowThrBulkOverride = parse_number<double>(require_key(kv, "lowThrBulkOverride"));
+
+    p.useLiquidClosure = parse_bool(require_key(kv, "useLiquidClosure"));
+    p.useOptimalBetaRepair = parse_bool(require_key(kv, "useOptimalBetaRepair"));
+    p.betaRepair = parse_number<double>(require_key(kv, "betaRepair"));
+    p.betaEOS = parse_number<double>(require_key(kv, "betaEOS"));
+    p.Kvirial = parse_number<double>(require_key(kv, "Kvirial"));
+    p.smoothPdriveAtInterzone = parse_bool(require_key(kv, "smoothPdriveAtInterzone"));
+    p.smoothPdriveInterzoneWidthCells = parse_number<int>(require_key(kv, "smoothPdriveInterzoneWidthCells"));
+    p.smoothPdriveInterzoneBlend = parse_number<double>(require_key(kv, "smoothPdriveInterzoneBlend"));
+    p.smoothPdriveIncludeShiftedLayouts = parse_bool(require_key(kv, "smoothPdriveIncludeShiftedLayouts"));
+
+    return p;
+}
+
+void write_runout_kv(const std::string& filepath, const RunOutStep& runout) {
+    std::ofstream fout(filepath);
+    if (!fout) {
+        throw std::runtime_error("Cannot open runout file for writing: " + filepath);
+    }
+    fout << "inputTag=" << runout.inputTag << '\n';
+    fout << "outputTag=" << runout.outputTag << '\n';
+    fout << "pBotInst=" << runout.pBotInst << '\n';
+    fout << "pTopInst=" << runout.pTopInst << '\n';
+    fout << "pMeanInst=" << runout.pMeanInst << '\n';
+    fout << "layoutMode=" << runout.layoutMode << '\n';
+    fout << "nZonesExecuted=" << runout.nZonesExecuted << '\n';
+}
+
+} // namespace mpcd
