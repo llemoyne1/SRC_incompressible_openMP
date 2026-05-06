@@ -43,3 +43,7 @@ dumps/
 # Système
 .DS_Store
 Thumbs.db
+
+# Fichiers/répertoires locaux non versionnés
+matlab/
+CMakeLists.txt
