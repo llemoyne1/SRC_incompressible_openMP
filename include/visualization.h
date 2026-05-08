@@ -26,6 +26,10 @@ private:
     bool enabled_ = false;
     bool close_ = false;
     int every_ = 1;
+
+#ifdef ENABLE_VISUALIZATION
+    void* window_ = nullptr;
+#endif
 };
 
 } // namespace mpcd
