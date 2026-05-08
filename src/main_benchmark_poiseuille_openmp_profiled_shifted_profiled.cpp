@@ -20,6 +20,7 @@
 #include "srd_collision.h"
 #include "state_io.h"
 #include "types.h"
+#include "visualization.h"
 #include "zone_pass_openmp.h"
 
 namespace {
@@ -209,7 +210,9 @@ int main(int argc, char** argv) {
 
         State state = read_state(x_path, v_path, type_path, r0_path, has_type, has_r0, params.n);
         const double rhoTarget = rho_target_scalar(params);
-
+  Visualizer visualizer;
+  visualizer.init(params);
+  
         std::ofstream metrics(out_prefix + "_metrics.csv");
         if (!metrics) throw std::runtime_error("Cannot open metrics CSV for writing");
         metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
@@ -229,6 +232,10 @@ int main(int argc, char** argv) {
         if (contains_step(dumpSteps, 0)) {
             const auto td0 = Clock::now();
             const CellFields G0 = compute_cell_fields(state.x, state.v, params, rhoTarget);
+  if (visualizer.should_draw(0)) {
+    visualizer.update(0, 0.0, params, state, G0);
+  }
+  
             dump_snapshot(out_prefix, 0, state, G0, params.n, has_type, has_r0);
             timers.dumps += elapsed_seconds(td0, Clock::now());
         }
@@ -277,6 +284,13 @@ int main(int argc, char** argv) {
             const auto closureResult = run_liquid_closure(stateRef, shiftedResult.stateOut, params);
             const auto t_closure1 = Clock::now();
             state = closureResult.stateOut;
+            
+  if (visualizer.should_draw(step)) {
+    visualizer.update(step, step * params.dt, params, state, closureResult.outFields);
+    if (visualizer.should_close()) {
+      break;
+    }
+  }            
             const double timeClosureStep = elapsed_seconds(t_closure0, t_closure1);
             timers.closure += timeClosureStep;
 
@@ -421,6 +435,7 @@ int main(int argc, char** argv) {
         manifest << "fracShiftedKernel=" << (timers.shifted > 0 ? timers.shiftedKernel / timers.shifted : 0.0) << "\n";
         manifest << "fracShiftedPack=" << (timers.shifted > 0 ? timers.shiftedPack / timers.shifted : 0.0) << "\n";
         manifest << "fracShiftedMerge=" << (timers.shifted > 0 ? timers.shiftedMerge / timers.shifted : 0.0) << "\n";
+    visualizer.shutdown();
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << '\n';

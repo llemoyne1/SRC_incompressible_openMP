@@ -68,7 +68,41 @@ const std::string& require_key(const std::unordered_map<std::string, std::string
     }
     return it->second;
 }
+std::string get_string_or(
+    const std::unordered_map<std::string, std::string>& kv,
+    const std::string& key,
+    const std::string& defaultValue
+) {
+    auto it = kv.find(key);
+    return (it == kv.end()) ? defaultValue : it->second;
+}
 
+int get_int_or(
+    const std::unordered_map<std::string, std::string>& kv,
+    const std::string& key,
+    int defaultValue
+) {
+    auto it = kv.find(key);
+    return (it == kv.end()) ? defaultValue : parse_number<int>(it->second);
+}
+
+double get_double_or(
+    const std::unordered_map<std::string, std::string>& kv,
+    const std::string& key,
+    double defaultValue
+) {
+    auto it = kv.find(key);
+    return (it == kv.end()) ? defaultValue : parse_number<double>(it->second);
+}
+
+bool get_bool_or(
+    const std::unordered_map<std::string, std::string>& kv,
+    const std::string& key,
+    bool defaultValue
+) {
+    auto it = kv.find(key);
+    return (it == kv.end()) ? defaultValue : parse_bool(it->second);
+}
 } // namespace
 
 Params read_params_kv(const std::string& filepath) {
@@ -132,6 +166,18 @@ Params read_params_kv(const std::string& filepath) {
     p.smoothPdriveInterzoneWidthCells = parse_number<int>(require_key(kv, "smoothPdriveInterzoneWidthCells"));
     p.smoothPdriveInterzoneBlend = parse_number<double>(require_key(kv, "smoothPdriveInterzoneBlend"));
     p.smoothPdriveIncludeShiftedLayouts = parse_bool(require_key(kv, "smoothPdriveIncludeShiftedLayouts"));
+
+  p.visualEnable = get_bool_or(kv, "visualEnable", false);
+  p.visualEvery = get_int_or(kv, "visualEvery", 20);
+  p.visualMode = get_string_or(kv, "visualMode", "field_particles");
+  p.visualField = get_string_or(kv, "visualField", "speed");
+  p.visualFieldAutoScale = get_bool_or(kv, "visualFieldAutoScale", true);
+  p.visualFieldMin = get_double_or(kv, "visualFieldMin", 0.0);
+  p.visualFieldMax = get_double_or(kv, "visualFieldMax", 1.0);
+  p.visualShowParticles = get_bool_or(kv, "visualShowParticles", true);
+  p.visualMaxParticles = get_int_or(kv, "visualMaxParticles", 10000);
+  p.visualPointSize = get_double_or(kv, "visualPointSize", 2.0);
+  p.visualParticleColorMode = get_string_or(kv, "visualParticleColorMode", "speed");
 
     return p;
 }

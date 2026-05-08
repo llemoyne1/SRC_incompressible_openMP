@@ -84,6 +84,20 @@ params.smoothPdriveInterzoneWidthCells = 1;
 params.smoothPdriveInterzoneBlend = 1.0;
 params.smoothPdriveIncludeShiftedLayouts = true;
 
+% Optional real-time visualization.
+% Commit 1 only writes parameters; the C++ backend is still no-op.
+params.visualEnable = false;
+params.visualEvery = 20;
+params.visualMode = 'field_particles';
+params.visualField = 'speed';
+params.visualFieldAutoScale = true;
+params.visualFieldMin = 0.0;
+params.visualFieldMax = 1.0;
+params.visualShowParticles = true;
+params.visualMaxParticles = 10000;
+params.visualPointSize = 2.0;
+params.visualParticleColorMode = 'speed';
+
 fn = fieldnames(overrides);
 for k = 1:numel(fn)
     params.(fn{k}) = overrides.(fn{k});

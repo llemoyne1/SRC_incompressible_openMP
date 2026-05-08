@@ -69,6 +69,19 @@ struct Params {
     int smoothPdriveInterzoneWidthCells;
     double smoothPdriveInterzoneBlend;
     bool smoothPdriveIncludeShiftedLayouts;
+      // Optional real-time visualization.
+  // Commit 1 only wires parameters and a no-op backend.
+  bool visualEnable;
+  int visualEvery;
+  std::string visualMode;              // particles | field | field_particles
+  std::string visualField;             // Ux | Uy | speed | vorticity | N | rho
+  bool visualFieldAutoScale;
+  double visualFieldMin;
+  double visualFieldMax;
+  bool visualShowParticles;
+  int visualMaxParticles;
+  double visualPointSize;
+  std::string visualParticleColorMode; // type | speed | Ux | Uy
 };
 
 struct State {
