@@ -46,3 +46,6 @@ Thumbs.db
 
 # Fichiers/répertoires locaux non versionnés
 CMakeLists.txt
+
+# Dossiers locaux de runs Poiseuille / benchmarks
+rbps*/
