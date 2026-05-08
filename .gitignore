@@ -45,5 +45,4 @@ dumps/
 Thumbs.db
 
 # Fichiers/répertoires locaux non versionnés
-matlab/
 CMakeLists.txt
