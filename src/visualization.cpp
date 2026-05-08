@@ -6,6 +6,9 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
 
 #ifdef ENABLE_VISUALIZATION
 #include <GLFW/glfw3.h>
@@ -14,6 +17,52 @@
 namespace mpcd {
 
 namespace {
+
+
+std::string make_window_title(
+    int step,
+    double time,
+    const Params& p,
+    double vmin,
+    double vmax
+) {
+    std::ostringstream oss;
+    oss << "SRC/MPCD real-time view"
+        << " | step=" << step
+        << " | t=" << std::fixed << std::setprecision(4) << time
+        << " | field=" << p.visualField
+        << " | every=" << p.visualEvery
+        << " | scale=";
+
+    if (p.visualFieldAutoScale) {
+        oss << "auto";
+    } else {
+        oss << "[" << std::setprecision(3) << vmin << "," << vmax << "]";
+    }
+
+    return oss.str();
+}
+
+void compute_letterbox_viewport(
+    int fbW, int fbH,
+    double Lx, double Ly,
+    int& vx, int& vy, int& vw, int& vh
+) {
+    const double domainAspect = Lx / std::max(Ly, 1e-30);
+    const double winAspect = static_cast<double>(fbW) / std::max(1, fbH);
+
+    if (winAspect > domainAspect) {
+        vh = fbH;
+        vw = static_cast<int>(std::round(domainAspect * vh));
+        vx = (fbW - vw) / 2;
+        vy = 0;
+    } else {
+        vw = fbW;
+        vh = static_cast<int>(std::round(vw / domainAspect));
+        vx = 0;
+        vy = (fbH - vh) / 2;
+    }
+}
 
 double clamp01(double x) {
     if (x < 0.0) return 0.0;
@@ -169,13 +218,16 @@ bool Visualizer::init(const Params& params) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 
-    GLFWwindow* win = glfwCreateWindow(
-        1100,
-        850,
-        "SRC/MPCD real-time view",
-        nullptr,
-        nullptr
-    );
+const int winW = std::max(200, params.visualWindowWidth);
+const int winH = std::max(200, params.visualWindowHeight);
+
+GLFWwindow* win = glfwCreateWindow(
+    winW,
+    winH,
+    "SRC/MPCD real-time view",
+    nullptr,
+    nullptr
+);
 
     if (!win) {
         glfwTerminate();
@@ -234,7 +286,10 @@ void Visualizer::update(
     int w = 1;
     int h = 1;
     glfwGetFramebufferSize(win, &w, &h);
-    glViewport(0, 0, w, h);
+    
+int vx = 0, vy = 0, vw = w, vh = h;
+compute_letterbox_viewport(w, h, p.Lx, p.Ly, vx, vy, vw, vh);
+glViewport(vx, vy, vw, vh);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -257,7 +312,19 @@ void Visualizer::update(
 
         double vmin = p.visualFieldMin;
         double vmax = p.visualFieldMax;
+glfwSetWindowTitle(win, make_window_title(step, time, p, vmin, vmax).c_str());
+std::cout
+    << "[viz] step=" << step
+    << " t=" << time
+    << " field=" << p.visualField;
 
+if (p.visualFieldAutoScale) {
+    std::cout << " scale=auto";
+} else {
+    std::cout << " scale=[" << vmin << "," << vmax << "]";
+}
+
+std::cout << std::endl;
         if (p.visualFieldAutoScale) {
             autoscale_range(values, vmin, vmax);
         }
@@ -295,7 +362,19 @@ void Visualizer::update(
 
         double vmin = 0.0;
         double vmax = 1.0;
+glfwSetWindowTitle(win, make_window_title(step, time, p, vmin, vmax).c_str());
+std::cout
+    << "[viz] step=" << step
+    << " t=" << time
+    << " field=" << p.visualField;
 
+if (p.visualFieldAutoScale) {
+    std::cout << " scale=auto";
+} else {
+    std::cout << " scale=[" << vmin << "," << vmax << "]";
+}
+
+std::cout << std::endl;
         if (p.visualParticleColorMode != "type") {
             std::vector<double> pv;
             pv.reserve(static_cast<std::size_t>(std::min(n, maxP + 1)));

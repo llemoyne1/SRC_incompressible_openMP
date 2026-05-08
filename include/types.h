@@ -82,6 +82,8 @@ struct Params {
   int visualMaxParticles;
   double visualPointSize;
   std::string visualParticleColorMode; // type | speed | Ux | Uy
+    int visualWindowWidth;
+  int visualWindowHeight;
 };
 
 struct State {

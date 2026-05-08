@@ -178,7 +178,8 @@ Params read_params_kv(const std::string& filepath) {
   p.visualMaxParticles = get_int_or(kv, "visualMaxParticles", 10000);
   p.visualPointSize = get_double_or(kv, "visualPointSize", 2.0);
   p.visualParticleColorMode = get_string_or(kv, "visualParticleColorMode", "speed");
-
+  p.visualWindowWidth = get_int_or(kv, "visualWindowWidth", 1100);
+  p.visualWindowHeight = get_int_or(kv, "visualWindowHeight", 850);
     return p;
 }
 
