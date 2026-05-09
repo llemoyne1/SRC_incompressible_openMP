@@ -56,13 +56,13 @@ params = default_params();
 params = merge_structs(params, paramsOverrides);
 params = finalize_params(params, paramsOverrides);
 
-workdir    = getf(overrides, 'workdir', fullfile(pwd, 'rbps8_viz'));
+workdir    = getf(overrides, 'workdir', fullfile(pwd, 'rbps_work'));
 prefixIn   = getf(overrides, 'prefixIn', 'in');
 prefixOut  = getf(overrides, 'prefixOut', 'out');
 seed       = getf(overrides, 'seed', 1);
 nThreads   = getf(overrides, 'nThreads', 8);
 removeMean = logical(getf(overrides, 'removeMean', true));
-exePath    = getf(overrides, 'exePath', default_exe_path());
+exePath    = getf(overrides, 'exePath', '/home/llemoyne/gasdyn/mpcd/incompressible/build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled_viz'); %default_exe_path());
 
 if isfield(overrides, 'x') && isfield(overrides, 'v')
     x = overrides.x;
@@ -139,12 +139,14 @@ function params = default_params()
 
 params = struct();
 params.nThreads=4;
+%params.workdir=fullfile(rootWin,'rbps8_cyl_smooth_viz1');
+%params.exePath=[rootLin '/build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled_viz'];
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 50;
+params.Nx = 150;
 params.Ny = 50;
-params.Lx = 10.0;
+params.Lx = 20.0;
 params.Ly = 10.0;
 params.Nc = params.Nx * params.Ny;
 
@@ -157,7 +159,7 @@ params.alphaDeg = 90.0;
 params.alpha = deg2rad(params.alphaDeg);
 params.kBT = 1.0;
 params.g = 0.0;
-params.bodyForceX = 0.25;
+params.bodyForceX = 0.75;
 params.useThermostat = true;
 params.keepMeanFlow = false;
 
@@ -215,7 +217,7 @@ params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 % Optional real-time visualization
 params.visualEnable = true;
 params.visualEvery = 1;
-params.visualMode = 'field';       % particles | field | field_particles
+params.visualMode = 'field_particles';       % particles | field | field_particles
 params.visualField = 'vorticity';                % Ux | Uy | speed | vorticity | N | rho | P
 
 params.visualFieldSmoothingEnable = true;
