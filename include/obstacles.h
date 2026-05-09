@@ -32,4 +32,28 @@ bool point_in_obstacle(const Params& p, double x, double y);
 // Cell-centre solid mask, size Nx*Ny, using index c = ix + Nx*iy.
 std::vector<std::uint8_t> build_solid_mask(const Params& p);
 
+struct FluidFractionMaskSummary {
+    int nCells = 0;
+    int nSolidCells = 0;
+    int nPartialCells = 0;
+    int nFullFluidCells = 0;
+    double sumFluidFraction = 0.0;
+    double gammaFluidObstacle = 0.0;
+};
+
+// Cell-centered fluid fraction mask for rectangle minus obstacle.
+// phi[c] = fraction of cell c that is fluid.
+// c = ix + params.Nx * iy.
+// nSub is the number of quadrature samples per direction in each cell.
+// shiftX, shiftY allow using the same routine for the base and shifted grids.
+std::vector<double> build_fluid_fraction_mask(const Params& params,
+                                              int nSub,
+                                              double shiftX,
+                                              double shiftY);
+
+FluidFractionMaskSummary summarize_fluid_fraction_mask(const Params& params,
+                                                       const std::vector<double>& phi,
+                                                       double phiSolidTol = 1e-12,
+                                                       double phiFullTol = 1e-12);
+
 } // namespace mpcd

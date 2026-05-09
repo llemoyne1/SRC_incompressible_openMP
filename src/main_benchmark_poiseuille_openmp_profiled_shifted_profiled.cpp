@@ -413,6 +413,40 @@ int main(int argc, char** argv) {
         const ObstacleCounts finalObsCounts = compute_obstacle_counts(state, params);
         manifest << "finalInsideObstacle=" << finalObsCounts.inside << "\n";
         manifest << "finalNearObstacle=" << finalObsCounts.near << "\n";
+        const int obstacleMaskSubsamples = 8;
+        const double dxMask = params.Lx / static_cast<double>(std::max(1, params.Nx));
+        const double dyMask = params.Ly / static_cast<double>(std::max(1, params.Ny));
+
+        const auto phiBase = build_fluid_fraction_mask(
+            params,
+            obstacleMaskSubsamples,
+            0.0,
+            0.0
+        );
+        const auto phiShifted = build_fluid_fraction_mask(
+            params,
+            obstacleMaskSubsamples,
+            0.5 * dxMask,
+            0.5 * dyMask
+        );
+
+        const auto maskBase = summarize_fluid_fraction_mask(params, phiBase);
+        const auto maskShifted = summarize_fluid_fraction_mask(params, phiShifted);
+
+        manifest << "obstacleMaskSubsamples=" << obstacleMaskSubsamples << "\n";
+
+        manifest << "fluidMaskBaseSum=" << maskBase.sumFluidFraction << "\n";
+        manifest << "fluidMaskBaseSolidCells=" << maskBase.nSolidCells << "\n";
+        manifest << "fluidMaskBasePartialCells=" << maskBase.nPartialCells << "\n";
+        manifest << "fluidMaskBaseFullFluidCells=" << maskBase.nFullFluidCells << "\n";
+        manifest << "fluidMaskBaseGammaFluid=" << maskBase.gammaFluidObstacle << "\n";
+
+        manifest << "fluidMaskShiftedSum=" << maskShifted.sumFluidFraction << "\n";
+        manifest << "fluidMaskShiftedSolidCells=" << maskShifted.nSolidCells << "\n";
+        manifest << "fluidMaskShiftedPartialCells=" << maskShifted.nPartialCells << "\n";
+        manifest << "fluidMaskShiftedFullFluidCells=" << maskShifted.nFullFluidCells << "\n";
+        manifest << "fluidMaskShiftedGammaFluid=" << maskShifted.gammaFluidObstacle << "\n";
+
                 manifest << "finalQx=" << flow_rate_qx(closureResult.outFields, params) << "\n";
                 manifest << "totalParticlesMovedDense=" << (baseResult.metrics.nParticlesMovedDense + shiftedResult.metrics.nParticlesMovedDense) << "\n";
                 manifest << "totalParticlesMovedSparse=" << (baseResult.metrics.nParticlesMovedSparse + shiftedResult.metrics.nParticlesMovedSparse) << "\n";
