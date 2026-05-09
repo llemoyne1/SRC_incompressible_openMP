@@ -43,7 +43,7 @@ struct FluidFractionMaskSummary {
 
 // Cell-centered fluid fraction mask for rectangle minus obstacle.
 // phi[c] = fraction of cell c that is fluid.
-// c = ix + params.Nx * iy.
+// c = iy + params.Ny * ix, consistently with common_grid.cpp.
 // nSub is the number of quadrature samples per direction in each cell.
 // shiftX, shiftY allow using the same routine for the base and shifted grids.
 std::vector<double> build_fluid_fraction_mask(const Params& params,
