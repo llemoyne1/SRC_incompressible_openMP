@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "common_grid.h"
+#include "obstacles.h"
 
 namespace mpcd {
 namespace {
@@ -128,6 +129,84 @@ std::vector<int> build_counts_from_parts(const std::vector<std::vector<int>>& pa
 std::vector<char> build_active_mask_vec(const Params& params) {
     return std::vector<char>(static_cast<std::size_t>(params.Nc), 1);
 }
+
+constexpr double kSolidPhiTol = 1e-12;
+// Conservative threshold for redistribution activity.
+// With this value, only cells that are effectively fully fluid act as
+// donors/receivers. Partial cut-cells are left to the dynamics and wall
+// reflection instead of being artificially filled by redistribution.
+constexpr double kRedistributionPhiMin = 1.0 - 1e-12;
+
+std::vector<double> canonical_fluid_fraction_mask(const Params& params,
+                                                  const std::vector<double>& fluidFractionMask) {
+    if (static_cast<int>(fluidFractionMask.size()) == params.Nc) {
+        return fluidFractionMask;
+    }
+
+    if (obstacle_is_active_cylinder(params)) {
+        return build_fluid_fraction_mask(params, 8, 0.0, 0.0);
+    }
+
+    return std::vector<double>(static_cast<std::size_t>(params.Nc), 1.0);
+}
+
+double gamma_from_fluid_fraction_mask(const Params& params,
+                                      const std::vector<double>& phi) {
+    double sumPhi = 0.0;
+    for (double p : phi) {
+        if (p > kSolidPhiTol) {
+            sumPhi += p;
+        }
+    }
+
+    if (sumPhi <= 0.0) {
+        return params.gamma;
+    }
+
+    return static_cast<double>(params.n) / sumPhi;
+}
+
+void apply_solid_fluid_thresholds(const std::vector<double>& phi,
+                                  double gammaFluid,
+                                  const Params& params,
+                                  const std::vector<char>& activeMaskVec,
+                                  std::vector<int>& bulkMask,
+                                  std::vector<double>& lowThrActiveMap,
+                                  std::vector<double>& highThrActiveMap) {
+    const double coef = params.coef;
+
+    for (int c = 0; c < params.Nc; ++c) {
+        const double phic = phi[static_cast<std::size_t>(c)];
+
+        if (!activeMaskVec[static_cast<std::size_t>(c)] || phic < kRedistributionPhiMin) {
+            bulkMask[static_cast<std::size_t>(c)] = 0;
+            lowThrActiveMap[static_cast<std::size_t>(c)] = 0.0;
+            highThrActiveMap[static_cast<std::size_t>(c)] = 0.0;
+            continue;
+        }
+
+        const double target = gammaFluid * phic;
+
+        if (params.lowMode == "1+coef") {
+            lowThrActiveMap[static_cast<std::size_t>(c)] = target / (1.0 + coef);
+        } else {
+            lowThrActiveMap[static_cast<std::size_t>(c)] = target * (1.0 - coef);
+        }
+
+        if (params.highMode == "1+coef") {
+            highThrActiveMap[static_cast<std::size_t>(c)] = target * (1.0 + coef);
+        } else {
+            highThrActiveMap[static_cast<std::size_t>(c)] = target + target * coef;
+        }
+
+        lowThrActiveMap[static_cast<std::size_t>(c)] =
+            std::max(lowThrActiveMap[static_cast<std::size_t>(c)], 0.0);
+        highThrActiveMap[static_cast<std::size_t>(c)] =
+            std::max(highThrActiveMap[static_cast<std::size_t>(c)],
+                     lowThrActiveMap[static_cast<std::size_t>(c)]);
+    }
+}
+
 
 std::pair<double,double> total_momentum(const std::vector<double>& v, int n) {
     double px = 0.0, py = 0.0;
@@ -285,11 +364,30 @@ std::vector<double> sample_in_cell(int cell, int n, const Params& params, std::m
     const double dy = params.Ly / static_cast<double>(params.Ny);
     const double x0 = static_cast<double>(ix) * dx;
     const double y0 = static_cast<double>(iy) * dy;
+
     std::vector<double> out(static_cast<std::size_t>(2 * n), 0.0);
+
     for (int k = 0; k < n; ++k) {
-        out[2 * k] = x0 + dx * U(rng);
-        out[2 * k + 1] = y0 + dy * U(rng);
+        bool accepted = false;
+
+        for (int attempt = 0; attempt < 256; ++attempt) {
+            const double xc = x0 + dx * U(rng);
+            const double yc = y0 + dy * U(rng);
+
+            if (!point_in_obstacle(params, xc, yc)) {
+                out[2 * k] = xc;
+                out[2 * k + 1] = yc;
+                accepted = true;
+                break;
+            }
+        }
+
+        if (!accepted) {
+            out[2 * k] = x0 + dx * U(rng);
+            out[2 * k + 1] = y0 + dy * U(rng);
+        }
     }
+
     return out;
 }
 
@@ -670,9 +768,19 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
                                  std::vector<double>& v,
                                  const Params& params,
                                  const Zone& zone,
-                                 std::uint64_t rngSeed) {
+                                 std::uint64_t rngSeed,
+                                 const std::vector<double>& fluidFractionMask) {
     ZoneKernelResult out{};
-    const auto activeMaskVec = build_active_mask_vec(params);
+    const auto fluidPhi = canonical_fluid_fraction_mask(params, fluidFractionMask);
+    const double gammaFluid = gamma_from_fluid_fraction_mask(params, fluidPhi);
+
+    auto activeMaskVec = build_active_mask_vec(params);
+    for (int c = 0; c < params.Nc; ++c) {
+        if (fluidPhi[static_cast<std::size_t>(c)] < kRedistributionPhiMin) {
+            activeMaskVec[static_cast<std::size_t>(c)] = 0;
+        }
+    }
+
     const auto zoneMaskVec = zone.maskVec;
     std::vector<char> zoneActiveMaskVec(static_cast<std::size_t>(params.Nc), 0);
     for (int c = 0; c < params.Nc; ++c) zoneActiveMaskVec[static_cast<std::size_t>(c)] = activeMaskVec[static_cast<std::size_t>(c)] && zoneMaskVec[static_cast<std::size_t>(c)];
@@ -723,6 +831,7 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
                 }
             }
         }
+        apply_solid_fluid_thresholds(fluidPhi, gammaFluid, params, activeMaskVec, bulkMask, lowThrActiveMap, highThrActiveMap);
         const auto bulkMaskDenseBefore = bulkMask;
 
         std::vector<int> denseList;
@@ -764,6 +873,7 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
                 highThrActiveMap[static_cast<std::size_t>(c)] = highThr;
             }
         }
+        apply_solid_fluid_thresholds(fluidPhi, gammaFluid, params, activeMaskVec, bulkMask, lowThrActiveMap, highThrActiveMap);
         out.stats[0] += static_cast<double>(nHigh);
         out.stats[1] += static_cast<double>(nLow);
         out.stats[2] += static_cast<double>(movedOut);
@@ -777,6 +887,7 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
                 highThrActiveMap[static_cast<std::size_t>(c)] = highThr;
             }
         }
+        apply_solid_fluid_thresholds(fluidPhi, gammaFluid, params, activeMaskVec, bulkMask, lowThrActiveMap, highThrActiveMap);
         // MATLAB keeps looping until max pass count without early break.
     }
 
@@ -792,6 +903,7 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
             highThrActiveMap[static_cast<std::size_t>(c)] = highThr;
         }
     }
+    apply_solid_fluid_thresholds(fluidPhi, gammaFluid, params, activeMaskVec, bulkMask, lowThrActiveMap, highThrActiveMap);
     const auto bulkMaskLowBefore = bulkMask;
 
     std::vector<int> lowList;
@@ -810,13 +922,16 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
         auto neigh = local_neighbors_in_zone(c, zone, params, 1);
         if (neigh.empty()) continue;
 
-        const int lowThrBulkInt = static_cast<int>(std::ceil(lowThrBulk));
-        int need = std::max(0, lowThrBulkInt - nc);
+        const double lowThrLocal = lowThrActiveMap[static_cast<std::size_t>(c)];
+        const int lowThrLocalInt = static_cast<int>(std::floor(std::max(0.0, lowThrLocal) + 1e-12));
+        int need = std::max(0, lowThrLocalInt - nc);
         if (need <= 0) continue;
 
         std::vector<int> donors;
         for (int dtest : neigh) {
-            if (zoneMaskVec[static_cast<std::size_t>(dtest)] && cntVec[static_cast<std::size_t>(dtest)] > lowThrBulkInt) donors.push_back(dtest);
+            const double reserveLowThr = lowThrActiveMap[static_cast<std::size_t>(dtest)];
+            const int reserve = static_cast<int>(std::floor(std::max(0.0, reserveLowThr) + 1e-12));
+            if (zoneActiveMaskVec[static_cast<std::size_t>(dtest)] && cntVec[static_cast<std::size_t>(dtest)] > reserve) donors.push_back(dtest);
         }
         if (donors.empty()) continue;
 
@@ -825,7 +940,9 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
         for (int d : orderedDonors) {
             auto idsDonor = partsInCell[static_cast<std::size_t>(d)];
             if (idsDonor.empty()) continue;
-            const int avail = cntVec[static_cast<std::size_t>(d)] - lowThrBulkInt;
+            const double donorReserveLowThr = lowThrActiveMap[static_cast<std::size_t>(d)];
+            const int donorReserve = static_cast<int>(std::floor(std::max(0.0, donorReserveLowThr) + 1e-12));
+            const int avail = cntVec[static_cast<std::size_t>(d)] - donorReserve;
             if (avail <= 0) continue;
             const int nt = std::min({need, avail, static_cast<int>(idsDonor.size())});
             if (nt <= 0) continue;
@@ -866,6 +983,7 @@ ZoneKernelResult run_zone_kernel(std::vector<double>& x,
         highThrActiveMap[static_cast<std::size_t>(c)] = maps.highThrLocMap[static_cast<std::size_t>(c)];
         if (bulkMask[static_cast<std::size_t>(c)]) highThrActiveMap[static_cast<std::size_t>(c)] = highThr;
     }
+    apply_solid_fluid_thresholds(fluidPhi, gammaFluid, params, activeMaskVec, bulkMask, lowThrActiveMap, highThrActiveMap);
 
     std::vector<double> dU2(static_cast<std::size_t>(params.Nc), 0.0);
     double dUmax = 0.0;
@@ -1066,12 +1184,13 @@ ZoneKernelStats run_zone_kernel_inplace(std::vector<double>& x,
                                         std::vector<double>& v,
                                         const Params& params,
                                         const ZoneDescriptor& zone,
-                                        std::uint64_t rngSeed) {
+                                        std::uint64_t rngSeed,
+                                        const std::vector<double>& fluidFractionMask) {
     Zone z{};
     z.id = zone.id;
     z.cellIds = zone.cellIds;
     z.maskVec.assign(zone.maskVec.begin(), zone.maskVec.end());
-    const auto r = run_zone_kernel(x, v, params, z, rngSeed);
+    const auto r = run_zone_kernel(x, v, params, z, rngSeed, fluidFractionMask);
     ZoneKernelStats out{};
     out.stats = r.stats;
     out.diag = r.diag;
@@ -1096,7 +1215,8 @@ std::vector<int> build_particle_ids_in_zone(const std::vector<double>& x,
 ZonePassResult run_zone_pass(const State& stateIn,
                              const Params& params,
                              const std::string& layoutMode,
-                             std::uint64_t rngSeedBase) {
+                             std::uint64_t rngSeedBase,
+                             const std::vector<double>& fluidFractionMask) {
     if (!params.useIncompressibleRedistribution || !params.useZoneRedistribution) {
         throw std::runtime_error("run_zone_pass requires useIncompressibleRedistribution=true and useZoneRedistribution=true");
     }
@@ -1131,7 +1251,7 @@ ZonePassResult run_zone_pass(const State& stateIn,
     double corrMax = 0.0;
 
     for (std::size_t iz = 0; iz < layout.zones.size(); ++iz) {
-        auto zk = run_zone_kernel(out.stateOut.x, out.stateOut.v, params, layout.zones[iz], rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1));
+        auto zk = run_zone_kernel(out.stateOut.x, out.stateOut.v, params, layout.zones[iz], rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1), fluidFractionMask);
         out.metrics.nParticlesMovedDense += zk.movedDense;
         out.metrics.nParticlesMovedSparse += zk.movedSparse;
         if (zk.stats[4] > 0.0) {

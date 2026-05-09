@@ -63,7 +63,8 @@ ZoneKernelStats run_zone_kernel_inplace(std::vector<double>& x,
                                         std::vector<double>& v,
                                         const Params& params,
                                         const ZoneDescriptor& zone,
-                                        std::uint64_t rngSeed);
+                                        std::uint64_t rngSeed,
+                                        const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 std::vector<int> build_particle_ids_in_zone(const std::vector<double>& x,
                                             const Params& params,
@@ -72,7 +73,8 @@ std::vector<int> build_particle_ids_in_zone(const std::vector<double>& x,
 ZonePassResult run_zone_pass(const State& stateIn,
                              const Params& params,
                              const std::string& layoutMode,
-                             std::uint64_t rngSeedBase);
+                             std::uint64_t rngSeedBase,
+                             const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 void write_i32_grid_bin(const std::string& filepath, int Nx, int Ny, const std::vector<std::int32_t>& data);
 

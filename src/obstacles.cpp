@@ -155,7 +155,7 @@ std::vector<double> build_fluid_fraction_mask(const Params& params,
                 }
             }
 
-            phi[static_cast<std::size_t>(ix) + static_cast<std::size_t>(Nx) * static_cast<std::size_t>(iy)] =
+            phi[static_cast<std::size_t>(iy) + static_cast<std::size_t>(Ny) * static_cast<std::size_t>(ix)] =
                 static_cast<double>(nFluid) * invSamples;
         }
     }

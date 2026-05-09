@@ -374,7 +374,7 @@ int main(int argc, char** argv) {
             timers.refBuild += elapsed_seconds(t_ref0, Clock::now());
 
             const auto t_base0 = Clock::now();
-            const auto baseResult = run_zone_pass_openmp(stateRef, params, "base", 88172645463325252ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads);
+            const auto baseResult = run_zone_pass_openmp(stateRef, params, "base", 88172645463325252ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads, phiBaseDiag);
             timers.base += elapsed_seconds(t_base0, Clock::now());
             timers.baseLayout += baseResult.metrics.timeLayout;
             timers.baseExtract += baseResult.metrics.timeZoneExtract;
@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
             timers.baseMerge += baseResult.metrics.timeMerge;
 
             const auto t_shift0 = Clock::now();
-            const auto shiftedResult = run_zone_pass_openmp(baseResult.stateOut, params, "shifted", 88172645463325252ULL + 4099ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads);
+            const auto shiftedResult = run_zone_pass_openmp(baseResult.stateOut, params, "shifted", 88172645463325252ULL + 4099ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads, phiBaseDiag);
             timers.shifted += elapsed_seconds(t_shift0, Clock::now());
             timers.shiftedLayout += shiftedResult.metrics.timeLayout;
             timers.shiftedExtract += shiftedResult.metrics.timeZoneExtract;
@@ -424,7 +424,7 @@ int main(int argc, char** argv) {
                 const auto basePair = compute_occstd_outband(baseFields, params);
                 const auto shiftedPair = compute_occstd_outband(shiftedFields, params);
                 const auto baseFluidPair = compute_occstd_outband_fluid_aware(baseFields, params, phiBaseDiag);
-                const auto shiftedFluidPair = compute_occstd_outband_fluid_aware(shiftedFields, params, phiShiftedDiag);
+                const auto shiftedFluidPair = compute_occstd_outband_fluid_aware(shiftedFields, params, phiBaseDiag);
                 baseOccStd = basePair.first;
                 baseOutBand = basePair.second;
                 shiftedOccStd = shiftedPair.first;
@@ -545,6 +545,8 @@ int main(int argc, char** argv) {
         manifest << "fluidMaskBaseDiagGammaFluid=" << fluidMaskBaseDiag.gammaFluidObstacle << "\n";
         manifest << "fluidMaskShiftedDiagSum=" << fluidMaskShiftedDiag.sumFluidFraction << "\n";
         manifest << "fluidMaskShiftedDiagGammaFluid=" << fluidMaskShiftedDiag.gammaFluidObstacle << "\n";
+        manifest << "fluidMaskUsedForBaseRedistribution=baseCellMask\n";
+        manifest << "fluidMaskUsedForShiftedRedistribution=baseCellMask\n";
 
                 manifest << "finalQx=" << flow_rate_qx(closureResult.outFields, params) << "\n";
                 manifest << "totalParticlesMovedDense=" << (baseResult.metrics.nParticlesMovedDense + shiftedResult.metrics.nParticlesMovedDense) << "\n";

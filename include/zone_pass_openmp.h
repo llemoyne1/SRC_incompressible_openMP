@@ -36,20 +36,24 @@ OpenMPPassResult run_zone_pass_openmp(const State& stateIn,
                                       const Params& params,
                                       const std::string& layoutMode,
                                       std::uint64_t rngSeedBase,
-                                      int nThreadsRequested);
+                                      int nThreadsRequested,
+                                      const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 OpenMPPassResult run_zone_pass_openmp_base(const State& stateIn,
                                            const Params& params,
                                            std::uint64_t rngSeedBase,
-                                           int nThreadsRequested);
+                                           int nThreadsRequested,
+                                           const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 OpenMPPassResult run_zone_pass_sync_serial(const State& stateIn,
                                            const Params& params,
                                            const std::string& layoutMode,
-                                           std::uint64_t rngSeedBase);
+                                           std::uint64_t rngSeedBase,
+                                           const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 OpenMPPassResult run_zone_pass_sync_serial_base(const State& stateIn,
                                                 const Params& params,
-                                                std::uint64_t rngSeedBase);
+                                                std::uint64_t rngSeedBase,
+                                                const std::vector<double>& fluidFractionMask = std::vector<double>());
 
 } // namespace mpcd

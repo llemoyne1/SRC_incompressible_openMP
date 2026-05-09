@@ -36,7 +36,8 @@ OpenMPPassResult run_zone_pass_snapshot_impl(const State& stateIn,
                                              const std::string& layoutMode,
                                              std::uint64_t rngSeedBase,
                                              int nThreadsRequested,
-                                             bool useOpenMP) {
+                                             bool useOpenMP,
+                                             const std::vector<double>& fluidFractionMask) {
     if (!params.useIncompressibleRedistribution || !params.useZoneRedistribution) {
         throw std::runtime_error("run_zone_pass_snapshot_impl requires useIncompressibleRedistribution=true and useZoneRedistribution=true");
     }
@@ -75,7 +76,8 @@ OpenMPPassResult run_zone_pass_snapshot_impl(const State& stateIn,
             auto t_kernel0 = Clock::now();
             zb.stats = run_zone_kernel_inplace(xLocal, vLocal, params,
                                                layout.zones[static_cast<std::size_t>(iz)],
-                                               rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1));
+                                               rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1),
+                                               fluidFractionMask);
             zb.times.kernel += std::chrono::duration<double>(Clock::now() - t_kernel0).count();
 
             auto t_alloc0 = Clock::now();
@@ -111,7 +113,8 @@ OpenMPPassResult run_zone_pass_snapshot_impl(const State& stateIn,
             auto t_kernel0 = Clock::now();
             zb.stats = run_zone_kernel_inplace(xLocal, vLocal, params,
                                                layout.zones[static_cast<std::size_t>(iz)],
-                                               rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1));
+                                               rngSeedBase + 104729ULL * static_cast<std::uint64_t>(iz + 1),
+                                               fluidFractionMask);
             zb.times.kernel += std::chrono::duration<double>(Clock::now() - t_kernel0).count();
 
             auto t_alloc0 = Clock::now();
@@ -177,28 +180,32 @@ OpenMPPassResult run_zone_pass_openmp(const State& stateIn,
                                       const Params& params,
                                       const std::string& layoutMode,
                                       std::uint64_t rngSeedBase,
-                                      int nThreadsRequested) {
-    return run_zone_pass_snapshot_impl(stateIn, params, layoutMode, rngSeedBase, nThreadsRequested, true);
+                                      int nThreadsRequested,
+                                      const std::vector<double>& fluidFractionMask) {
+    return run_zone_pass_snapshot_impl(stateIn, params, layoutMode, rngSeedBase, nThreadsRequested, true, fluidFractionMask);
 }
 
 OpenMPPassResult run_zone_pass_openmp_base(const State& stateIn,
                                            const Params& params,
                                            std::uint64_t rngSeedBase,
-                                           int nThreadsRequested) {
-    return run_zone_pass_openmp(stateIn, params, "base", rngSeedBase, nThreadsRequested);
+                                           int nThreadsRequested,
+                                           const std::vector<double>& fluidFractionMask) {
+    return run_zone_pass_openmp(stateIn, params, "base", rngSeedBase, nThreadsRequested, fluidFractionMask);
 }
 
 OpenMPPassResult run_zone_pass_sync_serial(const State& stateIn,
                                            const Params& params,
                                            const std::string& layoutMode,
-                                           std::uint64_t rngSeedBase) {
-    return run_zone_pass_snapshot_impl(stateIn, params, layoutMode, rngSeedBase, 1, false);
+                                           std::uint64_t rngSeedBase,
+                                           const std::vector<double>& fluidFractionMask) {
+    return run_zone_pass_snapshot_impl(stateIn, params, layoutMode, rngSeedBase, 1, false, fluidFractionMask);
 }
 
 OpenMPPassResult run_zone_pass_sync_serial_base(const State& stateIn,
                                                 const Params& params,
-                                                std::uint64_t rngSeedBase) {
-    return run_zone_pass_sync_serial(stateIn, params, "base", rngSeedBase);
+                                                std::uint64_t rngSeedBase,
+                                                const std::vector<double>& fluidFractionMask) {
+    return run_zone_pass_sync_serial(stateIn, params, "base", rngSeedBase, fluidFractionMask);
 }
 
 } // namespace mpcd
