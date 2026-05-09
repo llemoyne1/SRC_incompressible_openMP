@@ -246,14 +246,14 @@ int main(int argc, char** argv) {
 
             const auto t_ref0 = Clock::now();
             State stateRef = state;
-            for (int i = 0; i < params.n; ++i) {
+            const std::vector<double> xBeforeStream = stateRef.x; for (int i = 0; i < params.n; ++i) {
                 stateRef.v[2 * i] += params.bodyForceX * params.dt;
                 stateRef.v[2 * i + 1] += params.g * params.dt;
                 stateRef.x[2 * i] += params.dt * stateRef.v[2 * i];
                 stateRef.x[2 * i + 1] += params.dt * stateRef.v[2 * i + 1];
             }
             WallInfo wallInfo;
-            apply_bc_general(stateRef.x, stateRef.v, params, wallInfo, 104729ULL + 10007ULL * static_cast<std::uint64_t>(step));
+            apply_cylinder_specular_swept_bc(stateRef.x, stateRef.v, xBeforeStream, params); apply_bc_general(stateRef.x, stateRef.v, params, wallInfo, 104729ULL + 10007ULL * static_cast<std::uint64_t>(step));
             const auto cid = srd_cell_id_with_random_shift(stateRef.x, params, 130363ULL + 10007ULL * static_cast<std::uint64_t>(step));
             srd_collision_step(stateRef.v, cid, params, 433494437ULL + 10007ULL * static_cast<std::uint64_t>(step));
             timers.refBuild += elapsed_seconds(t_ref0, Clock::now());
@@ -281,7 +281,9 @@ int main(int argc, char** argv) {
             timers.shiftedMerge += shiftedResult.metrics.timeMerge;
 
             const auto t_closure0 = Clock::now();
-            const auto closureResult = run_liquid_closure(stateRef, shiftedResult.stateOut, params);
+            State shiftedStateForClosure = shiftedResult.stateOut;
+      apply_cylinder_specular_position_bc(shiftedStateForClosure.x, shiftedStateForClosure.v, params);
+      const auto closureResult = run_liquid_closure(stateRef, shiftedStateForClosure, params);
             const auto t_closure1 = Clock::now();
             state = closureResult.stateOut;
             
@@ -302,7 +304,7 @@ int main(int argc, char** argv) {
             if (metricsEvery > 0 && (step % metricsEvery == 0 || step == nSteps)) {
                 const auto t_diag0 = Clock::now();
                 const CellFields baseFields = compute_cell_fields(baseResult.stateOut.x, baseResult.stateOut.v, params, rhoTarget);
-                const CellFields shiftedFields = compute_cell_fields(shiftedResult.stateOut.x, shiftedResult.stateOut.v, params, rhoTarget);
+                const CellFields shiftedFields = compute_cell_fields(shiftedStateForClosure.x, shiftedStateForClosure.v, params, rhoTarget);
                 const auto basePair = compute_occstd_outband(baseFields, params);
                 const auto shiftedPair = compute_occstd_outband(shiftedFields, params);
                 baseOccStd = basePair.first;
@@ -361,7 +363,7 @@ int main(int argc, char** argv) {
             if (step == nSteps) {
                 if (!(metricsEvery > 0 && (step % metricsEvery == 0 || step == nSteps))) {
                     const CellFields baseFields = compute_cell_fields(baseResult.stateOut.x, baseResult.stateOut.v, params, rhoTarget);
-                    const CellFields shiftedFields = compute_cell_fields(shiftedResult.stateOut.x, shiftedResult.stateOut.v, params, rhoTarget);
+                    const CellFields shiftedFields = compute_cell_fields(shiftedStateForClosure.x, shiftedStateForClosure.v, params, rhoTarget);
                     const auto basePair = compute_occstd_outband(baseFields, params);
                     const auto shiftedPair = compute_occstd_outband(shiftedFields, params);
                     baseOccStd = basePair.first;
