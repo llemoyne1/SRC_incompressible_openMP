@@ -210,8 +210,8 @@ params.smoothPdriveInterzoneBlend = 1.0;
 params.smoothPdriveIncludeShiftedLayouts = true;
 
 % Benchmark runtime parameters read by the main executable
-params.benchmark_nSteps = 10000;
-params.benchmark_metricsEvery = 500;
+params.benchmark_nSteps = 30000;
+params.benchmark_metricsEvery = 100;
 params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 
 % Optional real-time visualization
@@ -246,7 +246,7 @@ params.obstacleEnable = true;
 params.obstacleType = 'cylinder';
 params.obstacleCx = 0.25 * params.Lx;
 params.obstacleCy = 0.5 * params.Ly;
-params.obstacleRadius = 0.8;
+params.obstacleRadius = 1.6;
 
 % Optional wake diagnostics behind cylindrical obstacle
 params.wakeDiagnosticsEnable = true;
