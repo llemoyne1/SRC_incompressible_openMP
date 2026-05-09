@@ -141,8 +141,8 @@ params = struct();
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 30;
-params.Ny = 30;
+params.Nx = 50;
+params.Ny = 50;
 params.Lx = 10.0;
 params.Ly = 10.0;
 params.Nc = params.Nx * params.Ny;
@@ -152,11 +152,11 @@ params.gamma = 20.0;
 params.n = round(params.gamma * params.Nc);
 params.dt = 5e-3;
 params.a0 = params.Lx / params.Nx;
-params.alphaDeg = 170.0;
+params.alphaDeg = 90.0;
 params.alpha = deg2rad(params.alphaDeg);
 params.kBT = 1.0;
 params.g = 0.0;
-params.bodyForceX = 0.1;
+params.bodyForceX = 0.25;
 params.useThermostat = true;
 params.keepMeanFlow = false;
 
@@ -215,8 +215,8 @@ params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 params.visualEnable = true;
 params.visualEvery = 1;
 params.visualMode = 'particles';       % particles | field | field_particles
-params.visualField = 'speed';                % Ux | Uy | speed | vorticity | N | rho | P
-params.visualFieldAutoScale = false;
+params.visualField = 'Uy';                % Ux | Uy | speed | vorticity | N | rho | P
+params.visualFieldAutoScale = true;
 params.visualFieldMin = -1.0;
 params.visualFieldMax = 2.5;
 params.visualShowParticles = true;
