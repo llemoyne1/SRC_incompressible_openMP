@@ -1,4 +1,5 @@
 #include "boundary_conditions.h"
+#include "obstacles.h"
 
 #include <cmath>
 #include <random>
@@ -14,6 +15,47 @@ bool is_periodic_pair(const Params& params, const std::string& axis_name) {
         return params.boundary_bottom == "periodic" && params.boundary_top == "periodic";
     }
     throw std::runtime_error("Unknown axis in is_periodic_pair: " + axis_name);
+}
+
+
+void apply_cylinder_specular_bc(std::vector<double>& x,
+                                std::vector<double>& v,
+                                const Params& params) {
+  if (!obstacle_is_active_cylinder(params)) {
+    return;
+  }
+
+  const double R = params.obstacleRadius;
+  double scale = 1.0;
+  scale = std::max(scale, params.Lx);
+  scale = std::max(scale, params.Ly);
+  scale = std::max(scale, R);
+  const double eps = 1e-10 * scale;
+
+  for (int i = 0; i < params.n; ++i) {
+    double& xi = x[2 * i];
+    double& yi = x[2 * i + 1];
+    double& vxi = v[2 * i];
+    double& vyi = v[2 * i + 1];
+
+    const ObstacleHit hit = cylinder_query(params, xi, yi);
+
+    if (!hit.inside) {
+      continue;
+    }
+
+    // Project the particle just outside the cylinder surface.
+    xi = params.obstacleCx + (R + eps) * hit.nx;
+    yi = params.obstacleCy + (R + eps) * hit.ny;
+
+    // Specular reflection of the incoming normal velocity component.
+    // If the particle is already moving outward, only the projection is applied.
+    const double vn = vxi * hit.nx + vyi * hit.ny;
+    if (vn < 0.0) {
+      vxi -= 2.0 * vn * hit.nx;
+      vyi -= 2.0 * vn * hit.ny;
+    }
+  }
 }
 
 void apply_bc_general(std::vector<double>& x,
@@ -200,6 +242,7 @@ void apply_bc_general(std::vector<double>& x,
             if (yi > params.Ly) yi = params.Ly;
         }
     }
+  apply_cylinder_specular_bc(x, v, params);
 }
 
 } // namespace mpcd
