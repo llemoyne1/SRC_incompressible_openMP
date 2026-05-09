@@ -78,6 +78,17 @@ struct Params {
   bool visualFieldAutoScale;
   double visualFieldMin;
   double visualFieldMax;
+  // Display-only field filtering. These parameters affect only
+  // visualization, never the particle dynamics or redistribution.
+  bool visualFieldSmoothingEnable;
+  int visualFieldSmoothingPasses;
+  int visualFieldMinOccupancy;
+  bool visualFieldTemporalAverageEnable;
+  double visualFieldTemporalAlpha;
+  bool visualFieldRobustScaleEnable;
+  double visualFieldRobustScaleLowPercentile;
+  double visualFieldRobustScaleHighPercentile;
+
   bool visualShowParticles;
   int visualMaxParticles;
   double visualPointSize;

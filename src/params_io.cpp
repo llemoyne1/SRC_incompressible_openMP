@@ -174,6 +174,14 @@ Params read_params_kv(const std::string& filepath) {
   p.visualFieldAutoScale = get_bool_or(kv, "visualFieldAutoScale", true);
   p.visualFieldMin = get_double_or(kv, "visualFieldMin", 0.0);
   p.visualFieldMax = get_double_or(kv, "visualFieldMax", 1.0);
+    p.visualFieldSmoothingEnable = get_bool_or(kv, "visualFieldSmoothingEnable", false);
+    p.visualFieldSmoothingPasses = get_int_or(kv, "visualFieldSmoothingPasses", 1);
+    p.visualFieldMinOccupancy = get_int_or(kv, "visualFieldMinOccupancy", 1);
+    p.visualFieldTemporalAverageEnable = get_bool_or(kv, "visualFieldTemporalAverageEnable", false);
+    p.visualFieldTemporalAlpha = get_double_or(kv, "visualFieldTemporalAlpha", 0.90);
+    p.visualFieldRobustScaleEnable = get_bool_or(kv, "visualFieldRobustScaleEnable", false);
+    p.visualFieldRobustScaleLowPercentile = get_double_or(kv, "visualFieldRobustScaleLowPercentile", 2.0);
+    p.visualFieldRobustScaleHighPercentile = get_double_or(kv, "visualFieldRobustScaleHighPercentile", 98.0);
   p.visualShowParticles = get_bool_or(kv, "visualShowParticles", true);
   p.visualMaxParticles = get_int_or(kv, "visualMaxParticles", 10000);
   p.visualPointSize = get_double_or(kv, "visualPointSize", 2.0);

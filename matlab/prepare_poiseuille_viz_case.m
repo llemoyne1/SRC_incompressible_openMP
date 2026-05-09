@@ -138,6 +138,7 @@ function params = default_params()
 % Complete default set for the final Poiseuille/OpenMP/profiled/shifted code.
 
 params = struct();
+params.nThreads=4;
 
 % Domain / grid
 params.caseType = 'poiseuille';
@@ -207,15 +208,25 @@ params.smoothPdriveInterzoneBlend = 1.0;
 params.smoothPdriveIncludeShiftedLayouts = true;
 
 % Benchmark runtime parameters read by the main executable
-params.benchmark_nSteps = 2000;
-params.benchmark_metricsEvery = 1;
+params.benchmark_nSteps = 10000;
+params.benchmark_metricsEvery = 500;
 params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 
 % Optional real-time visualization
 params.visualEnable = true;
 params.visualEvery = 1;
-params.visualMode = 'particles';       % particles | field | field_particles
-params.visualField = 'Uy';                % Ux | Uy | speed | vorticity | N | rho | P
+params.visualMode = 'field';       % particles | field | field_particles
+params.visualField = 'vorticity';                % Ux | Uy | speed | vorticity | N | rho | P
+
+params.visualFieldSmoothingEnable = true;
+params.visualFieldSmoothingPasses = 2;
+params.visualFieldMinOccupancy = 3;
+params.visualFieldTemporalAverageEnable = true;
+params.visualFieldTemporalAlpha = 0.95;
+params.visualFieldRobustScaleEnable = true;
+params.visualFieldRobustScaleLowPercentile = 2.0;
+params.visualFieldRobustScaleHighPercentile = 98.0;
+
 params.visualFieldAutoScale = true;
 params.visualFieldMin = -1.0;
 params.visualFieldMax = 2.5;
@@ -229,11 +240,11 @@ params.visualWindowHeight = 700;
 
 % Optional solid obstacle geometry. Geometry only at this stage;
 % particle reflection and solid/fluid masking will be added later.
-params.obstacleEnable = false;
-params.obstacleType = 'none';
-params.obstacleCx = 0.5 * params.Lx;
+params.obstacleEnable = true;
+params.obstacleType = 'cylinder';
+params.obstacleCx = 0.25 * params.Lx;
 params.obstacleCy = 0.5 * params.Ly;
-params.obstacleRadius = 0.0;
+params.obstacleRadius = 0.8;
 end
 
 function params = finalize_params(params, overrides)

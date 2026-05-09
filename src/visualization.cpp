@@ -144,6 +144,196 @@ void autoscale_range(const std::vector<double>& a, double& vmin, double& vmax) {
     }
 }
 
+
+std::vector<char> build_display_valid_mask(const Params& p, const CellFields& f) {
+    const int Nx = p.Nx;
+    const int Ny = p.Ny;
+    const int Nc = Nx * Ny;
+    const double dx = p.Lx / static_cast<double>(std::max(1, Nx));
+    const double dy = p.Ly / static_cast<double>(std::max(1, Ny));
+    const int minOcc = std::max(0, p.visualFieldMinOccupancy);
+
+    std::vector<char> valid(static_cast<std::size_t>(Nc), 1);
+
+    for (int ix = 0; ix < Nx; ++ix) {
+        for (int iy = 0; iy < Ny; ++iy) {
+            const int c = cell_id(ix, iy, Ny);
+            const double xc = (static_cast<double>(ix) + 0.5) * dx;
+            const double yc = (static_cast<double>(iy) + 0.5) * dy;
+
+            if (c < 0 || c >= Nc) {
+                continue;
+            }
+
+            if (static_cast<int>(f.N[static_cast<std::size_t>(c)]) < minOcc) {
+                valid[static_cast<std::size_t>(c)] = 0;
+            }
+
+            if (point_in_obstacle(p, xc, yc)) {
+                valid[static_cast<std::size_t>(c)] = 0;
+            }
+        }
+    }
+
+    return valid;
+}
+
+std::vector<double> smooth_field_spatial_once(const Params& p,
+                                              const std::vector<double>& in,
+                                              const std::vector<char>& valid) {
+    const int Nx = p.Nx;
+    const int Ny = p.Ny;
+    const int Nc = Nx * Ny;
+    const bool perX = (p.boundary_left == "periodic" && p.boundary_right == "periodic");
+
+    std::vector<double> out = in;
+
+    const double weights[3][3] = {
+        {1.0, 2.0, 1.0},
+        {2.0, 4.0, 2.0},
+        {1.0, 2.0, 1.0}
+    };
+
+    for (int ix = 0; ix < Nx; ++ix) {
+        for (int iy = 0; iy < Ny; ++iy) {
+            const int c = cell_id(ix, iy, Ny);
+            if (c < 0 || c >= Nc) continue;
+
+            double acc = 0.0;
+            double wsum = 0.0;
+
+            for (int ox = -1; ox <= 1; ++ox) {
+                int jx = ix + ox;
+                if (jx < 0 || jx >= Nx) {
+                    if (!perX) continue;
+                    if (jx < 0) jx = Nx - 1;
+                    if (jx >= Nx) jx = 0;
+                }
+
+                for (int oy = -1; oy <= 1; ++oy) {
+                    const int jy = iy + oy;
+                    if (jy < 0 || jy >= Ny) continue;
+
+                    const int cc = cell_id(jx, jy, Ny);
+                    if (cc < 0 || cc >= Nc) continue;
+                    if (!valid[static_cast<std::size_t>(cc)]) continue;
+
+                    const double value = in[static_cast<std::size_t>(cc)];
+                    if (!std::isfinite(value)) continue;
+
+                    const double w = weights[ox + 1][oy + 1];
+                    acc += w * value;
+                    wsum += w;
+                }
+            }
+
+            if (wsum > 0.0) {
+                out[static_cast<std::size_t>(c)] = acc / wsum;
+            }
+        }
+    }
+
+    return out;
+}
+
+std::vector<double> smooth_field_spatial(const Params& p,
+                                         const std::vector<double>& values,
+                                         const std::vector<char>& valid) {
+    std::vector<double> out = values;
+    const int nPasses = std::max(0, p.visualFieldSmoothingPasses);
+
+    for (int pass = 0; pass < nPasses; ++pass) {
+        out = smooth_field_spatial_once(p, out, valid);
+    }
+
+    return out;
+}
+
+std::vector<double> temporal_average_field(const Params& p,
+                                           const std::vector<double>& values) {
+    static std::vector<double> history;
+    static std::string historyKey;
+
+    std::ostringstream key;
+    key << p.Nx << "x" << p.Ny << ":" << p.visualField;
+
+    const std::string currentKey = key.str();
+
+    if (!p.visualFieldTemporalAverageEnable) {
+        history.clear();
+        historyKey.clear();
+        return values;
+    }
+
+    const double alpha = clamp01(p.visualFieldTemporalAlpha);
+
+    if (history.size() != values.size() || historyKey != currentKey) {
+        history = values;
+        historyKey = currentKey;
+        return values;
+    }
+
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (std::isfinite(values[i])) {
+            history[i] = alpha * history[i] + (1.0 - alpha) * values[i];
+        }
+    }
+
+    return history;
+}
+
+void percentile_range(const std::vector<double>& a,
+                      double qLow,
+                      double qHigh,
+                      double& vmin,
+                      double& vmax) {
+    std::vector<double> finite;
+    finite.reserve(a.size());
+
+    for (double x : a) {
+        if (std::isfinite(x)) {
+            finite.push_back(x);
+        }
+    }
+
+    if (finite.empty()) {
+        vmin = 0.0;
+        vmax = 1.0;
+        return;
+    }
+
+    qLow = std::max(0.0, std::min(100.0, qLow));
+    qHigh = std::max(0.0, std::min(100.0, qHigh));
+
+    if (qHigh <= qLow) {
+        qLow = 2.0;
+        qHigh = 98.0;
+    }
+
+    std::sort(finite.begin(), finite.end());
+
+    const auto pick = [&](double q) {
+        const double pos = (q / 100.0) * static_cast<double>(finite.size() - 1);
+        const std::size_t i0 = static_cast<std::size_t>(std::floor(pos));
+        const std::size_t i1 = std::min(i0 + 1, finite.size() - 1);
+        const double t = pos - static_cast<double>(i0);
+        return (1.0 - t) * finite[i0] + t * finite[i1];
+    };
+
+    vmin = pick(qLow);
+    vmax = pick(qHigh);
+
+    if (!(std::isfinite(vmin) && std::isfinite(vmax)) || vmax <= vmin) {
+        vmin = finite.front();
+        vmax = finite.back();
+        if (vmax <= vmin) {
+            vmax = vmin + 1.0;
+        }
+    }
+}
+
+
+
 double wrap_x(double x, double Lx) {
     if (Lx <= 0.0) return x;
     x = std::fmod(x, Lx);
@@ -380,12 +570,28 @@ void Visualizer::update(
     if (showField) {
         std::vector<double> values = build_field_values(p, fields);
 
-        double vmin = p.visualFieldMin;
+        
+        if (p.visualFieldSmoothingEnable) {
+            const auto valid = build_display_valid_mask(p, fields);
+            values = smooth_field_spatial(p, values, valid);
+        }
+
+        values = temporal_average_field(p, values);
+double vmin = p.visualFieldMin;
         double vmax = p.visualFieldMax;
 
         if (p.visualFieldAutoScale) {
-            autoscale_range(values, vmin, vmax);
-        }
+    if (p.visualFieldRobustScaleEnable) {
+        percentile_range(values,
+                         p.visualFieldRobustScaleLowPercentile,
+                         p.visualFieldRobustScaleHighPercentile,
+                         vmin,
+                         vmax);
+        statusScale = "robust";
+    } else {
+        autoscale_range(values, vmin, vmax);
+    }
+}
 
         statusMin = vmin;
         statusMax = vmax;
