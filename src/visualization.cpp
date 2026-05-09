@@ -24,8 +24,8 @@ double clamp01(double x) {
     return x;
 }
 
-int cell_id(int ix, int iy, int Nx) {
-    return ix + Nx * iy;
+int cell_id(int ix, int iy, int Ny) {
+    return iy + Ny * ix;
 }
 
 void scalar_color(double value, double vmin, double vmax, float& r, float& g, float& b) {
@@ -78,7 +78,7 @@ std::vector<double> build_field_values(const Params& p, const CellFields& f) {
 
         for (int iy = 0; iy < Ny; ++iy) {
             for (int ix = 0; ix < Nx; ++ix) {
-                const int c = cell_id(ix, iy, Nx);
+                const int c = cell_id(ix, iy, Ny);
 
                 int ixm = ix - 1;
                 int ixp = ix + 1;
@@ -107,12 +107,11 @@ std::vector<double> build_field_values(const Params& p, const CellFields& f) {
                     iyp = iy;
                     ddy = dy;
                 }
-
                 const double dUy_dx =
-                    (f.Uy[cell_id(ixp, iy, Nx)] - f.Uy[cell_id(ixm, iy, Nx)]) / ddx;
+(f.Uy[cell_id(ixp, iy, Ny)] - f.Uy[cell_id(ixm, iy, Ny)]) / ddx;
 
                 const double dUx_dy =
-                    (f.Ux[cell_id(ix, iyp, Nx)] - f.Ux[cell_id(ix, iym, Nx)]) / ddy;
+(f.Ux[cell_id(ix, iyp, Ny)] - f.Ux[cell_id(ix, iym, Ny)]) / ddy;
 
                 out[c] = dUy_dx - dUx_dy;
             }
@@ -397,7 +396,7 @@ void Visualizer::update(
         glBegin(GL_QUADS);
         for (int iy = 0; iy < p.Ny; ++iy) {
             for (int ix = 0; ix < p.Nx; ++ix) {
-                const int c = cell_id(ix, iy, p.Nx);
+                const int c = cell_id(ix, iy, p.Ny);
 
                 float r = 0.0f;
                 float g = 0.0f;
