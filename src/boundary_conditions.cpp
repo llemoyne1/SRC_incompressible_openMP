@@ -2,11 +2,101 @@
 #include "obstacles.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 namespace mpcd {
+
+namespace {
+
+std::string lowercase_ascii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+std::string canonical_obstacle_boundary_mode(const Params& params) {
+    std::string mode = lowercase_ascii(params.obstacleBoundaryMode);
+
+    if (mode.empty() || mode == "specular") {
+        return "specular";
+    }
+
+    if (mode == "bounceback" ||
+        mode == "bounce_back" ||
+        mode == "bounce-back" ||
+        mode == "noslip" ||
+        mode == "no-slip" ||
+        mode == "no_slip") {
+        return "bounceback";
+    }
+
+    throw std::runtime_error(
+        "Unsupported obstacleBoundaryMode: " + params.obstacleBoundaryMode +
+        " (supported: specular, bounceback)"
+    );
+}
+
+void reflect_velocity_at_cylinder(double& vx,
+                                  double& vy,
+                                  double nx,
+                                  double ny,
+                                  const std::string& mode) {
+    const double vn = vx * nx + vy * ny;
+
+    if (vn >= 0.0) {
+        return;
+    }
+
+    if (mode == "specular") {
+        vx -= 2.0 * vn * nx;
+        vy -= 2.0 * vn * ny;
+    } else if (mode == "bounceback") {
+        // Deterministic no-slip-like reflection for a fixed wall:
+        // both the normal and tangential components of the relative velocity
+        // are reversed.
+        vx = -vx;
+        vy = -vy;
+    } else {
+        throw std::runtime_error("Internal error: unsupported cylinder reflection mode: " + mode);
+    }
+}
+
+void reflect_remaining_displacement_at_cylinder(double remx,
+                                                double remy,
+                                                double nx,
+                                                double ny,
+                                                const std::string& mode,
+                                                double& outx,
+                                                double& outy) {
+    outx = remx;
+    outy = remy;
+
+    const double remn = remx * nx + remy * ny;
+
+    if (remn >= 0.0) {
+        return;
+    }
+
+    if (mode == "specular") {
+        outx -= 2.0 * remn * nx;
+        outy -= 2.0 * remn * ny;
+    } else if (mode == "bounceback") {
+        // Same local wall law applied to the remaining displacement during
+        // the current streaming step. This makes the position update
+        // consistent with the no-slip-like velocity reflection.
+        outx = -remx;
+        outy = -remy;
+    } else {
+        throw std::runtime_error("Internal error: unsupported cylinder displacement mode: " + mode);
+    }
+}
+
+} // namespace
 
 bool is_periodic_pair(const Params& params, const std::string& axis_name) {
     if (axis_name == "x") {
@@ -20,13 +110,14 @@ bool is_periodic_pair(const Params& params, const std::string& axis_name) {
 
 
 
-void apply_cylinder_specular_position_bc(std::vector<double>& x,
-                                         std::vector<double>& v,
-                                         const Params& params) {
+void apply_cylinder_position_bc(std::vector<double>& x,
+                                std::vector<double>& v,
+                                const Params& params) {
   if (!obstacle_is_active_cylinder(params)) {
     return;
   }
 
+  const std::string mode = canonical_obstacle_boundary_mode(params);
   const double R = params.obstacleRadius;
 
   double scale = 1.0;
@@ -49,27 +140,24 @@ void apply_cylinder_specular_position_bc(std::vector<double>& x,
     xi = params.obstacleCx + (R + eps) * hit.nx;
     yi = params.obstacleCy + (R + eps) * hit.ny;
 
-    const double vn = vxi * hit.nx + vyi * hit.ny;
-    if (vn < 0.0) {
-      vxi -= 2.0 * vn * hit.nx;
-      vyi -= 2.0 * vn * hit.ny;
-    }
+    reflect_velocity_at_cylinder(vxi, vyi, hit.nx, hit.ny, mode);
   }
 }
 
 
-void apply_cylinder_specular_swept_bc(std::vector<double>& x,
-                                      std::vector<double>& v,
-                                      const std::vector<double>& xOld,
-                                      const Params& params) {
+void apply_cylinder_swept_bc(std::vector<double>& x,
+                             std::vector<double>& v,
+                             const std::vector<double>& xOld,
+                             const Params& params) {
   if (!obstacle_is_active_cylinder(params)) {
     return;
   }
 
   if (static_cast<int>(xOld.size()) < 2 * params.n) {
-    throw std::runtime_error("apply_cylinder_specular_swept_bc: xOld has inconsistent size");
+    throw std::runtime_error("apply_cylinder_swept_bc: xOld has inconsistent size");
   }
 
+  const std::string mode = canonical_obstacle_boundary_mode(params);
   const double cx = params.obstacleCx;
   const double cy = params.obstacleCy;
   const double R = params.obstacleRadius;
@@ -148,24 +236,16 @@ void apply_cylinder_specular_swept_bc(std::vector<double>& x,
     }
 
     // Reflect remaining displacement for the fraction of the time step
-    // after impact.
+    // after impact, using the selected local cylinder wall law.
     const double remx = (1.0 - sHit) * dx;
     const double remy = (1.0 - sHit) * dy;
-    const double remn = remx * nx + remy * ny;
 
     double remrx = remx;
     double remry = remy;
-    if (remn < 0.0) {
-      remrx -= 2.0 * remn * nx;
-      remry -= 2.0 * remn * ny;
-    }
+    reflect_remaining_displacement_at_cylinder(remx, remy, nx, ny, mode, remrx, remry);
 
-    // Reflect incoming normal velocity component.
-    const double vn = vx * nx + vy * ny;
-    if (vn < 0.0) {
-      vx -= 2.0 * vn * nx;
-      vy -= 2.0 * vn * ny;
-    }
+    // Reflect incoming velocity component(s) using the selected local wall law.
+    reflect_velocity_at_cylinder(vx, vy, nx, ny, mode);
 
     x1 = xHit + remrx + eps * nx;
     y1 = yHit + remry + eps * ny;
@@ -173,7 +253,20 @@ void apply_cylinder_specular_swept_bc(std::vector<double>& x,
 
   // Final projection fallback: catches particles that started inside, or rare
   // cases with very large displacements.
-  apply_cylinder_specular_position_bc(x, v, params);
+  apply_cylinder_position_bc(x, v, params);
+}
+
+void apply_cylinder_specular_position_bc(std::vector<double>& x,
+                                         std::vector<double>& v,
+                                         const Params& params) {
+  apply_cylinder_position_bc(x, v, params);
+}
+
+void apply_cylinder_specular_swept_bc(std::vector<double>& x,
+                                      std::vector<double>& v,
+                                      const std::vector<double>& xOld,
+                                      const Params& params) {
+  apply_cylinder_swept_bc(x, v, xOld, params);
 }
 
 void apply_bc_general(std::vector<double>& x,
@@ -360,7 +453,7 @@ void apply_bc_general(std::vector<double>& x,
             if (yi > params.Ly) yi = params.Ly;
         }
     }
-  apply_cylinder_specular_position_bc(x, v, params);
+  apply_cylinder_position_bc(x, v, params);
 }
 
 } // namespace mpcd

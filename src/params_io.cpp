@@ -194,6 +194,7 @@ Params read_params_kv(const std::string& filepath) {
   p.obstacleCx = get_double_or(kv, "obstacleCx", 0.5 * p.Lx);
   p.obstacleCy = get_double_or(kv, "obstacleCy", 0.5 * p.Ly);
   p.obstacleRadius = get_double_or(kv, "obstacleRadius", 0.0);
+  p.obstacleBoundaryMode = get_string_or(kv, "obstacleBoundaryMode", "specular");
 
 
   p.wakeDiagnosticsEnable = get_bool_or(kv, "wakeDiagnosticsEnable", false);

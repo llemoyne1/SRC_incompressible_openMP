@@ -96,13 +96,13 @@ struct Params {
     int visualWindowWidth;
   int visualWindowHeight;
 
-  // Optional solid obstacle geometry.
-  // Geometry only: no particle reflection is applied yet.
+  // Optional solid obstacle geometry and wall interaction.
   bool obstacleEnable;
   std::string obstacleType; // none | cylinder
   double obstacleCx;
   double obstacleCy;
   double obstacleRadius;
+  std::string obstacleBoundaryMode; // specular | bounceback
 
 
   // Optional wake diagnostics behind a cylindrical obstacle.

@@ -129,6 +129,7 @@ fprintf('benchmarkSteps: %d\n', params.benchmark_nSteps);
 fprintf('visualEnable : %d\n', logical(params.visualEnable));
 fprintf('visualMode   : %s\n', char(string(params.visualMode)));
 fprintf('visualField  : %s\n', char(string(params.visualField)));
+fprintf('obstacleMode : %s\n', char(string(params.obstacleBoundaryMode)));
 fprintf('run command  : bash %s\n', prep.runScriptLinux);
 fprintf('===================================\n');
 
@@ -138,20 +139,20 @@ function params = default_params()
 % Complete default set for the final Poiseuille/OpenMP/profiled/shifted code.
 
 params = struct();
-params.nThreads=4;
+params.nThreads=12;
 %params.workdir=fullfile(rootWin,'rbps8_cyl_smooth_viz1');
 %params.exePath=[rootLin '/build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled_viz'];
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 75;
-params.Ny = 50;
-params.Lx = 15.0;
+params.Nx = 100;
+params.Ny = 100;
+params.Lx = 20.0;
 params.Ly = 10.0;
 params.Nc = params.Nx * params.Ny;
 
 % MPCD / SRC
-params.gamma = 20.0;
+params.gamma = 6.0;
 params.n = round(params.gamma * params.Nc);
 params.dt = 5e-3;
 params.a0 = params.Lx / params.Nx;
@@ -159,7 +160,7 @@ params.alphaDeg = 120.0;
 params.alpha = deg2rad(params.alphaDeg);
 params.kBT = 1.0;
 params.g = 0.0;
-params.bodyForceX = 0.2;
+params.bodyForceX = 1.;
 params.useThermostat = true;
 params.keepMeanFlow = false;
 
@@ -217,7 +218,7 @@ params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 % Optional real-time visualization
 params.visualEnable = true;
 params.visualEvery = 1;
-params.visualMode = 'field_particles';       % particles | field | field_particles
+params.visualMode = 'field';       % particles | field | field_particles
 params.visualField = 'vorticity';                % Ux | Uy | speed | vorticity | N | rho | P
 
 params.visualFieldSmoothingEnable = true;
@@ -245,8 +246,9 @@ params.visualWindowHeight = 700;
 params.obstacleEnable = true;
 params.obstacleType = 'cylinder';
 params.obstacleCx = 0.25 * params.Lx;
-params.obstacleCy = 0.5 * params.Ly;
+params.obstacleCy = 0.5 * params.Ly+0.005*params.Ly;
 params.obstacleRadius = 1.6;
+params.obstacleBoundaryMode = 'bounceback';
 
 % Optional wake diagnostics behind cylindrical obstacle
 params.wakeDiagnosticsEnable = true;

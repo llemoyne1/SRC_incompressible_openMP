@@ -683,6 +683,7 @@ int main(int argc, char** argv) {
         manifest << "benchmark_nSteps=" << nSteps << "\n";
         manifest << "benchmark_metricsEvery=" << metricsEvery << "\n";
         manifest << "benchmark_dumpSteps=" << require_key(kv, "benchmark_dumpSteps") << "\n";
+        manifest << "obstacleBoundaryMode=" << params.obstacleBoundaryMode << "\n";
         manifest << "wakeDiagnosticsEnable=" << (wakeDiagnosticsActive ? 1 : 0) << "\n";
         manifest << "wakeDiagnosticsEvery=" << wakeEvery << "\n";
         manifest << "wakeProbeXOverD="
@@ -731,7 +732,7 @@ int main(int argc, char** argv) {
                 stateRef.x[2 * i + 1] += params.dt * stateRef.v[2 * i + 1];
             }
             WallInfo wallInfo;
-            apply_cylinder_specular_swept_bc(stateRef.x, stateRef.v, xBeforeStream, params); apply_bc_general(stateRef.x, stateRef.v, params, wallInfo, 104729ULL + 10007ULL * static_cast<std::uint64_t>(step));
+            apply_cylinder_swept_bc(stateRef.x, stateRef.v, xBeforeStream, params); apply_bc_general(stateRef.x, stateRef.v, params, wallInfo, 104729ULL + 10007ULL * static_cast<std::uint64_t>(step));
             const auto cid = srd_cell_id_with_random_shift(stateRef.x, params, 130363ULL + 10007ULL * static_cast<std::uint64_t>(step));
             srd_collision_step(stateRef.v, cid, params, 433494437ULL + 10007ULL * static_cast<std::uint64_t>(step));
             timers.refBuild += elapsed_seconds(t_ref0, Clock::now());
