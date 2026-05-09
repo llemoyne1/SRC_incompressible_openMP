@@ -99,6 +99,14 @@ params.visualParticleColorMode = 'speed';
 params.visualWindowWidth = 1100;
 params.visualWindowHeight = 850;
 
+
+% Optional solid obstacle geometry. Geometry only at this stage;
+% particle reflection and solid/fluid masking will be added later.
+params.obstacleEnable = false;
+params.obstacleType = 'none';
+params.obstacleCx = 0.5 * params.Lx;
+params.obstacleCy = 0.5 * params.Ly;
+params.obstacleRadius = 0.0;
 fn = fieldnames(overrides);
 for k = 1:numel(fn)
     params.(fn{k}) = overrides.(fn{k});

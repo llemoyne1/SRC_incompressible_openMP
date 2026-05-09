@@ -134,8 +134,8 @@ params = struct();
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 50;
-params.Ny = 50;
+params.Nx = 30;
+params.Ny = 30;
 params.Lx = 10.0;
 params.Ly = 10.0;
 params.Nc = params.Nx * params.Ny;
@@ -205,20 +205,28 @@ params.benchmark_metricsEvery = 1;
 params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
 
 % Optional real-time visualization
-params.visualEnable = false;
-params.visualEvery = 20;
-params.visualMode = 'field_particles';       % particles | field | field_particles
+params.visualEnable = true;
+params.visualEvery = 1;
+params.visualMode = 'particles';       % particles | field | field_particles
 params.visualField = 'speed';                % Ux | Uy | speed | vorticity | N | rho | P
-params.visualFieldAutoScale = true;
-params.visualFieldMin = 0.0;
-params.visualFieldMax = 1.0;
+params.visualFieldAutoScale = false;
+params.visualFieldMin = -1.0;
+params.visualFieldMax = 2.5;
 params.visualShowParticles = true;
 params.visualMaxParticles = 10000;
-params.visualPointSize = 2.0;
+params.visualPointSize = 5.0;
 params.visualParticleColorMode = 'speed';    % type | speed | Ux | Uy
-params.visualWindowWidth = 1100;
-params.visualWindowHeight = 850;
+params.visualWindowWidth = 700;
+params.visualWindowHeight = 700;
 
+
+% Optional solid obstacle geometry. Geometry only at this stage;
+% particle reflection and solid/fluid masking will be added later.
+params.obstacleEnable = false;
+params.obstacleType = 'none';
+params.obstacleCx = 0.5 * params.Lx;
+params.obstacleCy = 0.5 * params.Ly;
+params.obstacleRadius = 0.0;
 end
 
 function params = finalize_params(params, overrides)

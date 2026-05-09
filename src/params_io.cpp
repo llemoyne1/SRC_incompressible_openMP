@@ -180,6 +180,12 @@ Params read_params_kv(const std::string& filepath) {
   p.visualParticleColorMode = get_string_or(kv, "visualParticleColorMode", "speed");
   p.visualWindowWidth = get_int_or(kv, "visualWindowWidth", 1100);
   p.visualWindowHeight = get_int_or(kv, "visualWindowHeight", 850);
+
+  p.obstacleEnable = get_bool_or(kv, "obstacleEnable", false);
+  p.obstacleType = get_string_or(kv, "obstacleType", "none");
+  p.obstacleCx = get_double_or(kv, "obstacleCx", 0.5 * p.Lx);
+  p.obstacleCy = get_double_or(kv, "obstacleCy", 0.5 * p.Ly);
+  p.obstacleRadius = get_double_or(kv, "obstacleRadius", 0.0);
     return p;
 }
 

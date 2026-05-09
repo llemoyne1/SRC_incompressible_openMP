@@ -84,6 +84,14 @@ struct Params {
   std::string visualParticleColorMode; // type | speed | Ux | Uy
     int visualWindowWidth;
   int visualWindowHeight;
+
+  // Optional solid obstacle geometry.
+  // Geometry only: no particle reflection is applied yet.
+  bool obstacleEnable;
+  std::string obstacleType; // none | cylinder
+  double obstacleCx;
+  double obstacleCy;
+  double obstacleRadius;
 };
 
 struct State {
