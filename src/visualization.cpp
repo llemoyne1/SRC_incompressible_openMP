@@ -1,5 +1,5 @@
 #include "visualization.h"
-
+#include "obstacles.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 
 #ifdef ENABLE_VISUALIZATION
 #include <GLFW/glfw3.h>
@@ -225,6 +226,39 @@ void compute_letterbox_viewport(
     vh = std::max(1, vh);
 }
 
+void draw_cylinder_obstacle(const Params& p) {
+    if (!obstacle_is_active_cylinder(p)) {
+        return;
+    }
+
+    const int nSeg = 96;
+    const double pi = std::acos(-1.0);
+
+    // Filled disk
+    glColor3f(0.15f, 0.15f, 0.15f);
+    glBegin(GL_POLYGON);
+    for (int k = 0; k < nSeg; ++k) {
+        const double th = 2.0 * pi * static_cast<double>(k) / static_cast<double>(nSeg);
+        const double x = p.obstacleCx + p.obstacleRadius * std::cos(th);
+        const double y = p.obstacleCy + p.obstacleRadius * std::sin(th);
+        glVertex2d(x, y);
+    }
+    glEnd();
+
+    // White outline
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+    for (int k = 0; k < nSeg; ++k) {
+        const double th = 2.0 * pi * static_cast<double>(k) / static_cast<double>(nSeg);
+        const double x = p.obstacleCx + p.obstacleRadius * std::cos(th);
+        const double y = p.obstacleCy + p.obstacleRadius * std::sin(th);
+        glVertex2d(x, y);
+    }
+    glEnd();
+    glLineWidth(1.0f);
+}
+
 } // namespace
 
 bool Visualizer::init(const Params& params) {
@@ -384,6 +418,8 @@ void Visualizer::update(
         }
         glEnd();
     }
+        // Draw the obstacle above the field and below particles.
+    draw_cylinder_obstacle(p);
 
     if (showParticles) {
         const int n = std::max(0, p.n);
