@@ -1,10 +1,12 @@
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -268,6 +270,335 @@ FluidAwareOccDiag compute_occstd_outband_fluid_aware(const CellFields& fields,
     return out;
 }
 
+
+int wake_cell_id(int ix, int iy, const Params& params) {
+    return iy + params.Ny * ix;
+}
+
+double wake_nan() {
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+double wrap_periodic(double x, double L) {
+    if (L <= 0.0) return x;
+    double y = std::fmod(x, L);
+    if (y < 0.0) y += L;
+    return y;
+}
+
+double signed_periodic_delta(double x, double center, double L) {
+    double d = x - center;
+    if (L > 0.0) {
+        d -= L * std::floor(d / L + 0.5);
+    }
+    return d;
+}
+
+double positive_periodic_delta(double x, double center, double L) {
+    if (L <= 0.0) return x - center;
+    double d = x - center;
+    d = std::fmod(d, L);
+    if (d < 0.0) d += L;
+    return d;
+}
+
+bool x_in_periodic_interval(double x, double x0, double x1, double L) {
+    if (L <= 0.0) return (x >= x0 && x <= x1);
+    if (x1 < x0) std::swap(x0, x1);
+    if ((x1 - x0) >= L) return true;
+
+    const double xx = wrap_periodic(x, L);
+    const double a = wrap_periodic(x0, L);
+    const double b = wrap_periodic(x1, L);
+
+    if (a <= b) {
+        return (xx >= a && xx <= b);
+    }
+    return (xx >= a || xx <= b);
+}
+
+std::vector<double> compute_wake_vorticity(const CellFields& f, const Params& params) {
+    const int Nx = params.Nx;
+    const int Ny = params.Ny;
+    const int Nc = Nx * Ny;
+    std::vector<double> omega(static_cast<std::size_t>(Nc), 0.0);
+
+    const double dx = params.Lx / static_cast<double>(std::max(1, Nx));
+    const double dy = params.Ly / static_cast<double>(std::max(1, Ny));
+    const bool perX = (params.boundary_left == "periodic" && params.boundary_right == "periodic");
+
+    for (int ix = 0; ix < Nx; ++ix) {
+        for (int iy = 0; iy < Ny; ++iy) {
+            int ixm = ix - 1;
+            int ixp = ix + 1;
+            double ddx = 2.0 * dx;
+
+            if (ix == 0) {
+                if (perX) ixm = Nx - 1;
+                else { ixm = ix; ddx = dx; }
+            }
+            if (ix == Nx - 1) {
+                if (perX) ixp = 0;
+                else { ixp = ix; ddx = dx; }
+            }
+
+            int iym = iy - 1;
+            int iyp = iy + 1;
+            double ddy = 2.0 * dy;
+
+            if (iy == 0) { iym = iy; ddy = dy; }
+            if (iy == Ny - 1) { iyp = iy; ddy = dy; }
+
+            const int c = wake_cell_id(ix, iy, params);
+            const double dUy_dx =
+                (f.Uy[static_cast<std::size_t>(wake_cell_id(ixp, iy, params))] -
+                 f.Uy[static_cast<std::size_t>(wake_cell_id(ixm, iy, params))]) / std::max(ddx, 1e-30);
+            const double dUx_dy =
+                (f.Ux[static_cast<std::size_t>(wake_cell_id(ix, iyp, params))] -
+                 f.Ux[static_cast<std::size_t>(wake_cell_id(ix, iym, params))]) / std::max(ddy, 1e-30);
+
+            omega[static_cast<std::size_t>(c)] = dUy_dx - dUx_dy;
+        }
+    }
+
+    return omega;
+}
+
+struct WakeWindowStats {
+    double Ux = 0.0;
+    double Uy = 0.0;
+    double speed = 0.0;
+    double omega = 0.0;
+    double N = 0.0;
+    int nCells = 0;
+    double nParticles = 0.0;
+};
+
+template <typename Selector>
+WakeWindowStats compute_wake_window_stats(const CellFields& f,
+                                          const std::vector<double>& omega,
+                                          const Params& params,
+                                          Selector select_cell) {
+    WakeWindowStats out;
+
+    const int Nx = params.Nx;
+    const int Ny = params.Ny;
+    const double dx = params.Lx / static_cast<double>(std::max(1, Nx));
+    const double dy = params.Ly / static_cast<double>(std::max(1, Ny));
+
+    double sumN = 0.0;
+    double sumUx = 0.0;
+    double sumUy = 0.0;
+    double sumOmega = 0.0;
+
+    for (int ix = 0; ix < Nx; ++ix) {
+        for (int iy = 0; iy < Ny; ++iy) {
+            const int c = wake_cell_id(ix, iy, params);
+            const double xc = (static_cast<double>(ix) + 0.5) * dx;
+            const double yc = (static_cast<double>(iy) + 0.5) * dy;
+
+            if (!select_cell(xc, yc)) {
+                continue;
+            }
+            if (point_in_obstacle(params, xc, yc)) {
+                continue;
+            }
+
+            ++out.nCells;
+            const double Nc = static_cast<double>(f.N[static_cast<std::size_t>(c)]);
+            out.nParticles += Nc;
+            out.N += Nc;
+
+            if (Nc <= 0.0) {
+                continue;
+            }
+
+            sumN += Nc;
+            sumUx += Nc * f.Ux[static_cast<std::size_t>(c)];
+            sumUy += Nc * f.Uy[static_cast<std::size_t>(c)];
+            sumOmega += Nc * omega[static_cast<std::size_t>(c)];
+        }
+    }
+
+    if (out.nCells > 0) {
+        out.N /= static_cast<double>(out.nCells);
+    } else {
+        out.N = wake_nan();
+    }
+
+    if (sumN > 0.0) {
+        out.Ux = sumUx / sumN;
+        out.Uy = sumUy / sumN;
+        out.speed = std::sqrt(out.Ux * out.Ux + out.Uy * out.Uy);
+        out.omega = sumOmega / sumN;
+    } else {
+        out.Ux = wake_nan();
+        out.Uy = wake_nan();
+        out.speed = wake_nan();
+        out.omega = wake_nan();
+    }
+
+    return out;
+}
+
+struct WakeProbeRow {
+    double Uref = 0.0;
+    double Nref = 0.0;
+    std::array<double, 4> probeX{};
+    std::array<WakeWindowStats, 4> probe{};
+    double wakeUyAsym = 0.0;
+    double recircLength = 0.0;
+};
+
+WakeProbeRow compute_wake_probe_row(const CellFields& fields, const Params& params) {
+    WakeProbeRow row;
+    row.Uref = wake_nan();
+    row.Nref = wake_nan();
+    row.wakeUyAsym = wake_nan();
+    row.recircLength = 0.0;
+
+    if (!obstacle_is_active_cylinder(params)) {
+        return row;
+    }
+
+    const std::vector<double> omega = compute_wake_vorticity(fields, params);
+
+    const double cx = params.obstacleCx;
+    const double cy = params.obstacleCy;
+    const double R = params.obstacleRadius;
+    const double D = 2.0 * R;
+    const double Lx = params.Lx;
+    const double Ly = params.Ly;
+
+    if (!(D > 0.0 && Lx > 0.0 && Ly > 0.0)) {
+        return row;
+    }
+
+    const double probeHalfWidth = std::max(0.0, params.wakeProbeHalfWidthOverD) * D;
+    const double probeHalfHeight = std::max(0.0, params.wakeProbeHalfHeightOverD) * D;
+    const double refHalfHeight = std::max(0.0, params.wakeReferenceHalfHeightOverD) * D;
+
+    const double xRef0 = cx + params.wakeReferenceXMinOverD * D;
+    const double xRef1 = cx + params.wakeReferenceXMaxOverD * D;
+    const WakeWindowStats ref = compute_wake_window_stats(
+        fields, omega, params,
+        [&](double x, double y) {
+            return x_in_periodic_interval(x, xRef0, xRef1, Lx) &&
+                   std::abs(y - cy) <= refHalfHeight;
+        }
+    );
+    row.Uref = ref.Ux;
+    row.Nref = ref.N;
+
+    const std::array<double, 4> probeOverD = {{
+        params.wakeProbe1XOverD,
+        params.wakeProbe2XOverD,
+        params.wakeProbe3XOverD,
+        params.wakeProbe4XOverD
+    }};
+
+    for (int k = 0; k < 4; ++k) {
+        const double xCenterRaw = cx + probeOverD[static_cast<std::size_t>(k)] * D;
+        const double xCenter = wrap_periodic(xCenterRaw, Lx);
+        row.probeX[static_cast<std::size_t>(k)] = xCenter;
+        row.probe[static_cast<std::size_t>(k)] = compute_wake_window_stats(
+            fields, omega, params,
+            [&](double x, double y) {
+                return std::abs(signed_periodic_delta(x, xCenter, Lx)) <= probeHalfWidth &&
+                       std::abs(y - cy) <= probeHalfHeight;
+            }
+        );
+    }
+
+    const double xWake0 = cx + D;
+    const double xWake1 = cx + 4.0 * D;
+    const WakeWindowStats top = compute_wake_window_stats(
+        fields, omega, params,
+        [&](double x, double y) {
+            return x_in_periodic_interval(x, xWake0, xWake1, Lx) &&
+                   y > cy && y <= cy + probeHalfHeight;
+        }
+    );
+    const WakeWindowStats bot = compute_wake_window_stats(
+        fields, omega, params,
+        [&](double x, double y) {
+            return x_in_periodic_interval(x, xWake0, xWake1, Lx) &&
+                   y < cy && y >= cy - probeHalfHeight;
+        }
+    );
+    if (std::isfinite(top.Uy) && std::isfinite(bot.Uy)) {
+        row.wakeUyAsym = top.Uy - bot.Uy;
+    }
+
+    const double centerlineHalfHeight = std::max(probeHalfHeight * 0.25,
+                                                0.5 * Ly / static_cast<double>(std::max(1, params.Ny)));
+    const double maxDownstream = std::min(8.0 * D, 0.5 * Lx);
+
+    for (int ix = 0; ix < params.Nx; ++ix) {
+        for (int iy = 0; iy < params.Ny; ++iy) {
+            const int c = wake_cell_id(ix, iy, params);
+            const double xc = (static_cast<double>(ix) + 0.5) * (params.Lx / static_cast<double>(std::max(1, params.Nx)));
+            const double yc = (static_cast<double>(iy) + 0.5) * (params.Ly / static_cast<double>(std::max(1, params.Ny)));
+            const double downstream = positive_periodic_delta(xc, cx, Lx);
+
+            if (downstream <= R || downstream > maxDownstream) {
+                continue;
+            }
+            if (std::abs(yc - cy) > centerlineHalfHeight) {
+                continue;
+            }
+            if (point_in_obstacle(params, xc, yc)) {
+                continue;
+            }
+            if (fields.N[static_cast<std::size_t>(c)] <= 0) {
+                continue;
+            }
+            if (fields.Ux[static_cast<std::size_t>(c)] < 0.0) {
+                row.recircLength = std::max(row.recircLength, downstream - R);
+            }
+        }
+    }
+
+    return row;
+}
+
+void write_wake_probe_header(std::ostream& out) {
+    out << "step,t,Uref,Nref";
+    for (int k = 1; k <= 4; ++k) {
+        out << ",p" << k << "_x"
+            << ",p" << k << "_Ux"
+            << ",p" << k << "_Uy"
+            << ",p" << k << "_speed"
+            << ",p" << k << "_omega"
+            << ",p" << k << "_N"
+            << ",p" << k << "_nCells"
+            << ",p" << k << "_nParticles";
+    }
+    out << ",wake_Uy_asym,recircLength\n";
+}
+
+void write_wake_probe_row(std::ostream& out,
+                          int step,
+                          double t,
+                          const Params& params,
+                          const CellFields& fields) {
+    const WakeProbeRow row = compute_wake_probe_row(fields, params);
+
+    out << step << ',' << t << ',' << row.Uref << ',' << row.Nref;
+    for (int k = 0; k < 4; ++k) {
+        const WakeWindowStats& p = row.probe[static_cast<std::size_t>(k)];
+        out << ',' << row.probeX[static_cast<std::size_t>(k)]
+            << ',' << p.Ux
+            << ',' << p.Uy
+            << ',' << p.speed
+            << ',' << p.omega
+            << ',' << p.N
+            << ',' << p.nCells
+            << ',' << p.nParticles;
+    }
+    out << ',' << row.wakeUyAsym << ',' << row.recircLength << '\n';
+}
+
 void dump_state_prefix(const std::string& prefix, const State& s, int n, bool has_type, bool has_r0) {
     write_xy_interleaved(prefix + "_x.bin", s.x, n);
     write_xy_interleaved(prefix + "_v.bin", s.v, n);
@@ -332,6 +663,19 @@ int main(int argc, char** argv) {
         if (!metrics) throw std::runtime_error("Cannot open metrics CSV for writing");
         metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,baseOccStdFluid,baseOutBandFluid,shiftedOccStdFluid,shiftedOutBandFluid,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,nInsideObstacle,nNearObstacle,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
 
+        const bool wakeDiagnosticsActive = params.wakeDiagnosticsEnable && obstacle_is_active_cylinder(params);
+        const int wakeEvery = (params.wakeDiagnosticsEvery > 0) ? params.wakeDiagnosticsEvery : metricsEvery;
+        std::ofstream wakeProbes;
+        if (wakeDiagnosticsActive) {
+            if (wakeEvery <= 0) {
+                throw std::runtime_error("wake diagnostics enabled but wakeDiagnosticsEvery and benchmark_metricsEvery are both <= 0");
+            }
+            wakeProbes.open(out_prefix + "_wake_probes.csv");
+            if (!wakeProbes) throw std::runtime_error("Cannot open wake probes CSV for writing");
+            wakeProbes << std::setprecision(17);
+            write_wake_probe_header(wakeProbes);
+        }
+
         std::ofstream manifest(out_prefix + "_runout.kv");
         if (!manifest) throw std::runtime_error("Cannot open benchmark runout file");
         manifest << "inputTag=" << x_path << "\n";
@@ -339,10 +683,29 @@ int main(int argc, char** argv) {
         manifest << "benchmark_nSteps=" << nSteps << "\n";
         manifest << "benchmark_metricsEvery=" << metricsEvery << "\n";
         manifest << "benchmark_dumpSteps=" << require_key(kv, "benchmark_dumpSteps") << "\n";
+        manifest << "wakeDiagnosticsEnable=" << (wakeDiagnosticsActive ? 1 : 0) << "\n";
+        manifest << "wakeDiagnosticsEvery=" << wakeEvery << "\n";
+        manifest << "wakeProbeXOverD="
+                 << params.wakeProbe1XOverD << ","
+                 << params.wakeProbe2XOverD << ","
+                 << params.wakeProbe3XOverD << ","
+                 << params.wakeProbe4XOverD << "\n";
+        manifest << "wakeProbeHalfWidthOverD=" << params.wakeProbeHalfWidthOverD << "\n";
+        manifest << "wakeProbeHalfHeightOverD=" << params.wakeProbeHalfHeightOverD << "\n";
+        manifest << "wakeReferenceXMinOverD=" << params.wakeReferenceXMinOverD << "\n";
+        manifest << "wakeReferenceXMaxOverD=" << params.wakeReferenceXMaxOverD << "\n";
+        manifest << "wakeReferenceHalfHeightOverD=" << params.wakeReferenceHalfHeightOverD << "\n";
         manifest << "nThreadsRequested=" << nthreads << "\n";
 
         PhaseTimers timers;
         const auto t_all_start = Clock::now();
+
+        if (wakeDiagnosticsActive) {
+            const auto tw0 = Clock::now();
+            const CellFields G0wake = compute_cell_fields(state.x, state.v, params, rhoTarget);
+            write_wake_probe_row(wakeProbes, 0, 0.0, params, G0wake);
+            timers.diagnostics += elapsed_seconds(tw0, Clock::now());
+        }
 
         if (contains_step(dumpSteps, 0)) {
             const auto td0 = Clock::now();
@@ -407,7 +770,13 @@ int main(int argc, char** argv) {
     if (visualizer.should_close()) {
       break;
     }
-  }            
+  }
+
+            if (wakeDiagnosticsActive && (step % wakeEvery == 0 || step == nSteps)) {
+                const auto twake0 = Clock::now();
+                write_wake_probe_row(wakeProbes, step, step * params.dt, params, closureResult.outFields);
+                timers.diagnostics += elapsed_seconds(twake0, Clock::now());
+            }
             const double timeClosureStep = elapsed_seconds(t_closure0, t_closure1);
             timers.closure += timeClosureStep;
 

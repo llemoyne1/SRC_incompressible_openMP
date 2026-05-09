@@ -103,6 +103,21 @@ struct Params {
   double obstacleCx;
   double obstacleCy;
   double obstacleRadius;
+
+
+  // Optional wake diagnostics behind a cylindrical obstacle.
+  // Diagnostics only: these parameters do not affect dynamics.
+  bool wakeDiagnosticsEnable;
+  int wakeDiagnosticsEvery;
+  double wakeProbe1XOverD;
+  double wakeProbe2XOverD;
+  double wakeProbe3XOverD;
+  double wakeProbe4XOverD;
+  double wakeProbeHalfWidthOverD;
+  double wakeProbeHalfHeightOverD;
+  double wakeReferenceXMinOverD;
+  double wakeReferenceXMaxOverD;
+  double wakeReferenceHalfHeightOverD;
 };
 
 struct State {

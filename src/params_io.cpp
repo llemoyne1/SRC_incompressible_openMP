@@ -194,6 +194,19 @@ Params read_params_kv(const std::string& filepath) {
   p.obstacleCx = get_double_or(kv, "obstacleCx", 0.5 * p.Lx);
   p.obstacleCy = get_double_or(kv, "obstacleCy", 0.5 * p.Ly);
   p.obstacleRadius = get_double_or(kv, "obstacleRadius", 0.0);
+
+
+  p.wakeDiagnosticsEnable = get_bool_or(kv, "wakeDiagnosticsEnable", false);
+  p.wakeDiagnosticsEvery = get_int_or(kv, "wakeDiagnosticsEvery", 0);
+  p.wakeProbe1XOverD = get_double_or(kv, "wakeProbe1XOverD", 1.0);
+  p.wakeProbe2XOverD = get_double_or(kv, "wakeProbe2XOverD", 2.0);
+  p.wakeProbe3XOverD = get_double_or(kv, "wakeProbe3XOverD", 4.0);
+  p.wakeProbe4XOverD = get_double_or(kv, "wakeProbe4XOverD", 6.0);
+  p.wakeProbeHalfWidthOverD = get_double_or(kv, "wakeProbeHalfWidthOverD", 0.25);
+  p.wakeProbeHalfHeightOverD = get_double_or(kv, "wakeProbeHalfHeightOverD", 0.50);
+  p.wakeReferenceXMinOverD = get_double_or(kv, "wakeReferenceXMinOverD", -4.0);
+  p.wakeReferenceXMaxOverD = get_double_or(kv, "wakeReferenceXMaxOverD", -2.0);
+  p.wakeReferenceHalfHeightOverD = get_double_or(kv, "wakeReferenceHalfHeightOverD", 1.0);
     return p;
 }
 

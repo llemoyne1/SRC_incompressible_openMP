@@ -144,9 +144,9 @@ params.nThreads=4;
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 150;
+params.Nx = 75;
 params.Ny = 50;
-params.Lx = 20.0;
+params.Lx = 15.0;
 params.Ly = 10.0;
 params.Nc = params.Nx * params.Ny;
 
@@ -155,11 +155,11 @@ params.gamma = 20.0;
 params.n = round(params.gamma * params.Nc);
 params.dt = 5e-3;
 params.a0 = params.Lx / params.Nx;
-params.alphaDeg = 90.0;
+params.alphaDeg = 120.0;
 params.alpha = deg2rad(params.alphaDeg);
 params.kBT = 1.0;
 params.g = 0.0;
-params.bodyForceX = 0.75;
+params.bodyForceX = 0.2;
 params.useThermostat = true;
 params.keepMeanFlow = false;
 
@@ -247,6 +247,19 @@ params.obstacleType = 'cylinder';
 params.obstacleCx = 0.25 * params.Lx;
 params.obstacleCy = 0.5 * params.Ly;
 params.obstacleRadius = 0.8;
+
+% Optional wake diagnostics behind cylindrical obstacle
+params.wakeDiagnosticsEnable = true;
+params.wakeDiagnosticsEvery = 500;        % 0: use benchmark_metricsEvery
+params.wakeProbe1XOverD = 1.0;
+params.wakeProbe2XOverD = 2.0;
+params.wakeProbe3XOverD = 4.0;
+params.wakeProbe4XOverD = 6.0;
+params.wakeProbeHalfWidthOverD = 0.25;
+params.wakeProbeHalfHeightOverD = 0.50;
+params.wakeReferenceXMinOverD = -4.0;
+params.wakeReferenceXMaxOverD = -2.0;
+params.wakeReferenceHalfHeightOverD = 1.0;
 end
 
 function params = finalize_params(params, overrides)
