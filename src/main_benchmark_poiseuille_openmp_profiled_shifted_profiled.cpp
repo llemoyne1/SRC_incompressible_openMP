@@ -16,6 +16,7 @@
 #include "common_grid.h"
 #include "dump_io.h"
 #include "liquid_closure.h"
+#include "obstacles.h"
 #include "params_io.h"
 #include "srd_collision.h"
 #include "state_io.h"
@@ -161,6 +162,40 @@ double rho_target_scalar(const Params& params) {
     return params.gamma / (dx * dy);
 }
 
+
+struct ObstacleCounts {
+  int inside = 0;
+  int near = 0;
+};
+
+ObstacleCounts compute_obstacle_counts(const State& state, const Params& params) {
+  ObstacleCounts out;
+
+  if (!obstacle_is_active_cylinder(params)) {
+    return out;
+  }
+
+  const double dxCell = params.Lx / static_cast<double>(std::max(1, params.Nx));
+  const double dyCell = params.Ly / static_cast<double>(std::max(1, params.Ny));
+  const double shell = std::max(dxCell, dyCell);
+
+  for (int i = 0; i < params.n; ++i) {
+    const double d = cylinder_signed_distance(
+        params,
+        state.x[2 * i],
+        state.x[2 * i + 1]
+    );
+
+    if (d <= 0.0) {
+      ++out.inside;
+    } else if (d <= shell) {
+      ++out.near;
+    }
+  }
+
+  return out;
+}
+
 void dump_state_prefix(const std::string& prefix, const State& s, int n, bool has_type, bool has_r0) {
     write_xy_interleaved(prefix + "_x.bin", s.x, n);
     write_xy_interleaved(prefix + "_v.bin", s.v, n);
@@ -215,7 +250,7 @@ int main(int argc, char** argv) {
   
         std::ofstream metrics(out_prefix + "_metrics.csv");
         if (!metrics) throw std::runtime_error("Cannot open metrics CSV for writing");
-        metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
+        metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,nInsideObstacle,nNearObstacle,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
 
         std::ofstream manifest(out_prefix + "_runout.kv");
         if (!manifest) throw std::runtime_error("Cannot open benchmark runout file");
@@ -312,6 +347,7 @@ int main(int argc, char** argv) {
                 shiftedOccStd = shiftedPair.first;
                 shiftedOutBand = shiftedPair.second;
                 timers.diagnostics += elapsed_seconds(t_diag0, Clock::now());
+        const ObstacleCounts obsCounts = compute_obstacle_counts(state, params);
 
                 const double timeStepTotal = elapsed_seconds(t_step_start, Clock::now());
                 metrics << step << ','
@@ -341,9 +377,7 @@ int main(int argc, char** argv) {
                         << closureResult.metrics.nMaskedInterzoneCells << ','
                         << closureResult.metrics.momentumDeltaX << ','
                         << closureResult.metrics.momentumDeltaY << ','
-                        << baseResult.metrics.nThreadsUsed << ','
-                        << shiftedResult.metrics.nThreadsUsed << ','
-                        << timeStepTotal << ','
+                        << baseResult.metrics.nThreadsUsed << ',' << shiftedResult.metrics.nThreadsUsed << ',' << obsCounts.inside << ',' << obsCounts.near << ',' << timeStepTotal << ','
                         << elapsed_seconds(t_ref0, t_base0) << ','
                         << elapsed_seconds(t_base0, t_shift0) << ','
                         << elapsed_seconds(t_shift0, t_closure0) << ','
@@ -376,6 +410,9 @@ int main(int argc, char** argv) {
                 manifest << "finalMeanKinetic=" << mean_kinetic(state.v, params.n) << "\n";
                 manifest << "finalMeanVelocityX=" << mean_component(state.v, 0, params.n) << "\n";
                 manifest << "finalMeanVelocityY=" << mean_component(state.v, 1, params.n) << "\n";
+        const ObstacleCounts finalObsCounts = compute_obstacle_counts(state, params);
+        manifest << "finalInsideObstacle=" << finalObsCounts.inside << "\n";
+        manifest << "finalNearObstacle=" << finalObsCounts.near << "\n";
                 manifest << "finalQx=" << flow_rate_qx(closureResult.outFields, params) << "\n";
                 manifest << "totalParticlesMovedDense=" << (baseResult.metrics.nParticlesMovedDense + shiftedResult.metrics.nParticlesMovedDense) << "\n";
                 manifest << "totalParticlesMovedSparse=" << (baseResult.metrics.nParticlesMovedSparse + shiftedResult.metrics.nParticlesMovedSparse) << "\n";

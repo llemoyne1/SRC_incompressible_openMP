@@ -88,6 +88,8 @@ assert(size(x,1) == params.n, ...
 assert(size(x,2) == 2 && size(v,2) == 2, ...
     'x and v must be n x 2 arrays.');
 
+nInsideInitial = count_inside_obstacle_local(params, x);
+
 if ~exist(workdir, 'dir')
     mkdir(workdir);
 end
@@ -99,6 +101,10 @@ runScriptPath = fullfile(workdir, 'run_poiseuille_viz_case.sh');
 
 write_params_kv_local(params, paramsPath);
 write_state_bin_local(inPrefix, x, v, type, r0);
+if exist('nInsideInitial', 'var') ~= 1
+    nInsideInitial = count_inside_obstacle_local(params, x);
+end
+fprintf('initialInside : %d\n', nInsideInitial);
 write_run_script(runScriptPath, exePath, paramsPath, inPrefix, outPrefix, nThreads);
 
 prep = struct();
@@ -111,6 +117,7 @@ prep.outPrefix = outPrefix;
 prep.runScriptPath = runScriptPath;
 prep.runScriptLinux = to_linux(runScriptPath);
 prep.nThreads = nThreads;
+prep.nInsideInitial = nInsideInitial;
 prep.dumpSteps = parse_dump_steps(params.benchmark_dumpSteps);
 
 fprintf('\n=== prepare_poiseuille_viz_case ===\n');
@@ -253,8 +260,32 @@ end
 
 n = params.n;
 x = zeros(n, 2);
-x(:,1) = params.Lx * rand(n, 1);
-x(:,2) = params.Ly * rand(n, 1);
+
+if obstacle_active_local(params)
+    % Rejection sampling in rectangle minus cylinder.
+    filled = 0;
+    batch = max(1000, ceil(1.5 * n));
+
+    while filled < n
+        cand = zeros(batch, 2);
+        cand(:,1) = params.Lx * rand(batch, 1);
+        cand(:,2) = params.Ly * rand(batch, 1);
+
+        keep = ~points_in_obstacle_local(params, cand);
+        cand = cand(keep, :);
+
+        nadd = min(size(cand, 1), n - filled);
+        if nadd > 0
+            x(filled + (1:nadd), :) = cand(1:nadd, :);
+            filled = filled + nadd;
+        else
+            batch = min(10 * n, max(batch + 1000, 2 * batch));
+        end
+    end
+else
+    x(:,1) = params.Lx * rand(n, 1);
+    x(:,2) = params.Ly * rand(n, 1);
+end
 
 sigma = sqrt(max(params.kBT, 0.0));
 v = sigma * randn(n, 2);
@@ -266,6 +297,27 @@ end
 
 type = zeros(n, 1, 'uint8');
 r0 = x;
+end
+
+function tf = obstacle_active_local(params)
+tf = isfield(params, 'obstacleEnable') && logical(params.obstacleEnable) && ...
+     isfield(params, 'obstacleType') && strcmpi(char(string(params.obstacleType)), 'cylinder') && ...
+     isfield(params, 'obstacleRadius') && params.obstacleRadius > 0;
+end
+
+function inside = points_in_obstacle_local(params, x)
+if ~obstacle_active_local(params)
+    inside = false(size(x,1), 1);
+    return;
+end
+
+dx = x(:,1) - params.obstacleCx;
+dy = x(:,2) - params.obstacleCy;
+inside = (dx .* dx + dy .* dy) <= params.obstacleRadius^2;
+end
+
+function nInside = count_inside_obstacle_local(params, x)
+nInside = nnz(points_in_obstacle_local(params, x));
 end
 
 function write_params_kv_local(params, filepath)
