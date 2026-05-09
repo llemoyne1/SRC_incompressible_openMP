@@ -196,6 +196,78 @@ ObstacleCounts compute_obstacle_counts(const State& state, const Params& params)
   return out;
 }
 
+
+struct FluidAwareOccDiag {
+    double occStd = 0.0;
+    double outBand = 0.0;
+    int nActiveFluidCells = 0;
+};
+
+FluidAwareOccDiag compute_occstd_outband_fluid_aware(const CellFields& fields,
+                                                     const Params& params,
+                                                     const std::vector<double>& phi) {
+    if (static_cast<int>(phi.size()) != params.Nc ||
+        static_cast<int>(fields.N.size()) != params.Nc) {
+        throw std::runtime_error("compute_occstd_outband_fluid_aware: inconsistent cell count");
+    }
+
+    FluidAwareOccDiag out;
+
+    double sumPhi = 0.0;
+    for (double p : phi) {
+        if (p > 1e-12) {
+            sumPhi += p;
+        }
+    }
+
+    if (sumPhi <= 0.0) {
+        return out;
+    }
+
+    const double gammaFluid = static_cast<double>(params.n) / sumPhi;
+    const double coef = params.coef;
+
+    double acc = 0.0;
+    int nOut = 0;
+
+    for (int c = 0; c < params.Nc; ++c) {
+        const double phic = phi[static_cast<std::size_t>(c)];
+        if (phic <= 1e-12) {
+            continue;
+        }
+
+        ++out.nActiveFluidCells;
+
+        const double target = gammaFluid * phic;
+        const double N = static_cast<double>(fields.N[static_cast<std::size_t>(c)]);
+        const double d = N - target;
+        acc += d * d;
+
+        const double highThr = target * (1.0 + coef);
+        double lowThr = 0.0;
+        if (params.lowMode == "1+coef") {
+            lowThr = target / (1.0 + coef);
+        } else {
+            lowThr = target * (1.0 - coef);
+        }
+
+        // Same convention as compute_occstd_outband(...): empty active cells
+        // are not counted as sparse/out-of-band.
+        if (N > highThr || (N > 0.0 && N < lowThr)) {
+            ++nOut;
+        }
+    }
+
+    if (out.nActiveFluidCells > 0) {
+        out.occStd = std::sqrt(acc / static_cast<double>(out.nActiveFluidCells)) /
+                     std::max(gammaFluid, 1e-30);
+        out.outBand = static_cast<double>(nOut) /
+                      static_cast<double>(out.nActiveFluidCells);
+    }
+
+    return out;
+}
+
 void dump_state_prefix(const std::string& prefix, const State& s, int n, bool has_type, bool has_r0) {
     write_xy_interleaved(prefix + "_x.bin", s.x, n);
     write_xy_interleaved(prefix + "_v.bin", s.v, n);
@@ -245,12 +317,20 @@ int main(int argc, char** argv) {
 
         State state = read_state(x_path, v_path, type_path, r0_path, has_type, has_r0, params.n);
         const double rhoTarget = rho_target_scalar(params);
+        const int obstacleMaskSubsamplesDiag = 8;
+        const double dxMaskDiag = params.Lx / static_cast<double>(std::max(1, params.Nx));
+        const double dyMaskDiag = params.Ly / static_cast<double>(std::max(1, params.Ny));
+        const auto phiBaseDiag = build_fluid_fraction_mask(params, obstacleMaskSubsamplesDiag, 0.0, 0.0);
+        const auto phiShiftedDiag = build_fluid_fraction_mask(params, obstacleMaskSubsamplesDiag, 0.5 * dxMaskDiag, 0.5 * dyMaskDiag);
+        const auto fluidMaskBaseDiag = summarize_fluid_fraction_mask(params, phiBaseDiag);
+        const auto fluidMaskShiftedDiag = summarize_fluid_fraction_mask(params, phiShiftedDiag);
+
   Visualizer visualizer;
   visualizer.init(params);
   
         std::ofstream metrics(out_prefix + "_metrics.csv");
         if (!metrics) throw std::runtime_error("Cannot open metrics CSV for writing");
-        metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,nInsideObstacle,nNearObstacle,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
+        metrics << "step,occStd,outBand,meanKinetic,meanUx,meanUy,Qx,baseOccStd,baseOutBand,shiftedOccStd,shiftedOutBand,baseOccStdFluid,baseOutBandFluid,shiftedOccStdFluid,shiftedOutBandFluid,meanPdrive,meanPdriveRaw,meanVelocityX,meanVelocityY,particlesMovedDense,particlesMovedSparse,betaRepairOpt,betaRepairApplied,betaRepairNum,betaRepairDen,rmsRepairDU,maxRepairDU,meanAbsRepairDU,nMaskedInterzoneCells,momentumDeltaX,momentumDeltaY,nThreadsUsedBase,nThreadsUsedShifted,nInsideObstacle,nNearObstacle,timeStepTotal,timeRefBuild,timeBase,timeShifted,timeClosure,timeDiagnostics,timeDump\n";
 
         std::ofstream manifest(out_prefix + "_runout.kv");
         if (!manifest) throw std::runtime_error("Cannot open benchmark runout file");
@@ -335,6 +415,7 @@ int main(int argc, char** argv) {
             finalThreadsShifted = shiftedResult.metrics.nThreadsUsed;
 
             double baseOccStd = 0.0, baseOutBand = 0.0, shiftedOccStd = 0.0, shiftedOutBand = 0.0;
+            double baseOccStdFluid = 0.0, baseOutBandFluid = 0.0, shiftedOccStdFluid = 0.0, shiftedOutBandFluid = 0.0;
 
             if (metricsEvery > 0 && (step % metricsEvery == 0 || step == nSteps)) {
                 const auto t_diag0 = Clock::now();
@@ -342,10 +423,16 @@ int main(int argc, char** argv) {
                 const CellFields shiftedFields = compute_cell_fields(shiftedStateForClosure.x, shiftedStateForClosure.v, params, rhoTarget);
                 const auto basePair = compute_occstd_outband(baseFields, params);
                 const auto shiftedPair = compute_occstd_outband(shiftedFields, params);
+                const auto baseFluidPair = compute_occstd_outband_fluid_aware(baseFields, params, phiBaseDiag);
+                const auto shiftedFluidPair = compute_occstd_outband_fluid_aware(shiftedFields, params, phiShiftedDiag);
                 baseOccStd = basePair.first;
                 baseOutBand = basePair.second;
                 shiftedOccStd = shiftedPair.first;
                 shiftedOutBand = shiftedPair.second;
+                baseOccStdFluid = baseFluidPair.occStd;
+                baseOutBandFluid = baseFluidPair.outBand;
+                shiftedOccStdFluid = shiftedFluidPair.occStd;
+                shiftedOutBandFluid = shiftedFluidPair.outBand;
                 timers.diagnostics += elapsed_seconds(t_diag0, Clock::now());
         const ObstacleCounts obsCounts = compute_obstacle_counts(state, params);
 
@@ -361,6 +448,10 @@ int main(int argc, char** argv) {
                         << baseOutBand << ','
                         << shiftedOccStd << ','
                         << shiftedOutBand << ','
+                        << baseOccStdFluid << ','
+                        << baseOutBandFluid << ','
+                        << shiftedOccStdFluid << ','
+                        << shiftedOutBandFluid << ','
                         << closureResult.metrics.meanPdrive << ','
                         << closureResult.metrics.meanPdriveRaw << ','
                         << mean_component(state.v, 0, params.n) << ','
@@ -407,6 +498,10 @@ int main(int argc, char** argv) {
                 }
                 manifest << "finalOccStd=" << shiftedOccStd << "\n";
                 manifest << "finalOutBand=" << shiftedOutBand << "\n";
+                manifest << "finalOccStdFluid=" << shiftedOccStdFluid << "\n";
+                manifest << "finalOutBandFluid=" << shiftedOutBandFluid << "\n";
+                manifest << "finalBaseOccStdFluid=" << baseOccStdFluid << "\n";
+                manifest << "finalBaseOutBandFluid=" << baseOutBandFluid << "\n";
                 manifest << "finalMeanKinetic=" << mean_kinetic(state.v, params.n) << "\n";
                 manifest << "finalMeanVelocityX=" << mean_component(state.v, 0, params.n) << "\n";
                 manifest << "finalMeanVelocityY=" << mean_component(state.v, 1, params.n) << "\n";
@@ -446,6 +541,10 @@ int main(int argc, char** argv) {
         manifest << "fluidMaskShiftedPartialCells=" << maskShifted.nPartialCells << "\n";
         manifest << "fluidMaskShiftedFullFluidCells=" << maskShifted.nFullFluidCells << "\n";
         manifest << "fluidMaskShiftedGammaFluid=" << maskShifted.gammaFluidObstacle << "\n";
+        manifest << "fluidMaskBaseDiagSum=" << fluidMaskBaseDiag.sumFluidFraction << "\n";
+        manifest << "fluidMaskBaseDiagGammaFluid=" << fluidMaskBaseDiag.gammaFluidObstacle << "\n";
+        manifest << "fluidMaskShiftedDiagSum=" << fluidMaskShiftedDiag.sumFluidFraction << "\n";
+        manifest << "fluidMaskShiftedDiagGammaFluid=" << fluidMaskShiftedDiag.gammaFluidObstacle << "\n";
 
                 manifest << "finalQx=" << flow_rate_qx(closureResult.outFields, params) << "\n";
                 manifest << "totalParticlesMovedDense=" << (baseResult.metrics.nParticlesMovedDense + shiftedResult.metrics.nParticlesMovedDense) << "\n";
