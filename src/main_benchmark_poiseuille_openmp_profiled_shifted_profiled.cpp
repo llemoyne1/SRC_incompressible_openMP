@@ -676,6 +676,12 @@ int main(int argc, char** argv) {
             write_wake_probe_header(wakeProbes);
         }
 
+        const bool redistributionActive =
+            params.useIncompressibleRedistribution && params.useZoneRedistribution;
+        const bool liquidClosureActive =
+            redistributionActive && params.useLiquidClosure;
+        const bool srcOnlyMode = !redistributionActive;
+
         std::ofstream manifest(out_prefix + "_runout.kv");
         if (!manifest) throw std::runtime_error("Cannot open benchmark runout file");
         manifest << "inputTag=" << x_path << "\n";
@@ -697,6 +703,12 @@ int main(int argc, char** argv) {
         manifest << "wakeReferenceXMaxOverD=" << params.wakeReferenceXMaxOverD << "\n";
         manifest << "wakeReferenceHalfHeightOverD=" << params.wakeReferenceHalfHeightOverD << "\n";
         manifest << "nThreadsRequested=" << nthreads << "\n";
+        manifest << "useIncompressibleRedistribution=" << (params.useIncompressibleRedistribution ? 1 : 0) << "\n";
+        manifest << "useZoneRedistribution=" << (params.useZoneRedistribution ? 1 : 0) << "\n";
+        manifest << "useLiquidClosure=" << (params.useLiquidClosure ? 1 : 0) << "\n";
+        manifest << "effectiveRedistributionActive=" << (redistributionActive ? 1 : 0) << "\n";
+        manifest << "effectiveLiquidClosureActive=" << (liquidClosureActive ? 1 : 0) << "\n";
+        manifest << "srcOnlyMode=" << (srcOnlyMode ? 1 : 0) << "\n";
 
         PhaseTimers timers;
         const auto t_all_start = Clock::now();
@@ -737,32 +749,72 @@ int main(int argc, char** argv) {
             srd_collision_step(stateRef.v, cid, params, 433494437ULL + 10007ULL * static_cast<std::uint64_t>(step));
             timers.refBuild += elapsed_seconds(t_ref0, Clock::now());
 
+            OpenMPPassResult baseResult;
+            OpenMPPassResult shiftedResult;
+            baseResult.stateOut = stateRef;
+            shiftedResult.stateOut = stateRef;
+            baseResult.metrics.nThreadsRequested = nthreads;
+            shiftedResult.metrics.nThreadsRequested = nthreads;
+            baseResult.metrics.nThreadsUsed = 0;
+            shiftedResult.metrics.nThreadsUsed = 0;
+
             const auto t_base0 = Clock::now();
-            const auto baseResult = run_zone_pass_openmp(stateRef, params, "base", 88172645463325252ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads, phiBaseDiag);
-            timers.base += elapsed_seconds(t_base0, Clock::now());
-            timers.baseLayout += baseResult.metrics.timeLayout;
-            timers.baseExtract += baseResult.metrics.timeZoneExtract;
-            timers.baseSnapshot += baseResult.metrics.timeSnapshot;
-            timers.baseAlloc += baseResult.metrics.timeAlloc;
-            timers.baseKernel += baseResult.metrics.timeKernel;
-            timers.basePack += baseResult.metrics.timePack;
-            timers.baseMerge += baseResult.metrics.timeMerge;
+            if (redistributionActive) {
+                baseResult = run_zone_pass_openmp(
+                    stateRef,
+                    params,
+                    "base",
+                    88172645463325252ULL + 10007ULL * static_cast<std::uint64_t>(step),
+                    nthreads,
+                    phiBaseDiag
+                );
+                timers.base += elapsed_seconds(t_base0, Clock::now());
+                timers.baseLayout += baseResult.metrics.timeLayout;
+                timers.baseExtract += baseResult.metrics.timeZoneExtract;
+                timers.baseSnapshot += baseResult.metrics.timeSnapshot;
+                timers.baseAlloc += baseResult.metrics.timeAlloc;
+                timers.baseKernel += baseResult.metrics.timeKernel;
+                timers.basePack += baseResult.metrics.timePack;
+                timers.baseMerge += baseResult.metrics.timeMerge;
+            }
 
             const auto t_shift0 = Clock::now();
-            const auto shiftedResult = run_zone_pass_openmp(baseResult.stateOut, params, "shifted", 88172645463325252ULL + 4099ULL + 10007ULL * static_cast<std::uint64_t>(step), nthreads, phiBaseDiag);
-            timers.shifted += elapsed_seconds(t_shift0, Clock::now());
-            timers.shiftedLayout += shiftedResult.metrics.timeLayout;
-            timers.shiftedExtract += shiftedResult.metrics.timeZoneExtract;
-            timers.shiftedSnapshot += shiftedResult.metrics.timeSnapshot;
-            timers.shiftedAlloc += shiftedResult.metrics.timeAlloc;
-            timers.shiftedKernel += shiftedResult.metrics.timeKernel;
-            timers.shiftedPack += shiftedResult.metrics.timePack;
-            timers.shiftedMerge += shiftedResult.metrics.timeMerge;
+            if (redistributionActive) {
+                shiftedResult = run_zone_pass_openmp(
+                    baseResult.stateOut,
+                    params,
+                    "shifted",
+                    88172645463325252ULL + 4099ULL + 10007ULL * static_cast<std::uint64_t>(step),
+                    nthreads,
+                    phiBaseDiag
+                );
+                timers.shifted += elapsed_seconds(t_shift0, Clock::now());
+                timers.shiftedLayout += shiftedResult.metrics.timeLayout;
+                timers.shiftedExtract += shiftedResult.metrics.timeZoneExtract;
+                timers.shiftedSnapshot += shiftedResult.metrics.timeSnapshot;
+                timers.shiftedAlloc += shiftedResult.metrics.timeAlloc;
+                timers.shiftedKernel += shiftedResult.metrics.timeKernel;
+                timers.shiftedPack += shiftedResult.metrics.timePack;
+                timers.shiftedMerge += shiftedResult.metrics.timeMerge;
+            } else {
+                shiftedResult.stateOut = baseResult.stateOut;
+            }
 
             const auto t_closure0 = Clock::now();
             State shiftedStateForClosure = shiftedResult.stateOut;
-      apply_cylinder_specular_position_bc(shiftedStateForClosure.x, shiftedStateForClosure.v, params);
-      const auto closureResult = run_liquid_closure(stateRef, shiftedStateForClosure, params);
+      apply_cylinder_position_bc(shiftedStateForClosure.x, shiftedStateForClosure.v, params);
+
+            LiquidClosureResult closureResult;
+            if (liquidClosureActive) {
+                closureResult = run_liquid_closure(stateRef, shiftedStateForClosure, params);
+            } else {
+                closureResult.stateOut = shiftedStateForClosure;
+                closureResult.stateRepaired = shiftedStateForClosure;
+                closureResult.refFields = compute_cell_fields(stateRef.x, stateRef.v, params, rhoTarget);
+                closureResult.redFields = compute_cell_fields(shiftedStateForClosure.x, shiftedStateForClosure.v, params, rhoTarget);
+                closureResult.repairedFields = closureResult.redFields;
+                closureResult.outFields = closureResult.redFields;
+            }
             const auto t_closure1 = Clock::now();
             state = closureResult.stateOut;
             

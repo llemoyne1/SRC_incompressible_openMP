@@ -139,36 +139,36 @@ function params = default_params()
 % Complete default set for the final Poiseuille/OpenMP/profiled/shifted code.
 
 params = struct();
-params.nThreads=12;
+params.nThreads=8;
 %params.workdir=fullfile(rootWin,'rbps8_cyl_smooth_viz1');
 %params.exePath=[rootLin '/build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled_viz'];
 
 % Domain / grid
 params.caseType = 'poiseuille';
-params.Nx = 100;
-params.Ny = 100;
-params.Lx = 20.0;
-params.Ly = 10.0;
+params.Nx = 324;
+params.Ny = 128;
+params.Lx = 3;
+params.Ly = 1;
 params.Nc = params.Nx * params.Ny;
 
 % MPCD / SRC
-params.gamma = 6.0;
+params.gamma = 10.0;
 params.n = round(params.gamma * params.Nc);
-params.dt = 5e-3;
+params.dt = 5e-4;
 params.a0 = params.Lx / params.Nx;
-params.alphaDeg = 120.0;
+params.alphaDeg = 90.0;
 params.alpha = deg2rad(params.alphaDeg);
 params.kBT = 1.0;
 params.g = 0.0;
-params.bodyForceX = 1.;
+params.bodyForceX = 5;
 params.useThermostat = true;
 params.keepMeanFlow = false;
 
 % Boundary conditions: Poiseuille benchmark
 params.boundary_left = 'periodic';
 params.boundary_right = 'periodic';
-params.boundary_bottom = 'thermalize';
-params.boundary_top = 'thermalize';
+params.boundary_bottom = 'thermalize';%'specular'; 
+params.boundary_top = 'thermalize';%'specular';
 params.Utop = 0.0;
 params.Ubottom = 0.0;
 params.wallSigma = sqrt(max(params.kBT, 0.0));
@@ -180,9 +180,9 @@ params.redistributionWallWettingEnabled = false;
 params.useInterfaceVelocityReorientation = false;
 
 % Incompressible redistribution by zones
-params.useIncompressibleRedistribution = true;
+params.useIncompressibleRedistribution = false; %%%%%%
 params.redistribAfterCollision = true;
-params.useZoneRedistribution = true;
+params.useZoneRedistribution = false;%%%%%
 params.zoneTileNx = 25;
 params.zoneTileNy = 25;
 params.zoneUseShiftedSecondPass = true;
@@ -200,7 +200,7 @@ params.highThrFloor = 25.0;
 params.lowThrBulkOverride = NaN;
 
 % Liquid closure
-params.useLiquidClosure = true;
+params.useLiquidClosure = false; %%%%%%%
 params.useOptimalBetaRepair = true;
 params.betaRepair = 0.0;
 params.betaEOS = 1.0;
@@ -211,15 +211,15 @@ params.smoothPdriveInterzoneBlend = 1.0;
 params.smoothPdriveIncludeShiftedLayouts = true;
 
 % Benchmark runtime parameters read by the main executable
-params.benchmark_nSteps = 30000;
+params.benchmark_nSteps = 20000;
 params.benchmark_metricsEvery = 100;
-params.benchmark_dumpSteps = '0,100,300,600,900,1200,1500,1800,2000';
+params.benchmark_dumpSteps = '10000,12000,14000,1600,18000,20000';
 
 % Optional real-time visualization
 params.visualEnable = true;
 params.visualEvery = 1;
 params.visualMode = 'field';       % particles | field | field_particles
-params.visualField = 'vorticity';                % Ux | Uy | speed | vorticity | N | rho | P
+params.visualField = 'Ux';                % Ux | Uy | speed | vorticity | N | rho | P
 
 params.visualFieldSmoothingEnable = true;
 params.visualFieldSmoothingPasses = 2;
@@ -243,15 +243,15 @@ params.visualWindowHeight = 700;
 
 % Optional solid obstacle geometry. Geometry only at this stage;
 % particle reflection and solid/fluid masking will be added later.
-params.obstacleEnable = true;
-params.obstacleType = 'cylinder';
-params.obstacleCx = 0.25 * params.Lx;
-params.obstacleCy = 0.5 * params.Ly+0.005*params.Ly;
-params.obstacleRadius = 1.6;
+params.obstacleEnable = false; %%%%%%%%%%%%%
+params.obstacleType = 'none';%'cylinder';%%%%%%%%%%%%%%%%
+params.obstacleCx = 0.2 * params.Lx;
+params.obstacleCy = 0.5 * params.Ly+0.01*params.Ly;
+params.obstacleRadius = 0.17*params.Ly;
 params.obstacleBoundaryMode = 'bounceback';
 
 % Optional wake diagnostics behind cylindrical obstacle
-params.wakeDiagnosticsEnable = true;
+params.wakeDiagnosticsEnable = false; %%%%%%%%%%%%%%%%%
 params.wakeDiagnosticsEvery = 500;        % 0: use benchmark_metricsEvery
 params.wakeProbe1XOverD = 1.0;
 params.wakeProbe2XOverD = 2.0;
