@@ -1,0 +1,57 @@
+# Active-domain smoke test: slowly moving top active-fluid boundary.
+# This is not yet a liquid EOS validation. It checks that yTop(t), fluidArea,
+# meanPhysicalDensity, solid reflection and solid_thermal wall coupling are
+# consistently evaluated from the active domain.
+# Requires initial_state_active_y095.smpcd generated inside 0 <= y <= 0.95.
+inputState = initial_state_active_y095.smpcd
+outputDir = runs/active_domain_y_top_slow_motion
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+# yTop(t) = 0.95 - 0.001*t. With dt=0.001 and 10000 steps,
+# t_end=10 and yTop_end=0.94, giving a visible ~1.06% density increase.
+fluidYTop0 = 0.95
+fluidYTopVelocity = -0.001
+
+dt = 0.001
+nSteps = 10000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+# No explicit wallUyTop is needed: the normal wall velocity is inherited from
+# fluidYTopVelocity. Leave the tangential offset at zero.
+wallUyTop = 0.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4

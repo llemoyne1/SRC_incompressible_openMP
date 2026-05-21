@@ -185,3 +185,16 @@ See `docs/SOLID_THERMAL_COUETTE_SLIDING.md`.
 The code separates the fixed numerical box (`Lx`, `Ly`, `Nx`, `Ny`) from the active fluid domain used by solid-wall reflection and solid-thermal wall coupling. By default they coincide. The active-domain bounds are controlled by `fluidXMin0`, `fluidXMax0`, `fluidYMin0`, `fluidYMax0` and optional boundary velocities. The aliases `fluidYTop0` and `fluidYTopVelocity` are available for future top-piston/EOS tests. Runtime summaries record `fluidArea` and `meanPhysicalDensity`; detailed field analysis remains in MATLAB post-processing.
 
 See `docs/ACTIVE_FLUID_DOMAIN.md`.
+
+### Active-domain smoke tests
+
+The active-domain refactor includes two smoke-test parameter files:
+
+```text
+examples/params_active_domain_y_top_static.kv
+examples/params_active_domain_y_top_slow_motion.kv
+```
+
+They require a reduced-domain initial state, `initial_state_active_y095.smpcd`, generated from MATLAB with particles inside `0 <= y <= 0.95`. The helper `matlab/validate_active_fluid_domain_refactor.m` summarizes `fluidYMax`, `fluidArea`, mean physical density and thermal control from `summary_runtime.csv`.
+
+See `docs/ACTIVE_FLUID_DOMAIN_SMOKE_TESTS.md`.
