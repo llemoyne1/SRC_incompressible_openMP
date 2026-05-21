@@ -53,3 +53,6 @@ CMakeLists.txt
 # Windows metadata files sometimes created under WSL/Linux
 *:Zone.Identifier
 *Zone.Identifier
+
+# Generated SRC/MPCD particle state files
+*.smpcd
