@@ -156,3 +156,26 @@ out = validate_solid_thermal_poiseuille_symmetry( ...
 ```
 
 This compares `Ux(y)` for solid y-walls with `Uy(x)` for solid x-walls. Agreement of the two profiles is the first axis-symmetry check for the generic `solid` thermal boundary condition.
+
+## Sliding-wall Couette validation
+
+Tangential solid-wall motion is tested with transposed Couette runs:
+
+```bash
+./build/src_mpcd_base examples/params_couette_y_solid_thermal_long.kv
+./build/src_mpcd_base examples/params_couette_x_solid_thermal_long.kv
+```
+
+MATLAB post-processing:
+
+```matlab
+addpath('matlab')
+out = validate_solid_thermal_couette_sliding( ...
+    'runs/couette_y_solid_thermal_long', ...
+    'runs/couette_x_solid_thermal_long', ...
+    'fitStartFraction', 0.5, ...
+    'excludeWallCells', 2, ...
+    'stationaryWindowFraction', 0.25);
+```
+
+See `docs/SOLID_THERMAL_COUETTE_SLIDING.md`.

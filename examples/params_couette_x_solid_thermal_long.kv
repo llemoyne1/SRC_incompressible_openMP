@@ -1,0 +1,48 @@
+# Long Couette validation: periodic-y channel, generic solid thermal x-walls.
+# Left wall is fixed; right wall slides tangentially in +y.
+# This is the transposed counterpart of params_couette_y_solid_thermal_long.kv.
+inputState = initial_state.smpcd
+outputDir = runs/couette_x_solid_thermal_long
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 50000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = solid
+bcRight = solid
+bcBottom = periodic
+bcTop = periodic
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxLeft = 0.0
+wallUyLeft = 0.0
+wallUxRight = 0.0
+wallUyRight = 0.02
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4
