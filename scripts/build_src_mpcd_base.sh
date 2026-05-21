@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CXX=${CXX:-g++}
+CXXFLAGS=${CXXFLAGS:--std=c++17 -O2 -Wall -Wextra -fopenmp}
+
+mkdir -p build
+
+$CXX $CXXFLAGS -Iinclude \
+  src/main_src_mpcd_base.cpp \
+  src/params_io_base.cpp \
+  src/cell_grid.cpp \
+  src/boundary_base.cpp \
+  src/src_collision.cpp \
+  src/src_mpcd_base.cpp \
+  src/runtime_summary.cpp \
+  src/particle_state.cpp \
+  src/state_smpcd_io.cpp \
+  -o build/src_mpcd_base
+
+echo "Built build/src_mpcd_base"

@@ -1,0 +1,36 @@
+# Minimal periodic SRC/MPCD base run.
+# Generate inputState with matlab/generate_smpcd_state_uniform.m or point this
+# parameter to an existing .smpcd file.
+inputState = initial_state.smpcd
+outputDir = runs/periodic_base
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 1000
+
+# 120 degrees in radians. alphaDeg = 120 is also accepted.
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcX = periodic
+bcY = periodic
+
+# Not implemented yet in this mass-aware base executable.
+thermostatEnable = false
+kBT = 0.01
+
+summaryEvery = 10
+dumpStateEvery = 1000
+
+# 0 means: keep the default OpenMP setting / environment.
+numThreads = 0
