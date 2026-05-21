@@ -31,6 +31,26 @@ double elapsed_seconds(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double>(now - t0).count();
 }
 
+int openmp_max_threads() {
+#ifdef _OPENMP
+    return omp_get_max_threads();
+#else
+    return 1;
+#endif
+}
+
+int openmp_active_threads() {
+    int active = 1;
+#ifdef _OPENMP
+    #pragma omp parallel
+    {
+        #pragma omp single
+        active = omp_get_num_threads();
+    }
+#endif
+    return active;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -49,6 +69,9 @@ int main(int argc, char** argv) {
         }
 #endif
 
+        const int ompMaxThreads = openmp_max_threads();
+        const int ompActiveThreads = openmp_active_threads();
+
         std::filesystem::create_directories(params.outputDir);
         const std::filesystem::path paramsCopy = std::filesystem::path(params.outputDir) / "params_used.kv";
         std::error_code ec;
@@ -65,7 +88,9 @@ int main(int argc, char** argv) {
 
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
-        summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0), &initialCellCount));
+        summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
+                                                     &initialCellCount, nullptr, nullptr, nullptr,
+                                                     ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
         }
@@ -77,12 +102,10 @@ int main(int argc, char** argv) {
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
                   << " wallVp=" << (params.wallVpEnable ? "on" : "off")
+                  << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
                   << " steps=" << params.nSteps
-#ifdef _OPENMP
-                  << " threads=" << omp_get_max_threads()
-#else
-                  << " threads=1"
-#endif
+                  << " threadsActive=" << ompActiveThreads
+                  << " threadsMax=" << ompMaxThreads
                   << " outputDir=" << params.outputDir << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
@@ -94,7 +117,9 @@ int main(int argc, char** argv) {
                 const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
                                                            &workspace.collision.cellCount,
                                                            &stepResult.boundary,
-                                                           &stepResult.collision);
+                                                           &stepResult.collision,
+                                                           &stepResult.thermostat,
+                                                           ompActiveThreads);
                 summary.append(s);
                 std::cout << "\r[src_mpcd_base] step=" << step
                           << "/" << params.nSteps

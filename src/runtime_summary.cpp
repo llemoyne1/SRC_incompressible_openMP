@@ -13,12 +13,15 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount,
                                        const BoundaryDiagnostics* boundary,
-                                       const CollisionDiagnostics* collision) {
+                                       const CollisionDiagnostics* collision,
+                                       const ThermostatDiagnostics* thermostat,
+                                       int numThreadsUsed) {
     validate_particle_state(state, "compute_runtime_summary");
     RuntimeSummary s{};
     s.step = step;
     s.time = static_cast<double>(step) * params.dt;
     s.wallTime = wallTime;
+    s.numThreadsUsed = numThreadsUsed > 0 ? numThreadsUsed : 1;
     s.Np = state.Np;
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -70,6 +73,16 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.virtualParticleCount = collision->virtualParticleCount;
         s.virtualMass = collision->virtualMass;
     }
+    if (thermostat != nullptr) {
+        s.thermostatApplied = thermostat->applied ? 1 : 0;
+        s.thermostatCells = thermostat->cellsRescaled;
+        s.thermostatParticles = thermostat->particlesRescaled;
+        s.thermostatKBTBefore = thermostat->kBTBefore;
+        s.thermostatKBTAfter = thermostat->kBTAfter;
+        s.thermostatScaleMean = thermostat->scaleMean;
+        s.thermostatScaleMin = thermostat->scaleMin;
+        s.thermostatScaleMax = thermostat->scaleMax;
+    }
 
     if (cellCount != nullptr && !cellCount->empty()) {
         const auto& count = *cellCount;
@@ -107,7 +120,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualMass\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualMass,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -117,6 +130,7 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
     out_ << s.step << ','
          << std::setprecision(17) << s.time << ','
          << s.wallTime << ','
+         << s.numThreadsUsed << ','
          << s.Np << ','
          << s.totalMass << ','
          << s.Px << ','
@@ -134,7 +148,15 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.hitsBottom << ','
          << s.hitsTop << ','
          << s.virtualParticleCount << ','
-         << s.virtualMass << '\n';
+         << s.virtualMass << ','
+         << s.thermostatApplied << ','
+         << s.thermostatCells << ','
+         << s.thermostatParticles << ','
+         << s.thermostatKBTBefore << ','
+         << s.thermostatKBTAfter << ','
+         << s.thermostatScaleMean << ','
+         << s.thermostatScaleMin << ','
+         << s.thermostatScaleMax << '\n';
 }
 
 } // namespace mpcd

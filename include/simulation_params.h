@@ -56,9 +56,16 @@ struct SimulationParams {
     double wallVpUxTop = 0.0;
     double wallVpUyTop = 0.0;
 
-    // Placeholder for future work. The base executable rejects thermostatEnable=true
-    // until a mass-aware thermostat is implemented explicitly.
+    // Mass-aware thermostat acting on velocities relative to the real-particle
+    // center-of-mass velocity in each collision cell. It is intended for forced
+    // channel calibration runs, where body force and wall coupling otherwise
+    // produce viscous heating.
     bool thermostatEnable = false;
+    std::string thermostatMode = "cell_relative_rescale";
+    int thermostatEvery = 1;
+    double thermostatTargetKBT = -1.0; // negative => use kBT
+    int thermostatMinParticles = 3;
+    double thermostatEpsilon = 1.0e-30;
     double kBT = 0.0;
 
     int summaryEvery = 10;

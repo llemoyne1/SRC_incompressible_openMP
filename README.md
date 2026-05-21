@@ -61,7 +61,7 @@ Run for example:
 
 Make sure that `inputState` in the parameter file points to the generated
 `.smpcd` state. Use `numThreads` in the parameter file or `OMP_NUM_THREADS` in
-the shell to control OpenMP parallelism.
+the shell to control OpenMP parallelism. Example files use `numThreads = 4`; set it to `0` to leave the choice to the OpenMP runtime.
 
 ## Documentation
 
@@ -119,3 +119,5 @@ cmp = compare_poiseuille_runs({ ...
 ```
 
 See `docs/POISEUILLE_VALIDATION.md` for details.
+
+- `docs/MASS_AWARE_THERMOSTAT.md` documents the optional mass-aware cell-relative thermostat for forced channel calibration runs.

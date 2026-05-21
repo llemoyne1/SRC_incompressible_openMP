@@ -8,6 +8,7 @@
 #include "particle_state.h"
 #include "simulation_params.h"
 #include "src_collision.h"
+#include "thermostat.h"
 
 namespace mpcd {
 
@@ -15,6 +16,7 @@ struct RuntimeSummary {
     int step = 0;
     double time = 0.0;
     double wallTime = 0.0;
+    int numThreadsUsed = 1;
 
     std::uint64_t Np = 0;
     double totalMass = 0.0;
@@ -37,6 +39,15 @@ struct RuntimeSummary {
 
     std::uint64_t virtualParticleCount = 0;
     double virtualMass = 0.0;
+
+    int thermostatApplied = 0;
+    std::uint64_t thermostatCells = 0;
+    std::uint64_t thermostatParticles = 0;
+    double thermostatKBTBefore = 0.0;
+    double thermostatKBTAfter = 0.0;
+    double thermostatScaleMean = 1.0;
+    double thermostatScaleMin = 1.0;
+    double thermostatScaleMax = 1.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -45,7 +56,9 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount = nullptr,
                                        const BoundaryDiagnostics* boundary = nullptr,
-                                       const CollisionDiagnostics* collision = nullptr);
+                                       const CollisionDiagnostics* collision = nullptr,
+                                       const ThermostatDiagnostics* thermostat = nullptr,
+                                       int numThreadsUsed = 1);
 
 class RuntimeSummaryWriter {
 public:

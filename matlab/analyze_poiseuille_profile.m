@@ -31,6 +31,11 @@ function out = analyze_poiseuille_profile(runDir, varargin)
     addParameter(p, 'makePlots', true, @islogical);
     addParameter(p, 'saveMat', false, @islogical);
     addParameter(p, 'matFile', '', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'saveTables', false, @islogical);
+    addParameter(p, 'profileCsv', '', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'frameMetricsCsv', '', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'plotConvergence', true, @islogical);
+    addParameter(p, 'stationaryWindowFraction', 0.25, @isnumeric);
     parse(p, runDir, varargin{:});
 
     runDir = char(p.Results.runDir);
@@ -157,10 +162,15 @@ function out = analyze_poiseuille_profile(runDir, varargin)
         fit.nuEff = NaN;
     end
 
-    q = trapz(coord, avgProfile);
-    meanVelocity = q / (max(coord) - min(coord));
+    domainLength = local_profile_domain_length(grid, profileDirection);
+    meanVelocity = mean(avgProfile, 'omitnan');
+    q = meanVelocity * domainLength;
     [uMax, idxMax] = max(avgProfile);
-    uCenter = interp1(coord, avgProfile, 0.5 * (coord(1) + coord(end)), 'linear', 'extrap');
+    uCenter = interp1(coord, avgProfile, 0.5 * domainLength, 'linear', 'extrap');
+
+    frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable, summaryTable, ...
+        p.Results.excludeWallCells, acc, domainLength);
+    stationarity = local_stationarity_table(frameMetrics, avgMask, p.Results.stationaryWindowFraction);
 
     profileTable = table(coord(:), avgProfile(:), stdProfile(:), fit.fitProfile(:), ...
         'VariableNames', {'coord','Umean','Ustd','Ufit'});
@@ -180,6 +190,8 @@ function out = analyze_poiseuille_profile(runDir, varargin)
     out.avgProfile = avgProfile;
     out.stdProfile = stdProfile;
     out.profileTable = profileTable;
+    out.frameMetrics = frameMetrics;
+    out.stationarity = stationarity;
     out.fit = fit;
     out.acceleration = acc;
     out.flowRatePerDepth = q;
@@ -193,6 +205,26 @@ function out = analyze_poiseuille_profile(runDir, varargin)
     if p.Results.makePlots
         local_plot_profile(out);
         local_plot_profile_evolution(out);
+        if p.Results.plotConvergence
+            local_plot_convergence(out);
+        end
+    end
+
+    if p.Results.saveTables
+        if isempty(p.Results.profileCsv)
+            profileCsv = fullfile(runDir, 'poiseuille_profile_table.csv');
+        else
+            profileCsv = char(p.Results.profileCsv);
+        end
+        if isempty(p.Results.frameMetricsCsv)
+            frameMetricsCsv = fullfile(runDir, 'poiseuille_frame_metrics.csv');
+        else
+            frameMetricsCsv = char(p.Results.frameMetricsCsv);
+        end
+        writetable(profileTable, profileCsv);
+        writetable(frameMetrics, frameMetricsCsv);
+        fprintf('Saved Poiseuille profile table: %s\n', profileCsv);
+        fprintf('Saved Poiseuille frame metrics: %s\n', frameMetricsCsv);
     end
 
     if p.Results.saveMat
@@ -241,6 +273,172 @@ function fit = local_quadratic_fit(coord, profile, excludeWallCells)
     fit.nuEff = NaN;
 end
 
+function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable, summaryTable, excludeWallCells, acc, domainLength)
+    nFrames = size(profiles, 2);
+    step = frameTable.step;
+    time = frameTable.time;
+    uMax = nan(nFrames, 1);
+    coordAtUMax = nan(nFrames, 1);
+    uCenter = nan(nFrames, 1);
+    uMean = nan(nFrames, 1);
+    flowRatePerDepth = nan(nFrames, 1);
+    wallLow = nan(nFrames, 1);
+    wallHigh = nan(nFrames, 1);
+    wallMean = nan(nFrames, 1);
+    centerMinusWall = nan(nFrames, 1);
+    wallAsymmetry = nan(nFrames, 1);
+    c2 = nan(nFrames, 1);
+    r2 = nan(nFrames, 1);
+    rmsResidual = nan(nFrames, 1);
+    nuEff = nan(nFrames, 1);
+    kBT = nan(nFrames, 1);
+    stdN = nan(nFrames, 1);
+    totalMass = nan(nFrames, 1);
+    Px = nan(nFrames, 1);
+    Py = nan(nFrames, 1);
+    virtualParticleCount = nan(nFrames, 1);
+    virtualMass = nan(nFrames, 1);
+    thermostatKBTBefore = nan(nFrames, 1);
+    thermostatKBTAfter = nan(nFrames, 1);
+    thermostatScaleMean = nan(nFrames, 1);
+
+    for k = 1:nFrames
+        profile = profiles(:, k);
+        uMean(k) = mean(profile, 'omitnan');
+        flowRatePerDepth(k) = uMean(k) * domainLength;
+        [uMax(k), idxMax] = max(profile);
+        if isfinite(uMax(k))
+            coordAtUMax(k) = coord(idxMax);
+        end
+        uCenter(k) = interp1(coord, profile, 0.5 * domainLength, 'linear', 'extrap');
+        wallLow(k) = profile(1);
+        wallHigh(k) = profile(end);
+        wallMean(k) = 0.5 * (wallLow(k) + wallHigh(k));
+        centerMinusWall(k) = uCenter(k) - wallMean(k);
+        wallAsymmetry(k) = wallLow(k) - wallHigh(k);
+        try
+            fit = local_quadratic_fit(coord, profile, excludeWallCells);
+            c2(k) = fit.c2;
+            r2(k) = fit.r2;
+            rmsResidual(k) = fit.rmsResidual;
+            if isfinite(acc) && abs(acc) > 0 && isfinite(fit.c2) && abs(fit.c2) > 0
+                nuEff(k) = -acc / (2.0 * fit.c2);
+            end
+        catch
+            % Keep NaNs for this frame.
+        end
+
+        row = local_find_summary_row(summaryTable, step(k));
+        if row > 0
+            kBT(k) = local_summary_value(summaryTable, row, {'kBT','kBTEstimate','meanKBT'});
+            stdN(k) = local_summary_value(summaryTable, row, {'stdN'});
+            totalMass(k) = local_summary_value(summaryTable, row, {'totalMass'});
+            Px(k) = local_summary_value(summaryTable, row, {'Px'});
+            Py(k) = local_summary_value(summaryTable, row, {'Py'});
+            virtualParticleCount(k) = local_summary_value(summaryTable, row, {'virtualParticleCount'});
+            virtualMass(k) = local_summary_value(summaryTable, row, {'virtualMass'});
+            thermostatKBTBefore(k) = local_summary_value(summaryTable, row, {'thermostatKBTBefore'});
+            thermostatKBTAfter(k) = local_summary_value(summaryTable, row, {'thermostatKBTAfter'});
+            thermostatScaleMean(k) = local_summary_value(summaryTable, row, {'thermostatScaleMean'});
+        end
+    end
+
+    frameMetrics = table(step, time, uMax, coordAtUMax, uCenter, uMean, flowRatePerDepth, ...
+        wallLow, wallHigh, wallMean, centerMinusWall, wallAsymmetry, ...
+        c2, r2, rmsResidual, nuEff, kBT, stdN, totalMass, Px, Py, ...
+        virtualParticleCount, virtualMass, thermostatKBTBefore, thermostatKBTAfter, thermostatScaleMean);
+end
+
+function row = local_find_summary_row(summaryTable, stepValue)
+    row = 0;
+    if isempty(summaryTable) || ~ismember('step', summaryTable.Properties.VariableNames) || ~isfinite(stepValue)
+        return;
+    end
+    idx = find(summaryTable.step == stepValue, 1, 'first');
+    if ~isempty(idx)
+        row = idx;
+    end
+end
+
+function value = local_summary_value(summaryTable, row, names)
+    value = NaN;
+    for k = 1:numel(names)
+        name = names{k};
+        if ismember(name, summaryTable.Properties.VariableNames)
+            value = summaryTable.(name)(row);
+            return;
+        end
+    end
+end
+
+function stationarity = local_stationarity_table(frameMetrics, avgMask, stationaryWindowFraction)
+    n = height(frameMetrics);
+    if n == 0
+        stationarity = table();
+        return;
+    end
+    stationaryWindowFraction = min(max(double(stationaryWindowFraction), 0.05), 1.0);
+    idxAvg = find(avgMask(:));
+    if isempty(idxAvg)
+        idxAvg = (1:n).';
+    end
+    nTail = max(3, ceil(stationaryWindowFraction * numel(idxAvg)));
+    idxTail = idxAvg(max(1, numel(idxAvg)-nTail+1):end);
+
+    metricNames = {'uCenter','uMean','centerMinusWall','wallAsymmetry','nuEff','r2','kBT','stdN','thermostatKBTBefore','thermostatKBTAfter','thermostatScaleMean'};
+    name = strings(numel(metricNames), 1);
+    meanValue = nan(numel(metricNames), 1);
+    stdValue = nan(numel(metricNames), 1);
+    slopePerStep = nan(numel(metricNames), 1);
+    relativeDriftOverTail = nan(numel(metricNames), 1);
+    firstValue = nan(numel(metricNames), 1);
+    lastValue = nan(numel(metricNames), 1);
+    nSamples = zeros(numel(metricNames), 1);
+
+    x = frameMetrics.step(idxTail);
+    if all(~isfinite(x)) || numel(unique(x(isfinite(x)))) < 2
+        x = (1:numel(idxTail)).';
+    end
+
+    for k = 1:numel(metricNames)
+        metric = metricNames{k};
+        name(k) = string(metric);
+        if ~ismember(metric, frameMetrics.Properties.VariableNames)
+            continue;
+        end
+        y = frameMetrics.(metric)(idxTail);
+        valid = isfinite(x) & isfinite(y);
+        nSamples(k) = sum(valid);
+        if nSamples(k) == 0
+            continue;
+        end
+        yy = y(valid);
+        xx = x(valid);
+        meanValue(k) = mean(yy);
+        stdValue(k) = std(yy);
+        firstValue(k) = yy(1);
+        lastValue(k) = yy(end);
+        if numel(yy) >= 2 && numel(unique(xx)) >= 2
+            coeff = polyfit(double(xx(:)), double(yy(:)), 1);
+            slopePerStep(k) = coeff(1);
+            drift = slopePerStep(k) * (max(xx) - min(xx));
+            scale = max(abs(meanValue(k)), eps);
+            relativeDriftOverTail(k) = drift / scale;
+        end
+    end
+
+    stationarity = table(name, meanValue, stdValue, slopePerStep, relativeDriftOverTail, ...
+        firstValue, lastValue, nSamples);
+end
+
+function L = local_profile_domain_length(grid, profileDirection)
+    if strcmp(profileDirection, 'y')
+        L = grid.Ly;
+    else
+        L = grid.Lx;
+    end
+end
+
 function local_plot_profile(out)
     figure('Name', ['Poiseuille profile: ' out.runDir]);
     hold on;
@@ -262,6 +460,88 @@ function local_plot_profile_evolution(out)
     ylabel(out.profileDirection);
     title(['Profile evolution, ' upper(out.flowComponent)], 'Interpreter', 'none');
     colorbar;
+end
+
+function local_plot_convergence(out)
+    fm = out.frameMetrics;
+    if isempty(fm) || height(fm) == 0
+        return;
+    end
+    x = fm.step;
+    if all(~isfinite(x))
+        x = (1:height(fm)).';
+        xLabel = 'frame';
+    else
+        xLabel = 'step';
+    end
+
+    figure('Name', ['Poiseuille convergence: ' out.runDir]);
+    tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    nexttile;
+    hold on;
+    plot(x, fm.uCenter, 'o-', 'DisplayName', 'center');
+    plot(x, fm.uMean, 'o-', 'DisplayName', 'mean');
+    plot(x, fm.wallLow, '.-', 'DisplayName', 'wall low');
+    plot(x, fm.wallHigh, '.-', 'DisplayName', 'wall high');
+    ylabel(upper(out.flowComponent));
+    xlabel(xLabel);
+    title('Velocity levels');
+    legend('Location', 'best');
+    grid on;
+    hold off;
+
+    nexttile;
+    hold on;
+    plot(x, fm.centerMinusWall, 'o-', 'DisplayName', 'center-wall');
+    plot(x, fm.wallAsymmetry, '.-', 'DisplayName', 'wall asymmetry');
+    ylabel(upper(out.flowComponent));
+    xlabel(xLabel);
+    title('Slip and symmetry indicators');
+    legend('Location', 'best');
+    grid on;
+    hold off;
+
+    nexttile;
+    plot(x, fm.r2, 'o-');
+    ylabel('R^2');
+    xlabel(xLabel);
+    title('Quadratic fit quality');
+    grid on;
+
+    nexttile;
+    plot(x, fm.nuEff, 'o-');
+    ylabel('\nu_{eff}', 'Interpreter', 'tex');
+    xlabel(xLabel);
+    title('Effective viscosity estimate');
+    grid on;
+
+    nexttile;
+    yyaxis left;
+    hold on;
+    plot(x, fm.kBT, 'o-', 'DisplayName', 'global kBT');
+    if ismember('thermostatKBTAfter', fm.Properties.VariableNames)
+        plot(x, fm.thermostatKBTAfter, '.-', 'DisplayName', 'thermostat after');
+    end
+    hold off;
+    ylabel('kBT');
+    yyaxis right;
+    plot(x, fm.stdN, '.-', 'DisplayName', 'stdN');
+    ylabel('stdN');
+    xlabel(xLabel);
+    title('Thermal and density controls');
+    grid on;
+
+    nexttile;
+    yyaxis left;
+    plot(x, fm.totalMass, 'o-');
+    ylabel('total mass');
+    yyaxis right;
+    plot(x, hypot(fm.Px, fm.Py), '.-');
+    ylabel('|P|');
+    xlabel(xLabel);
+    title('Conservation controls');
+    grid on;
 end
 
 function grid = local_grid_from_params(params)

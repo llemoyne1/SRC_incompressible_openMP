@@ -4,7 +4,7 @@ This branch starts from a minimal generic SRC/MPCD core. The first executable is
 restricted to a 2-D rectangular box with either periodic face pairs or simple
 specular/bounceback walls. It intentionally excludes the historical
 incompressible redistribution, Q6/Q9 projections, virial EOS, liquid closure,
-wall virtual particles, inlet/outlet flow handling, and case-specific diagnostics.
+inlet/outlet flow handling, and case-specific diagnostics. The base branch now includes a mass-aware relative thermostat, but only as an optional runtime-control layer for forced validation runs.
 
 ## Runtime contract
 
@@ -38,6 +38,7 @@ uniform body acceleration
 streaming
 boundary handling on each rectangular face
 random shifted-grid SRC/MPCD collision
+optional mass-aware relative thermostat
 runtime summary / optional state dump
 ```
 
@@ -101,6 +102,7 @@ g++ -std=c++17 -O2 -Wall -Wextra -fopenmp -Iinclude \
   src/cell_grid.cpp \
   src/boundary_base.cpp \
   src/src_collision.cpp \
+  src/thermostat.cpp \
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \
@@ -141,17 +143,33 @@ state_step_XXXXXXXX.smpcd   # if dumpStateEvery > 0
 ```
 
 
+## Optional mass-aware thermostat
+
+Forced channel runs can use a deterministic cell-relative rescaling thermostat:
+
+```text
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+```
+
+The thermostat rescales velocities relative to the real-particle mass-weighted
+cell velocity, so it conserves real-particle cell momentum and remains valid for
+heterogeneous particle masses. See `docs/MASS_AWARE_THERMOSTAT.md`.
+
 ## OpenMP notes
 
 The base executable is compiled with OpenMP by the provided build script. The
 parameter
 
 ```text
-numThreads = 0
+numThreads = 4
 ```
 
-keeps the OpenMP default, usually controlled by `OMP_NUM_THREADS`. A positive
-value calls `omp_set_num_threads(numThreads)` at startup.
+sets four OpenMP threads explicitly. Use `numThreads = 0` to keep the OpenMP runtime default, usually controlled by `OMP_NUM_THREADS`. A positive value calls `omp_set_num_threads(numThreads)` at startup. The executable reports `threadsActive` and `threadsMax` when the run starts, and `summary_runtime.csv` records `numThreadsUsed`.
 
 The first parallelized kernels are:
 

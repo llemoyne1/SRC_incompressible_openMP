@@ -172,6 +172,11 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "wallVpUxTop") p.wallVpUxTop = parse_double(value, key);
         else if (key == "wallVpUyTop") p.wallVpUyTop = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
+        else if (key == "thermostatMode") p.thermostatMode = get_lower(kv, key);
+        else if (key == "thermostatEvery") p.thermostatEvery = parse_int(value, key);
+        else if (key == "thermostatTargetKBT") p.thermostatTargetKBT = parse_double(value, key);
+        else if (key == "thermostatMinParticles") p.thermostatMinParticles = parse_int(value, key);
+        else if (key == "thermostatEpsilon") p.thermostatEpsilon = parse_double(value, key);
         else if (key == "kBT") p.kBT = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
@@ -284,7 +289,24 @@ void validate_simulation_params(const SimulationParams& p) {
     }
 
     if (p.thermostatEnable) {
-        throw std::runtime_error("thermostatEnable=true is not implemented yet in the mass-aware base executable");
+        if (p.thermostatMode != "cell_relative_rescale") {
+            throw std::runtime_error("thermostatMode currently supports only: cell_relative_rescale");
+        }
+        if (p.thermostatEvery <= 0) {
+            throw std::runtime_error("thermostatEvery must be positive when thermostatEnable=true");
+        }
+        if (p.thermostatMinParticles < 2) {
+            throw std::runtime_error("thermostatMinParticles must be at least 2");
+        }
+        if (!(p.thermostatEpsilon > 0.0)) {
+            throw std::runtime_error("thermostatEpsilon must be positive");
+        }
+        if (p.thermostatTargetKBT < 0.0 && !(p.kBT > 0.0)) {
+            throw std::runtime_error("thermostatTargetKBT is negative, so kBT must be positive when thermostatEnable=true");
+        }
+        if (p.thermostatTargetKBT == 0.0) {
+            throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
+        }
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

@@ -12,6 +12,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/cell_grid.cpp \
   src/boundary_base.cpp \
   src/src_collision.cpp \
+  src/thermostat.cpp \
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \

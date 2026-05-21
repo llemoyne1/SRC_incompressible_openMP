@@ -26,6 +26,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     StepResult result{};
     result.boundary = apply_boundary_conditions(state, params);
     result.collision = src_collision_step(state, params, grid, step, workspace.collision);
+    result.thermostat = apply_cell_relative_rescale_thermostat(
+        state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
     return result;
 }
 

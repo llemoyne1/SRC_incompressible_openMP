@@ -35,7 +35,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
     end
 
     figure('Name', 'SRC/MPCD runtime diagnostics');
-    tiledlayout(4, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tiledlayout(5, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
     nexttile;
     local_plot_if_present(summary, x, {'kBT','kBTEstimate','meanKBT'}, 'kBT');
@@ -116,6 +116,36 @@ function summary = plot_smpcd_summary(runDir, varargin)
     else
         text(0.5, 0.5, 'occupation extrema unavailable', 'HorizontalAlignment', 'center');
     end
+
+    nexttile;
+    names = summary.Properties.VariableNames;
+    thermoNames = intersect({'thermostatKBTBefore','thermostatKBTAfter'}, names, 'stable');
+    if ~isempty(thermoNames)
+        hold on;
+        for k = 1:numel(thermoNames)
+            plot(x, summary.(thermoNames{k}), '-');
+        end
+        hold off;
+        legend(thermoNames, 'Interpreter', 'none', 'Location', 'best');
+        title('thermostat kBT'); xlabel(xLabel); grid on;
+    else
+        text(0.5, 0.5, 'thermostat kBT unavailable', 'HorizontalAlignment', 'center');
+    end
+
+    nexttile;
+    scaleNames = intersect({'thermostatScaleMean','thermostatScaleMin','thermostatScaleMax'}, names, 'stable');
+    if ~isempty(scaleNames)
+        hold on;
+        for k = 1:numel(scaleNames)
+            plot(x, summary.(scaleNames{k}), '-');
+        end
+        hold off;
+        legend(scaleNames, 'Interpreter', 'none', 'Location', 'best');
+        title('thermostat scale'); xlabel(xLabel); grid on;
+    else
+        text(0.5, 0.5, 'thermostat scale unavailable', 'HorizontalAlignment', 'center');
+    end
+
 end
 
 function local_plot_if_present(T, x, candidates, titleText)
