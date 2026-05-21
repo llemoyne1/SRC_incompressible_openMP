@@ -66,3 +66,16 @@ the shell to control OpenMP parallelism.
 
 - `docs/SRCMPCD_STATE_BIN_V1.md`: binary particle-state format.
 - `docs/SRC_MPCD_BASE.md`: periodic base executable and runtime contract.
+
+## MATLAB post-processing
+
+The base solver writes primitive dumps only. MATLAB helpers in `matlab/` provide
+summary plots, sequential dump visualization and binned fields:
+
+```matlab
+addpath('matlab')
+out = postprocess_smpcd_run('runs/periodic_base', 'field', 'rho');
+```
+
+Useful fields are `particles`, `N`, `rho`, `Ux`, `Uy`, `speed`, `omega` and
+`type`. See `docs/MATLAB_POSTPROCESSING.md` for the full workflow.
