@@ -1,10 +1,19 @@
 #pragma once
 
+#include <cstdint>
 #include "particle_state.h"
 #include "simulation_params.h"
 
 namespace mpcd {
 
-void apply_periodic_boundaries(ParticleState& state, const SimulationParams& params);
+struct BoundaryDiagnostics {
+    std::uint64_t hitsLeft = 0;
+    std::uint64_t hitsRight = 0;
+    std::uint64_t hitsBottom = 0;
+    std::uint64_t hitsTop = 0;
+};
+
+BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
+                                              const SimulationParams& params);
 
 } // namespace mpcd

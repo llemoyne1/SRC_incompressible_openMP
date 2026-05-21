@@ -1,6 +1,5 @@
 #include "src_mpcd_base.h"
 
-#include "boundary_base.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -24,9 +23,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         state.y[i] += state.vy[i] * params.dt;
     }
 
-    apply_periodic_boundaries(state, params);
-
     StepResult result{};
+    result.boundary = apply_boundary_conditions(state, params);
     result.collision = src_collision_step(state, params, grid, step, workspace.collision);
     return result;
 }

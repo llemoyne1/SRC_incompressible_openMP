@@ -18,11 +18,26 @@ double wrap_periodic(double x, double L) {
     if (x < 0.0) {
         x += L;
     }
-    // Protect against rare roundoff that maps exactly to L.
     if (x >= L) {
         x -= L;
     }
     return x;
+}
+
+int bounded_cell_index(double xs, double L, double dx, int N) {
+    xs = std::clamp(xs, 0.0, L);
+    int i = static_cast<int>(std::floor(xs / dx));
+    if (i < 0) i = 0;
+    if (i >= N) i = N - 1;
+    return i;
+}
+
+int periodic_cell_index(double xs, double L, double dx, int N) {
+    xs = wrap_periodic(xs, L);
+    int i = static_cast<int>(std::floor(xs / dx));
+    if (i < 0) i = 0;
+    if (i >= N) i = N - 1;
+    return i;
 }
 
 int omp_thread_count() {
@@ -58,29 +73,33 @@ CellGrid make_cell_grid(const SimulationParams& params) {
     return grid;
 }
 
-int cell_index_periodic(double x, double y, const CellGrid& grid, const GridShift& shift) {
-    const double xs = wrap_periodic(x + shift.sx, grid.Lx);
-    const double ys = wrap_periodic(y + shift.sy, grid.Ly);
+int cell_index_from_position(double x,
+                             double y,
+                             const CellGrid& grid,
+                             const GridShift& shift,
+                             const SimulationParams& params) {
+    const double xs = x + shift.sx;
+    const double ys = y + shift.sy;
 
-    int ix = static_cast<int>(std::floor(xs / grid.dx));
-    int iy = static_cast<int>(std::floor(ys / grid.dy));
-
-    if (ix < 0) ix = 0;
-    if (iy < 0) iy = 0;
-    if (ix >= grid.Nx) ix = grid.Nx - 1;
-    if (iy >= grid.Ny) iy = grid.Ny - 1;
+    const int ix = is_x_periodic(params)
+        ? periodic_cell_index(xs, grid.Lx, grid.dx, grid.Nx)
+        : bounded_cell_index(xs, grid.Lx, grid.dx, grid.Nx);
+    const int iy = is_y_periodic(params)
+        ? periodic_cell_index(ys, grid.Ly, grid.dy, grid.Ny)
+        : bounded_cell_index(ys, grid.Ly, grid.dy, grid.Ny);
 
     return ix + grid.Nx * iy;
 }
 
-std::vector<std::uint32_t> compute_cell_counts_periodic(const ParticleState& state,
-                                                        const CellGrid& grid,
-                                                        const GridShift& shift) {
-    validate_particle_state(state, "compute_cell_counts_periodic");
+std::vector<std::uint32_t> compute_cell_counts(const ParticleState& state,
+                                               const CellGrid& grid,
+                                               const GridShift& shift,
+                                               const SimulationParams& params) {
+    validate_particle_state(state, "compute_cell_counts");
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const int nc = grid.numCells;
     if (nc <= 0) {
-        throw std::runtime_error("compute_cell_counts_periodic: invalid number of cells");
+        throw std::runtime_error("compute_cell_counts: invalid number of cells");
     }
 
     const int nt = std::max(1, omp_thread_count());
@@ -94,7 +113,7 @@ std::vector<std::uint32_t> compute_cell_counts_periodic(const ParticleState& sta
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
-            const int c = cell_index_periodic(state.x[i], state.y[i], grid, shift);
+            const int c = cell_index_from_position(state.x[i], state.y[i], grid, shift, params);
             local[offset + static_cast<std::size_t>(c)] += 1u;
         }
     }

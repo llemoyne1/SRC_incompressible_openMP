@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "boundary_base.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -27,13 +28,19 @@ struct RuntimeSummary {
     double stdN = 0.0;
     std::uint32_t minN = 0;
     std::uint32_t maxN = 0;
+
+    std::uint64_t hitsLeft = 0;
+    std::uint64_t hitsRight = 0;
+    std::uint64_t hitsBottom = 0;
+    std::uint64_t hitsTop = 0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const SimulationParams& params,
                                        int step,
                                        double wallTime,
-                                       const std::vector<std::uint32_t>* cellCount = nullptr);
+                                       const std::vector<std::uint32_t>* cellCount = nullptr,
+                                       const BoundaryDiagnostics* boundary = nullptr);
 
 class RuntimeSummaryWriter {
 public:

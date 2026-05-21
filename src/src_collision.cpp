@@ -128,7 +128,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
-            const int c = cell_index_periodic(state.x[i], state.y[i], grid, diag.shift);
+            const int c = cell_index_from_position(state.x[i], state.y[i], grid, diag.shift, params);
             ws.cellId[i] = c;
             const std::size_t k = offset + static_cast<std::size_t>(c);
             const double m = state.mass[i];

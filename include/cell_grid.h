@@ -30,10 +30,16 @@ struct CellMoments {
 };
 
 CellGrid make_cell_grid(const SimulationParams& params);
-int cell_index_periodic(double x, double y, const CellGrid& grid, const GridShift& shift);
 
-std::vector<std::uint32_t> compute_cell_counts_periodic(const ParticleState& state,
-                                                        const CellGrid& grid,
-                                                        const GridShift& shift);
+int cell_index_from_position(double x,
+                             double y,
+                             const CellGrid& grid,
+                             const GridShift& shift,
+                             const SimulationParams& params);
+
+std::vector<std::uint32_t> compute_cell_counts(const ParticleState& state,
+                                               const CellGrid& grid,
+                                               const GridShift& shift,
+                                               const SimulationParams& params);
 
 } // namespace mpcd

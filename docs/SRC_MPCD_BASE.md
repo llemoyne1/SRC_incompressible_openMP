@@ -1,9 +1,10 @@
 # SRC/MPCD base executable
 
 This branch starts from a minimal generic SRC/MPCD core. The first executable is
-restricted to a fully periodic 2-D box and intentionally excludes the historical
+restricted to a 2-D rectangular box with either periodic face pairs or simple
+specular/bounceback walls. It intentionally excludes the historical
 incompressible redistribution, Q6/Q9 projections, virial EOS, liquid closure,
-and case-specific diagnostics.
+wall virtual particles, inlet/outlet flow handling, and case-specific diagnostics.
 
 ## Runtime contract
 
@@ -35,7 +36,7 @@ For each step, the base executable performs:
 ```text
 uniform body acceleration
 streaming
-periodic wrapping
+boundary handling on each rectangular face
 random shifted-grid SRC/MPCD collision
 runtime summary / optional state dump
 ```
@@ -52,16 +53,38 @@ collision physics.
 
 ## Implemented boundaries
 
-Only
+Boundary modes are now specified per face:
 
 ```text
-bcX = periodic
-bcY = periodic
+bcLeft   = periodic | specular | bounceback
+bcRight  = periodic | specular | bounceback
+bcBottom = periodic | specular | bounceback
+bcTop    = periodic | specular | bounceback
 ```
 
-are supported in this first executable. Non-periodic walls, bounceback,
-specular reflection and virtual particles are deliberately left for later
-patches.
+The legacy pair aliases are still accepted:
+
+```text
+bcX = periodic | specular | bounceback
+bcY = periodic | specular | bounceback
+```
+
+`bcX` sets both `bcLeft` and `bcRight`; `bcY` sets both `bcBottom` and
+`bcTop`. Explicit per-face keys override the pair aliases. Periodic boundaries
+must be paired along an axis, so `bcLeft=periodic` requires
+`bcRight=periodic`, and `bcBottom=periodic` requires `bcTop=periodic`.
+
+Implemented wall modes:
+
+```text
+specular   : reverse the normal velocity component only
+bounceback : reverse both velocity components relative to a fixed wall
+```
+
+The modes `inlet`, `input`, `outlet`, `output` and `open` are reserved by the
+parser for a future internal-flow boundary layer, but are deliberately rejected
+by this executable for now. Wall virtual particles are also not implemented in
+this patch.
 
 ## Build
 
@@ -134,13 +157,13 @@ The first parallelized kernels are:
 
 ```text
 streaming/body acceleration
-periodic wrapping
+boundary handling
 cell-id assignment
 per-cell mass/momentum accumulation with per-thread buffers
 particle-wise SRC/MPCD rotation
 runtime reductions for mass/momentum/temperature
 ```
 
-The step-0 summary uses unshifted periodic cell counts, so `minN`, `maxN` and
+The step-0 summary uses unshifted cell counts with the configured boundary handling, so `minN`, `maxN` and
 `stdN` are meaningful before the first collision. Later summaries use the
 shifted collision-cell occupancy from the current step.

@@ -11,7 +11,8 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const SimulationParams& params,
                                        int step,
                                        double wallTime,
-                                       const std::vector<std::uint32_t>* cellCount) {
+                                       const std::vector<std::uint32_t>* cellCount,
+                                       const BoundaryDiagnostics* boundary) {
     validate_particle_state(state, "compute_runtime_summary");
     RuntimeSummary s{};
     s.step = step;
@@ -58,6 +59,13 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.kBTEstimate = thermal / (2.0 * static_cast<double>(n));
     }
 
+    if (boundary != nullptr) {
+        s.hitsLeft = boundary->hitsLeft;
+        s.hitsRight = boundary->hitsRight;
+        s.hitsBottom = boundary->hitsBottom;
+        s.hitsTop = boundary->hitsTop;
+    }
+
     if (cellCount != nullptr && !cellCount->empty()) {
         const auto& count = *cellCount;
         const std::size_t nc = count.size();
@@ -94,7 +102,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN\n";
+    out_ << "step,time,wallTime,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -115,7 +123,11 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.meanN << ','
          << s.stdN << ','
          << s.minN << ','
-         << s.maxN << '\n';
+         << s.maxN << ','
+         << s.hitsLeft << ','
+         << s.hitsRight << ','
+         << s.hitsBottom << ','
+         << s.hitsTop << '\n';
 }
 
 } // namespace mpcd

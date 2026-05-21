@@ -14,20 +14,19 @@ Implemented:
 - binary `.smpcd` particle state format with `x, y, vx, vy, type, mass`;
 - MATLAB writer/reader/generator/inspector for `.smpcd` states;
 - C++ reader/writer for `.smpcd` states;
-- first periodic 2-D SRC/MPCD base executable;
+- first rectangular 2-D SRC/MPCD base executable;
 - mass-aware cell velocity in the SRC/MPCD collision;
-- OpenMP-parallelized periodic base kernels with preallocated collision workspace;
+- OpenMP-parallelized base kernels with preallocated collision workspace;
 - minimal runtime summary CSV and optional `.smpcd` state dumps.
 
 Not implemented yet in the base executable:
 
-- non-periodic walls;
-- bounceback/specular reflection;
 - wall virtual particles;
 - incompressible redistribution;
 - Q6/Q9 pressure or mass-flux projection;
 - virial/liquid EOS closure;
-- case-specific physical diagnostics.
+- case-specific physical diagnostics;
+- inlet/outlet internal-flow boundary layer support.
 
 ## Build
 
@@ -47,12 +46,16 @@ Generate an initial `.smpcd` state from MATLAB, then use a parameter file such a
 
 ```text
 examples/params_periodic_base.kv
+examples/params_channel_y_bounceback.kv
+examples/params_channel_y_specular.kv
+examples/params_channel_x_bounceback.kv
 ```
 
-Run:
+Run for example:
 
 ```bash
 ./build/src_mpcd_base examples/params_periodic_base.kv
+./build/src_mpcd_base examples/params_channel_y_bounceback.kv
 ```
 
 Make sure that `inputState` in the parameter file points to the generated

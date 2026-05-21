@@ -29,9 +29,14 @@ struct SimulationParams {
     double bodyAccelerationX = 0.0;
     double bodyAccelerationY = 0.0;
 
-    // Only periodic boundaries are implemented in this first SRC/MPCD base executable.
-    std::string bcX = "periodic";
-    std::string bcY = "periodic";
+    // Boundary modes are specified per face. The legacy aliases bcX and bcY are
+    // still accepted by the parser and set the corresponding face pairs.
+    // Implemented now: periodic pairs, specular walls, bounceback walls.
+    // Reserved for future internal-flow simulations: inlet, outlet.
+    std::string bcLeft = "periodic";
+    std::string bcRight = "periodic";
+    std::string bcBottom = "periodic";
+    std::string bcTop = "periodic";
 
     // Placeholder for future work. The base executable rejects thermostatEnable=true
     // until a mass-aware thermostat is implemented explicitly.
@@ -46,5 +51,8 @@ struct SimulationParams {
 };
 
 void validate_simulation_params(const SimulationParams& params);
+
+bool is_x_periodic(const SimulationParams& params);
+bool is_y_periodic(const SimulationParams& params);
 
 } // namespace mpcd

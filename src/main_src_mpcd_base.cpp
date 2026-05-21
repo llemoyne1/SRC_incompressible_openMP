@@ -57,14 +57,14 @@ int main(int argc, char** argv) {
 
         mpcd::ParticleState state = mpcd::read_smpcd_state(params.inputState);
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
-        mpcd::apply_periodic_boundaries(state, params);
+        mpcd::apply_boundary_conditions(state, params);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;
         const auto t0 = std::chrono::steady_clock::now();
 
         const std::vector<std::uint32_t> initialCellCount =
-            mpcd::compute_cell_counts_periodic(state, grid, mpcd::GridShift{});
+            mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0), &initialCellCount));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
@@ -72,6 +72,10 @@ int main(int argc, char** argv) {
 
         std::cout << "[src_mpcd_base] Np=" << state.Np
                   << " grid=" << params.Nx << "x" << params.Ny
+                  << " bc=[L:" << params.bcLeft
+                  << ", R:" << params.bcRight
+                  << ", B:" << params.bcBottom
+                  << ", T:" << params.bcTop << "]"
                   << " steps=" << params.nSteps
 #ifdef _OPENMP
                   << " threads=" << omp_get_max_threads()
@@ -81,12 +85,14 @@ int main(int argc, char** argv) {
                   << " outputDir=" << params.outputDir << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
-            mpcd::run_src_mpcd_base_step(
+            const mpcd::StepResult stepResult = mpcd::run_src_mpcd_base_step(
                 state, params, grid, static_cast<std::uint64_t>(step), workspace);
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
                 const double wallTime = elapsed_seconds(t0);
-                const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime, &workspace.collision.cellCount);
+                const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
+                                                           &workspace.collision.cellCount,
+                                                           &stepResult.boundary);
                 summary.append(s);
                 std::cout << "\r[src_mpcd_base] step=" << step
                           << "/" << params.nSteps
