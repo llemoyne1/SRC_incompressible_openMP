@@ -10,8 +10,19 @@ namespace mpcd {
 
 struct CollisionDiagnostics {
     GridShift shift;
+
+    // virtualParticleCount is an integer-equivalent diagnostic retained for
+    // compatibility. virtualParticleEquivalent is the exact aggregate count
+    // used by the deterministic thermal wall model and can be non-integer.
     std::uint64_t virtualParticleCount = 0;
+    double virtualParticleEquivalent = 0.0;
     double virtualMass = 0.0;
+    double virtualMassLeft = 0.0;
+    double virtualMassRight = 0.0;
+    double virtualMassBottom = 0.0;
+    double virtualMassTop = 0.0;
+    double virtualMomentumX = 0.0;
+    double virtualMomentumY = 0.0;
 };
 
 struct CollisionWorkspace {

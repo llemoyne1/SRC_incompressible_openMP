@@ -78,15 +78,32 @@ function summary = plot_smpcd_summary(runDir, varargin)
     end
 
     nexttile;
-    if ismember('virtualParticleCount', summary.Properties.VariableNames)
-        plot(x, summary.virtualParticleCount, '-');
-        title('virtual particles'); xlabel(xLabel); grid on;
+    names = summary.Properties.VariableNames;
+    vpCountNames = intersect({'virtualParticleEquivalent','virtualParticleCount'}, names, 'stable');
+    if ~isempty(vpCountNames)
+        hold on;
+        for k = 1:numel(vpCountNames)
+            plot(x, summary.(vpCountNames{k}), '-');
+        end
+        hold off;
+        legend(vpCountNames, 'Interpreter', 'none', 'Location', 'best');
+        title('virtual wall population'); xlabel(xLabel); grid on;
     else
         text(0.5, 0.5, 'virtual-particle diagnostics unavailable', 'HorizontalAlignment', 'center');
     end
 
     nexttile;
-    if ismember('virtualMass', summary.Properties.VariableNames)
+    names = summary.Properties.VariableNames;
+    faceMassNames = intersect({'virtualMassLeft','virtualMassRight','virtualMassBottom','virtualMassTop'}, names, 'stable');
+    if ~isempty(faceMassNames)
+        hold on;
+        for k = 1:numel(faceMassNames)
+            plot(x, summary.(faceMassNames{k}), '-');
+        end
+        hold off;
+        legend(faceMassNames, 'Interpreter', 'none', 'Location', 'best');
+        title('virtual mass by face'); xlabel(xLabel); grid on;
+    elseif ismember('virtualMass', summary.Properties.VariableNames)
         plot(x, summary.virtualMass, '-');
         title('virtual mass'); xlabel(xLabel); grid on;
     else

@@ -38,7 +38,14 @@ struct RuntimeSummary {
     std::uint64_t hitsTop = 0;
 
     std::uint64_t virtualParticleCount = 0;
+    double virtualParticleEquivalent = 0.0;
     double virtualMass = 0.0;
+    double virtualMassLeft = 0.0;
+    double virtualMassRight = 0.0;
+    double virtualMassBottom = 0.0;
+    double virtualMassTop = 0.0;
+    double virtualMomentumX = 0.0;
+    double virtualMomentumY = 0.0;
 
     int thermostatApplied = 0;
     std::uint64_t thermostatCells = 0;

@@ -25,7 +25,10 @@ void apply_wall_velocity_reflection(const std::string& mode,
                                     bool normalIsX,
                                     double& vx,
                                     double& vy) {
-    if (mode == "specular") {
+    // The generic solid wall uses a specular geometric reflection to enforce
+    // impermeability. Tangential no-slip/thermal coupling is supplied by the
+    // aggregate wall contribution in the collision cell moments.
+    if (mode == "solid" || mode == "specular") {
         if (normalIsX) {
             vx = -vx;
         } else {

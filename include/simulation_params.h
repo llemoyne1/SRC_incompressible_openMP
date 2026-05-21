@@ -31,22 +31,27 @@ struct SimulationParams {
 
     // Boundary modes are specified per face. The legacy aliases bcX and bcY are
     // still accepted by the parser and set the corresponding face pairs.
-    // Implemented now: periodic pairs, specular walls, bounceback walls.
-    // Reserved for future internal-flow simulations: inlet, outlet.
+    // Implemented now: periodic pairs, solid thermal walls, and legacy
+    // specular/bounceback debug walls. Reserved for future internal-flow
+    // simulations: inlet, outlet.
     std::string bcLeft = "periodic";
     std::string bcRight = "periodic";
     std::string bcBottom = "periodic";
     std::string bcTop = "periodic";
 
-    // Virtual wall particles are not stored in the particle state. When enabled,
-    // they are sampled as aggregate mass/momentum contributions to boundary-cut
-    // collision cells. This is the first wall-coupling layer before explicit
-    // geometry/cylinder virtual particles.
-    bool wallVpEnable = false;
-    std::string wallVpMode = "stochastic_fraction";
-    double wallVpGamma = 0.0; // expected VP count in a fully solid collision cell; 0 => mean real occupancy
+    // Generic thermal solid-wall coupling. Solid walls are geometrically
+    // impermeable; wall coupling is represented by aggregate virtual wall mass
+    // and momentum in boundary-cut collision cells. The recommended path is
+    // bcFace=solid with wallAccommodation in [0,1]. Legacy wallVp* keys remain
+    // accepted as aliases for compatibility with earlier runs.
+    bool wallVpEnable = false;              // legacy: also activates coupling on legacy wall modes
+    std::string wallVpMode = "thermal";     // legacy key; accepted values: thermal, deterministic_thermal, stochastic_fraction
+    double wallAccommodation = 1.0;         // 0 => slip/specular-like, 1 => full thermal wall coupling
+    double wallVpGamma = 0.0;               // wall population in a fully solid collision cell; 0 => mean real occupancy
     double wallVpMass = 1.0;
-    double wallVpKBT = -1.0;  // negative => use kBT
+    double wallKBT = -1.0;                  // negative => use kBT
+    double wallVpKBT = -1.0;                // legacy alias for wallKBT
+    double wallThermalNoise = 1.0;          // 0 => deterministic momentum, 1 => full thermal aggregate noise
     double wallVpUxLeft = 0.0;
     double wallVpUyLeft = 0.0;
     double wallVpUxRight = 0.0;
@@ -79,5 +84,7 @@ void validate_simulation_params(const SimulationParams& params);
 
 bool is_x_periodic(const SimulationParams& params);
 bool is_y_periodic(const SimulationParams& params);
+bool is_solid_wall_mode(const std::string& mode);
+bool has_solid_wall(const SimulationParams& params);
 
 } // namespace mpcd

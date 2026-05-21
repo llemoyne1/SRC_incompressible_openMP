@@ -104,3 +104,18 @@ addpath('matlab')
 plot_smpcd_summary('runs/channel_y_bounceback_vp')
 postprocess_smpcd_run('runs/channel_y_bounceback_vp', 'field', 'speed')
 ```
+
+## Current recommended path
+
+The early stochastic wall-VP mode has been superseded for production-style solid walls by the generic `solid` boundary with thermal aggregate coupling documented in `docs/SOLID_THERMAL_BOUNDARIES.md`.
+
+Use the older `wallVpEnable=true` path mainly for legacy comparison with previous runs. New Poiseuille calibration runs should prefer:
+
+```text
+bcBottom = solid
+bcTop = solid
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+```

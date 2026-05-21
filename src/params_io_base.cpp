@@ -77,7 +77,7 @@ std::string get_lower(const std::unordered_map<std::string, std::string>& kv, co
 }
 
 bool is_wall_mode(const std::string& mode) {
-    return mode == "specular" || mode == "bounceback";
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
 }
 
 bool is_reserved_io_mode(const std::string& mode) {
@@ -160,17 +160,20 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         }
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
+        else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
         else if (key == "wallVpGamma") p.wallVpGamma = parse_double(value, key);
         else if (key == "wallVpMass") p.wallVpMass = parse_double(value, key);
+        else if (key == "wallKBT") p.wallKBT = parse_double(value, key);
         else if (key == "wallVpKBT") p.wallVpKBT = parse_double(value, key);
-        else if (key == "wallVpUxLeft") p.wallVpUxLeft = parse_double(value, key);
-        else if (key == "wallVpUyLeft") p.wallVpUyLeft = parse_double(value, key);
-        else if (key == "wallVpUxRight") p.wallVpUxRight = parse_double(value, key);
-        else if (key == "wallVpUyRight") p.wallVpUyRight = parse_double(value, key);
-        else if (key == "wallVpUxBottom") p.wallVpUxBottom = parse_double(value, key);
-        else if (key == "wallVpUyBottom") p.wallVpUyBottom = parse_double(value, key);
-        else if (key == "wallVpUxTop") p.wallVpUxTop = parse_double(value, key);
-        else if (key == "wallVpUyTop") p.wallVpUyTop = parse_double(value, key);
+        else if (key == "wallThermalNoise") p.wallThermalNoise = parse_double(value, key);
+        else if (key == "wallVpUxLeft" || key == "wallUxLeft") p.wallVpUxLeft = parse_double(value, key);
+        else if (key == "wallVpUyLeft" || key == "wallUyLeft") p.wallVpUyLeft = parse_double(value, key);
+        else if (key == "wallVpUxRight" || key == "wallUxRight") p.wallVpUxRight = parse_double(value, key);
+        else if (key == "wallVpUyRight" || key == "wallUyRight") p.wallVpUyRight = parse_double(value, key);
+        else if (key == "wallVpUxBottom" || key == "wallUxBottom") p.wallVpUxBottom = parse_double(value, key);
+        else if (key == "wallVpUyBottom" || key == "wallUyBottom") p.wallVpUyBottom = parse_double(value, key);
+        else if (key == "wallVpUxTop" || key == "wallUxTop") p.wallVpUxTop = parse_double(value, key);
+        else if (key == "wallVpUyTop" || key == "wallUyTop") p.wallVpUyTop = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
         else if (key == "thermostatMode") p.thermostatMode = get_lower(kv, key);
         else if (key == "thermostatEvery") p.thermostatEvery = parse_int(value, key);
@@ -213,6 +216,15 @@ bool is_x_periodic(const SimulationParams& p) {
 
 bool is_y_periodic(const SimulationParams& p) {
     return p.bcBottom == "periodic" && p.bcTop == "periodic";
+}
+
+bool is_solid_wall_mode(const std::string& mode) {
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
+}
+
+bool has_solid_wall(const SimulationParams& p) {
+    return is_solid_wall_mode(p.bcLeft) || is_solid_wall_mode(p.bcRight) ||
+           is_solid_wall_mode(p.bcBottom) || is_solid_wall_mode(p.bcTop);
 }
 
 void validate_simulation_params(const SimulationParams& p) {
@@ -261,30 +273,36 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error("Periodic y boundaries must be paired: bcBottom and bcTop must both be periodic");
     }
     if (!leftPeriodic && (!is_wall_mode(p.bcLeft) || !is_wall_mode(p.bcRight))) {
-        throw std::runtime_error("Non-periodic x boundaries currently require wall modes: specular or bounceback");
+        throw std::runtime_error("Non-periodic x boundaries currently require wall modes: solid, specular or bounceback");
     }
     if (!bottomPeriodic && (!is_wall_mode(p.bcBottom) || !is_wall_mode(p.bcTop))) {
-        throw std::runtime_error("Non-periodic y boundaries currently require wall modes: specular or bounceback");
+        throw std::runtime_error("Non-periodic y boundaries currently require wall modes: solid, specular or bounceback");
     }
 
-    if (p.wallVpEnable) {
-        if (p.wallVpMode != "stochastic_fraction") {
-            throw std::runtime_error("wallVpMode currently supports only: stochastic_fraction");
+    if (p.wallVpMode != "thermal" &&
+        p.wallVpMode != "deterministic_thermal" &&
+        p.wallVpMode != "stochastic_fraction") {
+        throw std::runtime_error("wallVpMode supports thermal/deterministic_thermal; stochastic_fraction is accepted as a legacy alias");
+    }
+    if (!(p.wallAccommodation >= 0.0 && p.wallAccommodation <= 1.0)) {
+        throw std::runtime_error("wallAccommodation must lie in [0,1]");
+    }
+    if (!(p.wallVpGamma >= 0.0)) {
+        throw std::runtime_error("wallVpGamma must be non-negative; use 0 to infer the mean real occupancy");
+    }
+    if (!(p.wallVpMass > 0.0)) {
+        throw std::runtime_error("wallVpMass must be positive");
+    }
+    if (!(p.wallThermalNoise >= 0.0)) {
+        throw std::runtime_error("wallThermalNoise must be non-negative");
+    }
+    if ((has_solid_wall(p) || p.wallVpEnable) && p.wallAccommodation > 0.0) {
+        const double effectiveWallKBT = p.wallKBT > 0.0 ? p.wallKBT : p.wallVpKBT;
+        if (effectiveWallKBT < 0.0 && !(p.kBT > 0.0)) {
+            throw std::runtime_error("wallKBT/wallVpKBT is negative, so kBT must be positive when solid wall coupling is active");
         }
-        if (is_x_periodic(p) && is_y_periodic(p)) {
-            throw std::runtime_error("wallVpEnable=true requires at least one non-periodic wall pair");
-        }
-        if (!(p.wallVpGamma >= 0.0)) {
-            throw std::runtime_error("wallVpGamma must be non-negative; use 0 to infer the mean real occupancy");
-        }
-        if (!(p.wallVpMass > 0.0)) {
-            throw std::runtime_error("wallVpMass must be positive");
-        }
-        if (p.wallVpKBT < 0.0 && !(p.kBT > 0.0)) {
-            throw std::runtime_error("wallVpKBT is negative, so kBT must be positive when wallVpEnable=true");
-        }
-        if (p.wallVpKBT == 0.0) {
-            throw std::runtime_error("wallVpKBT must be positive, or negative to inherit kBT");
+        if (effectiveWallKBT == 0.0) {
+            throw std::runtime_error("wallKBT/wallVpKBT must be positive, or negative to inherit kBT");
         }
     }
 

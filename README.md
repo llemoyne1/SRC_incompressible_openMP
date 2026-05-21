@@ -121,3 +121,38 @@ cmp = compare_poiseuille_runs({ ...
 See `docs/POISEUILLE_VALIDATION.md` for details.
 
 - `docs/MASS_AWARE_THERMOSTAT.md` documents the optional mass-aware cell-relative thermostat for forced channel calibration runs.
+
+## Generic solid thermal wall model
+
+The recommended solid-wall path is now `bcFace = solid` with aggregate thermal wall coupling controlled by a small set of parameters:
+
+```text
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+```
+
+See `docs/SOLID_THERMAL_BOUNDARIES.md` and the examples `params_channel_y_solid_thermal.kv`, `params_channel_x_solid_thermal.kv`, and `params_poiseuille_y_solid_thermal_thermostat.kv`.
+
+## Solid-thermal Poiseuille symmetry validation
+
+The generic solid-wall model can be validated by transposing the Poiseuille channel:
+
+```bash
+./build/src_mpcd_base examples/params_poiseuille_y_solid_thermal_long.kv
+./build/src_mpcd_base examples/params_poiseuille_x_solid_thermal_long.kv
+```
+
+Then in MATLAB:
+
+```matlab
+addpath('matlab')
+out = validate_solid_thermal_poiseuille_symmetry( ...
+    'runs/poiseuille_y_solid_thermal_long', ...
+    'runs/poiseuille_x_solid_thermal_long', ...
+    'fitStartFraction', 0.5, ...
+    'excludeWallCells', 2);
+```
+
+This compares `Ux(y)` for solid y-walls with `Uy(x)` for solid x-walls. Agreement of the two profiles is the first axis-symmetry check for the generic `solid` thermal boundary condition.

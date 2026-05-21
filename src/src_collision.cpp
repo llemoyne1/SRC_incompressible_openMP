@@ -87,38 +87,67 @@ double face_area_top(int ix, int iy, const CellGrid& grid, const GridShift& shif
     return insideX * outsideY;
 }
 
-void add_virtual_face_momentum(double faceArea,
-                               double fullCellArea,
-                               double gamma,
-                               double vpMass,
-                               double kBT,
-                               double wallUx,
-                               double wallUy,
-                               std::uint64_t seed,
-                               double& mass,
-                               double& px,
-                               double& py,
-                               std::uint64_t& vpCount,
-                               double& vpMassTotal) {
-    if (!(faceArea > 0.0)) return;
-    const double lambda = gamma * faceArea / fullCellArea;
-    if (!(lambda > 0.0)) return;
+struct VirtualFaceContribution {
+    double equivalentCount = 0.0;
+    double mass = 0.0;
+    double px = 0.0;
+    double py = 0.0;
+};
 
-    std::mt19937_64 rng(seed);
-    std::poisson_distribution<int> poisson(lambda);
-    const int nv = poisson(rng);
-    if (nv <= 0) return;
+VirtualFaceContribution make_virtual_face_contribution(double faceArea,
+                                                       double fullCellArea,
+                                                       double gamma,
+                                                       double accommodation,
+                                                       double vpMass,
+                                                       double kBT,
+                                                       double thermalNoise,
+                                                       double wallUx,
+                                                       double wallUy,
+                                                       std::uint64_t seed) {
+    VirtualFaceContribution out{};
+    if (!(faceArea > 0.0) || !(fullCellArea > 0.0)) return out;
 
-    const double nvD = static_cast<double>(nv);
-    const double mTot = nvD * vpMass;
-    const double sigmaP = std::sqrt(nvD * vpMass * kBT);
-    std::normal_distribution<double> normal(0.0, 1.0);
+    const double equivalentCount = accommodation * gamma * faceArea / fullCellArea;
+    if (!(equivalentCount > 0.0)) return out;
 
-    mass += mTot;
-    px += mTot * wallUx + sigmaP * normal(rng);
-    py += mTot * wallUy + sigmaP * normal(rng);
-    vpCount += static_cast<std::uint64_t>(nv);
-    vpMassTotal += mTot;
+    out.equivalentCount = equivalentCount;
+    out.mass = equivalentCount * vpMass;
+    out.px = out.mass * wallUx;
+    out.py = out.mass * wallUy;
+
+    if (thermalNoise > 0.0 && kBT > 0.0 && out.mass > 0.0) {
+        std::mt19937_64 rng(seed);
+        std::normal_distribution<double> normal(0.0, 1.0);
+        const double sigmaP = thermalNoise * std::sqrt(out.mass * kBT);
+        out.px += sigmaP * normal(rng);
+        out.py += sigmaP * normal(rng);
+    }
+
+    return out;
+}
+
+bool face_has_wall_coupling(const std::string& mode, const SimulationParams& params) {
+    // Recommended path: bcFace=solid activates the generic thermal wall.
+    // Legacy path: wallVpEnable=true also couples specular/bounceback walls.
+    return mode == "solid" || (params.wallVpEnable && (mode == "specular" || mode == "bounceback"));
+}
+
+void add_virtual_face_to_cell(const VirtualFaceContribution& v,
+                              double& mass,
+                              double& px,
+                              double& py,
+                              double& vpEquivalent,
+                              double& vpMassTotal,
+                              double& vpPxTotal,
+                              double& vpPyTotal) {
+    if (!(v.mass > 0.0)) return;
+    mass += v.mass;
+    px += v.px;
+    py += v.py;
+    vpEquivalent += v.equivalentCount;
+    vpMassTotal += v.mass;
+    vpPxTotal += v.px;
+    vpPyTotal += v.py;
 }
 
 } // namespace
@@ -225,12 +254,20 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
 
     const double inferredGamma = static_cast<double>(n) / static_cast<double>(nc);
     const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
-    const double wallVpKBT = params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT;
+    const double wallKBT = params.wallKBT > 0.0 ? params.wallKBT :
+                           (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
     const double fullCellArea = grid.dx * grid.dy;
-    std::uint64_t vpCountSum = 0u;
-    double vpMassSum = 0.0;
 
-#pragma omp parallel for reduction(+:vpCountSum,vpMassSum) if(nc > 256)
+    double vpEquivalentSum = 0.0;
+    double vpMassSum = 0.0;
+    double vpMassLeftSum = 0.0;
+    double vpMassRightSum = 0.0;
+    double vpMassBottomSum = 0.0;
+    double vpMassTopSum = 0.0;
+    double vpPxSum = 0.0;
+    double vpPySum = 0.0;
+
+#pragma omp parallel for reduction(+:vpEquivalentSum,vpMassSum,vpMassLeftSum,vpMassRightSum,vpMassBottomSum,vpMassTopSum,vpPxSum,vpPySum) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         std::uint32_t count = 0u;
         double mass = 0.0;
@@ -244,86 +281,84 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             py += ws.localPy[k];
         }
 
-        if (params.wallVpEnable) {
-            const int ix = c % grid.Nx;
-            const int iy = c / grid.Nx;
-            std::uint64_t cellVpCount = 0u;
-            double cellVpMass = 0.0;
+        const int ix = c % grid.Nx;
+        const int iy = c / grid.Nx;
+        double cellVpEquivalent = 0.0;
+        double cellVpMass = 0.0;
+        double cellVpPx = 0.0;
+        double cellVpPy = 0.0;
 
-            add_virtual_face_momentum(face_area_left(ix, iy, grid, diag.shift, params),
-                                      fullCellArea,
-                                      wallVpGamma,
-                                      params.wallVpMass,
-                                      wallVpKBT,
-                                      params.wallVpUxLeft,
-                                      params.wallVpUyLeft,
-                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
-                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
-                                                 0x4c454654ULL),
-                                      mass,
-                                      px,
-                                      py,
-                                      cellVpCount,
-                                      cellVpMass);
-            add_virtual_face_momentum(face_area_right(ix, iy, grid, diag.shift, params),
-                                      fullCellArea,
-                                      wallVpGamma,
-                                      params.wallVpMass,
-                                      wallVpKBT,
-                                      params.wallVpUxRight,
-                                      params.wallVpUyRight,
-                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
-                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
-                                                 0x5249474854ULL),
-                                      mass,
-                                      px,
-                                      py,
-                                      cellVpCount,
-                                      cellVpMass);
-            add_virtual_face_momentum(face_area_bottom(ix, iy, grid, diag.shift, params),
-                                      fullCellArea,
-                                      wallVpGamma,
-                                      params.wallVpMass,
-                                      wallVpKBT,
-                                      params.wallVpUxBottom,
-                                      params.wallVpUyBottom,
-                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
-                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
-                                                 0x424f54544f4dULL),
-                                      mass,
-                                      px,
-                                      py,
-                                      cellVpCount,
-                                      cellVpMass);
-            add_virtual_face_momentum(face_area_top(ix, iy, grid, diag.shift, params),
-                                      fullCellArea,
-                                      wallVpGamma,
-                                      params.wallVpMass,
-                                      wallVpKBT,
-                                      params.wallVpUxTop,
-                                      params.wallVpUyTop,
-                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
-                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
-                                                 0x544f50ULL),
-                                      mass,
-                                      px,
-                                      py,
-                                      cellVpCount,
-                                      cellVpMass);
-            vpCountSum += cellVpCount;
-            vpMassSum += cellVpMass;
+        if (face_has_wall_coupling(params.bcLeft, params)) {
+            const auto v = make_virtual_face_contribution(
+                face_area_left(ix, iy, grid, diag.shift, params),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                params.wallVpUxLeft, params.wallVpUyLeft,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x4c454654ULL));
+            add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassLeftSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcRight, params)) {
+            const auto v = make_virtual_face_contribution(
+                face_area_right(ix, iy, grid, diag.shift, params),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                params.wallVpUxRight, params.wallVpUyRight,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x5249474854ULL));
+            add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassRightSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcBottom, params)) {
+            const auto v = make_virtual_face_contribution(
+                face_area_bottom(ix, iy, grid, diag.shift, params),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                params.wallVpUxBottom, params.wallVpUyBottom,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x424f54544f4dULL));
+            add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassBottomSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcTop, params)) {
+            const auto v = make_virtual_face_contribution(
+                face_area_top(ix, iy, grid, diag.shift, params),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                params.wallVpUxTop, params.wallVpUyTop,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x544f50ULL));
+            add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassTopSum += v.mass;
         }
 
+        vpEquivalentSum += cellVpEquivalent;
+        vpMassSum += cellVpMass;
+        vpPxSum += cellVpPx;
+        vpPySum += cellVpPy;
+
         const std::size_t kk = static_cast<std::size_t>(c);
-        ws.cellCount[kk] = count; // real-particle occupancy only; VP diagnostics are separate.
+        ws.cellCount[kk] = count; // real-particle occupancy only; wall diagnostics are separate.
         ws.cellMass[kk] = mass;
         if (mass > 0.0) {
             ws.cellUx[kk] = px / mass;
             ws.cellUy[kk] = py / mass;
         }
     }
-    diag.virtualParticleCount = vpCountSum;
+    diag.virtualParticleEquivalent = vpEquivalentSum;
+    diag.virtualParticleCount = static_cast<std::uint64_t>(std::llround(vpEquivalentSum));
     diag.virtualMass = vpMassSum;
+    diag.virtualMassLeft = vpMassLeftSum;
+    diag.virtualMassRight = vpMassRightSum;
+    diag.virtualMassBottom = vpMassBottomSum;
+    diag.virtualMassTop = vpMassTopSum;
+    diag.virtualMomentumX = vpPxSum;
+    diag.virtualMomentumY = vpPySum;
 
     const double ca0 = std::cos(params.rotationAngle);
     const double sa0 = std::sin(params.rotationAngle);

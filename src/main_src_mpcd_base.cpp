@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
                   << ", R:" << params.bcRight
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
-                  << " wallVp=" << (params.wallVpEnable ? "on" : "off")
+                  << " wallAccommodation=" << params.wallAccommodation
                   << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
                   << " steps=" << params.nSteps
                   << " threadsActive=" << ompActiveThreads

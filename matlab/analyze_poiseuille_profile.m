@@ -169,7 +169,7 @@ function out = analyze_poiseuille_profile(runDir, varargin)
     uCenter = interp1(coord, avgProfile, 0.5 * domainLength, 'linear', 'extrap');
 
     frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable, summaryTable, ...
-        p.Results.excludeWallCells, acc, domainLength);
+        p.Results.excludeWallCells, acc, domainLength, profileDirection);
     stationarity = local_stationarity_table(frameMetrics, avgMask, p.Results.stationaryWindowFraction);
 
     profileTable = table(coord(:), avgProfile(:), stdProfile(:), fit.fitProfile(:), ...
@@ -273,7 +273,7 @@ function fit = local_quadratic_fit(coord, profile, excludeWallCells)
     fit.nuEff = NaN;
 end
 
-function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable, summaryTable, excludeWallCells, acc, domainLength)
+function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable, summaryTable, excludeWallCells, acc, domainLength, profileDirection)
     nFrames = size(profiles, 2);
     step = frameTable.step;
     time = frameTable.time;
@@ -297,7 +297,10 @@ function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable,
     Px = nan(nFrames, 1);
     Py = nan(nFrames, 1);
     virtualParticleCount = nan(nFrames, 1);
+    virtualParticleEquivalent = nan(nFrames, 1);
     virtualMass = nan(nFrames, 1);
+    virtualMassLow = nan(nFrames, 1);
+    virtualMassHigh = nan(nFrames, 1);
     thermostatKBTBefore = nan(nFrames, 1);
     thermostatKBTAfter = nan(nFrames, 1);
     thermostatScaleMean = nan(nFrames, 1);
@@ -336,7 +339,15 @@ function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable,
             Px(k) = local_summary_value(summaryTable, row, {'Px'});
             Py(k) = local_summary_value(summaryTable, row, {'Py'});
             virtualParticleCount(k) = local_summary_value(summaryTable, row, {'virtualParticleCount'});
+            virtualParticleEquivalent(k) = local_summary_value(summaryTable, row, {'virtualParticleEquivalent'});
             virtualMass(k) = local_summary_value(summaryTable, row, {'virtualMass'});
+            if strcmpi(profileDirection, 'y')
+                virtualMassLow(k) = local_summary_value(summaryTable, row, {'virtualMassBottom'});
+                virtualMassHigh(k) = local_summary_value(summaryTable, row, {'virtualMassTop'});
+            else
+                virtualMassLow(k) = local_summary_value(summaryTable, row, {'virtualMassLeft'});
+                virtualMassHigh(k) = local_summary_value(summaryTable, row, {'virtualMassRight'});
+            end
             thermostatKBTBefore(k) = local_summary_value(summaryTable, row, {'thermostatKBTBefore'});
             thermostatKBTAfter(k) = local_summary_value(summaryTable, row, {'thermostatKBTAfter'});
             thermostatScaleMean(k) = local_summary_value(summaryTable, row, {'thermostatScaleMean'});
@@ -346,7 +357,8 @@ function frameMetrics = local_compute_frame_metrics(coord, profiles, frameTable,
     frameMetrics = table(step, time, uMax, coordAtUMax, uCenter, uMean, flowRatePerDepth, ...
         wallLow, wallHigh, wallMean, centerMinusWall, wallAsymmetry, ...
         c2, r2, rmsResidual, nuEff, kBT, stdN, totalMass, Px, Py, ...
-        virtualParticleCount, virtualMass, thermostatKBTBefore, thermostatKBTAfter, thermostatScaleMean);
+        virtualParticleCount, virtualParticleEquivalent, virtualMass, virtualMassLow, virtualMassHigh, ...
+        thermostatKBTBefore, thermostatKBTAfter, thermostatScaleMean);
 end
 
 function row = local_find_summary_row(summaryTable, stepValue)
