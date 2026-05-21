@@ -12,9 +12,14 @@ struct StepResult {
     CollisionDiagnostics collision;
 };
 
+struct SrcMpcdBaseWorkspace {
+    CollisionWorkspace collision;
+};
+
 StepResult run_src_mpcd_base_step(ParticleState& state,
                                   const SimulationParams& params,
                                   const CellGrid& grid,
-                                  std::uint64_t step);
+                                  std::uint64_t step,
+                                  SrcMpcdBaseWorkspace& workspace);
 
 } // namespace mpcd

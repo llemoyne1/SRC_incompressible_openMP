@@ -9,12 +9,13 @@ namespace mpcd {
 StepResult run_src_mpcd_base_step(ParticleState& state,
                                   const SimulationParams& params,
                                   const CellGrid& grid,
-                                  std::uint64_t step) {
+                                  std::uint64_t step,
+                                  SrcMpcdBaseWorkspace& workspace) {
     validate_particle_state(state, "run_src_mpcd_base_step");
     const std::size_t n = static_cast<std::size_t>(state.Np);
 
     // Uniform body acceleration, then free streaming.
-    #pragma omp parallel for if(n > 10000)
+#pragma omp parallel for if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
         state.vx[i] += params.bodyAccelerationX * params.dt;
@@ -26,7 +27,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     apply_periodic_boundaries(state, params);
 
     StepResult result{};
-    result.collision = src_collision_step(state, params, grid, step);
+    result.collision = src_collision_step(state, params, grid, step, workspace.collision);
     return result;
 }
 

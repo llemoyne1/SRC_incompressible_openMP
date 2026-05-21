@@ -40,7 +40,7 @@ random shifted-grid SRC/MPCD collision
 runtime summary / optional state dump
 ```
 
-The collision is mass-aware:
+The collision is mass-aware and uses preallocated per-run work buffers, so the hot path does not reallocate particle/cell work arrays at every step:
 
 ```text
 u_cell = sum_i(m_i v_i) / sum_i(m_i)
@@ -116,3 +116,31 @@ params_used.kv
 summary_runtime.csv
 state_step_XXXXXXXX.smpcd   # if dumpStateEvery > 0
 ```
+
+
+## OpenMP notes
+
+The base executable is compiled with OpenMP by the provided build script. The
+parameter
+
+```text
+numThreads = 0
+```
+
+keeps the OpenMP default, usually controlled by `OMP_NUM_THREADS`. A positive
+value calls `omp_set_num_threads(numThreads)` at startup.
+
+The first parallelized kernels are:
+
+```text
+streaming/body acceleration
+periodic wrapping
+cell-id assignment
+per-cell mass/momentum accumulation with per-thread buffers
+particle-wise SRC/MPCD rotation
+runtime reductions for mass/momentum/temperature
+```
+
+The step-0 summary uses unshifted periodic cell counts, so `minN`, `maxN` and
+`stdN` are meaningful before the first collision. Later summaries use the
+shifted collision-cell occupancy from the current step.

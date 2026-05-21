@@ -16,7 +16,7 @@ Implemented:
 - C++ reader/writer for `.smpcd` states;
 - first periodic 2-D SRC/MPCD base executable;
 - mass-aware cell velocity in the SRC/MPCD collision;
-- optional OpenMP parallel loops;
+- OpenMP-parallelized periodic base kernels with preallocated collision workspace;
 - minimal runtime summary CSV and optional `.smpcd` state dumps.
 
 Not implemented yet in the base executable:
@@ -56,7 +56,8 @@ Run:
 ```
 
 Make sure that `inputState` in the parameter file points to the generated
-`.smpcd` state.
+`.smpcd` state. Use `numThreads` in the parameter file or `OMP_NUM_THREADS` in
+the shell to control OpenMP parallelism.
 
 ## Documentation
 

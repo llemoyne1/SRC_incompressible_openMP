@@ -1,7 +1,14 @@
 #include "cell_grid.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace mpcd {
 namespace {
@@ -16,6 +23,22 @@ double wrap_periodic(double x, double L) {
         x -= L;
     }
     return x;
+}
+
+int omp_thread_count() {
+#ifdef _OPENMP
+    return omp_get_max_threads();
+#else
+    return 1;
+#endif
+}
+
+int omp_thread_id() {
+#ifdef _OPENMP
+    return omp_get_thread_num();
+#else
+    return 0;
+#endif
 }
 
 } // namespace
@@ -48,6 +71,44 @@ int cell_index_periodic(double x, double y, const CellGrid& grid, const GridShif
     if (iy >= grid.Ny) iy = grid.Ny - 1;
 
     return ix + grid.Nx * iy;
+}
+
+std::vector<std::uint32_t> compute_cell_counts_periodic(const ParticleState& state,
+                                                        const CellGrid& grid,
+                                                        const GridShift& shift) {
+    validate_particle_state(state, "compute_cell_counts_periodic");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const int nc = grid.numCells;
+    if (nc <= 0) {
+        throw std::runtime_error("compute_cell_counts_periodic: invalid number of cells");
+    }
+
+    const int nt = std::max(1, omp_thread_count());
+    std::vector<std::uint32_t> local(static_cast<std::size_t>(nt * nc), 0u);
+
+#pragma omp parallel
+    {
+        const int tid = omp_thread_id();
+        const std::size_t offset = static_cast<std::size_t>(tid * nc);
+
+#pragma omp for
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+            const std::size_t i = static_cast<std::size_t>(ii);
+            const int c = cell_index_periodic(state.x[i], state.y[i], grid, shift);
+            local[offset + static_cast<std::size_t>(c)] += 1u;
+        }
+    }
+
+    std::vector<std::uint32_t> count(static_cast<std::size_t>(nc), 0u);
+#pragma omp parallel for if(nc > 256)
+    for (int c = 0; c < nc; ++c) {
+        std::uint32_t sum = 0u;
+        for (int t = 0; t < nt; ++t) {
+            sum += local[static_cast<std::size_t>(t * nc + c)];
+        }
+        count[static_cast<std::size_t>(c)] = sum;
+    }
+    return count;
 }
 
 } // namespace mpcd

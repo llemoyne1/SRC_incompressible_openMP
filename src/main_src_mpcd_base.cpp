@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -59,9 +60,12 @@ int main(int argc, char** argv) {
         mpcd::apply_periodic_boundaries(state, params);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
+        mpcd::SrcMpcdBaseWorkspace workspace;
         const auto t0 = std::chrono::steady_clock::now();
 
-        summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0), nullptr));
+        const std::vector<std::uint32_t> initialCellCount =
+            mpcd::compute_cell_counts_periodic(state, grid, mpcd::GridShift{});
+        summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0), &initialCellCount));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
         }
@@ -69,14 +73,20 @@ int main(int argc, char** argv) {
         std::cout << "[src_mpcd_base] Np=" << state.Np
                   << " grid=" << params.Nx << "x" << params.Ny
                   << " steps=" << params.nSteps
+#ifdef _OPENMP
+                  << " threads=" << omp_get_max_threads()
+#else
+                  << " threads=1"
+#endif
                   << " outputDir=" << params.outputDir << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
-            mpcd::StepResult result = mpcd::run_src_mpcd_base_step(state, params, grid, static_cast<std::uint64_t>(step));
+            mpcd::run_src_mpcd_base_step(
+                state, params, grid, static_cast<std::uint64_t>(step), workspace);
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
                 const double wallTime = elapsed_seconds(t0);
-                const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime, &result.collision.cellCount);
+                const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime, &workspace.collision.cellCount);
                 summary.append(s);
                 std::cout << "\r[src_mpcd_base] step=" << step
                           << "/" << params.nSteps
