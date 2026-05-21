@@ -35,7 +35,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
     end
 
     figure('Name', 'SRC/MPCD runtime diagnostics');
-    tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tiledlayout(4, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
     nexttile;
     local_plot_if_present(summary, x, {'kBT','kBTEstimate','meanKBT'}, 'kBT');
@@ -78,6 +78,22 @@ function summary = plot_smpcd_summary(runDir, varargin)
     end
 
     nexttile;
+    if ismember('virtualParticleCount', summary.Properties.VariableNames)
+        plot(x, summary.virtualParticleCount, '-');
+        title('virtual particles'); xlabel(xLabel); grid on;
+    else
+        text(0.5, 0.5, 'virtual-particle diagnostics unavailable', 'HorizontalAlignment', 'center');
+    end
+
+    nexttile;
+    if ismember('virtualMass', summary.Properties.VariableNames)
+        plot(x, summary.virtualMass, '-');
+        title('virtual mass'); xlabel(xLabel); grid on;
+    else
+        text(0.5, 0.5, 'virtual mass unavailable', 'HorizontalAlignment', 'center');
+    end
+
+    nexttile;
     if ismember('wallTime', summary.Properties.VariableNames)
         plot(x, summary.wallTime, '-');
         title('wall time'); xlabel(xLabel); ylabel('s'); grid on;
@@ -89,6 +105,16 @@ function summary = plot_smpcd_summary(runDir, varargin)
         title('wall time'); xlabel(xLabel); ylabel('s'); grid on;
     else
         text(0.5, 0.5, 'wall time unavailable', 'HorizontalAlignment', 'center');
+    end
+
+    nexttile;
+    names = summary.Properties.VariableNames;
+    if all(ismember({'minN','maxN'}, names))
+        plot(x, summary.minN, '-', x, summary.maxN, '-');
+        legend('minN','maxN', 'Location', 'best');
+        title('occupation extrema'); xlabel(xLabel); grid on;
+    else
+        text(0.5, 0.5, 'occupation extrema unavailable', 'HorizontalAlignment', 'center');
     end
 end
 

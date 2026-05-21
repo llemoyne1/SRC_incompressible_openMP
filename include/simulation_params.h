@@ -38,6 +38,24 @@ struct SimulationParams {
     std::string bcBottom = "periodic";
     std::string bcTop = "periodic";
 
+    // Virtual wall particles are not stored in the particle state. When enabled,
+    // they are sampled as aggregate mass/momentum contributions to boundary-cut
+    // collision cells. This is the first wall-coupling layer before explicit
+    // geometry/cylinder virtual particles.
+    bool wallVpEnable = false;
+    std::string wallVpMode = "stochastic_fraction";
+    double wallVpGamma = 0.0; // expected VP count in a fully solid collision cell; 0 => mean real occupancy
+    double wallVpMass = 1.0;
+    double wallVpKBT = -1.0;  // negative => use kBT
+    double wallVpUxLeft = 0.0;
+    double wallVpUyLeft = 0.0;
+    double wallVpUxRight = 0.0;
+    double wallVpUyRight = 0.0;
+    double wallVpUxBottom = 0.0;
+    double wallVpUyBottom = 0.0;
+    double wallVpUxTop = 0.0;
+    double wallVpUyTop = 0.0;
+
     // Placeholder for future work. The base executable rejects thermostatEnable=true
     // until a mass-aware thermostat is implemented explicitly.
     bool thermostatEnable = false;

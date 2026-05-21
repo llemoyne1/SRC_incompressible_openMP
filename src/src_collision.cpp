@@ -37,6 +37,90 @@ int thread_id() {
 #endif
 }
 
+double overlap_length(double a0, double a1, double b0, double b1) {
+    const double lo = std::max(a0, b0);
+    const double hi = std::min(a1, b1);
+    return hi > lo ? hi - lo : 0.0;
+}
+
+double face_area_left(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+    if (is_x_periodic(params)) return 0.0;
+    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
+    const double x1 = x0 + grid.dx;
+    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
+    const double y1 = y0 + grid.dy;
+    const double outsideX = overlap_length(x0, x1, -grid.dx, 0.0);
+    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
+    return outsideX * insideY;
+}
+
+double face_area_right(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+    if (is_x_periodic(params)) return 0.0;
+    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
+    const double x1 = x0 + grid.dx;
+    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
+    const double y1 = y0 + grid.dy;
+    const double outsideX = overlap_length(x0, x1, grid.Lx, grid.Lx + grid.dx);
+    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
+    return outsideX * insideY;
+}
+
+double face_area_bottom(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+    if (is_y_periodic(params)) return 0.0;
+    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
+    const double x1 = x0 + grid.dx;
+    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
+    const double y1 = y0 + grid.dy;
+    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
+    const double outsideY = overlap_length(y0, y1, -grid.dy, 0.0);
+    return insideX * outsideY;
+}
+
+double face_area_top(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+    if (is_y_periodic(params)) return 0.0;
+    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
+    const double x1 = x0 + grid.dx;
+    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
+    const double y1 = y0 + grid.dy;
+    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
+    const double outsideY = overlap_length(y0, y1, grid.Ly, grid.Ly + grid.dy);
+    return insideX * outsideY;
+}
+
+void add_virtual_face_momentum(double faceArea,
+                               double fullCellArea,
+                               double gamma,
+                               double vpMass,
+                               double kBT,
+                               double wallUx,
+                               double wallUy,
+                               std::uint64_t seed,
+                               double& mass,
+                               double& px,
+                               double& py,
+                               std::uint64_t& vpCount,
+                               double& vpMassTotal) {
+    if (!(faceArea > 0.0)) return;
+    const double lambda = gamma * faceArea / fullCellArea;
+    if (!(lambda > 0.0)) return;
+
+    std::mt19937_64 rng(seed);
+    std::poisson_distribution<int> poisson(lambda);
+    const int nv = poisson(rng);
+    if (nv <= 0) return;
+
+    const double nvD = static_cast<double>(nv);
+    const double mTot = nvD * vpMass;
+    const double sigmaP = std::sqrt(nvD * vpMass * kBT);
+    std::normal_distribution<double> normal(0.0, 1.0);
+
+    mass += mTot;
+    px += mTot * wallUx + sigmaP * normal(rng);
+    py += mTot * wallUy + sigmaP * normal(rng);
+    vpCount += static_cast<std::uint64_t>(nv);
+    vpMassTotal += mTot;
+}
+
 } // namespace
 
 GridShift sample_grid_shift(const SimulationParams& params, std::uint64_t step) {
@@ -139,7 +223,14 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         }
     }
 
-#pragma omp parallel for if(nc > 256)
+    const double inferredGamma = static_cast<double>(n) / static_cast<double>(nc);
+    const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
+    const double wallVpKBT = params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT;
+    const double fullCellArea = grid.dx * grid.dy;
+    std::uint64_t vpCountSum = 0u;
+    double vpMassSum = 0.0;
+
+#pragma omp parallel for reduction(+:vpCountSum,vpMassSum) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         std::uint32_t count = 0u;
         double mass = 0.0;
@@ -152,14 +243,87 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             px += ws.localPx[k];
             py += ws.localPy[k];
         }
+
+        if (params.wallVpEnable) {
+            const int ix = c % grid.Nx;
+            const int iy = c / grid.Nx;
+            std::uint64_t cellVpCount = 0u;
+            double cellVpMass = 0.0;
+
+            add_virtual_face_momentum(face_area_left(ix, iy, grid, diag.shift, params),
+                                      fullCellArea,
+                                      wallVpGamma,
+                                      params.wallVpMass,
+                                      wallVpKBT,
+                                      params.wallVpUxLeft,
+                                      params.wallVpUyLeft,
+                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                                                 0x4c454654ULL),
+                                      mass,
+                                      px,
+                                      py,
+                                      cellVpCount,
+                                      cellVpMass);
+            add_virtual_face_momentum(face_area_right(ix, iy, grid, diag.shift, params),
+                                      fullCellArea,
+                                      wallVpGamma,
+                                      params.wallVpMass,
+                                      wallVpKBT,
+                                      params.wallVpUxRight,
+                                      params.wallVpUyRight,
+                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                                                 0x5249474854ULL),
+                                      mass,
+                                      px,
+                                      py,
+                                      cellVpCount,
+                                      cellVpMass);
+            add_virtual_face_momentum(face_area_bottom(ix, iy, grid, diag.shift, params),
+                                      fullCellArea,
+                                      wallVpGamma,
+                                      params.wallVpMass,
+                                      wallVpKBT,
+                                      params.wallVpUxBottom,
+                                      params.wallVpUyBottom,
+                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                                                 0x424f54544f4dULL),
+                                      mass,
+                                      px,
+                                      py,
+                                      cellVpCount,
+                                      cellVpMass);
+            add_virtual_face_momentum(face_area_top(ix, iy, grid, diag.shift, params),
+                                      fullCellArea,
+                                      wallVpGamma,
+                                      params.wallVpMass,
+                                      wallVpKBT,
+                                      params.wallVpUxTop,
+                                      params.wallVpUyTop,
+                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                                                 0x544f50ULL),
+                                      mass,
+                                      px,
+                                      py,
+                                      cellVpCount,
+                                      cellVpMass);
+            vpCountSum += cellVpCount;
+            vpMassSum += cellVpMass;
+        }
+
         const std::size_t kk = static_cast<std::size_t>(c);
-        ws.cellCount[kk] = count;
+        ws.cellCount[kk] = count; // real-particle occupancy only; VP diagnostics are separate.
         ws.cellMass[kk] = mass;
         if (mass > 0.0) {
             ws.cellUx[kk] = px / mass;
             ws.cellUy[kk] = py / mass;
         }
     }
+    diag.virtualParticleCount = vpCountSum;
+    diag.virtualMass = vpMassSum;
 
     const double ca0 = std::cos(params.rotationAngle);
     const double sa0 = std::sin(params.rotationAngle);

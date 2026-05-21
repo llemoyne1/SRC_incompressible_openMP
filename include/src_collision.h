@@ -10,6 +10,8 @@ namespace mpcd {
 
 struct CollisionDiagnostics {
     GridShift shift;
+    std::uint64_t virtualParticleCount = 0;
+    double virtualMass = 0.0;
 };
 
 struct CollisionWorkspace {

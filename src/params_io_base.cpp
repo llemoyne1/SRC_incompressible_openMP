@@ -158,6 +158,19 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
                  key == "boundaryBottom" || key == "boundaryTop") {
             // Applied after the generic loop so per-face keys override pair aliases.
         }
+        else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
+        else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
+        else if (key == "wallVpGamma") p.wallVpGamma = parse_double(value, key);
+        else if (key == "wallVpMass") p.wallVpMass = parse_double(value, key);
+        else if (key == "wallVpKBT") p.wallVpKBT = parse_double(value, key);
+        else if (key == "wallVpUxLeft") p.wallVpUxLeft = parse_double(value, key);
+        else if (key == "wallVpUyLeft") p.wallVpUyLeft = parse_double(value, key);
+        else if (key == "wallVpUxRight") p.wallVpUxRight = parse_double(value, key);
+        else if (key == "wallVpUyRight") p.wallVpUyRight = parse_double(value, key);
+        else if (key == "wallVpUxBottom") p.wallVpUxBottom = parse_double(value, key);
+        else if (key == "wallVpUyBottom") p.wallVpUyBottom = parse_double(value, key);
+        else if (key == "wallVpUxTop") p.wallVpUxTop = parse_double(value, key);
+        else if (key == "wallVpUyTop") p.wallVpUyTop = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
         else if (key == "kBT") p.kBT = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
@@ -247,6 +260,27 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!bottomPeriodic && (!is_wall_mode(p.bcBottom) || !is_wall_mode(p.bcTop))) {
         throw std::runtime_error("Non-periodic y boundaries currently require wall modes: specular or bounceback");
+    }
+
+    if (p.wallVpEnable) {
+        if (p.wallVpMode != "stochastic_fraction") {
+            throw std::runtime_error("wallVpMode currently supports only: stochastic_fraction");
+        }
+        if (is_x_periodic(p) && is_y_periodic(p)) {
+            throw std::runtime_error("wallVpEnable=true requires at least one non-periodic wall pair");
+        }
+        if (!(p.wallVpGamma >= 0.0)) {
+            throw std::runtime_error("wallVpGamma must be non-negative; use 0 to infer the mean real occupancy");
+        }
+        if (!(p.wallVpMass > 0.0)) {
+            throw std::runtime_error("wallVpMass must be positive");
+        }
+        if (p.wallVpKBT < 0.0 && !(p.kBT > 0.0)) {
+            throw std::runtime_error("wallVpKBT is negative, so kBT must be positive when wallVpEnable=true");
+        }
+        if (p.wallVpKBT == 0.0) {
+            throw std::runtime_error("wallVpKBT must be positive, or negative to inherit kBT");
+        }
     }
 
     if (p.thermostatEnable) {

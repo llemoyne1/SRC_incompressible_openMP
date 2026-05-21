@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
                   << ", R:" << params.bcRight
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
+                  << " wallVp=" << (params.wallVpEnable ? "on" : "off")
                   << " steps=" << params.nSteps
 #ifdef _OPENMP
                   << " threads=" << omp_get_max_threads()
@@ -92,7 +93,8 @@ int main(int argc, char** argv) {
                 const double wallTime = elapsed_seconds(t0);
                 const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
                                                            &workspace.collision.cellCount,
-                                                           &stepResult.boundary);
+                                                           &stepResult.boundary,
+                                                           &stepResult.collision);
                 summary.append(s);
                 std::cout << "\r[src_mpcd_base] step=" << step
                           << "/" << params.nSteps

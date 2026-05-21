@@ -7,6 +7,7 @@
 #include "boundary_base.h"
 #include "particle_state.h"
 #include "simulation_params.h"
+#include "src_collision.h"
 
 namespace mpcd {
 
@@ -33,6 +34,9 @@ struct RuntimeSummary {
     std::uint64_t hitsRight = 0;
     std::uint64_t hitsBottom = 0;
     std::uint64_t hitsTop = 0;
+
+    std::uint64_t virtualParticleCount = 0;
+    double virtualMass = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -40,7 +44,8 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        int step,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount = nullptr,
-                                       const BoundaryDiagnostics* boundary = nullptr);
+                                       const BoundaryDiagnostics* boundary = nullptr,
+                                       const CollisionDiagnostics* collision = nullptr);
 
 class RuntimeSummaryWriter {
 public:

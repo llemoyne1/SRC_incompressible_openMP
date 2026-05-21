@@ -79,3 +79,13 @@ out = postprocess_smpcd_run('runs/periodic_base', 'field', 'rho');
 
 Useful fields are `particles`, `N`, `rho`, `Ux`, `Uy`, `speed`, `omega` and
 `type`. See `docs/MATLAB_POSTPROCESSING.md` for the full workflow.
+
+
+## Rectangular wall virtual particles
+
+The base executable now supports aggregate stochastic wall virtual particles for rectangular walls. They are enabled by `wallVpEnable = true` and contribute only to the collision-cell mass/momentum; they are not stored in `.smpcd` dumps. See `docs/WALL_VIRTUAL_PARTICLES.md` and the examples:
+
+```bash
+build/src_mpcd_base examples/params_channel_y_bounceback_vp.kv
+build/src_mpcd_base examples/params_channel_x_bounceback_vp.kv
+```

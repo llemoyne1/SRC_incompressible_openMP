@@ -1,0 +1,670 @@
+diff --git a/README.md b/README.md
+index 09ee2a4..cb5d5a1 100644
+--- a/README.md
++++ b/README.md
+@@ -79,3 +79,13 @@ out = postprocess_smpcd_run('runs/periodic_base', 'field', 'rho');
+ 
+ Useful fields are `particles`, `N`, `rho`, `Ux`, `Uy`, `speed`, `omega` and
+ `type`. See `docs/MATLAB_POSTPROCESSING.md` for the full workflow.
++
++
++## Rectangular wall virtual particles
++
++The base executable now supports aggregate stochastic wall virtual particles for rectangular walls. They are enabled by `wallVpEnable = true` and contribute only to the collision-cell mass/momentum; they are not stored in `.smpcd` dumps. See `docs/WALL_VIRTUAL_PARTICLES.md` and the examples:
++
++```bash
++build/src_mpcd_base examples/params_channel_y_bounceback_vp.kv
++build/src_mpcd_base examples/params_channel_x_bounceback_vp.kv
++```
+diff --git a/docs/WALL_VIRTUAL_PARTICLES.md b/docs/WALL_VIRTUAL_PARTICLES.md
+new file mode 100644
+index 0000000..baedd97
+--- /dev/null
++++ b/docs/WALL_VIRTUAL_PARTICLES.md
+@@ -0,0 +1,106 @@
++# Rectangular wall virtual particles
++
++This branch keeps the C++ solver as a compact SRC/MPCD engine and adds the first wall-coupling layer through aggregate virtual particles.
++
++## Scope
++
++Implemented in this patch:
++
++- rectangular faces only: left, right, bottom, top;
++- compatible with any non-periodic wall pair in `x` and/or `y`;
++- virtual particles are not stored in `.smpcd` states;
++- virtual particles are sampled as aggregate mass/momentum contributions to collision cells cut by shifted-grid wall regions;
++- real-particle dumps remain unchanged.
++
++Not implemented yet:
++
++- explicit solid geometry virtual particles, e.g. cylinder;
++- inlet/outlet/open boundaries;
++- wall-pressure mechanical diagnostics;
++- mass-aware thermostat of the real fluid.
++
++## Parameters
++
++Enable wall virtual particles with:
++
++```text
++wallVpEnable = true
++wallVpMode = stochastic_fraction
++wallVpGamma = 0.0
++wallVpMass = 1.0
++wallVpKBT = -1.0
++```
++
++`wallVpGamma = 0.0` means that the code infers the expected full-cell virtual-particle count from the mean real occupancy:
++
++```text
++gamma = Np / (Nx * Ny)
++```
++
++`wallVpKBT < 0` means that virtual particles inherit `kBT` from the parameter file.
++
++Wall velocities can be specified per face:
++
++```text
++wallVpUxLeft = 0.0
++wallVpUyLeft = 0.0
++wallVpUxRight = 0.0
++wallVpUyRight = 0.0
++wallVpUxBottom = 0.0
++wallVpUyBottom = 0.0
++wallVpUxTop = 0.0
++wallVpUyTop = 0.0
++```
++
++The current examples use fixed walls.
++
++## Collision-cell contribution
++
++For each shifted collision cell, the code computes the part of the cell located outside the physical domain next to each wall face. For a face area fraction `f`, the expected number of virtual particles is:
++
++```text
++lambda = wallVpGamma * f
++```
++
++A Poisson sample `Nv ~ Poisson(lambda)` is drawn deterministically from the run seed, step, cell index and face id. Instead of storing `Nv` explicit particles, the code samples their aggregate momentum around the prescribed wall velocity:
++
++```text
++Mvp = Nv * wallVpMass
++Pvp = Mvp * Uwall + Gaussian fluctuation with variance Nv * wallVpMass * wallVpKBT
++```
++
++The real-particle center-of-mass velocity in the cell is then computed from:
++
++```text
++Mcell = Mreal + Mvp
++Pcell = Preal + Pvp
++Ucell = Pcell / Mcell
++```
++
++Only real particles are rotated and advanced. Virtual particles exist only during the collision-moment calculation.
++
++## Diagnostics
++
++`summary_runtime.csv` contains two additional columns:
++
++```text
++virtualParticleCount
++virtualMass
++```
++
++The existing `meanN/stdN/minN/maxN` diagnostics still refer to real-particle cell occupancy only.
++
++## Examples
++
++```bash
++build/src_mpcd_base examples/params_channel_y_bounceback_vp.kv
++build/src_mpcd_base examples/params_channel_x_bounceback_vp.kv
++```
++
++Then inspect in MATLAB:
++
++```matlab
++addpath('matlab')
++plot_smpcd_summary('runs/channel_y_bounceback_vp')
++postprocess_smpcd_run('runs/channel_y_bounceback_vp', 'field', 'speed')
++```
+diff --git a/examples/params_channel_x_bounceback_vp.kv b/examples/params_channel_x_bounceback_vp.kv
+new file mode 100644
+index 0000000..2aa9c74
+--- /dev/null
++++ b/examples/params_channel_x_bounceback_vp.kv
+@@ -0,0 +1,42 @@
++# Periodic-y channel with bounceback x-walls and stochastic aggregate wall virtual particles.
++inputState = initial_state.smpcd
++outputDir = runs/channel_x_bounceback_vp
++
++Lx = 1.0
++Ly = 1.0
++Nx = 32
++Ny = 32
++
++dt = 0.001
++nSteps = 1000
++
++rotationAngle = 2.0943951023931953
++randomRotationSign = true
++
++gridShiftEnable = true
++rngSeed = 12345
++
++bodyAccelerationX = 0.0
++bodyAccelerationY = 0.0
++
++bcLeft = bounceback
++bcRight = bounceback
++bcBottom = periodic
++bcTop = periodic
++
++wallVpEnable = true
++wallVpMode = stochastic_fraction
++wallVpGamma = 0.0      # 0 => infer mean real occupancy Np/(Nx*Ny)
++wallVpMass = 1.0
++wallVpKBT = -1.0       # negative => inherit kBT
++wallVpUxLeft = 0.0
++wallVpUyLeft = 0.0
++wallVpUxRight = 0.0
++wallVpUyRight = 0.0
++
++thermostatEnable = false
++kBT = 0.01
++
++summaryEvery = 10
++dumpStateEvery = 1000
++numThreads = 0
+diff --git a/examples/params_channel_y_bounceback_vp.kv b/examples/params_channel_y_bounceback_vp.kv
+new file mode 100644
+index 0000000..78898b5
+--- /dev/null
++++ b/examples/params_channel_y_bounceback_vp.kv
+@@ -0,0 +1,40 @@
++# Periodic-x channel with bounceback y-walls and stochastic aggregate wall virtual particles.
++inputState = initial_state.smpcd
++outputDir = runs/channel_y_bounceback_vp
++
++Lx = 1.0
++Ly = 1.0
++Nx = 32
++Ny = 32
++
++dt = 0.001
++nSteps = 1000
++
++rotationAngle = 2.0943951023931953
++randomRotationSign = true
++
++gridShiftEnable = true
++rngSeed = 12345
++
++bodyAccelerationX = 0.0
++bodyAccelerationY = 0.0
++
++bcX = periodic
++bcY = bounceback
++
++wallVpEnable = true
++wallVpMode = stochastic_fraction
++wallVpGamma = 0.0      # 0 => infer mean real occupancy Np/(Nx*Ny)
++wallVpMass = 1.0
++wallVpKBT = -1.0       # negative => inherit kBT
++wallVpUxBottom = 0.0
++wallVpUyBottom = 0.0
++wallVpUxTop = 0.0
++wallVpUyTop = 0.0
++
++thermostatEnable = false
++kBT = 0.01
++
++summaryEvery = 10
++dumpStateEvery = 1000
++numThreads = 0
+diff --git a/include/runtime_summary.h b/include/runtime_summary.h
+index 80a5fc2..4f548bb 100644
+--- a/include/runtime_summary.h
++++ b/include/runtime_summary.h
+@@ -7,6 +7,7 @@
+ #include "boundary_base.h"
+ #include "particle_state.h"
+ #include "simulation_params.h"
++#include "src_collision.h"
+ 
+ namespace mpcd {
+ 
+@@ -33,6 +34,9 @@ struct RuntimeSummary {
+     std::uint64_t hitsRight = 0;
+     std::uint64_t hitsBottom = 0;
+     std::uint64_t hitsTop = 0;
++
++    std::uint64_t virtualParticleCount = 0;
++    double virtualMass = 0.0;
+ };
+ 
+ RuntimeSummary compute_runtime_summary(const ParticleState& state,
+@@ -40,7 +44,8 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
+                                        int step,
+                                        double wallTime,
+                                        const std::vector<std::uint32_t>* cellCount = nullptr,
+-                                       const BoundaryDiagnostics* boundary = nullptr);
++                                       const BoundaryDiagnostics* boundary = nullptr,
++                                       const CollisionDiagnostics* collision = nullptr);
+ 
+ class RuntimeSummaryWriter {
+ public:
+diff --git a/include/simulation_params.h b/include/simulation_params.h
+index d397b93..1c727ce 100644
+--- a/include/simulation_params.h
++++ b/include/simulation_params.h
+@@ -38,6 +38,24 @@ struct SimulationParams {
+     std::string bcBottom = "periodic";
+     std::string bcTop = "periodic";
+ 
++    // Virtual wall particles are not stored in the particle state. When enabled,
++    // they are sampled as aggregate mass/momentum contributions to boundary-cut
++    // collision cells. This is the first wall-coupling layer before explicit
++    // geometry/cylinder virtual particles.
++    bool wallVpEnable = false;
++    std::string wallVpMode = "stochastic_fraction";
++    double wallVpGamma = 0.0; // expected VP count in a fully solid collision cell; 0 => mean real occupancy
++    double wallVpMass = 1.0;
++    double wallVpKBT = -1.0;  // negative => use kBT
++    double wallVpUxLeft = 0.0;
++    double wallVpUyLeft = 0.0;
++    double wallVpUxRight = 0.0;
++    double wallVpUyRight = 0.0;
++    double wallVpUxBottom = 0.0;
++    double wallVpUyBottom = 0.0;
++    double wallVpUxTop = 0.0;
++    double wallVpUyTop = 0.0;
++
+     // Placeholder for future work. The base executable rejects thermostatEnable=true
+     // until a mass-aware thermostat is implemented explicitly.
+     bool thermostatEnable = false;
+diff --git a/include/src_collision.h b/include/src_collision.h
+index 4b10886..9eae471 100644
+--- a/include/src_collision.h
++++ b/include/src_collision.h
+@@ -10,6 +10,8 @@ namespace mpcd {
+ 
+ struct CollisionDiagnostics {
+     GridShift shift;
++    std::uint64_t virtualParticleCount = 0;
++    double virtualMass = 0.0;
+ };
+ 
+ struct CollisionWorkspace {
+diff --git a/matlab/plot_smpcd_summary.m b/matlab/plot_smpcd_summary.m
+index 9cdf1ba..925157d 100644
+--- a/matlab/plot_smpcd_summary.m
++++ b/matlab/plot_smpcd_summary.m
+@@ -35,7 +35,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
+     end
+ 
+     figure('Name', 'SRC/MPCD runtime diagnostics');
+-    tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
++    tiledlayout(4, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+ 
+     nexttile;
+     local_plot_if_present(summary, x, {'kBT','kBTEstimate','meanKBT'}, 'kBT');
+@@ -77,6 +77,22 @@ function summary = plot_smpcd_summary(runDir, varargin)
+         text(0.5, 0.5, 'wall-hit diagnostics unavailable', 'HorizontalAlignment', 'center');
+     end
+ 
++    nexttile;
++    if ismember('virtualParticleCount', summary.Properties.VariableNames)
++        plot(x, summary.virtualParticleCount, '-');
++        title('virtual particles'); xlabel(xLabel); grid on;
++    else
++        text(0.5, 0.5, 'virtual-particle diagnostics unavailable', 'HorizontalAlignment', 'center');
++    end
++
++    nexttile;
++    if ismember('virtualMass', summary.Properties.VariableNames)
++        plot(x, summary.virtualMass, '-');
++        title('virtual mass'); xlabel(xLabel); grid on;
++    else
++        text(0.5, 0.5, 'virtual mass unavailable', 'HorizontalAlignment', 'center');
++    end
++
+     nexttile;
+     if ismember('wallTime', summary.Properties.VariableNames)
+         plot(x, summary.wallTime, '-');
+@@ -90,6 +106,16 @@ function summary = plot_smpcd_summary(runDir, varargin)
+     else
+         text(0.5, 0.5, 'wall time unavailable', 'HorizontalAlignment', 'center');
+     end
++
++    nexttile;
++    names = summary.Properties.VariableNames;
++    if all(ismember({'minN','maxN'}, names))
++        plot(x, summary.minN, '-', x, summary.maxN, '-');
++        legend('minN','maxN', 'Location', 'best');
++        title('occupation extrema'); xlabel(xLabel); grid on;
++    else
++        text(0.5, 0.5, 'occupation extrema unavailable', 'HorizontalAlignment', 'center');
++    end
+ end
+ 
+ function local_plot_if_present(T, x, candidates, titleText)
+diff --git a/src/main_src_mpcd_base.cpp b/src/main_src_mpcd_base.cpp
+index 2e1894d..a0f2d5c 100644
+--- a/src/main_src_mpcd_base.cpp
++++ b/src/main_src_mpcd_base.cpp
+@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
+                   << ", R:" << params.bcRight
+                   << ", B:" << params.bcBottom
+                   << ", T:" << params.bcTop << "]"
++                  << " wallVp=" << (params.wallVpEnable ? "on" : "off")
+                   << " steps=" << params.nSteps
+ #ifdef _OPENMP
+                   << " threads=" << omp_get_max_threads()
+@@ -92,7 +93,8 @@ int main(int argc, char** argv) {
+                 const double wallTime = elapsed_seconds(t0);
+                 const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
+                                                            &workspace.collision.cellCount,
+-                                                           &stepResult.boundary);
++                                                           &stepResult.boundary,
++                                                           &stepResult.collision);
+                 summary.append(s);
+                 std::cout << "\r[src_mpcd_base] step=" << step
+                           << "/" << params.nSteps
+diff --git a/src/params_io_base.cpp b/src/params_io_base.cpp
+index a2b14ac..ca07d01 100644
+--- a/src/params_io_base.cpp
++++ b/src/params_io_base.cpp
+@@ -158,6 +158,19 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
+                  key == "boundaryBottom" || key == "boundaryTop") {
+             // Applied after the generic loop so per-face keys override pair aliases.
+         }
++        else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
++        else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
++        else if (key == "wallVpGamma") p.wallVpGamma = parse_double(value, key);
++        else if (key == "wallVpMass") p.wallVpMass = parse_double(value, key);
++        else if (key == "wallVpKBT") p.wallVpKBT = parse_double(value, key);
++        else if (key == "wallVpUxLeft") p.wallVpUxLeft = parse_double(value, key);
++        else if (key == "wallVpUyLeft") p.wallVpUyLeft = parse_double(value, key);
++        else if (key == "wallVpUxRight") p.wallVpUxRight = parse_double(value, key);
++        else if (key == "wallVpUyRight") p.wallVpUyRight = parse_double(value, key);
++        else if (key == "wallVpUxBottom") p.wallVpUxBottom = parse_double(value, key);
++        else if (key == "wallVpUyBottom") p.wallVpUyBottom = parse_double(value, key);
++        else if (key == "wallVpUxTop") p.wallVpUxTop = parse_double(value, key);
++        else if (key == "wallVpUyTop") p.wallVpUyTop = parse_double(value, key);
+         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
+         else if (key == "kBT") p.kBT = parse_double(value, key);
+         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
+@@ -249,6 +262,27 @@ void validate_simulation_params(const SimulationParams& p) {
+         throw std::runtime_error("Non-periodic y boundaries currently require wall modes: specular or bounceback");
+     }
+ 
++    if (p.wallVpEnable) {
++        if (p.wallVpMode != "stochastic_fraction") {
++            throw std::runtime_error("wallVpMode currently supports only: stochastic_fraction");
++        }
++        if (is_x_periodic(p) && is_y_periodic(p)) {
++            throw std::runtime_error("wallVpEnable=true requires at least one non-periodic wall pair");
++        }
++        if (!(p.wallVpGamma >= 0.0)) {
++            throw std::runtime_error("wallVpGamma must be non-negative; use 0 to infer the mean real occupancy");
++        }
++        if (!(p.wallVpMass > 0.0)) {
++            throw std::runtime_error("wallVpMass must be positive");
++        }
++        if (p.wallVpKBT < 0.0 && !(p.kBT > 0.0)) {
++            throw std::runtime_error("wallVpKBT is negative, so kBT must be positive when wallVpEnable=true");
++        }
++        if (p.wallVpKBT == 0.0) {
++            throw std::runtime_error("wallVpKBT must be positive, or negative to inherit kBT");
++        }
++    }
++
+     if (p.thermostatEnable) {
+         throw std::runtime_error("thermostatEnable=true is not implemented yet in the mass-aware base executable");
+     }
+diff --git a/src/runtime_summary.cpp b/src/runtime_summary.cpp
+index d410fd2..a9e6a41 100644
+--- a/src/runtime_summary.cpp
++++ b/src/runtime_summary.cpp
+@@ -12,7 +12,8 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
+                                        int step,
+                                        double wallTime,
+                                        const std::vector<std::uint32_t>* cellCount,
+-                                       const BoundaryDiagnostics* boundary) {
++                                       const BoundaryDiagnostics* boundary,
++                                       const CollisionDiagnostics* collision) {
+     validate_particle_state(state, "compute_runtime_summary");
+     RuntimeSummary s{};
+     s.step = step;
+@@ -65,6 +66,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
+         s.hitsBottom = boundary->hitsBottom;
+         s.hitsTop = boundary->hitsTop;
+     }
++    if (collision != nullptr) {
++        s.virtualParticleCount = collision->virtualParticleCount;
++        s.virtualMass = collision->virtualMass;
++    }
+ 
+     if (cellCount != nullptr && !cellCount->empty()) {
+         const auto& count = *cellCount;
+@@ -102,7 +107,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
+     if (!out_) {
+         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
+     }
+-    out_ << "step,time,wallTime,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop\n";
++    out_ << "step,time,wallTime,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualMass\n";
+ }
+ 
+ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
+@@ -127,7 +132,9 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
+          << s.hitsLeft << ','
+          << s.hitsRight << ','
+          << s.hitsBottom << ','
+-         << s.hitsTop << '\n';
++         << s.hitsTop << ','
++         << s.virtualParticleCount << ','
++         << s.virtualMass << '\n';
+ }
+ 
+ } // namespace mpcd
+diff --git a/src/src_collision.cpp b/src/src_collision.cpp
+index ce1ede8..c7e4929 100644
+--- a/src/src_collision.cpp
++++ b/src/src_collision.cpp
+@@ -37,6 +37,90 @@ int thread_id() {
+ #endif
+ }
+ 
++double overlap_length(double a0, double a1, double b0, double b1) {
++    const double lo = std::max(a0, b0);
++    const double hi = std::min(a1, b1);
++    return hi > lo ? hi - lo : 0.0;
++}
++
++double face_area_left(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
++    if (is_x_periodic(params)) return 0.0;
++    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
++    const double x1 = x0 + grid.dx;
++    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
++    const double y1 = y0 + grid.dy;
++    const double outsideX = overlap_length(x0, x1, -grid.dx, 0.0);
++    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
++    return outsideX * insideY;
++}
++
++double face_area_right(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
++    if (is_x_periodic(params)) return 0.0;
++    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
++    const double x1 = x0 + grid.dx;
++    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
++    const double y1 = y0 + grid.dy;
++    const double outsideX = overlap_length(x0, x1, grid.Lx, grid.Lx + grid.dx);
++    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
++    return outsideX * insideY;
++}
++
++double face_area_bottom(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
++    if (is_y_periodic(params)) return 0.0;
++    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
++    const double x1 = x0 + grid.dx;
++    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
++    const double y1 = y0 + grid.dy;
++    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
++    const double outsideY = overlap_length(y0, y1, -grid.dy, 0.0);
++    return insideX * outsideY;
++}
++
++double face_area_top(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
++    if (is_y_periodic(params)) return 0.0;
++    const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
++    const double x1 = x0 + grid.dx;
++    const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
++    const double y1 = y0 + grid.dy;
++    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
++    const double outsideY = overlap_length(y0, y1, grid.Ly, grid.Ly + grid.dy);
++    return insideX * outsideY;
++}
++
++void add_virtual_face_momentum(double faceArea,
++                               double fullCellArea,
++                               double gamma,
++                               double vpMass,
++                               double kBT,
++                               double wallUx,
++                               double wallUy,
++                               std::uint64_t seed,
++                               double& mass,
++                               double& px,
++                               double& py,
++                               std::uint64_t& vpCount,
++                               double& vpMassTotal) {
++    if (!(faceArea > 0.0)) return;
++    const double lambda = gamma * faceArea / fullCellArea;
++    if (!(lambda > 0.0)) return;
++
++    std::mt19937_64 rng(seed);
++    std::poisson_distribution<int> poisson(lambda);
++    const int nv = poisson(rng);
++    if (nv <= 0) return;
++
++    const double nvD = static_cast<double>(nv);
++    const double mTot = nvD * vpMass;
++    const double sigmaP = std::sqrt(nvD * vpMass * kBT);
++    std::normal_distribution<double> normal(0.0, 1.0);
++
++    mass += mTot;
++    px += mTot * wallUx + sigmaP * normal(rng);
++    py += mTot * wallUy + sigmaP * normal(rng);
++    vpCount += static_cast<std::uint64_t>(nv);
++    vpMassTotal += mTot;
++}
++
+ } // namespace
+ 
+ GridShift sample_grid_shift(const SimulationParams& params, std::uint64_t step) {
+@@ -139,7 +223,14 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
+         }
+     }
+ 
+-#pragma omp parallel for if(nc > 256)
++    const double inferredGamma = static_cast<double>(n) / static_cast<double>(nc);
++    const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
++    const double wallVpKBT = params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT;
++    const double fullCellArea = grid.dx * grid.dy;
++    std::uint64_t vpCountSum = 0u;
++    double vpMassSum = 0.0;
++
++#pragma omp parallel for reduction(+:vpCountSum,vpMassSum) if(nc > 256)
+     for (int c = 0; c < nc; ++c) {
+         std::uint32_t count = 0u;
+         double mass = 0.0;
+@@ -152,14 +243,87 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
+             px += ws.localPx[k];
+             py += ws.localPy[k];
+         }
++
++        if (params.wallVpEnable) {
++            const int ix = c % grid.Nx;
++            const int iy = c / grid.Nx;
++            std::uint64_t cellVpCount = 0u;
++            double cellVpMass = 0.0;
++
++            add_virtual_face_momentum(face_area_left(ix, iy, grid, diag.shift, params),
++                                      fullCellArea,
++                                      wallVpGamma,
++                                      params.wallVpMass,
++                                      wallVpKBT,
++                                      params.wallVpUxLeft,
++                                      params.wallVpUyLeft,
++                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
++                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
++                                                 0x4c454654ULL),
++                                      mass,
++                                      px,
++                                      py,
++                                      cellVpCount,
++                                      cellVpMass);
++            add_virtual_face_momentum(face_area_right(ix, iy, grid, diag.shift, params),
++                                      fullCellArea,
++                                      wallVpGamma,
++                                      params.wallVpMass,
++                                      wallVpKBT,
++                                      params.wallVpUxRight,
++                                      params.wallVpUyRight,
++                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
++                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
++                                                 0x5249474854ULL),
++                                      mass,
++                                      px,
++                                      py,
++                                      cellVpCount,
++                                      cellVpMass);
++            add_virtual_face_momentum(face_area_bottom(ix, iy, grid, diag.shift, params),
++                                      fullCellArea,
++                                      wallVpGamma,
++                                      params.wallVpMass,
++                                      wallVpKBT,
++                                      params.wallVpUxBottom,
++                                      params.wallVpUyBottom,
++                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
++                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
++                                                 0x424f54544f4dULL),
++                                      mass,
++                                      px,
++                                      py,
++                                      cellVpCount,
++                                      cellVpMass);
++            add_virtual_face_momentum(face_area_top(ix, iy, grid, diag.shift, params),
++                                      fullCellArea,
++                                      wallVpGamma,
++                                      params.wallVpMass,
++                                      wallVpKBT,
++                                      params.wallVpUxTop,
++                                      params.wallVpUyTop,
++                                      splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
++                                                 (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
++                                                 0x544f50ULL),
++                                      mass,
++                                      px,
++                                      py,
++                                      cellVpCount,
++                                      cellVpMass);
++            vpCountSum += cellVpCount;
++            vpMassSum += cellVpMass;
++        }
++
+         const std::size_t kk = static_cast<std::size_t>(c);
+-        ws.cellCount[kk] = count;
++        ws.cellCount[kk] = count; // real-particle occupancy only; VP diagnostics are separate.
+         ws.cellMass[kk] = mass;
+         if (mass > 0.0) {
+             ws.cellUx[kk] = px / mass;
+             ws.cellUy[kk] = py / mass;
+         }
+     }
++    diag.virtualParticleCount = vpCountSum;
++    diag.virtualMass = vpMassSum;
+ 
+     const double ca0 = std::cos(params.rotationAngle);
+     const double sa0 = std::sin(params.rotationAngle);
