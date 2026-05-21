@@ -9,10 +9,26 @@ struct SimulationParams {
     std::string inputState;
     std::string outputDir = "run_base";
 
+    // Fixed numerical box and collision grid. Lx/Ly remain the numerical
+    // extents used by periodic wrapping and fixed-size cell arrays. The active
+    // fluid domain can be a sub-domain of this box; see fluid* parameters below.
     double Lx = 1.0;
     double Ly = 1.0;
     int Nx = 32;
     int Ny = 32;
+
+    // Active fluid domain inside the fixed numerical box. Negative max bounds
+    // inherit the corresponding box size. Velocities are zero by default, so
+    // existing fixed-domain runs are unchanged. fluidYTop0/fluidYTopVelocity
+    // are accepted by the parser as aliases for fluidYMax0/fluidYMaxVelocity.
+    double fluidXMin0 = 0.0;
+    double fluidXMax0 = -1.0;
+    double fluidYMin0 = 0.0;
+    double fluidYMax0 = -1.0;
+    double fluidXMinVelocity = 0.0;
+    double fluidXMaxVelocity = 0.0;
+    double fluidYMinVelocity = 0.0;
+    double fluidYMaxVelocity = 0.0;
 
     double dt = 1.0e-3;
     int nSteps = 1000;

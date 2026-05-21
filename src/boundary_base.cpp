@@ -21,22 +21,47 @@ double wrap_periodic(double x, double L) {
     return x;
 }
 
+void wall_velocity_for_face(const SimulationParams& params,
+                            const FluidDomainBounds& domain,
+                            const std::string& face,
+                            double& ux,
+                            double& uy) {
+    if (face == "left") {
+        ux = domain.vxMin + params.wallVpUxLeft;
+        uy = params.wallVpUyLeft;
+    } else if (face == "right") {
+        ux = domain.vxMax + params.wallVpUxRight;
+        uy = params.wallVpUyRight;
+    } else if (face == "bottom") {
+        ux = params.wallVpUxBottom;
+        uy = domain.vyMin + params.wallVpUyBottom;
+    } else if (face == "top") {
+        ux = params.wallVpUxTop;
+        uy = domain.vyMax + params.wallVpUyTop;
+    } else {
+        ux = 0.0;
+        uy = 0.0;
+    }
+}
+
 void apply_wall_velocity_reflection(const std::string& mode,
                                     bool normalIsX,
+                                    double wallUx,
+                                    double wallUy,
                                     double& vx,
                                     double& vy) {
-    // The generic solid wall uses a specular geometric reflection to enforce
-    // impermeability. Tangential no-slip/thermal coupling is supplied by the
-    // aggregate wall contribution in the collision cell moments.
+    // The generic solid wall uses a specular geometric reflection in the wall
+    // frame to enforce impermeability. Tangential no-slip/thermal coupling is
+    // supplied by aggregate wall momentum in collision-cell moments.
     if (mode == "solid" || mode == "specular") {
         if (normalIsX) {
-            vx = -vx;
+            vx = 2.0 * wallUx - vx;
         } else {
-            vy = -vy;
+            vy = 2.0 * wallUy - vy;
         }
     } else if (mode == "bounceback") {
-        vx = -vx;
-        vy = -vy;
+        vx = 2.0 * wallUx - vx;
+        vy = 2.0 * wallUy - vy;
     } else {
         throw std::runtime_error("Unsupported non-periodic wall mode during reflection: " + mode);
     }
@@ -45,59 +70,66 @@ void apply_wall_velocity_reflection(const std::string& mode,
 void reflect_x(double& x,
                double& vx,
                double& vy,
-               double Lx,
-               const std::string& leftMode,
-               const std::string& rightMode,
+               const SimulationParams& params,
+               const FluidDomainBounds& domain,
                std::uint64_t& leftHits,
                std::uint64_t& rightHits) {
     int guard = 0;
-    while (x < 0.0 || x > Lx) {
+    while (x < domain.xMin || x > domain.xMax) {
         if (++guard > 64) {
-            throw std::runtime_error("Too many x-wall reflections in one step; reduce dt or check velocities");
+            throw std::runtime_error("Too many x-wall reflections in one step; reduce dt or check velocities/domain motion");
         }
-        if (x < 0.0) {
-            x = -x;
+        if (x < domain.xMin) {
+            x = 2.0 * domain.xMin - x;
             ++leftHits;
-            apply_wall_velocity_reflection(leftMode, true, vx, vy);
-        } else if (x > Lx) {
-            x = 2.0 * Lx - x;
+            double wx = 0.0, wy = 0.0;
+            wall_velocity_for_face(params, domain, "left", wx, wy);
+            apply_wall_velocity_reflection(params.bcLeft, true, wx, wy, vx, vy);
+        } else if (x > domain.xMax) {
+            x = 2.0 * domain.xMax - x;
             ++rightHits;
-            apply_wall_velocity_reflection(rightMode, true, vx, vy);
+            double wx = 0.0, wy = 0.0;
+            wall_velocity_for_face(params, domain, "right", wx, wy);
+            apply_wall_velocity_reflection(params.bcRight, true, wx, wy, vx, vy);
         }
     }
-    x = std::clamp(x, 0.0, Lx);
+    x = std::clamp(x, domain.xMin, domain.xMax);
 }
 
 void reflect_y(double& y,
                double& vx,
                double& vy,
-               double Ly,
-               const std::string& bottomMode,
-               const std::string& topMode,
+               const SimulationParams& params,
+               const FluidDomainBounds& domain,
                std::uint64_t& bottomHits,
                std::uint64_t& topHits) {
     int guard = 0;
-    while (y < 0.0 || y > Ly) {
+    while (y < domain.yMin || y > domain.yMax) {
         if (++guard > 64) {
-            throw std::runtime_error("Too many y-wall reflections in one step; reduce dt or check velocities");
+            throw std::runtime_error("Too many y-wall reflections in one step; reduce dt or check velocities/domain motion");
         }
-        if (y < 0.0) {
-            y = -y;
+        if (y < domain.yMin) {
+            y = 2.0 * domain.yMin - y;
             ++bottomHits;
-            apply_wall_velocity_reflection(bottomMode, false, vx, vy);
-        } else if (y > Ly) {
-            y = 2.0 * Ly - y;
+            double wx = 0.0, wy = 0.0;
+            wall_velocity_for_face(params, domain, "bottom", wx, wy);
+            apply_wall_velocity_reflection(params.bcBottom, false, wx, wy, vx, vy);
+        } else if (y > domain.yMax) {
+            y = 2.0 * domain.yMax - y;
             ++topHits;
-            apply_wall_velocity_reflection(topMode, false, vx, vy);
+            double wx = 0.0, wy = 0.0;
+            wall_velocity_for_face(params, domain, "top", wx, wy);
+            apply_wall_velocity_reflection(params.bcTop, false, wx, wy, vx, vy);
         }
     }
-    y = std::clamp(y, 0.0, Ly);
+    y = std::clamp(y, domain.yMin, domain.yMax);
 }
 
 } // namespace
 
 BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
-                                              const SimulationParams& params) {
+                                              const SimulationParams& params,
+                                              const FluidDomainBounds& domain) {
     validate_particle_state(state, "apply_boundary_conditions");
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const bool periodicX = is_x_periodic(params);
@@ -115,15 +147,13 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
         if (periodicX) {
             state.x[i] = wrap_periodic(state.x[i], params.Lx);
         } else {
-            reflect_x(state.x[i], state.vx[i], state.vy[i], params.Lx,
-                      params.bcLeft, params.bcRight, hitsLeft, hitsRight);
+            reflect_x(state.x[i], state.vx[i], state.vy[i], params, domain, hitsLeft, hitsRight);
         }
 
         if (periodicY) {
             state.y[i] = wrap_periodic(state.y[i], params.Ly);
         } else {
-            reflect_y(state.y[i], state.vx[i], state.vy[i], params.Ly,
-                      params.bcBottom, params.bcTop, hitsBottom, hitsTop);
+            reflect_y(state.y[i], state.vx[i], state.vy[i], params, domain, hitsBottom, hitsTop);
         }
     }
 

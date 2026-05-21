@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "boundary_base.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 #include "src_collision.h"
@@ -26,6 +27,16 @@ struct RuntimeSummary {
     double meanVy = 0.0;
     double meanKinetic = 0.0;
     double kBTEstimate = 0.0;
+
+    // Active fluid-domain diagnostics. These are recorded at runtime because
+    // future moving-domain runs need the exact geometric state associated with
+    // each step. Detailed profiles remain post-processing responsibilities.
+    double fluidXMin = 0.0;
+    double fluidXMax = 0.0;
+    double fluidYMin = 0.0;
+    double fluidYMax = 0.0;
+    double fluidArea = 0.0;
+    double meanPhysicalDensity = 0.0;
 
     double meanN = 0.0;
     double stdN = 0.0;

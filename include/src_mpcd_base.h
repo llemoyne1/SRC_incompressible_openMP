@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "boundary_base.h"
 #include "cell_grid.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 #include "src_collision.h"
@@ -11,6 +12,7 @@
 namespace mpcd {
 
 struct StepResult {
+    FluidDomainBounds domain;
     BoundaryDiagnostics boundary;
     CollisionDiagnostics collision;
     ThermostatDiagnostics thermostat;

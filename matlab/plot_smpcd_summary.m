@@ -51,8 +51,19 @@ function summary = plot_smpcd_summary(runDir, varargin)
     title('total momentum'); xlabel(xLabel); grid on;
 
     nexttile;
-    local_plot_if_present(summary, x, {'totalMass','mass'}, 'total mass');
-    xlabel(xLabel); grid on;
+    if ismember('meanPhysicalDensity', summary.Properties.VariableNames)
+        yyaxis left;
+        local_plot_if_present(summary, x, {'totalMass','mass'}, 'mass / density');
+        ylabel('mass');
+        yyaxis right;
+        plot(x, summary.meanPhysicalDensity, '-');
+        ylabel('mean physical density');
+        title('mass / density');
+        xlabel(xLabel); grid on;
+    else
+        local_plot_if_present(summary, x, {'totalMass','mass'}, 'total mass');
+        xlabel(xLabel); grid on;
+    end
 
     nexttile;
     if ismember('stdN', summary.Properties.VariableNames)

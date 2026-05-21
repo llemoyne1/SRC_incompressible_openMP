@@ -179,3 +179,9 @@ out = validate_solid_thermal_couette_sliding( ...
 ```
 
 See `docs/SOLID_THERMAL_COUETTE_SLIDING.md`.
+
+## Active fluid domain
+
+The code separates the fixed numerical box (`Lx`, `Ly`, `Nx`, `Ny`) from the active fluid domain used by solid-wall reflection and solid-thermal wall coupling. By default they coincide. The active-domain bounds are controlled by `fluidXMin0`, `fluidXMax0`, `fluidYMin0`, `fluidYMax0` and optional boundary velocities. The aliases `fluidYTop0` and `fluidYTopVelocity` are available for future top-piston/EOS tests. Runtime summaries record `fluidArea` and `meanPhysicalDensity`; detailed field analysis remains in MATLAB post-processing.
+
+See `docs/ACTIVE_FLUID_DOMAIN.md`.

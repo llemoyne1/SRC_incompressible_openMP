@@ -140,6 +140,14 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "Ly") p.Ly = parse_double(value, key);
         else if (key == "Nx") p.Nx = parse_int(value, key);
         else if (key == "Ny") p.Ny = parse_int(value, key);
+        else if (key == "fluidXMin0") p.fluidXMin0 = parse_double(value, key);
+        else if (key == "fluidXMax0") p.fluidXMax0 = parse_double(value, key);
+        else if (key == "fluidYMin0") p.fluidYMin0 = parse_double(value, key);
+        else if (key == "fluidYMax0" || key == "fluidYTop0") p.fluidYMax0 = parse_double(value, key);
+        else if (key == "fluidXMinVelocity") p.fluidXMinVelocity = parse_double(value, key);
+        else if (key == "fluidXMaxVelocity") p.fluidXMaxVelocity = parse_double(value, key);
+        else if (key == "fluidYMinVelocity") p.fluidYMinVelocity = parse_double(value, key);
+        else if (key == "fluidYMaxVelocity" || key == "fluidYTopVelocity") p.fluidYMaxVelocity = parse_double(value, key);
         else if (key == "dt") p.dt = parse_double(value, key);
         else if (key == "nSteps") p.nSteps = parse_int(value, key);
         else if (key == "rotationAngle") p.rotationAngle = parse_double(value, key);
@@ -239,6 +247,22 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.Nx <= 0 || p.Ny <= 0) {
         throw std::runtime_error("Nx and Ny must be positive");
+    }
+    const double xMax0 = p.fluidXMax0 >= 0.0 ? p.fluidXMax0 : p.Lx;
+    const double yMax0 = p.fluidYMax0 >= 0.0 ? p.fluidYMax0 : p.Ly;
+    if (p.fluidXMin0 < 0.0 || p.fluidYMin0 < 0.0 || xMax0 > p.Lx || yMax0 > p.Ly ||
+        !(xMax0 > p.fluidXMin0) || !(yMax0 > p.fluidYMin0)) {
+        throw std::runtime_error("Initial active fluid domain must lie inside [0,Lx]x[0,Ly] with positive area");
+    }
+    if ((p.bcLeft == "periodic" || p.bcRight == "periodic") &&
+        (std::abs(p.fluidXMin0) > 1.0e-14 || std::abs(xMax0 - p.Lx) > 1.0e-14 ||
+         std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0)) {
+        throw std::runtime_error("Periodic x boundaries require a full, static active fluid x-domain");
+    }
+    if ((p.bcBottom == "periodic" || p.bcTop == "periodic") &&
+        (std::abs(p.fluidYMin0) > 1.0e-14 || std::abs(yMax0 - p.Ly) > 1.0e-14 ||
+         std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0)) {
+        throw std::runtime_error("Periodic y boundaries require a full, static active fluid y-domain");
     }
     if (!(p.dt > 0.0)) {
         throw std::runtime_error("dt must be positive");

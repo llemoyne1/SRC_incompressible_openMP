@@ -43,6 +43,15 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
     s.totalMass = mass;
     s.Px = px;
     s.Py = py;
+
+    const FluidDomainBounds domain = make_fluid_domain_bounds(params, s.time);
+    s.fluidXMin = domain.xMin;
+    s.fluidXMax = domain.xMax;
+    s.fluidYMin = domain.yMin;
+    s.fluidYMax = domain.yMax;
+    s.fluidArea = fluid_domain_area(domain);
+    s.meanPhysicalDensity = s.fluidArea > 0.0 ? mass / s.fluidArea : 0.0;
+
     if (mass > 0.0) {
         s.meanVx = px / mass;
         s.meanVy = py / mass;
@@ -127,7 +136,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -146,6 +155,12 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.meanVy << ','
          << s.meanKinetic << ','
          << s.kBTEstimate << ','
+         << s.fluidXMin << ','
+         << s.fluidXMax << ','
+         << s.fluidYMin << ','
+         << s.fluidYMax << ','
+         << s.fluidArea << ','
+         << s.meanPhysicalDensity << ','
          << s.meanN << ','
          << s.stdN << ','
          << s.minN << ','

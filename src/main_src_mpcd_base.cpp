@@ -2,6 +2,7 @@
 #include "cell_grid.h"
 #include "params_io_base.h"
 #include "runtime_summary.h"
+#include "fluid_domain.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
 
@@ -80,7 +81,8 @@ int main(int argc, char** argv) {
 
         mpcd::ParticleState state = mpcd::read_smpcd_state(params.inputState);
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
-        mpcd::apply_boundary_conditions(state, params);
+        const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
+        mpcd::apply_boundary_conditions(state, params, initialDomain);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;
@@ -102,6 +104,8 @@ int main(int argc, char** argv) {
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
                   << " wallAccommodation=" << params.wallAccommodation
+                  << " fluid=[" << initialDomain.xMin << "," << initialDomain.xMax
+                  << "]x[" << initialDomain.yMin << "," << initialDomain.yMax << "]"
                   << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
                   << " steps=" << params.nSteps
                   << " threadsActive=" << ompActiveThreads

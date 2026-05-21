@@ -43,48 +43,76 @@ double overlap_length(double a0, double a1, double b0, double b1) {
     return hi > lo ? hi - lo : 0.0;
 }
 
-double face_area_left(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+double face_area_left(int ix, int iy, const CellGrid& grid, const GridShift& shift,
+                      const SimulationParams& params, const FluidDomainBounds& domain) {
     if (is_x_periodic(params)) return 0.0;
     const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
     const double x1 = x0 + grid.dx;
     const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
     const double y1 = y0 + grid.dy;
-    const double outsideX = overlap_length(x0, x1, -grid.dx, 0.0);
-    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
+    const double outsideX = overlap_length(x0, x1, domain.xMin - grid.dx, domain.xMin);
+    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, domain.yMin, domain.yMax);
     return outsideX * insideY;
 }
 
-double face_area_right(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+double face_area_right(int ix, int iy, const CellGrid& grid, const GridShift& shift,
+                       const SimulationParams& params, const FluidDomainBounds& domain) {
     if (is_x_periodic(params)) return 0.0;
     const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
     const double x1 = x0 + grid.dx;
     const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
     const double y1 = y0 + grid.dy;
-    const double outsideX = overlap_length(x0, x1, grid.Lx, grid.Lx + grid.dx);
-    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, 0.0, grid.Ly);
+    const double outsideX = overlap_length(x0, x1, domain.xMax, domain.xMax + grid.dx);
+    const double insideY = is_y_periodic(params) ? grid.dy : overlap_length(y0, y1, domain.yMin, domain.yMax);
     return outsideX * insideY;
 }
 
-double face_area_bottom(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+double face_area_bottom(int ix, int iy, const CellGrid& grid, const GridShift& shift,
+                        const SimulationParams& params, const FluidDomainBounds& domain) {
     if (is_y_periodic(params)) return 0.0;
     const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
     const double x1 = x0 + grid.dx;
     const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
     const double y1 = y0 + grid.dy;
-    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
-    const double outsideY = overlap_length(y0, y1, -grid.dy, 0.0);
+    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, domain.xMin, domain.xMax);
+    const double outsideY = overlap_length(y0, y1, domain.yMin - grid.dy, domain.yMin);
     return insideX * outsideY;
 }
 
-double face_area_top(int ix, int iy, const CellGrid& grid, const GridShift& shift, const SimulationParams& params) {
+double face_area_top(int ix, int iy, const CellGrid& grid, const GridShift& shift,
+                     const SimulationParams& params, const FluidDomainBounds& domain) {
     if (is_y_periodic(params)) return 0.0;
     const double x0 = static_cast<double>(ix) * grid.dx - shift.sx;
     const double x1 = x0 + grid.dx;
     const double y0 = static_cast<double>(iy) * grid.dy - shift.sy;
     const double y1 = y0 + grid.dy;
-    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, 0.0, grid.Lx);
-    const double outsideY = overlap_length(y0, y1, grid.Ly, grid.Ly + grid.dy);
+    const double insideX = is_x_periodic(params) ? grid.dx : overlap_length(x0, x1, domain.xMin, domain.xMax);
+    const double outsideY = overlap_length(y0, y1, domain.yMax, domain.yMax + grid.dy);
     return insideX * outsideY;
+}
+
+void wall_velocity_for_face(const SimulationParams& params,
+                            const FluidDomainBounds& domain,
+                            const char* face,
+                            double& ux,
+                            double& uy) {
+    const std::string f(face);
+    if (f == "left") {
+        ux = domain.vxMin + params.wallVpUxLeft;
+        uy = params.wallVpUyLeft;
+    } else if (f == "right") {
+        ux = domain.vxMax + params.wallVpUxRight;
+        uy = params.wallVpUyRight;
+    } else if (f == "bottom") {
+        ux = params.wallVpUxBottom;
+        uy = domain.vyMin + params.wallVpUyBottom;
+    } else if (f == "top") {
+        ux = params.wallVpUxTop;
+        uy = domain.vyMax + params.wallVpUyTop;
+    } else {
+        ux = 0.0;
+        uy = 0.0;
+    }
 }
 
 struct VirtualFaceContribution {
@@ -208,6 +236,7 @@ void resize_collision_workspace(CollisionWorkspace& ws,
 CollisionDiagnostics src_collision_step(ParticleState& state,
                                         const SimulationParams& params,
                                         const CellGrid& grid,
+                                        const FluidDomainBounds& domain,
                                         std::uint64_t step,
                                         CollisionWorkspace& ws) {
     validate_particle_state(state, "src_collision_step");
@@ -289,11 +318,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         double cellVpPy = 0.0;
 
         if (face_has_wall_coupling(params.bcLeft, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "left", wallUx, wallUy);
             const auto v = make_virtual_face_contribution(
-                face_area_left(ix, iy, grid, diag.shift, params),
+                face_area_left(ix, iy, grid, diag.shift, params, domain),
                 fullCellArea, wallVpGamma, params.wallAccommodation,
                 params.wallVpMass, wallKBT, params.wallThermalNoise,
-                params.wallVpUxLeft, params.wallVpUyLeft,
+                wallUx, wallUy,
                 splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
                            (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
                            0x4c454654ULL));
@@ -301,11 +332,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             vpMassLeftSum += v.mass;
         }
         if (face_has_wall_coupling(params.bcRight, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "right", wallUx, wallUy);
             const auto v = make_virtual_face_contribution(
-                face_area_right(ix, iy, grid, diag.shift, params),
+                face_area_right(ix, iy, grid, diag.shift, params, domain),
                 fullCellArea, wallVpGamma, params.wallAccommodation,
                 params.wallVpMass, wallKBT, params.wallThermalNoise,
-                params.wallVpUxRight, params.wallVpUyRight,
+                wallUx, wallUy,
                 splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
                            (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
                            0x5249474854ULL));
@@ -313,11 +346,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             vpMassRightSum += v.mass;
         }
         if (face_has_wall_coupling(params.bcBottom, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "bottom", wallUx, wallUy);
             const auto v = make_virtual_face_contribution(
-                face_area_bottom(ix, iy, grid, diag.shift, params),
+                face_area_bottom(ix, iy, grid, diag.shift, params, domain),
                 fullCellArea, wallVpGamma, params.wallAccommodation,
                 params.wallVpMass, wallKBT, params.wallThermalNoise,
-                params.wallVpUxBottom, params.wallVpUyBottom,
+                wallUx, wallUy,
                 splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
                            (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
                            0x424f54544f4dULL));
@@ -325,11 +360,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             vpMassBottomSum += v.mass;
         }
         if (face_has_wall_coupling(params.bcTop, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "top", wallUx, wallUy);
             const auto v = make_virtual_face_contribution(
-                face_area_top(ix, iy, grid, diag.shift, params),
+                face_area_top(ix, iy, grid, diag.shift, params, domain),
                 fullCellArea, wallVpGamma, params.wallAccommodation,
                 params.wallVpMass, wallKBT, params.wallThermalNoise,
-                params.wallVpUxTop, params.wallVpUyTop,
+                wallUx, wallUy,
                 splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
                            (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
                            0x544f50ULL));

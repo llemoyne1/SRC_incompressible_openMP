@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include "cell_grid.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -56,6 +57,7 @@ void resize_collision_workspace(CollisionWorkspace& ws,
 CollisionDiagnostics src_collision_step(ParticleState& state,
                                         const SimulationParams& params,
                                         const CellGrid& grid,
+                                        const FluidDomainBounds& domain,
                                         std::uint64_t step,
                                         CollisionWorkspace& ws);
 

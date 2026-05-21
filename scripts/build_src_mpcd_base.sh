@@ -11,6 +11,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/params_io_base.cpp \
   src/cell_grid.cpp \
   src/boundary_base.cpp \
+  src/fluid_domain.cpp \
   src/src_collision.cpp \
   src/thermostat.cpp \
   src/src_mpcd_base.cpp \
