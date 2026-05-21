@@ -21,7 +21,7 @@ Implemented:
 
 Not implemented yet in the base executable:
 
-- wall virtual particles;
+- explicit solid geometry/cylinder virtual particles;
 - incompressible redistribution;
 - Q6/Q9 pressure or mass-flux projection;
 - virial/liquid EOS closure;
@@ -49,6 +49,7 @@ examples/params_periodic_base.kv
 examples/params_channel_y_bounceback.kv
 examples/params_channel_y_specular.kv
 examples/params_channel_x_bounceback.kv
+examples/params_poiseuille_y_bounceback_vp.kv
 ```
 
 Run for example:
@@ -89,3 +90,32 @@ The base executable now supports aggregate stochastic wall virtual particles for
 build/src_mpcd_base examples/params_channel_y_bounceback_vp.kv
 build/src_mpcd_base examples/params_channel_x_bounceback_vp.kv
 ```
+
+
+## First Poiseuille validation
+
+The branch includes a lightweight MATLAB validation workflow for the primitive
+`.smpcd` dumps. Run the first channel cases with:
+
+```bash
+./build/src_mpcd_base examples/params_poiseuille_y_specular.kv
+./build/src_mpcd_base examples/params_poiseuille_y_bounceback.kv
+./build/src_mpcd_base examples/params_poiseuille_y_bounceback_vp.kv
+```
+
+Then compare the profiles in MATLAB:
+
+```matlab
+addpath('matlab')
+cmp = compare_poiseuille_runs({ ...
+    'runs/poiseuille_y_specular', ...
+    'runs/poiseuille_y_bounceback', ...
+    'runs/poiseuille_y_bounceback_vp'}, ...
+    'labels', {'specular', 'bounceback', 'bounceback+VP'}, ...
+    'flowComponent', 'Ux', ...
+    'profileDirection', 'y', ...
+    'fitStartFraction', 0.5, ...
+    'excludeWallCells', 2);
+```
+
+See `docs/POISEUILLE_VALIDATION.md` for details.
