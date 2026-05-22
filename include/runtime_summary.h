@@ -30,6 +30,10 @@ struct RuntimeSummary {
     double meanVy = 0.0;
     double meanKinetic = 0.0;
     double kBTEstimate = 0.0;
+    double meanParticleSpeed = 0.0;
+    double maxParticleSpeed = 0.0;
+    double maxParticleAbsVx = 0.0;
+    double maxParticleAbsVy = 0.0;
 
     // Active fluid-domain diagnostics. These are recorded at runtime because
     // future moving-domain runs need the exact geometric state associated with
@@ -50,6 +54,8 @@ struct RuntimeSummary {
     std::uint64_t hitsRight = 0;
     std::uint64_t hitsBottom = 0;
     std::uint64_t hitsTop = 0;
+    int maxXWallReflectionsPerParticle = 0;
+    int maxYWallReflectionsPerParticle = 0;
     std::uint64_t hitsImmersed = 0;
 
     std::uint64_t virtualParticleCount = 0;

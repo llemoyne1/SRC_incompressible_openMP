@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -44,6 +45,60 @@ void wall_velocity_for_face(const SimulationParams& params,
     }
 }
 
+struct ReflectionFailure {
+    bool failed = false;
+    std::string message;
+};
+
+std::string format_particle_wall_failure(const char* axis,
+                                         std::size_t particleIndex,
+                                         std::uint64_t step,
+                                         double time,
+                                         int attemptedReflections,
+                                         double x,
+                                         double y,
+                                         double vx,
+                                         double vy,
+                                         const FluidDomainBounds& domain,
+                                         double dt) {
+    std::ostringstream oss;
+    oss << "Too many " << axis << "-wall reflections in one step"
+        << "; step=" << step
+        << " time=" << time
+        << " particle=" << particleIndex
+        << " attemptedReflections=" << attemptedReflections
+        << " x=" << x
+        << " y=" << y
+        << " vx=" << vx
+        << " vy=" << vy
+        << " predictedNextX=" << (x + vx * dt)
+        << " predictedNextY=" << (y + vy * dt)
+        << " dt=" << dt
+        << " domain=[" << domain.xMin << "," << domain.xMax
+        << "]x[" << domain.yMin << "," << domain.yMax << "]"
+        << "; reduce dt or inspect particle/Q9/wall velocities";
+    return oss.str();
+}
+
+std::string format_nonfinite_particle_failure(std::size_t particleIndex,
+                                              std::uint64_t step,
+                                              double time,
+                                              double x,
+                                              double y,
+                                              double vx,
+                                              double vy) {
+    std::ostringstream oss;
+    oss << "Non-finite particle state before boundary conditions"
+        << "; step=" << step
+        << " time=" << time
+        << " particle=" << particleIndex
+        << " x=" << x
+        << " y=" << y
+        << " vx=" << vx
+        << " vy=" << vy;
+    return oss.str();
+}
+
 void apply_wall_velocity_reflection(const std::string& mode,
                                     bool normalIsX,
                                     double wallUx,
@@ -67,17 +122,25 @@ void apply_wall_velocity_reflection(const std::string& mode,
     }
 }
 
-void reflect_x(double& x,
-               double& vx,
-               double& vy,
-               const SimulationParams& params,
-               const FluidDomainBounds& domain,
-               std::uint64_t& leftHits,
-               std::uint64_t& rightHits) {
+int reflect_x(double& x,
+              double y,
+              double& vx,
+              double& vy,
+              const SimulationParams& params,
+              const FluidDomainBounds& domain,
+              std::uint64_t& leftHits,
+              std::uint64_t& rightHits,
+              std::size_t particleIndex,
+              std::uint64_t step,
+              double time,
+              ReflectionFailure& failure) {
     int guard = 0;
     while (x < domain.xMin || x > domain.xMax) {
         if (++guard > 64) {
-            throw std::runtime_error("Too many x-wall reflections in one step; reduce dt or check velocities/domain motion");
+            failure.failed = true;
+            failure.message = format_particle_wall_failure("x", particleIndex, step, time, guard,
+                                                           x, y, vx, vy, domain, params.dt);
+            return guard;
         }
         if (x < domain.xMin) {
             x = 2.0 * domain.xMin - x;
@@ -94,19 +157,28 @@ void reflect_x(double& x,
         }
     }
     x = std::clamp(x, domain.xMin, domain.xMax);
+    return guard;
 }
 
-void reflect_y(double& y,
-               double& vx,
-               double& vy,
-               const SimulationParams& params,
-               const FluidDomainBounds& domain,
-               std::uint64_t& bottomHits,
-               std::uint64_t& topHits) {
+int reflect_y(double x,
+              double& y,
+              double& vx,
+              double& vy,
+              const SimulationParams& params,
+              const FluidDomainBounds& domain,
+              std::uint64_t& bottomHits,
+              std::uint64_t& topHits,
+              std::size_t particleIndex,
+              std::uint64_t step,
+              double time,
+              ReflectionFailure& failure) {
     int guard = 0;
     while (y < domain.yMin || y > domain.yMax) {
         if (++guard > 64) {
-            throw std::runtime_error("Too many y-wall reflections in one step; reduce dt or check velocities/domain motion");
+            failure.failed = true;
+            failure.message = format_particle_wall_failure("y", particleIndex, step, time, guard,
+                                                           x, y, vx, vy, domain, params.dt);
+            return guard;
         }
         if (y < domain.yMin) {
             y = 2.0 * domain.yMin - y;
@@ -123,13 +195,16 @@ void reflect_y(double& y,
         }
     }
     y = std::clamp(y, domain.yMin, domain.yMax);
+    return guard;
 }
 
 } // namespace
 
 BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
                                               const SimulationParams& params,
-                                              const FluidDomainBounds& domain) {
+                                              const FluidDomainBounds& domain,
+                                              std::uint64_t step,
+                                              double time) {
     validate_particle_state(state, "apply_boundary_conditions");
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const bool periodicX = is_x_periodic(params);
@@ -139,22 +214,56 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
     std::uint64_t hitsRight = 0;
     std::uint64_t hitsBottom = 0;
     std::uint64_t hitsTop = 0;
+    int maxXReflections = 0;
+    int maxYReflections = 0;
+    ReflectionFailure firstFailure{};
 
-#pragma omp parallel for reduction(+:hitsLeft,hitsRight,hitsBottom,hitsTop) if(n > 10000)
+#pragma omp parallel for reduction(+:hitsLeft,hitsRight,hitsBottom,hitsTop) reduction(max:maxXReflections,maxYReflections) if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
+        ReflectionFailure localFailure{};
 
-        if (periodicX) {
-            state.x[i] = wrap_periodic(state.x[i], params.Lx);
-        } else {
-            reflect_x(state.x[i], state.vx[i], state.vy[i], params, domain, hitsLeft, hitsRight);
+        if (!std::isfinite(state.x[i]) || !std::isfinite(state.y[i]) ||
+            !std::isfinite(state.vx[i]) || !std::isfinite(state.vy[i])) {
+            localFailure.failed = true;
+            localFailure.message = format_nonfinite_particle_failure(
+                i, step, time, state.x[i], state.y[i], state.vx[i], state.vy[i]);
         }
 
-        if (periodicY) {
-            state.y[i] = wrap_periodic(state.y[i], params.Ly);
-        } else {
-            reflect_y(state.y[i], state.vx[i], state.vy[i], params, domain, hitsBottom, hitsTop);
+        if (!localFailure.failed) {
+            if (periodicX) {
+                state.x[i] = wrap_periodic(state.x[i], params.Lx);
+            } else {
+                const int r = reflect_x(state.x[i], state.y[i], state.vx[i], state.vy[i],
+                                        params, domain, hitsLeft, hitsRight,
+                                        i, step, time, localFailure);
+                maxXReflections = std::max(maxXReflections, r);
+            }
         }
+
+        if (!localFailure.failed) {
+            if (periodicY) {
+                state.y[i] = wrap_periodic(state.y[i], params.Ly);
+            } else {
+                const int r = reflect_y(state.x[i], state.y[i], state.vx[i], state.vy[i],
+                                        params, domain, hitsBottom, hitsTop,
+                                        i, step, time, localFailure);
+                maxYReflections = std::max(maxYReflections, r);
+            }
+        }
+
+        if (localFailure.failed) {
+#pragma omp critical(boundary_first_failure)
+            {
+                if (!firstFailure.failed) {
+                    firstFailure = localFailure;
+                }
+            }
+        }
+    }
+
+    if (firstFailure.failed) {
+        throw std::runtime_error(firstFailure.message);
     }
 
     BoundaryDiagnostics diag{};
@@ -162,6 +271,8 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
     diag.hitsRight = hitsRight;
     diag.hitsBottom = hitsBottom;
     diag.hitsTop = hitsTop;
+    diag.maxXWallReflectionsPerParticle = maxXReflections;
+    diag.maxYWallReflectionsPerParticle = maxYReflections;
     return diag;
 }
 

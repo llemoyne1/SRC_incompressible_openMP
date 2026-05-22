@@ -1,5 +1,6 @@
 #include "runtime_summary.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -32,15 +33,26 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
     double px = 0.0;
     double py = 0.0;
     double kinetic = 0.0;
+    double speedSum = 0.0;
+    double maxSpeed = 0.0;
+    double maxAbsVx = 0.0;
+    double maxAbsVy = 0.0;
 
-    #pragma omp parallel for reduction(+:mass,px,py,kinetic) if(n > 10000)
+    #pragma omp parallel for reduction(+:mass,px,py,kinetic,speedSum) reduction(max:maxSpeed,maxAbsVx,maxAbsVy) if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
         const double m = state.mass[i];
         mass += m;
-        px += m * state.vx[i];
-        py += m * state.vy[i];
-        kinetic += 0.5 * m * (state.vx[i] * state.vx[i] + state.vy[i] * state.vy[i]);
+        const double vx = state.vx[i];
+        const double vy = state.vy[i];
+        px += m * vx;
+        py += m * vy;
+        kinetic += 0.5 * m * (vx * vx + vy * vy);
+        const double speed = std::sqrt(vx * vx + vy * vy);
+        speedSum += speed;
+        maxSpeed = std::max(maxSpeed, speed);
+        maxAbsVx = std::max(maxAbsVx, std::abs(vx));
+        maxAbsVy = std::max(maxAbsVy, std::abs(vy));
     }
 
     s.totalMass = mass;
@@ -61,6 +73,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
     }
     if (n > 0u) {
         s.meanKinetic = kinetic / static_cast<double>(n);
+        s.meanParticleSpeed = speedSum / static_cast<double>(n);
+        s.maxParticleSpeed = maxSpeed;
+        s.maxParticleAbsVx = maxAbsVx;
+        s.maxParticleAbsVy = maxAbsVy;
     }
 
     double thermal = 0.0;
@@ -80,6 +96,8 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.hitsRight = boundary->hitsRight;
         s.hitsBottom = boundary->hitsBottom;
         s.hitsTop = boundary->hitsTop;
+        s.maxXWallReflectionsPerParticle = boundary->maxXWallReflectionsPerParticle;
+        s.maxYWallReflectionsPerParticle = boundary->maxYWallReflectionsPerParticle;
     }
     if (immersed != nullptr) {
         s.hitsImmersed = immersed->hits;
@@ -185,7 +203,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6Converged,q6Iterations,q6EmptyCells,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6Converged,q6Iterations,q6EmptyCells,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -204,6 +222,10 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.meanVy << ','
          << s.meanKinetic << ','
          << s.kBTEstimate << ','
+         << s.meanParticleSpeed << ','
+         << s.maxParticleSpeed << ','
+         << s.maxParticleAbsVx << ','
+         << s.maxParticleAbsVy << ','
          << s.fluidXMin << ','
          << s.fluidXMax << ','
          << s.fluidYMin << ','
@@ -218,6 +240,8 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.hitsRight << ','
          << s.hitsBottom << ','
          << s.hitsTop << ','
+         << s.maxXWallReflectionsPerParticle << ','
+         << s.maxYWallReflectionsPerParticle << ','
          << s.hitsImmersed << ','
          << s.virtualParticleCount << ','
          << s.virtualParticleEquivalent << ','
