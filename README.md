@@ -210,3 +210,11 @@ state generation and smoke-test commands.
 ## Recent immersed-circle validation example
 
 - `examples/params_immersed_circle_rotating_64x64.kv`: fixed circular immersed solid with prescribed angular wall velocity.
+
+### Translating immersed circle
+
+A first slowly translating immersed circular solid is provided in
+`examples/params_immersed_circle_translating_64x64.kv`. The moving center uses
+`immersedCircleVx/Vy`; the local wall velocity used by reflection and
+`solid_thermal` coupling is the rigid-body velocity of the moving circle. See
+`docs/IMMERSED_CIRCLE_TRANSLATION.md`.

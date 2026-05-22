@@ -187,6 +187,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "immersedCircleCy") p.immersedCircleCy = parse_double(value, key);
         else if (key == "immersedCircleR") p.immersedCircleR = parse_double(value, key);
         else if (key == "immersedCircleFractionSamples") p.immersedCircleFractionSamples = parse_int(value, key);
+        else if (key == "immersedCircleVx") p.immersedCircleVx = parse_double(value, key);
+        else if (key == "immersedCircleVy") p.immersedCircleVy = parse_double(value, key);
         else if (key == "immersedCircleWallUx") p.immersedCircleWallUx = parse_double(value, key);
         else if (key == "immersedCircleWallUy") p.immersedCircleWallUy = parse_double(value, key);
         else if (key == "immersedCircleOmega") p.immersedCircleOmega = parse_double(value, key);
@@ -347,11 +349,25 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         const double xMax0Circle = p.fluidXMax0 >= 0.0 ? p.fluidXMax0 : p.Lx;
         const double yMax0Circle = p.fluidYMax0 >= 0.0 ? p.fluidYMax0 : p.Ly;
-        if (p.immersedCircleCx - p.immersedCircleR < p.fluidXMin0 ||
-            p.immersedCircleCx + p.immersedCircleR > xMax0Circle ||
-            p.immersedCircleCy - p.immersedCircleR < p.fluidYMin0 ||
-            p.immersedCircleCy + p.immersedCircleR > yMax0Circle) {
-            throw std::runtime_error("The immersed circle must lie inside the initial active fluid domain");
+        const double tEndCircle = static_cast<double>(p.nSteps) * p.dt;
+        const double xMinEndCircle = p.fluidXMin0 + p.fluidXMinVelocity * tEndCircle;
+        const double xMaxEndCircle = xMax0Circle + p.fluidXMaxVelocity * tEndCircle;
+        const double yMinEndCircle = p.fluidYMin0 + p.fluidYMinVelocity * tEndCircle;
+        const double yMaxEndCircle = yMax0Circle + p.fluidYMaxVelocity * tEndCircle;
+        const double cxEnd = p.immersedCircleCx + p.immersedCircleVx * tEndCircle;
+        const double cyEnd = p.immersedCircleCy + p.immersedCircleVy * tEndCircle;
+        const bool circleInsideStart =
+            p.immersedCircleCx - p.immersedCircleR >= p.fluidXMin0 &&
+            p.immersedCircleCx + p.immersedCircleR <= xMax0Circle &&
+            p.immersedCircleCy - p.immersedCircleR >= p.fluidYMin0 &&
+            p.immersedCircleCy + p.immersedCircleR <= yMax0Circle;
+        const bool circleInsideEnd =
+            cxEnd - p.immersedCircleR >= xMinEndCircle &&
+            cxEnd + p.immersedCircleR <= xMaxEndCircle &&
+            cyEnd - p.immersedCircleR >= yMinEndCircle &&
+            cyEnd + p.immersedCircleR <= yMaxEndCircle;
+        if (!circleInsideStart || !circleInsideEnd) {
+            throw std::runtime_error("The immersed circle must lie inside the active fluid domain at the beginning and end of the run");
         }
     }
 

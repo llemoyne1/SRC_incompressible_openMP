@@ -33,8 +33,10 @@ function out = validate_immersed_circle_smoke(runDir, varargin)
     Ly = local_get_param(opt.Ly, params, 'Ly', 1.0);
     Nx = local_get_param(opt.Nx, params, 'Nx', 32);
     Ny = local_get_param(opt.Ny, params, 'Ny', 32);
-    cx = local_get_param(opt.circleCx, params, 'immersedCircleCx', 0.5);
-    cy = local_get_param(opt.circleCy, params, 'immersedCircleCy', 0.5);
+    cx0 = local_get_param(opt.circleCx, params, 'immersedCircleCx', 0.5);
+    cy0 = local_get_param(opt.circleCy, params, 'immersedCircleCy', 0.5);
+    vx = local_get_param([], params, 'immersedCircleVx', 0.0);
+    vy = local_get_param([], params, 'immersedCircleVy', 0.0);
     R = local_get_param(opt.circleR, params, 'immersedCircleR', 0.12);
 
     summaryPath = fullfile(runDir, 'summary_runtime.csv');
@@ -54,6 +56,10 @@ function out = validate_immersed_circle_smoke(runDir, varargin)
     finalState = [];
     for k = 1:nFrames
         state = read_smpcd_state(frameTable.fullPath{k});
+        tk = frameTable.time(k);
+        if isnan(tk), tk = 0.0; end
+        cx = cx0 + vx * tk;
+        cy = cy0 + vy * tk;
         r2 = (double(state.x(:)) - cx).^2 + (double(state.y(:)) - cy).^2;
         insideCount = nnz(r2 < (R * (1 - 1e-10))^2);
         maxInside = max(maxInside, insideCount);
@@ -122,7 +128,11 @@ function out = validate_immersed_circle_smoke(runDir, varargin)
             'showParticles', false, 'showVelocityVectors', false);
         hold on;
         th = linspace(0, 2*pi, 256);
-        plot(cx + R*cos(th), cy + R*sin(th), 'k-', 'LineWidth', 1.5);
+        tFinal = frameTable.time(end);
+        if isnan(tFinal), tFinal = 0.0; end
+        cxFinal = cx0 + vx * tFinal;
+        cyFinal = cy0 + vy * tFinal;
+        plot(cxFinal + R*cos(th), cyFinal + R*sin(th), 'k-', 'LineWidth', 1.5);
         title(sprintf('final %s with circle overlay', char(opt.field)), 'Interpreter', 'none');
         hold off;
     end

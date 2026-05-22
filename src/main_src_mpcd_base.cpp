@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
         const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
         mpcd::apply_boundary_conditions(state, params, initialDomain);
-        mpcd::apply_immersed_circle_reflection(state, params, initialDomain);
+        mpcd::apply_immersed_circle_reflection(state, params, initialDomain, 0.0);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;

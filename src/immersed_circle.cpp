@@ -22,9 +22,11 @@ inline double wrap_periodic(double x, double L) {
     return x;
 }
 
-inline double squared_distance_to_circle_center(double x, double y, const SimulationParams& p) {
-    const double dx = x - p.immersedCircleCx;
-    const double dy = y - p.immersedCircleCy;
+inline double squared_distance_to_circle_center(double x, double y, const SimulationParams& p, double time) {
+    double cx = 0.0, cy = 0.0;
+    immersed_circle_center(p, time, cx, cy);
+    const double dx = x - cx;
+    const double dy = y - cy;
     return dx * dx + dy * dy;
 }
 
@@ -34,23 +36,31 @@ bool immersed_circle_enabled(const SimulationParams& params) {
     return params.immersedCircleEnable && params.immersedCircleR > 0.0;
 }
 
-bool point_is_inside_immersed_circle(double x, double y, const SimulationParams& params) {
-    if (!immersed_circle_enabled(params)) return false;
-    return squared_distance_to_circle_center(x, y, params) < params.immersedCircleR * params.immersedCircleR;
+void immersed_circle_center(const SimulationParams& params, double time, double& cx, double& cy) {
+    cx = params.immersedCircleCx + params.immersedCircleVx * time;
+    cy = params.immersedCircleCy + params.immersedCircleVy * time;
 }
 
-double immersed_circle_signed_distance(double x, double y, const SimulationParams& params) {
+bool point_is_inside_immersed_circle(double x, double y, const SimulationParams& params, double time) {
+    if (!immersed_circle_enabled(params)) return false;
+    return squared_distance_to_circle_center(x, y, params, time) < params.immersedCircleR * params.immersedCircleR;
+}
+
+double immersed_circle_signed_distance(double x, double y, const SimulationParams& params, double time) {
     if (!immersed_circle_enabled(params)) {
         return 1.0e300;
     }
-    const double dx = x - params.immersedCircleCx;
-    const double dy = y - params.immersedCircleCy;
+    double cx = 0.0, cy = 0.0;
+    immersed_circle_center(params, time, cx, cy);
+    const double dx = x - cx;
+    const double dy = y - cy;
     return std::sqrt(dx * dx + dy * dy) - params.immersedCircleR;
 }
 
 ImmersedCircleDiagnostics apply_immersed_circle_reflection(ParticleState& state,
                                                            const SimulationParams& params,
-                                                           const FluidDomainBounds& domain) {
+                                                           const FluidDomainBounds& domain,
+                                                           double time) {
     (void)domain;
     ImmersedCircleDiagnostics diag{};
     if (!immersed_circle_enabled(params)) {
@@ -59,14 +69,11 @@ ImmersedCircleDiagnostics apply_immersed_circle_reflection(ParticleState& state,
 
     validate_particle_state(state, "apply_immersed_circle_reflection");
     const std::size_t n = static_cast<std::size_t>(state.Np);
-    const double cx = params.immersedCircleCx;
-    const double cy = params.immersedCircleCy;
+    double cx = 0.0, cy = 0.0;
+    immersed_circle_center(params, time, cx, cy);
     const double R = params.immersedCircleR;
     const double R2 = R * R;
     const double eps = 1.0e-12 * std::max(1.0, R);
-    // Local wall velocity is evaluated at the penetrated particle position.
-    // For the present patch the circle center is fixed, but the wall can rotate
-    // rigidly around that center.
 
     std::uint64_t hits = 0;
 #pragma omp parallel for reduction(+:hits) if(n > 10000)
@@ -90,17 +97,19 @@ ImmersedCircleDiagnostics apply_immersed_circle_reflection(ParticleState& state,
         }
 
         // Mirror the penetrated point through the circular boundary along the
-        // local normal. For small dt this is the usual post-streaming solid
-        // correction; robust swept intersection can be added later if needed.
+        // local normal. For slowly moving solids and small dt this post-streaming
+        // correction is sufficient. A swept intersection solver can be added
+        // later if moving solids become fast enough to cross a sizable fraction
+        // of a cell in one step.
         const double rMirror = std::max(R + eps, 2.0 * R - r + eps);
         state.x[i] = cx + rMirror * nx;
         state.y[i] = cy + rMirror * ny;
 
-        // Specular reflection in the local wall frame. This includes the
-        // prescribed tangential velocity of a rotating fixed circular wall.
+        // Specular reflection in the local moving-wall frame. The wall velocity
+        // includes center translation and rigid rotation.
         double wallUx = 0.0;
         double wallUy = 0.0;
-        immersed_circle_wall_velocity(params, state.x[i], state.y[i], wallUx, wallUy);
+        immersed_circle_wall_velocity(params, state.x[i], state.y[i], time, wallUx, wallUy);
         const double vrx = state.vx[i] - wallUx;
         const double vry = state.vy[i] - wallUy;
         const double vn = vrx * nx + vry * ny;
@@ -118,7 +127,8 @@ double immersed_circle_solid_fraction_in_cell(int ix,
                                               const CellGrid& grid,
                                               const GridShift& shift,
                                               const SimulationParams& params,
-                                              const FluidDomainBounds& domain) {
+                                              const FluidDomainBounds& domain,
+                                              double time) {
     if (!immersed_circle_enabled(params)) {
         return 0.0;
     }
@@ -143,7 +153,7 @@ double immersed_circle_solid_fraction_in_cell(int ix,
             if (!point_is_inside_fluid_domain(x, y, domain)) {
                 continue;
             }
-            if (point_is_inside_immersed_circle(x, y, params)) {
+            if (point_is_inside_immersed_circle(x, y, params, time)) {
                 inside += 1;
             }
         }
@@ -154,18 +164,21 @@ double immersed_circle_solid_fraction_in_cell(int ix,
 void immersed_circle_wall_velocity(const SimulationParams& params,
                                    double x,
                                    double y,
+                                   double time,
                                    double& ux,
                                    double& uy) {
-    const double dx = x - params.immersedCircleCx;
-    const double dy = y - params.immersedCircleCy;
+    double cx = 0.0, cy = 0.0;
+    immersed_circle_center(params, time, cx, cy);
+    const double dx = x - cx;
+    const double dy = y - cy;
 
-    // Rigid-body wall velocity for a fixed-center rotating circle:
-    // U = U0 + omega ez x r = (Ux0 - omega dy, Uy0 + omega dx).
-    // U0 is kept as a uniform wall-frame velocity hook. It should remain zero
-    // for genuine fixed-center rotation tests; translating geometry will be
-    // implemented separately because it changes phi(x,y,t).
-    ux = params.immersedCircleWallUx - params.immersedCircleOmega * dy;
-    uy = params.immersedCircleWallUy + params.immersedCircleOmega * dx;
+    // Rigid-body wall velocity for a translating and rotating circle:
+    // U = Vc + Uoffset + omega ez x r = (Vx + Ux0 - omega dy,
+    //                                   Vy + Uy0 + omega dx).
+    // The legacy immersedCircleWallU* offsets remain available as hooks but
+    // should normally be zero; center translation is represented by Vx/Vy.
+    ux = params.immersedCircleVx + params.immersedCircleWallUx - params.immersedCircleOmega * dy;
+    uy = params.immersedCircleVy + params.immersedCircleWallUy + params.immersedCircleOmega * dx;
 }
 
 } // namespace mpcd

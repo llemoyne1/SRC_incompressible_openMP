@@ -379,8 +379,9 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             double wallUx = 0.0, wallUy = 0.0;
             const double cellCx = (static_cast<double>(ix) + 0.5) * grid.dx - diag.shift.sx;
             const double cellCy = (static_cast<double>(iy) + 0.5) * grid.dy - diag.shift.sy;
-            immersed_circle_wall_velocity(params, cellCx, cellCy, wallUx, wallUy);
-            const double solidFraction = immersed_circle_solid_fraction_in_cell(ix, iy, grid, diag.shift, params, domain);
+            const double immersedTime = static_cast<double>(step) * params.dt;
+            immersed_circle_wall_velocity(params, cellCx, cellCy, immersedTime, wallUx, wallUy);
+            const double solidFraction = immersed_circle_solid_fraction_in_cell(ix, iy, grid, diag.shift, params, domain, immersedTime);
             const auto v = make_virtual_face_contribution(
                 solidFraction * fullCellArea,
                 fullCellArea, wallVpGamma, params.wallAccommodation,
