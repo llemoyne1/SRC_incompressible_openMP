@@ -218,3 +218,42 @@ A first slowly translating immersed circular solid is provided in
 `immersedCircleVx/Vy`; the local wall velocity used by reflection and
 `solid_thermal` coupling is the rigid-body velocity of the moving circle. See
 `docs/IMMERSED_CIRCLE_TRANSLATION.md`.
+
+## Incompressible Q6/Q9 development branch
+
+The incompressible development is carried on `feature/elliptic-q6-core`, while
+`clean/src-mpcd-base` remains the validated compressible baseline. The
+incompressible branch is built around a single generic elliptic projection core,
+not separate Q6/Q9-specific solvers.
+
+The core solves generic face-flux projection problems of the form:
+
+```text
+F_new = F_base - alpha grad(phi)
+div(F_new) = target
+```
+
+The same module is used for periodic projection, channel projection,
+Q9 mass-flux projection and elliptic low-pass filtering. This is intended to
+remain close to the validated MATLAB `general_bc` / `relax_to_uniform_lowk`
+method and to prepare later MPI/CUDA and surface-tension development.
+
+Current validation documents:
+
+- `docs/INCOMPRESSIBLE_Q6_Q9_STATUS.md`: current Q6/Q9 status and validation numbers.
+- `docs/ELLIPTIC_PROJECTION_CORE.md`: generic elliptic projection core.
+- `docs/Q6_PERIODIC_ADAPTER.md`: periodic Q6 adapter.
+- `docs/Q6_CHANNEL_POISEUILLE_VALIDATION.md`: Q6 channel validation.
+- `docs/Q9_PERIODIC_ADAPTER.md`: periodic Q9 mass-flux adapter.
+- `docs/Q9_BETA_SWEEP_VALIDATION.md`: Q9 beta sweep and raw-vs-filtered behavior.
+- `docs/TAYLOR_GREEN_Q9_FILTERED_VALIDATION.md`: filtered Q9 Taylor-Green validation.
+- `docs/POISEUILLE_Q9_FILTERED_CHANNEL_VALIDATION.md`: filtered Q9 channel validation.
+- `docs/Q9_LOWK_FILTERING_INCIDENT.md`: documented Q9 channel instability and low-k mismatch fix.
+
+For MATLAB scripts in this branch, the intended workflow is to launch MATLAB
+from the `matlab/` directory and use `../runs/...` paths, for example:
+
+```matlab
+addpath('.')
+out = validate_poiseuille_q9_channel_long('makePlots', true);
+```
