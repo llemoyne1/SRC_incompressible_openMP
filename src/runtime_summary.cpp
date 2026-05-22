@@ -18,6 +18,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const CollisionDiagnostics* collision,
                                        const Q6ProjectionDiagnostics* q6,
                                        const Q9ProjectionDiagnostics* q9,
+                                       const VirialPressureDiagnostics* virial,
                                        const ThermostatDiagnostics* thermostat,
                                        int numThreadsUsed) {
     validate_particle_state(state, "compute_runtime_summary");
@@ -156,8 +157,36 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.q9MomentumCorrectionVy = q9->momentumCorrectionVy;
         s.q9MomentumResidualBeforeCorrection = q9->momentumResidualBeforeCorrection;
     }
-    if (thermostat != nullptr) {
-        s.thermostatApplied = thermostat->applied ? 1 : 0;
+
+    if (virial != nullptr) {
+        s.virialEnabled = virial->enabled ? 1 : 0;
+        s.virialDiagnosticsEnabled = virial->diagnosticsEnabled ? 1 : 0;
+        s.virialKickEnabled = virial->kickEnabled ? 1 : 0;
+        s.virialKickApplied = virial->kickApplied ? 1 : 0;
+        s.virialK = virial->Kvirial;
+        s.virialBeta = virial->betaVirial;
+        s.virialRhoMean = virial->rhoMean;
+        s.virialRhoEOSRef = virial->rhoEOSRef;
+        s.virialRhoUniformNow = virial->rhoUniformNow;
+        s.virialRhoDriveRef = virial->rhoDriveRef;
+        s.virialRhoDefectRms = virial->rhoDefectRms;
+        s.virialRhoDefectRelRms = virial->rhoDefectRelRms;
+        s.PkinMean = virial->PkinMean;
+        s.PvirMean = virial->PvirMean;
+        s.PtotMean = virial->PtotMean;
+        s.PdriveMean = virial->PdriveMean;
+        s.gradPdriveRms = virial->gradPdriveRms;
+        s.gradPdriveMaxAbs = virial->gradPdriveMaxAbs;
+        s.virialDuRawRms = virial->duVirialRawRms;
+        s.virialDuAppliedRms = virial->duVirialAppliedRms;
+        s.virialDuAppliedMaxAbs = virial->duVirialAppliedMaxAbs;
+        s.virialDuOverThermalRms = virial->duVirialOverThermalRms;
+        s.virialMomentumCorrectionVx = virial->momentumCorrectionVx;
+        s.virialMomentumCorrectionVy = virial->momentumCorrectionVy;
+        s.virialMomentumResidualBeforeCorrection = virial->momentumResidualBeforeCorrection;
+        s.virialMomentumResidualAfterCorrection = virial->momentumResidualAfterCorrection;
+    }
+    if (thermostat != nullptr) {        s.thermostatApplied = thermostat->applied ? 1 : 0;
         s.thermostatCells = thermostat->cellsRescaled;
         s.thermostatParticles = thermostat->particlesRescaled;
         s.thermostatKBTBefore = thermostat->kBTBefore;
@@ -203,7 +232,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6Converged,q6Iterations,q6EmptyCells,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6Converged,q6Iterations,q6EmptyCells,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection,virialEnabled,virialDiagnosticsEnabled,virialKickEnabled,virialKickApplied,virialK,virialBeta,virialRhoMean,virialRhoEOSRef,virialRhoUniformNow,virialRhoDriveRef,virialRhoDefectRms,virialRhoDefectRelRms,PkinMean,PvirMean,PtotMean,PdriveMean,gradPdriveRms,gradPdriveMaxAbs,virialDuRawRms,virialDuAppliedRms,virialDuAppliedMaxAbs,virialDuOverThermalRms,virialMomentumCorrectionVx,virialMomentumCorrectionVy,virialMomentumResidualBeforeCorrection,virialMomentumResidualAfterCorrection\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -297,7 +326,33 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.q9CorrectionVelocityMaxAbs << ','
          << s.q9MomentumCorrectionVx << ','
          << s.q9MomentumCorrectionVy << ','
-         << s.q9MomentumResidualBeforeCorrection << '\n';
+         << s.q9MomentumResidualBeforeCorrection << ','
+         << s.virialEnabled << ','
+         << s.virialDiagnosticsEnabled << ','
+         << s.virialKickEnabled << ','
+         << s.virialKickApplied << ','
+         << s.virialK << ','
+         << s.virialBeta << ','
+         << s.virialRhoMean << ','
+         << s.virialRhoEOSRef << ','
+         << s.virialRhoUniformNow << ','
+         << s.virialRhoDriveRef << ','
+         << s.virialRhoDefectRms << ','
+         << s.virialRhoDefectRelRms << ','
+         << s.PkinMean << ','
+         << s.PvirMean << ','
+         << s.PtotMean << ','
+         << s.PdriveMean << ','
+         << s.gradPdriveRms << ','
+         << s.gradPdriveMaxAbs << ','
+         << s.virialDuRawRms << ','
+         << s.virialDuAppliedRms << ','
+         << s.virialDuAppliedMaxAbs << ','
+         << s.virialDuOverThermalRms << ','
+         << s.virialMomentumCorrectionVx << ','
+         << s.virialMomentumCorrectionVy << ','
+         << s.virialMomentumResidualBeforeCorrection << ','
+         << s.virialMomentumResidualAfterCorrection << '\n';
 }
 
 } // namespace mpcd

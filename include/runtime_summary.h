@@ -13,6 +13,7 @@
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
+#include "virial_pressure_kick.h"
 
 namespace mpcd {
 
@@ -116,6 +117,33 @@ struct RuntimeSummary {
     double q9MomentumCorrectionVx = 0.0;
     double q9MomentumCorrectionVy = 0.0;
     double q9MomentumResidualBeforeCorrection = 0.0;
+
+    int virialEnabled = 0;
+    int virialDiagnosticsEnabled = 0;
+    int virialKickEnabled = 0;
+    int virialKickApplied = 0;
+    double virialK = 0.0;
+    double virialBeta = 0.0;
+    double virialRhoMean = 0.0;
+    double virialRhoEOSRef = 0.0;
+    double virialRhoUniformNow = 0.0;
+    double virialRhoDriveRef = 0.0;
+    double virialRhoDefectRms = 0.0;
+    double virialRhoDefectRelRms = 0.0;
+    double PkinMean = 0.0;
+    double PvirMean = 0.0;
+    double PtotMean = 0.0;
+    double PdriveMean = 0.0;
+    double gradPdriveRms = 0.0;
+    double gradPdriveMaxAbs = 0.0;
+    double virialDuRawRms = 0.0;
+    double virialDuAppliedRms = 0.0;
+    double virialDuAppliedMaxAbs = 0.0;
+    double virialDuOverThermalRms = 0.0;
+    double virialMomentumCorrectionVx = 0.0;
+    double virialMomentumCorrectionVy = 0.0;
+    double virialMomentumResidualBeforeCorrection = 0.0;
+    double virialMomentumResidualAfterCorrection = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -128,6 +156,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const Q6ProjectionDiagnostics* q6 = nullptr,
                                        const Q9ProjectionDiagnostics* q9 = nullptr,
+                                       const VirialPressureDiagnostics* virial = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
                                        int numThreadsUsed = 1);
 

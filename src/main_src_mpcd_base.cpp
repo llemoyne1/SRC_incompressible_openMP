@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
-                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
                                                            &stepResult.collision,
                                                            &stepResult.q6,
                                                            &stepResult.q9,
+                                                           &stepResult.virial,
                                                            &stepResult.thermostat,
                                                            ompActiveThreads);
                 summary.append(s);

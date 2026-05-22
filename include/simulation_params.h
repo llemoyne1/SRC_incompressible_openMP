@@ -131,6 +131,25 @@ struct SimulationParams {
     double q9EllipticLowPassLengthCells = -1.0; // negative => MATLAB-like default from low-k index
     bool q9MomentumCorrectionEnable = true;
 
+
+    // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is
+    // independent from Q6/Q9 and is normally called after Q6/Q9 and before the
+    // final thermostat. It is disabled by default. method=q9_virial enables
+    // diagnostics and kick, with zero effect unless Kvirial and virialBeta are
+    // non-zero.
+    bool virialDiagnosticsEnable = false;
+    bool virialKickEnable = false;
+    double Kvirial = 0.0;
+    double virialBeta = 0.0;
+    std::string virialRhoEOSRefMode = "initial_physical_density"; // initial_physical_density, current_uniform, explicit
+    double virialRhoEOSRef = 0.0;
+    std::string virialRhoUniformMode = "reference_gamma_current_volume"; // current-volume uniform reference
+    double virialRhoUniformNow = 0.0;
+    std::string virialDriveTargetMode = "current_uniform"; // current_uniform, eos_ref, zero
+    std::string virialRhoKickMode = "uniform_now"; // uniform_now, local
+    double virialRhoKickMinFraction = 0.1;
+    bool virialMomentumCorrectionEnable = true;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

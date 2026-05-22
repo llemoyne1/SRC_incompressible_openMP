@@ -213,6 +213,18 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9EllipticLowPassPasses" || key == "massFluxEllipticLowPassPasses") p.q9EllipticLowPassPasses = parse_int(value, key);
         else if (key == "q9EllipticLowPassLengthCells" || key == "massFluxEllipticLowPassLengthCells") p.q9EllipticLowPassLengthCells = parse_double(value, key);
         else if (key == "q9MomentumCorrectionEnable") p.q9MomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
+        else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
+        else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
+        else if (key == "virialBeta" || key == "betaEOS") p.virialBeta = parse_double(value, key);
+        else if (key == "virialRhoEOSRefMode") p.virialRhoEOSRefMode = get_lower(kv, key);
+        else if (key == "virialRhoEOSRef") p.virialRhoEOSRef = parse_double(value, key);
+        else if (key == "virialRhoUniformMode") p.virialRhoUniformMode = get_lower(kv, key);
+        else if (key == "virialRhoUniformNow") p.virialRhoUniformNow = parse_double(value, key);
+        else if (key == "virialDriveTargetMode") p.virialDriveTargetMode = get_lower(kv, key);
+        else if (key == "virialRhoKickMode") p.virialRhoKickMode = get_lower(kv, key);
+        else if (key == "virialRhoKickMinFraction") p.virialRhoKickMinFraction = parse_double(value, key);
+        else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -244,6 +256,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     if (p.method == "q9" || p.method == "q9_virial") {
         p.projectionEnable = true;
         p.q9MassFluxProjectionEnable = true;
+    }
+    if (p.method == "q9_virial") {
+        p.virialDiagnosticsEnable = true;
+        p.virialKickEnable = true;
     }
 
     validate_simulation_params(p);
@@ -453,6 +469,46 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (!(p.q9EllipticLowPassLengthCells < 0.0 || p.q9EllipticLowPassLengthCells > 0.0)) {
             throw std::runtime_error("q9EllipticLowPassLengthCells must be positive, or negative to use the default");
+        }
+    }
+    if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
+        if (!(p.Kvirial >= 0.0)) {
+            throw std::runtime_error("Kvirial/virialK must be non-negative");
+        }
+        if (!(p.virialBeta >= 0.0)) {
+            throw std::runtime_error("virialBeta/betaEOS must be non-negative");
+        }
+        std::string eosMode = p.virialRhoEOSRefMode;
+        std::replace(eosMode.begin(), eosMode.end(), '-', '_');
+        if (eosMode != "initial_physical_density" && eosMode != "initial" && eosMode != "rho0" &&
+            eosMode != "current_uniform" && eosMode != "uniform_now" && eosMode != "rho_mean" &&
+            eosMode != "explicit" && eosMode != "user") {
+            throw std::runtime_error("virialRhoEOSRefMode supports: initial_physical_density, current_uniform, explicit");
+        }
+        std::string uniformMode = p.virialRhoUniformMode;
+        std::replace(uniformMode.begin(), uniformMode.end(), '-', '_');
+        if (uniformMode != "reference_gamma_current_volume" && uniformMode != "current_volume" &&
+            uniformMode != "gamma_current_volume" && uniformMode != "particle_mean" &&
+            uniformMode != "rho_mean" && uniformMode != "actual" &&
+            uniformMode != "explicit" && uniformMode != "user") {
+            throw std::runtime_error("virialRhoUniformMode supports: reference_gamma_current_volume, particle_mean, explicit");
+        }
+        std::string driveMode = p.virialDriveTargetMode;
+        std::replace(driveMode.begin(), driveMode.end(), '-', '_');
+        if (driveMode != "current_uniform" && driveMode != "uniform_now" && driveMode != "rho_uniform_now" &&
+            driveMode != "historical" && driveMode != "eos_ref" && driveMode != "initial" &&
+            driveMode != "initial_density" && driveMode != "rho_eos_ref" && driveMode != "zero" &&
+            driveMode != "none") {
+            throw std::runtime_error("virialDriveTargetMode supports: current_uniform, eos_ref, zero");
+        }
+        std::string kickMode = p.virialRhoKickMode;
+        std::replace(kickMode.begin(), kickMode.end(), '-', '_');
+        if (kickMode != "uniform_now" && kickMode != "current_uniform" && kickMode != "constant" &&
+            kickMode != "local" && kickMode != "cell" && kickMode != "rho_local") {
+            throw std::runtime_error("virialRhoKickMode supports: uniform_now, local");
+        }
+        if (!(p.virialRhoKickMinFraction > 0.0)) {
+            throw std::runtime_error("virialRhoKickMinFraction must be positive");
         }
     }
     if (p.summaryEvery <= 0) {
