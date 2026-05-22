@@ -78,18 +78,20 @@ struct SimulationParams {
     double wallVpUyTop = 0.0;
 
 
-    // First immersed analytic solid: one fixed circle. This is intentionally
-    // minimal and uses the same generic solid_thermal coupling parameters as
-    // rectangular walls: wallAccommodation, wallVpGamma, wallVpMass, wallKBT
-    // and wallThermalNoise. The circle velocity is kept explicit but defaults
-    // to zero; true rigid-body motion will be added in a later step.
+    // First immersed analytic solid: one fixed circular geometry. It uses the
+    // same generic solid_thermal coupling parameters as rectangular walls:
+    // wallAccommodation, wallVpGamma, wallVpMass, wallKBT and wallThermalNoise.
+    // The circle center is fixed here, but the local wall velocity can include
+    // a prescribed rigid rotation through immersedCircleOmega. True center
+    // translation will be added separately because it changes the geometry.
     bool immersedCircleEnable = false;
     double immersedCircleCx = 0.5;
     double immersedCircleCy = 0.5;
     double immersedCircleR = 0.1;
     int immersedCircleFractionSamples = 4;
-    double immersedCircleWallUx = 0.0;
+    double immersedCircleWallUx = 0.0; // translational wall-frame velocity component; center remains fixed in this patch
     double immersedCircleWallUy = 0.0;
+    double immersedCircleOmega = 0.0;  // angular velocity around the fixed center, positive counter-clockwise
 
     // Mass-aware thermostat acting on velocities relative to the real-particle
     // center-of-mass velocity in each collision cell. It is intended for forced

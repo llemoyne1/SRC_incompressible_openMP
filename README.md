@@ -206,3 +206,7 @@ The base solver now supports a first fixed immersed analytic circular solid via
 and adds only runtime control diagnostics (`hitsImmersed`,
 `virtualMassImmersed`). See `docs/IMMERSED_ANALYTIC_CIRCLE.md` for parameters,
 state generation and smoke-test commands.
+
+## Recent immersed-circle validation example
+
+- `examples/params_immersed_circle_rotating_64x64.kv`: fixed circular immersed solid with prescribed angular wall velocity.

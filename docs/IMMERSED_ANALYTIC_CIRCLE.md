@@ -19,6 +19,7 @@ immersedCircleR = 0.12
 immersedCircleFractionSamples = 4
 immersedCircleWallUx = 0.0
 immersedCircleWallUy = 0.0
+immersedCircleOmega = 0.0   # fixed-center rotation, positive counter-clockwise
 
 wallAccommodation = 1.0
 wallVpGamma = 0.0        # 0 => infer mean real occupancy
@@ -27,9 +28,10 @@ wallKBT = -1.0           # negative => inherit kBT
 wallThermalNoise = 1.0
 ```
 
-The circle must lie inside the initial active fluid domain. The present patch is
-fixed-geometry: non-zero circle velocity is accepted by the reflection and wall
-momentum formulas, but the circle center itself does not yet move.
+The circle must lie inside the initial active fluid domain. The present geometry
+is fixed-center: `immersedCircleOmega` prescribes a local tangential wall velocity
+without moving the circular region itself. Translation of the circle center will
+be introduced separately because it changes the signed-distance function in time.
 
 ## Particle reflection
 
@@ -88,6 +90,7 @@ generate_smpcd_state_uniform( ...
 ```bash
 ./build/src_mpcd_base examples/params_immersed_circle_periodic_solid_thermal.kv
 ./build/src_mpcd_base examples/params_immersed_circle_forced_periodic_solid_thermal.kv
+./build/src_mpcd_base examples/params_immersed_circle_rotating_64x64.kv
 ```
 
 ## MATLAB validation

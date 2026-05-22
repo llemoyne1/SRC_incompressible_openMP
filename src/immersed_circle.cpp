@@ -64,8 +64,9 @@ ImmersedCircleDiagnostics apply_immersed_circle_reflection(ParticleState& state,
     const double R = params.immersedCircleR;
     const double R2 = R * R;
     const double eps = 1.0e-12 * std::max(1.0, R);
-    const double wallUx = params.immersedCircleWallUx;
-    const double wallUy = params.immersedCircleWallUy;
+    // Local wall velocity is evaluated at the penetrated particle position.
+    // For the present patch the circle center is fixed, but the wall can rotate
+    // rigidly around that center.
 
     std::uint64_t hits = 0;
 #pragma omp parallel for reduction(+:hits) if(n > 10000)
@@ -95,9 +96,11 @@ ImmersedCircleDiagnostics apply_immersed_circle_reflection(ParticleState& state,
         state.x[i] = cx + rMirror * nx;
         state.y[i] = cy + rMirror * ny;
 
-        // Specular reflection in the wall frame. For the first analytic-circle
-        // patch the wall is fixed by default, but the velocity hooks are kept
-        // explicit for later rigid-body extensions.
+        // Specular reflection in the local wall frame. This includes the
+        // prescribed tangential velocity of a rotating fixed circular wall.
+        double wallUx = 0.0;
+        double wallUy = 0.0;
+        immersed_circle_wall_velocity(params, state.x[i], state.y[i], wallUx, wallUy);
         const double vrx = state.vx[i] - wallUx;
         const double vry = state.vy[i] - wallUy;
         const double vn = vrx * nx + vry * ny;
@@ -153,10 +156,16 @@ void immersed_circle_wall_velocity(const SimulationParams& params,
                                    double y,
                                    double& ux,
                                    double& uy) {
-    (void)x;
-    (void)y;
-    ux = params.immersedCircleWallUx;
-    uy = params.immersedCircleWallUy;
+    const double dx = x - params.immersedCircleCx;
+    const double dy = y - params.immersedCircleCy;
+
+    // Rigid-body wall velocity for a fixed-center rotating circle:
+    // U = U0 + omega ez x r = (Ux0 - omega dy, Uy0 + omega dx).
+    // U0 is kept as a uniform wall-frame velocity hook. It should remain zero
+    // for genuine fixed-center rotation tests; translating geometry will be
+    // implemented separately because it changes phi(x,y,t).
+    ux = params.immersedCircleWallUx - params.immersedCircleOmega * dy;
+    uy = params.immersedCircleWallUy + params.immersedCircleOmega * dx;
 }
 
 } // namespace mpcd

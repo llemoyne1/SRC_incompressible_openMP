@@ -189,6 +189,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "immersedCircleFractionSamples") p.immersedCircleFractionSamples = parse_int(value, key);
         else if (key == "immersedCircleWallUx") p.immersedCircleWallUx = parse_double(value, key);
         else if (key == "immersedCircleWallUy") p.immersedCircleWallUy = parse_double(value, key);
+        else if (key == "immersedCircleOmega") p.immersedCircleOmega = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
         else if (key == "thermostatMode") p.thermostatMode = get_lower(kv, key);
         else if (key == "thermostatEvery") p.thermostatEvery = parse_int(value, key);
