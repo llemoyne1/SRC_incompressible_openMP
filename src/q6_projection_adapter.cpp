@@ -74,9 +74,13 @@ void resize_q6_workspace(Q6ProjectionWorkspace& ws,
     resize_elliptic_projection_workspace(ws.elliptic, numCells);
 }
 
+int active_domain_cell_index(double x, double y, const FluidDomainBounds& domain, const SimulationParams& params);
+double active_domain_divergence_rate(const FluidDomainBounds& domain);
+
 void deposit_cell_velocity(const ParticleState& state,
                            const SimulationParams& params,
                            const CellGrid& grid,
+                           const FluidDomainBounds& domain,
                            Q6ProjectionWorkspace& ws,
                            Q6ProjectionDiagnostics& diag) {
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -92,7 +96,6 @@ void deposit_cell_velocity(const ParticleState& state,
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
 
-    const GridShift noShift{};
 #pragma omp parallel
     {
         const int tid = thread_id();
@@ -101,7 +104,7 @@ void deposit_cell_velocity(const ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
-            const int c = cell_index_from_position(state.x[i], state.y[i], grid, noShift, params);
+            const int c = active_domain_cell_index(state.x[i], state.y[i], domain, params);
             ws.cellId[i] = c;
             const std::size_t k = offset + static_cast<std::size_t>(c);
             const double m = state.mass[i];
@@ -177,6 +180,60 @@ EllipticProjectionBC q6_bc_from_particle_boundaries(const SimulationParams& para
     return bc;
 }
 
+
+int active_domain_cell_index(double x,
+                             double y,
+                             const FluidDomainBounds& domain,
+                             const SimulationParams& params) {
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    double xr = x - domain.xMin;
+    double yr = y - domain.yMin;
+    if (is_x_periodic(params)) {
+        xr = std::fmod(xr, width);
+        if (xr < 0.0) xr += width;
+    } else {
+        xr = std::clamp(xr, 0.0, width);
+    }
+    if (is_y_periodic(params)) {
+        yr = std::fmod(yr, height);
+        if (yr < 0.0) yr += height;
+    } else {
+        yr = std::clamp(yr, 0.0, height);
+    }
+    int ix = static_cast<int>(std::floor(xr / (width / static_cast<double>(params.Nx))));
+    int iy = static_cast<int>(std::floor(yr / (height / static_cast<double>(params.Ny))));
+    ix = std::clamp(ix, 0, params.Nx - 1);
+    iy = std::clamp(iy, 0, params.Ny - 1);
+    return ix + params.Nx * iy;
+}
+
+double active_domain_divergence_rate(const FluidDomainBounds& domain) {
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    double rate = 0.0;
+    if (width > 0.0) {
+        rate += (domain.vxMax - domain.vxMin) / width;
+    }
+    if (height > 0.0) {
+        rate += (domain.vyMax - domain.vyMin) / height;
+    }
+    return rate;
+}
+
+void add_moving_wall_fluxes_to_q6_bc(EllipticProjectionBC& bc,
+                                     const SimulationParams& params,
+                                     const FluidDomainBounds& domain) {
+    if (!is_x_periodic(params)) {
+        bc.xLowFlux = domain.vxMin;
+        bc.xHighFlux = domain.vxMax;
+    }
+    if (!is_y_periodic(params)) {
+        bc.yLowFlux = domain.vyMin;
+        bc.yHighFlux = domain.vyMax;
+    }
+}
+
 void face_correction_to_cell_velocity(const CellGrid& grid,
                                       const PeriodicFaceField& correctionFlux,
                                       std::vector<double>& dux,
@@ -246,6 +303,7 @@ bool q6_projection_requested(const SimulationParams& params) {
 Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                                      const SimulationParams& params,
                                                      const CellGrid& grid,
+                                                     const FluidDomainBounds& domain,
                                                      Q6ProjectionWorkspace& workspace) {
     validate_particle_state(state, "apply_q6_periodic_projection");
 
@@ -258,19 +316,22 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     const int nt = std::max(1, thread_count());
     resize_q6_workspace(workspace, state.Np, nc, nt);
 
-    deposit_cell_velocity(state, params, grid, workspace, diag);
+    deposit_cell_velocity(state, params, grid, domain, workspace, diag);
     build_face_velocity_from_cells(grid, workspace.cellUx, workspace.cellUy, workspace.baseFlux);
     fill_unit_alpha(workspace.alpha, nc);
-    std::fill(workspace.targetDivergence.begin(), workspace.targetDivergence.end(), 0.0);
+    std::fill(workspace.targetDivergence.begin(), workspace.targetDivergence.end(),
+              active_domain_divergence_rate(domain));
 
-    const EllipticProjectionGrid egrid = make_elliptic_projection_grid(params.Nx, params.Ny, params.Lx, params.Ly);
+    const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
+        params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
     EllipticProjectionParams eparams{};
     eparams.maxIterations = params.projectionMaxIterations;
     eparams.tolerance = params.projectionTolerance;
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
 
-    const EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
+    EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
+    add_moving_wall_fluxes_to_q6_bc(bc, params, domain);
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic);
 

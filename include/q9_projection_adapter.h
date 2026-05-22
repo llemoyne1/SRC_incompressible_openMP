@@ -5,6 +5,7 @@
 
 #include "cell_grid.h"
 #include "elliptic_projection.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -72,6 +73,7 @@ bool q9_projection_requested(const SimulationParams& params);
 Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
                                                       const SimulationParams& params,
                                                       const CellGrid& grid,
+                                                      const FluidDomainBounds& domain,
                                                       Q9ProjectionWorkspace& workspace);
 
 } // namespace mpcd

@@ -2,8 +2,8 @@ function out = validate_minimal_piston(runDirs, varargin)
 %VALIDATE_MINIMAL_PISTON Validate moving-top-wall piston summary diagnostics.
 %
 % out = validate_minimal_piston({ ...
-%     'runs/piston_y_solid_thermal_isothermal', ...
-%     'runs/piston_y_solid_thermal_unthermostatted'}, ...
+%     '../runs/piston_y_solid_thermal_isothermal', ...
+%     '../runs/piston_y_solid_thermal_unthermostatted'}, ...
 %     'labels', {'isothermal','unthermostatted'}, ...
 %     'makePlots', true);
 %
@@ -12,7 +12,7 @@ function out = validate_minimal_piston(runDirs, varargin)
 % from particle dumps alone once the fluid domain moves.
 
     if nargin < 1 || isempty(runDirs)
-        runDirs = {'runs/piston_y_solid_thermal_isothermal'};
+        runDirs = {'../runs/piston_y_solid_thermal_isothermal'};
     end
 
     p = inputParser;

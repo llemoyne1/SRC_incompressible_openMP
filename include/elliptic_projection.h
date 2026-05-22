@@ -59,6 +59,16 @@ enum class EllipticBoundaryType {
 struct EllipticProjectionBC {
     EllipticBoundaryType x = EllipticBoundaryType::Periodic;
     EllipticBoundaryType y = EllipticBoundaryType::Periodic;
+
+    // Prescribed normal fluxes on non-periodic domain boundaries. These are
+    // zero for fixed solid walls. For moving active-domain walls they are the
+    // wall normal velocity for Q6, or the corresponding mass flux for Q9.
+    // The compact face storage keeps high-boundary faces explicitly in the
+    // last cell row/column; low-boundary faces are implicit in divergence.
+    double xLowFlux = 0.0;
+    double xHighFlux = 0.0;
+    double yLowFlux = 0.0;
+    double yHighFlux = 0.0;
 };
 
 struct EllipticProjectionParams {

@@ -83,9 +83,64 @@ EllipticProjectionBC q9_bc_from_particle_boundaries(const SimulationParams& para
     return bc;
 }
 
+int active_domain_cell_index(double x,
+                             double y,
+                             const FluidDomainBounds& domain,
+                             const SimulationParams& params) {
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    double xr = x - domain.xMin;
+    double yr = y - domain.yMin;
+    if (is_x_periodic(params)) {
+        xr = std::fmod(xr, width);
+        if (xr < 0.0) xr += width;
+    } else {
+        xr = std::clamp(xr, 0.0, width);
+    }
+    if (is_y_periodic(params)) {
+        yr = std::fmod(yr, height);
+        if (yr < 0.0) yr += height;
+    } else {
+        yr = std::clamp(yr, 0.0, height);
+    }
+    int ix = static_cast<int>(std::floor(xr / (width / static_cast<double>(params.Nx))));
+    int iy = static_cast<int>(std::floor(yr / (height / static_cast<double>(params.Ny))));
+    ix = std::clamp(ix, 0, params.Nx - 1);
+    iy = std::clamp(iy, 0, params.Ny - 1);
+    return ix + params.Nx * iy;
+}
+
+double active_domain_divergence_rate(const FluidDomainBounds& domain) {
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    double rate = 0.0;
+    if (width > 0.0) {
+        rate += (domain.vxMax - domain.vxMin) / width;
+    }
+    if (height > 0.0) {
+        rate += (domain.vyMax - domain.vyMin) / height;
+    }
+    return rate;
+}
+
+void add_moving_wall_fluxes_to_q9_bc(EllipticProjectionBC& bc,
+                                     const SimulationParams& params,
+                                     const FluidDomainBounds& domain,
+                                     double meanCellMass) {
+    if (!is_x_periodic(params)) {
+        bc.xLowFlux = meanCellMass * domain.vxMin;
+        bc.xHighFlux = meanCellMass * domain.vxMax;
+    }
+    if (!is_y_periodic(params)) {
+        bc.yLowFlux = meanCellMass * domain.vyMin;
+        bc.yHighFlux = meanCellMass * domain.vyMax;
+    }
+}
+
 void deposit_cell_mass_momentum(const ParticleState& state,
                                 const SimulationParams& params,
                                 const CellGrid& grid,
+                                const FluidDomainBounds& domain,
                                 Q9ProjectionWorkspace& ws,
                                 Q9ProjectionDiagnostics& diag) {
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -99,7 +154,6 @@ void deposit_cell_mass_momentum(const ParticleState& state,
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
 
-    const GridShift noShift{};
 #pragma omp parallel
     {
         const int tid = thread_id();
@@ -108,7 +162,7 @@ void deposit_cell_mass_momentum(const ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
-            const int c = cell_index_from_position(state.x[i], state.y[i], grid, noShift, params);
+            const int c = active_domain_cell_index(state.x[i], state.y[i], domain, params);
             ws.cellId[i] = c;
             const std::size_t k = offset + static_cast<std::size_t>(c);
             const double m = state.mass[i];
@@ -272,6 +326,7 @@ void apply_q9_target_filter(const SimulationParams& params,
 }
 
 void build_uniform_density_relaxation_target(const SimulationParams& params,
+                                             const FluidDomainBounds& domain,
                                              const std::vector<double>& cellMass,
                                              std::vector<double>& target,
                                              Q9ProjectionDiagnostics& diag) {
@@ -296,14 +351,14 @@ void build_uniform_density_relaxation_target(const SimulationParams& params,
 
     const double beta = params.q9DensityRelaxationBeta;
     const double invDt = 1.0 / params.dt;
+    const double domainRate = active_domain_divergence_rate(domain);
 #pragma omp parallel for if(nc > 4096)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
-        // With continuity M_new = M - dt div(J_new), this raw target relaxes
-        // M toward the mean by approximately beta per application. A separate
-        // low-pass stage may then remove cell-scale occupancy noise, following
-        // the MATLAB Q9 general_bc path.
-        target[k] = beta * invDt * (cellMass[k] - mean);
+        // Positive target divergence lowers cell mass in the continuity estimate
+        // M_new = M - dt div(J). The uniform moving-domain term preserves the
+        // expected mean compression/expansion induced by moving active-domain walls.
+        target[k] = mean * domainRate + beta * invDt * (cellMass[k] - mean);
     }
     diag.targetDivergenceRawRms = vector_rms(target);
     diag.targetDivergenceRms = diag.targetDivergenceRawRms;
@@ -451,6 +506,7 @@ bool q9_projection_requested(const SimulationParams& params) {
 Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
                                                       const SimulationParams& params,
                                                       const CellGrid& grid,
+                                                      const FluidDomainBounds& domain,
                                                       Q9ProjectionWorkspace& workspace) {
     validate_particle_state(state, "apply_q9_mass_flux_projection");
 
@@ -463,13 +519,15 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     const int nt = std::max(1, thread_count());
     resize_q9_workspace(workspace, state.Np, nc, nt);
 
-    deposit_cell_mass_momentum(state, params, grid, workspace, diag);
+    deposit_cell_mass_momentum(state, params, grid, domain, workspace, diag);
     build_mass_flux_from_cell_momentum(grid, workspace.cellPx, workspace.cellPy, workspace.baseMassFlux);
     fill_alpha(workspace.alpha, nc, 1.0);
-    build_uniform_density_relaxation_target(params, workspace.cellMass, workspace.targetDivergence, diag);
+    build_uniform_density_relaxation_target(params, domain, workspace.cellMass, workspace.targetDivergence, diag);
 
-    const EllipticProjectionGrid egrid = make_elliptic_projection_grid(params.Nx, params.Ny, params.Lx, params.Ly);
-    const EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
+    const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
+        params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
+    EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
+    add_moving_wall_fluxes_to_q9_bc(bc, params, domain, diag.densityMean);
     apply_q9_target_filter(params, egrid, bc, workspace.alpha, workspace.targetDivergence, workspace, diag);
     const std::vector<double> projectionTarget = build_q9_projection_target(
         params, egrid, bc, workspace.baseMassFlux, workspace.alpha, workspace.targetDivergence, workspace);

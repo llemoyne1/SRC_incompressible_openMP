@@ -5,6 +5,7 @@
 
 #include "cell_grid.h"
 #include "elliptic_projection.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -75,6 +76,7 @@ bool q6_projection_requested(const SimulationParams& params);
 Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                                      const SimulationParams& params,
                                                      const CellGrid& grid,
+                                                     const FluidDomainBounds& domain,
                                                      Q6ProjectionWorkspace& workspace);
 
 } // namespace mpcd

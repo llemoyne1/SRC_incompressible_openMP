@@ -260,22 +260,32 @@ std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,
             double fxW = 0.0;
             if (periodicX || i < grid.Nx - 1) {
                 fxE = flux.x[k];
+            } else {
+                // High non-periodic boundary face is stored by the last cell.
+                fxE = flux.x[k];
             }
             if (periodicX || i > 0) {
                 const int im = periodicX ? wrap_index(i - 1, grid.Nx) : (i - 1);
                 const int w = cell_index(im, j, grid.Nx);
                 fxW = flux.x[static_cast<std::size_t>(w)];
+            } else {
+                fxW = bc.xLowFlux;
             }
 
             double fyN = 0.0;
             double fyS = 0.0;
             if (periodicY || j < grid.Ny - 1) {
                 fyN = flux.y[k];
+            } else {
+                // High non-periodic boundary face is stored by the last cell.
+                fyN = flux.y[k];
             }
             if (periodicY || j > 0) {
                 const int jm = periodicY ? wrap_index(j - 1, grid.Ny) : (j - 1);
                 const int s = cell_index(i, jm, grid.Nx);
                 fyS = flux.y[static_cast<std::size_t>(s)];
+            } else {
+                fyS = bc.yLowFlux;
             }
 
             div[k] = (fxE - fxW) * invDx + (fyN - fyS) * invDy;
@@ -373,9 +383,28 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     resize_periodic_face_field(result.correctionFlux, grid.numCells);
     resize_periodic_face_field(result.projectedFlux, grid.numCells);
 
+    // Inhomogeneous moving-wall fluxes are handled as prescribed projected
+    // boundary fluxes. The elliptic solve only computes the interior gradient
+    // correction; high non-periodic boundary faces are fixed before the solve
+    // for compatibility of the Neumann problem.
+    PeriodicFaceField solveBaseFlux = baseFlux;
+    if (bc.x != EllipticBoundaryType::Periodic) {
+        for (int j = 0; j < grid.Ny; ++j) {
+            const int c = cell_index(grid.Nx - 1, j, grid.Nx);
+            solveBaseFlux.x[static_cast<std::size_t>(c)] = bc.xHighFlux;
+        }
+    }
+    if (bc.y != EllipticBoundaryType::Periodic) {
+        for (int i = 0; i < grid.Nx; ++i) {
+            const int c = cell_index(i, grid.Ny - 1, grid.Nx);
+            solveBaseFlux.y[static_cast<std::size_t>(c)] = bc.yHighFlux;
+        }
+    }
+    const std::vector<double> divForSolve = compute_face_divergence(grid, solveBaseFlux, bc);
+
     for (int c = 0; c < grid.numCells; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
-        workspace.rhs[k] = targetDivergence[k] - result.divBefore[k];
+        workspace.rhs[k] = targetDivergence[k] - divForSolve[k];
     }
 
     result.diagnostics.rhsMeanBeforeGauge = mean_value(workspace.rhs);
@@ -405,8 +434,8 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 result.correctionFlux.x[k] = -alpha.x[k] * gradX;
                 result.projectedFlux.x[k] = baseFlux.x[k] + result.correctionFlux.x[k];
             } else {
-                result.correctionFlux.x[k] = -baseFlux.x[k];
-                result.projectedFlux.x[k] = 0.0;
+                result.correctionFlux.x[k] = bc.xHighFlux - baseFlux.x[k];
+                result.projectedFlux.x[k] = bc.xHighFlux;
             }
 
             if (periodicY || j < grid.Ny - 1) {
@@ -416,8 +445,8 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 result.correctionFlux.y[k] = -alpha.y[k] * gradY;
                 result.projectedFlux.y[k] = baseFlux.y[k] + result.correctionFlux.y[k];
             } else {
-                result.correctionFlux.y[k] = -baseFlux.y[k];
-                result.projectedFlux.y[k] = 0.0;
+                result.correctionFlux.y[k] = bc.yHighFlux - baseFlux.y[k];
+                result.projectedFlux.y[k] = bc.yHighFlux;
             }
         }
     }
