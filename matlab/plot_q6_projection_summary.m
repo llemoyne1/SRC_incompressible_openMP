@@ -34,27 +34,33 @@ for k = 1:numel(required)
 end
 
 if opts.makePlots
+    plotMask = T.q6Applied > 0;
+    if ~any(plotMask)
+        plotMask = true(height(T), 1);
+    end
+    Tp = T(plotMask, :);
+
     figure('Name', 'Q6 projection summary');
     tiledlayout(3, 2, 'TileSpacing', 'compact');
 
     nexttile;
-    semilogy(T.time, max(T.q6ResidualRel, realmin)); grid on;
+    semilogy(Tp.time, max(Tp.q6ResidualRel, realmin)); grid on;
     xlabel('time'); ylabel('residual rel.'); title('CG residual');
 
     nexttile;
-    semilogy(T.time, max(T.q6DivBeforeRms, realmin), '-', ...
-             T.time, max(T.q6DivAfterProjectedFluxRms, realmin), '-', ...
-             T.time, max(T.q6DivAfterCellVelocityRms, realmin), '-');
+    semilogy(Tp.time, max(Tp.q6DivBeforeRms, realmin), '-', ...
+             Tp.time, max(Tp.q6DivAfterProjectedFluxRms, realmin), '-', ...
+             Tp.time, max(Tp.q6DivAfterCellVelocityRms, realmin), '-');
     grid on; xlabel('time'); ylabel('RMS divergence');
     legend('before', 'projected faces', 'cell velocity', 'Location', 'best');
     title('Q6 divergence');
 
     nexttile;
-    plot(T.time, T.q6CorrectionVelocityRms); grid on;
+    plot(Tp.time, Tp.q6CorrectionVelocityRms); grid on;
     xlabel('time'); ylabel('RMS'); title('velocity correction');
 
     nexttile;
-    semilogy(T.time, max(T.q6MomentumResidualBeforeCorrection, realmin)); grid on;
+    semilogy(Tp.time, max(Tp.q6MomentumResidualBeforeCorrection, realmin)); grid on;
     xlabel('time'); ylabel('|dP| before correction'); title('momentum correction residual');
 
     nexttile;

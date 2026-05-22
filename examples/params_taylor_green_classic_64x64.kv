@@ -1,0 +1,40 @@
+# Periodic Taylor--Green validation run, classic compressible SRC/MPCD baseline.
+# Generate initial_state_tg_64x64_g20_u0p05_kbt0p01.smpcd with
+# matlab/generate_smpcd_state_taylor_green.m.
+
+inputState = initial_state_tg_64x64_g20_u0p05_kbt0p01.smpcd
+outputDir = runs/taylor_green_classic_64x64
+
+Lx = 1.0
+Ly = 1.0
+Nx = 64
+Ny = 64
+
+dt = 0.001
+nSteps = 2000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcX = periodic
+bcY = periodic
+
+method = classic
+projectionEnable = false
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 10
+dumpStateEvery = 100
+numThreads = 4
