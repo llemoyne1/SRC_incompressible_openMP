@@ -43,6 +43,24 @@ struct PeriodicFaceField {
     std::vector<double> y;
 };
 
+// Boundary policy for the generic elliptic face-field core.
+//
+// Periodic keeps the original wrap-around topology. WallNoNormalFlux closes the
+// corresponding direction with homogeneous normal flux at the low and high
+// boundaries. With the compact face storage used here, the high boundary face is
+// stored in the last cell of the direction and the low boundary face is implicit.
+// This is sufficient for the periodic-x / wall-y channel operator and keeps the
+// data layout identical for Q6, Q9 and future surface-tension adapters.
+enum class EllipticBoundaryType {
+    Periodic,
+    WallNoNormalFlux
+};
+
+struct EllipticProjectionBC {
+    EllipticBoundaryType x = EllipticBoundaryType::Periodic;
+    EllipticBoundaryType y = EllipticBoundaryType::Periodic;
+};
+
 struct EllipticProjectionParams {
     int maxIterations = 500;
     double tolerance = 1.0e-12;
@@ -91,13 +109,31 @@ EllipticProjectionGrid make_elliptic_projection_grid(int Nx, int Ny, double Lx, 
 void resize_periodic_face_field(PeriodicFaceField& f, int numCells);
 void resize_elliptic_projection_workspace(EllipticProjectionWorkspace& workspace, int numCells);
 
+std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,
+                                            const PeriodicFaceField& flux,
+                                            const EllipticProjectionBC& bc);
+
 std::vector<double> compute_periodic_face_divergence(const EllipticProjectionGrid& grid,
                                                      const PeriodicFaceField& flux);
+
+void apply_elliptic_operator(const EllipticProjectionGrid& grid,
+                             const PeriodicFaceField& alpha,
+                             const std::vector<double>& phi,
+                             std::vector<double>& Aphi,
+                             const EllipticProjectionBC& bc);
 
 void apply_periodic_elliptic_operator(const EllipticProjectionGrid& grid,
                                       const PeriodicFaceField& alpha,
                                       const std::vector<double>& phi,
                                       std::vector<double>& Aphi);
+
+EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
+                                                const PeriodicFaceField& baseFlux,
+                                                const PeriodicFaceField& alpha,
+                                                const std::vector<double>& targetDivergence,
+                                                const EllipticProjectionParams& params,
+                                                const EllipticProjectionBC& bc,
+                                                EllipticProjectionWorkspace& workspace);
 
 EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGrid& grid,
                                                      const PeriodicFaceField& baseFlux,

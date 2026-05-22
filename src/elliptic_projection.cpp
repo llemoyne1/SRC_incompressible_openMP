@@ -119,12 +119,13 @@ ScalarStats face_stats(const PeriodicFaceField& f) {
     return s;
 }
 
-void solve_periodic_cg(const EllipticProjectionGrid& grid,
-                       const PeriodicFaceField& alpha,
-                       const EllipticProjectionParams& params,
-                       std::vector<double>& phi,
-                       EllipticProjectionWorkspace& workspace,
-                       EllipticProjectionDiagnostics& diag) {
+void solve_cg(const EllipticProjectionGrid& grid,
+              const PeriodicFaceField& alpha,
+              const EllipticProjectionParams& params,
+              const EllipticProjectionBC& bc,
+              std::vector<double>& phi,
+              EllipticProjectionWorkspace& workspace,
+              EllipticProjectionDiagnostics& diag) {
     const int nc = grid.numCells;
     require_scalar_size(workspace.r, nc, "workspace.r");
     require_scalar_size(workspace.p, nc, "workspace.p");
@@ -156,7 +157,7 @@ void solve_periodic_cg(const EllipticProjectionGrid& grid,
     diag.iterations = 0;
 
     for (int it = 0; it < maxIt; ++it) {
-        apply_periodic_elliptic_operator(grid, alpha, workspace.p, workspace.Ap);
+        apply_elliptic_operator(grid, alpha, workspace.p, workspace.Ap, bc);
         const double pAp = dot_product(workspace.p, workspace.Ap);
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
             break;
@@ -238,76 +239,127 @@ void resize_elliptic_projection_workspace(EllipticProjectionWorkspace& workspace
     workspace.Ap.assign(n, 0.0);
 }
 
-std::vector<double> compute_periodic_face_divergence(const EllipticProjectionGrid& grid,
-                                                     const PeriodicFaceField& flux) {
+std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,
+                                            const PeriodicFaceField& flux,
+                                            const EllipticProjectionBC& bc) {
     require_grid(grid);
-    require_face_size(flux, grid.numCells, "compute_periodic_face_divergence.flux");
+    require_face_size(flux, grid.numCells, "compute_face_divergence.flux");
     std::vector<double> div(static_cast<std::size_t>(grid.numCells), 0.0);
     const double invDx = 1.0 / grid.dx;
     const double invDy = 1.0 / grid.dy;
+    const bool periodicX = bc.x == EllipticBoundaryType::Periodic;
+    const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
 
 #pragma omp parallel for if(grid.numCells > 4096)
     for (int j = 0; j < grid.Ny; ++j) {
-        const int jm = wrap_index(j - 1, grid.Ny);
         for (int i = 0; i < grid.Nx; ++i) {
-            const int im = wrap_index(i - 1, grid.Nx);
             const int c = cell_index(i, j, grid.Nx);
-            const int w = cell_index(im, j, grid.Nx);
-            const int s = cell_index(i, jm, grid.Nx);
-            div[static_cast<std::size_t>(c)] =
-                (flux.x[static_cast<std::size_t>(c)] - flux.x[static_cast<std::size_t>(w)]) * invDx +
-                (flux.y[static_cast<std::size_t>(c)] - flux.y[static_cast<std::size_t>(s)]) * invDy;
+            const std::size_t k = static_cast<std::size_t>(c);
+
+            double fxE = 0.0;
+            double fxW = 0.0;
+            if (periodicX || i < grid.Nx - 1) {
+                fxE = flux.x[k];
+            }
+            if (periodicX || i > 0) {
+                const int im = periodicX ? wrap_index(i - 1, grid.Nx) : (i - 1);
+                const int w = cell_index(im, j, grid.Nx);
+                fxW = flux.x[static_cast<std::size_t>(w)];
+            }
+
+            double fyN = 0.0;
+            double fyS = 0.0;
+            if (periodicY || j < grid.Ny - 1) {
+                fyN = flux.y[k];
+            }
+            if (periodicY || j > 0) {
+                const int jm = periodicY ? wrap_index(j - 1, grid.Ny) : (j - 1);
+                const int s = cell_index(i, jm, grid.Nx);
+                fyS = flux.y[static_cast<std::size_t>(s)];
+            }
+
+            div[k] = (fxE - fxW) * invDx + (fyN - fyS) * invDy;
         }
     }
     return div;
+}
+
+std::vector<double> compute_periodic_face_divergence(const EllipticProjectionGrid& grid,
+                                                     const PeriodicFaceField& flux) {
+    EllipticProjectionBC bc{};
+    bc.x = EllipticBoundaryType::Periodic;
+    bc.y = EllipticBoundaryType::Periodic;
+    return compute_face_divergence(grid, flux, bc);
+}
+
+void apply_elliptic_operator(const EllipticProjectionGrid& grid,
+                             const PeriodicFaceField& alpha,
+                             const std::vector<double>& phi,
+                             std::vector<double>& Aphi,
+                             const EllipticProjectionBC& bc) {
+    require_grid(grid);
+    require_face_size(alpha, grid.numCells, "apply_elliptic_operator.alpha");
+    require_scalar_size(phi, grid.numCells, "apply_elliptic_operator.phi");
+    Aphi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
+
+    const double invDx2 = 1.0 / (grid.dx * grid.dx);
+    const double invDy2 = 1.0 / (grid.dy * grid.dy);
+    const bool periodicX = bc.x == EllipticBoundaryType::Periodic;
+    const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
+
+#pragma omp parallel for if(grid.numCells > 4096)
+    for (int j = 0; j < grid.Ny; ++j) {
+        for (int i = 0; i < grid.Nx; ++i) {
+            const int c = cell_index(i, j, grid.Nx);
+            const std::size_t k = static_cast<std::size_t>(c);
+            const double pc = phi[k];
+            double a = 0.0;
+
+            if (periodicX || i < grid.Nx - 1) {
+                const int ip = periodicX ? wrap_index(i + 1, grid.Nx) : (i + 1);
+                const int e = cell_index(ip, j, grid.Nx);
+                a += alpha.x[k] * (pc - phi[static_cast<std::size_t>(e)]) * invDx2;
+            }
+            if (periodicX || i > 0) {
+                const int im = periodicX ? wrap_index(i - 1, grid.Nx) : (i - 1);
+                const int w = cell_index(im, j, grid.Nx);
+                a += alpha.x[static_cast<std::size_t>(w)] *
+                     (pc - phi[static_cast<std::size_t>(w)]) * invDx2;
+            }
+            if (periodicY || j < grid.Ny - 1) {
+                const int jp = periodicY ? wrap_index(j + 1, grid.Ny) : (j + 1);
+                const int n = cell_index(i, jp, grid.Nx);
+                a += alpha.y[k] * (pc - phi[static_cast<std::size_t>(n)]) * invDy2;
+            }
+            if (periodicY || j > 0) {
+                const int jm = periodicY ? wrap_index(j - 1, grid.Ny) : (j - 1);
+                const int s = cell_index(i, jm, grid.Nx);
+                a += alpha.y[static_cast<std::size_t>(s)] *
+                     (pc - phi[static_cast<std::size_t>(s)]) * invDy2;
+            }
+
+            Aphi[k] = a;
+        }
+    }
 }
 
 void apply_periodic_elliptic_operator(const EllipticProjectionGrid& grid,
                                       const PeriodicFaceField& alpha,
                                       const std::vector<double>& phi,
                                       std::vector<double>& Aphi) {
-    require_grid(grid);
-    require_face_size(alpha, grid.numCells, "apply_periodic_elliptic_operator.alpha");
-    require_scalar_size(phi, grid.numCells, "apply_periodic_elliptic_operator.phi");
-    Aphi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
-
-    const double invDx2 = 1.0 / (grid.dx * grid.dx);
-    const double invDy2 = 1.0 / (grid.dy * grid.dy);
-
-#pragma omp parallel for if(grid.numCells > 4096)
-    for (int j = 0; j < grid.Ny; ++j) {
-        const int jm = wrap_index(j - 1, grid.Ny);
-        const int jp = wrap_index(j + 1, grid.Ny);
-        for (int i = 0; i < grid.Nx; ++i) {
-            const int im = wrap_index(i - 1, grid.Nx);
-            const int ip = wrap_index(i + 1, grid.Nx);
-            const int c = cell_index(i, j, grid.Nx);
-            const int e = cell_index(ip, j, grid.Nx);
-            const int w = cell_index(im, j, grid.Nx);
-            const int n = cell_index(i, jp, grid.Nx);
-            const int s = cell_index(i, jm, grid.Nx);
-
-            const double pc = phi[static_cast<std::size_t>(c)];
-            const double axE = alpha.x[static_cast<std::size_t>(c)];
-            const double axW = alpha.x[static_cast<std::size_t>(w)];
-            const double ayN = alpha.y[static_cast<std::size_t>(c)];
-            const double ayS = alpha.y[static_cast<std::size_t>(s)];
-
-            Aphi[static_cast<std::size_t>(c)] =
-                axE * (pc - phi[static_cast<std::size_t>(e)]) * invDx2 +
-                axW * (pc - phi[static_cast<std::size_t>(w)]) * invDx2 +
-                ayN * (pc - phi[static_cast<std::size_t>(n)]) * invDy2 +
-                ayS * (pc - phi[static_cast<std::size_t>(s)]) * invDy2;
-        }
-    }
+    EllipticProjectionBC bc{};
+    bc.x = EllipticBoundaryType::Periodic;
+    bc.y = EllipticBoundaryType::Periodic;
+    apply_elliptic_operator(grid, alpha, phi, Aphi, bc);
 }
 
-EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGrid& grid,
-                                                     const PeriodicFaceField& baseFlux,
-                                                     const PeriodicFaceField& alpha,
-                                                     const std::vector<double>& targetDivergence,
-                                                     const EllipticProjectionParams& params,
-                                                     EllipticProjectionWorkspace& workspace) {
+EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
+                                                const PeriodicFaceField& baseFlux,
+                                                const PeriodicFaceField& alpha,
+                                                const std::vector<double>& targetDivergence,
+                                                const EllipticProjectionParams& params,
+                                                const EllipticProjectionBC& bc,
+                                                EllipticProjectionWorkspace& workspace) {
     require_grid(grid);
     require_face_size(baseFlux, grid.numCells, "project_periodic_face_field.baseFlux");
     require_face_size(alpha, grid.numCells, "project_periodic_face_field.alpha");
@@ -316,7 +368,7 @@ EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGri
     resize_elliptic_projection_workspace(workspace, grid.numCells);
 
     EllipticProjectionResult result{};
-    result.divBefore = compute_periodic_face_divergence(grid, baseFlux);
+    result.divBefore = compute_face_divergence(grid, baseFlux, bc);
     result.phi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
     resize_periodic_face_field(result.correctionFlux, grid.numCells);
     resize_periodic_face_field(result.projectedFlux, grid.numCells);
@@ -332,30 +384,45 @@ EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGri
     }
     result.diagnostics.rhsMeanAfterGauge = mean_value(workspace.rhs);
 
-    solve_periodic_cg(grid, alpha, params, result.phi, workspace, result.diagnostics);
+    solve_cg(grid, alpha, params, bc, result.phi, workspace, result.diagnostics);
 
     const double invDx = 1.0 / grid.dx;
     const double invDy = 1.0 / grid.dy;
 
+    const bool periodicX = bc.x == EllipticBoundaryType::Periodic;
+    const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
+
 #pragma omp parallel for if(grid.numCells > 4096)
     for (int j = 0; j < grid.Ny; ++j) {
-        const int jp = wrap_index(j + 1, grid.Ny);
         for (int i = 0; i < grid.Nx; ++i) {
-            const int ip = wrap_index(i + 1, grid.Nx);
             const int c = cell_index(i, j, grid.Nx);
-            const int e = cell_index(ip, j, grid.Nx);
-            const int n = cell_index(i, jp, grid.Nx);
             const std::size_t k = static_cast<std::size_t>(c);
-            const double gradX = (result.phi[static_cast<std::size_t>(e)] - result.phi[k]) * invDx;
-            const double gradY = (result.phi[static_cast<std::size_t>(n)] - result.phi[k]) * invDy;
-            result.correctionFlux.x[k] = -alpha.x[k] * gradX;
-            result.correctionFlux.y[k] = -alpha.y[k] * gradY;
-            result.projectedFlux.x[k] = baseFlux.x[k] + result.correctionFlux.x[k];
-            result.projectedFlux.y[k] = baseFlux.y[k] + result.correctionFlux.y[k];
+
+            if (periodicX || i < grid.Nx - 1) {
+                const int ip = periodicX ? wrap_index(i + 1, grid.Nx) : (i + 1);
+                const int e = cell_index(ip, j, grid.Nx);
+                const double gradX = (result.phi[static_cast<std::size_t>(e)] - result.phi[k]) * invDx;
+                result.correctionFlux.x[k] = -alpha.x[k] * gradX;
+                result.projectedFlux.x[k] = baseFlux.x[k] + result.correctionFlux.x[k];
+            } else {
+                result.correctionFlux.x[k] = -baseFlux.x[k];
+                result.projectedFlux.x[k] = 0.0;
+            }
+
+            if (periodicY || j < grid.Ny - 1) {
+                const int jp = periodicY ? wrap_index(j + 1, grid.Ny) : (j + 1);
+                const int n = cell_index(i, jp, grid.Nx);
+                const double gradY = (result.phi[static_cast<std::size_t>(n)] - result.phi[k]) * invDy;
+                result.correctionFlux.y[k] = -alpha.y[k] * gradY;
+                result.projectedFlux.y[k] = baseFlux.y[k] + result.correctionFlux.y[k];
+            } else {
+                result.correctionFlux.y[k] = -baseFlux.y[k];
+                result.projectedFlux.y[k] = 0.0;
+            }
         }
     }
 
-    result.divAfter = compute_periodic_face_divergence(grid, result.projectedFlux);
+    result.divAfter = compute_face_divergence(grid, result.projectedFlux, bc);
 
     const ScalarStats divBeforeStats = scalar_stats(result.divBefore);
     const ScalarStats targetStats = scalar_stats(targetDivergence);
@@ -374,6 +441,18 @@ EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGri
     result.diagnostics.projectedFluxMaxAbs = projStats.maxAbs;
 
     return result;
+}
+
+EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGrid& grid,
+                                                     const PeriodicFaceField& baseFlux,
+                                                     const PeriodicFaceField& alpha,
+                                                     const std::vector<double>& targetDivergence,
+                                                     const EllipticProjectionParams& params,
+                                                     EllipticProjectionWorkspace& workspace) {
+    EllipticProjectionBC bc{};
+    bc.x = EllipticBoundaryType::Periodic;
+    bc.y = EllipticBoundaryType::Periodic;
+    return project_face_field(grid, baseFlux, alpha, targetDivergence, params, bc, workspace);
 }
 
 } // namespace mpcd

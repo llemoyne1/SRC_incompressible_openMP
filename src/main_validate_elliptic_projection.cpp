@@ -6,6 +6,8 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,7 +52,10 @@ void print_usage(const char* exe) {
         << "  --Ny N                  grid cells in y (default 48)\n"
         << "  --kx K                  manufactured scalar mode in x (default 2)\n"
         << "  --ky K                  manufactured scalar mode in y (default 3)\n"
-        << "  --alphaVariation A      periodic face-coefficient modulation, 0<=A<1 (default 0.25)\n"
+        << "  --bc periodic|channel   elliptic BC validation case (default periodic)\n"
+        << "                           periodic: periodic x and y\n"
+        << "                           channel : periodic x, no-normal-flux walls in y\n"
+        << "  --alphaVariation A      face-coefficient modulation, 0<=A<1 (default 0.25)\n"
         << "  --tol T                 CG relative tolerance (default 1e-12)\n"
         << "  --maxIt N               CG maximum iterations (default 2000)\n"
         << "  --csv FILE              write one-line validation CSV\n"
@@ -76,6 +81,10 @@ double rms_difference_mean_free(const std::vector<double>& a, const std::vector<
     return std::sqrt(sum2 / static_cast<double>(n));
 }
 
+bool is_periodic(mpcd::EllipticBoundaryType bc) {
+    return bc == mpcd::EllipticBoundaryType::Periodic;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -89,6 +98,7 @@ int main(int argc, char** argv) {
         const int Ny = parse_int(argc, argv, "--Ny", 48);
         const int kx = parse_int(argc, argv, "--kx", 2);
         const int ky = parse_int(argc, argv, "--ky", 3);
+        const std::string bcName = parse_string(argc, argv, "--bc", "periodic");
         const double alphaVariation = parse_double(argc, argv, "--alphaVariation", 0.25);
         const double tol = parse_double(argc, argv, "--tol", 1.0e-12);
         const int maxIt = parse_int(argc, argv, "--maxIt", 2000);
@@ -96,6 +106,17 @@ int main(int argc, char** argv) {
 
         if (!(alphaVariation >= 0.0 && alphaVariation < 1.0)) {
             throw std::runtime_error("--alphaVariation must satisfy 0 <= A < 1");
+        }
+
+        mpcd::EllipticProjectionBC bc{};
+        if (bcName == "periodic") {
+            bc.x = mpcd::EllipticBoundaryType::Periodic;
+            bc.y = mpcd::EllipticBoundaryType::Periodic;
+        } else if (bcName == "channel") {
+            bc.x = mpcd::EllipticBoundaryType::Periodic;
+            bc.y = mpcd::EllipticBoundaryType::WallNoNormalFlux;
+        } else {
+            throw std::runtime_error("Unknown --bc value: " + bcName);
         }
 
         const mpcd::EllipticProjectionGrid grid = mpcd::make_elliptic_projection_grid(Nx, Ny, 1.0, 1.0);
@@ -117,21 +138,28 @@ int main(int argc, char** argv) {
             for (int i = 0; i < Nx; ++i) {
                 const double x = (static_cast<double>(i) + 0.5) / static_cast<double>(Nx);
                 const double y = (static_cast<double>(j) + 0.5) / static_cast<double>(Ny);
-                phiTrue[static_cast<std::size_t>(idx(i, j))] =
-                    std::sin(2.0 * pi() * static_cast<double>(kx) * x) *
-                    std::cos(2.0 * pi() * static_cast<double>(ky) * y) +
-                    0.35 * std::cos(2.0 * pi() * static_cast<double>(kx + 1) * x +
-                                     2.0 * pi() * static_cast<double>(ky - 1) * y);
+                if (bcName == "channel") {
+                    // Compatible with no-normal-flux walls: dphi/dy = 0 at y=0,1.
+                    phiTrue[static_cast<std::size_t>(idx(i, j))] =
+                        std::sin(2.0 * pi() * static_cast<double>(kx) * x) *
+                        std::cos(pi() * static_cast<double>(ky) * y) +
+                        0.35 * std::cos(2.0 * pi() * static_cast<double>(kx + 1) * x) *
+                        std::cos(pi() * static_cast<double>(ky + 1) * y);
+                } else {
+                    phiTrue[static_cast<std::size_t>(idx(i, j))] =
+                        std::sin(2.0 * pi() * static_cast<double>(kx) * x) *
+                        std::cos(2.0 * pi() * static_cast<double>(ky) * y) +
+                        0.35 * std::cos(2.0 * pi() * static_cast<double>(kx + 1) * x +
+                                         2.0 * pi() * static_cast<double>(ky - 1) * y);
+                }
             }
         }
 
+        const bool periodicX = is_periodic(bc.x);
+        const bool periodicY = is_periodic(bc.y);
         for (int j = 0; j < Ny; ++j) {
-            const int jp = wrap(j + 1, Ny);
             for (int i = 0; i < Nx; ++i) {
-                const int ip = wrap(i + 1, Nx);
                 const int c = idx(i, j);
-                const int e = idx(ip, j);
-                const int n = idx(i, jp);
                 const double xFace = (static_cast<double>(i) + 1.0) / static_cast<double>(Nx);
                 const double yFace = (static_cast<double>(j) + 1.0) / static_cast<double>(Ny);
                 const double xCell = (static_cast<double>(i) + 0.5) / static_cast<double>(Nx);
@@ -143,10 +171,23 @@ int main(int argc, char** argv) {
                 alpha.y[k] = 1.0 + alphaVariation *
                     std::sin(2.0 * pi() * xCell) * std::sin(2.0 * pi() * yFace);
 
-                baseFlux.x[k] = alpha.x[k] *
-                    (phiTrue[static_cast<std::size_t>(e)] - phiTrue[k]) / grid.dx;
-                baseFlux.y[k] = alpha.y[k] *
-                    (phiTrue[static_cast<std::size_t>(n)] - phiTrue[k]) / grid.dy;
+                if (periodicX || i < Nx - 1) {
+                    const int ip = periodicX ? wrap(i + 1, Nx) : (i + 1);
+                    const int e = idx(ip, j);
+                    baseFlux.x[k] = alpha.x[k] *
+                        (phiTrue[static_cast<std::size_t>(e)] - phiTrue[k]) / grid.dx;
+                } else {
+                    baseFlux.x[k] = 0.0;
+                }
+
+                if (periodicY || j < Ny - 1) {
+                    const int jp = periodicY ? wrap(j + 1, Ny) : (j + 1);
+                    const int n = idx(i, jp);
+                    baseFlux.y[k] = alpha.y[k] *
+                        (phiTrue[static_cast<std::size_t>(n)] - phiTrue[k]) / grid.dy;
+                } else {
+                    baseFlux.y[k] = 0.0;
+                }
             }
         }
 
@@ -158,7 +199,7 @@ int main(int argc, char** argv) {
 
         mpcd::EllipticProjectionWorkspace workspace;
         const mpcd::EllipticProjectionResult result =
-            mpcd::project_periodic_face_field(grid, baseFlux, alpha, target, params, workspace);
+            mpcd::project_face_field(grid, baseFlux, alpha, target, params, bc, workspace);
 
         const double phiError = rms_difference_mean_free(result.phi, phiTrue);
         const double reduction = result.diagnostics.divBeforeRms > 0.0
@@ -166,7 +207,8 @@ int main(int argc, char** argv) {
             : 0.0;
 
         std::cout << std::setprecision(12)
-                  << "=== periodic elliptic projection manufactured validation ===\n"
+                  << "=== elliptic projection manufactured validation ===\n"
+                  << "bc                           : " << bcName << "\n"
                   << "grid                         : " << Nx << " x " << Ny << "\n"
                   << "alphaVariation               : " << alphaVariation << "\n"
                   << "converged                    : " << (result.diagnostics.converged ? "true" : "false") << "\n"
@@ -183,8 +225,8 @@ int main(int argc, char** argv) {
         if (!csv.empty()) {
             std::ofstream out(csv);
             if (!out) throw std::runtime_error("Cannot write CSV: " + csv);
-            out << "Nx,Ny,kx,ky,alphaVariation,converged,iterations,residualRel,rhsMeanBeforeGauge,rhsMeanAfterGauge,divBeforeRms,divAfterRms,reduction,projectedFluxRms,phiRmsErrorMeanFree\n";
-            out << Nx << ',' << Ny << ',' << kx << ',' << ky << ',' << std::setprecision(17)
+            out << "bc,Nx,Ny,kx,ky,alphaVariation,converged,iterations,residualRel,rhsMeanBeforeGauge,rhsMeanAfterGauge,divBeforeRms,divAfterRms,reduction,projectedFluxRms,phiRmsErrorMeanFree\n";
+            out << bcName << ',' << Nx << ',' << Ny << ',' << kx << ',' << ky << ',' << std::setprecision(17)
                 << alphaVariation << ',' << (result.diagnostics.converged ? 1 : 0) << ','
                 << result.diagnostics.iterations << ',' << result.diagnostics.residualRel << ','
                 << result.diagnostics.rhsMeanBeforeGauge << ',' << result.diagnostics.rhsMeanAfterGauge << ','

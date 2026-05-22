@@ -29,7 +29,7 @@ fully decayed.
 ## Generate the initial state
 
 ```matlab
-addpath('matlab')
+% From the matlab/ directory:
 state = generate_taylor_green_high_snr_short_state();
 ```
 
@@ -49,7 +49,7 @@ initial_state_tg_64x64_g80_u0p08_kbt0p01.smpcd
 ## Analyze
 
 ```matlab
-addpath('matlab')
+% From the matlab/ directory:
 out = validate_taylor_green_q6_high_snr_short( ...
     'makePlots', true, ...
     'plotFinalFields', true);

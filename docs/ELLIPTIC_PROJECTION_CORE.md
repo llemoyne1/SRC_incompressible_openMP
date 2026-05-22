@@ -1,10 +1,10 @@
-# Generic periodic elliptic projection core
+# Generic elliptic projection core
 
 This module introduces the first C++ elliptic projection core intended to be
 shared by future Q6, Q9 and surface-tension developments.
 
 The core is deliberately not named as a Q6-only module. It projects a generic
-periodic face field:
+face field:
 
 ```text
 F_new = F_base + F_corr
@@ -19,8 +19,9 @@ A phi = target - div(F_base)
 A     = -div(alpha grad)
 ```
 
-On a fully periodic domain, `A` has a constant nullspace. The implementation
-therefore removes the mean of the right-hand side and keeps `phi` mean-free.
+For the currently implemented periodic and channel Neumann configurations, `A`
+has a constant nullspace. The implementation therefore removes the mean of the
+right-hand side and keeps `phi` mean-free.
 
 ## Discretization
 
@@ -32,8 +33,28 @@ The grid is finite-volume/cell-centered:
 - divergence is computed by face flux differences;
 - the correction flux is built from the same face gradient used by the operator.
 
+The face-field name is historical: the same compact storage is now also used for
+channel-like no-normal-flux boundaries. For a wall-normal direction, the high
+boundary face is stored in the last cell and the low boundary face is implicit
+and fixed to zero normal flux.
+
 The operator is applied matrix-free and solved by conjugate gradients on the
-compatible mean-zero periodic subspace.
+compatible mean-zero subspace.
+
+
+## Boundary configurations currently implemented
+
+The generic core currently supports:
+
+```text
+periodic : periodic x, periodic y
+channel  : periodic x, no-normal-flux walls in y
+```
+
+The channel configuration is the intended elliptic foundation for later
+periodic-x / wall-y Q6 Poiseuille validation. It is still independent of the
+particle solver: the Q6 adapter has not yet been switched to the channel operator
+in this patch.
 
 ## Intended adapters
 
@@ -77,10 +98,17 @@ Run the manufactured periodic validation:
 
 ```bash
 ./build/validate_elliptic_projection --Nx 64 --Ny 48 --alphaVariation 0.25 \
-  --csv elliptic_projection_validation.csv
+  --bc periodic --csv elliptic_projection_periodic_validation.csv
 ```
 
-The validation constructs a known cell scalar `phi_true`, builds
+Run the manufactured channel validation:
+
+```bash
+./build/validate_elliptic_projection --Nx 64 --Ny 48 --alphaVariation 0.25 \
+  --bc channel --csv elliptic_projection_channel_validation.csv
+```
+
+Both validations construct a known cell scalar `phi_true`, build
 
 ```text
 F_base = alpha grad(phi_true)
