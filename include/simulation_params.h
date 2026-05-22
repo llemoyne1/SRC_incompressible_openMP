@@ -107,6 +107,17 @@ struct SimulationParams {
     double thermostatEpsilon = 1.0e-30;
     double kBT = 0.0;
 
+    // Optional incompressible/projection modules. The current Q6 adapter is the
+    // first consumer of the generic elliptic projection core. The supported and
+    // validated first use case is a fully periodic fixed box, but this scope is
+    // documented rather than guarded by extra runtime restrictions.
+    std::string method = "classic";          // classic, q6; q9 reserved for later
+    bool projectionEnable = false;
+    std::string projectionOperator = "periodic_fv_cg";
+    int projectionMaxIterations = 300;
+    double projectionTolerance = 1.0e-10;
+    bool projectionMomentumCorrectionEnable = true;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

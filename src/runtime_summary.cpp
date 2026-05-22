@@ -15,6 +15,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const BoundaryDiagnostics* boundary,
                                        const ImmersedCircleDiagnostics* immersed,
                                        const CollisionDiagnostics* collision,
+                                       const Q6ProjectionDiagnostics* q6,
                                        const ThermostatDiagnostics* thermostat,
                                        int numThreadsUsed) {
     validate_particle_state(state, "compute_runtime_summary");
@@ -94,6 +95,24 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.virtualMomentumX = collision->virtualMomentumX;
         s.virtualMomentumY = collision->virtualMomentumY;
     }
+    if (q6 != nullptr) {
+        s.q6Applied = q6->applied ? 1 : 0;
+        s.q6Converged = q6->converged ? 1 : 0;
+        s.q6Iterations = q6->iterations;
+        s.q6EmptyCells = q6->emptyCells;
+        s.q6ResidualRel = q6->residualRel;
+        s.q6DivBeforeRms = q6->divBeforeRms;
+        s.q6DivBeforeMaxAbs = q6->divBeforeMaxAbs;
+        s.q6DivAfterProjectedFluxRms = q6->divAfterProjectedFluxRms;
+        s.q6DivAfterProjectedFluxMaxAbs = q6->divAfterProjectedFluxMaxAbs;
+        s.q6DivAfterCellVelocityRms = q6->divAfterCellVelocityRms;
+        s.q6DivAfterCellVelocityMaxAbs = q6->divAfterCellVelocityMaxAbs;
+        s.q6CorrectionVelocityRms = q6->correctionVelocityRms;
+        s.q6CorrectionVelocityMaxAbs = q6->correctionVelocityMaxAbs;
+        s.q6MomentumCorrectionVx = q6->momentumCorrectionVx;
+        s.q6MomentumCorrectionVy = q6->momentumCorrectionVy;
+        s.q6MomentumResidualBeforeCorrection = q6->momentumResidualBeforeCorrection;
+    }
     if (thermostat != nullptr) {
         s.thermostatApplied = thermostat->applied ? 1 : 0;
         s.thermostatCells = thermostat->cellsRescaled;
@@ -141,7 +160,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6Converged,q6Iterations,q6EmptyCells,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -192,7 +211,23 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.thermostatKBTAfter << ','
          << s.thermostatScaleMean << ','
          << s.thermostatScaleMin << ','
-         << s.thermostatScaleMax << '\n';
+         << s.thermostatScaleMax << ','
+         << s.q6Applied << ','
+         << s.q6Converged << ','
+         << s.q6Iterations << ','
+         << s.q6EmptyCells << ','
+         << s.q6ResidualRel << ','
+         << s.q6DivBeforeRms << ','
+         << s.q6DivBeforeMaxAbs << ','
+         << s.q6DivAfterProjectedFluxRms << ','
+         << s.q6DivAfterProjectedFluxMaxAbs << ','
+         << s.q6DivAfterCellVelocityRms << ','
+         << s.q6DivAfterCellVelocityMaxAbs << ','
+         << s.q6CorrectionVelocityRms << ','
+         << s.q6CorrectionVelocityMaxAbs << ','
+         << s.q6MomentumCorrectionVx << ','
+         << s.q6MomentumCorrectionVy << ','
+         << s.q6MomentumResidualBeforeCorrection << '\n';
 }
 
 } // namespace mpcd

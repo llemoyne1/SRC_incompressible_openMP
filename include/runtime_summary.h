@@ -8,6 +8,7 @@
 #include "fluid_domain.h"
 #include "immersed_circle.h"
 #include "particle_state.h"
+#include "q6_projection_adapter.h"
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
@@ -69,6 +70,23 @@ struct RuntimeSummary {
     double thermostatScaleMean = 1.0;
     double thermostatScaleMin = 1.0;
     double thermostatScaleMax = 1.0;
+
+    int q6Applied = 0;
+    int q6Converged = 0;
+    int q6Iterations = 0;
+    std::uint64_t q6EmptyCells = 0;
+    double q6ResidualRel = 0.0;
+    double q6DivBeforeRms = 0.0;
+    double q6DivBeforeMaxAbs = 0.0;
+    double q6DivAfterProjectedFluxRms = 0.0;
+    double q6DivAfterProjectedFluxMaxAbs = 0.0;
+    double q6DivAfterCellVelocityRms = 0.0;
+    double q6DivAfterCellVelocityMaxAbs = 0.0;
+    double q6CorrectionVelocityRms = 0.0;
+    double q6CorrectionVelocityMaxAbs = 0.0;
+    double q6MomentumCorrectionVx = 0.0;
+    double q6MomentumCorrectionVy = 0.0;
+    double q6MomentumResidualBeforeCorrection = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -79,6 +97,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const BoundaryDiagnostics* boundary = nullptr,
                                        const ImmersedCircleDiagnostics* immersed = nullptr,
                                        const CollisionDiagnostics* collision = nullptr,
+                                       const Q6ProjectionDiagnostics* q6 = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
                                        int numThreadsUsed = 1);
 

@@ -199,6 +199,12 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "thermostatMinParticles") p.thermostatMinParticles = parse_int(value, key);
         else if (key == "thermostatEpsilon") p.thermostatEpsilon = parse_double(value, key);
         else if (key == "kBT") p.kBT = parse_double(value, key);
+        else if (key == "method") p.method = get_lower(kv, key);
+        else if (key == "projectionEnable") p.projectionEnable = parse_bool(value, key);
+        else if (key == "projectionOperator") p.projectionOperator = get_lower(kv, key);
+        else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
+        else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
+        else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -223,6 +229,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     if (has_key(kv, "boundaryRight")) p.bcRight = get_lower(kv, "boundaryRight");
     if (has_key(kv, "boundaryBottom")) p.bcBottom = get_lower(kv, "boundaryBottom");
     if (has_key(kv, "boundaryTop")) p.bcTop = get_lower(kv, "boundaryTop");
+
+    if (p.method == "q6") {
+        p.projectionEnable = true;
+    }
 
     validate_simulation_params(p);
     return p;
@@ -389,6 +399,20 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (p.thermostatTargetKBT == 0.0) {
             throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
+        }
+    }
+    if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
+        throw std::runtime_error("method currently accepts: classic, q6; q9/q9_virial are reserved names");
+    }
+    if (p.projectionEnable) {
+        if (p.projectionOperator != "periodic_fv_cg") {
+            throw std::runtime_error("projectionOperator currently supports only: periodic_fv_cg");
+        }
+        if (p.projectionMaxIterations < 0) {
+            throw std::runtime_error("projectionMaxIterations must be non-negative");
+        }
+        if (!(p.projectionTolerance > 0.0)) {
+            throw std::runtime_error("projectionTolerance must be positive");
         }
     }
     if (p.summaryEvery <= 0) {

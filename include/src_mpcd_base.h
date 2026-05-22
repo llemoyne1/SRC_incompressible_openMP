@@ -6,6 +6,7 @@
 #include "fluid_domain.h"
 #include "immersed_circle.h"
 #include "particle_state.h"
+#include "q6_projection_adapter.h"
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
@@ -17,11 +18,13 @@ struct StepResult {
     BoundaryDiagnostics boundary;
     ImmersedCircleDiagnostics immersed;
     CollisionDiagnostics collision;
+    Q6ProjectionDiagnostics q6;
     ThermostatDiagnostics thermostat;
 };
 
 struct SrcMpcdBaseWorkspace {
     CollisionWorkspace collision;
+    Q6ProjectionWorkspace q6;
     ThermostatWorkspace thermostat;
 };
 
