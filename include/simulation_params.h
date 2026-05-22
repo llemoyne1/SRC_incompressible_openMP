@@ -113,7 +113,7 @@ struct SimulationParams {
     // documented rather than guarded by extra runtime restrictions.
     std::string method = "classic";          // classic, q6; q9 reserved for later
     bool projectionEnable = false;
-    std::string projectionOperator = "periodic_fv_cg";
+    std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
     int projectionMaxIterations = 300;
     double projectionTolerance = 1.0e-10;
     bool projectionMomentumCorrectionEnable = true;

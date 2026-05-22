@@ -405,8 +405,11 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error("method currently accepts: classic, q6; q9/q9_virial are reserved names");
     }
     if (p.projectionEnable) {
-        if (p.projectionOperator != "periodic_fv_cg") {
-            throw std::runtime_error("projectionOperator currently supports only: periodic_fv_cg");
+        if (p.projectionOperator != "periodic_fv_cg" &&
+            p.projectionOperator != "channel_fv_cg" &&
+            p.projectionOperator != "auto_fv_cg" &&
+            p.projectionOperator != "elliptic_fv_cg") {
+            throw std::runtime_error("projectionOperator supports: periodic_fv_cg, channel_fv_cg, auto_fv_cg, elliptic_fv_cg");
         }
         if (p.projectionMaxIterations < 0) {
             throw std::runtime_error("projectionMaxIterations must be non-negative");

@@ -136,3 +136,15 @@ A compact MATLAB diagnostic is available:
 addpath('matlab')
 plot_q6_projection_summary('runs/periodic_q6_smoke')
 ```
+
+## Channel extension note
+
+After the generic elliptic core was extended to support no-normal-flux wall
+directions, the same Q6 adapter can also be used for the first documented
+channel configuration. The adapter infers the elliptic boundary policy from the
+particle boundary modes: periodic directions remain periodic, and wall directions
+use no-normal-flux elliptic faces.
+
+The first intended channel validation is documented in
+`docs/Q6_CHANNEL_POISEUILLE_VALIDATION.md` and uses a periodic-x / solid-y
+Poiseuille flow.

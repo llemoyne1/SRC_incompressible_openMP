@@ -168,6 +168,15 @@ void fill_unit_alpha(PeriodicFaceField& alpha, int numCells) {
     std::fill(alpha.y.begin(), alpha.y.end(), 1.0);
 }
 
+EllipticProjectionBC q6_bc_from_particle_boundaries(const SimulationParams& params) {
+    EllipticProjectionBC bc{};
+    bc.x = is_x_periodic(params) ? EllipticBoundaryType::Periodic
+                                 : EllipticBoundaryType::WallNoNormalFlux;
+    bc.y = is_y_periodic(params) ? EllipticBoundaryType::Periodic
+                                 : EllipticBoundaryType::WallNoNormalFlux;
+    return bc;
+}
+
 void face_correction_to_cell_velocity(const CellGrid& grid,
                                       const PeriodicFaceField& correctionFlux,
                                       std::vector<double>& dux,
@@ -261,8 +270,9 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
 
-    EllipticProjectionResult result = project_periodic_face_field(
-        egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, workspace.elliptic);
+    const EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
+    EllipticProjectionResult result = project_face_field(
+        egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic);
 
     diag.applied = true;
     diag.converged = result.diagnostics.converged;
@@ -282,7 +292,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
         workspace.correctedCellUy[k] = workspace.cellUy[k] + workspace.cellDUy[k];
     }
     build_face_velocity_from_cells(grid, workspace.correctedCellUx, workspace.correctedCellUy, workspace.correctedCellFlux);
-    std::vector<double> divCellAfter = compute_periodic_face_divergence(egrid, workspace.correctedCellFlux);
+    std::vector<double> divCellAfter = compute_face_divergence(egrid, workspace.correctedCellFlux, bc);
     double div2 = 0.0;
     double divMax = 0.0;
 #pragma omp parallel for reduction(+:div2) reduction(max:divMax) if(nc > 4096)
