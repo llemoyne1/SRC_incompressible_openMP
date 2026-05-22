@@ -182,6 +182,13 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "wallVpUyBottom" || key == "wallUyBottom") p.wallVpUyBottom = parse_double(value, key);
         else if (key == "wallVpUxTop" || key == "wallUxTop") p.wallVpUxTop = parse_double(value, key);
         else if (key == "wallVpUyTop" || key == "wallUyTop") p.wallVpUyTop = parse_double(value, key);
+        else if (key == "immersedCircleEnable") p.immersedCircleEnable = parse_bool(value, key);
+        else if (key == "immersedCircleCx") p.immersedCircleCx = parse_double(value, key);
+        else if (key == "immersedCircleCy") p.immersedCircleCy = parse_double(value, key);
+        else if (key == "immersedCircleR") p.immersedCircleR = parse_double(value, key);
+        else if (key == "immersedCircleFractionSamples") p.immersedCircleFractionSamples = parse_int(value, key);
+        else if (key == "immersedCircleWallUx") p.immersedCircleWallUx = parse_double(value, key);
+        else if (key == "immersedCircleWallUy") p.immersedCircleWallUy = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
         else if (key == "thermostatMode") p.thermostatMode = get_lower(kv, key);
         else if (key == "thermostatEvery") p.thermostatEvery = parse_int(value, key);
@@ -320,13 +327,30 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.wallThermalNoise >= 0.0)) {
         throw std::runtime_error("wallThermalNoise must be non-negative");
     }
-    if ((has_solid_wall(p) || p.wallVpEnable) && p.wallAccommodation > 0.0) {
+    if ((has_solid_wall(p) || p.wallVpEnable || p.immersedCircleEnable) && p.wallAccommodation > 0.0) {
         const double effectiveWallKBT = p.wallKBT > 0.0 ? p.wallKBT : p.wallVpKBT;
         if (effectiveWallKBT < 0.0 && !(p.kBT > 0.0)) {
             throw std::runtime_error("wallKBT/wallVpKBT is negative, so kBT must be positive when solid wall coupling is active");
         }
         if (effectiveWallKBT == 0.0) {
             throw std::runtime_error("wallKBT/wallVpKBT must be positive, or negative to inherit kBT");
+        }
+    }
+
+    if (p.immersedCircleEnable) {
+        if (!(p.immersedCircleR > 0.0)) {
+            throw std::runtime_error("immersedCircleR must be positive when immersedCircleEnable=true");
+        }
+        if (p.immersedCircleFractionSamples <= 0) {
+            throw std::runtime_error("immersedCircleFractionSamples must be positive");
+        }
+        const double xMax0Circle = p.fluidXMax0 >= 0.0 ? p.fluidXMax0 : p.Lx;
+        const double yMax0Circle = p.fluidYMax0 >= 0.0 ? p.fluidYMax0 : p.Ly;
+        if (p.immersedCircleCx - p.immersedCircleR < p.fluidXMin0 ||
+            p.immersedCircleCx + p.immersedCircleR > xMax0Circle ||
+            p.immersedCircleCy - p.immersedCircleR < p.fluidYMin0 ||
+            p.immersedCircleCy + p.immersedCircleR > yMax0Circle) {
+            throw std::runtime_error("The immersed circle must lie inside the initial active fluid domain");
         }
     }
 

@@ -75,7 +75,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
 
     nexttile;
     names = summary.Properties.VariableNames;
-    hitNames = intersect({'hitsLeft','hitsRight','hitsBottom','hitsTop'}, names, 'stable');
+    hitNames = intersect({'hitsLeft','hitsRight','hitsBottom','hitsTop','hitsImmersed'}, names, 'stable');
     if ~isempty(hitNames)
         hold on;
         for k = 1:numel(hitNames)
@@ -105,7 +105,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
 
     nexttile;
     names = summary.Properties.VariableNames;
-    faceMassNames = intersect({'virtualMassLeft','virtualMassRight','virtualMassBottom','virtualMassTop'}, names, 'stable');
+    faceMassNames = intersect({'virtualMassLeft','virtualMassRight','virtualMassBottom','virtualMassTop','virtualMassImmersed'}, names, 'stable');
     if ~isempty(faceMassNames)
         hold on;
         for k = 1:numel(faceMassNames)

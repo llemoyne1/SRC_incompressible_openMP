@@ -198,3 +198,11 @@ examples/params_active_domain_y_top_slow_motion.kv
 They require a reduced-domain initial state, `initial_state_active_y095.smpcd`, generated from MATLAB with particles inside `0 <= y <= 0.95`. The helper `matlab/validate_active_fluid_domain_refactor.m` summarizes `fluidYMax`, `fluidArea`, mean physical density and thermal control from `summary_runtime.csv`.
 
 See `docs/ACTIVE_FLUID_DOMAIN_SMOKE_TESTS.md`.
+
+## Immersed analytic circle
+
+The base solver now supports a first fixed immersed analytic circular solid via
+`immersedCircleEnable=true`. It reuses the generic `solid_thermal` wall coupling
+and adds only runtime control diagnostics (`hitsImmersed`,
+`virtualMassImmersed`). See `docs/IMMERSED_ANALYTIC_CIRCLE.md` for parameters,
+state generation and smoke-test commands.

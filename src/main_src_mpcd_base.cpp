@@ -3,6 +3,7 @@
 #include "params_io_base.h"
 #include "runtime_summary.h"
 #include "fluid_domain.h"
+#include "immersed_circle.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
 
@@ -83,6 +84,7 @@ int main(int argc, char** argv) {
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
         const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
         mpcd::apply_boundary_conditions(state, params, initialDomain);
+        mpcd::apply_immersed_circle_reflection(state, params, initialDomain);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;
@@ -91,7 +93,7 @@ int main(int argc, char** argv) {
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
-                                                     &initialCellCount, nullptr, nullptr, nullptr,
+                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr,
                                                      ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
@@ -104,6 +106,7 @@ int main(int argc, char** argv) {
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
                   << " wallAccommodation=" << params.wallAccommodation
+                  << " immersedCircle=" << (params.immersedCircleEnable ? "on" : "off")
                   << " fluid=[" << initialDomain.xMin << "," << initialDomain.xMax
                   << "]x[" << initialDomain.yMin << "," << initialDomain.yMax << "]"
                   << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
@@ -121,6 +124,7 @@ int main(int argc, char** argv) {
                 const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
                                                            &workspace.collision.cellCount,
                                                            &stepResult.boundary,
+                                                           &stepResult.immersed,
                                                            &stepResult.collision,
                                                            &stepResult.thermostat,
                                                            ompActiveThreads);

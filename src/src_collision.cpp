@@ -1,4 +1,5 @@
 #include "src_collision.h"
+#include "immersed_circle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -293,10 +294,11 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     double vpMassRightSum = 0.0;
     double vpMassBottomSum = 0.0;
     double vpMassTopSum = 0.0;
+    double vpMassImmersedSum = 0.0;
     double vpPxSum = 0.0;
     double vpPySum = 0.0;
 
-#pragma omp parallel for reduction(+:vpEquivalentSum,vpMassSum,vpMassLeftSum,vpMassRightSum,vpMassBottomSum,vpMassTopSum,vpPxSum,vpPySum) if(nc > 256)
+#pragma omp parallel for reduction(+:vpEquivalentSum,vpMassSum,vpMassLeftSum,vpMassRightSum,vpMassBottomSum,vpMassTopSum,vpMassImmersedSum,vpPxSum,vpPySum) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         std::uint32_t count = 0u;
         double mass = 0.0;
@@ -373,6 +375,23 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
             vpMassTopSum += v.mass;
         }
+        if (immersed_circle_enabled(params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            const double cellCx = (static_cast<double>(ix) + 0.5) * grid.dx - diag.shift.sx;
+            const double cellCy = (static_cast<double>(iy) + 0.5) * grid.dy - diag.shift.sy;
+            immersed_circle_wall_velocity(params, cellCx, cellCy, wallUx, wallUy);
+            const double solidFraction = immersed_circle_solid_fraction_in_cell(ix, iy, grid, diag.shift, params, domain);
+            const auto v = make_virtual_face_contribution(
+                solidFraction * fullCellArea,
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                wallUx, wallUy,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x494d4d4552534544ULL));
+            add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassImmersedSum += v.mass;
+        }
 
         vpEquivalentSum += cellVpEquivalent;
         vpMassSum += cellVpMass;
@@ -394,6 +413,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     diag.virtualMassRight = vpMassRightSum;
     diag.virtualMassBottom = vpMassBottomSum;
     diag.virtualMassTop = vpMassTopSum;
+    diag.virtualMassImmersed = vpMassImmersedSum;
     diag.virtualMomentumX = vpPxSum;
     diag.virtualMomentumY = vpPySum;
 

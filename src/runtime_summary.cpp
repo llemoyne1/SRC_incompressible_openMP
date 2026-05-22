@@ -13,6 +13,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount,
                                        const BoundaryDiagnostics* boundary,
+                                       const ImmersedCircleDiagnostics* immersed,
                                        const CollisionDiagnostics* collision,
                                        const ThermostatDiagnostics* thermostat,
                                        int numThreadsUsed) {
@@ -78,6 +79,9 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.hitsBottom = boundary->hitsBottom;
         s.hitsTop = boundary->hitsTop;
     }
+    if (immersed != nullptr) {
+        s.hitsImmersed = immersed->hits;
+    }
     if (collision != nullptr) {
         s.virtualParticleCount = collision->virtualParticleCount;
         s.virtualParticleEquivalent = collision->virtualParticleEquivalent;
@@ -86,6 +90,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.virtualMassRight = collision->virtualMassRight;
         s.virtualMassBottom = collision->virtualMassBottom;
         s.virtualMassTop = collision->virtualMassTop;
+        s.virtualMassImmersed = collision->virtualMassImmersed;
         s.virtualMomentumX = collision->virtualMomentumX;
         s.virtualMomentumY = collision->virtualMomentumY;
     }
@@ -136,7 +141,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -169,6 +174,7 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.hitsRight << ','
          << s.hitsBottom << ','
          << s.hitsTop << ','
+         << s.hitsImmersed << ','
          << s.virtualParticleCount << ','
          << s.virtualParticleEquivalent << ','
          << s.virtualMass << ','
@@ -176,6 +182,7 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.virtualMassRight << ','
          << s.virtualMassBottom << ','
          << s.virtualMassTop << ','
+         << s.virtualMassImmersed << ','
          << s.virtualMomentumX << ','
          << s.virtualMomentumY << ','
          << s.thermostatApplied << ','

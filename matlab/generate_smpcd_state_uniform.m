@@ -20,6 +20,10 @@ function state = generate_smpcd_state_uniform(varargin)
     p.addParameter('mode', 'uniform_per_cell', @(s) ischar(s) || isstring(s));
     p.addParameter('velocityMode', 'maxwell', @(s) ischar(s) || isstring(s));
     p.addParameter('removeMeanMomentum', true, @(x) islogical(x) && isscalar(x));
+    p.addParameter('excludeCircle', false, @(x) islogical(x) && isscalar(x));
+    p.addParameter('circleCx', 0.5, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('circleCy', 0.5, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('circleR', 0.1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
     p.parse(varargin{:});
     opt = p.Results;
 
@@ -45,6 +49,16 @@ function state = generate_smpcd_state_uniform(varargin)
             y = opt.Ly * rand(Np,1);
         otherwise
             error('generate_smpcd_state_uniform:badMode', 'Unknown mode: %s', mode);
+    end
+
+    if opt.excludeCircle && opt.circleR > 0
+        inside = ((x - opt.circleCx).^2 + (y - opt.circleCy).^2) < opt.circleR.^2;
+        while any(inside)
+            nReplace = nnz(inside);
+            x(inside) = opt.Lx * rand(nReplace,1);
+            y(inside) = opt.Ly * rand(nReplace,1);
+            inside = ((x - opt.circleCx).^2 + (y - opt.circleCy).^2) < opt.circleR.^2;
+        end
     end
 
     velocityMode = char(opt.velocityMode);

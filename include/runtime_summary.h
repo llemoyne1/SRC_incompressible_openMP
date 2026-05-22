@@ -6,6 +6,7 @@
 #include <vector>
 #include "boundary_base.h"
 #include "fluid_domain.h"
+#include "immersed_circle.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 #include "src_collision.h"
@@ -47,6 +48,7 @@ struct RuntimeSummary {
     std::uint64_t hitsRight = 0;
     std::uint64_t hitsBottom = 0;
     std::uint64_t hitsTop = 0;
+    std::uint64_t hitsImmersed = 0;
 
     std::uint64_t virtualParticleCount = 0;
     double virtualParticleEquivalent = 0.0;
@@ -55,6 +57,7 @@ struct RuntimeSummary {
     double virtualMassRight = 0.0;
     double virtualMassBottom = 0.0;
     double virtualMassTop = 0.0;
+    double virtualMassImmersed = 0.0;
     double virtualMomentumX = 0.0;
     double virtualMomentumY = 0.0;
 
@@ -74,6 +77,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount = nullptr,
                                        const BoundaryDiagnostics* boundary = nullptr,
+                                       const ImmersedCircleDiagnostics* immersed = nullptr,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
                                        int numThreadsUsed = 1);

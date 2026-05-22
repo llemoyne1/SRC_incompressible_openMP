@@ -22,6 +22,7 @@ struct CollisionDiagnostics {
     double virtualMassRight = 0.0;
     double virtualMassBottom = 0.0;
     double virtualMassTop = 0.0;
+    double virtualMassImmersed = 0.0;
     double virtualMomentumX = 0.0;
     double virtualMomentumY = 0.0;
 };
