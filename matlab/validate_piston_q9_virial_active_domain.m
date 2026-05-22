@@ -84,7 +84,7 @@ PkinMeanEnd = last_or_nan(T, 'PkinMean');
 PvirMeanEnd = last_or_nan(T, 'PvirMean');
 PtotMeanEnd = last_or_nan(T, 'PtotMean');
 PdriveMeanEnd = last_or_nan(T, 'PdriveMean');
-PtotMeanStart = first_or_nan(T, 'PtotMean');
+PtotMeanStart = first_finite_or_nan(T, 'PtotMean');
 PtotMeanRatio = safe_ratio(PtotMeanEnd, PtotMeanStart);
 
 row = table(string(label), string(runDir), n, T.time(1), T.time(end), ...
@@ -163,6 +163,17 @@ if ismember(name, T.Properties.VariableNames)
     v = T.(name)(1);
 else
     v = NaN;
+end
+end
+
+function v = first_finite_or_nan(T, name)
+v = NaN;
+if ismember(name, T.Properties.VariableNames)
+    x = T.(name);
+    idx = find(isfinite(x), 1, 'first');
+    if ~isempty(idx)
+        v = x(idx);
+    end
 end
 end
 

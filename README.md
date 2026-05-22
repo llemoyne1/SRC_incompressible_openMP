@@ -249,6 +249,9 @@ Current validation documents:
 - `docs/TAYLOR_GREEN_Q9_FILTERED_VALIDATION.md`: filtered Q9 Taylor-Green validation.
 - `docs/POISEUILLE_Q9_FILTERED_CHANNEL_VALIDATION.md`: filtered Q9 channel validation.
 - `docs/Q9_LOWK_FILTERING_INCIDENT.md`: documented Q9 channel instability and low-k mismatch fix.
+- `docs/PISTON_ACTIVE_DOMAIN_Q6_Q9.md`: moving active-domain piston with Q6/Q9.
+- `docs/VIRIAL_EOS_PISTON.md`: optional virial EOS pressure kick.
+- `docs/VIRIAL_EOS_SWEEP.md`: piston virial parameter sweep and `PtotMeanRatio` diagnostics.
 
 For MATLAB scripts in this branch, the intended workflow is to launch MATLAB
 from the `matlab/` directory and use `../runs/...` paths, for example:

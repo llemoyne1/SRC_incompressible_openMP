@@ -109,3 +109,13 @@ out = validate_piston_q9_virial_active_domain('makePlots', true);
 
 The MATLAB script assumes paths of the form `../runs/...` because it is intended
 to be launched from `matlab/`.
+
+## Parameter sweep
+
+A dedicated sweep document is available in `docs/VIRIAL_EOS_SWEEP.md`.  It keeps
+the same moving active-domain piston and filtered-Q9 setup, then varies
+`Kvirial` and `virialBeta` while monitoring EOS consistency and kick amplitude.
+
+The sweep post-processing computes `PtotMeanRatio` from the first finite
+`PtotMean` value, avoiding the earlier `NaN` ratio produced when the first row
+of a summary did not contain initialized virial diagnostics.
