@@ -35,7 +35,7 @@ function summary = plot_smpcd_summary(runDir, varargin)
     end
 
     figure('Name', 'SRC/MPCD runtime diagnostics');
-    tiledlayout(5, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tiledlayout(6, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
     nexttile;
     local_plot_if_present(summary, x, {'kBT','kBTEstimate','meanKBT'}, 'kBT');
