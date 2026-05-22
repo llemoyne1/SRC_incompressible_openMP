@@ -31,6 +31,19 @@ target_raw = beta / dt * (M_cell - mean(M_cell))
 target     = elliptic_lowpass(target_raw)
 ```
 
+For filtered Q9, the correction itself is also restricted to the same low-pass
+subspace. In practice, the adapter filters the divergence mismatch
+
+```text
+rhs_full = target - div(J_base)
+rhs      = elliptic_lowpass(rhs_full)
+```
+
+and passes an equivalent projection target to the generic face-field projection
+core. This mirrors the MATLAB `relax_to_uniform_lowk` / `general_bc` path and
+avoids forcing Q9 to cancel cell-scale mass-flux divergence while only asking
+for a low-k density relaxation target.
+
 Using the discrete continuity interpretation
 
 ```text

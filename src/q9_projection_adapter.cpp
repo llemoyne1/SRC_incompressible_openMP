@@ -221,6 +221,29 @@ double vector_rms(const std::vector<double>& v) {
     return std::sqrt(sum2 / static_cast<double>(n));
 }
 
+EllipticLowPassParams make_q9_lowpass_params(const SimulationParams& params,
+                                             const EllipticProjectionGrid& egrid) {
+    const int nc = egrid.numCells;
+    const double nApprox = std::sqrt(static_cast<double>(std::max(1, nc)));
+    const double denom = std::max(1.0, 2.0 * static_cast<double>(params.q9LowKMaxIndex) + 1.0);
+    const double lenCells = params.q9EllipticLowPassLengthCells > 0.0
+        ? params.q9EllipticLowPassLengthCells
+        : std::max(1.0, nApprox / denom);
+    const double ell = lenCells * 0.5 * (egrid.dx + egrid.dy);
+
+    EllipticLowPassParams filterParams{};
+    filterParams.passes = std::max(0, params.q9EllipticLowPassPasses);
+    filterParams.length = ell;
+    filterParams.maxIterations = std::max(1, params.projectionMaxIterations);
+    filterParams.tolerance = std::max(0.0, params.projectionTolerance);
+    filterParams.removeMeanEachPass = true;
+    return filterParams;
+}
+
+bool q9_lowk_correction_only(const SimulationParams& params) {
+    return !q9_target_filter_is_none(params) && params.q9EllipticLowPassPasses != 0;
+}
+
 void apply_q9_target_filter(const SimulationParams& params,
                             const EllipticProjectionGrid& egrid,
                             const EllipticProjectionBC& bc,
@@ -239,20 +262,7 @@ void apply_q9_target_filter(const SimulationParams& params,
         throw std::runtime_error("Unsupported q9TargetFilter in Q9 adapter: " + params.q9TargetFilter);
     }
 
-    const int nc = egrid.numCells;
-    const double nApprox = std::sqrt(static_cast<double>(std::max(1, nc)));
-    const double denom = std::max(1.0, 2.0 * static_cast<double>(params.q9LowKMaxIndex) + 1.0);
-    const double lenCells = params.q9EllipticLowPassLengthCells > 0.0
-        ? params.q9EllipticLowPassLengthCells
-        : std::max(1.0, nApprox / denom);
-    const double ell = lenCells * 0.5 * (egrid.dx + egrid.dy);
-
-    EllipticLowPassParams filterParams{};
-    filterParams.passes = std::max(0, params.q9EllipticLowPassPasses);
-    filterParams.length = ell;
-    filterParams.maxIterations = std::max(1, params.projectionMaxIterations);
-    filterParams.tolerance = std::max(0.0, params.projectionTolerance);
-    filterParams.removeMeanEachPass = true;
+    const EllipticLowPassParams filterParams = make_q9_lowpass_params(params, egrid);
 
     EllipticLowPassDiagnostics filterDiag{};
     target = elliptic_lowpass_cell_field(egrid, target, alpha, filterParams, bc, ws.elliptic, &filterDiag);
@@ -331,6 +341,40 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
     }
     diag.correctionVelocityRms = nc > 0 ? std::sqrt(sum2 / static_cast<double>(nc)) : 0.0;
     diag.correctionVelocityMaxAbs = maxAbs;
+}
+
+std::vector<double> build_q9_projection_target(const SimulationParams& params,
+                                                const EllipticProjectionGrid& egrid,
+                                                const EllipticProjectionBC& bc,
+                                                const PeriodicFaceField& baseFlux,
+                                                const PeriodicFaceField& alpha,
+                                                const std::vector<double>& densityTarget,
+                                                Q9ProjectionWorkspace& ws) {
+    if (!q9_lowk_correction_only(params)) {
+        return densityTarget;
+    }
+
+    const std::vector<double> divBefore = compute_face_divergence(egrid, baseFlux, bc);
+    std::vector<double> rhs(divBefore.size(), 0.0);
+    const std::size_t n = divBefore.size();
+#pragma omp parallel for if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t k = static_cast<std::size_t>(ii);
+        rhs[k] = densityTarget[k] - divBefore[k];
+    }
+    subtract_vector_mean(rhs);
+
+    const EllipticLowPassParams filterParams = make_q9_lowpass_params(params, egrid);
+    rhs = elliptic_lowpass_cell_field(egrid, rhs, alpha, filterParams, bc, ws.elliptic, nullptr);
+    subtract_vector_mean(rhs);
+
+    std::vector<double> projectionTarget(n, 0.0);
+#pragma omp parallel for if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t k = static_cast<std::size_t>(ii);
+        projectionTarget[k] = divBefore[k] + rhs[k];
+    }
+    return projectionTarget;
 }
 
 void compute_estimated_density_after(const SimulationParams& params,
@@ -427,6 +471,9 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(params.Nx, params.Ny, params.Lx, params.Ly);
     const EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
     apply_q9_target_filter(params, egrid, bc, workspace.alpha, workspace.targetDivergence, workspace, diag);
+    const std::vector<double> projectionTarget = build_q9_projection_target(
+        params, egrid, bc, workspace.baseMassFlux, workspace.alpha, workspace.targetDivergence, workspace);
+
     EllipticProjectionParams eparams{};
     eparams.maxIterations = params.projectionMaxIterations;
     eparams.tolerance = params.projectionTolerance;
@@ -434,7 +481,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     eparams.removePhiMean = true;
 
     EllipticProjectionResult result = project_face_field(
-        egrid, workspace.baseMassFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic);
+        egrid, workspace.baseMassFlux, workspace.alpha, projectionTarget, eparams, bc, workspace.elliptic);
 
     diag.applied = true;
     diag.converged = result.diagnostics.converged;
