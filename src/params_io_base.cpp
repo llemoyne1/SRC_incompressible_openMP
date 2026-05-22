@@ -208,6 +208,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9MassFluxProjectionEnable") p.q9MassFluxProjectionEnable = parse_bool(value, key);
         else if (key == "q9MassFluxProjectionStrength") p.q9MassFluxProjectionStrength = parse_double(value, key);
         else if (key == "q9DensityRelaxationBeta") p.q9DensityRelaxationBeta = parse_double(value, key);
+        else if (key == "q9TargetFilter" || key == "massFluxTargetFilter") p.q9TargetFilter = get_lower(kv, key);
+        else if (key == "q9LowKMaxIndex" || key == "massFluxLowKMaxIndex" || key == "lowKMaxIndex") p.q9LowKMaxIndex = parse_int(value, key);
+        else if (key == "q9EllipticLowPassPasses" || key == "massFluxEllipticLowPassPasses") p.q9EllipticLowPassPasses = parse_int(value, key);
+        else if (key == "q9EllipticLowPassLengthCells" || key == "massFluxEllipticLowPassLengthCells") p.q9EllipticLowPassLengthCells = parse_double(value, key);
         else if (key == "q9MomentumCorrectionEnable") p.q9MomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
@@ -432,6 +436,23 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (!(p.q9DensityRelaxationBeta >= 0.0 && p.q9DensityRelaxationBeta <= 1.0)) {
             throw std::runtime_error("q9DensityRelaxationBeta must lie in [0,1]");
+        }
+        std::string q9Filter = p.q9TargetFilter;
+        std::replace(q9Filter.begin(), q9Filter.end(), '-', '_');
+        if (q9Filter != "none" && q9Filter != "off" && q9Filter != "identity" && q9Filter != "raw" &&
+            q9Filter != "elliptic_lowpass" && q9Filter != "operator_lowpass" &&
+            q9Filter != "lowpass_operator" && q9Filter != "lowpass_elliptic" &&
+            q9Filter != "lowk_elliptic") {
+            throw std::runtime_error("q9TargetFilter supports: none, elliptic_lowpass");
+        }
+        if (p.q9LowKMaxIndex < 0) {
+            throw std::runtime_error("q9LowKMaxIndex must be non-negative");
+        }
+        if (p.q9EllipticLowPassPasses < 0) {
+            throw std::runtime_error("q9EllipticLowPassPasses must be non-negative");
+        }
+        if (!(p.q9EllipticLowPassLengthCells < 0.0 || p.q9EllipticLowPassLengthCells > 0.0)) {
+            throw std::runtime_error("q9EllipticLowPassLengthCells must be positive, or negative to use the default");
         }
     }
     if (p.summaryEvery <= 0) {

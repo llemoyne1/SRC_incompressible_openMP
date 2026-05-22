@@ -31,6 +31,8 @@ struct Q9ProjectionDiagnostics {
     double massFluxDivAfterRms = 0.0;
     double massFluxDivAfterMaxAbs = 0.0;
     double targetDivergenceRms = 0.0;
+    double targetDivergenceRawRms = 0.0;
+    double targetDivergenceFilterRatio = 1.0;
     double densityMean = 0.0;
     double densityStdBefore = 0.0;
     double densityStdAfterEstimate = 0.0;

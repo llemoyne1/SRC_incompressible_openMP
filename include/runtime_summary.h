@@ -99,6 +99,8 @@ struct RuntimeSummary {
     double q9MassFluxDivAfterRms = 0.0;
     double q9MassFluxDivAfterMaxAbs = 0.0;
     double q9TargetDivergenceRms = 0.0;
+    double q9TargetDivergenceRawRms = 0.0;
+    double q9TargetDivergenceFilterRatio = 1.0;
     double q9DensityMean = 0.0;
     double q9DensityStdBefore = 0.0;
     double q9DensityStdAfterEstimate = 0.0;

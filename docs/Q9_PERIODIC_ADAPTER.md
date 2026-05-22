@@ -27,7 +27,8 @@ J_base = M_cell U_cell = cell momentum
 and the target divergence is a uniform-density relaxation target:
 
 ```text
-target = beta / dt * (M_cell - mean(M_cell))
+target_raw = beta / dt * (M_cell - mean(M_cell))
+target     = elliptic_lowpass(target_raw)
 ```
 
 Using the discrete continuity interpretation
@@ -57,7 +58,10 @@ projectionMomentumCorrectionEnable = true
 
 q9MassFluxProjectionEnable = true
 q9MassFluxProjectionStrength = 1.0
-q9DensityRelaxationBeta = 0.002
+q9DensityRelaxationBeta = 5.0e-4
+q9TargetFilter = elliptic_lowpass
+q9LowKMaxIndex = 2
+q9EllipticLowPassPasses = 1
 q9MomentumCorrectionEnable = true
 ```
 
@@ -116,6 +120,8 @@ q9ResidualRel
 q9MassFluxDivBeforeRms
 q9MassFluxDivAfterRms
 q9TargetDivergenceRms
+q9TargetDivergenceRawRms
+q9TargetDivergenceFilterRatio
 q9DensityStdBefore
 q9DensityStdAfterEstimate
 q9DensityStdRatioEstimate
@@ -127,3 +133,10 @@ For Q9, `q9MassFluxDivAfterRms` is not expected to be near zero when
 `q9DensityRelaxationBeta > 0`; it should match the non-zero relaxation target.
 The elliptic solve quality is measured by `q9ResidualRel`, and the immediate
 mass-homogenization estimate is measured by `q9DensityStdRatioEstimate`.
+
+The default Q9 target filter follows the MATLAB `general_bc` path: an elliptic
+Helmholtz low-pass filter damps cell-scale occupancy noise before the mass-flux
+projection is applied. This filter is implemented in the generic
+`elliptic_projection` core and uses the same matrix-free `-div(alpha grad)`
+operator as Q6/Q9. The raw, unfiltered target remains available with
+`q9TargetFilter = none` for diagnostic checks only.

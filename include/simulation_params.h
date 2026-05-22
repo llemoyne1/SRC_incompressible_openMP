@@ -124,7 +124,11 @@ struct SimulationParams {
     // periodic boxes; other configurations are documented progressively.
     bool q9MassFluxProjectionEnable = false;
     double q9MassFluxProjectionStrength = 1.0;
-    double q9DensityRelaxationBeta = 0.002;
+    double q9DensityRelaxationBeta = 5.0e-4;
+    std::string q9TargetFilter = "elliptic_lowpass"; // none, elliptic_lowpass; MATLAB-compatible aliases accepted
+    int q9LowKMaxIndex = 2;
+    int q9EllipticLowPassPasses = 1;
+    double q9EllipticLowPassLengthCells = -1.0; // negative => MATLAB-like default from low-k index
     bool q9MomentumCorrectionEnable = true;
 
     int summaryEvery = 10;

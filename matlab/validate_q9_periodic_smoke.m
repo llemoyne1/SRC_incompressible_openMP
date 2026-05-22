@@ -28,6 +28,12 @@ out.q9ResidualEnd = [NaN; q9.q9ResidualRel(end)];
 out.q9MassFluxDivBeforeEnd = [NaN; q9.q9MassFluxDivBeforeRms(end)];
 out.q9MassFluxDivAfterEnd = [NaN; q9.q9MassFluxDivAfterRms(end)];
 out.q9TargetDivergenceEnd = [NaN; q9.q9TargetDivergenceRms(end)];
+if ismember('q9TargetDivergenceRawRms', q9.Properties.VariableNames)
+    out.q9TargetDivergenceRawEnd = [NaN; q9.q9TargetDivergenceRawRms(end)];
+end
+if ismember('q9TargetDivergenceFilterRatio', q9.Properties.VariableNames)
+    out.q9TargetFilterRatioEnd = [NaN; q9.q9TargetDivergenceFilterRatio(end)];
+end
 out.q9DensityStdBeforeEnd = [NaN; q9.q9DensityStdBefore(end)];
 out.q9DensityStdAfterEstimateEnd = [NaN; q9.q9DensityStdAfterEstimate(end)];
 out.q9DensityStdRatioEstimateEnd = [NaN; q9.q9DensityStdRatioEstimate(end)];
@@ -74,8 +80,14 @@ title('Q9 density relaxation estimate');
 
 nexttile;
 plot(q9.time(mask), q9.q9DensityStdRatioEstimate(mask), '-');
-grid on; xlabel('t'); ylabel('std after / before');
-title('Q9 per-step estimated relaxation');
+hold on;
+if ismember('q9TargetDivergenceFilterRatio', q9.Properties.VariableNames)
+    plot(q9.time(mask), q9.q9TargetDivergenceFilterRatio(mask), '--');
+    legend('std after / before','target filtered/raw', 'Location','best');
+end
+hold off;
+grid on; xlabel('t'); ylabel('ratio');
+title('Q9 filtered target and relaxation estimate');
 
 nexttile;
 semilogy(q9.time(mask), q9.q9ResidualRel(mask), '-');

@@ -97,6 +97,26 @@ struct EllipticProjectionResult {
     EllipticProjectionDiagnostics diagnostics;
 };
 
+
+struct EllipticLowPassParams {
+    int passes = 1;
+    double length = 0.0;
+    int maxIterations = 500;
+    double tolerance = 1.0e-12;
+    bool removeMeanEachPass = true;
+};
+
+struct EllipticLowPassDiagnostics {
+    bool applied = false;
+    bool converged = false;
+    int passes = 0;
+    int lastIterations = 0;
+    double inputRms = 0.0;
+    double outputRms = 0.0;
+    double filterRatio = 1.0;
+    double lastResidualRel = 0.0;
+};
+
 struct EllipticProjectionWorkspace {
     std::vector<double> rhs;
     std::vector<double> r;
@@ -141,5 +161,21 @@ EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGri
                                                      const std::vector<double>& targetDivergence,
                                                      const EllipticProjectionParams& params,
                                                      EllipticProjectionWorkspace& workspace);
+
+// Generic elliptic/Helmholtz low-pass filter for cell-centered fields:
+//
+//   (I + length^2 A) f_filtered = f_input,
+//   A = -div(alpha grad).
+//
+// This uses the same finite-volume div/grad/operator and boundary policy as the
+// face-field projection core. It is intended for Q9 density-target filtering and
+// future interface/surface-tension smoothing without adding a separate operator.
+std::vector<double> elliptic_lowpass_cell_field(const EllipticProjectionGrid& grid,
+                                                const std::vector<double>& input,
+                                                const PeriodicFaceField& alpha,
+                                                const EllipticLowPassParams& params,
+                                                const EllipticProjectionBC& bc,
+                                                EllipticProjectionWorkspace& workspace,
+                                                EllipticLowPassDiagnostics* diagnostics = nullptr);
 
 } // namespace mpcd

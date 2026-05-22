@@ -86,6 +86,22 @@ appropriate mass/occupancy normalization.
 The capillary module can reuse the same face geometry, gradients, divergence
 and elliptic machinery when coupling capillary pressure/force to Q6/Q9.
 
+## Generic elliptic low-pass filter
+
+The same module also exposes a Helmholtz-type low-pass filter for cell-centered
+fields:
+
+```text
+(I + length^2 A) f_filtered = f_input,
+A = -div(alpha grad)
+```
+
+This filter uses the same matrix-free operator, face coefficients and boundary
+policy as the projection solve. It is used by the Q9 adapter to reproduce the
+MATLAB-style `elliptic_lowpass` filtering of the density-relaxation target, and
+it is intentionally generic so that future interface and surface-tension modules
+can reuse it for smoothed density, color, curvature or capillary-pressure fields.
+
 ## Standalone validation
 
 Build:

@@ -443,6 +443,156 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     return result;
 }
 
+
+namespace {
+
+void apply_helmholtz_lowpass_operator(const EllipticProjectionGrid& grid,
+                                      const PeriodicFaceField& alpha,
+                                      const EllipticProjectionBC& bc,
+                                      double lengthSquared,
+                                      const std::vector<double>& x,
+                                      std::vector<double>& Bx) {
+    apply_elliptic_operator(grid, alpha, x, Bx, bc);
+    const int nc = grid.numCells;
+#pragma omp parallel for if(nc > 4096)
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t k = static_cast<std::size_t>(c);
+        Bx[k] = x[k] + lengthSquared * Bx[k];
+    }
+}
+
+struct HelmholtzLowPassSolveInfo {
+    bool converged = false;
+    int iterations = 0;
+    double residualRel = 0.0;
+};
+
+HelmholtzLowPassSolveInfo solve_helmholtz_lowpass_once(const EllipticProjectionGrid& grid,
+                                                       const PeriodicFaceField& alpha,
+                                                       const EllipticProjectionBC& bc,
+                                                       double length,
+                                                       const std::vector<double>& rhs,
+                                                       int maxIterations,
+                                                       double tolerance,
+                                                       std::vector<double>& out,
+                                                       EllipticProjectionWorkspace& workspace) {
+    const int nc = grid.numCells;
+    require_scalar_size(rhs, nc, "elliptic_lowpass rhs");
+    require_scalar_size(workspace.r, nc, "workspace.r");
+    require_scalar_size(workspace.p, nc, "workspace.p");
+    require_scalar_size(workspace.Ap, nc, "workspace.Ap");
+
+    out.assign(static_cast<std::size_t>(nc), 0.0);
+    workspace.r = rhs;
+    workspace.p = workspace.r;
+    std::fill(workspace.Ap.begin(), workspace.Ap.end(), 0.0);
+
+    HelmholtzLowPassSolveInfo info{};
+    const double rhsNorm2 = dot_product(rhs, rhs);
+    if (rhsNorm2 <= std::numeric_limits<double>::epsilon()) {
+        info.converged = true;
+        return info;
+    }
+
+    const double rhsNorm = std::sqrt(rhsNorm2);
+    const double absTol = std::max(0.0, tolerance) * rhsNorm;
+    const double lengthSquared = length * length;
+    double rr = rhsNorm2;
+    const int maxIt = std::max(1, maxIterations);
+
+    for (int it = 0; it < maxIt; ++it) {
+        apply_helmholtz_lowpass_operator(grid, alpha, bc, lengthSquared, workspace.p, workspace.Ap);
+        const double pAp = dot_product(workspace.p, workspace.Ap);
+        if (!(pAp > 0.0) || !std::isfinite(pAp)) {
+            break;
+        }
+
+        const double a = rr / pAp;
+#pragma omp parallel for if(nc > 4096)
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            out[k] += a * workspace.p[k];
+            workspace.r[k] -= a * workspace.Ap[k];
+        }
+
+        const double rrNew = dot_product(workspace.r, workspace.r);
+        info.iterations = it + 1;
+        info.residualRel = std::sqrt(rrNew) / rhsNorm;
+        if (std::sqrt(rrNew) <= absTol) {
+            info.converged = true;
+            rr = rrNew;
+            break;
+        }
+
+        const double beta = rrNew / rr;
+#pragma omp parallel for if(nc > 4096)
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            workspace.p[k] = workspace.r[k] + beta * workspace.p[k];
+        }
+        rr = rrNew;
+    }
+
+    if (!info.converged) {
+        info.residualRel = std::sqrt(dot_product(workspace.r, workspace.r)) / rhsNorm;
+    }
+    return info;
+}
+
+} // namespace
+
+std::vector<double> elliptic_lowpass_cell_field(const EllipticProjectionGrid& grid,
+                                                const std::vector<double>& input,
+                                                const PeriodicFaceField& alpha,
+                                                const EllipticLowPassParams& params,
+                                                const EllipticProjectionBC& bc,
+                                                EllipticProjectionWorkspace& workspace,
+                                                EllipticLowPassDiagnostics* diagnostics) {
+    require_grid(grid);
+    require_scalar_size(input, grid.numCells, "elliptic_lowpass input");
+    require_face_size(alpha, grid.numCells, "elliptic_lowpass alpha");
+    resize_elliptic_projection_workspace(workspace, grid.numCells);
+
+    EllipticLowPassDiagnostics diag{};
+    diag.passes = std::max(0, params.passes);
+
+    std::vector<double> current = input;
+    if (params.removeMeanEachPass) {
+        subtract_mean(current);
+    }
+    diag.inputRms = scalar_stats(current).rms;
+
+    if (diag.passes == 0 || !(params.length > 0.0)) {
+        diag.applied = false;
+        diag.converged = true;
+        diag.outputRms = diag.inputRms;
+        diag.filterRatio = diag.inputRms > 0.0 ? 1.0 : 0.0;
+        if (diagnostics) *diagnostics = diag;
+        return current;
+    }
+
+    diag.applied = true;
+    diag.converged = true;
+    std::vector<double> filtered;
+    for (int pass = 0; pass < diag.passes; ++pass) {
+        const HelmholtzLowPassSolveInfo info = solve_helmholtz_lowpass_once(
+            grid, alpha, bc, params.length, current,
+            params.maxIterations, params.tolerance, filtered, workspace);
+        if (params.removeMeanEachPass) {
+            subtract_mean(filtered);
+        }
+        current.swap(filtered);
+        diag.lastIterations = info.iterations;
+        diag.lastResidualRel = info.residualRel;
+        diag.converged = diag.converged && info.converged;
+    }
+
+    diag.outputRms = scalar_stats(current).rms;
+    diag.filterRatio = diag.inputRms > 0.0 ? diag.outputRms / diag.inputRms : 0.0;
+    if (diagnostics) *diagnostics = diag;
+    return current;
+}
+
 EllipticProjectionResult project_periodic_face_field(const EllipticProjectionGrid& grid,
                                                      const PeriodicFaceField& baseFlux,
                                                      const PeriodicFaceField& alpha,

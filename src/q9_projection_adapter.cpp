@@ -1,10 +1,13 @@
 #include "q9_projection_adapter.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
+#include <string>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -161,6 +164,103 @@ void fill_alpha(PeriodicFaceField& alpha, int numCells, double value) {
     std::fill(alpha.y.begin(), alpha.y.end(), value);
 }
 
+
+std::string canonical_filter_name(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    std::replace(s.begin(), s.end(), '-', '_');
+    return s;
+}
+
+bool q9_target_filter_is_none(const SimulationParams& params) {
+    const std::string f = canonical_filter_name(params.q9TargetFilter);
+    return f == "none" || f == "off" || f == "identity" || f == "raw";
+}
+
+bool q9_target_filter_is_elliptic_lowpass(const SimulationParams& params) {
+    const std::string f = canonical_filter_name(params.q9TargetFilter);
+    return f == "elliptic_lowpass" || f == "operator_lowpass" ||
+           f == "lowpass_operator" || f == "lowpass_elliptic" ||
+           f == "lowk_elliptic";
+}
+
+double vector_mean(const std::vector<double>& v) {
+    if (v.empty()) {
+        return 0.0;
+    }
+    double sum = 0.0;
+    const std::size_t n = v.size();
+#pragma omp parallel for reduction(+:sum) if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        sum += v[static_cast<std::size_t>(ii)];
+    }
+    return sum / static_cast<double>(n);
+}
+
+void subtract_vector_mean(std::vector<double>& v) {
+    const double m = vector_mean(v);
+    const std::size_t n = v.size();
+#pragma omp parallel for if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        v[static_cast<std::size_t>(ii)] -= m;
+    }
+}
+
+double vector_rms(const std::vector<double>& v) {
+    if (v.empty()) {
+        return 0.0;
+    }
+    double sum2 = 0.0;
+    const std::size_t n = v.size();
+#pragma omp parallel for reduction(+:sum2) if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const double a = v[static_cast<std::size_t>(ii)];
+        sum2 += a * a;
+    }
+    return std::sqrt(sum2 / static_cast<double>(n));
+}
+
+void apply_q9_target_filter(const SimulationParams& params,
+                            const EllipticProjectionGrid& egrid,
+                            const EllipticProjectionBC& bc,
+                            const PeriodicFaceField& alpha,
+                            std::vector<double>& target,
+                            Q9ProjectionWorkspace& ws,
+                            Q9ProjectionDiagnostics& diag) {
+    subtract_vector_mean(target);
+    diag.targetDivergenceRawRms = vector_rms(target);
+    if (q9_target_filter_is_none(params) || params.q9EllipticLowPassPasses == 0) {
+        diag.targetDivergenceRms = diag.targetDivergenceRawRms;
+        diag.targetDivergenceFilterRatio = 1.0;
+        return;
+    }
+    if (!q9_target_filter_is_elliptic_lowpass(params)) {
+        throw std::runtime_error("Unsupported q9TargetFilter in Q9 adapter: " + params.q9TargetFilter);
+    }
+
+    const int nc = egrid.numCells;
+    const double nApprox = std::sqrt(static_cast<double>(std::max(1, nc)));
+    const double denom = std::max(1.0, 2.0 * static_cast<double>(params.q9LowKMaxIndex) + 1.0);
+    const double lenCells = params.q9EllipticLowPassLengthCells > 0.0
+        ? params.q9EllipticLowPassLengthCells
+        : std::max(1.0, nApprox / denom);
+    const double ell = lenCells * 0.5 * (egrid.dx + egrid.dy);
+
+    EllipticLowPassParams filterParams{};
+    filterParams.passes = std::max(0, params.q9EllipticLowPassPasses);
+    filterParams.length = ell;
+    filterParams.maxIterations = std::max(1, params.projectionMaxIterations);
+    filterParams.tolerance = std::max(0.0, params.projectionTolerance);
+    filterParams.removeMeanEachPass = true;
+
+    EllipticLowPassDiagnostics filterDiag{};
+    target = elliptic_lowpass_cell_field(egrid, target, alpha, filterParams, bc, ws.elliptic, &filterDiag);
+
+    diag.targetDivergenceRms = filterDiag.outputRms;
+    diag.targetDivergenceFilterRatio = filterDiag.filterRatio;
+}
+
 void build_uniform_density_relaxation_target(const SimulationParams& params,
                                              const std::vector<double>& cellMass,
                                              std::vector<double>& target,
@@ -186,16 +286,18 @@ void build_uniform_density_relaxation_target(const SimulationParams& params,
 
     const double beta = params.q9DensityRelaxationBeta;
     const double invDt = 1.0 / params.dt;
-    double target2 = 0.0;
-#pragma omp parallel for reduction(+:target2) if(nc > 4096)
+#pragma omp parallel for if(nc > 4096)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
-        // With continuity M_new = M - dt div(J_new), this target relaxes
-        // M toward the mean by approximately beta per application.
+        // With continuity M_new = M - dt div(J_new), this raw target relaxes
+        // M toward the mean by approximately beta per application. A separate
+        // low-pass stage may then remove cell-scale occupancy noise, following
+        // the MATLAB Q9 general_bc path.
         target[k] = beta * invDt * (cellMass[k] - mean);
-        target2 += target[k] * target[k];
     }
-    diag.targetDivergenceRms = std::sqrt(target2 / static_cast<double>(nc));
+    diag.targetDivergenceRawRms = vector_rms(target);
+    diag.targetDivergenceRms = diag.targetDivergenceRawRms;
+    diag.targetDivergenceFilterRatio = 1.0;
 }
 
 void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
@@ -323,13 +425,14 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     build_uniform_density_relaxation_target(params, workspace.cellMass, workspace.targetDivergence, diag);
 
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(params.Nx, params.Ny, params.Lx, params.Ly);
+    const EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
+    apply_q9_target_filter(params, egrid, bc, workspace.alpha, workspace.targetDivergence, workspace, diag);
     EllipticProjectionParams eparams{};
     eparams.maxIterations = params.projectionMaxIterations;
     eparams.tolerance = params.projectionTolerance;
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
 
-    const EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseMassFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic);
 
