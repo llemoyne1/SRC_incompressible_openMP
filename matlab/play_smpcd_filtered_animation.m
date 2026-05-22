@@ -56,6 +56,8 @@ Ly = str2double(string(params.Ly));
 circleCx = local_get_override_or_param(opts.circleCx, params, {'immersedCircleCx'}, 0.5);
 circleCy = local_get_override_or_param(opts.circleCy, params, {'immersedCircleCy'}, 0.5);
 circleR  = local_get_override_or_param(opts.circleR,  params, {'immersedCircleR'},  0.12);
+circleVx = local_get_override_or_param([], params, {'immersedCircleVx'}, 0.0);
+circleVy = local_get_override_or_param([], params, {'immersedCircleVy'}, 0.0);
 
 nFrames = height(frameTable);
 startIdx = min(nFrames, max(1, floor(opts.timeAverageStartFraction * nFrames) + 1));
@@ -96,7 +98,10 @@ for ii = 1:numel(selectedIdx)
     colorbar;
     hold on;
     th = linspace(0, 2*pi, 256);
-    plot(circleCx + circleR*cos(th), circleCy + circleR*sin(th), 'k-', 'LineWidth', 1.0);
+    cxt = circleCx + circleVx * times(ii);
+    cyt = circleCy + circleVy * times(ii);
+    plot(cxt + circleR*cos(th), cyt + circleR*sin(th), 'k-', 'LineWidth', 1.0);
+    plot(circleCx + circleVx * times, circleCy + circleVy * times, 'k:', 'LineWidth', 0.8);
     if opts.showVelocityVectors
         ss = max(1, round(opts.vectorStride));
         quiver(Xc(1:ss:end,1:ss:end), Yc(1:ss:end,1:ss:end), ...

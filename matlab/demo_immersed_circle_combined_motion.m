@@ -79,18 +79,44 @@ else
 end
 
 fprintf('\n=== Combined immersed-circle demo summary ===\n');
-if isstruct(out.translation) && isfield(out.translation, 'centerEndX')
+tr = local_first_table_row(out.translation);
+if ~isempty(tr) && all(ismember({'centerStartX','centerEndX','centerStartY','centerEndY'}, tr.Properties.VariableNames))
     fprintf('Translation: x %.6g -> %.6g, y %.6g -> %.6g\n', ...
-        out.translation.centerStartX, out.translation.centerEndX, ...
-        out.translation.centerStartY, out.translation.centerEndY);
+        tr.centerStartX, tr.centerEndX, tr.centerStartY, tr.centerEndY);
 end
-if isstruct(out.rotation) && isfield(out.rotation, 'nearWallMeanUtheta')
+
+rot = local_first_table_row(out.rotation);
+if ~isempty(rot) && all(ismember({'nearWallMeanUtheta','expectedSurfaceSpeed'}, rot.Properties.VariableNames))
     fprintf('Rotation: near-wall <u_theta> = %.6g, expected surface speed = %.6g\n', ...
-        out.rotation.nearWallMeanUtheta, out.rotation.expectedSurfaceSpeed);
+        rot.nearWallMeanUtheta, rot.expectedSurfaceSpeed);
 end
-if isstruct(out.smoke) && isfield(out.smoke, 'maxParticlesInsideCircle')
+
+sm = local_first_table_row(out.smoke);
+if ~isempty(sm) && ismember('maxParticlesInsideCircle', sm.Properties.VariableNames)
     fprintf('Penetration diagnostic: max particles inside circle = %g\n', ...
-        out.smoke.maxParticlesInsideCircle);
+        sm.maxParticlesInsideCircle);
 end
 fprintf('================================================\n\n');
+end
+
+function row = local_first_table_row(x)
+row = [];
+
+if istable(x)
+    if height(x) >= 1
+        row = x(1,:);
+    end
+    return;
+end
+
+if isstruct(x)
+    names = fieldnames(x);
+    for k = 1:numel(names)
+        candidate = x.(names{k});
+        if istable(candidate) && height(candidate) >= 1
+            row = candidate(1,:);
+            return;
+        end
+    end
+end
 end
