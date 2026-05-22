@@ -205,6 +205,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "q9MassFluxProjectionEnable") p.q9MassFluxProjectionEnable = parse_bool(value, key);
+        else if (key == "q9MassFluxProjectionStrength") p.q9MassFluxProjectionStrength = parse_double(value, key);
+        else if (key == "q9DensityRelaxationBeta") p.q9DensityRelaxationBeta = parse_double(value, key);
+        else if (key == "q9MomentumCorrectionEnable") p.q9MomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -232,6 +236,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
 
     if (p.method == "q6") {
         p.projectionEnable = true;
+    }
+    if (p.method == "q9" || p.method == "q9_virial") {
+        p.projectionEnable = true;
+        p.q9MassFluxProjectionEnable = true;
     }
 
     validate_simulation_params(p);
@@ -402,7 +410,7 @@ void validate_simulation_params(const SimulationParams& p) {
         }
     }
     if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
-        throw std::runtime_error("method currently accepts: classic, q6; q9/q9_virial are reserved names");
+        throw std::runtime_error("method currently accepts: classic, q6, q9, q9_virial");
     }
     if (p.projectionEnable) {
         if (p.projectionOperator != "periodic_fv_cg" &&
@@ -416,6 +424,14 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (!(p.projectionTolerance > 0.0)) {
             throw std::runtime_error("projectionTolerance must be positive");
+        }
+    }
+    if (p.q9MassFluxProjectionEnable) {
+        if (!(p.q9MassFluxProjectionStrength >= 0.0 && p.q9MassFluxProjectionStrength <= 1.0)) {
+            throw std::runtime_error("q9MassFluxProjectionStrength must lie in [0,1]");
+        }
+        if (!(p.q9DensityRelaxationBeta >= 0.0 && p.q9DensityRelaxationBeta <= 1.0)) {
+            throw std::runtime_error("q9DensityRelaxationBeta must lie in [0,1]");
         }
     }
     if (p.summaryEvery <= 0) {

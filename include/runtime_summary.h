@@ -9,6 +9,7 @@
 #include "immersed_circle.h"
 #include "particle_state.h"
 #include "q6_projection_adapter.h"
+#include "q9_projection_adapter.h"
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
@@ -87,6 +88,26 @@ struct RuntimeSummary {
     double q6MomentumCorrectionVx = 0.0;
     double q6MomentumCorrectionVy = 0.0;
     double q6MomentumResidualBeforeCorrection = 0.0;
+
+    int q9Applied = 0;
+    int q9Converged = 0;
+    int q9Iterations = 0;
+    std::uint64_t q9EmptyCells = 0;
+    double q9ResidualRel = 0.0;
+    double q9MassFluxDivBeforeRms = 0.0;
+    double q9MassFluxDivBeforeMaxAbs = 0.0;
+    double q9MassFluxDivAfterRms = 0.0;
+    double q9MassFluxDivAfterMaxAbs = 0.0;
+    double q9TargetDivergenceRms = 0.0;
+    double q9DensityMean = 0.0;
+    double q9DensityStdBefore = 0.0;
+    double q9DensityStdAfterEstimate = 0.0;
+    double q9DensityStdRatioEstimate = 0.0;
+    double q9CorrectionVelocityRms = 0.0;
+    double q9CorrectionVelocityMaxAbs = 0.0;
+    double q9MomentumCorrectionVx = 0.0;
+    double q9MomentumCorrectionVy = 0.0;
+    double q9MomentumResidualBeforeCorrection = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -98,6 +119,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const ImmersedCircleDiagnostics* immersed = nullptr,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const Q6ProjectionDiagnostics* q6 = nullptr,
+                                       const Q9ProjectionDiagnostics* q9 = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
                                        int numThreadsUsed = 1);
 

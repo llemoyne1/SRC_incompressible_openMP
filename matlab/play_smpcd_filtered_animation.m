@@ -29,7 +29,7 @@ addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'temporalHalfWindow', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
-addParameter(p, 'showVelocityVectors', false, @(x) islogical(x) || isnumeric(x));
+addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'vectorStride', 4, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'circleCx', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x)));
 addParameter(p, 'circleCy', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x)));

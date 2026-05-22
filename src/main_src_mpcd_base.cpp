@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
-                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
@@ -129,6 +129,7 @@ int main(int argc, char** argv) {
                                                            &stepResult.immersed,
                                                            &stepResult.collision,
                                                            &stepResult.q6,
+                                                           &stepResult.q9,
                                                            &stepResult.thermostat,
                                                            ompActiveThreads);
                 summary.append(s);
@@ -138,6 +139,7 @@ int main(int argc, char** argv) {
                           << " kBT=" << s.kBTEstimate
                           << " stdN=" << s.stdN
                           << " q6Div=" << s.q6DivBeforeRms << "->" << s.q6DivAfterProjectedFluxRms
+                          << " q9Std=" << s.q9DensityStdBefore << "->" << s.q9DensityStdAfterEstimate
                           << " wall=" << wallTime << " s" << std::flush;
             }
 

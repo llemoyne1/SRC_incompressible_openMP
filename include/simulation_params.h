@@ -111,12 +111,21 @@ struct SimulationParams {
     // first consumer of the generic elliptic projection core. The supported and
     // validated first use case is a fully periodic fixed box, but this scope is
     // documented rather than guarded by extra runtime restrictions.
-    std::string method = "classic";          // classic, q6; q9 reserved for later
+    std::string method = "classic";          // classic, q6, q9; q9_virial reserved for later
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
     int projectionMaxIterations = 300;
     double projectionTolerance = 1.0e-10;
     bool projectionMomentumCorrectionEnable = true;
+
+    // Optional Q9 mass-flux projection adapter. Q9 reuses the same generic
+    // elliptic face-field core as Q6 but projects a mass/momentum flux toward
+    // a uniform-density relaxation target. The first validated scope is
+    // periodic boxes; other configurations are documented progressively.
+    bool q9MassFluxProjectionEnable = false;
+    double q9MassFluxProjectionStrength = 1.0;
+    double q9DensityRelaxationBeta = 0.002;
+    bool q9MomentumCorrectionEnable = true;
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

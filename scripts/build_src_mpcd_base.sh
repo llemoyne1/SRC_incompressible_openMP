@@ -17,6 +17,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/thermostat.cpp \
   src/elliptic_projection.cpp \
   src/q6_projection_adapter.cpp \
+  src/q9_projection_adapter.cpp \
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \
