@@ -1,0 +1,54 @@
+# Combined translation + rotation demonstration for a fixed-radius immersed circle.
+# The circle moves slowly to the right while rotating counter-clockwise.
+
+outputDir = runs/immersed_circle_combined_motion_64x64
+inputState = initial_state_circle_combined_64x64_g20.smpcd
+
+Lx = 1.0
+Ly = 1.0
+Nx = 64
+Ny = 64
+
+dt = 0.001
+nSteps = 50000
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = periodic
+bcTop = periodic
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+kBT = 0.01
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+
+immersedCircleEnable = true
+immersedCircleCx = 0.35
+immersedCircleCy = 0.50
+immersedCircleR = 0.12
+immersedCircleFractionSamples = 4
+
+# Combined motion:
+# - translation to the right
+# - counter-clockwise rotation
+immersedCircleVx = 0.003
+immersedCircleVy = 0.0
+immersedCircleOmega = 0.20
+
+# Optional wall-velocity offsets kept at zero for this demonstration.
+immersedCircleWallUx = 0.0
+immersedCircleWallUy = 0.0
