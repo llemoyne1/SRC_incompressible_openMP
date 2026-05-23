@@ -76,12 +76,19 @@ modeTailMeanAbsRatio = mean(abs(M.densityCosMode(max(1, floor((1-tailFraction)*h
 
 uxSinStart = first_finite_or_nan_table(M, 'uxSinMode');
 uxSinEnd = last_finite_or_nan_table(M, 'uxSinMode');
+[uxSinPeakAbs, timeUxSinPeakAbs] = local_peak_abs(M, 'uxSinMode');
+integralAbsUxSinMode = local_integral_abs(M, 'uxSinMode');
 filteredStdStart = first_finite_positive_or_nan_table(M, 'densityFilteredStd');
 filteredStdEnd = last_finite_or_nan_table(M, 'densityFilteredStd');
 
+[virialKickRmsPeak, timeVirialKickRmsPeak] = local_peak_value(T, 'virialDuAppliedRms');
+virialKickMaxPeak = local_peak_value_scalar(T, 'virialDuAppliedMaxAbs');
+virialOverThermalPeak = local_peak_value_scalar(T, 'virialDuOverThermalRms');
+
 row = table(string(label), string(runDir), n, first_finite_or_nan(T, 'time'), last_finite_or_nan(T, 'time'), ...
     modeStart, modeEnd, modeAbsRatio, modeTailMeanAbsRatio, ...
-    uxSinStart, uxSinEnd, filteredStdStart, filteredStdEnd, safe_ratio(filteredStdEnd, filteredStdStart), ...
+    uxSinStart, uxSinEnd, uxSinPeakAbs, timeUxSinPeakAbs, integralAbsUxSinMode, ...
+    filteredStdStart, filteredStdEnd, safe_ratio(filteredStdEnd, filteredStdStart), ...
     last_finite_or_nan(T, 'kBTEstimate'), mean_omitnan(T, 'kBTEstimate', tail), ...
     last_finite_or_nan(T, 'q6DivAfterProjectedFluxRms'), last_finite_or_nan(T, 'q6ResidualRel'), ...
     last_finite_or_nan(T, 'q9ResidualRel'), last_finite_or_nan(T, 'q9TargetDivergenceFilterRatio'), ...
@@ -90,15 +97,18 @@ row = table(string(label), string(runDir), n, first_finite_or_nan(T, 'time'), la
     last_finite_or_nan(T, 'PvirMean'), last_finite_or_nan(T, 'PtotMean'), last_finite_or_nan(T, 'gradPdriveRms'), ...
     last_finite_or_nan(T, 'virialDuAppliedRms'), mean_omitnan(T, 'virialDuAppliedRms', tail), ...
     last_finite_or_nan(T, 'virialDuAppliedMaxAbs'), last_finite_or_nan(T, 'virialDuOverThermalRms'), ...
+    virialKickRmsPeak, timeVirialKickRmsPeak, virialKickMaxPeak, virialOverThermalPeak, ...
     last_finite_or_nan(T, 'maxParticleAbsVx'), last_finite_or_nan(T, 'maxParticleAbsVy'), ...
     last_finite_or_nan(T, 'maxYWallReflectionsPerParticle'), ...
     'VariableNames', {'run','runDir','nRows','timeStart','timeEnd', ...
     'densityCosModeStart','densityCosModeEnd','densityCosModeAbsRatio','densityCosModeTailMeanAbsRatio', ...
-    'uxSinModeStart','uxSinModeEnd','filteredStdStart','filteredStdEnd','filteredStdRatio', ...
+    'uxSinModeStart','uxSinModeEnd','uxSinModePeakAbs','timeUxSinModePeakAbs','integralAbsUxSinMode', ...
+    'filteredStdStart','filteredStdEnd','filteredStdRatio', ...
     'kBTEnd','kBTTailMean','q6DivAfterEnd','q6ResidualEnd','q9ResidualEnd','q9TargetFilterRatioEnd', ...
     'q9CorrectionVelocityRmsEnd','q9CorrectionVelocityMaxEnd', ...
     'virialEnabled','virialKickApplied','PvirMeanEnd','PtotMeanEnd','gradPdriveRmsEnd', ...
     'virialDuAppliedRmsEnd','virialDuAppliedRmsTailMean','virialDuAppliedMaxEnd','virialDuOverThermalRmsEnd', ...
+    'virialDuAppliedRmsPeak','timeVirialDuAppliedRmsPeak','virialDuAppliedMaxPeak','virialDuOverThermalRmsPeak', ...
     'maxParticleAbsVxEnd','maxParticleAbsVyEnd','yWallReflectionMaxPerParticleEnd'});
 end
 
@@ -276,4 +286,65 @@ if isempty(idx)
 else
     v = x(idx);
 end
+end
+
+function [peakAbs, timePeak] = local_peak_abs(T, name)
+peakAbs = NaN;
+timePeak = NaN;
+if ~ismember(name, T.Properties.VariableNames) || ~ismember('time', T.Properties.VariableNames)
+    return;
+end
+x = T.(name);
+mask = isfinite(x) & isfinite(T.time);
+if ~any(mask)
+    return;
+end
+vals = abs(x(mask));
+times = T.time(mask);
+[peakAbs, idx] = max(vals);
+timePeak = times(idx);
+end
+
+function integralAbs = local_integral_abs(T, name)
+integralAbs = NaN;
+if ~ismember(name, T.Properties.VariableNames) || ~ismember('time', T.Properties.VariableNames)
+    return;
+end
+x = T.(name);
+t = T.time;
+mask = isfinite(x) & isfinite(t);
+if nnz(mask) < 2
+    return;
+end
+integralAbs = trapz(t(mask), abs(x(mask)));
+end
+
+function [peakValue, timePeak] = local_peak_value(T, name)
+peakValue = NaN;
+timePeak = NaN;
+if ~ismember(name, T.Properties.VariableNames) || ~ismember('time', T.Properties.VariableNames)
+    return;
+end
+x = T.(name);
+t = T.time;
+mask = isfinite(x) & isfinite(t);
+if ~any(mask)
+    return;
+end
+[peakValue, idx] = max(x(mask));
+times = t(mask);
+timePeak = times(idx);
+end
+
+function peakValue = local_peak_value_scalar(T, name)
+peakValue = NaN;
+if ~ismember(name, T.Properties.VariableNames)
+    return;
+end
+x = T.(name);
+mask = isfinite(x);
+if ~any(mask)
+    return;
+end
+peakValue = max(x(mask));
 end
