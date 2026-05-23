@@ -264,17 +264,54 @@ double resolve_rho_drive_ref(const SimulationParams& params,
     throw std::runtime_error("Unknown virialDriveTargetMode: " + params.virialDriveTargetMode);
 }
 
+bool virial_cell_active(const ImmersedSolidProjectionMask* mask, std::size_t k) {
+    return mask == nullptr || mask->activeCell.empty() || mask->activeCell[k] != 0u;
+}
+
+std::uint64_t virial_active_cell_count(const ImmersedSolidProjectionMask* mask, int nc) {
+    if (mask == nullptr || mask->activeCell.empty()) {
+        return static_cast<std::uint64_t>(std::max(0, nc));
+    }
+    return mask->fluidCells;
+}
+
+const ImmersedSolidProjectionMask* prepare_virial_immersed_mask(const SimulationParams& params,
+                                                                const CellGrid& grid,
+                                                                const FluidDomainBounds& domain,
+                                                                VirialPressureWorkspace& ws,
+                                                                VirialPressureDiagnostics& diag) {
+    if (!immersed_solid_enabled(params)) {
+        ws.immersedMask = ImmersedSolidProjectionMask{};
+        return nullptr;
+    }
+    ws.immersedMask = build_immersed_solid_projection_mask(
+        params, grid, domain, static_cast<double>(0.0), params.projectionImmersedSolidFluidFractionThreshold);
+    diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
+    diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+    return &ws.immersedMask;
+}
+
 void compute_pressure_maps(const ParticleState& state,
                            const SimulationParams& params,
                            const FluidDomainBounds& domain,
+                           const ImmersedSolidProjectionMask* mask,
                            VirialPressureWorkspace& ws,
                            VirialPressureDiagnostics& diag) {
     const int nc = params.Nx * params.Ny;
     const double area = fluid_domain_area(domain);
     const double cellArea = area / static_cast<double>(std::max(1, nc));
-    diag.rhoMean = area > 0.0 ? static_cast<double>(state.Np) / area : 0.0;
-    diag.rhoEOSRef = resolve_rho_eos_ref(params, state, diag.rhoMean);
-    diag.rhoUniformNow = resolve_rho_uniform_now(params, state, domain, diag.rhoMean);
+    const std::uint64_t activeCells = virial_active_cell_count(mask, nc);
+    const double activeArea = cellArea * static_cast<double>(activeCells);
+    diag.rhoMean = activeArea > 0.0 ? static_cast<double>(state.Np) / activeArea : 0.0;
+    // For immersed solids, use the active fluid area as the EOS/current-volume
+    // reference.  This avoids treating deliberately empty solid cells as a
+    // low-density liquid and prevents artificial pressure kicks at the immersed wall.
+    diag.rhoEOSRef = diag.rhoMean;
+    diag.rhoUniformNow = diag.rhoMean;
+    if (!immersed_solid_enabled(params)) {
+        diag.rhoEOSRef = resolve_rho_eos_ref(params, state, diag.rhoMean);
+        diag.rhoUniformNow = resolve_rho_uniform_now(params, state, domain, diag.rhoMean);
+    }
     diag.rhoDriveRef = resolve_rho_drive_ref(params, diag.rhoEOSRef, diag.rhoUniformNow);
 
     double rhoDef2 = 0.0;
@@ -294,6 +331,15 @@ void compute_pressure_maps(const ParticleState& state,
 #pragma omp parallel for reduction(+:rhoDef2,pkinSum,pvirSum,ptotSum,pdriveSum) reduction(min:rhoMin,pkinMin,pvirMin,ptotMin) reduction(max:rhoMax,pkinMax,pvirMax,ptotMax) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
+        if (!virial_cell_active(mask, k)) {
+            ws.cellRho[k] = 0.0;
+            ws.cellTemperature[k] = 0.0;
+            ws.Pkin[k] = 0.0;
+            ws.PvirEOS[k] = 0.0;
+            ws.PtotEOS[k] = 0.0;
+            ws.Pdrive[k] = 0.0;
+            continue;
+        }
         const double rho = cellArea > 0.0 ? ws.cellMass[k] / cellArea : 0.0;
         double temp = 0.0;
         if (ws.cellCount[k] > 1.0) {
@@ -327,7 +373,7 @@ void compute_pressure_maps(const ParticleState& state,
         ptotMax = std::max(ptotMax, ptot);
     }
 
-    const double invNc = nc > 0 ? 1.0 / static_cast<double>(nc) : 0.0;
+    const double invNc = activeCells > 0u ? 1.0 / static_cast<double>(activeCells) : 0.0;
     diag.rhoDefectRms = std::sqrt(std::max(0.0, rhoDef2 * invNc));
     diag.rhoDefectRelRms = diag.rhoUniformNow != 0.0 ? diag.rhoDefectRms / std::abs(diag.rhoUniformNow) : 0.0;
     diag.rhoMin = std::isfinite(rhoMin) ? rhoMin : 0.0;
@@ -350,6 +396,7 @@ double field_at(const std::vector<double>& f, int ix, int iy, int Nx) {
 
 void compute_boundary_aware_gradient(const SimulationParams& params,
                                      const FluidDomainBounds& domain,
+                                     const ImmersedSolidProjectionMask* mask,
                                      const std::vector<double>& f,
                                      std::vector<double>& gx,
                                      std::vector<double>& gy,
@@ -368,35 +415,57 @@ void compute_boundary_aware_gradient(const SimulationParams& params,
     for (int iy = 0; iy < Ny; ++iy) {
         for (int ix = 0; ix < Nx; ++ix) {
             const int c = ix + Nx * iy;
-            double dfdx = 0.0;
-            double dfdy = 0.0;
-            if (is_x_periodic(params)) {
-                const int im = (ix + Nx - 1) % Nx;
-                const int ip = (ix + 1) % Nx;
-                dfdx = (field_at(f, ip, iy, Nx) - field_at(f, im, iy, Nx)) / (2.0 * dx);
-            } else if (Nx > 1) {
-                if (ix == 0) {
-                    dfdx = (field_at(f, 1, iy, Nx) - field_at(f, 0, iy, Nx)) / dx;
-                } else if (ix == Nx - 1) {
-                    dfdx = (field_at(f, Nx - 1, iy, Nx) - field_at(f, Nx - 2, iy, Nx)) / dx;
-                } else {
-                    dfdx = (field_at(f, ix + 1, iy, Nx) - field_at(f, ix - 1, iy, Nx)) / (2.0 * dx);
-                }
-            }
-            if (is_y_periodic(params)) {
-                const int jm = (iy + Ny - 1) % Ny;
-                const int jp = (iy + 1) % Ny;
-                dfdy = (field_at(f, ix, jp, Nx) - field_at(f, ix, jm, Nx)) / (2.0 * dy);
-            } else if (Ny > 1) {
-                if (iy == 0) {
-                    dfdy = (field_at(f, ix, 1, Nx) - field_at(f, ix, 0, Nx)) / dy;
-                } else if (iy == Ny - 1) {
-                    dfdy = (field_at(f, ix, Ny - 1, Nx) - field_at(f, ix, Ny - 2, Nx)) / dy;
-                } else {
-                    dfdy = (field_at(f, ix, iy + 1, Nx) - field_at(f, ix, iy - 1, Nx)) / (2.0 * dy);
-                }
-            }
             const std::size_t k = static_cast<std::size_t>(c);
+            if (!virial_cell_active(mask, k)) {
+                gx[k] = 0.0;
+                gy[k] = 0.0;
+                continue;
+            }
+
+            const double center = field_at(f, ix, iy, Nx);
+            auto sample_cell = [&](int qx, int qy) -> double {
+                int sx = qx;
+                int sy = qy;
+                if (is_x_periodic(params)) {
+                    sx = (qx + Nx) % Nx;
+                } else {
+                    sx = std::clamp(qx, 0, Nx - 1);
+                }
+                if (is_y_periodic(params)) {
+                    sy = (qy + Ny) % Ny;
+                } else {
+                    sy = std::clamp(qy, 0, Ny - 1);
+                }
+                const int cc = sx + Nx * sy;
+                return virial_cell_active(mask, static_cast<std::size_t>(cc)) ? field_at(f, sx, sy, Nx) : center;
+            };
+
+            double dfdx = 0.0;
+            if (Nx > 1) {
+                if (is_x_periodic(params)) {
+                    dfdx = (sample_cell(ix + 1, iy) - sample_cell(ix - 1, iy)) / (2.0 * dx);
+                } else if (ix == 0) {
+                    dfdx = (sample_cell(ix + 1, iy) - center) / dx;
+                } else if (ix == Nx - 1) {
+                    dfdx = (center - sample_cell(ix - 1, iy)) / dx;
+                } else {
+                    dfdx = (sample_cell(ix + 1, iy) - sample_cell(ix - 1, iy)) / (2.0 * dx);
+                }
+            }
+
+            double dfdy = 0.0;
+            if (Ny > 1) {
+                if (is_y_periodic(params)) {
+                    dfdy = (sample_cell(ix, iy + 1) - sample_cell(ix, iy - 1)) / (2.0 * dy);
+                } else if (iy == 0) {
+                    dfdy = (sample_cell(ix, iy + 1) - center) / dy;
+                } else if (iy == Ny - 1) {
+                    dfdy = (center - sample_cell(ix, iy - 1)) / dy;
+                } else {
+                    dfdy = (sample_cell(ix, iy + 1) - sample_cell(ix, iy - 1)) / (2.0 * dy);
+                }
+            }
+
             gx[k] = dfdx;
             gy[k] = dfdy;
             const double mag2 = dfdx * dfdx + dfdy * dfdy;
@@ -404,11 +473,13 @@ void compute_boundary_aware_gradient(const SimulationParams& params,
             maxAbs = std::max(maxAbs, std::sqrt(mag2));
         }
     }
-    diag.gradPdriveRms = nc > 0 ? std::sqrt(sum2 / static_cast<double>(nc)) : 0.0;
+    const std::uint64_t activeCells = virial_active_cell_count(mask, nc);
+    diag.gradPdriveRms = activeCells > 0u ? std::sqrt(sum2 / static_cast<double>(activeCells)) : 0.0;
     diag.gradPdriveMaxAbs = maxAbs;
 }
 
 void compute_virial_velocity_kick(const SimulationParams& params,
+                                  const ImmersedSolidProjectionMask* mask,
                                   const VirialPressureWorkspace& ws,
                                   VirialPressureWorkspace& out,
                                   const VirialPressureDiagnostics& inDiag,
@@ -422,6 +493,11 @@ void compute_virial_velocity_kick(const SimulationParams& params,
 #pragma omp parallel for reduction(+:raw2,applied2) reduction(max:appliedMax) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
+        if (!virial_cell_active(mask, k)) {
+            out.dux[k] = 0.0;
+            out.duy[k] = 0.0;
+            continue;
+        }
         double rhoKick = inDiag.rhoUniformNow;
         if (rhoKickMode == "local" || rhoKickMode == "cell" || rhoKickMode == "rho_local") {
             rhoKick = std::max(ws.cellRho[k], rhoMin);
@@ -443,8 +519,9 @@ void compute_virial_velocity_kick(const SimulationParams& params,
         applied2 += dux * dux + duy * duy;
         appliedMax = std::max(appliedMax, std::sqrt(dux * dux + duy * duy));
     }
-    diag.duVirialRawRms = nc > 0 ? std::sqrt(raw2 / static_cast<double>(nc)) : 0.0;
-    diag.duVirialAppliedRms = nc > 0 ? std::sqrt(applied2 / static_cast<double>(nc)) : 0.0;
+    const std::uint64_t activeCells = virial_active_cell_count(mask, nc);
+    diag.duVirialRawRms = activeCells > 0u ? std::sqrt(raw2 / static_cast<double>(activeCells)) : 0.0;
+    diag.duVirialAppliedRms = activeCells > 0u ? std::sqrt(applied2 / static_cast<double>(activeCells)) : 0.0;
     diag.duVirialAppliedMaxAbs = appliedMax;
     const double thermal = params.kBT > 0.0 ? std::sqrt(params.kBT) : 0.0;
     diag.duVirialOverThermalRms = thermal > 0.0 ? diag.duVirialAppliedRms / thermal : 0.0;
@@ -499,7 +576,6 @@ VirialPressureDiagnostics apply_virial_pressure_kick(ParticleState& state,
                                                      const CellGrid& grid,
                                                      const FluidDomainBounds& domain,
                                                      VirialPressureWorkspace& workspace) {
-    (void)grid;
     validate_particle_state(state, "apply_virial_pressure_kick");
 
     VirialPressureDiagnostics diag{};
@@ -516,10 +592,11 @@ VirialPressureDiagnostics apply_virial_pressure_kick(ParticleState& state,
     const int nc = params.Nx * params.Ny;
     const int nt = std::max(1, thread_count());
     resize_workspace(workspace, state.Np, nc, nt);
+    const ImmersedSolidProjectionMask* mask = prepare_virial_immersed_mask(params, grid, domain, workspace, diag);
     deposit_cell_mass_momentum(state, params, domain, workspace);
-    compute_pressure_maps(state, params, domain, workspace, diag);
-    compute_boundary_aware_gradient(params, domain, workspace.Pdrive, workspace.gradPx, workspace.gradPy, diag);
-    compute_virial_velocity_kick(params, workspace, workspace, diag, diag);
+    compute_pressure_maps(state, params, domain, mask, workspace, diag);
+    compute_boundary_aware_gradient(params, domain, mask, workspace.Pdrive, workspace.gradPx, workspace.gradPy, diag);
+    compute_virial_velocity_kick(params, mask, workspace, workspace, diag, diag);
 
     if (diag.kickEnabled && params.Kvirial != 0.0 && params.virialBeta != 0.0) {
         diag.kickApplied = true;

@@ -308,9 +308,28 @@ void add_moving_wall_fluxes_to_q6_bc(EllipticProjectionBC& bc,
     }
 }
 
+double face_strength_for_q6(double requestedStrength,
+                            const ImmersedSolidProjectionMask* immersedMask,
+                            bool xFace,
+                            std::size_t k) {
+    if (immersedMask != nullptr && !immersedMask->faceOpen.x.empty()) {
+        const double open = xFace ? immersedMask->faceOpen.x[k] : immersedMask->faceOpen.y[k];
+        // A sub-relaxed Q6 projection is useful for tuning the interior
+        // incompressibility/structure compromise, but an immersed solid wall
+        // must remain impermeable.  Closed immersed-solid faces therefore keep
+        // the full raw correction, which is -baseFlux on such faces in the
+        // elliptic core.  Open fluid-fluid faces use the requested strength.
+        if (open == 0.0) {
+            return 1.0;
+        }
+    }
+    return requestedStrength;
+}
+
 void build_scaled_q6_fluxes(const PeriodicFaceField& baseFlux,
                             const PeriodicFaceField& rawCorrectionFlux,
                             double strength,
+                            const ImmersedSolidProjectionMask* immersedMask,
                             PeriodicFaceField& appliedCorrectionFlux,
                             PeriodicFaceField& appliedProjectedFlux) {
     const std::size_t n = baseFlux.x.size();
@@ -322,8 +341,10 @@ void build_scaled_q6_fluxes(const PeriodicFaceField& baseFlux,
 #pragma omp parallel for if(n > 4096)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t k = static_cast<std::size_t>(ii);
-        appliedCorrectionFlux.x[k] = strength * rawCorrectionFlux.x[k];
-        appliedCorrectionFlux.y[k] = strength * rawCorrectionFlux.y[k];
+        const double sx = face_strength_for_q6(strength, immersedMask, true, k);
+        const double sy = face_strength_for_q6(strength, immersedMask, false, k);
+        appliedCorrectionFlux.x[k] = sx * rawCorrectionFlux.x[k];
+        appliedCorrectionFlux.y[k] = sy * rawCorrectionFlux.y[k];
         appliedProjectedFlux.x[k] = baseFlux.x[k] + appliedCorrectionFlux.x[k];
         appliedProjectedFlux.y[k] = baseFlux.y[k] + appliedCorrectionFlux.y[k];
     }
@@ -445,6 +466,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     build_scaled_q6_fluxes(workspace.baseFlux,
                            result.correctionFlux,
                            params.q6ProjectionStrength,
+                           mask != nullptr ? &workspace.immersedMask : nullptr,
                            workspace.appliedCorrectionFlux,
                            workspace.appliedProjectedFlux);
 

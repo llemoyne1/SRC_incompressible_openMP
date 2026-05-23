@@ -137,6 +137,8 @@ struct RuntimeSummary {
     int virialKickApplied = 0;
     double virialK = 0.0;
     double virialBeta = 0.0;
+    std::uint64_t virialImmersedSolidFluidCells = 0;
+    std::uint64_t virialImmersedSolidSolidCells = 0;
     double virialRhoMean = 0.0;
     double virialRhoEOSRef = 0.0;
     double virialRhoUniformNow = 0.0;

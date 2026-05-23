@@ -146,3 +146,29 @@ metrics. These are part of the method-selection criterion: a good Q6/Q9 setting
 should not only reduce compressibility diagnostics, but should also preserve
 organized recirculation in cells whose particle population remains statistically
 credible.
+
+## 0055 note: hard immersed-wall semantics for under-relaxed Q6
+
+The first completed sweep showed that under-relaxing Q6 by multiplying the full
+face correction also under-relaxed the no-flux correction on closed immersed
+faces.  This made `q6ImmersedSolidLeakProjectedFluxRmsLate` non-zero whenever
+`q6ProjectionStrength < 1`.
+
+From patch 0055 onward, `q6ProjectionStrength` only under-relaxes open
+fluid-fluid faces.  Closed immersed-solid faces always use the full wall
+correction returned by the elliptic core.  The parameter should therefore be
+read as an interior projection-strength knob, not as a relaxation of the solid
+impermeability condition.
+
+The pre-0055 sweep remains useful for choosing candidate interior strengths.
+The selected candidate to rerun is:
+
+```text
+q6ProjectionStrength = 0.50
+q9DensityRelaxationBeta = 0.00100
+q9LowKMaxIndex = 2
+```
+
+See `docs/BACKWARD_STEP_Q6_Q9_PARAMETRIC_RESULTS_AND_LIQUID_COMPARISON.md` for
+the documented interpretation of the completed sweep and the follow-up virial
+comparison case.

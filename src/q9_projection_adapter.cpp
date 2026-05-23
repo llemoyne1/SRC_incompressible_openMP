@@ -442,9 +442,23 @@ void build_uniform_density_relaxation_target(const SimulationParams& params,
     diag.targetDivergenceFilterRatio = 1.0;
 }
 
+double face_strength_for_q9(double requestedStrength,
+                            const ImmersedSolidProjectionMask* immersedMask,
+                            bool xFace,
+                            std::size_t k) {
+    if (immersedMask != nullptr && !immersedMask->faceOpen.x.empty()) {
+        const double open = xFace ? immersedMask->faceOpen.x[k] : immersedMask->faceOpen.y[k];
+        if (open == 0.0) {
+            return 1.0;
+        }
+    }
+    return requestedStrength;
+}
+
 void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
                                       const PeriodicFaceField& correctionFlux,
                                       const EllipticProjectionMask* mask,
+                                      const ImmersedSolidProjectionMask* immersedMask,
                                       double strength,
                                       std::vector<double>& dux,
                                       std::vector<double>& duy,
@@ -460,8 +474,10 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
 #pragma omp parallel for reduction(+:sum2) reduction(max:maxAbs) if(nc > 4096)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
-        const double dcx = mask_active(mask, k) ? strength * correctionFlux.x[k] : 0.0;
-        const double dcy = mask_active(mask, k) ? strength * correctionFlux.y[k] : 0.0;
+        const double sx = face_strength_for_q9(strength, immersedMask, true, k);
+        const double sy = face_strength_for_q9(strength, immersedMask, false, k);
+        const double dcx = mask_active(mask, k) ? sx * correctionFlux.x[k] : 0.0;
+        const double dcy = mask_active(mask, k) ? sy * correctionFlux.y[k] : 0.0;
         appliedCorrectionFlux.x[k] = dcx;
         appliedCorrectionFlux.y[k] = dcy;
         if (cellMass[k] > 0.0) {
@@ -642,6 +658,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     correction_flux_to_velocity_kick(workspace.cellMass,
                                      result.correctionFlux,
                                      mask,
+                                     mask != nullptr ? &workspace.immersedMask : nullptr,
                                      params.q9MassFluxProjectionStrength,
                                      workspace.cellDUx,
                                      workspace.cellDUy,

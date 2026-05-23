@@ -5,6 +5,7 @@
 
 #include "cell_grid.h"
 #include "fluid_domain.h"
+#include "immersed_solid.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -31,6 +32,9 @@ struct VirialPressureDiagnostics {
 
     double Kvirial = 0.0;
     double betaVirial = 0.0;
+
+    std::uint64_t immersedSolidFluidCells = 0;
+    std::uint64_t immersedSolidSolidCells = 0;
 
     double rhoMean = 0.0;
     double rhoEOSRef = 0.0;
@@ -91,6 +95,8 @@ struct VirialPressureWorkspace {
     std::vector<double> localPx;
     std::vector<double> localPy;
     std::vector<double> localRelKinetic;
+
+    ImmersedSolidProjectionMask immersedMask;
 };
 
 bool virial_pressure_requested(const SimulationParams& params);

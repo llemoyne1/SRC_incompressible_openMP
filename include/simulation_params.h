@@ -127,7 +127,7 @@ struct SimulationParams {
     int projectionMaxIterations = 300;
     double projectionTolerance = 1.0e-10;
     bool projectionMomentumCorrectionEnable = true;
-    double q6ProjectionStrength = 1.0; // under-relax Q6 velocity correction; 1 => full projection
+    double q6ProjectionStrength = 1.0; // under-relax Q6 fluid-fluid correction; immersed-solid no-flux remains hard
     bool projectionImmersedSolidMaskEnable = false;
     bool projectionAllowUnmaskedImmersedSolid = false;
     double projectionImmersedSolidFluidFractionThreshold = 0.5;
