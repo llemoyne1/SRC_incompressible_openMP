@@ -98,17 +98,13 @@ function out = validate_backward_step_smoke(runDir, varargin)
         end
         grid on; xlabel('time'); title('Immersed wall hits');
 
-        nexttile;
-        plot_smpcd_frame(finalState, finalFields, 'field', opt.field, ...
-            'showParticles', false, 'showVelocityVectors', false);
-        hold on; local_draw_rectangle(xMin, xMax, yMin, yMax); hold off;
-        title(sprintf('final %s', char(opt.field)), 'Interpreter', 'none');
+        ax = nexttile;
+        local_plot_binned_field(ax, finalFields, char(opt.field), xMin, xMax, yMin, yMax);
+        title(ax, sprintf('final %s', char(opt.field)), 'Interpreter', 'none');
 
-        nexttile;
-        plot_smpcd_frame(finalState, finalFields, 'field', 'Ux', ...
-            'showParticles', false, 'showVelocityVectors', false);
-        hold on; local_draw_rectangle(xMin, xMax, yMin, yMax); hold off;
-        title('final Ux');
+        ax = nexttile;
+        local_plot_binned_field(ax, finalFields, 'Ux', xMin, xMax, yMin, yMax);
+        title(ax, 'final Ux');
     end
 end
 
@@ -141,6 +137,46 @@ function v = local_summary_mean(summary, name)
     end
 end
 
-function local_draw_rectangle(xMin, xMax, yMin, yMax)
-    plot([xMin xMax xMax xMin xMin], [yMin yMin yMax yMax yMin], 'k-', 'LineWidth', 1.5);
+function local_plot_binned_field(ax, fields, fieldName, xMin, xMax, yMin, yMax)
+    data = local_extract_field(fields, fieldName);
+    [Xc, Yc] = meshgrid(fields.xc, fields.yc);
+    insideSolid = Xc >= xMin & Xc <= xMax & Yc >= yMin & Yc <= yMax;
+    data(insideSolid) = NaN;
+
+    imagesc(ax, fields.xc, fields.yc, data);
+    set(ax, 'YDir', 'normal');
+    axis(ax, 'equal');
+    axis(ax, [0 fields.Lx 0 fields.Ly]);
+    xlabel(ax, 'x');
+    ylabel(ax, 'y');
+    colorbar(ax);
+    hold(ax, 'on');
+    local_draw_rectangle(ax, xMin, xMax, yMin, yMax);
+    hold(ax, 'off');
+end
+
+function data = local_extract_field(fields, fieldName)
+    switch lower(char(fieldName))
+        case {'n','count','occupancy'}
+            data = fields.N;
+        case {'rho','density'}
+            data = fields.rho;
+        case {'ux'}
+            data = fields.Ux;
+        case {'uy'}
+            data = fields.Uy;
+        case {'speed','u'}
+            data = fields.speed;
+        case {'omega','vorticity'}
+            data = fields.omega;
+        case {'type','dominanttype'}
+            data = fields.dominantType;
+        otherwise
+            error('validate_backward_step_smoke:unknownField', 'Unknown field: %s', char(fieldName));
+    end
+end
+
+function local_draw_rectangle(ax, xMin, xMax, yMin, yMax)
+    patch(ax, [xMin xMax xMax xMin], [yMin yMin yMax yMax], [0.20 0.20 0.20], ...
+        'EdgeColor', 'k', 'LineWidth', 1.0, 'FaceAlpha', 1.0);
 end
