@@ -4,6 +4,41 @@
 #include <cstdint>
 
 namespace mpcd {
+namespace {
+
+void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) {
+    if (!params.keepMeanFlowEnable) {
+        return;
+    }
+    validate_particle_state(state, "apply_keep_mean_flow");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+
+    double mass = 0.0;
+    double px = 0.0;
+    double py = 0.0;
+#pragma omp parallel for reduction(+:mass,px,py) if(n > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t i = static_cast<std::size_t>(ii);
+        const double m = state.mass[i];
+        mass += m;
+        px += m * state.vx[i];
+        py += m * state.vy[i];
+    }
+    if (!(mass > 0.0)) {
+        return;
+    }
+
+    const double dvx = params.targetMeanUx - px / mass;
+    const double dvy = params.targetMeanUy - py / mass;
+#pragma omp parallel for if(n > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t i = static_cast<std::size_t>(ii);
+        state.vx[i] += dvx;
+        state.vy[i] += dvy;
+    }
+}
+
+} // namespace
 
 StepResult run_src_mpcd_base_step(ParticleState& state,
                                   const SimulationParams& params,
@@ -34,6 +69,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     result.virial = apply_virial_pressure_kick(state, params, grid, result.domain, workspace.virial);
     result.thermostat = apply_cell_relative_rescale_thermostat(
         state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
+    apply_keep_mean_flow(state, params);
     return result;
 }
 

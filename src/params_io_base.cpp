@@ -159,6 +159,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "bodyAccelerationY") p.bodyAccelerationY = parse_double(value, key);
         else if (key == "bodyForceX") p.bodyAccelerationX = parse_double(value, key);
         else if (key == "bodyForceY") p.bodyAccelerationY = parse_double(value, key);
+        else if (key == "keepMeanFlowEnable" || key == "keepMeanFlow") p.keepMeanFlowEnable = parse_bool(value, key);
+        else if (key == "targetMeanUx" || key == "meanFlowUx" || key == "U0") p.targetMeanUx = parse_double(value, key);
+        else if (key == "targetMeanUy" || key == "meanFlowUy") p.targetMeanUy = parse_double(value, key);
         else if (key == "bcX" || key == "bcY" ||
                  key == "bcLeft" || key == "bcRight" ||
                  key == "bcBottom" || key == "bcTop" ||
@@ -368,6 +371,12 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!bottomPeriodic && (!is_wall_mode(p.bcBottom) || !is_wall_mode(p.bcTop))) {
         throw std::runtime_error("Non-periodic y boundaries currently require wall modes: solid, specular or bounceback");
+    }
+
+    if (p.keepMeanFlowEnable) {
+        if (!std::isfinite(p.targetMeanUx) || !std::isfinite(p.targetMeanUy)) {
+            throw std::runtime_error("targetMeanUx/targetMeanUy must be finite when keepMeanFlowEnable=true");
+        }
     }
 
     if (p.wallVpMode != "thermal" &&

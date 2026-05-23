@@ -45,6 +45,14 @@ struct SimulationParams {
     double bodyAccelerationX = 0.0;
     double bodyAccelerationY = 0.0;
 
+    // Optional global mean-flow controller. This is useful for periodic wake
+    // tests around immersed solids: it mimics the CUDA VK keepMeanFlow path by
+    // applying a spatially uniform velocity shift after the SRC/Q6/Q9/virial/
+    // thermostat sequence, while preserving relative thermal velocities.
+    bool keepMeanFlowEnable = false;
+    double targetMeanUx = 0.0;
+    double targetMeanUy = 0.0;
+
     // Boundary modes are specified per face. The legacy aliases bcX and bcY are
     // still accepted by the parser and set the corresponding face pairs.
     // Implemented now: periodic pairs, solid thermal walls, and legacy
