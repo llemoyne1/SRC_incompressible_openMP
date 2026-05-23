@@ -104,3 +104,30 @@ A plausible target is the `Q9 s=0.50 beta=1e-3 lowK=2` case, provided the
 hard-wall leak diagnostics remain zero after the fix. If `lowK=4` improves
 population reliability without fragmenting the reversed region, it can be
 kept as an alternative; otherwise `lowK=2` remains the cleaner default.
+
+## Completed hard-wall calibration results
+
+The completed 30000-step hard-wall calibration confirms the corrected semantics:
+all selected cases keep zero projected leak through the immersed solid, including
+`q6ProjectionStrength = 0.50`.
+
+| case | Q6 leak RMS | Q9 leak RMS | Q6 div after | P05(N) rev/ref | N<5 rev | CV(N) rev | omega low-k | largest rev. comp. | rev. comps |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Q6 s=0.50 | 0 | 0 | 4.214e-1 | 0.582 | 0.0119 | 0.119 | 0.135 | 0.202 | 29 |
+| Q6 s=1.00 | 0 | 0 | 7.55e-10 | 0.710 | 0 | 0.105 | 0.188 | 0.211 | 24 |
+| Q9 s=0.50 beta=1e-3 k=2 | 0 | 0 | 4.215e-1 | 0.730 | 0.0127 | 0.118 | 0.155 | 0.266 | 34 |
+| Q9 s=0.50 beta=1e-3 k=4 | 0 | 0 | 4.205e-1 | 0.762 | 0 | 0.103 | 0.141 | 0.247 | 32 |
+
+The result shifts the preferred no-virial baseline slightly toward the `lowK=4`
+Q9 case.  `lowK=2` keeps the largest reversed component marginally larger, but
+`lowK=4` gives the cleaner recirculation population low tail.  Since the current
+validation argument is that quasi-incompressible SRC/MPCD should preserve
+statistical reliability in recirculation zones, `lowK=4` is the better candidate
+to test with the virial closure.
+
+The final follow-up is documented in
+`docs/BACKWARD_STEP_FINAL_Q9_VIRIAL_CONFIGURATION.md` and launched with:
+
+```bash
+./scripts/run_backward_step_final_liquid_config_test.sh
+```

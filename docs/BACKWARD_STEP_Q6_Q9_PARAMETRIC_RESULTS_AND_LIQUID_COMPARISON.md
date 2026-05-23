@@ -81,18 +81,20 @@ The current code now uses the following semantics:
 - therefore the immersed wall remains impermeable even for `q6ProjectionStrength
   < 1`.
 
-With this correction, the most promising candidate to rerun is:
+The hard-wall rerun was completed.  It confirms zero immersed-solid leak for
+all selected cases, including `q6ProjectionStrength = 0.50`.  The current
+no-virial default candidate is now:
 
 ```text
 Q9 hard-wall selected:
 q6ProjectionStrength = 0.50
 q9DensityRelaxationBeta = 0.00100
-q9LowKMaxIndex = 2
+q9LowKMaxIndex = 4
 ```
 
-This setting gave the best pre-correction compromise between population
-reliability and organized recirculation, but must be rerun with the hard-wall
-semantics before being accepted as a default.
+The `lowK=2` case gives a slightly more compact largest reversed component,
+but `lowK=4` gives the cleaner low-tail population statistics in the
+recirculation zone, which is the primary reliability criterion for the method.
 
 ## Q6/Q9 versus complete Q6/Q9/virial closure
 
@@ -108,12 +110,15 @@ pressure maps and gradients, so empty cells inside the solid rectangle do not
 act as a spurious low-density liquid.  This is essential before testing the full
 liquid closure on an immersed geometry.
 
-Default liquid-closure comparison parameters:
+The first liquid-closure comparison was run at `lowK=2`; it showed that the
+virial kick improves the population low tail in the reversed zone while keeping
+`virialDuOverThermalRmsLate` very small.  The final focused test now uses the
+selected `lowK=4` baseline:
 
 ```text
 q6ProjectionStrength = 0.50
 q9DensityRelaxationBeta = 0.00100
-q9LowKMaxIndex = 2
+q9LowKMaxIndex = 4
 Kvirial = 0.50
 virialBeta = 0.05
 ```
@@ -121,13 +126,13 @@ virialBeta = 0.05
 Run:
 
 ```bash
-./scripts/run_backward_step_liquid_closure_comparison.sh
+./scripts/run_backward_step_final_liquid_config_test.sh
 ```
 
 Analyze from `matlab/`:
 
 ```matlab
-suite = validate_backward_step_liquid_closure_comparison();
+suite = validate_backward_step_final_liquid_config();
 ```
 
 Primary acceptance checks:
@@ -139,3 +144,13 @@ Primary acceptance checks:
 - `virialDuOverThermalRmsLate` remains small enough that the EOS kick is a
   liquid closure correction, not the dominant dynamics;
 - low-k vorticity fraction and largest reversed component are not degraded.
+
+
+## Final configuration follow-up
+
+The final lowK=4 Q9/Q9+virial test and the acceptance criteria for freezing the
+immersed-solid liquid default are documented in:
+
+```text
+docs/BACKWARD_STEP_FINAL_Q9_VIRIAL_CONFIGURATION.md
+```
