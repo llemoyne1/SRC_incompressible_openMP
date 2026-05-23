@@ -24,6 +24,11 @@ function state = generate_smpcd_state_uniform(varargin)
     p.addParameter('circleCx', 0.5, @(x) isnumeric(x) && isscalar(x));
     p.addParameter('circleCy', 0.5, @(x) isnumeric(x) && isscalar(x));
     p.addParameter('circleR', 0.1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+    p.addParameter('excludeRectangle', false, @(x) islogical(x) && isscalar(x));
+    p.addParameter('rectangleXMin', 0.0, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('rectangleXMax', 0.25, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('rectangleYMin', 0.0, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('rectangleYMax', 0.5, @(x) isnumeric(x) && isscalar(x));
     p.parse(varargin{:});
     opt = p.Results;
 
@@ -58,6 +63,22 @@ function state = generate_smpcd_state_uniform(varargin)
             x(inside) = opt.Lx * rand(nReplace,1);
             y(inside) = opt.Ly * rand(nReplace,1);
             inside = ((x - opt.circleCx).^2 + (y - opt.circleCy).^2) < opt.circleR.^2;
+        end
+    end
+
+    if opt.excludeRectangle
+        if ~(opt.rectangleXMax > opt.rectangleXMin && opt.rectangleYMax > opt.rectangleYMin)
+            error('generate_smpcd_state_uniform:badRectangle', ...
+                'Rectangle exclusion requires rectangleXMax>XMin and rectangleYMax>YMin.');
+        end
+        inside = x >= opt.rectangleXMin & x <= opt.rectangleXMax & ...
+                 y >= opt.rectangleYMin & y <= opt.rectangleYMax;
+        while any(inside)
+            nReplace = nnz(inside);
+            x(inside) = opt.Lx * rand(nReplace,1);
+            y(inside) = opt.Ly * rand(nReplace,1);
+            inside = x >= opt.rectangleXMin & x <= opt.rectangleXMax & ...
+                     y >= opt.rectangleYMin & y <= opt.rectangleYMax;
         end
     end
 

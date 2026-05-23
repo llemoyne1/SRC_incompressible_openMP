@@ -6,7 +6,7 @@
 #include <vector>
 #include "boundary_base.h"
 #include "fluid_domain.h"
-#include "immersed_circle.h"
+#include "immersed_solid.h"
 #include "particle_state.h"
 #include "q6_projection_adapter.h"
 #include "q9_projection_adapter.h"
@@ -152,7 +152,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        double wallTime,
                                        const std::vector<std::uint32_t>* cellCount = nullptr,
                                        const BoundaryDiagnostics* boundary = nullptr,
-                                       const ImmersedCircleDiagnostics* immersed = nullptr,
+                                       const ImmersedSolidDiagnostics* immersed = nullptr,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const Q6ProjectionDiagnostics* q6 = nullptr,
                                        const Q9ProjectionDiagnostics* q9 = nullptr,

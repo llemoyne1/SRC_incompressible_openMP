@@ -3,7 +3,7 @@
 #include "params_io_base.h"
 #include "runtime_summary.h"
 #include "fluid_domain.h"
-#include "immersed_circle.h"
+#include "immersed_solid.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
 
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
         const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
         mpcd::apply_boundary_conditions(state, params, initialDomain, 0u, 0.0);
-        mpcd::apply_immersed_circle_reflection(state, params, initialDomain, 0.0);
+        mpcd::apply_immersed_solid_reflection(state, params, initialDomain, 0.0);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
                   << ", B:" << params.bcBottom
                   << ", T:" << params.bcTop << "]"
                   << " wallAccommodation=" << params.wallAccommodation
-                  << " immersedCircle=" << (params.immersedCircleEnable ? "on" : "off")
+                  << " immersedSolid=" << (params.immersedSolidEnable ? "on" : "off")
                   << " fluid=[" << initialDomain.xMin << "," << initialDomain.xMax
                   << "]x[" << initialDomain.yMin << "," << initialDomain.yMax << "]"
                   << " method=" << params.method

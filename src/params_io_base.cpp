@@ -182,16 +182,24 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "wallVpUyBottom" || key == "wallUyBottom") p.wallVpUyBottom = parse_double(value, key);
         else if (key == "wallVpUxTop" || key == "wallUxTop") p.wallVpUxTop = parse_double(value, key);
         else if (key == "wallVpUyTop" || key == "wallUyTop") p.wallVpUyTop = parse_double(value, key);
-        else if (key == "immersedCircleEnable") p.immersedCircleEnable = parse_bool(value, key);
-        else if (key == "immersedCircleCx") p.immersedCircleCx = parse_double(value, key);
-        else if (key == "immersedCircleCy") p.immersedCircleCy = parse_double(value, key);
-        else if (key == "immersedCircleR") p.immersedCircleR = parse_double(value, key);
-        else if (key == "immersedCircleFractionSamples") p.immersedCircleFractionSamples = parse_int(value, key);
-        else if (key == "immersedCircleVx") p.immersedCircleVx = parse_double(value, key);
-        else if (key == "immersedCircleVy") p.immersedCircleVy = parse_double(value, key);
-        else if (key == "immersedCircleWallUx") p.immersedCircleWallUx = parse_double(value, key);
-        else if (key == "immersedCircleWallUy") p.immersedCircleWallUy = parse_double(value, key);
-        else if (key == "immersedCircleOmega") p.immersedCircleOmega = parse_double(value, key);
+        else if (key == "immersedSolidEnable" || key == "immersedCircleEnable") {
+            p.immersedSolidEnable = parse_bool(value, key);
+            if (key == "immersedCircleEnable") p.immersedSolidShape = "circle";
+        }
+        else if (key == "immersedSolidShape") p.immersedSolidShape = get_lower(kv, key);
+        else if (key == "immersedSolidCx" || key == "immersedCircleCx") p.immersedSolidCx = parse_double(value, key);
+        else if (key == "immersedSolidCy" || key == "immersedCircleCy") p.immersedSolidCy = parse_double(value, key);
+        else if (key == "immersedSolidR" || key == "immersedCircleR") p.immersedSolidR = parse_double(value, key);
+        else if (key == "immersedSolidFractionSamples" || key == "immersedCircleFractionSamples") p.immersedSolidFractionSamples = parse_int(value, key);
+        else if (key == "immersedSolidVx" || key == "immersedCircleVx") p.immersedSolidVx = parse_double(value, key);
+        else if (key == "immersedSolidVy" || key == "immersedCircleVy") p.immersedSolidVy = parse_double(value, key);
+        else if (key == "immersedSolidWallUx" || key == "immersedCircleWallUx") p.immersedSolidWallUx = parse_double(value, key);
+        else if (key == "immersedSolidWallUy" || key == "immersedCircleWallUy") p.immersedSolidWallUy = parse_double(value, key);
+        else if (key == "immersedSolidOmega" || key == "immersedCircleOmega") p.immersedSolidOmega = parse_double(value, key);
+        else if (key == "immersedSolidXMin") p.immersedSolidXMin = parse_double(value, key);
+        else if (key == "immersedSolidXMax") p.immersedSolidXMax = parse_double(value, key);
+        else if (key == "immersedSolidYMin") p.immersedSolidYMin = parse_double(value, key);
+        else if (key == "immersedSolidYMax") p.immersedSolidYMax = parse_double(value, key);
         else if (key == "thermostatEnable") p.thermostatEnable = parse_bool(value, key);
         else if (key == "thermostatMode") p.thermostatMode = get_lower(kv, key);
         else if (key == "thermostatEvery") p.thermostatEvery = parse_int(value, key);
@@ -249,6 +257,13 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     if (has_key(kv, "boundaryRight")) p.bcRight = get_lower(kv, "boundaryRight");
     if (has_key(kv, "boundaryBottom")) p.bcBottom = get_lower(kv, "boundaryBottom");
     if (has_key(kv, "boundaryTop")) p.bcTop = get_lower(kv, "boundaryTop");
+
+    if (has_key(kv, "immersedCircleEnable") && !has_key(kv, "immersedSolidShape")) {
+        p.immersedSolidShape = "circle";
+    }
+    if (has_key(kv, "immersedSolidShape")) {
+        p.immersedSolidShape = get_lower(kv, "immersedSolidShape");
+    }
 
     if (p.method == "q6") {
         p.projectionEnable = true;
@@ -368,7 +383,7 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.wallThermalNoise >= 0.0)) {
         throw std::runtime_error("wallThermalNoise must be non-negative");
     }
-    if ((has_solid_wall(p) || p.wallVpEnable || p.immersedCircleEnable) && p.wallAccommodation > 0.0) {
+    if ((has_solid_wall(p) || p.wallVpEnable || p.immersedSolidEnable) && p.wallAccommodation > 0.0) {
         const double effectiveWallKBT = p.wallKBT > 0.0 ? p.wallKBT : p.wallVpKBT;
         if (effectiveWallKBT < 0.0 && !(p.kBT > 0.0)) {
             throw std::runtime_error("wallKBT/wallVpKBT is negative, so kBT must be positive when solid wall coupling is active");
@@ -378,34 +393,64 @@ void validate_simulation_params(const SimulationParams& p) {
         }
     }
 
-    if (p.immersedCircleEnable) {
-        if (!(p.immersedCircleR > 0.0)) {
-            throw std::runtime_error("immersedCircleR must be positive when immersedCircleEnable=true");
+    if (p.immersedSolidEnable) {
+        std::string solidShape = p.immersedSolidShape;
+        std::replace(solidShape.begin(), solidShape.end(), '-', '_');
+        if (solidShape != "circle" && solidShape != "disk" && solidShape != "disc" &&
+            solidShape != "rectangle" && solidShape != "rect" && solidShape != "box" && solidShape != "step") {
+            throw std::runtime_error("immersedSolidShape supports: circle, rectangle");
         }
-        if (p.immersedCircleFractionSamples <= 0) {
-            throw std::runtime_error("immersedCircleFractionSamples must be positive");
+        if (p.immersedSolidFractionSamples <= 0) {
+            throw std::runtime_error("immersedSolidFractionSamples must be positive");
         }
-        const double xMax0Circle = p.fluidXMax0 >= 0.0 ? p.fluidXMax0 : p.Lx;
-        const double yMax0Circle = p.fluidYMax0 >= 0.0 ? p.fluidYMax0 : p.Ly;
-        const double tEndCircle = static_cast<double>(p.nSteps) * p.dt;
-        const double xMinEndCircle = p.fluidXMin0 + p.fluidXMinVelocity * tEndCircle;
-        const double xMaxEndCircle = xMax0Circle + p.fluidXMaxVelocity * tEndCircle;
-        const double yMinEndCircle = p.fluidYMin0 + p.fluidYMinVelocity * tEndCircle;
-        const double yMaxEndCircle = yMax0Circle + p.fluidYMaxVelocity * tEndCircle;
-        const double cxEnd = p.immersedCircleCx + p.immersedCircleVx * tEndCircle;
-        const double cyEnd = p.immersedCircleCy + p.immersedCircleVy * tEndCircle;
-        const bool circleInsideStart =
-            p.immersedCircleCx - p.immersedCircleR >= p.fluidXMin0 &&
-            p.immersedCircleCx + p.immersedCircleR <= xMax0Circle &&
-            p.immersedCircleCy - p.immersedCircleR >= p.fluidYMin0 &&
-            p.immersedCircleCy + p.immersedCircleR <= yMax0Circle;
-        const bool circleInsideEnd =
-            cxEnd - p.immersedCircleR >= xMinEndCircle &&
-            cxEnd + p.immersedCircleR <= xMaxEndCircle &&
-            cyEnd - p.immersedCircleR >= yMinEndCircle &&
-            cyEnd + p.immersedCircleR <= yMaxEndCircle;
-        if (!circleInsideStart || !circleInsideEnd) {
-            throw std::runtime_error("The immersed circle must lie inside the active fluid domain at the beginning and end of the run");
+
+        const double xMax0Solid = p.fluidXMax0 >= 0.0 ? p.fluidXMax0 : p.Lx;
+        const double yMax0Solid = p.fluidYMax0 >= 0.0 ? p.fluidYMax0 : p.Ly;
+        const double tEndSolid = static_cast<double>(p.nSteps) * p.dt;
+        const double xMinEndSolid = p.fluidXMin0 + p.fluidXMinVelocity * tEndSolid;
+        const double xMaxEndSolid = xMax0Solid + p.fluidXMaxVelocity * tEndSolid;
+        const double yMinEndSolid = p.fluidYMin0 + p.fluidYMinVelocity * tEndSolid;
+        const double yMaxEndSolid = yMax0Solid + p.fluidYMaxVelocity * tEndSolid;
+
+        if (solidShape == "circle" || solidShape == "disk" || solidShape == "disc") {
+            if (!(p.immersedSolidR > 0.0)) {
+                throw std::runtime_error("immersedSolidR/immersedCircleR must be positive when immersedSolidShape=circle");
+            }
+            const double cxEnd = p.immersedSolidCx + p.immersedSolidVx * tEndSolid;
+            const double cyEnd = p.immersedSolidCy + p.immersedSolidVy * tEndSolid;
+            const bool circleInsideStart =
+                p.immersedSolidCx - p.immersedSolidR >= p.fluidXMin0 &&
+                p.immersedSolidCx + p.immersedSolidR <= xMax0Solid &&
+                p.immersedSolidCy - p.immersedSolidR >= p.fluidYMin0 &&
+                p.immersedSolidCy + p.immersedSolidR <= yMax0Solid;
+            const bool circleInsideEnd =
+                cxEnd - p.immersedSolidR >= xMinEndSolid &&
+                cxEnd + p.immersedSolidR <= xMaxEndSolid &&
+                cyEnd - p.immersedSolidR >= yMinEndSolid &&
+                cyEnd + p.immersedSolidR <= yMaxEndSolid;
+            if (!circleInsideStart || !circleInsideEnd) {
+                throw std::runtime_error("The immersed circle must lie inside the active fluid domain at the beginning and end of the run");
+            }
+        } else {
+            if (!(p.immersedSolidXMax > p.immersedSolidXMin) || !(p.immersedSolidYMax > p.immersedSolidYMin)) {
+                throw std::runtime_error("immersedSolid rectangle requires XMax>XMin and YMax>YMin");
+            }
+            if (std::abs(p.immersedSolidOmega) > 0.0) {
+                throw std::runtime_error("immersedSolidOmega is currently implemented only for circle; use Omega=0 for rectangle");
+            }
+            const double xMinEnd = p.immersedSolidXMin + p.immersedSolidVx * tEndSolid;
+            const double xMaxEnd = p.immersedSolidXMax + p.immersedSolidVx * tEndSolid;
+            const double yMinEnd = p.immersedSolidYMin + p.immersedSolidVy * tEndSolid;
+            const double yMaxEnd = p.immersedSolidYMax + p.immersedSolidVy * tEndSolid;
+            const bool rectInsideStart =
+                p.immersedSolidXMin >= p.fluidXMin0 && p.immersedSolidXMax <= xMax0Solid &&
+                p.immersedSolidYMin >= p.fluidYMin0 && p.immersedSolidYMax <= yMax0Solid;
+            const bool rectInsideEnd =
+                xMinEnd >= xMinEndSolid && xMaxEnd <= xMaxEndSolid &&
+                yMinEnd >= yMinEndSolid && yMaxEnd <= yMaxEndSolid;
+            if (!rectInsideStart || !rectInsideEnd) {
+                throw std::runtime_error("The immersed rectangle must lie inside the active fluid domain at the beginning and end of the run");
+            }
         }
     }
 

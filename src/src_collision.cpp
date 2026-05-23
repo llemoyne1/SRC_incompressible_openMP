@@ -1,5 +1,5 @@
 #include "src_collision.h"
-#include "immersed_circle.h"
+#include "immersed_solid.h"
 
 #include <algorithm>
 #include <cmath>
@@ -375,13 +375,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             add_virtual_face_to_cell(v, mass, px, py, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
             vpMassTopSum += v.mass;
         }
-        if (immersed_circle_enabled(params)) {
+        if (immersed_solid_enabled(params)) {
             double wallUx = 0.0, wallUy = 0.0;
             const double cellCx = (static_cast<double>(ix) + 0.5) * grid.dx - diag.shift.sx;
             const double cellCy = (static_cast<double>(iy) + 0.5) * grid.dy - diag.shift.sy;
             const double immersedTime = static_cast<double>(step) * params.dt;
-            immersed_circle_wall_velocity(params, cellCx, cellCy, immersedTime, wallUx, wallUy);
-            const double solidFraction = immersed_circle_solid_fraction_in_cell(ix, iy, grid, diag.shift, params, domain, immersedTime);
+            immersed_solid_wall_velocity(params, cellCx, cellCy, immersedTime, wallUx, wallUy);
+            const double solidFraction = immersed_solid_fraction_in_cell(ix, iy, grid, diag.shift, params, domain, immersedTime);
             const auto v = make_virtual_face_contribution(
                 solidFraction * fullCellArea,
                 fullCellArea, wallVpGamma, params.wallAccommodation,

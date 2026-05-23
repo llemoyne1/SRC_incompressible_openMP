@@ -78,22 +78,32 @@ struct SimulationParams {
     double wallVpUyTop = 0.0;
 
 
-    // First immersed analytic solid: one fixed circular geometry. It uses the
-    // same generic solid_thermal coupling parameters as rectangular walls:
-    // wallAccommodation, wallVpGamma, wallVpMass, wallKBT and wallThermalNoise.
-    // The circle center can translate linearly and the local wall velocity can
-    // include both center translation and a prescribed rigid rotation through
-    // immersedCircleOmega. This is the first simple rigid-body immersed solid.
-    bool immersedCircleEnable = false;
-    double immersedCircleCx = 0.5;
-    double immersedCircleCy = 0.5;
-    double immersedCircleR = 0.1;
-    int immersedCircleFractionSamples = 4;
-    double immersedCircleVx = 0.0;     // center translation velocity
-    double immersedCircleVy = 0.0;
-    double immersedCircleWallUx = 0.0; // legacy uniform wall-velocity offset; normally keep zero
-    double immersedCircleWallUy = 0.0;
-    double immersedCircleOmega = 0.0;  // angular velocity around the moving center, positive counter-clockwise
+    // Analytic immersed solid handled by the compact immersed_solid module.
+    // Current shapes: circle and axis-aligned rectangle. Legacy immersedCircle*
+    // parameter keys remain accepted as aliases for shape=circle.
+    bool immersedSolidEnable = false;
+    std::string immersedSolidShape = "circle"; // circle, rectangle
+    int immersedSolidFractionSamples = 4;
+
+    // Circle parameters. The center can translate linearly and the local wall
+    // velocity can include both center translation and a prescribed rigid
+    // rotation through immersedSolidOmega.
+    double immersedSolidCx = 0.5;
+    double immersedSolidCy = 0.5;
+    double immersedSolidR = 0.1;
+    double immersedSolidVx = 0.0;     // center/body translation velocity
+    double immersedSolidVy = 0.0;
+    double immersedSolidWallUx = 0.0; // legacy uniform wall-velocity offset; normally keep zero
+    double immersedSolidWallUy = 0.0;
+    double immersedSolidOmega = 0.0;  // circle angular velocity, positive counter-clockwise
+
+    // Rectangle parameters. Bounds are axis-aligned at t=0 and translate with
+    // immersedSolidVx/Vy. Rotation is intentionally not implemented for the
+    // rectangle yet; use Omega=0 for rectangle/backward-step smoke tests.
+    double immersedSolidXMin = 0.0;
+    double immersedSolidXMax = 0.25;
+    double immersedSolidYMin = 0.0;
+    double immersedSolidYMax = 0.50;
 
     // Mass-aware thermostat acting on velocities relative to the real-particle
     // center-of-mass velocity in each collision cell. It is intended for forced

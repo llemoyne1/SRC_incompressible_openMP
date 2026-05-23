@@ -27,7 +27,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const double time = static_cast<double>(step) * params.dt;
     result.domain = make_fluid_domain_bounds(params, time);
     result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
-    result.immersed = apply_immersed_circle_reflection(state, params, result.domain, time);
+    result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
     result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, workspace.q6);
     result.q9 = apply_q9_mass_flux_projection(state, params, grid, result.domain, workspace.q9);

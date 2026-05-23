@@ -4,7 +4,7 @@
 #include "boundary_base.h"
 #include "cell_grid.h"
 #include "fluid_domain.h"
-#include "immersed_circle.h"
+#include "immersed_solid.h"
 #include "particle_state.h"
 #include "q6_projection_adapter.h"
 #include "q9_projection_adapter.h"
@@ -18,7 +18,7 @@ namespace mpcd {
 struct StepResult {
     FluidDomainBounds domain;
     BoundaryDiagnostics boundary;
-    ImmersedCircleDiagnostics immersed;
+    ImmersedSolidDiagnostics immersed;
     CollisionDiagnostics collision;
     Q6ProjectionDiagnostics q6;
     Q9ProjectionDiagnostics q9;
