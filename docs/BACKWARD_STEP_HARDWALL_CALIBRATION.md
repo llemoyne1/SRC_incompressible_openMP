@@ -131,3 +131,22 @@ The final follow-up is documented in
 ```bash
 ./scripts/run_backward_step_final_liquid_config_test.sh
 ```
+
+## Result artifacts
+
+The calibration CSV and figures used for this documentation are committed in:
+
+```text
+docs/results/backward_step_final/backward_step_hardwall_calibration_summary.csv
+docs/results/backward_step_final/backward_step_hardwall_calibration_key_metrics.png
+docs/results/backward_step_final/backward_step_hardwall_calibration_projection_metrics.png
+```
+
+The final no-virial choice from this calibration is:
+
+```text
+Q9 hard-wall, q6ProjectionStrength=0.50, beta=0.001, lowK=4
+```
+
+The final liquid-closure extension of this baseline is documented in
+`docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md`.

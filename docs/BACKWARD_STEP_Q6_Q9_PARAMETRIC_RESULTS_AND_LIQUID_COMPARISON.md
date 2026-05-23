@@ -146,11 +146,32 @@ Primary acceptance checks:
 - low-k vorticity fraction and largest reversed component are not degraded.
 
 
-## Final configuration follow-up
+## Final configuration freeze
 
-The final lowK=4 Q9/Q9+virial test and the acceptance criteria for freezing the
-immersed-solid liquid default are documented in:
+The final `lowK=4` Q9/Q9+virial comparison is complete. It confirms the
+following immersed-solid liquid-closure default:
 
 ```text
+q6ProjectionStrength = 0.50
+q9MassFluxProjectionStrength = 1.00
+q9DensityRelaxationBeta = 0.00100
+q9LowKMaxIndex = 4
+Kvirial = 0.50
+virialBeta = 0.05
+```
+
+The decisive result is that the virial closure improves population reliability
+without materially changing the principal structural metrics. In the reversed
+region, `populationP05ReversedOverReference` improves from `0.762` to `0.828`,
+`populationTemporalCvMeanReversed` improves from `0.103` to `0.0929`, and
+`populationBelow5FractionReversed` remains zero. At the same time, downstream
+`omegaRms` remains near `0.079`, the downstream low-k vorticity fraction remains
+near `0.14--0.15`, and `virialDuOverThermalRmsLate` is only `0.00332`.
+
+The full freeze note and committed result artifacts are in:
+
+```text
+docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md
 docs/BACKWARD_STEP_FINAL_Q9_VIRIAL_CONFIGURATION.md
+docs/results/backward_step_final/
 ```

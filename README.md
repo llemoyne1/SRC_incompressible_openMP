@@ -252,6 +252,10 @@ Current validation documents:
 - `docs/PISTON_ACTIVE_DOMAIN_Q6_Q9.md`: moving active-domain piston with Q6/Q9.
 - `docs/VIRIAL_EOS_PISTON.md`: optional virial EOS pressure kick.
 - `docs/VIRIAL_EOS_SWEEP.md`: piston virial parameter sweep and `PtotMeanRatio` diagnostics.
+- `docs/IMMERSED_SOLID_Q6_Q9_MASK.md`: immersed-solid mask for Q6/Q9 projections.
+- `docs/BACKWARD_STEP_PARAMETRIC_Q6_Q9.md`: backward-step Q6/Q9 parameter sweep.
+- `docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md`: frozen immersed-solid liquid-closure default from the backward-step validation.
+- `docs/VON_KARMAN_LONG_COMPARISON.md`: periodic forced von-Karman-style cylinder comparison setup.
 
 For MATLAB scripts in this branch, the intended workflow is to launch MATLAB
 from the `matlab/` directory and use `../runs/...` paths, for example:

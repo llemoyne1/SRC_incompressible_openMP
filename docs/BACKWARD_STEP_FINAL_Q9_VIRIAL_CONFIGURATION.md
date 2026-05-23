@@ -8,6 +8,59 @@ The case remains a periodic-x forced channel with an immersed rectangular step.
 It is a separated-flow stress test for the method, not yet a true inlet/outlet
 backward-facing-step benchmark.
 
+
+## Final lowK=4 Q9/Q9+virial test completed
+
+The focused final test has now been completed. The recommended immersed-solid
+liquid-closure default is confirmed as:
+
+```text
+method = q9_virial
+projectionImmersedSolidMaskEnable = true
+q6ProjectionStrength = 0.50
+q9MassFluxProjectionStrength = 1.00
+q9DensityRelaxationBeta = 0.00100
+q9LowKMaxIndex = 4
+q9EllipticLowPassPasses = 1
+Kvirial = 0.50
+virialBeta = 0.05
+```
+
+The final comparison is:
+
+| metric | Q9 k=4 | Q9 k=4 + virial | conclusion |
+|---|---:|---:|---|
+| Q6 leak RMS | 0 | 0 | hard-wall condition preserved |
+| Q9 leak RMS | 0 | 0 | mass-flux projection respects solid |
+| Q6 div after | 4.205e-1 | 4.181e-1 | expected residual for `q6ProjectionStrength=0.50` |
+| std(N) late | 7.675 | 7.380 | improved by virial |
+| population CV, fluid | 0.0736 | 0.0461 | improved by virial |
+| P05(N) fluid/ref | 0.901 | 0.936 | improved low tail |
+| P05(N) reversed/ref | 0.762 | 0.828 | improved recirculation reliability |
+| N<5 reversed | 0 | 0 | no under-sampled reversed cells |
+| population temporal CV reversed | 0.103 | 0.0929 | improved by virial |
+| omega RMS downstream | 0.0790 | 0.0792 | preserved |
+| omega total RMS downstream | 0.389 | 0.385 | preserved |
+| omega low-k fraction | 0.141 | 0.147 | preserved/slightly improved |
+| largest reversed component | 0.247 | 0.240 | comparable |
+| reversed component count | 32 | 37 | slightly more fragmented |
+| virial du / u_th RMS | 0 | 0.00332 | very small kick |
+
+The virial closure therefore improves the population reliability of the
+recirculation zone without significantly changing the principal vorticity
+metrics. The only small caveat is a modest increase in the number of reversed
+components; this is not considered disqualifying because the population
+statistics and large-scale vorticity remain favorable.
+
+Committed result artifacts are available in:
+
+```text
+docs/results/backward_step_final/
+```
+
+See also `docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md` for the concise
+configuration freeze note.
+
 ## Result of the hard-wall calibration
 
 After the hard-wall projection fix, `q6ProjectionStrength < 1` no longer makes
@@ -59,9 +112,9 @@ on this case, not like a new forcing mechanism: its velocity kick is far below
 the thermal velocity scale and the large-scale vorticity indicators remain close
 to the no-virial case.
 
-## Final focused test
+## Reproducing the final focused test
 
-The remaining test is the direct comparison:
+The completed final direct comparison was:
 
 ```text
 Q9 hard-wall lowK=4, no virial
@@ -149,7 +202,7 @@ reversedLargestComponentFraction should remain comparable or improve
 reversedComponentCount should not increase enough to indicate fragmentation
 ```
 
-If the final `lowK=4 + virial` run satisfies these checks, the recommended
+The final `lowK=4 + virial` run satisfies these checks. The recommended
 immersed-solid liquid closure default is:
 
 ```text
