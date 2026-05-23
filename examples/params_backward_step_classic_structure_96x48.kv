@@ -1,0 +1,79 @@
+# High-signal classic SRC/MPCD visualization case for the immersed-rectangle step.
+#
+# This case deliberately increases the advective signal compared with the
+# conservative validation case. It is not a canonical inlet/outlet
+# backward-facing-step benchmark: it remains a periodic-x forced channel with a
+# bottom-attached rectangular immersed solid. Its purpose is to make the
+# separated/reversed region easier to inspect visually before implementing true
+# inlet/outlet conditions and masked Q6/Q9 projection.
+#
+# It reuses the same initial state as the smoke/long validation cases. The lower
+# kBT is imposed by the cell-relative thermostat during the run.
+
+inputState = initial_state_backward_step_96x48_g20.smpcd
+outputDir = runs/backward_step_classic_structure_96x48
+
+Lx = 2.0
+Ly = 1.0
+Nx = 96
+Ny = 48
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = 0.001
+nSteps = 30000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+# Five times stronger than the conservative long case. With kBT=0.0025 this
+# gives a much better mean-flow/thermal-noise ratio while staying in a cautious
+# classic-SRC regime.
+bodyAccelerationX = 0.015
+bodyAccelerationY = 0.0
+
+method = classic
+projectionEnable = false
+q9MassFluxProjectionEnable = false
+virialDiagnosticsEnable = false
+virialKickEnable = false
+
+immersedSolidEnable = true
+immersedSolidShape = rectangle
+immersedSolidXMin = 0.25
+immersedSolidXMax = 0.65
+immersedSolidYMin = 0.0
+immersedSolidYMax = 0.50
+immersedSolidFractionSamples = 4
+immersedSolidVx = 0.0
+immersedSolidVy = 0.0
+immersedSolidWallUx = 0.0
+immersedSolidWallUy = 0.0
+immersedSolidOmega = 0.0
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.0025
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4
