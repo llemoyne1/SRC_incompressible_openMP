@@ -134,14 +134,15 @@ int main(int argc, char** argv) {
                                                            &stepResult.thermostat,
                                                            ompActiveThreads);
                 summary.append(s);
-                std::cout << "\r[src_mpcd_base] step=" << step
-                          << "/" << params.nSteps
-                          << " t=" << s.time
-                          << " kBT=" << s.kBTEstimate
-                          << " stdN=" << s.stdN
-                          << " q6Div=" << s.q6DivBeforeRms << "->" << s.q6DivAfterProjectedFluxRms
-                          << " q9Std=" << s.q9DensityStdBefore << "->" << s.q9DensityStdAfterEstimate
-                          << " wall=" << wallTime << " s" << std::flush;
+    std::cout << "\r\033[K[src_mpcd_base] step=" << step
+          << "/" << params.nSteps
+          << " t=" << std::fixed << std::setprecision(3) << s.time
+          << " kBT=" << std::scientific << std::setprecision(3) << s.kBTEstimate
+          << " stdN=" << std::fixed << std::setprecision(3) << s.stdN
+          << " q6=" << std::scientific << std::setprecision(2) << s.q6DivAfterProjectedFluxRms
+          << " q9r=" << std::fixed << std::setprecision(4) << s.q9DensityStdRatioEstimate
+          << " wall=" << std::fixed << std::setprecision(1) << wallTime << "s"
+          << std::flush;
             }
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
