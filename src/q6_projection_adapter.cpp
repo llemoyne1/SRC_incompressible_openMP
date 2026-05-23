@@ -69,6 +69,8 @@ void resize_q6_workspace(Q6ProjectionWorkspace& ws,
     ws.localPy.assign(nLocal, 0.0);
     resize_periodic_face_field(ws.baseFlux, numCells);
     resize_periodic_face_field(ws.alpha, numCells);
+    resize_periodic_face_field(ws.appliedCorrectionFlux, numCells);
+    resize_periodic_face_field(ws.appliedProjectedFlux, numCells);
     resize_periodic_face_field(ws.correctedCellFlux, numCells);
     ws.targetDivergence.assign(nc, 0.0);
     resize_elliptic_projection_workspace(ws.elliptic, numCells);
@@ -306,6 +308,27 @@ void add_moving_wall_fluxes_to_q6_bc(EllipticProjectionBC& bc,
     }
 }
 
+void build_scaled_q6_fluxes(const PeriodicFaceField& baseFlux,
+                            const PeriodicFaceField& rawCorrectionFlux,
+                            double strength,
+                            PeriodicFaceField& appliedCorrectionFlux,
+                            PeriodicFaceField& appliedProjectedFlux) {
+    const std::size_t n = baseFlux.x.size();
+    if (baseFlux.y.size() != n || rawCorrectionFlux.x.size() != n || rawCorrectionFlux.y.size() != n) {
+        throw std::runtime_error("build_scaled_q6_fluxes: inconsistent face-field sizes");
+    }
+    resize_periodic_face_field(appliedCorrectionFlux, static_cast<int>(n));
+    resize_periodic_face_field(appliedProjectedFlux, static_cast<int>(n));
+#pragma omp parallel for if(n > 4096)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t k = static_cast<std::size_t>(ii);
+        appliedCorrectionFlux.x[k] = strength * rawCorrectionFlux.x[k];
+        appliedCorrectionFlux.y[k] = strength * rawCorrectionFlux.y[k];
+        appliedProjectedFlux.x[k] = baseFlux.x[k] + appliedCorrectionFlux.x[k];
+        appliedProjectedFlux.y[k] = baseFlux.y[k] + appliedCorrectionFlux.y[k];
+    }
+}
+
 void face_correction_to_cell_velocity(const CellGrid& grid,
                                       const PeriodicFaceField& correctionFlux,
                                       std::vector<double>& dux,
@@ -412,18 +435,39 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
 
     diag.applied = true;
+    diag.projectionStrength = params.q6ProjectionStrength;
     diag.converged = result.diagnostics.converged;
     diag.iterations = result.diagnostics.iterations;
     diag.residualRel = result.diagnostics.residualRel;
     diag.divBeforeRms = result.diagnostics.divBeforeRms;
     diag.divBeforeMaxAbs = result.diagnostics.divBeforeMaxAbs;
-    diag.divAfterProjectedFluxRms = result.diagnostics.divAfterRms;
-    diag.divAfterProjectedFluxMaxAbs = result.diagnostics.divAfterMaxAbs;
+
+    build_scaled_q6_fluxes(workspace.baseFlux,
+                           result.correctionFlux,
+                           params.q6ProjectionStrength,
+                           workspace.appliedCorrectionFlux,
+                           workspace.appliedProjectedFlux);
+
+    std::vector<double> divProjectedAfter = compute_face_divergence(egrid, workspace.appliedProjectedFlux, bc, mask);
+    double projectedDiv2 = 0.0;
+    double projectedDivMax = 0.0;
+    std::uint64_t projectedDivCount = 0u;
+#pragma omp parallel for reduction(+:projectedDiv2,projectedDivCount) reduction(max:projectedDivMax) if(nc > 4096)
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t k = static_cast<std::size_t>(c);
+        if (mask != nullptr && mask->activeCell[k] == 0u) continue;
+        const double d = divProjectedAfter[k];
+        projectedDiv2 += d * d;
+        projectedDivMax = std::max(projectedDivMax, std::abs(d));
+        projectedDivCount += 1u;
+    }
+    diag.divAfterProjectedFluxRms = projectedDivCount > 0u ? std::sqrt(projectedDiv2 / static_cast<double>(projectedDivCount)) : 0.0;
+    diag.divAfterProjectedFluxMaxAbs = projectedDivMax;
 
     if (mask != nullptr) {
-        compute_q6_solid_leak(result.projectedFlux, workspace.immersedMask, diag);
+        compute_q6_solid_leak(workspace.appliedProjectedFlux, workspace.immersedMask, diag);
     }
-    face_correction_to_cell_velocity(grid, result.correctionFlux, workspace.cellDUx, workspace.cellDUy, diag);
+    face_correction_to_cell_velocity(grid, workspace.appliedCorrectionFlux, workspace.cellDUx, workspace.cellDUy, diag);
 
 #pragma omp parallel for if(nc > 4096)
     for (int c = 0; c < nc; ++c) {

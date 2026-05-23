@@ -37,6 +37,7 @@ struct Q6ProjectionDiagnostics {
     std::uint64_t immersedSolidClosedXFaces = 0;
     std::uint64_t immersedSolidClosedYFaces = 0;
 
+    double projectionStrength = 1.0;
     double residualRel = 0.0;
     double divBeforeRms = 0.0;
     double divBeforeMaxAbs = 0.0;
@@ -73,6 +74,8 @@ struct Q6ProjectionWorkspace {
 
     PeriodicFaceField baseFlux;
     PeriodicFaceField alpha;
+    PeriodicFaceField appliedCorrectionFlux;
+    PeriodicFaceField appliedProjectedFlux;
     PeriodicFaceField correctedCellFlux;
     std::vector<double> targetDivergence;
     EllipticProjectionWorkspace elliptic;

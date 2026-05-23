@@ -213,6 +213,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "q6ProjectionStrength" || key == "projectionStrength") p.q6ProjectionStrength = parse_double(value, key);
         else if (key == "projectionImmersedSolidMaskEnable") p.projectionImmersedSolidMaskEnable = parse_bool(value, key);
         else if (key == "projectionAllowUnmaskedImmersedSolid") p.projectionAllowUnmaskedImmersedSolid = parse_bool(value, key);
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
@@ -480,7 +481,8 @@ void validate_simulation_params(const SimulationParams& p) {
     if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
         throw std::runtime_error("method currently accepts: classic, q6, q9, q9_virial");
     }
-    if (p.projectionEnable) {
+    const bool q6OrProjectionRequested = p.projectionEnable || p.method == "q6" || p.method == "q9" || p.method == "q9_virial";
+    if (q6OrProjectionRequested) {
         if (p.projectionOperator != "periodic_fv_cg" &&
             p.projectionOperator != "channel_fv_cg" &&
             p.projectionOperator != "auto_fv_cg" &&
@@ -493,16 +495,19 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!(p.projectionTolerance > 0.0)) {
             throw std::runtime_error("projectionTolerance must be positive");
         }
+        if (!(p.q6ProjectionStrength >= 0.0 && p.q6ProjectionStrength <= 1.0)) {
+            throw std::runtime_error("q6ProjectionStrength must lie in [0,1]");
+        }
         if (!(p.projectionImmersedSolidFluidFractionThreshold >= 0.0 &&
               p.projectionImmersedSolidFluidFractionThreshold <= 1.0)) {
             throw std::runtime_error("projectionImmersedSolidFluidFractionThreshold must lie in [0,1]");
         }
     }
-    if ((p.projectionEnable || p.q9MassFluxProjectionEnable || p.method == "q6" || p.method == "q9" || p.method == "q9_virial") &&
+    if ((q6OrProjectionRequested || p.q9MassFluxProjectionEnable) &&
         p.immersedSolidEnable && !p.projectionImmersedSolidMaskEnable && !p.projectionAllowUnmaskedImmersedSolid) {
         throw std::runtime_error("Q6/Q9 with immersedSolidEnable requires projectionImmersedSolidMaskEnable=true; use projectionAllowUnmaskedImmersedSolid=true only for explicit debug controls");
     }
-    if ((p.projectionEnable || p.q9MassFluxProjectionEnable || p.method == "q6" || p.method == "q9" || p.method == "q9_virial") &&
+    if ((q6OrProjectionRequested || p.q9MassFluxProjectionEnable) &&
         p.immersedSolidEnable && p.projectionImmersedSolidMaskEnable &&
         (std::abs(p.immersedSolidVx) > 0.0 || std::abs(p.immersedSolidVy) > 0.0 || std::abs(p.immersedSolidOmega) > 0.0)) {
         throw std::runtime_error("Q6/Q9 immersed-solid projection mask currently supports fixed immersed solids only");

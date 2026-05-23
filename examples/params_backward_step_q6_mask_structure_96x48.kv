@@ -1,0 +1,77 @@
+# High-signal Q6 SRC/MPCD visualization case for the immersed-rectangle step.
+#
+# This is the masked-Q6 counterpart of params_backward_step_classic_structure_96x48.kv.
+# It remains a periodic-x forced channel, not an inlet/outlet backward-facing-step
+# benchmark. The immersed rectangle is represented both at particle level and in
+# the elliptic projection through projectionImmersedSolidMaskEnable=true.
+
+inputState = initial_state_backward_step_96x48_g20.smpcd
+outputDir = runs/backward_step_q6_mask_structure_96x48
+
+Lx = 2.0
+Ly = 1.0
+Nx = 96
+Ny = 48
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = 0.001
+nSteps = 30000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+bodyAccelerationX = 0.015
+bodyAccelerationY = 0.0
+
+method = q6
+projectionEnable = true
+projectionOperator = channel_fv_cg
+projectionMaxIterations = 700
+projectionTolerance = 1.0e-9
+projectionMomentumCorrectionEnable = true
+projectionImmersedSolidMaskEnable = true
+projectionImmersedSolidFluidFractionThreshold = 0.5
+q9MassFluxProjectionEnable = false
+virialDiagnosticsEnable = false
+virialKickEnable = false
+
+immersedSolidEnable = true
+immersedSolidShape = rectangle
+immersedSolidXMin = 0.25
+immersedSolidXMax = 0.65
+immersedSolidYMin = 0.0
+immersedSolidYMax = 0.50
+immersedSolidFractionSamples = 4
+immersedSolidVx = 0.0
+immersedSolidVy = 0.0
+immersedSolidWallUx = 0.0
+immersedSolidWallUy = 0.0
+immersedSolidOmega = 0.0
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.0025
+
+summaryEvery = 100
+dumpStateEvery = 500
+numThreads = 4

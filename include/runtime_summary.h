@@ -80,6 +80,7 @@ struct RuntimeSummary {
     double thermostatScaleMax = 1.0;
 
     int q6Applied = 0;
+    double q6ProjectionStrength = 1.0;
     int q6Converged = 0;
     int q6Iterations = 0;
     std::uint64_t q6EmptyCells = 0;
