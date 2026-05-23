@@ -1,28 +1,20 @@
-function out = validate_piston_q9_virial_sweep(varargin)
-%VALIDATE_PISTON_Q9_VIRIAL_SWEEP Summarize a Kvirial/virialBeta piston sweep.
+function out = validate_piston_q9_virial_stress_compression(varargin)
+%VALIDATE_PISTON_Q9_VIRIAL_STRESS_COMPRESSION Summarize stronger piston virial tests.
 %
 % Intended to be launched from matlab/.
 %
-% out = validate_piston_q9_virial_sweep('makePlots', true);
+% out = validate_piston_q9_virial_stress_compression('makePlots', true);
 
 p = inputParser;
-p.FunctionName = 'validate_piston_q9_virial_sweep';
+p.FunctionName = 'validate_piston_q9_virial_stress_compression';
 addParameter(p, 'runDirs', { ...
-    '../runs/piston_y_q9_filtered_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p005_beta0p02_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p010_beta0p02_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p020_beta0p02_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p050_beta0p02_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p100_beta0p02_solid_thermal_isothermal', ...
-    '../runs/piston_y_q9_virial_K0p100_beta0p05_solid_thermal_isothermal'}, @(x) iscell(x) || isstring(x));
+    '../runs/piston_y_q9_filtered_stress_y080_solid_thermal_isothermal', ...
+    '../runs/piston_y_q9_virial_stress_y080_K0p250_beta0p10_solid_thermal_isothermal', ...
+    '../runs/piston_y_q9_virial_stress_y080_K0p500_beta0p20_solid_thermal_isothermal'}, @(x) iscell(x) || isstring(x));
 addParameter(p, 'labels', { ...
-    'q9_filtered', ...
-    'K0p005_b0p02', ...
-    'K0p010_b0p02', ...
-    'K0p020_b0p02', ...
-    'K0p050_b0p02', ...
-    'K0p100_b0p02', ...
-    'K0p100_b0p05'}, @(x) iscell(x) || isstring(x));
+    'q9_filtered_y080', ...
+    'K0p250_b0p10_y080', ...
+    'K0p500_b0p20_y080'}, @(x) iscell(x) || isstring(x));
 addParameter(p, 'makePlots', true, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'tailFraction', 0.5, @(x) isnumeric(x) && isscalar(x) && x > 0 && x <= 1);
 parse(p, varargin{:});
@@ -30,7 +22,7 @@ parse(p, varargin{:});
 runDirs = cellstr(string(p.Results.runDirs));
 labels = cellstr(string(p.Results.labels));
 if numel(runDirs) ~= numel(labels)
-    error('validate_piston_q9_virial_sweep:labelMismatch', ...
+    error('validate_piston_q9_virial_stress_compression:labelMismatch', ...
         'runDirs and labels must have the same length.');
 end
 
@@ -39,7 +31,7 @@ rows = cell(numel(runDirs), 1);
 for k = 1:numel(runDirs)
     f = fullfile(runDirs{k}, 'summary_runtime.csv');
     if ~isfile(f)
-        error('validate_piston_q9_virial_sweep:missingSummary', ...
+        error('validate_piston_q9_virial_stress_compression:missingSummary', ...
             'Cannot find summary file: %s', f);
     end
     S{k} = readtable(f);
@@ -47,7 +39,7 @@ for k = 1:numel(runDirs)
 end
 
 metrics = vertcat(rows{:});
-fprintf('\n=== Moving active-domain piston Q9/virial sweep ===\n');
+fprintf('\n=== Moving active-domain piston Q9/virial stress compression ===\n');
 disp(metrics);
 
 if p.Results.makePlots
@@ -66,18 +58,18 @@ n = height(T);
 i0 = max(1, floor((1 - tailFraction) * n) + 1);
 tail = i0:n;
 
-rhoStart = first_finite_or_nan(T, 'meanPhysicalDensity');
+rhoStart = first_finite_positive_or_nan(T, 'meanPhysicalDensity');
 rhoEnd = last_finite_or_nan(T, 'meanPhysicalDensity');
-areaStart = first_finite_or_nan(T, 'fluidArea');
+areaStart = first_finite_positive_or_nan(T, 'fluidArea');
 areaEnd = last_finite_or_nan(T, 'fluidArea');
 expectedRhoRatio = safe_ratio(areaStart, areaEnd);
 rhoRatio = safe_ratio(rhoEnd, rhoStart);
 
-PtotStart = first_finite_positive_or_nan(T, 'PtotMean');
-PtotEnd = last_finite_or_nan(T, 'PtotMean');
 PkinStart = first_finite_positive_or_nan(T, 'PkinMean');
 PkinEnd = last_finite_or_nan(T, 'PkinMean');
 PvirEnd = last_finite_or_nan(T, 'PvirMean');
+PtotStart = first_finite_positive_or_nan(T, 'PtotMean');
+PtotEnd = last_finite_or_nan(T, 'PtotMean');
 
 KvirialEstimate = NaN;
 rhoEOSRef = last_finite_or_nan(T, 'virialRhoEOSRef');
@@ -91,6 +83,7 @@ if isfinite(PkinEnd) && isfinite(KvirialEstimate) && isfinite(rhoEnd) && isfinit
 end
 
 row = table(string(label), string(runDir), n, first_finite_or_nan(T, 'time'), last_finite_or_nan(T, 'time'), ...
+    first_finite_or_nan(T, 'fluidYMax'), last_finite_or_nan(T, 'fluidYMax'), ...
     expectedRhoRatio, rhoRatio, rhoRatio - expectedRhoRatio, ...
     rel_change(first_finite_or_nan(T, 'totalMass'), last_finite_or_nan(T, 'totalMass')), ...
     last_finite_or_nan(T, 'kBTEstimate'), mean_omitnan(T, 'kBTEstimate', tail), ...
@@ -107,7 +100,7 @@ row = table(string(label), string(runDir), n, first_finite_or_nan(T, 'time'), la
     last_finite_or_nan(T, 'virialDuAppliedMaxAbs'), last_finite_or_nan(T, 'virialDuOverThermalRms'), ...
     last_finite_or_nan(T, 'virialMomentumResidualAfterCorrection'), ...
     last_finite_or_nan(T, 'maxParticleAbsVy'), last_finite_or_nan(T, 'maxYWallReflectionsPerParticle'), ...
-    'VariableNames', {'run','runDir','nRows','timeStart','timeEnd', ...
+    'VariableNames', {'run','runDir','nRows','timeStart','timeEnd','yTopStart','yTopEnd', ...
     'expectedRhoRatio','rhoRatio','rhoAreaResidual','massRelDrift', ...
     'kBTEnd','kBTTailMean', ...
     'q6DivAfterEnd','q6ResidualEnd','q9ResidualEnd','q9TargetFilterRatioEnd', ...
@@ -121,19 +114,21 @@ row = table(string(label), string(runDir), n, first_finite_or_nan(T, 'time'), la
 end
 
 function local_plot(S, labels)
-figure('Name', 'Piston Q9 virial sweep');
+figure('Name', 'Piston Q9 virial stress compression');
 tiledlayout(2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 nexttile; hold on;
-for k = 1:numel(S), plot(S{k}.time, S{k}.meanPhysicalDensity./S{k}.meanPhysicalDensity(1), 'DisplayName', labels{k}); end
+for k = 1:numel(S)
+    rho0 = first_finite_positive_or_nan(S{k}, 'meanPhysicalDensity');
+    if isfinite(rho0), plot(S{k}.time, S{k}.meanPhysicalDensity./rho0, 'DisplayName', labels{k}); end
+end
 hold off; grid on; xlabel('time'); ylabel('\rho/\rho_0'); title('Mean density ratio'); legend('Interpreter','none');
 
 nexttile; hold on;
 for k = 1:numel(S)
     if ismember('PtotMean', S{k}.Properties.VariableNames)
-        y = S{k}.PtotMean;
-        i0 = find(isfinite(y) & y > 0, 1, 'first');
-        if ~isempty(i0), plot(S{k}.time, y./y(i0), 'DisplayName', labels{k}); end
+        y0 = first_finite_positive_or_nan(S{k}, 'PtotMean');
+        if isfinite(y0), plot(S{k}.time, S{k}.PtotMean./y0, 'DisplayName', labels{k}); end
     end
 end
 hold off; grid on; xlabel('time'); ylabel('P_{tot}/P_{tot,0}'); title('EOS total pressure ratio');
@@ -180,7 +175,6 @@ if ismember(name, T.Properties.VariableNames)
 end
 end
 
-
 function v = first_finite_positive_or_nan(T, name)
 v = NaN;
 if ismember(name, T.Properties.VariableNames)
@@ -222,3 +216,4 @@ else
     r = NaN;
 end
 end
+
