@@ -107,3 +107,15 @@ Useful qualitative patterns are:
   fragmented reversed patches rather than a coherent bubble;
 - high `uxReversePersistenceMaxDownstream`: at least one persistent reversed
   region exists during the averaging window.
+
+## Population reliability companion diagnostics
+
+The coherence metrics should be interpreted together with the population
+reliability diagnostics documented in
+`docs/BACKWARD_STEP_POPULATION_RELIABILITY_DIAGNOSTICS.md`. In particular,
+apparent high vorticity in the classic particle run can be misleading if it is
+associated with low-population cells in the separated region. The companion
+metrics report downstream and recirculation population tails such as
+`populationP05ReversedOverReference`,
+`populationLowHalfRefFractionReversed`, and
+`populationBelow5FractionReversed`.

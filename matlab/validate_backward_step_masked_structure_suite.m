@@ -286,6 +286,7 @@ function local_plot_suite(suite, fieldName, outputDir)
     saveas(fig2, fullfile(outputDir, 'backward_step_masked_structure_suite_profiles.png'));
 
     local_plot_coherence_suite(suite, outputDir);
+    local_plot_population_suite(suite, outputDir);
 end
 
 function local_plot_coherence_suite(suite, outputDir)
@@ -327,6 +328,48 @@ function local_plot_coherence_suite(suite, outputDir)
     saveas(fig, fullfile(outputDir, 'backward_step_masked_structure_suite_coherence.png'));
 end
 
+function local_plot_population_suite(suite, outputDir)
+    n = numel(suite.cases);
+    labels = suite.labels;
+    fig = figure('Name', 'Backward step masked Q6/Q9 suite: population diagnostics');
+    tiledlayout(n, 4, 'TileSpacing', 'compact', 'Padding', 'compact');
+    for i = 1:n
+        out = suite.cases{i};
+        if ~isfield(out, 'populationFields')
+            continue;
+        end
+        fields = out.meanFields;
+        pop = out.populationFields;
+        params = out.params;
+        xMin = local_param_double(params, 'immersedSolidXMin', 0.25);
+        xMax = local_param_double(params, 'immersedSolidXMax', 0.65);
+        yMin = local_param_double(params, 'immersedSolidYMin', 0.0);
+        yMax = local_param_double(params, 'immersedSolidYMax', 0.50);
+        [Xc, Yc] = meshgrid(fields.xc, fields.yc);
+        solidMask = Xc >= xMin & Xc <= xMax & Yc >= yMin & Yc <= yMax;
+
+        nexttile;
+        local_plot_field(fields, 'N', solidMask, xMin, xMax, yMin, yMax);
+        title(sprintf('%s: mean N', labels{i}), 'Interpreter', 'none');
+
+        nexttile;
+        nrel = fields.N ./ max(out.populationReferenceNFluid, eps);
+        local_plot_data_field(fields, nrel, solidMask, xMin, xMax, yMin, yMax);
+        title(sprintf('%s: N / <N>_fluid', labels{i}), 'Interpreter', 'none');
+
+        nexttile;
+        local_plot_data_field(fields, pop.NTemporalCv, solidMask, xMin, xMax, yMin, yMax);
+        title(sprintf('%s: temporal CV(N)', labels{i}), 'Interpreter', 'none');
+
+        nexttile;
+        low = double(nrel < 0.5);
+        low(~isfinite(nrel)) = NaN;
+        local_plot_data_field(fields, low, solidMask, xMin, xMax, yMin, yMax);
+        title(sprintf('%s: N < 0.5 ref', labels{i}), 'Interpreter', 'none');
+    end
+    saveas(fig, fullfile(outputDir, 'backward_step_masked_structure_suite_population.png'));
+end
+
 function local_plot_field(fields, name, solidMask, xMin, xMax, yMin, yMax)
     if ~isfield(fields, name)
         error('validate_backward_step_masked_structure_suite:badField', 'Unknown field: %s', name);
@@ -342,6 +385,17 @@ function local_plot_field(fields, name, solidMask, xMin, xMax, yMin, yMax)
     xlabel('x'); ylabel('y');
 end
 
+
+function local_plot_data_field(fields, data, solidMask, xMin, xMax, yMin, yMax)
+    data(solidMask) = NaN;
+    imagesc(fields.xc, fields.yc, data);
+    axis xy equal tight;
+    colorbar;
+    hold on;
+    rectangle('Position', [xMin, yMin, xMax-xMin, yMax-yMin], 'EdgeColor', 'k', 'LineWidth', 1.5);
+    hold off;
+    xlabel('x'); ylabel('y');
+end
 
 function local_plot_coherence_field(fields, data, solidMask, xMin, xMax, yMin, yMax)
     data(solidMask) = NaN;

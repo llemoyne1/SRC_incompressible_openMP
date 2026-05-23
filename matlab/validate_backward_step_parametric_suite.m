@@ -171,6 +171,35 @@ function local_plot_parametric_metrics(suite, outputDir)
 
     saveas(figC, fullfile(outputDir, 'backward_step_parametric_suite_coherence_metrics.png'));
 
+    figP = figure('Name', 'Backward step parametric suite: population reliability metrics');
+    tiledlayout(2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationP05DownstreamOverReference');
+    ylabel('P05(N) downstream / ref'); title('Downstream low-tail population'); grid on;
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationLowHalfRefFractionDownstream');
+    ylabel('fraction N < 0.5 ref'); title('Downstream under-populated cells'); grid on;
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationTemporalCvMeanDownstream');
+    ylabel('mean temporal CV(N)'); title('Downstream population intermittency'); grid on;
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationP05ReversedOverReference');
+    ylabel('P05(N) reversed / ref'); title('Recirculation low-tail population'); grid on;
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationLowHalfRefFractionReversed');
+    ylabel('fraction N < 0.5 ref'); title('Recirculation under-populated cells'); grid on;
+
+    nexttile;
+    local_plot_by_strength(tbl, isQ6, isQ9, 'populationBelow5FractionReversed');
+    ylabel('fraction N < 5'); title('Recirculation cells below N=5'); grid on;
+
+    saveas(figP, fullfile(outputDir, 'backward_step_parametric_suite_population_metrics.png'));
+
     if any(isQ9)
         fig2 = figure('Name', 'Backward step parametric suite: Q9 tuning');
         tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');

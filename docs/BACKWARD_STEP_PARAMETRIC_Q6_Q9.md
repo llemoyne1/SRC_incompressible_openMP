@@ -131,3 +131,18 @@ to determine whether a partial Q6 correction preserves more separated structure
 while retaining most of the incompressibility benefit, and whether Q9 needs a
 larger relaxation/filter bandwidth to have a measurable density effect on this
 immersed-step case.
+
+## Population reliability diagnostics
+
+After applying the population-reliability diagnostics patch, the parametric
+analysis also writes
+
+```text
+runs/backward_step_parametric_suite_analysis/backward_step_parametric_suite_population_metrics.png
+```
+
+and the summary table contains downstream and reversed-region population-tail
+metrics. These are part of the method-selection criterion: a good Q6/Q9 setting
+should not only reduce compressibility diagnostics, but should also preserve
+organized recirculation in cells whose particle population remains statistically
+credible.

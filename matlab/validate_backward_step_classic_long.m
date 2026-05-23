@@ -93,6 +93,7 @@ function out = validate_backward_step_classic_long(runDir, varargin)
 
     meanFields = local_finalize_mean_fields(templateFields, acc);
     coherenceFields = local_finalize_coherence_fields(meanFields, acc);
+    populationFields = local_finalize_population_fields(meanFields, acc);
 
     [Xc, Yc] = meshgrid(meanFields.xc, meanFields.yc);
     insideSolid = Xc >= xMin & Xc <= xMax & Yc >= yMin & Yc <= yMax;
@@ -102,6 +103,20 @@ function out = validate_backward_step_classic_long(runDir, varargin)
 
     lowerProfile = local_lower_layer_profile(meanFields, xMin, xMax, yMin, yMax, insideSolid);
     [reattachXProfile, reattachLengthProfile] = local_profile_reattachment(lowerProfile, xMax);
+
+    lateSummary = summary(summary.step >= frameTable.step(firstAverageFrame), :);
+    if isempty(lateSummary)
+        lateSummary = summary;
+    end
+
+    populationReferenceNFluid = mean(meanFields.N(fluidMask), 'omitnan');
+    if ~isfinite(populationReferenceNFluid) || populationReferenceNFluid <= 0
+        populationReferenceNFluid = local_summary_mean(lateSummary, 'meanN');
+    end
+    populationNominalGammaParam = local_get(params, 'gamma', NaN);
+    populationStatsFluid = local_population_stats(meanFields.N, populationFields.NTemporalStd, fluidMask, populationReferenceNFluid);
+    populationStatsDownstream = local_population_stats(meanFields.N, populationFields.NTemporalStd, downstreamMask, populationReferenceNFluid);
+    populationStatsReversed = local_population_stats(meanFields.N, populationFields.NTemporalStd, reversedMask, populationReferenceNFluid);
 
     if any(reversedMask(:))
         reattachXCell = max(Xc(reversedMask), [], 'omitnan');
@@ -128,11 +143,6 @@ function out = validate_backward_step_classic_long(runDir, varargin)
     uxReversePersistenceMaxDownstream = max(uxReverseProbabilityDownstream, [], 'omitnan');
     [reversedLargestComponentFraction, reversedComponentCount] = local_largest_component_fraction(reversedMask);
 
-    lateSummary = summary(summary.step >= frameTable.step(firstAverageFrame), :);
-    if isempty(lateSummary)
-        lateSummary = summary;
-    end
-
     out = struct();
     out.runDir = runDir;
     out.params = params;
@@ -142,6 +152,7 @@ function out = validate_backward_step_classic_long(runDir, varargin)
     out.averageRows = averageRows;
     out.meanFields = meanFields;
     out.coherenceFields = coherenceFields;
+    out.populationFields = populationFields;
     out.finalState = finalState;
     out.finalFields = finalFields;
     out.lowerLayerProfile = lowerProfile;
@@ -153,6 +164,35 @@ function out = validate_backward_step_classic_long(runDir, varargin)
     out.meanUxLate = local_summary_mean(lateSummary, 'meanVx');
     out.meanUyLate = local_summary_mean(lateSummary, 'meanVy');
     out.stdNLate = local_summary_mean(lateSummary, 'stdN');
+    out.populationReferenceNFluid = populationReferenceNFluid;
+    out.populationNominalGammaParam = populationNominalGammaParam;
+    out.populationMeanFluid = populationStatsFluid.mean;
+    out.populationStdFluid = populationStatsFluid.std;
+    out.populationCvFluid = populationStatsFluid.cv;
+    out.populationMinFluid = populationStatsFluid.min;
+    out.populationP05Fluid = populationStatsFluid.p05;
+    out.populationP05FluidOverReference = populationStatsFluid.p05OverRef;
+    out.populationLowHalfRefFractionFluid = populationStatsFluid.lowHalfRefFraction;
+    out.populationBelow5FractionFluid = populationStatsFluid.below5Fraction;
+    out.populationMeanDownstream = populationStatsDownstream.mean;
+    out.populationStdDownstream = populationStatsDownstream.std;
+    out.populationCvDownstream = populationStatsDownstream.cv;
+    out.populationMinDownstream = populationStatsDownstream.min;
+    out.populationP05Downstream = populationStatsDownstream.p05;
+    out.populationP05DownstreamOverReference = populationStatsDownstream.p05OverRef;
+    out.populationLowHalfRefFractionDownstream = populationStatsDownstream.lowHalfRefFraction;
+    out.populationLowQuarterRefFractionDownstream = populationStatsDownstream.lowQuarterRefFraction;
+    out.populationBelow5FractionDownstream = populationStatsDownstream.below5Fraction;
+    out.populationBelow10FractionDownstream = populationStatsDownstream.below10Fraction;
+    out.populationTemporalStdMeanDownstream = populationStatsDownstream.temporalStdMean;
+    out.populationTemporalCvMeanDownstream = populationStatsDownstream.temporalCvMean;
+    out.populationMeanReversed = populationStatsReversed.mean;
+    out.populationMinReversed = populationStatsReversed.min;
+    out.populationP05Reversed = populationStatsReversed.p05;
+    out.populationP05ReversedOverReference = populationStatsReversed.p05OverRef;
+    out.populationLowHalfRefFractionReversed = populationStatsReversed.lowHalfRefFraction;
+    out.populationBelow5FractionReversed = populationStatsReversed.below5Fraction;
+    out.populationTemporalCvMeanReversed = populationStatsReversed.temporalCvMean;
     out.thermalVelocityLate = sqrt(max(out.kBTMeanLate, 0.0));
     out.meanUxOverThermalLate = out.meanUxLate / max(out.thermalVelocityLate, eps);
     out.minUxDownstream = min(uxDownstream, [], 'omitnan');
@@ -179,6 +219,16 @@ function out = validate_backward_step_classic_long(runDir, varargin)
     out.table = table(string(runDir), nFrames, numel(averageRows), maxInside, ...
         out.totalImmersedHits, out.meanImmersedVirtualMassLate, out.kBTMeanLate, out.kBTStdLate, ...
         out.thermalVelocityLate, out.meanUxLate, out.meanUxOverThermalLate, out.meanUyLate, out.stdNLate, ...
+        out.populationReferenceNFluid, out.populationNominalGammaParam, ...
+        out.populationMeanFluid, out.populationCvFluid, out.populationMinFluid, out.populationP05Fluid, ...
+        out.populationP05FluidOverReference, out.populationLowHalfRefFractionFluid, out.populationBelow5FractionFluid, ...
+        out.populationMeanDownstream, out.populationCvDownstream, out.populationMinDownstream, out.populationP05Downstream, ...
+        out.populationP05DownstreamOverReference, out.populationLowHalfRefFractionDownstream, ...
+        out.populationLowQuarterRefFractionDownstream, out.populationBelow5FractionDownstream, out.populationBelow10FractionDownstream, ...
+        out.populationTemporalStdMeanDownstream, out.populationTemporalCvMeanDownstream, ...
+        out.populationMeanReversed, out.populationMinReversed, out.populationP05Reversed, ...
+        out.populationP05ReversedOverReference, out.populationLowHalfRefFractionReversed, ...
+        out.populationBelow5FractionReversed, out.populationTemporalCvMeanReversed, ...
         out.minUxDownstream, out.meanUxDownstream, out.meanUxDownstreamOverThermal, ...
         out.reversedUxFraction, out.omegaRmsDownstream, out.omegaTotalRmsDownstream, ...
         out.omegaFluctRmsDownstream, out.omegaCoherenceRatioDownstream, ...
@@ -189,6 +239,16 @@ function out = validate_backward_step_classic_long(runDir, varargin)
         'VariableNames', {'runDir','nFrames','nAveragedFrames','maxParticlesInsideRectangle', ...
         'totalImmersedHits','meanImmersedVirtualMassLate','kBTMeanLate','kBTStdLate', ...
         'thermalVelocityLate','meanUxLate','meanUxOverThermalLate','meanUyLate','stdNLate', ...
+        'populationReferenceNFluid','populationNominalGammaParam', ...
+        'populationMeanFluid','populationCvFluid','populationMinFluid','populationP05Fluid', ...
+        'populationP05FluidOverReference','populationLowHalfRefFractionFluid','populationBelow5FractionFluid', ...
+        'populationMeanDownstream','populationCvDownstream','populationMinDownstream','populationP05Downstream', ...
+        'populationP05DownstreamOverReference','populationLowHalfRefFractionDownstream', ...
+        'populationLowQuarterRefFractionDownstream','populationBelow5FractionDownstream','populationBelow10FractionDownstream', ...
+        'populationTemporalStdMeanDownstream','populationTemporalCvMeanDownstream', ...
+        'populationMeanReversed','populationMinReversed','populationP05Reversed', ...
+        'populationP05ReversedOverReference','populationLowHalfRefFractionReversed', ...
+        'populationBelow5FractionReversed','populationTemporalCvMeanReversed', ...
         'minUxDownstream','meanUxDownstream','meanUxDownstreamOverThermal', ...
         'reversedUxFraction','omegaRmsDownstream','omegaTotalRmsDownstream', ...
         'omegaFluctRmsDownstream','omegaCoherenceRatioDownstream', ...
@@ -205,6 +265,8 @@ function out = validate_backward_step_classic_long(runDir, varargin)
         writetable(fieldTable, fullfile(runDir, 'backward_step_mean_fields.csv'));
         coherenceTable = local_coherence_fields_to_table(coherenceFields, meanFields);
         writetable(coherenceTable, fullfile(runDir, 'backward_step_coherence_fields.csv'));
+        populationTable = local_population_fields_to_table(populationFields, meanFields);
+        writetable(populationTable, fullfile(runDir, 'backward_step_population_fields.csv'));
     end
 
     if opt.makePlots
@@ -217,11 +279,11 @@ function acc = local_empty_accumulator(Ny, Nx)
     acc.N = z; acc.mass = z; acc.rho = z;
     acc.Ux = z; acc.Uy = z; acc.speed = z; acc.omega = z;
     acc.kineticEnergy = z; acc.kBTcell = z;
-    acc.omegaSq = z; acc.uxReverse = z;
+    acc.omegaSq = z; acc.uxReverse = z; acc.NSq = z;
     acc.countN = z; acc.countMass = z; acc.countRho = z;
     acc.countUx = z; acc.countUy = z; acc.countSpeed = z; acc.countOmega = z;
     acc.countKineticEnergy = z; acc.countKBTcell = z;
-    acc.countOmegaSq = z; acc.countUxReverse = z;
+    acc.countOmegaSq = z; acc.countUxReverse = z; acc.countNSq = z;
 end
 
 function acc = local_accumulate_fields(acc, fields)
@@ -233,6 +295,7 @@ function acc = local_accumulate_fields(acc, fields)
     acc = local_accumulate_one(acc, fields, 'speed');
     acc = local_accumulate_one(acc, fields, 'omega');
     acc = local_accumulate_coherence(acc, fields);
+    acc = local_accumulate_population(acc, fields);
     acc = local_accumulate_one(acc, fields, 'kineticEnergy');
     acc = local_accumulate_one(acc, fields, 'kBTcell');
 end
@@ -296,6 +359,31 @@ function coherenceFields = local_finalize_coherence_fields(meanFields, acc)
 end
 
 
+function acc = local_accumulate_population(acc, fields)
+    N = fields.N;
+    validN = isfinite(N);
+    acc.NSq(validN) = acc.NSq(validN) + N(validN).^2;
+    acc.countNSq(validN) = acc.countNSq(validN) + 1;
+end
+
+function populationFields = local_finalize_population_fields(meanFields, acc)
+    populationFields = struct();
+    populationFields.xc = meanFields.xc;
+    populationFields.yc = meanFields.yc;
+    populationFields.Lx = meanFields.Lx;
+    populationFields.Ly = meanFields.Ly;
+
+    NSecondMoment = acc.NSq ./ max(acc.countNSq, 1);
+    NSecondMoment(acc.countNSq == 0) = NaN;
+    NVariance = NSecondMoment - meanFields.N.^2;
+    NVariance(~isfinite(NVariance)) = NaN;
+    NVariance = max(NVariance, 0);
+
+    populationFields.NTemporalStd = sqrt(NVariance);
+    populationFields.NTemporalCv = populationFields.NTemporalStd ./ max(meanFields.N, eps);
+    populationFields.NTemporalCv(~isfinite(populationFields.NTemporalCv)) = NaN;
+end
+
 function profile = local_lower_layer_profile(fields, xMin, xMax, yMin, yMax, insideSolid)
     [Xc, Yc] = meshgrid(fields.xc, fields.yc);
     band = Yc > yMin & Yc < yMax & ~insideSolid & isfinite(fields.Ux);
@@ -303,6 +391,9 @@ function profile = local_lower_layer_profile(fields, xMin, xMax, yMin, yMax, ins
     uyMean = nan(numel(fields.xc), 1);
     omegaRms = nan(numel(fields.xc), 1);
     reversedFraction = nan(numel(fields.xc), 1);
+    NMean = nan(numel(fields.xc), 1);
+    NMin = nan(numel(fields.xc), 1);
+    NP05 = nan(numel(fields.xc), 1);
     nFluidCells = zeros(numel(fields.xc), 1);
     for ix = 1:numel(fields.xc)
         mask = band(:, ix);
@@ -315,12 +406,17 @@ function profile = local_lower_layer_profile(fields, xMin, xMax, yMin, yMax, ins
             uyMean(ix) = mean(uy, 'omitnan');
             omegaRms(ix) = local_rms_omitnan(om);
             reversedFraction(ix) = mean(ux < 0, 'omitnan');
+            nvals = fields.N(mask, ix);
+            NMean(ix) = mean(nvals, 'omitnan');
+            NMin(ix) = min(nvals, [], 'omitnan');
+            NP05(ix) = local_percentile_omitnan(nvals, 5);
         end
     end
     downstream = fields.xc(:) > xMax;
-    profile = table(fields.xc(:), uxMean, uyMean, omegaRms, reversedFraction, nFluidCells, downstream, ...
+    profile = table(fields.xc(:), uxMean, uyMean, omegaRms, reversedFraction, NMean, NMin, NP05, nFluidCells, downstream, ...
         'VariableNames', {'x','UxMeanLowerLayer','UyMeanLowerLayer','omegaRmsLowerLayer', ...
-        'reversedFractionLowerLayer','nFluidCellsLowerLayer','isDownstreamOfStep'});
+        'reversedFractionLowerLayer','NMeanLowerLayer','NMinLowerLayer','NP05LowerLayer', ...
+        'nFluidCellsLowerLayer','isDownstreamOfStep'});
     profile.isInsideSolidStreamwise = fields.xc(:) >= xMin & fields.xc(:) <= xMax;
 end
 
@@ -391,6 +487,13 @@ function local_plot_validation(out, fieldName, xMin, xMax, yMin, yMax)
     ax = nexttile; local_plot_coherence_field(ax, out, 'omegaFluctRms', xMin, xMax, yMin, yMax); title(ax, 'omega temporal fluctuation RMS');
     ax = nexttile; local_plot_coherence_field(ax, out, 'omegaCoherenceCellRatio', xMin, xMax, yMin, yMax); title(ax, '|mean omega| / temporal RMS');
     ax = nexttile; local_plot_coherence_field(ax, out, 'uxReverseProbability', xMin, xMax, yMin, yMax); title(ax, 'P(Ux < 0) over averaged frames');
+
+    figure('Name', 'Backward-step population reliability diagnostics');
+    tiledlayout(2,2);
+    ax = nexttile; local_plot_binned_field(ax, out.meanFields, 'N', xMin, xMax, yMin, yMax, false, false); title(ax, 'mean population N');
+    ax = nexttile; local_plot_population_ratio(ax, out, xMin, xMax, yMin, yMax); title(ax, 'mean N / fluid reference N');
+    ax = nexttile; local_plot_population_field(ax, out, 'NTemporalStd', xMin, xMax, yMin, yMax); title(ax, 'temporal std(N)');
+    ax = nexttile; local_plot_population_field(ax, out, 'NTemporalCv', xMin, xMax, yMin, yMax); title(ax, 'temporal CV(N)');
 end
 
 function local_plot_binned_field(ax, fields, fieldName, xMin, xMax, yMin, yMax, overlayUxZero, overlayQuiver)
@@ -463,6 +566,41 @@ function local_plot_coherence_field(ax, out, fieldName, xMin, xMax, yMin, yMax)
     hold(ax, 'off');
 end
 
+function local_plot_population_field(ax, out, fieldName, xMin, xMax, yMin, yMax)
+    data = out.populationFields.(fieldName);
+    [Xc, Yc] = meshgrid(out.meanFields.xc, out.meanFields.yc);
+    insideSolid = Xc >= xMin & Xc <= xMax & Yc >= yMin & Yc <= yMax;
+    data(insideSolid) = NaN;
+    imagesc(ax, out.meanFields.xc, out.meanFields.yc, data);
+    set(ax, 'YDir', 'normal');
+    axis(ax, 'equal');
+    axis(ax, [0 out.meanFields.Lx 0 out.meanFields.Ly]);
+    xlabel(ax, 'x');
+    ylabel(ax, 'y');
+    colorbar(ax);
+    hold(ax, 'on');
+    local_draw_rectangle(ax, xMin, xMax, yMin, yMax);
+    hold(ax, 'off');
+end
+
+function local_plot_population_ratio(ax, out, xMin, xMax, yMin, yMax)
+    data = out.meanFields.N ./ max(out.populationReferenceNFluid, eps);
+    [Xc, Yc] = meshgrid(out.meanFields.xc, out.meanFields.yc);
+    insideSolid = Xc >= xMin & Xc <= xMax & Yc >= yMin & Yc <= yMax;
+    data(insideSolid) = NaN;
+    imagesc(ax, out.meanFields.xc, out.meanFields.yc, data);
+    set(ax, 'YDir', 'normal');
+    axis(ax, 'equal');
+    axis(ax, [0 out.meanFields.Lx 0 out.meanFields.Ly]);
+    xlabel(ax, 'x');
+    ylabel(ax, 'y');
+    colorbar(ax);
+    hold(ax, 'on');
+    contour(ax, out.meanFields.xc, out.meanFields.yc, data, [0.5 0.5], 'k', 'LineWidth', 1.0);
+    local_draw_rectangle(ax, xMin, xMax, yMin, yMax);
+    hold(ax, 'off');
+end
+
 function data = local_extract_field(fields, fieldName)
     switch lower(char(fieldName))
         case {'n','count','occupancy'}
@@ -523,6 +661,62 @@ function v = local_summary_std(summary, name)
         v = std(summary.(name), 'omitnan');
     else
         v = NaN;
+    end
+end
+
+function s = local_population_stats(Nmean, NtemporalStd, mask, nRef)
+    valid = mask & isfinite(Nmean);
+    vals = Nmean(valid);
+    if nargin < 4 || ~isfinite(nRef) || nRef <= 0
+        nRef = mean(vals, 'omitnan');
+    end
+    s = struct('mean', NaN, 'std', NaN, 'cv', NaN, 'min', NaN, ...
+        'p05', NaN, 'p10', NaN, 'p25', NaN, 'p05OverRef', NaN, ...
+        'lowHalfRefFraction', NaN, 'lowQuarterRefFraction', NaN, ...
+        'below5Fraction', NaN, 'below10Fraction', NaN, ...
+        'temporalStdMean', NaN, 'temporalCvMean', NaN);
+    if isempty(vals)
+        return;
+    end
+    s.mean = mean(vals, 'omitnan');
+    s.std = std(vals, 'omitnan');
+    s.cv = s.std / max(s.mean, eps);
+    s.min = min(vals, [], 'omitnan');
+    s.p05 = local_percentile_omitnan(vals, 5);
+    s.p10 = local_percentile_omitnan(vals, 10);
+    s.p25 = local_percentile_omitnan(vals, 25);
+    s.p05OverRef = s.p05 / max(nRef, eps);
+    s.lowHalfRefFraction = mean(vals < 0.5 * nRef, 'omitnan');
+    s.lowQuarterRefFraction = mean(vals < 0.25 * nRef, 'omitnan');
+    s.below5Fraction = mean(vals < 5, 'omitnan');
+    s.below10Fraction = mean(vals < 10, 'omitnan');
+
+    tvals = NtemporalStd(valid);
+    s.temporalStdMean = mean(tvals, 'omitnan');
+    temporalCv = tvals ./ max(vals, eps);
+    temporalCv(~isfinite(temporalCv)) = NaN;
+    s.temporalCvMean = mean(temporalCv, 'omitnan');
+end
+
+function q = local_percentile_omitnan(x, p)
+    x = sort(x(isfinite(x)));
+    if isempty(x)
+        q = NaN;
+        return;
+    end
+    if numel(x) == 1
+        q = x(1);
+        return;
+    end
+    p = min(max(double(p), 0), 100);
+    pos = 1 + (p / 100) * (numel(x) - 1);
+    lo = floor(pos);
+    hi = ceil(pos);
+    if lo == hi
+        q = x(lo);
+    else
+        w = pos - lo;
+        q = (1 - w) * x(lo) + w * x(hi);
     end
 end
 
@@ -606,6 +800,12 @@ function tbl = local_coherence_fields_to_table(coherenceFields, meanFields)
     tbl = table(Xc(:), Yc(:), coherenceFields.omegaTemporalRms(:), coherenceFields.omegaFluctRms(:), ...
         coherenceFields.omegaCoherenceCellRatio(:), coherenceFields.uxReverseProbability(:), ...
         'VariableNames', {'x','y','omegaTemporalRms','omegaFluctRms','omegaCoherenceCellRatio','uxReverseProbability'});
+end
+
+function tbl = local_population_fields_to_table(populationFields, meanFields)
+    [Xc, Yc] = meshgrid(meanFields.xc, meanFields.yc);
+    tbl = table(Xc(:), Yc(:), meanFields.N(:), populationFields.NTemporalStd(:), populationFields.NTemporalCv(:), ...
+        'VariableNames', {'x','y','NMean','NTemporalStd','NTemporalCv'});
 end
 
 function v = local_rms_omitnan(x)
