@@ -150,6 +150,13 @@ struct RuntimeSummary {
     double q9ImmersedSolidLeakCutMassFluxMaxAbs = 0.0;
     double q9CorrectionVelocityRms = 0.0;
     double q9CorrectionVelocityMaxAbs = 0.0;
+    int q9OpenBoundaryEnabled = 0;
+    double q9OpenBoundaryMassFluxXLow = 0.0;
+    double q9OpenBoundaryMassFluxXHigh = 0.0;
+    double q9OpenBoundaryMassFluxYLow = 0.0;
+    double q9OpenBoundaryMassFluxYHigh = 0.0;
+    double q9OpenBoundaryMassFluxBalance = 0.0;
+    double q9OpenBoundaryMeanDivergence = 0.0;
     double q9MomentumCorrectionVx = 0.0;
     double q9MomentumCorrectionVy = 0.0;
     double q9MomentumResidualBeforeCorrection = 0.0;

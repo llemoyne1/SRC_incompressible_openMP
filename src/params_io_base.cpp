@@ -440,14 +440,15 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("0062 inlet/outlet supports one open axis at a time");
         }
         const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
-        if (p.method != "classic" && p.method != "q6") {
-            throw std::runtime_error("0062 inlet/outlet currently supports method=classic or method=q6 only; Q9/virial come later");
+        const bool q9OpenBoundary = (p.method == "q9") || p.q9MassFluxProjectionEnable;
+        if (p.method != "classic" && p.method != "q6" && p.method != "q9") {
+            throw std::runtime_error("0063 inlet/outlet currently supports method=classic, method=q6 or method=q9 only; virial comes later");
         }
-        if (p.q9MassFluxProjectionEnable || p.virialDiagnosticsEnable || p.virialKickEnable) {
-            throw std::runtime_error("0062 inlet/outlet currently supports classic/Q6 only; Q9/virial are disabled for open boundaries");
+        if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
+            throw std::runtime_error("0063 inlet/outlet currently supports classic/Q6/Q9 only; virial is disabled for open boundaries");
         }
-        if (q6OpenBoundary && p.immersedSolidEnable) {
-            throw std::runtime_error("0062 Q6 inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
+        if ((q6OpenBoundary || q9OpenBoundary) && p.immersedSolidEnable) {
+            throw std::runtime_error("0063 Q6/Q9 inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
         }
         std::string inletInjectionMode = p.inletInjectionMode;
         std::replace(inletInjectionMode.begin(), inletInjectionMode.end(), '-', '_');

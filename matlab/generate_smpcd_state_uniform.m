@@ -29,6 +29,9 @@ function state = generate_smpcd_state_uniform(varargin)
     p.addParameter('rectangleXMax', 0.25, @(x) isnumeric(x) && isscalar(x));
     p.addParameter('rectangleYMin', 0.0, @(x) isnumeric(x) && isscalar(x));
     p.addParameter('rectangleYMax', 0.5, @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('Ux', 0., @(x) isnumeric(x) && isscalar(x));
+    p.addParameter('Uy', 0., @(x) isnumeric(x) && isscalar(x));
+    
     p.parse(varargin{:});
     opt = p.Results;
 
@@ -86,8 +89,8 @@ function state = generate_smpcd_state_uniform(varargin)
     switch velocityMode
         case 'maxwell'
             sigma = sqrt(opt.kBT / opt.mass);
-            vx = sigma * randn(Np,1);
-            vy = sigma * randn(Np,1);
+            vx =opt.Ux+ sigma * randn(Np,1);
+            vy =opt.Uy+ sigma * randn(Np,1);
         case 'zero'
             vx = zeros(Np,1);
             vy = zeros(Np,1);

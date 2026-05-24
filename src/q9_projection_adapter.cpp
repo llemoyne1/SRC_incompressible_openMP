@@ -123,10 +123,41 @@ double active_domain_divergence_rate(const FluidDomainBounds& domain) {
     return rate;
 }
 
-void add_moving_wall_fluxes_to_q9_bc(EllipticProjectionBC& bc,
-                                     const SimulationParams& params,
-                                     const FluidDomainBounds& domain,
-                                     double meanCellMass) {
+bool has_x_io_pair(const SimulationParams& params) {
+    return (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) ||
+           (is_outlet_boundary_mode(params.bcLeft) && is_inlet_boundary_mode(params.bcRight));
+}
+
+bool has_y_io_pair(const SimulationParams& params) {
+    return (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) ||
+           (is_outlet_boundary_mode(params.bcBottom) && is_inlet_boundary_mode(params.bcTop));
+}
+
+double q9_open_x_velocity_component(const SimulationParams& params) {
+    if (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) {
+        return params.inletUxLeft;
+    }
+    if (is_inlet_boundary_mode(params.bcRight) && is_outlet_boundary_mode(params.bcLeft)) {
+        return params.inletUxRight;
+    }
+    return 0.0;
+}
+
+double q9_open_y_velocity_component(const SimulationParams& params) {
+    if (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) {
+        return params.inletUyBottom;
+    }
+    if (is_inlet_boundary_mode(params.bcTop) && is_outlet_boundary_mode(params.bcBottom)) {
+        return params.inletUyTop;
+    }
+    return 0.0;
+}
+
+void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
+                                       const SimulationParams& params,
+                                       const FluidDomainBounds& domain,
+                                       double meanCellMass,
+                                       Q9ProjectionDiagnostics& diag) {
     if (!is_x_periodic(params)) {
         bc.xLowFlux = meanCellMass * domain.vxMin;
         bc.xHighFlux = meanCellMass * domain.vxMax;
@@ -135,6 +166,35 @@ void add_moving_wall_fluxes_to_q9_bc(EllipticProjectionBC& bc,
         bc.yLowFlux = meanCellMass * domain.vyMin;
         bc.yHighFlux = meanCellMass * domain.vyMax;
     }
+
+    // 0063 minimal open-boundary policy for Q9: use the same balanced face
+    // flux convention as 0062/Q6, but in mass-flux units.  The prescribed
+    // velocity is multiplied by the current mean cell mass, matching the Q9
+    // compact face-field convention baseMassFlux = cellMass * cellVelocity.
+    if (has_x_io_pair(params)) {
+        const double jx = meanCellMass * q9_open_x_velocity_component(params);
+        bc.xLowFlux = jx;
+        bc.xHighFlux = jx;
+        diag.openBoundaryEnabled = true;
+    }
+    if (has_y_io_pair(params)) {
+        const double jy = meanCellMass * q9_open_y_velocity_component(params);
+        bc.yLowFlux = jy;
+        bc.yHighFlux = jy;
+        diag.openBoundaryEnabled = true;
+    }
+
+    diag.openBoundaryMassFluxXLow = bc.xLowFlux;
+    diag.openBoundaryMassFluxXHigh = bc.xHighFlux;
+    diag.openBoundaryMassFluxYLow = bc.yLowFlux;
+    diag.openBoundaryMassFluxYHigh = bc.yHighFlux;
+
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    diag.openBoundaryMassFluxBalance = (bc.xHighFlux - bc.xLowFlux) * height +
+                                       (bc.yHighFlux - bc.yLowFlux) * width;
+    const double area = width * height;
+    diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryMassFluxBalance / area : 0.0;
 }
 
 void deposit_cell_mass_momentum(const ParticleState& state,
@@ -664,7 +724,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
         params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
     EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
-    add_moving_wall_fluxes_to_q9_bc(bc, params, domain, diag.densityMean);
+    add_boundary_mass_fluxes_to_q9_bc(bc, params, domain, diag.densityMean, diag);
     apply_q9_target_filter(params, egrid, bc, workspace.alpha, mask, workspace.targetDivergence, workspace, diag);
     const std::vector<double> projectionTarget = build_q9_projection_target(
         params, egrid, bc, workspace.baseMassFlux, workspace.alpha, mask, workspace.targetDivergence, workspace);

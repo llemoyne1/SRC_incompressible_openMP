@@ -55,6 +55,15 @@ struct Q9ProjectionDiagnostics {
     double immersedSolidLeakCutMassFluxMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
+
+    bool openBoundaryEnabled = false;
+    double openBoundaryMassFluxXLow = 0.0;
+    double openBoundaryMassFluxXHigh = 0.0;
+    double openBoundaryMassFluxYLow = 0.0;
+    double openBoundaryMassFluxYHigh = 0.0;
+    double openBoundaryMassFluxBalance = 0.0;
+    double openBoundaryMeanDivergence = 0.0;
+
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;

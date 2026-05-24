@@ -20,6 +20,9 @@ addParameter(p, 'seed', 12345, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'circleCx', 0.35, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'circleCy', 0.20, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'circleR', 0.04, @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p,'Ux', 9., @(x) isnumeric(x) && isscalar(x));
+addParameter(p,'Uy', 0., @(x) isnumeric(x) && isscalar(x));
+
 parse(p, varargin{:});
 opt = p.Results;
 
@@ -30,7 +33,7 @@ state = generate_smpcd_state_uniform('output', char(opt.output), ...
     'mode', 'uniform_per_cell', 'velocityMode', 'maxwell', ...
     'removeMeanMomentum', true, ...
     'excludeCircle', true, 'circleCx', opt.circleCx, ...
-    'circleCy', opt.circleCy, 'circleR', opt.circleR);
+    'circleCy', opt.circleCy, 'circleR', opt.circleR,'Ux',opt.Ux,'Uy',opt.Uy);
 
 fprintf('[generate_von_karman_cylinder_state] wrote %s\n', char(opt.output));
 fprintf('  geometry: L=(%.6g, %.6g), grid=%dx%d, gamma=%.6g, circle=(%.6g, %.6g), R=%.6g\n', ...
