@@ -11,6 +11,10 @@ function S = analyze_open_channel_poiseuille_validation_0065(varargin)
 %   runs/open_channel_poiseuille_validation_0065/profiles/profiles_y_<case>.csv
 %   runs/open_channel_poiseuille_validation_0065/profiles/profiles_x_<case>.csv
 %
+% 0065b adds bulk/core diagnostics from the final state:
+%   - bulk = cells excluding open inlet/outlet reservoirs;
+%   - core = bulk cells excluding near-wall rows used for robust validation.
+%
 % A non-default run root can be supplied with:
 %   S = analyze_open_channel_poiseuille_validation_0065('root','..', ...
 %       'runRoot','runs/test_0065_short');
@@ -196,6 +200,9 @@ function stats = default_profile_stats()
 stats = struct();
 stats.profileStateFound = 0;
 stats.profileOpenExclusionCells = NaN;
+stats.profileWallExclusionCells = NaN;
+
+% Legacy open-reservoir-excluded profile diagnostics kept for compatibility.
 stats.profileBulkRhoMean = NaN;
 stats.profileBulkRhoStd = NaN;
 stats.profileBulkKBTMean = NaN;
@@ -207,6 +214,45 @@ stats.profileUxQuadraticR2 = NaN;
 stats.profilePkinMean = NaN;
 stats.profilePvirMean = NaN;
 stats.profilePtotMean = NaN;
+
+% 0065b robust bulk/core diagnostics. Bulk excludes inlet/outlet reservoir
+% slabs. Core excludes both reservoir slabs and near-wall rows.
+stats.profileBulkCellCount = NaN;
+stats.profileBulkCountMean = NaN;
+stats.profileBulkCountStd = NaN;
+stats.profileBulkCountMin = NaN;
+stats.profileBulkCountMax = NaN;
+stats.profileBulkEmptyCellFraction = NaN;
+stats.profileBulkMinCountXIndex = NaN;
+stats.profileBulkMinCountYIndex = NaN;
+stats.profileBulkMaxCountXIndex = NaN;
+stats.profileBulkMaxCountYIndex = NaN;
+stats.profileBulkUxStd = NaN;
+stats.profileBulkUyMean = NaN;
+stats.profileBulkUyRms = NaN;
+
+stats.profileCoreCellCount = NaN;
+stats.profileCoreCountMean = NaN;
+stats.profileCoreCountStd = NaN;
+stats.profileCoreCountMin = NaN;
+stats.profileCoreCountMax = NaN;
+stats.profileCoreEmptyCellFraction = NaN;
+stats.profileCoreRhoMean = NaN;
+stats.profileCoreRhoStd = NaN;
+stats.profileCoreKBTMean = NaN;
+stats.profileCoreUxMean = NaN;
+stats.profileCoreUxStd = NaN;
+stats.profileCoreUyMean = NaN;
+stats.profileCoreUyRms = NaN;
+stats.profileCorePkinMean = NaN;
+stats.profileCorePvirMean = NaN;
+stats.profileCorePtotMean = NaN;
+
+stats.profileUxQuadraticA = NaN;
+stats.profileUxQuadraticB = NaN;
+stats.profileUxQuadraticC = NaN;
+stats.profileUxQuadraticRMSE = NaN;
+stats.profileUxQuadraticNPoints = NaN;
 end
 
 function [Y, X, stats] = compute_final_profiles(paramsFile, stateFile, opts)
@@ -300,10 +346,21 @@ Y.PkinMean = mean(Pkin(:, activeX), 2);
 Y.PvirMean = mean(Pvir(:, activeX), 2);
 Y.PtotMean = mean(Ptot(:, activeX), 2);
 
+wallEx = max(0, round(opts.excludeWallCells));
+wallEx = min(wallEx, floor((Ny - 1) / 2));
+wallExcludedY = false(Ny, 1);
+if wallEx > 0
+    wallExcludedY(1:wallEx) = true;
+    wallExcludedY((Ny-wallEx+1):Ny) = true;
+end
+Y.isWallExcludedForCore = wallExcludedY;
+Y.isUsedForQuadraticFit = ~wallExcludedY;
+
 X = table();
 X.xIndex = (1:Nx)';
 X.xCenter = xCenter;
 X.isOpenReservoirExcluded = excludeX(:);
+X.isActiveForBulk = activeX(:);
 X.countMean = mean(count, 1)';
 X.rhoMean = mean(rho, 1)';
 X.uxMean = mean(ux, 1)';
@@ -316,6 +373,7 @@ X.PtotMean = mean(Ptot, 1)';
 stats = default_profile_stats();
 stats.profileStateFound = 1;
 stats.profileOpenExclusionCells = ex;
+stats.profileWallExclusionCells = wallEx;
 stats.profileBulkRhoMean = mean(rho(activeMask));
 stats.profileBulkRhoStd = std(rho(activeMask));
 stats.profileBulkKBTMean = mean(kBT(activeMask));
@@ -324,13 +382,16 @@ stats.profilePkinMean = mean(Pkin(activeMask));
 stats.profilePvirMean = mean(Pvir(activeMask));
 stats.profilePtotMean = mean(Ptot(activeMask));
 
+[bulkStats, coreStats] = compute_bulk_core_stats(count, rho, ux, uy, kBT, Pkin, Pvir, Ptot, activeMask, wallExcludedY);
+stats = merge_stats(stats, bulkStats, 'profileBulk');
+stats = merge_stats(stats, coreStats, 'profileCore');
+
 centerIdx = max(1, min(Ny, round((Ny + 1) / 2)));
 stats.profileUxCenter = Y.uxMean(centerIdx);
 stats.profileUxWallMean = 0.5 * (Y.uxMean(1) + Y.uxMean(end));
 stats.profileUxCenterMinusWall = stats.profileUxCenter - stats.profileUxWallMean;
 
-wallEx = max(0, round(opts.excludeWallCells));
-fitIdx = (1+wallEx):(Ny-wallEx);
+fitIdx = find(Y.isUsedForQuadraticFit);
 if numel(fitIdx) >= 4
     yf = Y.yCenter(fitIdx);
     uf = Y.uxMean(fitIdx);
@@ -338,9 +399,87 @@ if numel(fitIdx) >= 4
     pred = polyval(p, yf);
     ssRes = sum((uf - pred).^2);
     ssTot = sum((uf - mean(uf)).^2);
+    stats.profileUxQuadraticA = p(1);
+    stats.profileUxQuadraticB = p(2);
+    stats.profileUxQuadraticC = p(3);
+    stats.profileUxQuadraticRMSE = sqrt(mean((uf - pred).^2));
+    stats.profileUxQuadraticNPoints = numel(fitIdx);
     if ssTot > 0
         stats.profileUxQuadraticR2 = 1.0 - ssRes / ssTot;
     end
+end
+end
+
+
+function [bulkStats, coreStats] = compute_bulk_core_stats(count, rho, ux, uy, kBT, Pkin, Pvir, Ptot, activeMask, wallExcludedY)
+[Ny, Nx] = size(count);
+coreMask = activeMask & repmat(~wallExcludedY(:), 1, Nx);
+if ~any(coreMask(:))
+    coreMask = activeMask;
+end
+bulkStats = compute_masked_stats(count, rho, ux, uy, kBT, Pkin, Pvir, Ptot, activeMask);
+coreStats = compute_masked_stats(count, rho, ux, uy, kBT, Pkin, Pvir, Ptot, coreMask);
+end
+
+function out = compute_masked_stats(count, rho, ux, uy, kBT, Pkin, Pvir, Ptot, mask)
+out = struct();
+if ~any(mask(:))
+    out.CellCount = 0;
+    out.CountMean = NaN;
+    out.CountStd = NaN;
+    out.CountMin = NaN;
+    out.CountMax = NaN;
+    out.EmptyCellFraction = NaN;
+    out.MinCountXIndex = NaN;
+    out.MinCountYIndex = NaN;
+    out.MaxCountXIndex = NaN;
+    out.MaxCountYIndex = NaN;
+    out.RhoMean = NaN;
+    out.RhoStd = NaN;
+    out.KBTMean = NaN;
+    out.UxMean = NaN;
+    out.UxStd = NaN;
+    out.UyMean = NaN;
+    out.UyRms = NaN;
+    out.PkinMean = NaN;
+    out.PvirMean = NaN;
+    out.PtotMean = NaN;
+    return;
+end
+c = count(mask);
+out.CellCount = numel(c);
+out.CountMean = mean(c);
+out.CountStd = std(c);
+out.CountMin = min(c);
+out.CountMax = max(c);
+out.EmptyCellFraction = mean(c <= 0);
+activeLinear = find(mask);
+[~, minLocal] = min(count(activeLinear));
+[~, maxLocal] = max(count(activeLinear));
+minLinear = activeLinear(minLocal);
+maxLinear = activeLinear(maxLocal);
+[minY, minX] = ind2sub(size(count), minLinear);
+[maxY, maxX] = ind2sub(size(count), maxLinear);
+out.MinCountXIndex = minX;
+out.MinCountYIndex = minY;
+out.MaxCountXIndex = maxX;
+out.MaxCountYIndex = maxY;
+out.RhoMean = mean(rho(mask));
+out.RhoStd = std(rho(mask));
+out.KBTMean = mean(kBT(mask));
+out.UxMean = mean(ux(mask));
+out.UxStd = std(ux(mask));
+out.UyMean = mean(uy(mask));
+out.UyRms = sqrt(mean(uy(mask).^2));
+out.PkinMean = mean(Pkin(mask));
+out.PvirMean = mean(Pvir(mask));
+out.PtotMean = mean(Ptot(mask));
+end
+
+function stats = merge_stats(stats, values, prefix)
+fields = fieldnames(values);
+for i = 1:numel(fields)
+    stats.([prefix fields{i}]) = values.(fields{i});
 end
 end
 
@@ -460,6 +599,18 @@ try
     legend('Interpreter','none', 'Location','best');
     grid on;
     title('0065 final density profiles');
+
+    figure('Name','0065 count(y) profiles');
+    hold on;
+    for i = 1:numel(names)
+        Y = profileYTables.(names{i});
+        plot(Y.countMean, Y.yCenter, '-o', 'DisplayName', names{i});
+    end
+    xlabel('count N');
+    ylabel('y');
+    legend('Interpreter','none', 'Location','best');
+    grid on;
+    title('0065 final population profiles');
 
     figure('Name','0065 Ptot(y) profiles');
     hold on;
