@@ -35,6 +35,8 @@ struct VirialPressureDiagnostics {
 
     std::uint64_t immersedSolidFluidCells = 0;
     std::uint64_t immersedSolidSolidCells = 0;
+    std::uint64_t openBoundaryExcludedCells = 0;
+    std::uint64_t activeCells = 0;
 
     double rhoMean = 0.0;
     double rhoEOSRef = 0.0;

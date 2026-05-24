@@ -275,19 +275,81 @@ std::uint64_t virial_active_cell_count(const ImmersedSolidProjectionMask* mask, 
     return mask->fluidCells;
 }
 
+bool open_boundary_excludes_cell(const SimulationParams& params, int ix, int iy) {
+    const int n = params.virialOpenBoundaryExclusionCells;
+    if (n <= 0 || !has_io_boundary(params)) {
+        return false;
+    }
+    if (is_io_boundary_mode(params.bcLeft) && ix < n) {
+        return true;
+    }
+    if (is_io_boundary_mode(params.bcRight) && ix >= params.Nx - n) {
+        return true;
+    }
+    if (is_io_boundary_mode(params.bcBottom) && iy < n) {
+        return true;
+    }
+    if (is_io_boundary_mode(params.bcTop) && iy >= params.Ny - n) {
+        return true;
+    }
+    return false;
+}
+
 const ImmersedSolidProjectionMask* prepare_virial_immersed_mask(const SimulationParams& params,
                                                                 const CellGrid& grid,
                                                                 const FluidDomainBounds& domain,
                                                                 VirialPressureWorkspace& ws,
                                                                 VirialPressureDiagnostics& diag) {
-    if (!immersed_solid_enabled(params)) {
+    const bool hasImmersed = immersed_solid_enabled(params);
+    const bool hasOpenExclusion = has_io_boundary(params) && params.virialOpenBoundaryExclusionCells > 0;
+    if (!hasImmersed && !hasOpenExclusion) {
         ws.immersedMask = ImmersedSolidProjectionMask{};
+        diag.activeCells = static_cast<std::uint64_t>(std::max(0, params.Nx * params.Ny));
         return nullptr;
     }
-    ws.immersedMask = build_immersed_solid_projection_mask(
-        params, grid, domain, static_cast<double>(0.0), params.projectionImmersedSolidFluidFractionThreshold);
-    diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
-    diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+
+    if (hasImmersed) {
+        ws.immersedMask = build_immersed_solid_projection_mask(
+            params, grid, domain, static_cast<double>(0.0), params.projectionImmersedSolidFluidFractionThreshold);
+        diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
+        diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+    } else {
+        const int nc = params.Nx * params.Ny;
+        ws.immersedMask = ImmersedSolidProjectionMask{};
+        ws.immersedMask.activeCell.assign(static_cast<std::size_t>(nc), static_cast<std::uint8_t>(1u));
+        ws.immersedMask.fluidFraction.assign(static_cast<std::size_t>(nc), 1.0);
+        ws.immersedMask.fluidCells = static_cast<std::uint64_t>(std::max(0, nc));
+        ws.immersedMask.solidCells = 0u;
+    }
+
+    if (hasOpenExclusion) {
+        std::uint64_t excluded = 0u;
+        std::uint64_t active = 0u;
+        for (int iy = 0; iy < params.Ny; ++iy) {
+            for (int ix = 0; ix < params.Nx; ++ix) {
+                const std::size_t k = static_cast<std::size_t>(ix + params.Nx * iy);
+                if (!ws.immersedMask.activeCell.empty() && ws.immersedMask.activeCell[k] == 0u) {
+                    continue;
+                }
+                if (open_boundary_excludes_cell(params, ix, iy)) {
+                    ws.immersedMask.activeCell[k] = 0u;
+                    if (!ws.immersedMask.fluidFraction.empty()) {
+                        ws.immersedMask.fluidFraction[k] = 0.0;
+                    }
+                    ++excluded;
+                }
+            }
+        }
+        for (std::uint8_t v : ws.immersedMask.activeCell) {
+            if (v != 0u) {
+                ++active;
+            }
+        }
+        ws.immersedMask.fluidCells = active;
+        ws.immersedMask.solidCells = static_cast<std::uint64_t>(std::max(0, params.Nx * params.Ny)) - active;
+        diag.openBoundaryExcludedCells = excluded;
+    }
+    diag.activeCells = ws.immersedMask.fluidCells;
     return &ws.immersedMask;
 }
 
@@ -302,13 +364,21 @@ void compute_pressure_maps(const ParticleState& state,
     const double cellArea = area / static_cast<double>(std::max(1, nc));
     const std::uint64_t activeCells = virial_active_cell_count(mask, nc);
     const double activeArea = cellArea * static_cast<double>(activeCells);
-    diag.rhoMean = activeArea > 0.0 ? static_cast<double>(state.Np) / activeArea : 0.0;
-    // For immersed solids, use the active fluid area as the EOS/current-volume
-    // reference.  This avoids treating deliberately empty solid cells as a
-    // low-density liquid and prevents artificial pressure kicks at the immersed wall.
+    double activeMass = 0.0;
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t k = static_cast<std::size_t>(c);
+        if (virial_cell_active(mask, k)) {
+            activeMass += ws.cellMass[k];
+        }
+    }
+    diag.rhoMean = activeArea > 0.0 ? activeMass / activeArea : 0.0;
+    // For immersed solids and open inlet/outlet reservoirs, use the active bulk
+    // fluid area as the EOS/current-volume reference. This avoids treating
+    // deliberately inactive solid/reservoir cells as low-density liquid and
+    // prevents artificial pressure kicks at immersed walls or open reservoirs.
     diag.rhoEOSRef = diag.rhoMean;
     diag.rhoUniformNow = diag.rhoMean;
-    if (!immersed_solid_enabled(params)) {
+    if (!immersed_solid_enabled(params) && !has_io_boundary(params)) {
         diag.rhoEOSRef = resolve_rho_eos_ref(params, state, diag.rhoMean);
         diag.rhoUniformNow = resolve_rho_uniform_now(params, state, domain, diag.rhoMean);
     }

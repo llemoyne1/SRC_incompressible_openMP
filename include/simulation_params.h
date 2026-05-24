@@ -196,6 +196,7 @@ struct SimulationParams {
     std::string virialRhoKickMode = "uniform_now"; // uniform_now, local
     double virialRhoKickMinFraction = 0.1;
     bool virialMomentumCorrectionEnable = true;
+    int virialOpenBoundaryExclusionCells = 3; // 0064: skip inlet/outlet reservoir cells in virial EOS/kick
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

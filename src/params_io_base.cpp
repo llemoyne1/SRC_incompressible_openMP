@@ -272,6 +272,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "virialRhoKickMode") p.virialRhoKickMode = get_lower(kv, key);
         else if (key == "virialRhoKickMinFraction") p.virialRhoKickMinFraction = parse_double(value, key);
         else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "virialOpenBoundaryExclusionCells" || key == "virialReservoirExclusionCells") p.virialOpenBoundaryExclusionCells = parse_int(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -441,14 +442,15 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
         const bool q9OpenBoundary = (p.method == "q9") || p.q9MassFluxProjectionEnable;
-        if (p.method != "classic" && p.method != "q6" && p.method != "q9") {
-            throw std::runtime_error("0063 inlet/outlet currently supports method=classic, method=q6 or method=q9 only; virial comes later");
+        if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
+            throw std::runtime_error("0064 inlet/outlet currently supports method=classic, method=q6, method=q9 or method=q9_virial");
         }
-        if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
-            throw std::runtime_error("0063 inlet/outlet currently supports classic/Q6/Q9 only; virial is disabled for open boundaries");
+        const bool virialOpenBoundary = p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial";
+        if (virialOpenBoundary && !q9OpenBoundary) {
+            throw std::runtime_error("0064 virial inlet/outlet requires the Q9 mass-flux path; use method=q9_virial or enable q9MassFluxProjectionEnable");
         }
         if ((q6OpenBoundary || q9OpenBoundary) && p.immersedSolidEnable) {
-            throw std::runtime_error("0063 Q6/Q9 inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
+            throw std::runtime_error("0064 Q6/Q9/virial inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
         }
         std::string inletInjectionMode = p.inletInjectionMode;
         std::replace(inletInjectionMode.begin(), inletInjectionMode.end(), '-', '_');
@@ -688,6 +690,12 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (!(p.virialRhoKickMinFraction > 0.0)) {
             throw std::runtime_error("virialRhoKickMinFraction must be positive");
+        }
+        if (p.virialOpenBoundaryExclusionCells < 0) {
+            throw std::runtime_error("virialOpenBoundaryExclusionCells must be non-negative");
+        }
+        if (has_io_boundary(p) && p.virialKickEnable && p.virialOpenBoundaryExclusionCells <= 0) {
+            throw std::runtime_error("0064 virial inlet/outlet requires virialOpenBoundaryExclusionCells>0 for reservoir/bulk separation");
         }
     }
     if (p.summaryEvery <= 0) {
