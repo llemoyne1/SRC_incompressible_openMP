@@ -1,0 +1,75 @@
+# 0062 Q6 minimal open-channel Poiseuille-style smoke test.
+# Geometry: x-open channel, y-solid walls. The particle boundary remains the
+# 0061b CUDA-like recycling inlet/outlet. Q6 additionally prescribes a balanced
+# normal velocity flux on the open elliptic faces. keepMeanFlow is enabled here
+# to exercise the short-domain outlet without waiting for a full convective time.
+
+inputState = initial_state_open_channel_64x32_g20_kbt0p01.smpcd
+outputDir = runs/open_channel_q6_inlet_outlet_keepmean_64x32
+
+Lx = 2.0
+Ly = 1.0
+Nx = 64
+Ny = 32
+
+dt = 0.001
+nSteps = 1000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+keepMeanFlowEnable = true
+targetMeanUx = 0.05
+targetMeanUy = 0.0
+
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+inletUxLeft = 0.05
+inletUyLeft = 0.0
+inletKBT = -1.0
+inletThermalNoise = 0.0
+inletInjectionMode = cuda_recycle
+inletSlabCells = 1.0
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+method = q6
+projectionEnable = true
+projectionOperator = elliptic_fv_cg
+projectionMaxIterations = 500
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+q6ProjectionStrength = 0.50
+projectionImmersedSolidMaskEnable = false
+projectionAllowUnmaskedImmersedSolid = false
+q9MassFluxProjectionEnable = false
+virialDiagnosticsEnable = false
+virialKickEnable = false
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 500
+numThreads = 4

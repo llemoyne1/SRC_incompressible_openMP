@@ -327,9 +327,40 @@ double active_domain_divergence_rate(const FluidDomainBounds& domain) {
     return rate;
 }
 
-void add_moving_wall_fluxes_to_q6_bc(EllipticProjectionBC& bc,
-                                     const SimulationParams& params,
-                                     const FluidDomainBounds& domain) {
+bool has_x_io_pair(const SimulationParams& params) {
+    return (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) ||
+           (is_outlet_boundary_mode(params.bcLeft) && is_inlet_boundary_mode(params.bcRight));
+}
+
+bool has_y_io_pair(const SimulationParams& params) {
+    return (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) ||
+           (is_outlet_boundary_mode(params.bcBottom) && is_inlet_boundary_mode(params.bcTop));
+}
+
+double q6_open_x_flux_component(const SimulationParams& params) {
+    if (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) {
+        return params.inletUxLeft;
+    }
+    if (is_inlet_boundary_mode(params.bcRight) && is_outlet_boundary_mode(params.bcLeft)) {
+        return params.inletUxRight;
+    }
+    return 0.0;
+}
+
+double q6_open_y_flux_component(const SimulationParams& params) {
+    if (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) {
+        return params.inletUyBottom;
+    }
+    if (is_inlet_boundary_mode(params.bcTop) && is_outlet_boundary_mode(params.bcBottom)) {
+        return params.inletUyTop;
+    }
+    return 0.0;
+}
+
+void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
+                                  const SimulationParams& params,
+                                  const FluidDomainBounds& domain,
+                                  Q6ProjectionDiagnostics& diag) {
     if (!is_x_periodic(params)) {
         bc.xLowFlux = domain.vxMin;
         bc.xHighFlux = domain.vxMax;
@@ -338,6 +369,35 @@ void add_moving_wall_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         bc.yLowFlux = domain.vyMin;
         bc.yHighFlux = domain.vyMax;
     }
+
+    // 0062 minimal open-boundary policy: an inlet/outlet pair prescribes a
+    // balanced normal velocity component on both external faces of the open
+    // axis.  This keeps the elliptic RHS compatible with a zero target
+    // divergence while reusing the existing compact face storage.
+    if (has_x_io_pair(params)) {
+        const double ux = q6_open_x_flux_component(params);
+        bc.xLowFlux = ux;
+        bc.xHighFlux = ux;
+        diag.openBoundaryEnabled = true;
+    }
+    if (has_y_io_pair(params)) {
+        const double uy = q6_open_y_flux_component(params);
+        bc.yLowFlux = uy;
+        bc.yHighFlux = uy;
+        diag.openBoundaryEnabled = true;
+    }
+
+    diag.openBoundaryFluxXLow = bc.xLowFlux;
+    diag.openBoundaryFluxXHigh = bc.xHighFlux;
+    diag.openBoundaryFluxYLow = bc.yLowFlux;
+    diag.openBoundaryFluxYHigh = bc.yHighFlux;
+
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    diag.openBoundaryFluxBalance = (bc.xHighFlux - bc.xLowFlux) * height +
+                                   (bc.yHighFlux - bc.yLowFlux) * width;
+    const double area = width * height;
+    diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryFluxBalance / area : 0.0;
 }
 
 double face_strength_for_q6(double requestedStrength,
@@ -483,7 +543,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.removePhiMean = true;
 
     EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
-    add_moving_wall_fluxes_to_q6_bc(bc, params, domain);
+    add_boundary_fluxes_to_q6_bc(bc, params, domain, diag);
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
 

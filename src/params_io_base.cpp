@@ -437,11 +437,17 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("y inlet/outlet modes must form an inlet/outlet pair");
         }
         if (xIoPair && yIoPair) {
-            throw std::runtime_error("0061 classic inlet/outlet supports one open axis at a time");
+            throw std::runtime_error("0062 inlet/outlet supports one open axis at a time");
         }
-        if (p.method != "classic" || p.projectionEnable || p.q9MassFluxProjectionEnable ||
-            p.virialDiagnosticsEnable || p.virialKickEnable) {
-            throw std::runtime_error("0061 inlet/outlet support is particle-only and currently restricted to method=classic with Q6/Q9/virial disabled");
+        const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
+        if (p.method != "classic" && p.method != "q6") {
+            throw std::runtime_error("0062 inlet/outlet currently supports method=classic or method=q6 only; Q9/virial come later");
+        }
+        if (p.q9MassFluxProjectionEnable || p.virialDiagnosticsEnable || p.virialKickEnable) {
+            throw std::runtime_error("0062 inlet/outlet currently supports classic/Q6 only; Q9/virial are disabled for open boundaries");
+        }
+        if (q6OpenBoundary && p.immersedSolidEnable) {
+            throw std::runtime_error("0062 Q6 inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
         }
         std::string inletInjectionMode = p.inletInjectionMode;
         std::replace(inletInjectionMode.begin(), inletInjectionMode.end(), '-', '_');

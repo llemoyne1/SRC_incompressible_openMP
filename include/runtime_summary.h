@@ -107,6 +107,13 @@ struct RuntimeSummary {
     double q6ImmersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
     double q6CorrectionVelocityRms = 0.0;
     double q6CorrectionVelocityMaxAbs = 0.0;
+    int q6OpenBoundaryEnabled = 0;
+    double q6OpenBoundaryFluxXLow = 0.0;
+    double q6OpenBoundaryFluxXHigh = 0.0;
+    double q6OpenBoundaryFluxYLow = 0.0;
+    double q6OpenBoundaryFluxYHigh = 0.0;
+    double q6OpenBoundaryFluxBalance = 0.0;
+    double q6OpenBoundaryMeanDivergence = 0.0;
     double q6MomentumCorrectionVx = 0.0;
     double q6MomentumCorrectionVy = 0.0;
     double q6MomentumResidualBeforeCorrection = 0.0;

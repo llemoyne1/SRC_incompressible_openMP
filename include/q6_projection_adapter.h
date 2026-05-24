@@ -57,6 +57,15 @@ struct Q6ProjectionDiagnostics {
     double immersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
+
+    bool openBoundaryEnabled = false;
+    double openBoundaryFluxXLow = 0.0;
+    double openBoundaryFluxXHigh = 0.0;
+    double openBoundaryFluxYLow = 0.0;
+    double openBoundaryFluxYHigh = 0.0;
+    double openBoundaryFluxBalance = 0.0;
+    double openBoundaryMeanDivergence = 0.0;
+
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;
