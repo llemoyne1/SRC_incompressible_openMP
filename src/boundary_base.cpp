@@ -1,4 +1,5 @@
 #include "boundary_base.h"
+#include "immersed_solid.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
+#include <utility>
 
 namespace mpcd {
 namespace {
@@ -488,6 +491,346 @@ int reflect_y(double x,
     return guard;
 }
 
+
+std::string normalized_inlet_reservoir_mode(const SimulationParams& params) {
+    std::string mode = params.inletReservoirMode;
+    std::replace(mode.begin(), mode.end(), '-', '_');
+    if (mode == "" || mode == "default") {
+        mode = params.inletInjectionMode;
+        std::replace(mode.begin(), mode.end(), '-', '_');
+    }
+    if (mode == "cuda_recycle" || mode == "thin_slab") return "recycle";
+    return mode;
+}
+
+bool hard_inlet_reservoir_enabled(const SimulationParams& params) {
+    const std::string mode = normalized_inlet_reservoir_mode(params);
+    return mode == "hard_cell_density" || mode == "hard_density" || mode == "hard" || mode == "cell_density";
+}
+
+struct HardReservoirCell {
+    int ix = 0;
+    int iy = 0;
+    double x0 = 0.0;
+    double x1 = 0.0;
+    double y0 = 0.0;
+    double y1 = 0.0;
+};
+
+bool point_in_inlet_reservoir(double x,
+                              double y,
+                              const SimulationParams& params,
+                              const FluidDomainBounds& domain) {
+    if (!hard_inlet_reservoir_enabled(params)) return false;
+    const int nx = std::max(1, params.Nx);
+    const int ny = std::max(1, params.Ny);
+    const int cellsX = std::clamp(params.inletReservoirCells, 1, nx);
+    const int cellsY = std::clamp(params.inletReservoirCells, 1, ny);
+    const double dx = (domain.xMax - domain.xMin) / static_cast<double>(nx);
+    const double dy = (domain.yMax - domain.yMin) / static_cast<double>(ny);
+
+    if (is_inlet_boundary_mode(params.bcLeft)) {
+        return x >= domain.xMin && x < domain.xMin + static_cast<double>(cellsX) * dx &&
+               y >= domain.yMin && y <= domain.yMax;
+    }
+    if (is_inlet_boundary_mode(params.bcRight)) {
+        return x > domain.xMax - static_cast<double>(cellsX) * dx && x <= domain.xMax &&
+               y >= domain.yMin && y <= domain.yMax;
+    }
+    if (is_inlet_boundary_mode(params.bcBottom)) {
+        return y >= domain.yMin && y < domain.yMin + static_cast<double>(cellsY) * dy &&
+               x >= domain.xMin && x <= domain.xMax;
+    }
+    if (is_inlet_boundary_mode(params.bcTop)) {
+        return y > domain.yMax - static_cast<double>(cellsY) * dy && y <= domain.yMax &&
+               x >= domain.xMin && x <= domain.xMax;
+    }
+    return false;
+}
+
+std::vector<HardReservoirCell> build_hard_reservoir_cells(const SimulationParams& params,
+                                                          const FluidDomainBounds& domain,
+                                                          double time) {
+    std::vector<HardReservoirCell> cells;
+    const int nx = std::max(1, params.Nx);
+    const int ny = std::max(1, params.Ny);
+    const int cellsX = std::clamp(params.inletReservoirCells, 1, nx);
+    const int cellsY = std::clamp(params.inletReservoirCells, 1, ny);
+    const double dx = (domain.xMax - domain.xMin) / static_cast<double>(nx);
+    const double dy = (domain.yMax - domain.yMin) / static_cast<double>(ny);
+
+    auto add_cell = [&](int ix, int iy) {
+        HardReservoirCell c{};
+        c.ix = ix;
+        c.iy = iy;
+        c.x0 = domain.xMin + static_cast<double>(ix) * dx;
+        c.x1 = domain.xMin + static_cast<double>(ix + 1) * dx;
+        c.y0 = domain.yMin + static_cast<double>(iy) * dy;
+        c.y1 = domain.yMin + static_cast<double>(iy + 1) * dy;
+        const double xc = 0.5 * (c.x0 + c.x1);
+        const double yc = 0.5 * (c.y0 + c.y1);
+        if (point_is_inside_immersed_solid(xc, yc, params, time)) {
+            return;
+        }
+        cells.push_back(c);
+    };
+
+    if (is_inlet_boundary_mode(params.bcLeft)) {
+        for (int ix = 0; ix < cellsX; ++ix) {
+            for (int iy = 0; iy < ny; ++iy) add_cell(ix, iy);
+        }
+    } else if (is_inlet_boundary_mode(params.bcRight)) {
+        for (int ix = nx - cellsX; ix < nx; ++ix) {
+            for (int iy = 0; iy < ny; ++iy) add_cell(ix, iy);
+        }
+    } else if (is_inlet_boundary_mode(params.bcBottom)) {
+        for (int iy = 0; iy < cellsY; ++iy) {
+            for (int ix = 0; ix < nx; ++ix) add_cell(ix, iy);
+        }
+    } else if (is_inlet_boundary_mode(params.bcTop)) {
+        for (int iy = ny - cellsY; iy < ny; ++iy) {
+            for (int ix = 0; ix < nx; ++ix) add_cell(ix, iy);
+        }
+    }
+    return cells;
+}
+
+void append_particle(ParticleState& state,
+                     double x,
+                     double y,
+                     double vx,
+                     double vy,
+                     std::uint32_t type,
+                     double mass) {
+    state.x.push_back(x);
+    state.y.push_back(y);
+    state.vx.push_back(vx);
+    state.vy.push_back(vy);
+    state.type.push_back(type);
+    state.mass.push_back(mass);
+    state.Np = static_cast<std::uint64_t>(state.x.size());
+}
+
+void sample_hard_inlet_cell_particles(ParticleState& state,
+                                      const SimulationParams& params,
+                                      const HardReservoirCell& cell,
+                                      const char* inletFace,
+                                      std::uint64_t step,
+                                      std::uint64_t cellOrdinal,
+                                      std::uint32_t particleType,
+                                      double particleMass,
+                                      BoundaryDiagnostics& diag) {
+    const int targetN = params.inletTargetOccupancy;
+    if (targetN <= 0) return;
+
+    double ux = 0.0, uy = 0.0;
+    inlet_velocity_for_face(params, inletFace, ux, uy);
+    const double effectiveKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
+    const double sigma = (effectiveKBT > 0.0 && particleMass > 0.0)
+        ? params.inletThermalNoise * std::sqrt(effectiveKBT / particleMass)
+        : 0.0;
+
+    std::vector<double> xs(static_cast<std::size_t>(targetN));
+    std::vector<double> ys(static_cast<std::size_t>(targetN));
+    std::vector<double> vxs(static_cast<std::size_t>(targetN));
+    std::vector<double> vys(static_cast<std::size_t>(targetN));
+
+    std::mt19937_64 rng(splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                   (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^ face_tag(inletFace)));
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    std::normal_distribution<double> normal(0.0, 1.0);
+
+    double meanFlucX = 0.0;
+    double meanFlucY = 0.0;
+    for (int n = 0; n < targetN; ++n) {
+        const double rx = uni(rng);
+        const double ry = uni(rng);
+        xs[static_cast<std::size_t>(n)] = clamp_strictly_inside(cell.x0 + rx * (cell.x1 - cell.x0), cell.x0, cell.x1);
+        ys[static_cast<std::size_t>(n)] = clamp_strictly_inside(cell.y0 + ry * (cell.y1 - cell.y0), cell.y0, cell.y1);
+        const double fx = sigma > 0.0 ? sigma * normal(rng) : 0.0;
+        const double fy = sigma > 0.0 ? sigma * normal(rng) : 0.0;
+        vxs[static_cast<std::size_t>(n)] = ux + fx;
+        vys[static_cast<std::size_t>(n)] = uy + fy;
+        meanFlucX += fx;
+        meanFlucY += fy;
+    }
+    meanFlucX /= static_cast<double>(targetN);
+    meanFlucY /= static_cast<double>(targetN);
+
+    if (params.inletHardCellVelocityMean) {
+        for (int n = 0; n < targetN; ++n) {
+            vxs[static_cast<std::size_t>(n)] -= meanFlucX;
+            vys[static_cast<std::size_t>(n)] -= meanFlucY;
+        }
+    }
+
+    if (params.inletHardCellThermalRescale && effectiveKBT > 0.0 && particleMass > 0.0 && targetN > 1) {
+        double thermal = 0.0;
+        for (int n = 0; n < targetN; ++n) {
+            const double dx = vxs[static_cast<std::size_t>(n)] - ux;
+            const double dy = vys[static_cast<std::size_t>(n)] - uy;
+            thermal += particleMass * (dx * dx + dy * dy);
+        }
+        const double desired = 2.0 * static_cast<double>(targetN) * effectiveKBT;
+        if (thermal > 0.0 && desired > 0.0) {
+            const double scale = std::sqrt(desired / thermal);
+            for (int n = 0; n < targetN; ++n) {
+                vxs[static_cast<std::size_t>(n)] = ux + scale * (vxs[static_cast<std::size_t>(n)] - ux);
+                vys[static_cast<std::size_t>(n)] = uy + scale * (vys[static_cast<std::size_t>(n)] - uy);
+            }
+        }
+    }
+
+    for (int n = 0; n < targetN; ++n) {
+        const std::size_t k = static_cast<std::size_t>(n);
+        append_particle(state, xs[k], ys[k], vxs[k], vys[k], particleType, particleMass);
+        diag.inletMeanUx += vxs[k];
+        diag.inletMeanUy += vys[k];
+        const double dvx = vxs[k] - ux;
+        const double dvy = vys[k] - uy;
+        diag.inletKBT += particleMass * (dvx * dvx + dvy * dvy);
+    }
+    diag.inletParticlesInserted += static_cast<std::uint64_t>(targetN);
+}
+
+BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
+                                                        const SimulationParams& params,
+                                                        const FluidDomainBounds& domain,
+                                                        std::uint64_t step,
+                                                        double time) {
+    BoundaryDiagnostics diag{};
+    diag.inletHardReservoirEnabled = 1;
+    const bool periodicX = is_x_periodic(params);
+    const bool periodicY = is_y_periodic(params);
+    const bool ioX = is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight);
+    const bool ioY = is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop);
+
+    const char* inletFace = is_inlet_boundary_mode(params.bcLeft) ? "left" :
+                            is_inlet_boundary_mode(params.bcRight) ? "right" :
+                            is_inlet_boundary_mode(params.bcBottom) ? "bottom" : "top";
+
+    const std::uint32_t refType = state.type.empty() ? 0u : state.type.front();
+    const double refMass = state.mass.empty() ? 1.0 : state.mass.front();
+
+    ParticleState kept{};
+    kept.dim = state.dim;
+    kept.x.reserve(state.x.size());
+    kept.y.reserve(state.y.size());
+    kept.vx.reserve(state.vx.size());
+    kept.vy.reserve(state.vy.size());
+    kept.type.reserve(state.type.size());
+    kept.mass.reserve(state.mass.size());
+
+    ReflectionFailure firstFailure{};
+    int maxXReflections = 0;
+    int maxYReflections = 0;
+
+    const std::size_t n0 = static_cast<std::size_t>(state.Np);
+    for (std::size_t i = 0; i < n0; ++i) {
+        double x = state.x[i];
+        double y = state.y[i];
+        double vx = state.vx[i];
+        double vy = state.vy[i];
+        const std::uint32_t type = state.type[i];
+        const double mass = state.mass[i];
+
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(vx) || !std::isfinite(vy)) {
+            firstFailure.failed = true;
+            firstFailure.message = format_nonfinite_particle_failure(i, step, time, x, y, vx, vy);
+            break;
+        }
+
+        bool remove = false;
+
+        if (periodicX) {
+            x = wrap_periodic(x, params.Lx);
+        } else if (ioX) {
+            if (x < domain.xMin) {
+                ++diag.hitsLeft;
+                if (is_inlet_boundary_mode(params.bcLeft)) ++diag.inletBackflowDeleted;
+                else ++diag.outletParticlesDeleted;
+                remove = true;
+            } else if (x > domain.xMax) {
+                ++diag.hitsRight;
+                if (is_inlet_boundary_mode(params.bcRight)) ++diag.inletBackflowDeleted;
+                else ++diag.outletParticlesDeleted;
+                remove = true;
+            }
+        } else {
+            const int r = reflect_x(x, y, vx, vy, params, domain, diag.hitsLeft, diag.hitsRight,
+                                    i, step, time, firstFailure);
+            maxXReflections = std::max(maxXReflections, r);
+        }
+
+        if (!remove && !firstFailure.failed) {
+            if (periodicY) {
+                y = wrap_periodic(y, params.Ly);
+            } else if (ioY) {
+                if (y < domain.yMin) {
+                    ++diag.hitsBottom;
+                    if (is_inlet_boundary_mode(params.bcBottom)) ++diag.inletBackflowDeleted;
+                    else ++diag.outletParticlesDeleted;
+                    remove = true;
+                } else if (y > domain.yMax) {
+                    ++diag.hitsTop;
+                    if (is_inlet_boundary_mode(params.bcTop)) ++diag.inletBackflowDeleted;
+                    else ++diag.outletParticlesDeleted;
+                    remove = true;
+                }
+            } else {
+                const int r = reflect_y(x, y, vx, vy, params, domain, diag.hitsBottom, diag.hitsTop,
+                                        i, step, time, firstFailure);
+                maxYReflections = std::max(maxYReflections, r);
+            }
+        }
+
+        if (!remove && !firstFailure.failed && point_in_inlet_reservoir(x, y, params, domain)) {
+            ++diag.inletReservoirDeleted;
+            remove = true;
+        }
+
+        if (!remove && !firstFailure.failed) {
+            append_particle(kept, x, y, vx, vy, type, mass);
+        }
+    }
+
+    if (firstFailure.failed) {
+        throw std::runtime_error(firstFailure.message);
+    }
+
+    state = std::move(kept);
+
+    const auto cells = build_hard_reservoir_cells(params, domain, time);
+    diag.inletReservoirCells = static_cast<std::uint64_t>(cells.size());
+    diag.inletReservoirTargetParticles = static_cast<std::uint64_t>(cells.size()) *
+                                         static_cast<std::uint64_t>(std::max(0, params.inletTargetOccupancy));
+    std::uint64_t ordinal = 0u;
+    for (const auto& cell : cells) {
+        sample_hard_inlet_cell_particles(state, params, cell, inletFace, step, ordinal++,
+                                         refType, refMass, diag);
+    }
+
+    diag.inletReservoirMeanN = cells.empty() ? 0.0 : static_cast<double>(params.inletTargetOccupancy);
+    diag.inletReservoirStdN = 0.0;
+    diag.inletReservoirMinN = cells.empty() ? 0u : static_cast<std::uint32_t>(params.inletTargetOccupancy);
+    diag.inletReservoirMaxN = cells.empty() ? 0u : static_cast<std::uint32_t>(params.inletTargetOccupancy);
+    diag.inletReservoirEmptyFraction = cells.empty() ? 0.0 : (params.inletTargetOccupancy == 0 ? 1.0 : 0.0);
+    if (diag.inletParticlesInserted > 0u) {
+        const double inserted = static_cast<double>(diag.inletParticlesInserted);
+        diag.inletMeanUx /= inserted;
+        diag.inletMeanUy /= inserted;
+        diag.inletKBT /= (2.0 * inserted);
+    }
+    const std::int64_t deleted = static_cast<std::int64_t>(diag.inletReservoirDeleted +
+                                                          diag.inletBackflowDeleted +
+                                                          diag.outletParticlesDeleted);
+    diag.inletNetParticleDelta = static_cast<std::int64_t>(diag.inletParticlesInserted) - deleted;
+    diag.maxXWallReflectionsPerParticle = maxXReflections;
+    diag.maxYWallReflectionsPerParticle = maxYReflections;
+    validate_particle_state(state, "apply_hard_inlet_reservoir_boundary");
+    return diag;
+}
+
 } // namespace
 
 BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
@@ -496,6 +839,12 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
                                               std::uint64_t step,
                                               double time) {
     validate_particle_state(state, "apply_boundary_conditions");
+    if (hard_inlet_reservoir_enabled(params) &&
+        (is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight) ||
+         is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop))) {
+        return apply_hard_inlet_reservoir_boundary(state, params, domain, step, time);
+    }
+
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const bool periodicX = is_x_periodic(params);
     const bool periodicY = is_y_periodic(params);

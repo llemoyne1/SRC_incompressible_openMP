@@ -56,6 +56,20 @@ struct Q9ProjectionDiagnostics {
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
 
+    // 0066 safety diagnostics.  Raw values are measured before low-mass
+    // suppression and velocity limiting; correctionVelocity* above is the
+    // actually applied kick after safeguards.
+    std::uint64_t safetyActiveCells = 0;
+    std::uint64_t safetyExcludedCells = 0;
+    std::uint64_t openBoundaryExcludedCells = 0;
+    std::uint64_t immersedHaloExcludedCells = 0;
+    std::uint64_t lowMassSuppressedCells = 0;
+    std::uint64_t velocityLimitedCells = 0;
+    double correctionVelocityRawRms = 0.0;
+    double correctionVelocityRawMaxAbs = 0.0;
+    double correctionVelocityLimiter = 0.0;
+    double minCellMassForCorrection = 0.0;
+
     bool openBoundaryEnabled = false;
     double openBoundaryMassFluxXLow = 0.0;
     double openBoundaryMassFluxXHigh = 0.0;
@@ -92,6 +106,7 @@ struct Q9ProjectionWorkspace {
     EllipticProjectionWorkspace elliptic;
     ImmersedSolidProjectionMask immersedMask;
     EllipticProjectionMask ellipticMask;
+    std::vector<std::uint8_t> maskScratch;
 };
 
 bool q9_projection_requested(const SimulationParams& params);

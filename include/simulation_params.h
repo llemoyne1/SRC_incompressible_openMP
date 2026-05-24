@@ -82,10 +82,22 @@ struct SimulationParams {
     double inletUyTop = 0.0;
     double inletKBT = -1.0;             // negative => use kBT
     double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
-    std::string inletInjectionMode = "cuda_recycle"; // currently: cuda_recycle/thin_slab
+    std::string inletInjectionMode = "cuda_recycle"; // currently: cuda_recycle/thin_slab/hard_cell_density
     double inletSlabCells = 1.0;        // injected slab thickness in local grid cells
     bool inletRandomizeTangential = true; // randomize transverse coordinate on injection
     bool inletReinjectBackflow = true;  // re-inject particles crossing back through inlet
+
+    // Hard inlet reservoir mode. Unlike periodic wrapping or CUDA-like
+    // recycling, an inlet is a thermodynamic reservoir: in hard_cell_density
+    // mode the inlet band is rebuilt every step with exactly
+    // inletTargetOccupancy particles per active reservoir cell. Particles
+    // crossing an outlet or backflowing through an inlet are deleted, so Np is
+    // no longer constrained to remain constant in open-boundary runs.
+    std::string inletReservoirMode = "recycle"; // recycle/cuda_recycle or hard_cell_density
+    int inletReservoirCells = 1;
+    int inletTargetOccupancy = 0;       // must be >0 for hard_cell_density; usually gamma
+    bool inletHardCellVelocityMean = true;
+    bool inletHardCellThermalRescale = true;
 
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
@@ -177,6 +189,13 @@ struct SimulationParams {
     int q9EllipticLowPassPasses = 1;
     double q9EllipticLowPassLengthCells = -1.0; // negative => MATLAB-like default from low-k index
     bool q9MomentumCorrectionEnable = true;
+
+    // Q9 safeguards for open-boundary domains containing immersed solids.
+    // Inactive by default. Required for Q9 + inlet/outlet + immersed solid.
+    int q9OpenBoundaryExclusionCells = 0;
+    int q9ImmersedSolidHaloCells = 0;
+    double q9MinCellMassForCorrection = 0.0;
+    double q9CorrectionVelocityLimiter = 0.0;
 
 
     // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is

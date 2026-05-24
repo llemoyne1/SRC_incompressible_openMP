@@ -59,6 +59,23 @@ struct RuntimeSummary {
     int maxYWallReflectionsPerParticle = 0;
     std::uint64_t hitsImmersed = 0;
 
+    int inletHardReservoirEnabled = 0;
+    std::uint64_t inletReservoirCells = 0;
+    std::uint64_t inletReservoirTargetParticles = 0;
+    std::uint64_t inletReservoirDeleted = 0;
+    std::uint64_t inletBackflowDeleted = 0;
+    std::uint64_t outletParticlesDeleted = 0;
+    std::uint64_t inletParticlesInserted = 0;
+    std::int64_t inletNetParticleDelta = 0;
+    double inletReservoirMeanN = 0.0;
+    double inletReservoirStdN = 0.0;
+    std::uint32_t inletReservoirMinN = 0;
+    std::uint32_t inletReservoirMaxN = 0;
+    double inletReservoirEmptyFraction = 0.0;
+    double inletMeanUx = 0.0;
+    double inletMeanUy = 0.0;
+    double inletKBT = 0.0;
+
     std::uint64_t virtualParticleCount = 0;
     double virtualParticleEquivalent = 0.0;
     double virtualMass = 0.0;

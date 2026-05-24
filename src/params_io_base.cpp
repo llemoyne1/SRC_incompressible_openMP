@@ -200,6 +200,11 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             p.inletRandomizeTangential = parse_bool(value, key);
         }
         else if (key == "inletReinjectBackflow" || key == "reinjectBackflow") p.inletReinjectBackflow = parse_bool(value, key);
+        else if (key == "inletReservoirMode") p.inletReservoirMode = get_lower(kv, key);
+        else if (key == "inletReservoirCells" || key == "inletDensityCells") p.inletReservoirCells = parse_int(value, key);
+        else if (key == "inletTargetOccupancy" || key == "inletTargetN" || key == "inletGamma") p.inletTargetOccupancy = parse_int(value, key);
+        else if (key == "inletHardCellVelocityMean") p.inletHardCellVelocityMean = parse_bool(value, key);
+        else if (key == "inletHardCellThermalRescale") p.inletHardCellThermalRescale = parse_bool(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -260,6 +265,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9EllipticLowPassPasses" || key == "massFluxEllipticLowPassPasses") p.q9EllipticLowPassPasses = parse_int(value, key);
         else if (key == "q9EllipticLowPassLengthCells" || key == "massFluxEllipticLowPassLengthCells") p.q9EllipticLowPassLengthCells = parse_double(value, key);
         else if (key == "q9MomentumCorrectionEnable") p.q9MomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "q9OpenBoundaryExclusionCells" || key == "q9ReservoirExclusionCells") p.q9OpenBoundaryExclusionCells = parse_int(value, key);
+        else if (key == "q9ImmersedSolidHaloCells" || key == "q9SolidHaloCells") p.q9ImmersedSolidHaloCells = parse_int(value, key);
+        else if (key == "q9MinCellMassForCorrection" || key == "q9MinMassForCorrection") p.q9MinCellMassForCorrection = parse_double(value, key);
+        else if (key == "q9CorrectionVelocityLimiter" || key == "q9CorrectionVelocityLimit") p.q9CorrectionVelocityLimiter = parse_double(value, key);
         else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
         else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
         else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
@@ -353,6 +362,22 @@ bool has_solid_wall(const SimulationParams& p) {
 bool has_io_boundary(const SimulationParams& p) {
     return is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight) ||
            is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop);
+}
+
+std::string normalized_inlet_reservoir_mode(const SimulationParams& p) {
+    std::string mode = p.inletReservoirMode;
+    std::replace(mode.begin(), mode.end(), '-', '_');
+    if (mode.empty() || mode == "default") {
+        mode = p.inletInjectionMode;
+        std::replace(mode.begin(), mode.end(), '-', '_');
+    }
+    if (mode == "cuda_recycle" || mode == "thin_slab") return "recycle";
+    return mode;
+}
+
+bool hard_inlet_reservoir_requested(const SimulationParams& p) {
+    const std::string mode = normalized_inlet_reservoir_mode(p);
+    return mode == "hard_cell_density" || mode == "hard_density" || mode == "hard" || mode == "cell_density";
 }
 
 void validate_simulation_params(const SimulationParams& p) {
@@ -449,13 +474,41 @@ void validate_simulation_params(const SimulationParams& p) {
         if (virialOpenBoundary && !q9OpenBoundary) {
             throw std::runtime_error("0064 virial inlet/outlet requires the Q9 mass-flux path; use method=q9_virial or enable q9MassFluxProjectionEnable");
         }
+        const bool hardInletReservoir = hard_inlet_reservoir_requested(p);
         if ((q6OpenBoundary || q9OpenBoundary) && p.immersedSolidEnable) {
-            throw std::runtime_error("0064 Q6/Q9/virial inlet/outlet is restricted to clean channel/open-channel cases without immersed solids");
+            std::string solidShapeForOpen = p.immersedSolidShape;
+            std::replace(solidShapeForOpen.begin(), solidShapeForOpen.end(), '-', '_');
+            const bool staticRectangle =
+                (solidShapeForOpen == "rectangle" || solidShapeForOpen == "rect" ||
+                 solidShapeForOpen == "box" || solidShapeForOpen == "step") &&
+                std::abs(p.immersedSolidVx) == 0.0 &&
+                std::abs(p.immersedSolidVy) == 0.0 &&
+                std::abs(p.immersedSolidOmega) == 0.0;
+            if (!hardInletReservoir || !staticRectangle || !p.projectionImmersedSolidMaskEnable ||
+                p.projectionAllowUnmaskedImmersedSolid) {
+                throw std::runtime_error("0067 Q6/Q9 inlet/outlet with immersed solids requires hard_cell_density inlet, fixed rectangle, projectionImmersedSolidMaskEnable=true and projectionAllowUnmaskedImmersedSolid=false");
+            }
         }
         std::string inletInjectionMode = p.inletInjectionMode;
         std::replace(inletInjectionMode.begin(), inletInjectionMode.end(), '-', '_');
-        if (inletInjectionMode != "cuda_recycle" && inletInjectionMode != "thin_slab") {
-            throw std::runtime_error("inletInjectionMode currently supports cuda_recycle/thin_slab");
+        if (inletInjectionMode != "cuda_recycle" && inletInjectionMode != "thin_slab" &&
+            inletInjectionMode != "hard_cell_density" && inletInjectionMode != "hard_density" &&
+            inletInjectionMode != "hard" && inletInjectionMode != "cell_density") {
+            throw std::runtime_error("inletInjectionMode currently supports cuda_recycle/thin_slab/hard_cell_density");
+        }
+        const std::string inletReservoirMode = normalized_inlet_reservoir_mode(p);
+        if (inletReservoirMode != "recycle" && inletReservoirMode != "hard_cell_density" &&
+            inletReservoirMode != "hard_density" && inletReservoirMode != "hard" &&
+            inletReservoirMode != "cell_density") {
+            throw std::runtime_error("inletReservoirMode supports recycle or hard_cell_density");
+        }
+        if (hardInletReservoir) {
+            if (p.inletReservoirCells <= 0) {
+                throw std::runtime_error("hard_cell_density inlet requires inletReservoirCells>0");
+            }
+            if (p.inletTargetOccupancy <= 0) {
+                throw std::runtime_error("hard_cell_density inlet requires inletTargetOccupancy>0");
+            }
         }
         if (!(p.inletThermalNoise >= 0.0) || !std::isfinite(p.inletThermalNoise)) {
             throw std::runtime_error("inletThermalNoise must be finite and non-negative");
@@ -652,6 +705,19 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("q9EllipticLowPassLengthCells must be positive, or negative to use the default");
         }
     }
+    if (p.q9OpenBoundaryExclusionCells < 0) {
+        throw std::runtime_error("q9OpenBoundaryExclusionCells must be non-negative");
+    }
+    if (p.q9ImmersedSolidHaloCells < 0) {
+        throw std::runtime_error("q9ImmersedSolidHaloCells must be non-negative");
+    }
+    if (!(p.q9MinCellMassForCorrection >= 0.0)) {
+        throw std::runtime_error("q9MinCellMassForCorrection must be non-negative");
+    }
+    if (!(p.q9CorrectionVelocityLimiter >= 0.0)) {
+        throw std::runtime_error("q9CorrectionVelocityLimiter must be non-negative");
+    }
+
     if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
         if (!(p.Kvirial >= 0.0)) {
             throw std::runtime_error("Kvirial/virialK must be non-negative");
