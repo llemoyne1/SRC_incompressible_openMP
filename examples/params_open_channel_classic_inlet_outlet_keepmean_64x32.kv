@@ -1,0 +1,72 @@
+# 0061 classic particle-only inlet/outlet smoke test.
+# Generate the initial state from repository root with:
+#   cd matlab
+#   generate_open_channel_classic_state('output','../initial_state_open_channel_64x32_g20_kbt0p01.smpcd');
+#   cd ..
+
+inputState = initial_state_open_channel_64x32_g20_kbt0p01.smpcd
+outputDir = runs/open_channel_classic_inlet_outlet_smoke_64x32
+
+Lx = 2.0
+Ly = 1.0
+Nx = 64
+Ny = 32
+
+dt = 0.001
+nSteps = 5000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+# Particle reservoir at the inlet. inletThermalNoise=1 samples a Maxwellian
+# fluctuation around the prescribed mean velocity using inletKBT/kBT.
+inletUxLeft = 0.05
+inletUyLeft = 0.0
+inletKBT = -1.0
+inletThermalNoise = 1.0
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+method = classic
+projectionEnable = false
+q9MassFluxProjectionEnable = false
+virialDiagnosticsEnable = false
+virialKickEnable = false
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4
+
+# 0061 diagnostic run: enforce mean flow to exercise outlet recycling.
+outputDir = runs/open_channel_classic_inlet_outlet_keepmean_64x32
+keepMeanFlowEnable = true
+targetMeanUx = 0.05
+targetMeanUy = 0.0
+nSteps = 10000
+summaryEvery = 100
+dumpStateEvery = 1000
