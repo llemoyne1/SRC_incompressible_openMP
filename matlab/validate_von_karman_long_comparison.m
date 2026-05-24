@@ -146,6 +146,12 @@ late = runtime(max(1, floor(0.5*height(runtime))+1):end, :);
 method = local_get_string(params, 'method', 'classic');
 q6Leak = local_late_mean(late, 'q6ImmersedSolidLeakProjectedFluxRms');
 q9Leak = local_late_mean(late, 'q9ImmersedSolidLeakMassFluxRms');
+q6CellLeak = local_late_mean(late, 'q6ImmersedSolidLeakCellClosedProjectedFluxRms');
+q6CutLeak = local_late_mean(late, 'q6ImmersedSolidLeakCutProjectedFluxRms');
+q9CellLeak = local_late_mean(late, 'q9ImmersedSolidLeakCellClosedMassFluxRms');
+q9CutLeak = local_late_mean(late, 'q9ImmersedSolidLeakCutMassFluxRms');
+q6CutFaces = local_late_mean(late, 'q6ImmersedSolidCutClosedXFaces') + local_late_mean(late, 'q6ImmersedSolidCutClosedYFaces');
+q9CutFaces = local_late_mean(late, 'q9ImmersedSolidCutClosedXFaces') + local_late_mean(late, 'q9ImmersedSolidCutClosedYFaces');
 virialDuThermal = local_late_mean(late, 'virialDuOverThermalRms');
 
 maxInside = local_max_particles_inside_circle(frames, cx, cy, R);
@@ -155,13 +161,16 @@ row = table(string(label), string(runDir), string(method), nFrames, nAvg, maxIns
     NRef, popCvWake, popMinWake, popP05Wake, popP05WakeOverRef, popBelow5Wake, popLowHalfRefWake, popTemporalCvMeanWake, ...
     mean(UxWake, 'omitnan'), local_rms(UyWake), local_rms(hypot(UxWake, UyWake)), ...
     omegaRmsWake, omegaTotalRmsWake, omegaFluctRmsWake, omegaTemporalMeanFractionWake, omegaFluctToMeanRatioWake, omegaMeanLowKFractionWake, ...
-    q6Leak, q9Leak, virialDuThermal, ...
+    q6Leak, q9Leak, q6CellLeak, q6CutLeak, q9CellLeak, q9CutLeak, q6CutFaces, q9CutFaces, virialDuThermal, ...
     'VariableNames', {'caseLabel','runDir','method','nFrames','nAveragedFrames','maxParticlesInsideCircle', ...
     'kBTMeanLate','meanVxLate','meanVyLate', ...
     'populationReferenceNFluid','populationCvWake','populationMinWake','populationP05Wake','populationP05WakeOverReference','populationBelow5FractionWake','populationLowHalfRefFractionWake','populationTemporalCvMeanWake', ...
     'meanUxWake','uyRmsWake','speedRmsWake', ...
     'omegaRmsWake','omegaTotalRmsWake','omegaFluctRmsWake','omegaTemporalMeanFractionWake','omegaFluctToMeanRatioWake','omegaMeanLowKFractionWake', ...
-    'q6ImmersedSolidLeakProjectedFluxRmsLate','q9ImmersedSolidLeakMassFluxRmsLate','virialDuOverThermalRmsLate'});
+    'q6ImmersedSolidLeakProjectedFluxRmsLate','q9ImmersedSolidLeakMassFluxRmsLate', ...
+    'q6ImmersedSolidLeakCellClosedProjectedFluxRmsLate','q6ImmersedSolidLeakCutProjectedFluxRmsLate', ...
+    'q9ImmersedSolidLeakCellClosedMassFluxRmsLate','q9ImmersedSolidLeakCutMassFluxRmsLate', ...
+    'q6ImmersedSolidCutClosedFacesLate','q9ImmersedSolidCutClosedFacesLate','virialDuOverThermalRmsLate'});
 
 out = struct();
 out.row = row;
@@ -255,5 +264,17 @@ nexttile; bar(labels, summary.omegaMeanLowKFractionWake); ylabel('low-k fraction
 nexttile; bar(labels, summary.populationP05WakeOverReference); ylabel('P05/reference'); title('Wake population lower tail'); grid on;
 nexttile; bar(labels, summary.populationBelow5FractionWake); ylabel('fraction'); title('Wake cells N<5'); grid on;
 nexttile; bar(labels, summary.q6ImmersedSolidLeakProjectedFluxRmsLate + summary.q9ImmersedSolidLeakMassFluxRmsLate); ylabel('leak RMS'); title('Projection solid leak'); grid on;
+
+if ismember('q6ImmersedSolidLeakCutProjectedFluxRmsLate', summary.Properties.VariableNames)
+    figure('Name', 'Von Karman curved solid mask diagnostics');
+    tiledlayout(1,3, 'Padding', 'compact', 'TileSpacing', 'compact');
+    nexttile; bar(labels, [summary.q6ImmersedSolidCutClosedFacesLate, summary.q9ImmersedSolidCutClosedFacesLate], 'grouped');
+    ylabel('closed cut faces'); title('Curved-solid cut faces'); legend({'Q6','Q9'}, 'Location', 'best'); grid on;
+    nexttile; bar(labels, [summary.q6ImmersedSolidLeakCellClosedProjectedFluxRmsLate, summary.q6ImmersedSolidLeakCutProjectedFluxRmsLate], 'grouped');
+    ylabel('Q6 leak RMS'); title('Q6 leak split'); legend({'cell/boundary','cut'}, 'Location', 'best'); grid on;
+    nexttile; bar(labels, [summary.q9ImmersedSolidLeakCellClosedMassFluxRmsLate, summary.q9ImmersedSolidLeakCutMassFluxRmsLate], 'grouped');
+    ylabel('Q9 leak RMS'); title('Q9 leak split'); legend({'cell/boundary','cut'}, 'Location', 'best'); grid on;
+    exportgraphics(gcf, fullfile(outDir, 'von_karman_curved_solid_mask_diagnostics.png'), 'Resolution', 160);
+end
 exportgraphics(fig, fullfile(outDir, 'von_karman_long_comparison_metrics.png'), 'Resolution', 150);
 end

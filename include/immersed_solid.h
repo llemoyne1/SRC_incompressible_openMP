@@ -17,11 +17,19 @@ struct ImmersedSolidDiagnostics {
 struct ImmersedSolidProjectionMask {
     std::vector<std::uint8_t> activeCell;
     PeriodicFaceField faceOpen;
+    std::vector<std::uint8_t> faceClosedByCellX;
+    std::vector<std::uint8_t> faceClosedByCellY;
+    std::vector<std::uint8_t> faceClosedByCutX;
+    std::vector<std::uint8_t> faceClosedByCutY;
     std::vector<double> fluidFraction;
     std::uint64_t fluidCells = 0;
     std::uint64_t solidCells = 0;
     std::uint64_t closedXFaces = 0;
     std::uint64_t closedYFaces = 0;
+    std::uint64_t cellClosedXFaces = 0;
+    std::uint64_t cellClosedYFaces = 0;
+    std::uint64_t cutClosedXFaces = 0;
+    std::uint64_t cutClosedYFaces = 0;
 };
 
 enum class ImmersedSolidShape {

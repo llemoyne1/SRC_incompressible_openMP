@@ -177,6 +177,100 @@ inline FaceHit nearest_rectangle_face(double x,
     return out;
 }
 
+
+inline bool segment_intersects_circle(double x0,
+                                      double y0,
+                                      double x1,
+                                      double y1,
+                                      const SimulationParams& p,
+                                      double time) {
+    double cx = 0.0, cy = 0.0;
+    immersed_solid_circle_center(p, time, cx, cy);
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double len2 = dx * dx + dy * dy;
+    double t = 0.0;
+    if (len2 > kTiny) {
+        t = ((cx - x0) * dx + (cy - y0) * dy) / len2;
+        t = clamp(t, 0.0, 1.0);
+    }
+    const double px = x0 + t * dx;
+    const double py = y0 + t * dy;
+    const double rx = px - cx;
+    const double ry = py - cy;
+    return rx * rx + ry * ry <= p.immersedSolidR * p.immersedSolidR;
+}
+
+inline bool segment_intersects_rectangle(double x0,
+                                         double y0,
+                                         double x1,
+                                         double y1,
+                                         const SimulationParams& p,
+                                         double time) {
+    double xMin = 0.0, xMax = 0.0, yMin = 0.0, yMax = 0.0;
+    immersed_solid_rectangle_bounds(p, time, xMin, xMax, yMin, yMax);
+    if (x0 >= xMin && x0 <= xMax && y0 >= yMin && y0 <= yMax) return true;
+    if (x1 >= xMin && x1 <= xMax && y1 >= yMin && y1 <= yMax) return true;
+
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    double t0 = 0.0;
+    double t1 = 1.0;
+    auto clip = [&](double pEdge, double qEdge) {
+        if (std::abs(pEdge) <= kTiny) return qEdge >= 0.0;
+        const double r = qEdge / pEdge;
+        if (pEdge < 0.0) {
+            if (r > t1) return false;
+            if (r > t0) t0 = r;
+        } else {
+            if (r < t0) return false;
+            if (r < t1) t1 = r;
+        }
+        return true;
+    };
+    return clip(-dx, x0 - xMin) && clip(dx, xMax - x0) &&
+           clip(-dy, y0 - yMin) && clip(dy, yMax - y0) && t0 <= t1;
+}
+
+inline bool segment_intersects_immersed_solid(double x0,
+                                              double y0,
+                                              double x1,
+                                              double y1,
+                                              const SimulationParams& p,
+                                              double time) {
+    if (!immersed_solid_enabled(p)) return false;
+    switch (immersed_solid_shape(p)) {
+        case ImmersedSolidShape::Circle:
+            return segment_intersects_circle(x0, y0, x1, y1, p, time);
+        case ImmersedSolidShape::Rectangle:
+            return segment_intersects_rectangle(x0, y0, x1, y1, p, time);
+        case ImmersedSolidShape::None:
+            return false;
+    }
+    return false;
+}
+
+inline bool face_segment_cuts_solid(bool xFace,
+                                    int i,
+                                    int j,
+                                    const CellGrid& grid,
+                                    const SimulationParams& p,
+                                    double time) {
+    if (!p.projectionImmersedSolidCloseCutFaces) return false;
+    if (xFace) {
+        double x = static_cast<double>(i + 1) * grid.dx;
+        if (x >= grid.Lx) x -= grid.Lx;
+        const double y0 = static_cast<double>(j) * grid.dy;
+        const double y1 = static_cast<double>(j + 1) * grid.dy;
+        return segment_intersects_immersed_solid(x, y0, x, y1, p, time);
+    }
+    double y = static_cast<double>(j + 1) * grid.dy;
+    if (y >= grid.Ly) y -= grid.Ly;
+    const double x0 = static_cast<double>(i) * grid.dx;
+    const double x1 = static_cast<double>(i + 1) * grid.dx;
+    return segment_intersects_immersed_solid(x0, y, x1, y, p, time);
+}
+
 } // namespace
 
 ImmersedSolidShape immersed_solid_shape(const SimulationParams& params) {
@@ -366,6 +460,10 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
     resize_periodic_face_field(mask.faceOpen, nc);
     std::fill(mask.faceOpen.x.begin(), mask.faceOpen.x.end(), 1.0);
     std::fill(mask.faceOpen.y.begin(), mask.faceOpen.y.end(), 1.0);
+    mask.faceClosedByCellX.assign(static_cast<std::size_t>(nc), 0u);
+    mask.faceClosedByCellY.assign(static_cast<std::size_t>(nc), 0u);
+    mask.faceClosedByCutX.assign(static_cast<std::size_t>(nc), 0u);
+    mask.faceClosedByCutY.assign(static_cast<std::size_t>(nc), 0u);
 
     if (!immersed_solid_enabled(params)) {
         mask.fluidCells = static_cast<std::uint64_t>(std::max(0, nc));
@@ -397,7 +495,11 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
     const bool periodicY = is_y_periodic(params);
     std::uint64_t closedX = 0u;
     std::uint64_t closedY = 0u;
-#pragma omp parallel for reduction(+:closedX,closedY) if(nc > 1024)
+    std::uint64_t cellClosedX = 0u;
+    std::uint64_t cellClosedY = 0u;
+    std::uint64_t cutClosedX = 0u;
+    std::uint64_t cutClosedY = 0u;
+#pragma omp parallel for reduction(+:closedX,closedY,cellClosedX,cellClosedY,cutClosedX,cutClosedY) if(nc > 1024)
     for (int j = 0; j < grid.Ny; ++j) {
         for (int i = 0; i < grid.Nx; ++i) {
             const int c = i + grid.Nx * j;
@@ -405,26 +507,58 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
             const bool a = mask.activeCell[k] != 0u;
 
             bool openX = false;
+            bool closedByCellX = false;
+            bool closedByCutX = false;
             if (periodicX || i < grid.Nx - 1) {
                 const int ip = periodicX ? ((i + 1) % grid.Nx) : (i + 1);
                 const int e = ip + grid.Nx * j;
                 openX = a && (mask.activeCell[static_cast<std::size_t>(e)] != 0u);
+                closedByCellX = !openX;
+                if (openX && face_segment_cuts_solid(true, i, j, grid, params, time)) {
+                    openX = false;
+                    closedByCellX = false;
+                    closedByCutX = true;
+                }
+            } else {
+                closedByCellX = true;
             }
             mask.faceOpen.x[k] = openX ? 1.0 : 0.0;
+            mask.faceClosedByCellX[k] = closedByCellX ? 1u : 0u;
+            mask.faceClosedByCutX[k] = closedByCutX ? 1u : 0u;
             if (!openX) ++closedX;
+            if (closedByCellX) ++cellClosedX;
+            if (closedByCutX) ++cutClosedX;
 
             bool openY = false;
+            bool closedByCellY = false;
+            bool closedByCutY = false;
             if (periodicY || j < grid.Ny - 1) {
                 const int jp = periodicY ? ((j + 1) % grid.Ny) : (j + 1);
                 const int n = i + grid.Nx * jp;
                 openY = a && (mask.activeCell[static_cast<std::size_t>(n)] != 0u);
+                closedByCellY = !openY;
+                if (openY && face_segment_cuts_solid(false, i, j, grid, params, time)) {
+                    openY = false;
+                    closedByCellY = false;
+                    closedByCutY = true;
+                }
+            } else {
+                closedByCellY = true;
             }
             mask.faceOpen.y[k] = openY ? 1.0 : 0.0;
+            mask.faceClosedByCellY[k] = closedByCellY ? 1u : 0u;
+            mask.faceClosedByCutY[k] = closedByCutY ? 1u : 0u;
             if (!openY) ++closedY;
+            if (closedByCellY) ++cellClosedY;
+            if (closedByCutY) ++cutClosedY;
         }
     }
     mask.closedXFaces = closedX;
     mask.closedYFaces = closedY;
+    mask.cellClosedXFaces = cellClosedX;
+    mask.cellClosedYFaces = cellClosedY;
+    mask.cutClosedXFaces = cutClosedX;
+    mask.cutClosedYFaces = cutClosedY;
     return mask;
 }
 

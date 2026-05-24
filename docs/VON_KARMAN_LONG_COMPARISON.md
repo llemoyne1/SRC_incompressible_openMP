@@ -16,7 +16,8 @@ classic and full liquid closure:
 - periodic x/y domain;
 - imposed global mean flow around the obstacle;
 - identical geometry for classic and Q9/virial;
-- Q6/Q9 immersed-solid hard-wall mask for the liquid closure case.
+- Q6/Q9 immersed-solid hard-wall mask for the liquid closure case;
+- strict closure of curved cut faces around the analytic circle.
 
 This gives a useful stress test of structure preservation around a curved solid
 before introducing inlet/outlet boundary conditions.
@@ -96,6 +97,7 @@ q9LowKMaxIndex = 4
 Kvirial = 0.50
 virialBeta = 0.05
 projectionImmersedSolidMaskEnable = true
+projectionImmersedSolidCloseCutFaces = true
 ```
 
 ## Usage
@@ -152,7 +154,7 @@ Key quantities:
   `populationBelow5FractionWake`, `populationTemporalCvMeanWake`;
 - coherent, total, and fluctuating wake vorticity;
 - `omegaMeanLowKFractionWake`;
-- immersed-solid projection leak diagnostics for Q6/Q9;
+- immersed-solid projection leak diagnostics for Q6/Q9, including the split between cell/boundary closed faces and curved cut faces when available;
 - `virialDuOverThermalRmsLate`.
 
 ## Interpretation caveat
@@ -162,3 +164,21 @@ benchmark.  The true CUDA-like case requires external inlet/outlet support in th
 OpenMP boundary layer and then in the Q6/Q9 elliptic boundary conditions.  The
 present test is nevertheless useful for validating whether the final liquid
 closure preserves organized wake structures around a curved immersed solid.
+
+
+## Curved-solid hard-wall update
+
+For circular obstacles, the liquid run must close not only cells whose centres
+are classified as solid, but also fluid-fluid faces whose segment intersects the
+analytic circle.  The option:
+
+```text
+projectionImmersedSolidCloseCutFaces = true
+```
+
+is enabled by default and written explicitly by the von-Karman script.  The
+runtime summary appends cut-face diagnostics such as
+`q6ImmersedSolidLeakCutProjectedFluxRms` and
+`q9ImmersedSolidLeakCutMassFluxRms`.  A clean curved-solid projection should
+report non-zero cut-face counts but near-zero leak on those faces.  See
+`docs/IMMERSED_SOLID_CURVED_HARDWALL_MASK.md` for details.

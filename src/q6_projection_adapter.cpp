@@ -191,6 +191,10 @@ const EllipticProjectionMask* prepare_immersed_projection_mask(const SimulationP
     diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
     diag.immersedSolidClosedXFaces = ws.immersedMask.closedXFaces;
     diag.immersedSolidClosedYFaces = ws.immersedMask.closedYFaces;
+    diag.immersedSolidCellClosedXFaces = ws.immersedMask.cellClosedXFaces;
+    diag.immersedSolidCellClosedYFaces = ws.immersedMask.cellClosedYFaces;
+    diag.immersedSolidCutClosedXFaces = ws.immersedMask.cutClosedXFaces;
+    diag.immersedSolidCutClosedYFaces = ws.immersedMask.cutClosedYFaces;
     return &ws.ellipticMask;
 }
 
@@ -224,8 +228,14 @@ void compute_q6_solid_leak(const PeriodicFaceField& projectedFlux,
     const std::size_t n = mask.activeCell.size();
     double sum2 = 0.0;
     double maxAbs = 0.0;
+    double sum2Cell = 0.0;
+    double maxAbsCell = 0.0;
+    double sum2Cut = 0.0;
+    double maxAbsCut = 0.0;
     std::uint64_t count = 0u;
-#pragma omp parallel for reduction(+:sum2,count) reduction(max:maxAbs) if(n > 4096)
+    std::uint64_t countCell = 0u;
+    std::uint64_t countCut = 0u;
+#pragma omp parallel for reduction(+:sum2,count,sum2Cell,countCell,sum2Cut,countCut) reduction(max:maxAbs,maxAbsCell,maxAbsCut) if(n > 4096)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t k = static_cast<std::size_t>(ii);
         if (mask.faceOpen.x[k] == 0.0) {
@@ -233,16 +243,38 @@ void compute_q6_solid_leak(const PeriodicFaceField& projectedFlux,
             sum2 += a * a;
             maxAbs = std::max(maxAbs, a);
             count += 1u;
+            if (!mask.faceClosedByCutX.empty() && mask.faceClosedByCutX[k] != 0u) {
+                sum2Cut += a * a;
+                maxAbsCut = std::max(maxAbsCut, a);
+                countCut += 1u;
+            } else {
+                sum2Cell += a * a;
+                maxAbsCell = std::max(maxAbsCell, a);
+                countCell += 1u;
+            }
         }
         if (mask.faceOpen.y[k] == 0.0) {
             const double a = std::abs(projectedFlux.y[k]);
             sum2 += a * a;
             maxAbs = std::max(maxAbs, a);
             count += 1u;
+            if (!mask.faceClosedByCutY.empty() && mask.faceClosedByCutY[k] != 0u) {
+                sum2Cut += a * a;
+                maxAbsCut = std::max(maxAbsCut, a);
+                countCut += 1u;
+            } else {
+                sum2Cell += a * a;
+                maxAbsCell = std::max(maxAbsCell, a);
+                countCell += 1u;
+            }
         }
     }
     diag.immersedSolidLeakProjectedFluxRms = count > 0u ? std::sqrt(sum2 / static_cast<double>(count)) : 0.0;
     diag.immersedSolidLeakProjectedFluxMaxAbs = maxAbs;
+    diag.immersedSolidLeakCellClosedProjectedFluxRms = countCell > 0u ? std::sqrt(sum2Cell / static_cast<double>(countCell)) : 0.0;
+    diag.immersedSolidLeakCellClosedProjectedFluxMaxAbs = maxAbsCell;
+    diag.immersedSolidLeakCutProjectedFluxRms = countCut > 0u ? std::sqrt(sum2Cut / static_cast<double>(countCut)) : 0.0;
+    diag.immersedSolidLeakCutProjectedFluxMaxAbs = maxAbsCut;
 }
 
 EllipticProjectionBC q6_bc_from_particle_boundaries(const SimulationParams& params) {

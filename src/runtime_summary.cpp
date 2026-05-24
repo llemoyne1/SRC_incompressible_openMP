@@ -125,6 +125,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.q6ImmersedSolidSolidCells = q6->immersedSolidSolidCells;
         s.q6ImmersedSolidClosedXFaces = q6->immersedSolidClosedXFaces;
         s.q6ImmersedSolidClosedYFaces = q6->immersedSolidClosedYFaces;
+        s.q6ImmersedSolidCellClosedXFaces = q6->immersedSolidCellClosedXFaces;
+        s.q6ImmersedSolidCellClosedYFaces = q6->immersedSolidCellClosedYFaces;
+        s.q6ImmersedSolidCutClosedXFaces = q6->immersedSolidCutClosedXFaces;
+        s.q6ImmersedSolidCutClosedYFaces = q6->immersedSolidCutClosedYFaces;
         s.q6ResidualRel = q6->residualRel;
         s.q6DivBeforeRms = q6->divBeforeRms;
         s.q6DivBeforeMaxAbs = q6->divBeforeMaxAbs;
@@ -134,6 +138,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.q6DivAfterCellVelocityMaxAbs = q6->divAfterCellVelocityMaxAbs;
         s.q6ImmersedSolidLeakProjectedFluxRms = q6->immersedSolidLeakProjectedFluxRms;
         s.q6ImmersedSolidLeakProjectedFluxMaxAbs = q6->immersedSolidLeakProjectedFluxMaxAbs;
+        s.q6ImmersedSolidLeakCellClosedProjectedFluxRms = q6->immersedSolidLeakCellClosedProjectedFluxRms;
+        s.q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs = q6->immersedSolidLeakCellClosedProjectedFluxMaxAbs;
+        s.q6ImmersedSolidLeakCutProjectedFluxRms = q6->immersedSolidLeakCutProjectedFluxRms;
+        s.q6ImmersedSolidLeakCutProjectedFluxMaxAbs = q6->immersedSolidLeakCutProjectedFluxMaxAbs;
         s.q6CorrectionVelocityRms = q6->correctionVelocityRms;
         s.q6CorrectionVelocityMaxAbs = q6->correctionVelocityMaxAbs;
         s.q6MomentumCorrectionVx = q6->momentumCorrectionVx;
@@ -150,6 +158,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.q9ImmersedSolidSolidCells = q9->immersedSolidSolidCells;
         s.q9ImmersedSolidClosedXFaces = q9->immersedSolidClosedXFaces;
         s.q9ImmersedSolidClosedYFaces = q9->immersedSolidClosedYFaces;
+        s.q9ImmersedSolidCellClosedXFaces = q9->immersedSolidCellClosedXFaces;
+        s.q9ImmersedSolidCellClosedYFaces = q9->immersedSolidCellClosedYFaces;
+        s.q9ImmersedSolidCutClosedXFaces = q9->immersedSolidCutClosedXFaces;
+        s.q9ImmersedSolidCutClosedYFaces = q9->immersedSolidCutClosedYFaces;
         s.q9ResidualRel = q9->residualRel;
         s.q9MassFluxDivBeforeRms = q9->massFluxDivBeforeRms;
         s.q9MassFluxDivBeforeMaxAbs = q9->massFluxDivBeforeMaxAbs;
@@ -164,6 +176,10 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.q9DensityStdRatioEstimate = q9->densityStdRatioEstimate;
         s.q9ImmersedSolidLeakMassFluxRms = q9->immersedSolidLeakMassFluxRms;
         s.q9ImmersedSolidLeakMassFluxMaxAbs = q9->immersedSolidLeakMassFluxMaxAbs;
+        s.q9ImmersedSolidLeakCellClosedMassFluxRms = q9->immersedSolidLeakCellClosedMassFluxRms;
+        s.q9ImmersedSolidLeakCellClosedMassFluxMaxAbs = q9->immersedSolidLeakCellClosedMassFluxMaxAbs;
+        s.q9ImmersedSolidLeakCutMassFluxRms = q9->immersedSolidLeakCutMassFluxRms;
+        s.q9ImmersedSolidLeakCutMassFluxMaxAbs = q9->immersedSolidLeakCutMassFluxMaxAbs;
         s.q9CorrectionVelocityRms = q9->correctionVelocityRms;
         s.q9CorrectionVelocityMaxAbs = q9->correctionVelocityMaxAbs;
         s.q9MomentumCorrectionVx = q9->momentumCorrectionVx;
@@ -247,7 +263,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6ProjectionStrength,q6Converged,q6Iterations,q6EmptyCells,q6ImmersedSolidFluidCells,q6ImmersedSolidSolidCells,q6ImmersedSolidClosedXFaces,q6ImmersedSolidClosedYFaces,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6ImmersedSolidLeakProjectedFluxRms,q6ImmersedSolidLeakProjectedFluxMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ImmersedSolidFluidCells,q9ImmersedSolidSolidCells,q9ImmersedSolidClosedXFaces,q9ImmersedSolidClosedYFaces,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9ImmersedSolidLeakMassFluxRms,q9ImmersedSolidLeakMassFluxMaxAbs,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection,virialEnabled,virialDiagnosticsEnabled,virialKickEnabled,virialKickApplied,virialK,virialBeta,virialImmersedSolidFluidCells,virialImmersedSolidSolidCells,virialRhoMean,virialRhoEOSRef,virialRhoUniformNow,virialRhoDriveRef,virialRhoDefectRms,virialRhoDefectRelRms,PkinMean,PvirMean,PtotMean,PdriveMean,gradPdriveRms,gradPdriveMaxAbs,virialDuRawRms,virialDuAppliedRms,virialDuAppliedMaxAbs,virialDuOverThermalRms,virialMomentumCorrectionVx,virialMomentumCorrectionVy,virialMomentumResidualBeforeCorrection,virialMomentumResidualAfterCorrection\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6ProjectionStrength,q6Converged,q6Iterations,q6EmptyCells,q6ImmersedSolidFluidCells,q6ImmersedSolidSolidCells,q6ImmersedSolidClosedXFaces,q6ImmersedSolidClosedYFaces,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6ImmersedSolidLeakProjectedFluxRms,q6ImmersedSolidLeakProjectedFluxMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,q9Applied,q9Converged,q9Iterations,q9EmptyCells,q9ImmersedSolidFluidCells,q9ImmersedSolidSolidCells,q9ImmersedSolidClosedXFaces,q9ImmersedSolidClosedYFaces,q9ResidualRel,q9MassFluxDivBeforeRms,q9MassFluxDivBeforeMaxAbs,q9MassFluxDivAfterRms,q9MassFluxDivAfterMaxAbs,q9TargetDivergenceRms,q9TargetDivergenceRawRms,q9TargetDivergenceFilterRatio,q9DensityMean,q9DensityStdBefore,q9DensityStdAfterEstimate,q9DensityStdRatioEstimate,q9ImmersedSolidLeakMassFluxRms,q9ImmersedSolidLeakMassFluxMaxAbs,q9CorrectionVelocityRms,q9CorrectionVelocityMaxAbs,q9MomentumCorrectionVx,q9MomentumCorrectionVy,q9MomentumResidualBeforeCorrection,virialEnabled,virialDiagnosticsEnabled,virialKickEnabled,virialKickApplied,virialK,virialBeta,virialImmersedSolidFluidCells,virialImmersedSolidSolidCells,virialRhoMean,virialRhoEOSRef,virialRhoUniformNow,virialRhoDriveRef,virialRhoDefectRms,virialRhoDefectRelRms,PkinMean,PvirMean,PtotMean,PdriveMean,gradPdriveRms,gradPdriveMaxAbs,virialDuRawRms,virialDuAppliedRms,virialDuAppliedMaxAbs,virialDuOverThermalRms,virialMomentumCorrectionVx,virialMomentumCorrectionVy,virialMomentumResidualBeforeCorrection,virialMomentumResidualAfterCorrection,q6ImmersedSolidCellClosedXFaces,q6ImmersedSolidCellClosedYFaces,q6ImmersedSolidCutClosedXFaces,q6ImmersedSolidCutClosedYFaces,q6ImmersedSolidLeakCellClosedProjectedFluxRms,q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs,q6ImmersedSolidLeakCutProjectedFluxRms,q6ImmersedSolidLeakCutProjectedFluxMaxAbs,q9ImmersedSolidCellClosedXFaces,q9ImmersedSolidCellClosedYFaces,q9ImmersedSolidCutClosedXFaces,q9ImmersedSolidCutClosedYFaces,q9ImmersedSolidLeakCellClosedMassFluxRms,q9ImmersedSolidLeakCellClosedMassFluxMaxAbs,q9ImmersedSolidLeakCutMassFluxRms,q9ImmersedSolidLeakCutMassFluxMaxAbs\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -382,7 +398,23 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.virialMomentumCorrectionVx << ','
          << s.virialMomentumCorrectionVy << ','
          << s.virialMomentumResidualBeforeCorrection << ','
-         << s.virialMomentumResidualAfterCorrection << '\n';
+         << s.virialMomentumResidualAfterCorrection << ','
+         << s.q6ImmersedSolidCellClosedXFaces << ','
+         << s.q6ImmersedSolidCellClosedYFaces << ','
+         << s.q6ImmersedSolidCutClosedXFaces << ','
+         << s.q6ImmersedSolidCutClosedYFaces << ','
+         << s.q6ImmersedSolidLeakCellClosedProjectedFluxRms << ','
+         << s.q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs << ','
+         << s.q6ImmersedSolidLeakCutProjectedFluxRms << ','
+         << s.q6ImmersedSolidLeakCutProjectedFluxMaxAbs << ','
+         << s.q9ImmersedSolidCellClosedXFaces << ','
+         << s.q9ImmersedSolidCellClosedYFaces << ','
+         << s.q9ImmersedSolidCutClosedXFaces << ','
+         << s.q9ImmersedSolidCutClosedYFaces << ','
+         << s.q9ImmersedSolidLeakCellClosedMassFluxRms << ','
+         << s.q9ImmersedSolidLeakCellClosedMassFluxMaxAbs << ','
+         << s.q9ImmersedSolidLeakCutMassFluxRms << ','
+         << s.q9ImmersedSolidLeakCutMassFluxMaxAbs << '\n';
 }
 
 } // namespace mpcd

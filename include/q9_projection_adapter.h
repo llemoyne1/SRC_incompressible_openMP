@@ -30,6 +30,10 @@ struct Q9ProjectionDiagnostics {
     std::uint64_t immersedSolidSolidCells = 0;
     std::uint64_t immersedSolidClosedXFaces = 0;
     std::uint64_t immersedSolidClosedYFaces = 0;
+    std::uint64_t immersedSolidCellClosedXFaces = 0;
+    std::uint64_t immersedSolidCellClosedYFaces = 0;
+    std::uint64_t immersedSolidCutClosedXFaces = 0;
+    std::uint64_t immersedSolidCutClosedYFaces = 0;
 
     double residualRel = 0.0;
     double massFluxDivBeforeRms = 0.0;
@@ -45,6 +49,10 @@ struct Q9ProjectionDiagnostics {
     double densityStdRatioEstimate = 0.0;
     double immersedSolidLeakMassFluxRms = 0.0;
     double immersedSolidLeakMassFluxMaxAbs = 0.0;
+    double immersedSolidLeakCellClosedMassFluxRms = 0.0;
+    double immersedSolidLeakCellClosedMassFluxMaxAbs = 0.0;
+    double immersedSolidLeakCutMassFluxRms = 0.0;
+    double immersedSolidLeakCutMassFluxMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
     double momentumCorrectionVx = 0.0;

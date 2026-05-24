@@ -139,6 +139,7 @@ struct SimulationParams {
     bool projectionImmersedSolidMaskEnable = false;
     bool projectionAllowUnmaskedImmersedSolid = false;
     double projectionImmersedSolidFluidFractionThreshold = 0.5;
+    bool projectionImmersedSolidCloseCutFaces = true;
 
     // Optional Q9 mass-flux projection adapter. Q9 reuses the same generic
     // elliptic face-field core as Q6 but projects a mass/momentum flux toward

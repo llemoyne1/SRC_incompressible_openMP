@@ -459,6 +459,16 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
             solveBaseFlux.y[static_cast<std::size_t>(c)] = bc.yHighFlux;
         }
     }
+    // Faces with alpha=0 are internal no-flux faces.  This matters for curved
+    // immersed solids where two neighbouring cell centres can both be fluid
+    // while the face segment itself is cut by the solid.  The solve RHS must
+    // not include base flux through such faces.
+#pragma omp parallel for if(grid.numCells > 4096)
+    for (int c = 0; c < grid.numCells; ++c) {
+        const std::size_t k = static_cast<std::size_t>(c);
+        if (alpha.x[k] == 0.0) solveBaseFlux.x[k] = 0.0;
+        if (alpha.y[k] == 0.0) solveBaseFlux.y[k] = 0.0;
+    }
     const std::vector<double> divForSolve = compute_face_divergence(grid, solveBaseFlux, bc, mask);
 
     for (int c = 0; c < grid.numCells; ++c) {
@@ -496,9 +506,14 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 const int ip = periodicX ? wrap_index(i + 1, grid.Nx) : (i + 1);
                 const int e = cell_index(ip, j, grid.Nx);
                 if (mask_active(mask, e)) {
-                    const double gradX = (result.phi[static_cast<std::size_t>(e)] - result.phi[k]) * invDx;
-                    result.correctionFlux.x[k] = -alpha.x[k] * gradX;
-                    result.projectedFlux.x[k] = baseFlux.x[k] + result.correctionFlux.x[k];
+                    if (alpha.x[k] == 0.0) {
+                        result.correctionFlux.x[k] = -baseFlux.x[k];
+                        result.projectedFlux.x[k] = 0.0;
+                    } else {
+                        const double gradX = (result.phi[static_cast<std::size_t>(e)] - result.phi[k]) * invDx;
+                        result.correctionFlux.x[k] = -alpha.x[k] * gradX;
+                        result.projectedFlux.x[k] = baseFlux.x[k] + result.correctionFlux.x[k];
+                    }
                 } else {
                     result.correctionFlux.x[k] = -baseFlux.x[k];
                     result.projectedFlux.x[k] = 0.0;
@@ -512,9 +527,14 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 const int jp = periodicY ? wrap_index(j + 1, grid.Ny) : (j + 1);
                 const int n = cell_index(i, jp, grid.Nx);
                 if (mask_active(mask, n)) {
-                    const double gradY = (result.phi[static_cast<std::size_t>(n)] - result.phi[k]) * invDy;
-                    result.correctionFlux.y[k] = -alpha.y[k] * gradY;
-                    result.projectedFlux.y[k] = baseFlux.y[k] + result.correctionFlux.y[k];
+                    if (alpha.y[k] == 0.0) {
+                        result.correctionFlux.y[k] = -baseFlux.y[k];
+                        result.projectedFlux.y[k] = 0.0;
+                    } else {
+                        const double gradY = (result.phi[static_cast<std::size_t>(n)] - result.phi[k]) * invDy;
+                        result.correctionFlux.y[k] = -alpha.y[k] * gradY;
+                        result.projectedFlux.y[k] = baseFlux.y[k] + result.correctionFlux.y[k];
+                    }
                 } else {
                     result.correctionFlux.y[k] = -baseFlux.y[k];
                     result.projectedFlux.y[k] = 0.0;

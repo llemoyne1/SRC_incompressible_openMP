@@ -36,6 +36,10 @@ struct Q6ProjectionDiagnostics {
     std::uint64_t immersedSolidSolidCells = 0;
     std::uint64_t immersedSolidClosedXFaces = 0;
     std::uint64_t immersedSolidClosedYFaces = 0;
+    std::uint64_t immersedSolidCellClosedXFaces = 0;
+    std::uint64_t immersedSolidCellClosedYFaces = 0;
+    std::uint64_t immersedSolidCutClosedXFaces = 0;
+    std::uint64_t immersedSolidCutClosedYFaces = 0;
 
     double projectionStrength = 1.0;
     double residualRel = 0.0;
@@ -47,6 +51,10 @@ struct Q6ProjectionDiagnostics {
     double divAfterCellVelocityMaxAbs = 0.0;
     double immersedSolidLeakProjectedFluxRms = 0.0;
     double immersedSolidLeakProjectedFluxMaxAbs = 0.0;
+    double immersedSolidLeakCellClosedProjectedFluxRms = 0.0;
+    double immersedSolidLeakCellClosedProjectedFluxMaxAbs = 0.0;
+    double immersedSolidLeakCutProjectedFluxRms = 0.0;
+    double immersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
     double momentumCorrectionVx = 0.0;

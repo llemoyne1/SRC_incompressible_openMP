@@ -220,6 +220,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionImmersedSolidMaskEnable") p.projectionImmersedSolidMaskEnable = parse_bool(value, key);
         else if (key == "projectionAllowUnmaskedImmersedSolid") p.projectionAllowUnmaskedImmersedSolid = parse_bool(value, key);
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
+        else if (key == "projectionImmersedSolidCloseCutFaces") p.projectionImmersedSolidCloseCutFaces = parse_bool(value, key);
         else if (key == "q9MassFluxProjectionEnable") p.q9MassFluxProjectionEnable = parse_bool(value, key);
         else if (key == "q9MassFluxProjectionStrength") p.q9MassFluxProjectionStrength = parse_double(value, key);
         else if (key == "q9DensityRelaxationBeta") p.q9DensityRelaxationBeta = parse_double(value, key);

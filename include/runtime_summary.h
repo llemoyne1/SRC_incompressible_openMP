@@ -88,6 +88,10 @@ struct RuntimeSummary {
     std::uint64_t q6ImmersedSolidSolidCells = 0;
     std::uint64_t q6ImmersedSolidClosedXFaces = 0;
     std::uint64_t q6ImmersedSolidClosedYFaces = 0;
+    std::uint64_t q6ImmersedSolidCellClosedXFaces = 0;
+    std::uint64_t q6ImmersedSolidCellClosedYFaces = 0;
+    std::uint64_t q6ImmersedSolidCutClosedXFaces = 0;
+    std::uint64_t q6ImmersedSolidCutClosedYFaces = 0;
     double q6ResidualRel = 0.0;
     double q6DivBeforeRms = 0.0;
     double q6DivBeforeMaxAbs = 0.0;
@@ -97,6 +101,10 @@ struct RuntimeSummary {
     double q6DivAfterCellVelocityMaxAbs = 0.0;
     double q6ImmersedSolidLeakProjectedFluxRms = 0.0;
     double q6ImmersedSolidLeakProjectedFluxMaxAbs = 0.0;
+    double q6ImmersedSolidLeakCellClosedProjectedFluxRms = 0.0;
+    double q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs = 0.0;
+    double q6ImmersedSolidLeakCutProjectedFluxRms = 0.0;
+    double q6ImmersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
     double q6CorrectionVelocityRms = 0.0;
     double q6CorrectionVelocityMaxAbs = 0.0;
     double q6MomentumCorrectionVx = 0.0;
@@ -111,6 +119,10 @@ struct RuntimeSummary {
     std::uint64_t q9ImmersedSolidSolidCells = 0;
     std::uint64_t q9ImmersedSolidClosedXFaces = 0;
     std::uint64_t q9ImmersedSolidClosedYFaces = 0;
+    std::uint64_t q9ImmersedSolidCellClosedXFaces = 0;
+    std::uint64_t q9ImmersedSolidCellClosedYFaces = 0;
+    std::uint64_t q9ImmersedSolidCutClosedXFaces = 0;
+    std::uint64_t q9ImmersedSolidCutClosedYFaces = 0;
     double q9ResidualRel = 0.0;
     double q9MassFluxDivBeforeRms = 0.0;
     double q9MassFluxDivBeforeMaxAbs = 0.0;
@@ -125,6 +137,10 @@ struct RuntimeSummary {
     double q9DensityStdRatioEstimate = 0.0;
     double q9ImmersedSolidLeakMassFluxRms = 0.0;
     double q9ImmersedSolidLeakMassFluxMaxAbs = 0.0;
+    double q9ImmersedSolidLeakCellClosedMassFluxRms = 0.0;
+    double q9ImmersedSolidLeakCellClosedMassFluxMaxAbs = 0.0;
+    double q9ImmersedSolidLeakCutMassFluxRms = 0.0;
+    double q9ImmersedSolidLeakCutMassFluxMaxAbs = 0.0;
     double q9CorrectionVelocityRms = 0.0;
     double q9CorrectionVelocityMaxAbs = 0.0;
     double q9MomentumCorrectionVx = 0.0;
