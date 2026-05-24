@@ -193,6 +193,13 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletUyTop") p.inletUyTop = parse_double(value, key);
         else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
         else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
+        else if (key == "inletInjectionMode") p.inletInjectionMode = get_lower(kv, key);
+        else if (key == "inletSlabCells" || key == "inletInjectionSlabCells") p.inletSlabCells = parse_double(value, key);
+        else if (key == "inletRandomizeTangential" || key == "inletRandomizeTransverse" ||
+                 key == "inletRandomizeY" || key == "injectRandomY") {
+            p.inletRandomizeTangential = parse_bool(value, key);
+        }
+        else if (key == "inletReinjectBackflow" || key == "reinjectBackflow") p.inletReinjectBackflow = parse_bool(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -436,8 +443,16 @@ void validate_simulation_params(const SimulationParams& p) {
             p.virialDiagnosticsEnable || p.virialKickEnable) {
             throw std::runtime_error("0061 inlet/outlet support is particle-only and currently restricted to method=classic with Q6/Q9/virial disabled");
         }
-        if (!(p.inletThermalNoise >= 0.0)) {
-            throw std::runtime_error("inletThermalNoise must be non-negative");
+        std::string inletInjectionMode = p.inletInjectionMode;
+        std::replace(inletInjectionMode.begin(), inletInjectionMode.end(), '-', '_');
+        if (inletInjectionMode != "cuda_recycle" && inletInjectionMode != "thin_slab") {
+            throw std::runtime_error("inletInjectionMode currently supports cuda_recycle/thin_slab");
+        }
+        if (!(p.inletThermalNoise >= 0.0) || !std::isfinite(p.inletThermalNoise)) {
+            throw std::runtime_error("inletThermalNoise must be finite and non-negative");
+        }
+        if (!(p.inletSlabCells > 0.0) || !std::isfinite(p.inletSlabCells)) {
+            throw std::runtime_error("inletSlabCells must be finite and positive");
         }
         if (p.inletThermalNoise > 0.0) {
             const double effectiveInletKBT = p.inletKBT > 0.0 ? p.inletKBT : p.kBT;

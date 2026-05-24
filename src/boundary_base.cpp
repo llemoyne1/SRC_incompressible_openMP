@@ -30,6 +30,12 @@ std::uint64_t splitmix64(std::uint64_t x) {
     return x ^ (x >> 31U);
 }
 
+double uint64_to_unit_open(std::uint64_t x) {
+    // Convert the top 53 random bits to a double in [0,1). Boundary-condition
+    // callers subsequently clamp to a strictly interior coordinate.
+    return static_cast<double>(x >> 11U) * (1.0 / 9007199254740992.0);
+}
+
 void wall_velocity_for_face(const SimulationParams& params,
                             const FluidDomainBounds& domain,
                             const std::string& face,
@@ -164,6 +170,42 @@ std::uint64_t face_tag(const char* face) {
     return 0x46414345ULL;
 }
 
+std::uint64_t inlet_seed(const SimulationParams& params,
+                         const char* face,
+                         std::size_t particleIndex,
+                         std::uint64_t step,
+                         std::uint64_t salt) {
+    return splitmix64(params.rngSeed ^
+                      (step * 0x9e3779b97f4a7c15ULL) ^
+                      (static_cast<std::uint64_t>(particleIndex) * 0xbf58476d1ce4e5b9ULL) ^
+                      face_tag(face) ^ salt);
+}
+
+double inlet_uniform01(const SimulationParams& params,
+                       const char* face,
+                       std::size_t particleIndex,
+                       std::uint64_t step,
+                       std::uint64_t salt) {
+    return uint64_to_unit_open(inlet_seed(params, face, particleIndex, step, salt));
+}
+
+double clamp_strictly_inside(double x, double lo, double hi) {
+    const double width = hi - lo;
+    const double eps = 1.0e-12 * std::max(1.0, std::abs(width));
+    return std::clamp(x, lo + eps, hi - eps);
+}
+
+double random_inside_interval(const SimulationParams& params,
+                              const char* face,
+                              std::size_t particleIndex,
+                              std::uint64_t step,
+                              std::uint64_t salt,
+                              double lo,
+                              double hi) {
+    const double u = inlet_uniform01(params, face, particleIndex, step, salt);
+    return clamp_strictly_inside(lo + u * (hi - lo), lo, hi);
+}
+
 void sample_inlet_velocity(const SimulationParams& params,
                            const char* face,
                            std::size_t particleIndex,
@@ -178,11 +220,7 @@ void sample_inlet_velocity(const SimulationParams& params,
 
     const double effectiveKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
     if (params.inletThermalNoise > 0.0 && effectiveKBT > 0.0 && mass > 0.0) {
-        const std::uint64_t seed = splitmix64(params.rngSeed ^
-                                             (step * 0x9e3779b97f4a7c15ULL) ^
-                                             (static_cast<std::uint64_t>(particleIndex) * 0xbf58476d1ce4e5b9ULL) ^
-                                             face_tag(face));
-        std::mt19937_64 rng(seed);
+        std::mt19937_64 rng(inlet_seed(params, face, particleIndex, step, 0x7f4a7c159e3779b9ULL));
         std::normal_distribution<double> normal(0.0, 1.0);
         const double sigma = params.inletThermalNoise * std::sqrt(effectiveKBT / mass);
         vx += sigma * normal(rng);
@@ -190,22 +228,90 @@ void sample_inlet_velocity(const SimulationParams& params,
     }
 }
 
-double inward_offset(double distance, double width) {
-    if (!(width > 0.0)) {
-        return 0.0;
-    }
-    double d = std::fmod(std::abs(distance), width);
+double inlet_slab_width_x(const SimulationParams& params, const FluidDomainBounds& domain) {
+    const double width = domain.xMax - domain.xMin;
+    const double dx = width / static_cast<double>(std::max(1, params.Nx));
+    const double requested = params.inletSlabCells * dx;
     const double eps = 1.0e-12 * std::max(1.0, width);
-    if (!(d > eps)) {
-        d = eps;
+    return std::clamp(requested, eps, width);
+}
+
+double inlet_slab_width_y(const SimulationParams& params, const FluidDomainBounds& domain) {
+    const double height = domain.yMax - domain.yMin;
+    const double dy = height / static_cast<double>(std::max(1, params.Ny));
+    const double requested = params.inletSlabCells * dy;
+    const double eps = 1.0e-12 * std::max(1.0, height);
+    return std::clamp(requested, eps, height);
+}
+
+void inject_from_x_inlet(double& x,
+                         double& y,
+                         double& vx,
+                         double& vy,
+                         const SimulationParams& params,
+                         const FluidDomainBounds& domain,
+                         const char* inletFace,
+                         std::size_t particleIndex,
+                         std::uint64_t step,
+                         double mass) {
+    const double slab = inlet_slab_width_x(params, domain);
+    if (std::string(inletFace) == "left") {
+        x = random_inside_interval(params, inletFace, particleIndex, step, 0xa511e9b3ULL,
+                                   domain.xMin, domain.xMin + slab);
+    } else {
+        x = random_inside_interval(params, inletFace, particleIndex, step, 0xa511e9b3ULL,
+                                   domain.xMax - slab, domain.xMax);
     }
-    if (d > width - eps) {
-        d = width - eps;
+
+    if (params.inletRandomizeTangential) {
+        y = random_inside_interval(params, inletFace, particleIndex, step, 0x9e3779b9ULL,
+                                   domain.yMin, domain.yMax);
+    } else {
+        y = clamp_strictly_inside(y, domain.yMin, domain.yMax);
     }
-    return d;
+    sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
+}
+
+void inject_from_y_inlet(double& x,
+                         double& y,
+                         double& vx,
+                         double& vy,
+                         const SimulationParams& params,
+                         const FluidDomainBounds& domain,
+                         const char* inletFace,
+                         std::size_t particleIndex,
+                         std::uint64_t step,
+                         double mass) {
+    const double slab = inlet_slab_width_y(params, domain);
+    if (std::string(inletFace) == "bottom") {
+        y = random_inside_interval(params, inletFace, particleIndex, step, 0xa511e9b3ULL,
+                                   domain.yMin, domain.yMin + slab);
+    } else {
+        y = random_inside_interval(params, inletFace, particleIndex, step, 0xa511e9b3ULL,
+                                   domain.yMax - slab, domain.yMax);
+    }
+
+    if (params.inletRandomizeTangential) {
+        x = random_inside_interval(params, inletFace, particleIndex, step, 0x9e3779b9ULL,
+                                   domain.xMin, domain.xMax);
+    } else {
+        x = clamp_strictly_inside(x, domain.xMin, domain.xMax);
+    }
+    sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
+}
+
+void clamp_backflow_x(double& x, const FluidDomainBounds& domain, bool lowSide) {
+    const double eps = 1.0e-12 * std::max(1.0, domain.xMax - domain.xMin);
+    x = lowSide ? (domain.xMin + eps) : (domain.xMax - eps);
+}
+
+void clamp_backflow_y(double& y, const FluidDomainBounds& domain, bool lowSide) {
+    const double eps = 1.0e-12 * std::max(1.0, domain.yMax - domain.yMin);
+    y = lowSide ? (domain.yMin + eps) : (domain.yMax - eps);
 }
 
 int apply_io_x(double& x,
+               double& y,
                double& vx,
                double& vy,
                const SimulationParams& params,
@@ -221,30 +327,42 @@ int apply_io_x(double& x,
 
     const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
     const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
-    const double width = domain.xMax - domain.xMin;
 
     if (x < domain.xMin) {
         ++leftHits;
+        if (leftInlet) {
+            if (params.inletReinjectBackflow) {
+                inject_from_x_inlet(x, y, vx, vy, params, domain, "left", particleIndex, step, mass);
+                return 1;
+            }
+            clamp_backflow_x(x, domain, true);
+            return 0;
+        }
+        if (rightInlet) {
+            inject_from_x_inlet(x, y, vx, vy, params, domain, "right", particleIndex, step, mass);
+            return 1;
+        }
     } else {
         ++rightHits;
+        if (rightInlet) {
+            if (params.inletReinjectBackflow) {
+                inject_from_x_inlet(x, y, vx, vy, params, domain, "right", particleIndex, step, mass);
+                return 1;
+            }
+            clamp_backflow_x(x, domain, false);
+            return 0;
+        }
+        if (leftInlet) {
+            inject_from_x_inlet(x, y, vx, vy, params, domain, "left", particleIndex, step, mass);
+            return 1;
+        }
     }
 
-    const double distance = x < domain.xMin ? (domain.xMin - x) : (x - domain.xMax);
-    const double d = inward_offset(distance, width);
-    if (leftInlet) {
-        x = domain.xMin + d;
-        sample_inlet_velocity(params, "left", particleIndex, step, mass, vx, vy);
-    } else if (rightInlet) {
-        x = domain.xMax - d;
-        sample_inlet_velocity(params, "right", particleIndex, step, mass, vx, vy);
-    } else {
-        throw std::runtime_error("Internal error: x inlet/outlet pair has no inlet face");
-    }
-    x = std::clamp(x, domain.xMin, domain.xMax);
-    return 1;
+    throw std::runtime_error("Internal error: x inlet/outlet pair has no inlet face");
 }
 
-int apply_io_y(double& y,
+int apply_io_y(double& x,
+               double& y,
                double& vx,
                double& vy,
                const SimulationParams& params,
@@ -260,27 +378,38 @@ int apply_io_y(double& y,
 
     const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
     const bool topInlet = is_inlet_boundary_mode(params.bcTop);
-    const double height = domain.yMax - domain.yMin;
 
     if (y < domain.yMin) {
         ++bottomHits;
+        if (bottomInlet) {
+            if (params.inletReinjectBackflow) {
+                inject_from_y_inlet(x, y, vx, vy, params, domain, "bottom", particleIndex, step, mass);
+                return 1;
+            }
+            clamp_backflow_y(y, domain, true);
+            return 0;
+        }
+        if (topInlet) {
+            inject_from_y_inlet(x, y, vx, vy, params, domain, "top", particleIndex, step, mass);
+            return 1;
+        }
     } else {
         ++topHits;
+        if (topInlet) {
+            if (params.inletReinjectBackflow) {
+                inject_from_y_inlet(x, y, vx, vy, params, domain, "top", particleIndex, step, mass);
+                return 1;
+            }
+            clamp_backflow_y(y, domain, false);
+            return 0;
+        }
+        if (bottomInlet) {
+            inject_from_y_inlet(x, y, vx, vy, params, domain, "bottom", particleIndex, step, mass);
+            return 1;
+        }
     }
 
-    const double distance = y < domain.yMin ? (domain.yMin - y) : (y - domain.yMax);
-    const double d = inward_offset(distance, height);
-    if (bottomInlet) {
-        y = domain.yMin + d;
-        sample_inlet_velocity(params, "bottom", particleIndex, step, mass, vx, vy);
-    } else if (topInlet) {
-        y = domain.yMax - d;
-        sample_inlet_velocity(params, "top", particleIndex, step, mass, vx, vy);
-    } else {
-        throw std::runtime_error("Internal error: y inlet/outlet pair has no inlet face");
-    }
-    y = std::clamp(y, domain.yMin, domain.yMax);
-    return 1;
+    throw std::runtime_error("Internal error: y inlet/outlet pair has no inlet face");
 }
 
 int reflect_x(double& x,
@@ -397,7 +526,7 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
             if (periodicX) {
                 state.x[i] = wrap_periodic(state.x[i], params.Lx);
             } else if (ioX) {
-                (void)apply_io_x(state.x[i], state.vx[i], state.vy[i],
+                (void)apply_io_x(state.x[i], state.y[i], state.vx[i], state.vy[i],
                                  params, domain, hitsLeft, hitsRight,
                                  i, step, state.mass[i]);
             } else {
@@ -412,7 +541,7 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
             if (periodicY) {
                 state.y[i] = wrap_periodic(state.y[i], params.Ly);
             } else if (ioY) {
-                (void)apply_io_y(state.y[i], state.vx[i], state.vy[i],
+                (void)apply_io_y(state.x[i], state.y[i], state.vx[i], state.vy[i],
                                  params, domain, hitsBottom, hitsTop,
                                  i, step, state.mass[i]);
             } else {

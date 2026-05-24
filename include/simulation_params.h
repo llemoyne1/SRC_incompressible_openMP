@@ -66,9 +66,12 @@ struct SimulationParams {
     // Minimal particle-reservoir inlet/outlet support for classic SRC/MPCD
     // open-channel tests. A particle crossing an outlet is recycled at the
     // paired inlet face with the prescribed inlet mean velocity plus optional
-    // Maxwellian thermal noise. This deliberately remains a particle-only
-    // boundary mechanism; Q6/Q9/virial open-boundary compatibility is added in
-    // later patches through the elliptic face-flux machinery.
+    // Maxwellian thermal noise. The 0061b default follows the legacy CUDA
+    // inlet-injection path: reinject into a thin inlet slab and randomize the
+    // tangential coordinate to keep the inlet density homogeneous. This
+    // deliberately remains a particle-only boundary mechanism; Q6/Q9/virial
+    // open-boundary compatibility is added in later patches through the
+    // elliptic face-flux machinery.
     double inletUxLeft = 0.0;
     double inletUyLeft = 0.0;
     double inletUxRight = 0.0;
@@ -79,6 +82,10 @@ struct SimulationParams {
     double inletUyTop = 0.0;
     double inletKBT = -1.0;             // negative => use kBT
     double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
+    std::string inletInjectionMode = "cuda_recycle"; // currently: cuda_recycle/thin_slab
+    double inletSlabCells = 1.0;        // injected slab thickness in local grid cells
+    bool inletRandomizeTangential = true; // randomize transverse coordinate on injection
+    bool inletReinjectBackflow = true;  // re-inject particles crossing back through inlet
 
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
