@@ -84,6 +84,15 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
         r.q9DensityStdRatioEstimateFinal = getlast(T, 'q9DensityStdRatioEstimate');
         r.q9CorrectionVelocityRmsFinal = getlast(T, 'q9CorrectionVelocityRms');
         r.q9CorrectionVelocityMaxAbsFinal = getlast(T, 'q9CorrectionVelocityMaxAbs');
+        r.q9CorrectionVelocityRawMaxAbsFinal = getlast(T, 'q9CorrectionVelocityRawMaxAbs');
+        r.q9CorrectionVelocityLimiterFinal = getlast(T, 'q9CorrectionVelocityLimiter');
+        r.q9SafetyActiveCellsFinal = getlast(T, 'q9SafetyActiveCells');
+        r.q9SafetyExcludedCellsFinal = getlast(T, 'q9SafetyExcludedCells');
+        r.q9OpenBoundaryExcludedCellsFinal = getlast(T, 'q9OpenBoundaryExcludedCells');
+        r.q9ImmersedHaloExcludedCellsFinal = getlast(T, 'q9ImmersedHaloExcludedCells');
+        r.q9LowMassSuppressedCellsFinal = getlast(T, 'q9LowMassSuppressedCells');
+        r.q9VelocityLimitedCellsFinal = getlast(T, 'q9VelocityLimitedCells');
+        r.q9VelocityLimitedFractionFinal = safe_ratio(r.q9VelocityLimitedCellsFinal, r.q9SafetyActiveCellsFinal);
         r.virialKickAppliedFinal = getlast(T, 'virialKickApplied');
         r.virialDuOverThermalRmsFinal = getlast(T, 'virialDuOverThermalRms');
         r.virialMomentumResidualAfterFinal = getlast(T, 'virialMomentumResidualAfterCorrection');
@@ -91,7 +100,11 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
             r.inletReservoirStdNFinal == 0 && r.inletReservoirMinNFinal == 20 && ...
             r.inletReservoirMaxNFinal == 20 && abs(r.inletMeanUxFinal - 0.05) < 1e-12;
         r.passThermalRelative = r.kBTOverTargetLate < 2.0;
-        r.passNoCatastrophicQ9 = isnan(r.q9CorrectionVelocityMaxAbsFinal) || r.q9CorrectionVelocityMaxAbsFinal < 1.0;
+        r.passNoCatastrophicQ9 = isnan(r.q9CorrectionVelocityMaxAbsFinal) || r.q9CorrectionVelocityMaxAbsFinal < 0.05;
+        r.passLimiterActive = isnan(r.q9CorrectionVelocityLimiterFinal) || ...
+            r.q9CorrectionVelocityLimiterFinal <= 0 || ...
+            r.q9CorrectionVelocityMaxAbsFinal <= 1.05 * r.q9CorrectionVelocityLimiterFinal;
+        r.passLimitedFraction = isnan(r.q9VelocityLimitedFractionFinal) || r.q9VelocityLimitedFractionFinal <= 0.15;
         rows = [rows; r]; %#ok<AGROW>
     end
 
@@ -99,6 +112,17 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
         S = table();
     else
         S = struct2table(rows);
+        q6Rows = contains(S.caseLabel, "q6") & S.q9AppliedFinal == 0;
+        if any(q6Rows)
+            q6Ref = S.kBTMeanLate(find(q6Rows, 1, 'first'));
+        else
+            q6Ref = NaN;
+        end
+        S.q6KBTReferenceLate = repmat(q6Ref, height(S), 1);
+        S.q9KBTOverQ6Late = S.kBTMeanLate ./ q6Ref;
+        S.passRelativeToQ6 = isnan(S.q9AppliedFinal) | S.q9AppliedFinal == 0 | S.q9KBTOverQ6Late <= 1.15;
+        S.passHardInletSoftQ9 = S.passHardInletDensity & S.passLimiterActive & ...
+            S.passNoCatastrophicQ9 & S.passRelativeToQ6 & S.passLimitedFraction;
     end
     out = fullfile(runRoot, 'summary_hard_inlet_validation_0067.csv');
     if ~isempty(S)

@@ -13,6 +13,14 @@ RUN_ROOT="${RUN_ROOT:-runs/backward_step_hard_inlet_validation_0067}"
 STATE_FILE="${STATE_FILE:-initial_state_backward_step_96x48_g20_kbt0p0025.smpcd}"
 RUN_Q9_VIRIAL="${RUN_Q9_VIRIAL:-1}"
 RUN_CLASSIC="${RUN_CLASSIC:-0}"
+RUN_Q9_STRONG_REFERENCE="${RUN_Q9_STRONG_REFERENCE:-0}"
+
+# Conservative Q9 safeguards for hard-inlet + immersed-solid open boundaries.
+# These defaults are deliberately local to this backward-step validation case.
+Q9_OPEN_EXCLUSION_CELLS="${Q9_OPEN_EXCLUSION_CELLS:-5}"
+Q9_IMMERSED_HALO_CELLS="${Q9_IMMERSED_HALO_CELLS:-5}"
+Q9_MIN_CELL_MASS="${Q9_MIN_CELL_MASS:-8.0}"
+Q9_CORRECTION_LIMITER="${Q9_CORRECTION_LIMITER:-0.003}"
 
 if [[ "$AUTO_BUILD" == "1" ]]; then
   ./scripts/build_src_mpcd_base.sh
@@ -97,10 +105,10 @@ projectionImmersedSolidCloseCutFaces = true
 q9MassFluxProjectionEnable = ${q9}
 q9MassFluxProjectionStrength = ${q9_strength}
 q9DensityRelaxationBeta = ${q9_beta}
-q9OpenBoundaryExclusionCells = 5
-q9ImmersedSolidHaloCells = 5
-q9MinCellMassForCorrection = 8.0
-q9CorrectionVelocityLimiter = 0.003
+q9OpenBoundaryExclusionCells = ${Q9_OPEN_EXCLUSION_CELLS}
+q9ImmersedSolidHaloCells = ${Q9_IMMERSED_HALO_CELLS}
+q9MinCellMassForCorrection = ${Q9_MIN_CELL_MASS}
+q9CorrectionVelocityLimiter = ${Q9_CORRECTION_LIMITER}
 q9TargetFilter = elliptic_lowpass
 q9LowKMaxIndex = 4
 q9EllipticLowPassPasses = 1
@@ -151,10 +159,13 @@ if [[ "$RUN_CLASSIC" == "1" ]]; then
   write_case "backstep_classic_hard_inlet" "classic" "false" "false" "0.0" "0.0"
 fi
 write_case "backstep_q6_hard_inlet" "q6" "false" "false" "0.0" "0.0"
-write_case "backstep_q9_hard_inlet_s100" "q9" "true" "false" "1.00" "0.001"
-write_case "backstep_q9_hard_inlet_s025" "q9" "true" "false" "0.25" "0.001"
+write_case "backstep_q9_hard_inlet_s003" "q9" "true" "false" "0.03" "0.001"
+write_case "backstep_q9_hard_inlet_s005" "q9" "true" "false" "0.05" "0.001"
 if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
-  write_case "backstep_q9_virial_hard_inlet_s025" "q9_virial" "true" "true" "0.25" "0.001"
+  write_case "backstep_q9_virial_hard_inlet_s005" "q9_virial" "true" "true" "0.05" "0.001"
+fi
+if [[ "$RUN_Q9_STRONG_REFERENCE" == "1" ]]; then
+  write_case "backstep_q9_hard_inlet_s025_reference" "q9" "true" "false" "0.25" "0.001"
 fi
 
 echo "[0067] done. Analyze with: cd matlab && S = analyze_backward_step_hard_inlet_validation_0067('root','..');"
