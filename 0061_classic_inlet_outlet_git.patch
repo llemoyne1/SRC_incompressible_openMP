@@ -1,0 +1,573 @@
+diff --git a/docs/INLET_OUTLET_CLASSIC_0061.md b/docs/INLET_OUTLET_CLASSIC_0061.md
+new file mode 100644
+index 0000000..37091ea
+--- /dev/null
++++ b/docs/INLET_OUTLET_CLASSIC_0061.md
+@@ -0,0 +1,42 @@
++# 0061 — classic particle-only inlet/outlet boundaries
++
++This patch introduces the first inlet/outlet layer for the C++ SRC/MPCD core. It is intentionally restricted to `method=classic` and does not modify the Q6, Q9 or virial paths.
++
++## Scope
++
++Implemented boundary pairs:
++
++- `bcLeft=inlet`, `bcRight=outlet` or the reversed x-pair;
++- `bcBottom=inlet`, `bcTop=outlet` or the reversed y-pair;
++- exactly one open axis at a time;
++- the transverse axis may remain `periodic` or use a wall pair such as `solid/solid`.
++
++The aliases `input` and `output` are accepted. `open` is treated as an outlet-like boundary.
++
++When a particle crosses an outlet, it is recycled at the paired inlet. When a particle exits through the inlet side because of thermal backflow, it is also reset from the inlet reservoir. The particle count therefore remains constant. The inlet velocity is prescribed by face-specific parameters such as `inletUxLeft` and `inletUyLeft`. With `inletThermalNoise>0`, a Maxwellian fluctuation is sampled around this mean velocity using `inletKBT` or, if negative, `kBT`.
++
++## Explicit non-scope
++
++Open boundaries with Q6, Q9 and virial closure are deliberately rejected at validation time. They need prescribed normal fluxes and reservoir/sponge handling in the elliptic operators, which is the planned 0062–0064 work.
++
++## Smoke validation
++
++Generate the initial state from `matlab/`:
++
++```matlab
++generate_open_channel_classic_state('output','../initial_state_open_channel_64x32_g20_kbt0p01.smpcd');
++```
++
++Then run:
++
++```bash
++./scripts/run_open_channel_classic_inlet_outlet_smoke.sh
++```
++
++Basic acceptance criteria for 0061 are conservative:
++
++- the executable starts with `bc=[L:inlet, R:outlet, B:solid, T:solid]`;
++- `Np` and `totalMass` remain constant;
++- `meanN` remains equal to the reference occupancy;
++- `kBTEstimate` remains controlled when the thermostat is enabled;
++- `hitsRight` becomes non-zero once particles reach the outlet, and those particles are recycled at the inlet without leaving the active domain.
+diff --git a/examples/params_open_channel_classic_inlet_outlet_smoke_64x32.kv b/examples/params_open_channel_classic_inlet_outlet_smoke_64x32.kv
+new file mode 100644
+index 0000000..5abe805
+--- /dev/null
++++ b/examples/params_open_channel_classic_inlet_outlet_smoke_64x32.kv
+@@ -0,0 +1,63 @@
++# 0061 classic particle-only inlet/outlet smoke test.
++# Generate the initial state from repository root with:
++#   cd matlab
++#   generate_open_channel_classic_state('output','../initial_state_open_channel_64x32_g20_kbt0p01.smpcd');
++#   cd ..
++
++inputState = initial_state_open_channel_64x32_g20_kbt0p01.smpcd
++outputDir = runs/open_channel_classic_inlet_outlet_smoke_64x32
++
++Lx = 2.0
++Ly = 1.0
++Nx = 64
++Ny = 32
++
++dt = 0.001
++nSteps = 5000
++
++rotationAngle = 2.0943951023931953
++randomRotationSign = true
++gridShiftEnable = true
++rngSeed = 12345
++
++bodyAccelerationX = 0.0
++bodyAccelerationY = 0.0
++
++bcLeft = inlet
++bcRight = outlet
++bcBottom = solid
++bcTop = solid
++
++# Particle reservoir at the inlet. inletThermalNoise=1 samples a Maxwellian
++# fluctuation around the prescribed mean velocity using inletKBT/kBT.
++inletUxLeft = 0.05
++inletUyLeft = 0.0
++inletKBT = -1.0
++inletThermalNoise = 1.0
++
++wallAccommodation = 1.0
++wallVpGamma = 0.0
++wallVpMass = 1.0
++wallKBT = -1.0
++wallThermalNoise = 1.0
++wallUxBottom = 0.0
++wallUyBottom = 0.0
++wallUxTop = 0.0
++wallUyTop = 0.0
++
++method = classic
++projectionEnable = false
++q9MassFluxProjectionEnable = false
++virialDiagnosticsEnable = false
++virialKickEnable = false
++
++thermostatEnable = true
++thermostatMode = cell_relative_rescale
++thermostatEvery = 1
++thermostatTargetKBT = -1.0
++thermostatMinParticles = 3
++kBT = 0.01
++
++summaryEvery = 100
++dumpStateEvery = 1000
++numThreads = 4
+diff --git a/include/simulation_params.h b/include/simulation_params.h
+index 4af5327..d8bbd4c 100644
+--- a/include/simulation_params.h
++++ b/include/simulation_params.h
+@@ -63,6 +63,23 @@ struct SimulationParams {
+     std::string bcBottom = "periodic";
+     std::string bcTop = "periodic";
+ 
++    // Minimal particle-reservoir inlet/outlet support for classic SRC/MPCD
++    // open-channel tests. A particle crossing an outlet is recycled at the
++    // paired inlet face with the prescribed inlet mean velocity plus optional
++    // Maxwellian thermal noise. This deliberately remains a particle-only
++    // boundary mechanism; Q6/Q9/virial open-boundary compatibility is added in
++    // later patches through the elliptic face-flux machinery.
++    double inletUxLeft = 0.0;
++    double inletUyLeft = 0.0;
++    double inletUxRight = 0.0;
++    double inletUyRight = 0.0;
++    double inletUxBottom = 0.0;
++    double inletUyBottom = 0.0;
++    double inletUxTop = 0.0;
++    double inletUyTop = 0.0;
++    double inletKBT = -1.0;             // negative => use kBT
++    double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
++
+     // Generic thermal solid-wall coupling. Solid walls are geometrically
+     // impermeable; wall coupling is represented by aggregate virtual wall mass
+     // and momentum in boundary-cut collision cells. The recommended path is
+@@ -185,6 +202,10 @@ void validate_simulation_params(const SimulationParams& params);
+ bool is_x_periodic(const SimulationParams& params);
+ bool is_y_periodic(const SimulationParams& params);
+ bool is_solid_wall_mode(const std::string& mode);
++bool is_inlet_boundary_mode(const std::string& mode);
++bool is_outlet_boundary_mode(const std::string& mode);
++bool is_io_boundary_mode(const std::string& mode);
+ bool has_solid_wall(const SimulationParams& params);
++bool has_io_boundary(const SimulationParams& params);
+ 
+ } // namespace mpcd
+diff --git a/matlab/generate_open_channel_classic_state.m b/matlab/generate_open_channel_classic_state.m
+new file mode 100644
+index 0000000..689997d
+--- /dev/null
++++ b/matlab/generate_open_channel_classic_state.m
+@@ -0,0 +1,38 @@
++function state = generate_open_channel_classic_state(varargin)
++%GENERATE_OPEN_CHANNEL_CLASSIC_STATE Initial state for 0061 inlet/outlet smoke tests.
++%
++% Example from repository root:
++%   cd matlab
++%   generate_open_channel_classic_state('output','../initial_state_open_channel_64x32_g20_kbt0p01.smpcd');
++%   cd ..
++
++    p = inputParser;
++    p.FunctionName = 'generate_open_channel_classic_state';
++    p.addParameter('output', '../initial_state_open_channel_64x32_g20_kbt0p01.smpcd', @(s) ischar(s) || isstring(s));
++    p.addParameter('Lx', 2.0, @(x) isnumeric(x) && isscalar(x) && x > 0);
++    p.addParameter('Ly', 1.0, @(x) isnumeric(x) && isscalar(x) && x > 0);
++    p.addParameter('Nx', 64, @(x) isnumeric(x) && isscalar(x) && x >= 1);
++    p.addParameter('Ny', 32, @(x) isnumeric(x) && isscalar(x) && x >= 1);
++    p.addParameter('gamma', 20, @(x) isnumeric(x) && isscalar(x) && x >= 1);
++    p.addParameter('kBT', 0.01, @(x) isnumeric(x) && isscalar(x) && x >= 0);
++    p.addParameter('inletUx', 0.05, @(x) isnumeric(x) && isscalar(x));
++    p.addParameter('seed', 12345, @(x) isnumeric(x) && isscalar(x));
++    p.parse(varargin{:});
++    opt = p.Results;
++
++    state = generate_smpcd_state_uniform( ...
++        'output', '', ...
++        'Lx', opt.Lx, 'Ly', opt.Ly, ...
++        'Nx', opt.Nx, 'Ny', opt.Ny, ...
++        'gamma', opt.gamma, ...
++        'kBT', opt.kBT, ...
++        'seed', opt.seed, ...
++        'mode', 'uniform_per_cell', ...
++        'velocityMode', 'maxwell', ...
++        'removeMeanMomentum', true);
++
++    state.vx = state.vx + opt.inletUx;
++    write_smpcd_state(char(opt.output), state);
++    fprintf('[generate_open_channel_classic_state] wrote %s with Np=%d, meanUx=%g\n', ...
++        char(opt.output), numel(state.x), mean(state.vx));
++end
+diff --git a/scripts/run_open_channel_classic_inlet_outlet_smoke.sh b/scripts/run_open_channel_classic_inlet_outlet_smoke.sh
+new file mode 100755
+index 0000000..f9337c4
+--- /dev/null
++++ b/scripts/run_open_channel_classic_inlet_outlet_smoke.sh
+@@ -0,0 +1,6 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++cd "$(dirname "$0")/.."
++./scripts/build_src_mpcd_base.sh
++./build/src_mpcd_base examples/params_open_channel_classic_inlet_outlet_smoke_64x32.kv
+diff --git a/src/boundary_base.cpp b/src/boundary_base.cpp
+index bea004a..13a9549 100644
+--- a/src/boundary_base.cpp
++++ b/src/boundary_base.cpp
+@@ -4,6 +4,7 @@
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
++#include <random>
+ #include <sstream>
+ #include <stdexcept>
+ #include <string>
+@@ -22,6 +23,13 @@ double wrap_periodic(double x, double L) {
+     return x;
+ }
+ 
++std::uint64_t splitmix64(std::uint64_t x) {
++    x += 0x9e3779b97f4a7c15ULL;
++    x = (x ^ (x >> 30U)) * 0xbf58476d1ce4e5b9ULL;
++    x = (x ^ (x >> 27U)) * 0x94d049bb133111ebULL;
++    return x ^ (x >> 31U);
++}
++
+ void wall_velocity_for_face(const SimulationParams& params,
+                             const FluidDomainBounds& domain,
+                             const std::string& face,
+@@ -122,6 +130,159 @@ void apply_wall_velocity_reflection(const std::string& mode,
+     }
+ }
+ 
++
++
++void inlet_velocity_for_face(const SimulationParams& params,
++                             const char* face,
++                             double& ux,
++                             double& uy) {
++    const std::string f(face);
++    if (f == "left") {
++        ux = params.inletUxLeft;
++        uy = params.inletUyLeft;
++    } else if (f == "right") {
++        ux = params.inletUxRight;
++        uy = params.inletUyRight;
++    } else if (f == "bottom") {
++        ux = params.inletUxBottom;
++        uy = params.inletUyBottom;
++    } else if (f == "top") {
++        ux = params.inletUxTop;
++        uy = params.inletUyTop;
++    } else {
++        ux = 0.0;
++        uy = 0.0;
++    }
++}
++
++std::uint64_t face_tag(const char* face) {
++    const std::string f(face);
++    if (f == "left") return 0x4c454654ULL;
++    if (f == "right") return 0x5249474854ULL;
++    if (f == "bottom") return 0x424f54544f4dULL;
++    if (f == "top") return 0x544f50ULL;
++    return 0x46414345ULL;
++}
++
++void sample_inlet_velocity(const SimulationParams& params,
++                           const char* face,
++                           std::size_t particleIndex,
++                           std::uint64_t step,
++                           double mass,
++                           double& vx,
++                           double& vy) {
++    double ux = 0.0, uy = 0.0;
++    inlet_velocity_for_face(params, face, ux, uy);
++    vx = ux;
++    vy = uy;
++
++    const double effectiveKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
++    if (params.inletThermalNoise > 0.0 && effectiveKBT > 0.0 && mass > 0.0) {
++        const std::uint64_t seed = splitmix64(params.rngSeed ^
++                                             (step * 0x9e3779b97f4a7c15ULL) ^
++                                             (static_cast<std::uint64_t>(particleIndex) * 0xbf58476d1ce4e5b9ULL) ^
++                                             face_tag(face));
++        std::mt19937_64 rng(seed);
++        std::normal_distribution<double> normal(0.0, 1.0);
++        const double sigma = params.inletThermalNoise * std::sqrt(effectiveKBT / mass);
++        vx += sigma * normal(rng);
++        vy += sigma * normal(rng);
++    }
++}
++
++double inward_offset(double distance, double width) {
++    if (!(width > 0.0)) {
++        return 0.0;
++    }
++    double d = std::fmod(std::abs(distance), width);
++    const double eps = 1.0e-12 * std::max(1.0, width);
++    if (!(d > eps)) {
++        d = eps;
++    }
++    if (d > width - eps) {
++        d = width - eps;
++    }
++    return d;
++}
++
++int apply_io_x(double& x,
++               double& vx,
++               double& vy,
++               const SimulationParams& params,
++               const FluidDomainBounds& domain,
++               std::uint64_t& leftHits,
++               std::uint64_t& rightHits,
++               std::size_t particleIndex,
++               std::uint64_t step,
++               double mass) {
++    if (x >= domain.xMin && x <= domain.xMax) {
++        return 0;
++    }
++
++    const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
++    const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
++    const double width = domain.xMax - domain.xMin;
++
++    if (x < domain.xMin) {
++        ++leftHits;
++    } else {
++        ++rightHits;
++    }
++
++    const double distance = x < domain.xMin ? (domain.xMin - x) : (x - domain.xMax);
++    const double d = inward_offset(distance, width);
++    if (leftInlet) {
++        x = domain.xMin + d;
++        sample_inlet_velocity(params, "left", particleIndex, step, mass, vx, vy);
++    } else if (rightInlet) {
++        x = domain.xMax - d;
++        sample_inlet_velocity(params, "right", particleIndex, step, mass, vx, vy);
++    } else {
++        throw std::runtime_error("Internal error: x inlet/outlet pair has no inlet face");
++    }
++    x = std::clamp(x, domain.xMin, domain.xMax);
++    return 1;
++}
++
++int apply_io_y(double& y,
++               double& vx,
++               double& vy,
++               const SimulationParams& params,
++               const FluidDomainBounds& domain,
++               std::uint64_t& bottomHits,
++               std::uint64_t& topHits,
++               std::size_t particleIndex,
++               std::uint64_t step,
++               double mass) {
++    if (y >= domain.yMin && y <= domain.yMax) {
++        return 0;
++    }
++
++    const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
++    const bool topInlet = is_inlet_boundary_mode(params.bcTop);
++    const double height = domain.yMax - domain.yMin;
++
++    if (y < domain.yMin) {
++        ++bottomHits;
++    } else {
++        ++topHits;
++    }
++
++    const double distance = y < domain.yMin ? (domain.yMin - y) : (y - domain.yMax);
++    const double d = inward_offset(distance, height);
++    if (bottomInlet) {
++        y = domain.yMin + d;
++        sample_inlet_velocity(params, "bottom", particleIndex, step, mass, vx, vy);
++    } else if (topInlet) {
++        y = domain.yMax - d;
++        sample_inlet_velocity(params, "top", particleIndex, step, mass, vx, vy);
++    } else {
++        throw std::runtime_error("Internal error: y inlet/outlet pair has no inlet face");
++    }
++    y = std::clamp(y, domain.yMin, domain.yMax);
++    return 1;
++}
++
+ int reflect_x(double& x,
+               double y,
+               double& vx,
+@@ -209,6 +370,8 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
+     const std::size_t n = static_cast<std::size_t>(state.Np);
+     const bool periodicX = is_x_periodic(params);
+     const bool periodicY = is_y_periodic(params);
++    const bool ioX = is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight);
++    const bool ioY = is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop);
+ 
+     std::uint64_t hitsLeft = 0;
+     std::uint64_t hitsRight = 0;
+@@ -233,6 +396,10 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
+         if (!localFailure.failed) {
+             if (periodicX) {
+                 state.x[i] = wrap_periodic(state.x[i], params.Lx);
++            } else if (ioX) {
++                (void)apply_io_x(state.x[i], state.vx[i], state.vy[i],
++                                 params, domain, hitsLeft, hitsRight,
++                                 i, step, state.mass[i]);
+             } else {
+                 const int r = reflect_x(state.x[i], state.y[i], state.vx[i], state.vy[i],
+                                         params, domain, hitsLeft, hitsRight,
+@@ -244,6 +411,10 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
+         if (!localFailure.failed) {
+             if (periodicY) {
+                 state.y[i] = wrap_periodic(state.y[i], params.Ly);
++            } else if (ioY) {
++                (void)apply_io_y(state.y[i], state.vx[i], state.vy[i],
++                                 params, domain, hitsBottom, hitsTop,
++                                 i, step, state.mass[i]);
+             } else {
+                 const int r = reflect_y(state.x[i], state.y[i], state.vx[i], state.vy[i],
+                                         params, domain, hitsBottom, hitsTop,
+diff --git a/src/params_io_base.cpp b/src/params_io_base.cpp
+index 2dbc357..a754b29 100644
+--- a/src/params_io_base.cpp
++++ b/src/params_io_base.cpp
+@@ -81,7 +81,7 @@ bool is_wall_mode(const std::string& mode) {
+ }
+ 
+ bool is_reserved_io_mode(const std::string& mode) {
+-    return mode == "inlet" || mode == "input" || mode == "outlet" || mode == "output" || mode == "open";
++    return is_io_boundary_mode(mode);
+ }
+ 
+ bool is_known_boundary_mode(const std::string& mode) {
+@@ -169,6 +169,30 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
+                  key == "boundaryBottom" || key == "boundaryTop") {
+             // Applied after the generic loop so per-face keys override pair aliases.
+         }
++        else if (key == "inletUx" || key == "inletVelocityX") {
++            const double u = parse_double(value, key);
++            p.inletUxLeft = u;
++            p.inletUxRight = u;
++            p.inletUxBottom = u;
++            p.inletUxTop = u;
++        }
++        else if (key == "inletUy" || key == "inletVelocityY") {
++            const double u = parse_double(value, key);
++            p.inletUyLeft = u;
++            p.inletUyRight = u;
++            p.inletUyBottom = u;
++            p.inletUyTop = u;
++        }
++        else if (key == "inletUxLeft") p.inletUxLeft = parse_double(value, key);
++        else if (key == "inletUyLeft") p.inletUyLeft = parse_double(value, key);
++        else if (key == "inletUxRight") p.inletUxRight = parse_double(value, key);
++        else if (key == "inletUyRight") p.inletUyRight = parse_double(value, key);
++        else if (key == "inletUxBottom") p.inletUxBottom = parse_double(value, key);
++        else if (key == "inletUyBottom") p.inletUyBottom = parse_double(value, key);
++        else if (key == "inletUxTop") p.inletUxTop = parse_double(value, key);
++        else if (key == "inletUyTop") p.inletUyTop = parse_double(value, key);
++        else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
++        else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
+         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
+         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
+         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
+@@ -301,11 +325,28 @@ bool is_solid_wall_mode(const std::string& mode) {
+     return mode == "solid" || mode == "specular" || mode == "bounceback";
+ }
+ 
++bool is_inlet_boundary_mode(const std::string& mode) {
++    return mode == "inlet" || mode == "input";
++}
++
++bool is_outlet_boundary_mode(const std::string& mode) {
++    return mode == "outlet" || mode == "output" || mode == "open";
++}
++
++bool is_io_boundary_mode(const std::string& mode) {
++    return is_inlet_boundary_mode(mode) || is_outlet_boundary_mode(mode);
++}
++
+ bool has_solid_wall(const SimulationParams& p) {
+     return is_solid_wall_mode(p.bcLeft) || is_solid_wall_mode(p.bcRight) ||
+            is_solid_wall_mode(p.bcBottom) || is_solid_wall_mode(p.bcTop);
+ }
+ 
++bool has_io_boundary(const SimulationParams& p) {
++    return is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight) ||
++           is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop);
++}
++
+ void validate_simulation_params(const SimulationParams& p) {
+     if (p.inputState.empty()) {
+         throw std::runtime_error("Missing required parameter: inputState");
+@@ -351,10 +392,6 @@ void validate_simulation_params(const SimulationParams& p) {
+         if (!is_known_boundary_mode(modes[i])) {
+             throw std::runtime_error("Unknown boundary mode for " + names[i] + ": " + modes[i]);
+         }
+-        if (is_reserved_io_mode(modes[i])) {
+-            throw std::runtime_error("Boundary mode '" + modes[i] + "' for " + names[i] +
+-                                     " is reserved for future inlet/outlet support and is not implemented yet");
+-        }
+     }
+ 
+     const bool leftPeriodic = p.bcLeft == "periodic";
+@@ -367,11 +404,55 @@ void validate_simulation_params(const SimulationParams& p) {
+     if (bottomPeriodic != topPeriodic) {
+         throw std::runtime_error("Periodic y boundaries must be paired: bcBottom and bcTop must both be periodic");
+     }
+-    if (!leftPeriodic && (!is_wall_mode(p.bcLeft) || !is_wall_mode(p.bcRight))) {
+-        throw std::runtime_error("Non-periodic x boundaries currently require wall modes: solid, specular or bounceback");
++
++    const bool xWallPair = !leftPeriodic && is_wall_mode(p.bcLeft) && is_wall_mode(p.bcRight);
++    const bool yWallPair = !bottomPeriodic && is_wall_mode(p.bcBottom) && is_wall_mode(p.bcTop);
++    const bool xIoPair = !leftPeriodic &&
++        ((is_inlet_boundary_mode(p.bcLeft) && is_outlet_boundary_mode(p.bcRight)) ||
++         (is_outlet_boundary_mode(p.bcLeft) && is_inlet_boundary_mode(p.bcRight)));
++    const bool yIoPair = !bottomPeriodic &&
++        ((is_inlet_boundary_mode(p.bcBottom) && is_outlet_boundary_mode(p.bcTop)) ||
++         (is_outlet_boundary_mode(p.bcBottom) && is_inlet_boundary_mode(p.bcTop)));
++
++    if (!leftPeriodic && !xWallPair && !xIoPair) {
++        throw std::runtime_error("Non-periodic x boundaries require either a wall/wall pair or an inlet/outlet pair");
+     }
+-    if (!bottomPeriodic && (!is_wall_mode(p.bcBottom) || !is_wall_mode(p.bcTop))) {
+-        throw std::runtime_error("Non-periodic y boundaries currently require wall modes: solid, specular or bounceback");
++    if (!bottomPeriodic && !yWallPair && !yIoPair) {
++        throw std::runtime_error("Non-periodic y boundaries require either a wall/wall pair or an inlet/outlet pair");
++    }
++
++    const bool hasIO = xIoPair || yIoPair || has_io_boundary(p);
++    if (hasIO) {
++        if (!xIoPair && (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight))) {
++            throw std::runtime_error("x inlet/outlet modes must form an inlet/outlet pair");
++        }
++        if (!yIoPair && (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop))) {
++            throw std::runtime_error("y inlet/outlet modes must form an inlet/outlet pair");
++        }
++        if (xIoPair && yIoPair) {
++            throw std::runtime_error("0061 classic inlet/outlet supports one open axis at a time");
++        }
++        if (p.method != "classic" || p.projectionEnable || p.q9MassFluxProjectionEnable ||
++            p.virialDiagnosticsEnable || p.virialKickEnable) {
++            throw std::runtime_error("0061 inlet/outlet support is particle-only and currently restricted to method=classic with Q6/Q9/virial disabled");
++        }
++        if (!(p.inletThermalNoise >= 0.0)) {
++            throw std::runtime_error("inletThermalNoise must be non-negative");
++        }
++        if (p.inletThermalNoise > 0.0) {
++            const double effectiveInletKBT = p.inletKBT > 0.0 ? p.inletKBT : p.kBT;
++            if (!(effectiveInletKBT > 0.0)) {
++                throw std::runtime_error("inletKBT is negative, so kBT must be positive when inletThermalNoise>0");
++            }
++        }
++        const double inletSpeedScale = std::max({
++            std::abs(p.inletUxLeft), std::abs(p.inletUyLeft),
++            std::abs(p.inletUxRight), std::abs(p.inletUyRight),
++            std::abs(p.inletUxBottom), std::abs(p.inletUyBottom),
++            std::abs(p.inletUxTop), std::abs(p.inletUyTop)});
++        if (!std::isfinite(inletSpeedScale)) {
++            throw std::runtime_error("Inlet velocities must be finite");
++        }
+     }
+ 
+     if (p.keepMeanFlowEnable) {
