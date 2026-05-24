@@ -84,8 +84,10 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
         r.q9DensityStdRatioEstimateFinal = getlast(T, 'q9DensityStdRatioEstimate');
         r.q9CorrectionVelocityRmsFinal = getlast(T, 'q9CorrectionVelocityRms');
         r.q9CorrectionVelocityMaxAbsFinal = getlast(T, 'q9CorrectionVelocityMaxAbs');
+        r.q9CorrectionVelocityRawRmsFinal = getlast(T, 'q9CorrectionVelocityRawRms');
         r.q9CorrectionVelocityRawMaxAbsFinal = getlast(T, 'q9CorrectionVelocityRawMaxAbs');
         r.q9CorrectionVelocityLimiterFinal = getlast(T, 'q9CorrectionVelocityLimiter');
+        r.q9MinCellMassForCorrectionFinal = getlast(T, 'q9MinCellMassForCorrection');
         r.q9SafetyActiveCellsFinal = getlast(T, 'q9SafetyActiveCells');
         r.q9SafetyExcludedCellsFinal = getlast(T, 'q9SafetyExcludedCells');
         r.q9OpenBoundaryExcludedCellsFinal = getlast(T, 'q9OpenBoundaryExcludedCells');
@@ -93,6 +95,8 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
         r.q9LowMassSuppressedCellsFinal = getlast(T, 'q9LowMassSuppressedCells');
         r.q9VelocityLimitedCellsFinal = getlast(T, 'q9VelocityLimitedCells');
         r.q9VelocityLimitedFractionFinal = safe_ratio(r.q9VelocityLimitedCellsFinal, r.q9SafetyActiveCellsFinal);
+        r.q9RawOverLimiterFinal = safe_ratio(r.q9CorrectionVelocityRawMaxAbsFinal, r.q9CorrectionVelocityLimiterFinal);
+        r.q9RmsOverLimiterFinal = safe_ratio(r.q9CorrectionVelocityRmsFinal, r.q9CorrectionVelocityLimiterFinal);
         r.virialKickAppliedFinal = getlast(T, 'virialKickApplied');
         r.virialDuOverThermalRmsFinal = getlast(T, 'virialDuOverThermalRms');
         r.virialMomentumResidualAfterFinal = getlast(T, 'virialMomentumResidualAfterCorrection');
@@ -101,10 +105,16 @@ function S = analyze_backward_step_hard_inlet_validation_0067(varargin)
             r.inletReservoirMaxNFinal == 20 && abs(r.inletMeanUxFinal - 0.05) < 1e-12;
         r.passThermalRelative = r.kBTOverTargetLate < 2.0;
         r.passNoCatastrophicQ9 = isnan(r.q9CorrectionVelocityMaxAbsFinal) || r.q9CorrectionVelocityMaxAbsFinal < 0.05;
-        r.passLimiterActive = isnan(r.q9CorrectionVelocityLimiterFinal) || ...
-            r.q9CorrectionVelocityLimiterFinal <= 0 || ...
-            r.q9CorrectionVelocityMaxAbsFinal <= 1.05 * r.q9CorrectionVelocityLimiterFinal;
-        r.passLimitedFraction = isnan(r.q9VelocityLimitedFractionFinal) || r.q9VelocityLimitedFractionFinal <= 0.15;
+        if r.q9AppliedFinal == 1
+            r.passLimiterActive = isfinite(r.q9CorrectionVelocityLimiterFinal) && ...
+                r.q9CorrectionVelocityLimiterFinal > 0 && ...
+                r.q9CorrectionVelocityMaxAbsFinal <= 1.05 * r.q9CorrectionVelocityLimiterFinal;
+            r.passLimitedFraction = isfinite(r.q9VelocityLimitedFractionFinal) && ...
+                r.q9VelocityLimitedFractionFinal <= 0.15;
+        else
+            r.passLimiterActive = true;
+            r.passLimitedFraction = true;
+        end
         rows = [rows; r]; %#ok<AGROW>
     end
 
