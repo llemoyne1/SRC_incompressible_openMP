@@ -81,7 +81,7 @@ bool is_wall_mode(const std::string& mode) {
 }
 
 bool is_reserved_io_mode(const std::string& mode) {
-    return mode == "inlet" || mode == "input" || mode == "outlet" || mode == "output" || mode == "open";
+    return is_io_boundary_mode(mode);
 }
 
 bool is_known_boundary_mode(const std::string& mode) {
@@ -169,6 +169,30 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
                  key == "boundaryBottom" || key == "boundaryTop") {
             // Applied after the generic loop so per-face keys override pair aliases.
         }
+        else if (key == "inletUx" || key == "inletVelocityX") {
+            const double u = parse_double(value, key);
+            p.inletUxLeft = u;
+            p.inletUxRight = u;
+            p.inletUxBottom = u;
+            p.inletUxTop = u;
+        }
+        else if (key == "inletUy" || key == "inletVelocityY") {
+            const double u = parse_double(value, key);
+            p.inletUyLeft = u;
+            p.inletUyRight = u;
+            p.inletUyBottom = u;
+            p.inletUyTop = u;
+        }
+        else if (key == "inletUxLeft") p.inletUxLeft = parse_double(value, key);
+        else if (key == "inletUyLeft") p.inletUyLeft = parse_double(value, key);
+        else if (key == "inletUxRight") p.inletUxRight = parse_double(value, key);
+        else if (key == "inletUyRight") p.inletUyRight = parse_double(value, key);
+        else if (key == "inletUxBottom") p.inletUxBottom = parse_double(value, key);
+        else if (key == "inletUyBottom") p.inletUyBottom = parse_double(value, key);
+        else if (key == "inletUxTop") p.inletUxTop = parse_double(value, key);
+        else if (key == "inletUyTop") p.inletUyTop = parse_double(value, key);
+        else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
+        else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -301,9 +325,26 @@ bool is_solid_wall_mode(const std::string& mode) {
     return mode == "solid" || mode == "specular" || mode == "bounceback";
 }
 
+bool is_inlet_boundary_mode(const std::string& mode) {
+    return mode == "inlet" || mode == "input";
+}
+
+bool is_outlet_boundary_mode(const std::string& mode) {
+    return mode == "outlet" || mode == "output" || mode == "open";
+}
+
+bool is_io_boundary_mode(const std::string& mode) {
+    return is_inlet_boundary_mode(mode) || is_outlet_boundary_mode(mode);
+}
+
 bool has_solid_wall(const SimulationParams& p) {
     return is_solid_wall_mode(p.bcLeft) || is_solid_wall_mode(p.bcRight) ||
            is_solid_wall_mode(p.bcBottom) || is_solid_wall_mode(p.bcTop);
+}
+
+bool has_io_boundary(const SimulationParams& p) {
+    return is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight) ||
+           is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop);
 }
 
 void validate_simulation_params(const SimulationParams& p) {
@@ -351,10 +392,6 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!is_known_boundary_mode(modes[i])) {
             throw std::runtime_error("Unknown boundary mode for " + names[i] + ": " + modes[i]);
         }
-        if (is_reserved_io_mode(modes[i])) {
-            throw std::runtime_error("Boundary mode '" + modes[i] + "' for " + names[i] +
-                                     " is reserved for future inlet/outlet support and is not implemented yet");
-        }
     }
 
     const bool leftPeriodic = p.bcLeft == "periodic";
@@ -367,11 +404,55 @@ void validate_simulation_params(const SimulationParams& p) {
     if (bottomPeriodic != topPeriodic) {
         throw std::runtime_error("Periodic y boundaries must be paired: bcBottom and bcTop must both be periodic");
     }
-    if (!leftPeriodic && (!is_wall_mode(p.bcLeft) || !is_wall_mode(p.bcRight))) {
-        throw std::runtime_error("Non-periodic x boundaries currently require wall modes: solid, specular or bounceback");
+
+    const bool xWallPair = !leftPeriodic && is_wall_mode(p.bcLeft) && is_wall_mode(p.bcRight);
+    const bool yWallPair = !bottomPeriodic && is_wall_mode(p.bcBottom) && is_wall_mode(p.bcTop);
+    const bool xIoPair = !leftPeriodic &&
+        ((is_inlet_boundary_mode(p.bcLeft) && is_outlet_boundary_mode(p.bcRight)) ||
+         (is_outlet_boundary_mode(p.bcLeft) && is_inlet_boundary_mode(p.bcRight)));
+    const bool yIoPair = !bottomPeriodic &&
+        ((is_inlet_boundary_mode(p.bcBottom) && is_outlet_boundary_mode(p.bcTop)) ||
+         (is_outlet_boundary_mode(p.bcBottom) && is_inlet_boundary_mode(p.bcTop)));
+
+    if (!leftPeriodic && !xWallPair && !xIoPair) {
+        throw std::runtime_error("Non-periodic x boundaries require either a wall/wall pair or an inlet/outlet pair");
     }
-    if (!bottomPeriodic && (!is_wall_mode(p.bcBottom) || !is_wall_mode(p.bcTop))) {
-        throw std::runtime_error("Non-periodic y boundaries currently require wall modes: solid, specular or bounceback");
+    if (!bottomPeriodic && !yWallPair && !yIoPair) {
+        throw std::runtime_error("Non-periodic y boundaries require either a wall/wall pair or an inlet/outlet pair");
+    }
+
+    const bool hasIO = xIoPair || yIoPair || has_io_boundary(p);
+    if (hasIO) {
+        if (!xIoPair && (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight))) {
+            throw std::runtime_error("x inlet/outlet modes must form an inlet/outlet pair");
+        }
+        if (!yIoPair && (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop))) {
+            throw std::runtime_error("y inlet/outlet modes must form an inlet/outlet pair");
+        }
+        if (xIoPair && yIoPair) {
+            throw std::runtime_error("0061 classic inlet/outlet supports one open axis at a time");
+        }
+        if (p.method != "classic" || p.projectionEnable || p.q9MassFluxProjectionEnable ||
+            p.virialDiagnosticsEnable || p.virialKickEnable) {
+            throw std::runtime_error("0061 inlet/outlet support is particle-only and currently restricted to method=classic with Q6/Q9/virial disabled");
+        }
+        if (!(p.inletThermalNoise >= 0.0)) {
+            throw std::runtime_error("inletThermalNoise must be non-negative");
+        }
+        if (p.inletThermalNoise > 0.0) {
+            const double effectiveInletKBT = p.inletKBT > 0.0 ? p.inletKBT : p.kBT;
+            if (!(effectiveInletKBT > 0.0)) {
+                throw std::runtime_error("inletKBT is negative, so kBT must be positive when inletThermalNoise>0");
+            }
+        }
+        const double inletSpeedScale = std::max({
+            std::abs(p.inletUxLeft), std::abs(p.inletUyLeft),
+            std::abs(p.inletUxRight), std::abs(p.inletUyRight),
+            std::abs(p.inletUxBottom), std::abs(p.inletUyBottom),
+            std::abs(p.inletUxTop), std::abs(p.inletUyTop)});
+        if (!std::isfinite(inletSpeedScale)) {
+            throw std::runtime_error("Inlet velocities must be finite");
+        }
     }
 
     if (p.keepMeanFlowEnable) {

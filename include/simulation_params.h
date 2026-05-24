@@ -63,6 +63,23 @@ struct SimulationParams {
     std::string bcBottom = "periodic";
     std::string bcTop = "periodic";
 
+    // Minimal particle-reservoir inlet/outlet support for classic SRC/MPCD
+    // open-channel tests. A particle crossing an outlet is recycled at the
+    // paired inlet face with the prescribed inlet mean velocity plus optional
+    // Maxwellian thermal noise. This deliberately remains a particle-only
+    // boundary mechanism; Q6/Q9/virial open-boundary compatibility is added in
+    // later patches through the elliptic face-flux machinery.
+    double inletUxLeft = 0.0;
+    double inletUyLeft = 0.0;
+    double inletUxRight = 0.0;
+    double inletUyRight = 0.0;
+    double inletUxBottom = 0.0;
+    double inletUyBottom = 0.0;
+    double inletUxTop = 0.0;
+    double inletUyTop = 0.0;
+    double inletKBT = -1.0;             // negative => use kBT
+    double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
+
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
     // and momentum in boundary-cut collision cells. The recommended path is
@@ -185,6 +202,10 @@ void validate_simulation_params(const SimulationParams& params);
 bool is_x_periodic(const SimulationParams& params);
 bool is_y_periodic(const SimulationParams& params);
 bool is_solid_wall_mode(const std::string& mode);
+bool is_inlet_boundary_mode(const std::string& mode);
+bool is_outlet_boundary_mode(const std::string& mode);
+bool is_io_boundary_mode(const std::string& mode);
 bool has_solid_wall(const SimulationParams& params);
+bool has_io_boundary(const SimulationParams& params);
 
 } // namespace mpcd
