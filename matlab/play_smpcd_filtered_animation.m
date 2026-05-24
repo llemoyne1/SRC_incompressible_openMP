@@ -21,7 +21,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 p = inputParser;
 p.FunctionName = 'play_smpcd_filtered_animation';
 addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'Ux', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'omega', @(s) ischar(s) || isstring(s));
 addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
 addParameter(p, 'filterType', 'box', @(s) ischar(s) || isstring(s));
