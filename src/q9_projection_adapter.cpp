@@ -133,22 +133,40 @@ bool has_y_io_pair(const SimulationParams& params) {
            (is_outlet_boundary_mode(params.bcBottom) && is_inlet_boundary_mode(params.bcTop));
 }
 
-double q9_open_x_velocity_component(const SimulationParams& params) {
+double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
+    if (!params.inletVelocityRampEnable) return 1.0;
+    const double t0 = params.inletVelocityRampStartTime;
+    const double t1 = params.inletVelocityRampEndTime;
+    if (!(t1 > t0)) return params.inletVelocityRampFinalFactor;
+    double a = 0.0;
+    if (time <= t0) a = 0.0;
+    else if (time >= t1) a = 1.0;
+    else a = (time - t0) / (t1 - t0);
+    if (params.inletVelocityRampProfile == "smoothstep") {
+        a = a * a * (3.0 - 2.0 * a);
+    }
+    return (1.0 - a) * params.inletVelocityRampInitialFactor +
+           a * params.inletVelocityRampFinalFactor;
+}
+
+double q9_open_x_velocity_component(const SimulationParams& params, double time) {
+    const double f = inlet_velocity_ramp_factor(params, time);
     if (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) {
-        return params.inletUxLeft;
+        return f * params.inletUxLeft;
     }
     if (is_inlet_boundary_mode(params.bcRight) && is_outlet_boundary_mode(params.bcLeft)) {
-        return params.inletUxRight;
+        return f * params.inletUxRight;
     }
     return 0.0;
 }
 
-double q9_open_y_velocity_component(const SimulationParams& params) {
+double q9_open_y_velocity_component(const SimulationParams& params, double time) {
+    const double f = inlet_velocity_ramp_factor(params, time);
     if (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) {
-        return params.inletUyBottom;
+        return f * params.inletUyBottom;
     }
     if (is_inlet_boundary_mode(params.bcTop) && is_outlet_boundary_mode(params.bcBottom)) {
-        return params.inletUyTop;
+        return f * params.inletUyTop;
     }
     return 0.0;
 }
@@ -156,6 +174,7 @@ double q9_open_y_velocity_component(const SimulationParams& params) {
 void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
                                        const SimulationParams& params,
                                        const FluidDomainBounds& domain,
+                                       double time,
                                        double meanCellMass,
                                        Q9ProjectionDiagnostics& diag) {
     if (!is_x_periodic(params)) {
@@ -172,13 +191,13 @@ void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
     // velocity is multiplied by the current mean cell mass, matching the Q9
     // compact face-field convention baseMassFlux = cellMass * cellVelocity.
     if (has_x_io_pair(params)) {
-        const double jx = meanCellMass * q9_open_x_velocity_component(params);
+        const double jx = meanCellMass * q9_open_x_velocity_component(params, time);
         bc.xLowFlux = jx;
         bc.xHighFlux = jx;
         diag.openBoundaryEnabled = true;
     }
     if (has_y_io_pair(params)) {
-        const double jy = meanCellMass * q9_open_y_velocity_component(params);
+        const double jy = meanCellMass * q9_open_y_velocity_component(params, time);
         bc.yLowFlux = jy;
         bc.yHighFlux = jy;
         diag.openBoundaryEnabled = true;
@@ -955,6 +974,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
                                                       const SimulationParams& params,
                                                       const CellGrid& grid,
                                                       const FluidDomainBounds& domain,
+                                                      double time,
                                                       Q9ProjectionWorkspace& workspace) {
     validate_particle_state(state, "apply_q9_mass_flux_projection");
 
@@ -971,7 +991,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     build_mass_flux_from_cell_momentum(grid, workspace.cellPx, workspace.cellPy, workspace.baseMassFlux);
     fill_alpha(workspace.alpha, nc, 1.0);
     const EllipticProjectionMask* mask = prepare_q9_projection_mask(
-        params, grid, domain, static_cast<double>(0.0), workspace, diag);
+        params, grid, domain, time, workspace, diag);
     if (mask != nullptr) {
         apply_immersed_face_alpha(workspace.immersedMask, workspace.alpha);
     }
@@ -980,7 +1000,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
         params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
     EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
-    add_boundary_mass_fluxes_to_q9_bc(bc, params, domain, diag.densityMean, diag);
+    add_boundary_mass_fluxes_to_q9_bc(bc, params, domain, time, diag.densityMean, diag);
     apply_q9_target_filter(params, egrid, bc, workspace.alpha, mask, workspace.targetDivergence, workspace, diag);
     const std::vector<double> projectionTarget = build_q9_projection_target(
         params, egrid, bc, workspace.baseMassFlux, workspace.alpha, mask, workspace.targetDivergence, workspace);

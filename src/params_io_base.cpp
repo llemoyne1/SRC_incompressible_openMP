@@ -191,6 +191,12 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletUyBottom") p.inletUyBottom = parse_double(value, key);
         else if (key == "inletUxTop") p.inletUxTop = parse_double(value, key);
         else if (key == "inletUyTop") p.inletUyTop = parse_double(value, key);
+        else if (key == "inletVelocityRampEnable" || key == "inletRampEnable") p.inletVelocityRampEnable = parse_bool(value, key);
+        else if (key == "inletVelocityRampStartTime" || key == "inletRampStartTime") p.inletVelocityRampStartTime = parse_double(value, key);
+        else if (key == "inletVelocityRampEndTime" || key == "inletRampEndTime") p.inletVelocityRampEndTime = parse_double(value, key);
+        else if (key == "inletVelocityRampInitialFactor" || key == "inletRampInitialFactor") p.inletVelocityRampInitialFactor = parse_double(value, key);
+        else if (key == "inletVelocityRampFinalFactor" || key == "inletRampFinalFactor") p.inletVelocityRampFinalFactor = parse_double(value, key);
+        else if (key == "inletVelocityRampProfile" || key == "inletRampProfile") p.inletVelocityRampProfile = get_lower(kv, key);
         else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
         else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
         else if (key == "inletInjectionMode") p.inletInjectionMode = get_lower(kv, key);
@@ -538,6 +544,21 @@ void validate_simulation_params(const SimulationParams& p) {
             std::abs(p.inletUxTop), std::abs(p.inletUyTop)});
         if (!std::isfinite(inletSpeedScale)) {
             throw std::runtime_error("Inlet velocities must be finite");
+        }
+        if (p.inletVelocityRampEnable) {
+            if (!std::isfinite(p.inletVelocityRampStartTime) ||
+                !std::isfinite(p.inletVelocityRampEndTime) ||
+                !std::isfinite(p.inletVelocityRampInitialFactor) ||
+                !std::isfinite(p.inletVelocityRampFinalFactor)) {
+                throw std::runtime_error("inlet velocity ramp parameters must be finite");
+            }
+            if (p.inletVelocityRampEndTime < p.inletVelocityRampStartTime) {
+                throw std::runtime_error("inletVelocityRampEndTime must be >= inletVelocityRampStartTime");
+            }
+            if (p.inletVelocityRampProfile != "linear" &&
+                p.inletVelocityRampProfile != "smoothstep") {
+                throw std::runtime_error("inletVelocityRampProfile must be linear or smoothstep");
+            }
         }
     }
 

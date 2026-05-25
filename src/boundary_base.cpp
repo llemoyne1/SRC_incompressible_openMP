@@ -141,8 +141,33 @@ void apply_wall_velocity_reflection(const std::string& mode,
 
 
 
+double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
+    if (!params.inletVelocityRampEnable) {
+        return 1.0;
+    }
+    const double t0 = params.inletVelocityRampStartTime;
+    const double t1 = params.inletVelocityRampEndTime;
+    if (!(t1 > t0)) {
+        return params.inletVelocityRampFinalFactor;
+    }
+    double a = 0.0;
+    if (time <= t0) {
+        a = 0.0;
+    } else if (time >= t1) {
+        a = 1.0;
+    } else {
+        a = (time - t0) / (t1 - t0);
+    }
+    if (params.inletVelocityRampProfile == "smoothstep") {
+        a = a * a * (3.0 - 2.0 * a);
+    }
+    return (1.0 - a) * params.inletVelocityRampInitialFactor +
+           a * params.inletVelocityRampFinalFactor;
+}
+
 void inlet_velocity_for_face(const SimulationParams& params,
                              const char* face,
+                             double time,
                              double& ux,
                              double& uy) {
     const std::string f(face);
@@ -162,6 +187,9 @@ void inlet_velocity_for_face(const SimulationParams& params,
         ux = 0.0;
         uy = 0.0;
     }
+    const double fRamp = inlet_velocity_ramp_factor(params, time);
+    ux *= fRamp;
+    uy *= fRamp;
 }
 
 std::uint64_t face_tag(const char* face) {
@@ -217,7 +245,7 @@ void sample_inlet_velocity(const SimulationParams& params,
                            double& vx,
                            double& vy) {
     double ux = 0.0, uy = 0.0;
-    inlet_velocity_for_face(params, face, ux, uy);
+    inlet_velocity_for_face(params, face, static_cast<double>(step) * params.dt, ux, uy);
     vx = ux;
     vy = uy;
 
@@ -624,7 +652,7 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     if (targetN <= 0) return;
 
     double ux = 0.0, uy = 0.0;
-    inlet_velocity_for_face(params, inletFace, ux, uy);
+    inlet_velocity_for_face(params, inletFace, static_cast<double>(step) * params.dt, ux, uy);
     const double effectiveKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
     const double sigma = (effectiveKBT > 0.0 && particleMass > 0.0)
         ? params.inletThermalNoise * std::sqrt(effectiveKBT / particleMass)

@@ -120,6 +120,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
                                                       const SimulationParams& params,
                                                       const CellGrid& grid,
                                                       const FluidDomainBounds& domain,
+                                                      double time,
                                                       Q9ProjectionWorkspace& workspace);
 
 } // namespace mpcd

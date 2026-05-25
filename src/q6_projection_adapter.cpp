@@ -337,22 +337,40 @@ bool has_y_io_pair(const SimulationParams& params) {
            (is_outlet_boundary_mode(params.bcBottom) && is_inlet_boundary_mode(params.bcTop));
 }
 
-double q6_open_x_flux_component(const SimulationParams& params) {
+double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
+    if (!params.inletVelocityRampEnable) return 1.0;
+    const double t0 = params.inletVelocityRampStartTime;
+    const double t1 = params.inletVelocityRampEndTime;
+    if (!(t1 > t0)) return params.inletVelocityRampFinalFactor;
+    double a = 0.0;
+    if (time <= t0) a = 0.0;
+    else if (time >= t1) a = 1.0;
+    else a = (time - t0) / (t1 - t0);
+    if (params.inletVelocityRampProfile == "smoothstep") {
+        a = a * a * (3.0 - 2.0 * a);
+    }
+    return (1.0 - a) * params.inletVelocityRampInitialFactor +
+           a * params.inletVelocityRampFinalFactor;
+}
+
+double q6_open_x_flux_component(const SimulationParams& params, double time) {
+    const double f = inlet_velocity_ramp_factor(params, time);
     if (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) {
-        return params.inletUxLeft;
+        return f * params.inletUxLeft;
     }
     if (is_inlet_boundary_mode(params.bcRight) && is_outlet_boundary_mode(params.bcLeft)) {
-        return params.inletUxRight;
+        return f * params.inletUxRight;
     }
     return 0.0;
 }
 
-double q6_open_y_flux_component(const SimulationParams& params) {
+double q6_open_y_flux_component(const SimulationParams& params, double time) {
+    const double f = inlet_velocity_ramp_factor(params, time);
     if (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) {
-        return params.inletUyBottom;
+        return f * params.inletUyBottom;
     }
     if (is_inlet_boundary_mode(params.bcTop) && is_outlet_boundary_mode(params.bcBottom)) {
-        return params.inletUyTop;
+        return f * params.inletUyTop;
     }
     return 0.0;
 }
@@ -360,6 +378,7 @@ double q6_open_y_flux_component(const SimulationParams& params) {
 void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
                                   const SimulationParams& params,
                                   const FluidDomainBounds& domain,
+                                  double time,
                                   Q6ProjectionDiagnostics& diag) {
     if (!is_x_periodic(params)) {
         bc.xLowFlux = domain.vxMin;
@@ -375,13 +394,13 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
     // axis.  This keeps the elliptic RHS compatible with a zero target
     // divergence while reusing the existing compact face storage.
     if (has_x_io_pair(params)) {
-        const double ux = q6_open_x_flux_component(params);
+        const double ux = q6_open_x_flux_component(params, time);
         bc.xLowFlux = ux;
         bc.xHighFlux = ux;
         diag.openBoundaryEnabled = true;
     }
     if (has_y_io_pair(params)) {
-        const double uy = q6_open_y_flux_component(params);
+        const double uy = q6_open_y_flux_component(params, time);
         bc.yLowFlux = uy;
         bc.yHighFlux = uy;
         diag.openBoundaryEnabled = true;
@@ -512,6 +531,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                                      const SimulationParams& params,
                                                      const CellGrid& grid,
                                                      const FluidDomainBounds& domain,
+                                                     double time,
                                                      Q6ProjectionWorkspace& workspace) {
     validate_particle_state(state, "apply_q6_periodic_projection");
 
@@ -543,7 +563,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.removePhiMean = true;
 
     EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
-    add_boundary_fluxes_to_q6_bc(bc, params, domain, diag);
+    add_boundary_fluxes_to_q6_bc(bc, params, domain, time, diag);
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
 

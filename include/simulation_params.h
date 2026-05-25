@@ -80,6 +80,21 @@ struct SimulationParams {
     double inletUyBottom = 0.0;
     double inletUxTop = 0.0;
     double inletUyTop = 0.0;
+
+    // Optional time ramp for inlet velocities and matching Q6/Q9 open-boundary
+    // flux targets.  The stored inletUx*/inletUy* values remain the final
+    // target values.  When enabled, they are scaled by a factor interpolating
+    // from inletVelocityRampInitialFactor to inletVelocityRampFinalFactor over
+    // [inletVelocityRampStartTime, inletVelocityRampEndTime].  This avoids an
+    // impulsive hard-inlet start while preserving the final validated method
+    // parameters.  Supported profiles: linear, smoothstep.
+    bool inletVelocityRampEnable = false;
+    double inletVelocityRampStartTime = 0.0;
+    double inletVelocityRampEndTime = 0.0;
+    double inletVelocityRampInitialFactor = 0.0;
+    double inletVelocityRampFinalFactor = 1.0;
+    std::string inletVelocityRampProfile = "linear";
+
     double inletKBT = -1.0;             // negative => use kBT
     double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
     std::string inletInjectionMode = "cuda_recycle"; // currently: cuda_recycle/thin_slab/hard_cell_density

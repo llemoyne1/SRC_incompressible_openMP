@@ -64,8 +64,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
     result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
     result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
-    result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, workspace.q6);
-    result.q9 = apply_q9_mass_flux_projection(state, params, grid, result.domain, workspace.q9);
+    result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+    result.q9 = apply_q9_mass_flux_projection(state, params, grid, result.domain, time, workspace.q9);
     result.virial = apply_virial_pressure_kick(state, params, grid, result.domain, workspace.virial);
     result.thermostat = apply_cell_relative_rescale_thermostat(
         state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
