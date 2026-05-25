@@ -113,6 +113,14 @@ projectionImmersedSolidCloseCutFaces = true
 
 q9MassFluxProjectionEnable = ${q9}
 q9MassFluxProjectionStrength = ${q9_strength}
+q9OpenBoundaryExclusionCells = 5
+q9ImmersedSolidHaloCells = 5
+q9MinCellMassForCorrection = 8.0
+q9CorrectionVelocityLimiter = 0.003
+q9LowMassTreatment = ramp_floor
+q9MassFloorForCorrection = 8.0
+q9LowMassRampStart = 1.0
+q9LowMassRampEnd = 8.0
 q9DensityRelaxationBeta = ${Q9_BETA}
 q9OpenBoundaryExclusionCells = ${Q9_OPEN_EXCLUSION_CELLS}
 q9ImmersedSolidHaloCells = ${Q9_IMMERSED_HALO_CELLS}
