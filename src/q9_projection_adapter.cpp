@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <vector>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 
@@ -171,6 +173,62 @@ double q9_open_y_velocity_component(const SimulationParams& params, double time)
     return 0.0;
 }
 
+struct ApertureInterval { double lo = 0.0; double hi = 0.0; };
+
+ApertureInterval normalize_aperture_interval(double requestedLo, double requestedHi, double domainLo, double domainHi) {
+    ApertureInterval a{};
+    a.lo = std::clamp(requestedLo, domainLo, domainHi);
+    const double hiRaw = requestedHi < 0.0 ? domainHi : requestedHi;
+    a.hi = std::clamp(hiRaw, domainLo, domainHi);
+    if (a.hi < a.lo) a.hi = a.lo;
+    return a;
+}
+
+ApertureInterval x_face_aperture_y(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
+    if (!params.openBoundaryApertureEnable) return {domain.yMin, domain.yMax};
+    const std::string f(face);
+    if (f == "left") return normalize_aperture_interval(params.leftOpenYMin, params.leftOpenYMax, domain.yMin, domain.yMax);
+    if (f == "right") return normalize_aperture_interval(params.rightOpenYMin, params.rightOpenYMax, domain.yMin, domain.yMax);
+    return {domain.yMin, domain.yMax};
+}
+
+ApertureInterval y_face_aperture_x(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
+    if (!params.openBoundaryApertureEnable) return {domain.xMin, domain.xMax};
+    const std::string f(face);
+    if (f == "bottom") return normalize_aperture_interval(params.bottomOpenXMin, params.bottomOpenXMax, domain.xMin, domain.xMax);
+    if (f == "top") return normalize_aperture_interval(params.topOpenXMin, params.topOpenXMax, domain.xMin, domain.xMax);
+    return {domain.xMin, domain.xMax};
+}
+
+bool cell_center_in_interval(double center, const ApertureInterval& a) {
+    return center >= a.lo && center <= a.hi;
+}
+
+void set_x_boundary_flux_profile(std::vector<double>& profile, int Ny, double yMin, double yMax, double value, const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(Ny), 0.0);
+    const double dy = (yMax - yMin) / static_cast<double>(std::max(1, Ny));
+    for (int j = 0; j < Ny; ++j) {
+        const double yc = yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) profile[static_cast<std::size_t>(j)] = value;
+    }
+}
+
+void set_y_boundary_flux_profile(std::vector<double>& profile, int Nx, double xMin, double xMax, double value, const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(Nx), 0.0);
+    const double dx = (xMax - xMin) / static_cast<double>(std::max(1, Nx));
+    for (int i = 0; i < Nx; ++i) {
+        const double xc = xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) profile[static_cast<std::size_t>(i)] = value;
+    }
+}
+
+double mean_profile_value(const std::vector<double>& v, double fallback) {
+    if (v.empty()) return fallback;
+    double s = 0.0;
+    for (const double x : v) s += x;
+    return s / static_cast<double>(v.size());
+}
+
 void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
                                        const SimulationParams& params,
                                        const FluidDomainBounds& domain,
@@ -194,12 +252,28 @@ void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
         const double jx = meanCellMass * q9_open_x_velocity_component(params, time);
         bc.xLowFlux = jx;
         bc.xHighFlux = jx;
+        if (params.openBoundaryApertureEnable) {
+            set_x_boundary_flux_profile(bc.xLowFluxProfile, params.Ny, domain.yMin, domain.yMax, jx,
+                                        x_face_aperture_y(params, domain, "left"));
+            set_x_boundary_flux_profile(bc.xHighFluxProfile, params.Ny, domain.yMin, domain.yMax, jx,
+                                        x_face_aperture_y(params, domain, "right"));
+            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, jx);
+            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, jx);
+        }
         diag.openBoundaryEnabled = true;
     }
     if (has_y_io_pair(params)) {
         const double jy = meanCellMass * q9_open_y_velocity_component(params, time);
         bc.yLowFlux = jy;
         bc.yHighFlux = jy;
+        if (params.openBoundaryApertureEnable) {
+            set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, jy,
+                                        y_face_aperture_x(params, domain, "bottom"));
+            set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, jy,
+                                        y_face_aperture_x(params, domain, "top"));
+            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, jy);
+            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, jy);
+        }
         diag.openBoundaryEnabled = true;
     }
 
@@ -210,8 +284,15 @@ void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
 
     const double width = fluid_domain_width(domain);
     const double height = fluid_domain_height(domain);
-    diag.openBoundaryMassFluxBalance = (bc.xHighFlux - bc.xLowFlux) * height +
-                                       (bc.yHighFlux - bc.yLowFlux) * width;
+    const double xLowIntegral = bc.xLowFluxProfile.empty() ? bc.xLowFlux * height :
+        std::accumulate(bc.xLowFluxProfile.begin(), bc.xLowFluxProfile.end(), 0.0) * (height / static_cast<double>(params.Ny));
+    const double xHighIntegral = bc.xHighFluxProfile.empty() ? bc.xHighFlux * height :
+        std::accumulate(bc.xHighFluxProfile.begin(), bc.xHighFluxProfile.end(), 0.0) * (height / static_cast<double>(params.Ny));
+    const double yLowIntegral = bc.yLowFluxProfile.empty() ? bc.yLowFlux * width :
+        std::accumulate(bc.yLowFluxProfile.begin(), bc.yLowFluxProfile.end(), 0.0) * (width / static_cast<double>(params.Nx));
+    const double yHighIntegral = bc.yHighFluxProfile.empty() ? bc.yHighFlux * width :
+        std::accumulate(bc.yHighFluxProfile.begin(), bc.yHighFluxProfile.end(), 0.0) * (width / static_cast<double>(params.Nx));
+    diag.openBoundaryMassFluxBalance = (xHighIntegral - xLowIntegral) + (yHighIntegral - yLowIntegral);
     const double area = width * height;
     diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryMassFluxBalance / area : 0.0;
 }
@@ -331,6 +412,7 @@ bool q9_safety_mask_requested(const SimulationParams& params) {
 
 void apply_q9_open_boundary_exclusion(const SimulationParams& params,
                                       const CellGrid& grid,
+                                      const FluidDomainBounds& domain,
                                       EllipticProjectionMask& mask,
                                       Q9ProjectionDiagnostics& diag) {
     const int n = std::max(0, params.q9OpenBoundaryExclusionCells);
@@ -339,25 +421,39 @@ void apply_q9_open_boundary_exclusion(const SimulationParams& params,
     std::uint64_t changed = 0u;
     if (has_x_io_pair(params)) {
         const int w = std::min(n, grid.Nx);
+        const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, grid.Ny));
         for (int j = 0; j < grid.Ny; ++j) {
-            for (int i = 0; i < w; ++i) {
-                if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+            const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+            const bool leftOpen = cell_center_in_interval(yc, x_face_aperture_y(params, domain, "left"));
+            const bool rightOpen = cell_center_in_interval(yc, x_face_aperture_y(params, domain, "right"));
+            if (leftOpen) {
+                for (int i = 0; i < w; ++i) {
+                    if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+                }
             }
-            for (int i = std::max(0, grid.Nx - w); i < grid.Nx; ++i) {
-                if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+            if (rightOpen) {
+                for (int i = std::max(0, grid.Nx - w); i < grid.Nx; ++i) {
+                    if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+                }
             }
         }
     }
     if (has_y_io_pair(params)) {
         const int w = std::min(n, grid.Ny);
-        for (int j = 0; j < w; ++j) {
-            for (int i = 0; i < grid.Nx; ++i) {
-                if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+        const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, grid.Nx));
+        for (int i = 0; i < grid.Nx; ++i) {
+            const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+            const bool bottomOpen = cell_center_in_interval(xc, y_face_aperture_x(params, domain, "bottom"));
+            const bool topOpen = cell_center_in_interval(xc, y_face_aperture_x(params, domain, "top"));
+            if (bottomOpen) {
+                for (int j = 0; j < w; ++j) {
+                    if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+                }
             }
-        }
-        for (int j = std::max(0, grid.Ny - w); j < grid.Ny; ++j) {
-            for (int i = 0; i < grid.Nx; ++i) {
-                if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+            if (topOpen) {
+                for (int j = std::max(0, grid.Ny - w); j < grid.Ny; ++j) {
+                    if (deactivate_q9_cell(mask, q9_cell_index(i, j, grid.Nx))) ++changed;
+                }
             }
         }
     }
@@ -437,7 +533,7 @@ const EllipticProjectionMask* prepare_q9_projection_mask(const SimulationParams&
         initialize_all_active_mask(ws.ellipticMask, grid.numCells);
     }
 
-    apply_q9_open_boundary_exclusion(params, grid, ws.ellipticMask, diag);
+    apply_q9_open_boundary_exclusion(params, grid, domain, ws.ellipticMask, diag);
     apply_q9_immersed_halo_exclusion(params, grid, ws, diag);
     recount_q9_mask(ws.ellipticMask);
     diag.safetyActiveCells = ws.ellipticMask.activeCells;

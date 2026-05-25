@@ -226,6 +226,109 @@ double clamp_strictly_inside(double x, double lo, double hi) {
     return std::clamp(x, lo + eps, hi - eps);
 }
 
+struct ApertureInterval {
+    double lo = 0.0;
+    double hi = 0.0;
+};
+
+ApertureInterval normalize_aperture_interval(double requestedLo,
+                                             double requestedHi,
+                                             double domainLo,
+                                             double domainHi) {
+    ApertureInterval a{};
+    a.lo = std::clamp(requestedLo, domainLo, domainHi);
+    const double hiRaw = requestedHi < 0.0 ? domainHi : requestedHi;
+    a.hi = std::clamp(hiRaw, domainLo, domainHi);
+    if (a.hi < a.lo) {
+        a.hi = a.lo;
+    }
+    return a;
+}
+
+ApertureInterval x_face_aperture_y(const SimulationParams& params,
+                                   const FluidDomainBounds& domain,
+                                   const char* face) {
+    if (!params.openBoundaryApertureEnable) {
+        return {domain.yMin, domain.yMax};
+    }
+    const std::string f(face);
+    if (f == "left") {
+        return normalize_aperture_interval(params.leftOpenYMin, params.leftOpenYMax, domain.yMin, domain.yMax);
+    }
+    if (f == "right") {
+        return normalize_aperture_interval(params.rightOpenYMin, params.rightOpenYMax, domain.yMin, domain.yMax);
+    }
+    return {domain.yMin, domain.yMax};
+}
+
+ApertureInterval y_face_aperture_x(const SimulationParams& params,
+                                   const FluidDomainBounds& domain,
+                                   const char* face) {
+    if (!params.openBoundaryApertureEnable) {
+        return {domain.xMin, domain.xMax};
+    }
+    const std::string f(face);
+    if (f == "bottom") {
+        return normalize_aperture_interval(params.bottomOpenXMin, params.bottomOpenXMax, domain.xMin, domain.xMax);
+    }
+    if (f == "top") {
+        return normalize_aperture_interval(params.topOpenXMin, params.topOpenXMax, domain.xMin, domain.xMax);
+    }
+    return {domain.xMin, domain.xMax};
+}
+
+bool point_in_x_face_aperture(const SimulationParams& params,
+                              const FluidDomainBounds& domain,
+                              const char* face,
+                              double y) {
+    const ApertureInterval a = x_face_aperture_y(params, domain, face);
+    return y >= a.lo && y <= a.hi;
+}
+
+bool point_in_y_face_aperture(const SimulationParams& params,
+                              const FluidDomainBounds& domain,
+                              const char* face,
+                              double x) {
+    const ApertureInterval a = y_face_aperture_x(params, domain, face);
+    return x >= a.lo && x <= a.hi;
+}
+
+void reflect_x_as_solid_face(double& x,
+                             double& vx,
+                             double& vy,
+                             const SimulationParams& params,
+                             const FluidDomainBounds& domain,
+                             const char* face) {
+    const std::string f(face);
+    if (f == "left") {
+        x = 2.0 * domain.xMin - x;
+    } else {
+        x = 2.0 * domain.xMax - x;
+    }
+    double wx = 0.0, wy = 0.0;
+    wall_velocity_for_face(params, domain, f, wx, wy);
+    apply_wall_velocity_reflection("solid", true, wx, wy, vx, vy);
+    x = std::clamp(x, domain.xMin, domain.xMax);
+}
+
+void reflect_y_as_solid_face(double& y,
+                             double& vx,
+                             double& vy,
+                             const SimulationParams& params,
+                             const FluidDomainBounds& domain,
+                             const char* face) {
+    const std::string f(face);
+    if (f == "bottom") {
+        y = 2.0 * domain.yMin - y;
+    } else {
+        y = 2.0 * domain.yMax - y;
+    }
+    double wx = 0.0, wy = 0.0;
+    wall_velocity_for_face(params, domain, f, wx, wy);
+    apply_wall_velocity_reflection("solid", false, wx, wy, vx, vy);
+    y = std::clamp(y, domain.yMin, domain.yMax);
+}
+
 double random_inside_interval(const SimulationParams& params,
                               const char* face,
                               std::size_t particleIndex,
@@ -294,11 +397,12 @@ void inject_from_x_inlet(double& x,
                                    domain.xMax - slab, domain.xMax);
     }
 
+    const ApertureInterval ay = x_face_aperture_y(params, domain, inletFace);
     if (params.inletRandomizeTangential) {
         y = random_inside_interval(params, inletFace, particleIndex, step, 0x9e3779b9ULL,
-                                   domain.yMin, domain.yMax);
+                                   ay.lo, ay.hi);
     } else {
-        y = clamp_strictly_inside(y, domain.yMin, domain.yMax);
+        y = clamp_strictly_inside(y, ay.lo, ay.hi);
     }
     sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
 }
@@ -322,11 +426,12 @@ void inject_from_y_inlet(double& x,
                                    domain.yMax - slab, domain.yMax);
     }
 
+    const ApertureInterval ax = y_face_aperture_x(params, domain, inletFace);
     if (params.inletRandomizeTangential) {
         x = random_inside_interval(params, inletFace, particleIndex, step, 0x9e3779b9ULL,
-                                   domain.xMin, domain.xMax);
+                                   ax.lo, ax.hi);
     } else {
-        x = clamp_strictly_inside(x, domain.xMin, domain.xMax);
+        x = clamp_strictly_inside(x, ax.lo, ax.hi);
     }
     sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
 }
@@ -361,6 +466,10 @@ int apply_io_x(double& x,
 
     if (x < domain.xMin) {
         ++leftHits;
+        if (!point_in_x_face_aperture(params, domain, "left", y)) {
+            reflect_x_as_solid_face(x, vx, vy, params, domain, "left");
+            return 0;
+        }
         if (leftInlet) {
             if (params.inletReinjectBackflow) {
                 inject_from_x_inlet(x, y, vx, vy, params, domain, "left", particleIndex, step, mass);
@@ -375,6 +484,10 @@ int apply_io_x(double& x,
         }
     } else {
         ++rightHits;
+        if (!point_in_x_face_aperture(params, domain, "right", y)) {
+            reflect_x_as_solid_face(x, vx, vy, params, domain, "right");
+            return 0;
+        }
         if (rightInlet) {
             if (params.inletReinjectBackflow) {
                 inject_from_x_inlet(x, y, vx, vy, params, domain, "right", particleIndex, step, mass);
@@ -412,6 +525,10 @@ int apply_io_y(double& x,
 
     if (y < domain.yMin) {
         ++bottomHits;
+        if (!point_in_y_face_aperture(params, domain, "bottom", x)) {
+            reflect_y_as_solid_face(y, vx, vy, params, domain, "bottom");
+            return 0;
+        }
         if (bottomInlet) {
             if (params.inletReinjectBackflow) {
                 inject_from_y_inlet(x, y, vx, vy, params, domain, "bottom", particleIndex, step, mass);
@@ -426,6 +543,10 @@ int apply_io_y(double& x,
         }
     } else {
         ++topHits;
+        if (!point_in_y_face_aperture(params, domain, "top", x)) {
+            reflect_y_as_solid_face(y, vx, vy, params, domain, "top");
+            return 0;
+        }
         if (topInlet) {
             if (params.inletReinjectBackflow) {
                 inject_from_y_inlet(x, y, vx, vy, params, domain, "top", particleIndex, step, mass);
@@ -559,19 +680,19 @@ bool point_in_inlet_reservoir(double x,
 
     if (is_inlet_boundary_mode(params.bcLeft)) {
         return x >= domain.xMin && x < domain.xMin + static_cast<double>(cellsX) * dx &&
-               y >= domain.yMin && y <= domain.yMax;
+               point_in_x_face_aperture(params, domain, "left", y);
     }
     if (is_inlet_boundary_mode(params.bcRight)) {
         return x > domain.xMax - static_cast<double>(cellsX) * dx && x <= domain.xMax &&
-               y >= domain.yMin && y <= domain.yMax;
+               point_in_x_face_aperture(params, domain, "right", y);
     }
     if (is_inlet_boundary_mode(params.bcBottom)) {
         return y >= domain.yMin && y < domain.yMin + static_cast<double>(cellsY) * dy &&
-               x >= domain.xMin && x <= domain.xMax;
+               point_in_y_face_aperture(params, domain, "bottom", x);
     }
     if (is_inlet_boundary_mode(params.bcTop)) {
         return y > domain.yMax - static_cast<double>(cellsY) * dy && y <= domain.yMax &&
-               x >= domain.xMin && x <= domain.xMax;
+               point_in_y_face_aperture(params, domain, "top", x);
     }
     return false;
 }
@@ -597,6 +718,10 @@ std::vector<HardReservoirCell> build_hard_reservoir_cells(const SimulationParams
         c.y1 = domain.yMin + static_cast<double>(iy + 1) * dy;
         const double xc = 0.5 * (c.x0 + c.x1);
         const double yc = 0.5 * (c.y0 + c.y1);
+        if (is_inlet_boundary_mode(params.bcLeft) && !point_in_x_face_aperture(params, domain, "left", yc)) return;
+        if (is_inlet_boundary_mode(params.bcRight) && !point_in_x_face_aperture(params, domain, "right", yc)) return;
+        if (is_inlet_boundary_mode(params.bcBottom) && !point_in_y_face_aperture(params, domain, "bottom", xc)) return;
+        if (is_inlet_boundary_mode(params.bcTop) && !point_in_y_face_aperture(params, domain, "top", xc)) return;
         if (point_is_inside_immersed_solid(xc, yc, params, time)) {
             return;
         }
@@ -775,14 +900,22 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
         } else if (ioX) {
             if (x < domain.xMin) {
                 ++diag.hitsLeft;
-                if (is_inlet_boundary_mode(params.bcLeft)) ++diag.inletBackflowDeleted;
-                else ++diag.outletParticlesDeleted;
-                remove = true;
+                if (point_in_x_face_aperture(params, domain, "left", y)) {
+                    if (is_inlet_boundary_mode(params.bcLeft)) ++diag.inletBackflowDeleted;
+                    else ++diag.outletParticlesDeleted;
+                    remove = true;
+                } else {
+                    reflect_x_as_solid_face(x, vx, vy, params, domain, "left");
+                }
             } else if (x > domain.xMax) {
                 ++diag.hitsRight;
-                if (is_inlet_boundary_mode(params.bcRight)) ++diag.inletBackflowDeleted;
-                else ++diag.outletParticlesDeleted;
-                remove = true;
+                if (point_in_x_face_aperture(params, domain, "right", y)) {
+                    if (is_inlet_boundary_mode(params.bcRight)) ++diag.inletBackflowDeleted;
+                    else ++diag.outletParticlesDeleted;
+                    remove = true;
+                } else {
+                    reflect_x_as_solid_face(x, vx, vy, params, domain, "right");
+                }
             }
         } else {
             const int r = reflect_x(x, y, vx, vy, params, domain, diag.hitsLeft, diag.hitsRight,
@@ -796,14 +929,22 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
             } else if (ioY) {
                 if (y < domain.yMin) {
                     ++diag.hitsBottom;
-                    if (is_inlet_boundary_mode(params.bcBottom)) ++diag.inletBackflowDeleted;
-                    else ++diag.outletParticlesDeleted;
-                    remove = true;
+                    if (point_in_y_face_aperture(params, domain, "bottom", x)) {
+                        if (is_inlet_boundary_mode(params.bcBottom)) ++diag.inletBackflowDeleted;
+                        else ++diag.outletParticlesDeleted;
+                        remove = true;
+                    } else {
+                        reflect_y_as_solid_face(y, vx, vy, params, domain, "bottom");
+                    }
                 } else if (y > domain.yMax) {
                     ++diag.hitsTop;
-                    if (is_inlet_boundary_mode(params.bcTop)) ++diag.inletBackflowDeleted;
-                    else ++diag.outletParticlesDeleted;
-                    remove = true;
+                    if (point_in_y_face_aperture(params, domain, "top", x)) {
+                        if (is_inlet_boundary_mode(params.bcTop)) ++diag.inletBackflowDeleted;
+                        else ++diag.outletParticlesDeleted;
+                        remove = true;
+                    } else {
+                        reflect_y_as_solid_face(y, vx, vy, params, domain, "top");
+                    }
                 }
             } else {
                 const int r = reflect_y(x, y, vx, vy, params, domain, diag.hitsBottom, diag.hitsTop,

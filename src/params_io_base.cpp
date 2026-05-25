@@ -211,6 +211,15 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletTargetOccupancy" || key == "inletTargetN" || key == "inletGamma") p.inletTargetOccupancy = parse_int(value, key);
         else if (key == "inletHardCellVelocityMean") p.inletHardCellVelocityMean = parse_bool(value, key);
         else if (key == "inletHardCellThermalRescale") p.inletHardCellThermalRescale = parse_bool(value, key);
+        else if (key == "openBoundaryApertureEnable" || key == "ioApertureEnable") p.openBoundaryApertureEnable = parse_bool(value, key);
+        else if (key == "leftOpenYMin" || key == "inletLeftYMin") p.leftOpenYMin = parse_double(value, key);
+        else if (key == "leftOpenYMax" || key == "inletLeftYMax") p.leftOpenYMax = parse_double(value, key);
+        else if (key == "rightOpenYMin" || key == "outletRightYMin") p.rightOpenYMin = parse_double(value, key);
+        else if (key == "rightOpenYMax" || key == "outletRightYMax") p.rightOpenYMax = parse_double(value, key);
+        else if (key == "bottomOpenXMin" || key == "inletBottomXMin") p.bottomOpenXMin = parse_double(value, key);
+        else if (key == "bottomOpenXMax" || key == "inletBottomXMax") p.bottomOpenXMax = parse_double(value, key);
+        else if (key == "topOpenXMin" || key == "outletTopXMin") p.topOpenXMin = parse_double(value, key);
+        else if (key == "topOpenXMax" || key == "outletTopXMax") p.topOpenXMax = parse_double(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -561,6 +570,15 @@ void validate_simulation_params(const SimulationParams& p) {
             if (p.inletVelocityRampProfile != "linear" &&
                 p.inletVelocityRampProfile != "smoothstep") {
                 throw std::runtime_error("inletVelocityRampProfile must be linear or smoothstep");
+            }
+        }
+        if (p.openBoundaryApertureEnable) {
+            const double vals[] = {p.leftOpenYMin, p.leftOpenYMax, p.rightOpenYMin, p.rightOpenYMax,
+                                   p.bottomOpenXMin, p.bottomOpenXMax, p.topOpenXMin, p.topOpenXMax};
+            for (const double v : vals) {
+                if (!std::isfinite(v)) {
+                    throw std::runtime_error("open-boundary aperture bounds must be finite; use negative high bounds to inherit the domain maximum");
+                }
             }
         }
     }

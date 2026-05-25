@@ -114,6 +114,22 @@ struct SimulationParams {
     bool inletHardCellVelocityMean = true;
     bool inletHardCellThermalRescale = true;
 
+    // Optional segmented open-boundary apertures.  When enabled, inlet/outlet
+    // particle exchange and Q6/Q9 open-boundary fluxes are restricted to the
+    // specified aperture on each face.  The complementary parts of the boundary
+    // behave as impermeable solid walls.  Negative high bounds inherit the
+    // active-domain high coordinate, preserving the historical full-face
+    // inlet/outlet behavior by default.
+    bool openBoundaryApertureEnable = false;
+    double leftOpenYMin = 0.0;
+    double leftOpenYMax = -1.0;
+    double rightOpenYMin = 0.0;
+    double rightOpenYMax = -1.0;
+    double bottomOpenXMin = 0.0;
+    double bottomOpenXMax = -1.0;
+    double topOpenXMin = 0.0;
+    double topOpenXMax = -1.0;
+
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
     // and momentum in boundary-cut collision cells. The recommended path is

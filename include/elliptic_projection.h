@@ -75,6 +75,15 @@ struct EllipticProjectionBC {
     double xHighFlux = 0.0;
     double yLowFlux = 0.0;
     double yHighFlux = 0.0;
+
+    // Optional per-face profiles for segmented inlet/outlet apertures.  Empty
+    // vectors mean that the scalar flux above is used uniformly.  xLow/xHigh
+    // profiles are indexed by j in [0,Ny); yLow/yHigh profiles are indexed by
+    // i in [0,Nx).  Closed wall portions are represented by zero flux.
+    std::vector<double> xLowFluxProfile;
+    std::vector<double> xHighFluxProfile;
+    std::vector<double> yLowFluxProfile;
+    std::vector<double> yHighFluxProfile;
 };
 
 struct EllipticProjectionParams {

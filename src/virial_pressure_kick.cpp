@@ -207,6 +207,37 @@ std::string canonical(std::string s) {
     return s;
 }
 
+struct ApertureInterval { double lo = 0.0; double hi = 0.0; };
+
+ApertureInterval normalize_aperture_interval(double requestedLo, double requestedHi, double domainLo, double domainHi) {
+    ApertureInterval a{};
+    a.lo = std::clamp(requestedLo, domainLo, domainHi);
+    const double hiRaw = requestedHi < 0.0 ? domainHi : requestedHi;
+    a.hi = std::clamp(hiRaw, domainLo, domainHi);
+    if (a.hi < a.lo) a.hi = a.lo;
+    return a;
+}
+
+ApertureInterval x_face_aperture_y(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
+    if (!params.openBoundaryApertureEnable) return {domain.yMin, domain.yMax};
+    const std::string f(face);
+    if (f == "left") return normalize_aperture_interval(params.leftOpenYMin, params.leftOpenYMax, domain.yMin, domain.yMax);
+    if (f == "right") return normalize_aperture_interval(params.rightOpenYMin, params.rightOpenYMax, domain.yMin, domain.yMax);
+    return {domain.yMin, domain.yMax};
+}
+
+ApertureInterval y_face_aperture_x(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
+    if (!params.openBoundaryApertureEnable) return {domain.xMin, domain.xMax};
+    const std::string f(face);
+    if (f == "bottom") return normalize_aperture_interval(params.bottomOpenXMin, params.bottomOpenXMax, domain.xMin, domain.xMax);
+    if (f == "top") return normalize_aperture_interval(params.topOpenXMin, params.topOpenXMax, domain.xMin, domain.xMax);
+    return {domain.xMin, domain.xMax};
+}
+
+bool in_interval(double x, const ApertureInterval& a) {
+    return x >= a.lo && x <= a.hi;
+}
+
 double initial_domain_area(const SimulationParams& params) {
     const double xMax0 = params.fluidXMax0 >= 0.0 ? params.fluidXMax0 : params.Lx;
     const double yMax0 = params.fluidYMax0 >= 0.0 ? params.fluidYMax0 : params.Ly;
@@ -275,21 +306,32 @@ std::uint64_t virial_active_cell_count(const ImmersedSolidProjectionMask* mask, 
     return mask->fluidCells;
 }
 
-bool open_boundary_excludes_cell(const SimulationParams& params, int ix, int iy) {
+bool open_boundary_excludes_cell(const SimulationParams& params,
+                                const FluidDomainBounds& domain,
+                                int ix,
+                                int iy) {
     const int n = params.virialOpenBoundaryExclusionCells;
     if (n <= 0 || !has_io_boundary(params)) {
         return false;
     }
-    if (is_io_boundary_mode(params.bcLeft) && ix < n) {
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    const double xc = domain.xMin + (static_cast<double>(ix) + 0.5) * dx;
+    const double yc = domain.yMin + (static_cast<double>(iy) + 0.5) * dy;
+    if (is_io_boundary_mode(params.bcLeft) && ix < n &&
+        in_interval(yc, x_face_aperture_y(params, domain, "left"))) {
         return true;
     }
-    if (is_io_boundary_mode(params.bcRight) && ix >= params.Nx - n) {
+    if (is_io_boundary_mode(params.bcRight) && ix >= params.Nx - n &&
+        in_interval(yc, x_face_aperture_y(params, domain, "right"))) {
         return true;
     }
-    if (is_io_boundary_mode(params.bcBottom) && iy < n) {
+    if (is_io_boundary_mode(params.bcBottom) && iy < n &&
+        in_interval(xc, y_face_aperture_x(params, domain, "bottom"))) {
         return true;
     }
-    if (is_io_boundary_mode(params.bcTop) && iy >= params.Ny - n) {
+    if (is_io_boundary_mode(params.bcTop) && iy >= params.Ny - n &&
+        in_interval(xc, y_face_aperture_x(params, domain, "top"))) {
         return true;
     }
     return false;
@@ -331,7 +373,7 @@ const ImmersedSolidProjectionMask* prepare_virial_immersed_mask(const Simulation
                 if (!ws.immersedMask.activeCell.empty() && ws.immersedMask.activeCell[k] == 0u) {
                     continue;
                 }
-                if (open_boundary_excludes_cell(params, ix, iy)) {
+                if (open_boundary_excludes_cell(params, domain, ix, iy)) {
                     ws.immersedMask.activeCell[k] = 0u;
                     if (!ws.immersedMask.fluidFraction.empty()) {
                         ws.immersedMask.fluidFraction[k] = 0.0;

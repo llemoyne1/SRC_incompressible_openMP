@@ -50,6 +50,16 @@ inline bool mask_active(const EllipticProjectionMask* mask, int c) {
     return !mask || mask->activeCell[static_cast<std::size_t>(c)] != 0u;
 }
 
+double boundary_flux_value(const std::vector<double>& profile, int index, double fallback) {
+    if (profile.empty()) {
+        return fallback;
+    }
+    if (index < 0 || index >= static_cast<int>(profile.size())) {
+        throw std::runtime_error("boundary_flux_value: invalid boundary-flux profile size");
+    }
+    return profile[static_cast<std::size_t>(index)];
+}
+
 std::uint64_t mask_active_count(const EllipticProjectionMask* mask, int nc) {
     if (!mask) return static_cast<std::uint64_t>(std::max(0, nc));
     if (mask->activeCells > 0u || mask->inactiveCells > 0u) return mask->activeCells;
@@ -315,7 +325,7 @@ std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,
                 const int w = cell_index(im, j, grid.Nx);
                 fxW = mask_active(mask, w) ? flux.x[static_cast<std::size_t>(w)] : 0.0;
             } else {
-                fxW = bc.xLowFlux;
+                fxW = boundary_flux_value(bc.xLowFluxProfile, j, bc.xLowFlux);
             }
 
             double fyN = 0.0;
@@ -332,7 +342,7 @@ std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,
                 const int s = cell_index(i, jm, grid.Nx);
                 fyS = mask_active(mask, s) ? flux.y[static_cast<std::size_t>(s)] : 0.0;
             } else {
-                fyS = bc.yLowFlux;
+                fyS = boundary_flux_value(bc.yLowFluxProfile, i, bc.yLowFlux);
             }
 
             div[k] = (fxE - fxW) * invDx + (fyN - fyS) * invDy;
@@ -450,13 +460,15 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     if (bc.x != EllipticBoundaryType::Periodic) {
         for (int j = 0; j < grid.Ny; ++j) {
             const int c = cell_index(grid.Nx - 1, j, grid.Nx);
-            solveBaseFlux.x[static_cast<std::size_t>(c)] = bc.xHighFlux;
+            solveBaseFlux.x[static_cast<std::size_t>(c)] =
+                boundary_flux_value(bc.xHighFluxProfile, j, bc.xHighFlux);
         }
     }
     if (bc.y != EllipticBoundaryType::Periodic) {
         for (int i = 0; i < grid.Nx; ++i) {
             const int c = cell_index(i, grid.Ny - 1, grid.Nx);
-            solveBaseFlux.y[static_cast<std::size_t>(c)] = bc.yHighFlux;
+            solveBaseFlux.y[static_cast<std::size_t>(c)] =
+                boundary_flux_value(bc.yHighFluxProfile, i, bc.yHighFlux);
         }
     }
     // Faces with alpha=0 are internal no-flux faces.  This matters for curved
@@ -519,8 +531,9 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                     result.projectedFlux.x[k] = 0.0;
                 }
             } else {
-                result.correctionFlux.x[k] = bc.xHighFlux - baseFlux.x[k];
-                result.projectedFlux.x[k] = bc.xHighFlux;
+                const double faceFlux = boundary_flux_value(bc.xHighFluxProfile, j, bc.xHighFlux);
+                result.correctionFlux.x[k] = faceFlux - baseFlux.x[k];
+                result.projectedFlux.x[k] = faceFlux;
             }
 
             if (periodicY || j < grid.Ny - 1) {
@@ -540,8 +553,9 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                     result.projectedFlux.y[k] = 0.0;
                 }
             } else {
-                result.correctionFlux.y[k] = bc.yHighFlux - baseFlux.y[k];
-                result.projectedFlux.y[k] = bc.yHighFlux;
+                const double faceFlux = boundary_flux_value(bc.yHighFluxProfile, i, bc.yHighFlux);
+                result.correctionFlux.y[k] = faceFlux - baseFlux.y[k];
+                result.projectedFlux.y[k] = faceFlux;
             }
         }
     }
