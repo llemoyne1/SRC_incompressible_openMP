@@ -714,6 +714,56 @@ double q9_effective_mass_threshold(double absoluteValue,
     return overGammaValue * gammaRef;
 }
 
+struct Q9VelocityLimiterConfig {
+    std::string mode = "absolute";
+    double limit = 0.0;
+    bool soft = false;
+};
+
+double q9_reference_kbt_for_velocity_limiter(const SimulationParams& params) {
+    if (params.q9CorrectionLimiterThermalKBT > 0.0) {
+        return params.q9CorrectionLimiterThermalKBT;
+    }
+    if (params.thermostatTargetKBT > 0.0) {
+        return params.thermostatTargetKBT;
+    }
+    return params.kBT;
+}
+
+Q9VelocityLimiterConfig q9_velocity_limiter_config(const SimulationParams& params) {
+    Q9VelocityLimiterConfig cfg;
+    cfg.mode = canonical_filter_name(params.q9CorrectionLimiterMode);
+    if (cfg.mode == "off") {
+        cfg.mode = "none";
+    }
+    if (cfg.mode == "absolute_hard") {
+        cfg.mode = "absolute";
+    }
+
+    if (cfg.mode == "none") {
+        cfg.limit = 0.0;
+        cfg.soft = false;
+        return cfg;
+    }
+
+    if (cfg.mode == "thermal_soft" || cfg.mode == "thermal_hard") {
+        const double kBTRef = q9_reference_kbt_for_velocity_limiter(params);
+        if (!(kBTRef > 0.0)) {
+            throw std::runtime_error("thermal Q9 limiter requires q9CorrectionLimiterThermalKBT>0, thermostatTargetKBT>0, or kBT>0");
+        }
+        cfg.limit = std::max(0.0, params.q9CorrectionVelocityLimiterOverThermal) * std::sqrt(kBTRef);
+        cfg.soft = (cfg.mode == "thermal_soft");
+        return cfg;
+    }
+
+    // Legacy absolute hard cap.  A zero value means no limiter, preserving old
+    // behaviour for parameter files that set q9CorrectionVelocityLimiter=0.
+    cfg.mode = "absolute";
+    cfg.limit = std::max(0.0, params.q9CorrectionVelocityLimiter);
+    cfg.soft = false;
+    return cfg;
+}
+
 void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
                                       const PeriodicFaceField& correctionFlux,
                                       const EllipticProjectionMask* mask,
@@ -734,7 +784,7 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
         params.q9MinCellMassForCorrectionOverGamma,
         params,
         "q9MinCellMassForCorrectionOverGamma");
-    const double limiter = std::max(0.0, params.q9CorrectionVelocityLimiter);
+    const Q9VelocityLimiterConfig limiter = q9_velocity_limiter_config(params);
     const std::string lowMassTreatment = canonical_filter_name(params.q9LowMassTreatment);
     const bool useRampFloor = lowMassTreatment == "ramp_floor" || lowMassTreatment == "floor_ramp";
 
@@ -773,7 +823,7 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
     diag.massFloorForCorrection = massFloor;
     diag.lowMassRampStart = rampStart;
     diag.lowMassRampEnd = rampEnd;
-    diag.correctionVelocityLimiter = limiter;
+    diag.correctionVelocityLimiter = limiter.limit;
 
     double rawSum2 = 0.0;
     double appliedSum2 = 0.0;
@@ -834,11 +884,21 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
         rawSum2 += ux * ux + uy * uy;
         rawMaxAbs = std::max(rawMaxAbs, rawMag);
 
-        if (limiter > 0.0 && rawMag > limiter) {
-            const double scale = limiter / rawMag;
-            ux *= scale;
-            uy *= scale;
-            limited += 1u;
+        if (limiter.limit > 0.0 && rawMag > 0.0) {
+            double scale = 1.0;
+            if (limiter.soft) {
+                const double z = rawMag / limiter.limit;
+                scale = std::tanh(z) / z;
+            } else if (rawMag > limiter.limit) {
+                scale = limiter.limit / rawMag;
+            }
+            if (scale < 1.0) {
+                ux *= scale;
+                uy *= scale;
+                if (rawMag > limiter.limit) {
+                    limited += 1u;
+                }
+            }
         }
 
         dux[k] = ux;

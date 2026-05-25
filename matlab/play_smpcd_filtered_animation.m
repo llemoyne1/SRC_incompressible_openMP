@@ -5,7 +5,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 %
 %   Optional name/value pairs:
 %     'field'                    : 'omega','Ux','Uy','speed','rho','N','solidFraction','solidAny','q6Active','q6Excluded','q9Active','q9Excluded',
-%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','inletReservoir',                                  'outletReservoir','maskCode', default 'Uy'
+%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','inletReservoir', 'outletReservoir','maskCode', default 'Uy'
 %     'frameStride'              : use every nth frame, default 1
 %     'timeAverageStartFraction' : discard first fraction of frames, default 0.0
 %     'filterType'               : 'none' or 'box', default 'box'
@@ -42,13 +42,13 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 p = inputParser;
 p.FunctionName = 'play_smpcd_filtered_animation';
 addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'q9Active', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'rho', @(s) ischar(s) || isstring(s));
 addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
 addParameter(p, 'filterType', 'box', @(s) ischar(s) || isstring(s));
 addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'filterDiscreteFields', false, @(x) islogical(x) || isnumeric(x));
-addParameter(p, 'temporalHalfWindow', 3, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'temporalHalfWindow', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
 addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));

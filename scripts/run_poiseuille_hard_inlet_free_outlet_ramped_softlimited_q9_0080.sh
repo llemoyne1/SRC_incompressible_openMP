@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 0079 Poiseuille/open-channel hard-inlet / free-outlet validation with a
-# progressive inlet velocity ramp.
+# 0080 Poiseuille/open-channel hard-inlet / free-outlet validation with a
+# progressive inlet velocity ramp and a thermal soft Q9 correction limiter.
 # Scope: inlet/outlet only, no immersed solid.
 # Purpose: avoid the impulsive hard-inlet start while preserving the final
 # validated Q6/Q9 model parameters from feature/elliptic-q6-core.
@@ -12,11 +12,11 @@ cd "$ROOT_DIR"
 
 AUTO_BUILD="${AUTO_BUILD:-1}"
 AUTO_ANALYZE="${AUTO_ANALYZE:-0}"
-CASE_STEPS="${CASE_STEPS:-60000}"
+CASE_STEPS="${CASE_STEPS:-80000}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-5000}"
 NUM_THREADS="${NUM_THREADS:-8}"
-RUN_ROOT="${RUN_ROOT:-runs/poiseuille_hard_inlet_free_outlet_ramped_q9_0079_G30}"
+RUN_ROOT="${RUN_ROOT:-runs/poiseuille_hard_inlet_free_outlet_ramped_softlimited_q9_0080}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-0}"
 
 # Fixed physical channel, reduced grid for response-time validation.
@@ -35,7 +35,7 @@ INIT_UX="${INIT_UX:-0.0}"
 # INLET_RAMP_END_TIME=1.0 so the ramp reaches Uin during the smoke.
 INLET_RAMP_ENABLE="${INLET_RAMP_ENABLE:-true}"
 INLET_RAMP_START_TIME="${INLET_RAMP_START_TIME:-0.0}"
-INLET_RAMP_END_TIME="${INLET_RAMP_END_TIME:-20.0}"
+INLET_RAMP_END_TIME="${INLET_RAMP_END_TIME:-40.0}"
 INLET_RAMP_INITIAL_FACTOR="${INLET_RAMP_INITIAL_FACTOR:-0.0}"
 INLET_RAMP_FINAL_FACTOR="${INLET_RAMP_FINAL_FACTOR:-1.0}"
 INLET_RAMP_PROFILE="${INLET_RAMP_PROFILE:-smoothstep}"
@@ -63,6 +63,15 @@ Q9_STRENGTH="${Q9_STRENGTH:-1.0}"
 Q9_BETA="${Q9_BETA:-0.0005}"
 Q9_LOWK_MAX_INDEX="${Q9_LOWK_MAX_INDEX:-2}"
 Q9_ELLIPTIC_LOW_PASS_PASSES="${Q9_ELLIPTIC_LOW_PASS_PASSES:-1}"
+
+# Universal Q9 correction limiter.  Keep the validated Q9 strength=1.0, but
+# bound instantaneous correction kicks by a thermal speed scale.  The default
+# C=0.5 gives |dU|_soft ~ 0.5*sqrt(kBT); for kBT=0.0025 this is 0.025.
+# Set Q9_CORRECTION_LIMITER_MODE=none to recover the unbounded 0079 behavior,
+# or Q9_CORRECTION_LIMITER_MODE=absolute with Q9_CORRECTION_LIMITER for legacy tests.
+Q9_CORRECTION_LIMITER_MODE="${Q9_CORRECTION_LIMITER_MODE:-thermal_soft}"
+Q9_CORRECTION_LIMITER_OVER_THERMAL="${Q9_CORRECTION_LIMITER_OVER_THERMAL:-0.5}"
+Q9_CORRECTION_LIMITER_THERMAL_KBT="${Q9_CORRECTION_LIMITER_THERMAL_KBT:-0.0}"
 Q9_CORRECTION_LIMITER="${Q9_CORRECTION_LIMITER:-0.0}"
 
 # Low-mass regularization remains available for hard-open-boundary runs.
@@ -196,6 +205,9 @@ q9ImmersedSolidHaloCells = 0
 q9ReferenceGamma = ${GAMMA}
 q9MinCellMassForCorrection = ${Q9_MIN_CELL_MASS}
 q9CorrectionVelocityLimiter = ${Q9_CORRECTION_LIMITER}
+q9CorrectionLimiterMode = ${Q9_CORRECTION_LIMITER_MODE}
+q9CorrectionVelocityLimiterOverThermal = ${Q9_CORRECTION_LIMITER_OVER_THERMAL}
+q9CorrectionLimiterThermalKBT = ${Q9_CORRECTION_LIMITER_THERMAL_KBT}
 q9LowMassTreatment = ${Q9_LOW_MASS_TREATMENT}
 q9MassFloorForCorrection = ${Q9_MASS_FLOOR}
 q9LowMassRampStart = ${Q9_LOW_MASS_RAMP_START}
@@ -256,8 +268,8 @@ dumpStateEvery = ${DUMP_STATE_EVERY}
 numThreads = ${NUM_THREADS}
 EOF_KV
 
-  echo "[0079] running ${label}"
-  echo "[0079] params: ${params_file}"
+  echo "[0080] running ${label}"
+  echo "[0080] params: ${params_file}"
 
   if [[ "$CONTINUE_ON_ERROR" == "1" ]]; then
     set +e
@@ -265,7 +277,7 @@ EOF_KV
     local rc=${PIPESTATUS[0]}
     set -e
     if [[ "$rc" -ne 0 ]]; then
-      echo "[0079] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
+      echo "[0080] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
       return 0
     fi
   else
@@ -273,31 +285,32 @@ EOF_KV
   fi
 }
 
-echo "[0079] inlet velocity ramp: enable=${INLET_RAMP_ENABLE}, factor ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
+echo "[0080] inlet velocity ramp: enable=${INLET_RAMP_ENABLE}, factor ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
+echo "[0080] Q9 correction limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
 
 SECONDS=0
 if [[ "$RUN_CLASSIC" == "1" ]]; then
-  write_case "poiseuille_classic_ramped_hard_inlet_u${UIN//./p}_48x24" "classic" "false" "false"
+  write_case "poiseuille_classic_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "classic" "false" "false"
 fi
 if [[ "$RUN_Q6" == "1" ]]; then
-  write_case "poiseuille_q6_ramped_hard_inlet_u${UIN//./p}_48x24" "q6" "false" "false"
+  write_case "poiseuille_q6_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q6" "false" "false"
 fi
 if [[ "$RUN_Q9" == "1" ]]; then
-  write_case "poiseuille_q9_ramped_hard_inlet_u${UIN//./p}_48x24" "q9" "true" "false"
+  write_case "poiseuille_q9_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q9" "true" "false"
 fi
 if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
-  write_case "poiseuille_q9_virial_ramped_hard_inlet_u${UIN//./p}_48x24" "q9_virial" "true" "true"
+  write_case "poiseuille_q9_virial_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q9_virial" "true" "true"
 fi
 
 elapsed=$SECONDS
-printf '[0079] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
+printf '[0080] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
 
-echo "[0079] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}');"
+echo "[0080] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}');"
 
 if [[ "$AUTO_ANALYZE" == "1" ]]; then
   if command -v matlab >/dev/null 2>&1; then
     matlab -batch "cd('matlab'); analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}');"
   else
-    echo "[0079] AUTO_ANALYZE=1 requested but matlab is not available." >&2
+    echo "[0080] AUTO_ANALYZE=1 requested but matlab is not available." >&2
   fi
 fi

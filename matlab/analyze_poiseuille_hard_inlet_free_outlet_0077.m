@@ -304,7 +304,7 @@ end
 function local_plot_by_case(T, outDir, baseName, fieldName)
 if isempty(T) || ~ismember(fieldName, T.Properties.VariableNames); return; end
 labels = unique(T.caseLabel, 'stable');
-fig = figure('Visible','off'); hold on; grid on;
+fig = figure('Visible','on'); hold on; grid on;
 for i = 1:numel(labels)
     idx = T.caseLabel == labels(i);
     plot(T.time(idx), T.(fieldName)(idx), 'DisplayName', char(labels(i)));
@@ -312,7 +312,7 @@ end
 xlabel('time'); ylabel(fieldName); title(strrep(baseName, '_', '\_'));
 legend('Location','best', 'Interpreter','none');
 saveas(fig, fullfile(outDir, [baseName '.png']));
-close(fig);
+%close(fig);
 end
 
 function geom = local_geometry(params)

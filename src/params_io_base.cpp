@@ -275,6 +275,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9ImmersedSolidHaloCells" || key == "q9SolidHaloCells") p.q9ImmersedSolidHaloCells = parse_int(value, key);
         else if (key == "q9MinCellMassForCorrection" || key == "q9MinMassForCorrection") p.q9MinCellMassForCorrection = parse_double(value, key);
         else if (key == "q9CorrectionVelocityLimiter" || key == "q9CorrectionVelocityLimit") p.q9CorrectionVelocityLimiter = parse_double(value, key);
+        else if (key == "q9CorrectionLimiterMode") p.q9CorrectionLimiterMode = get_lower(kv, key);
+        else if (key == "q9CorrectionVelocityLimiterOverThermal" || key == "q9CorrectionVelocityLimitOverThermal") p.q9CorrectionVelocityLimiterOverThermal = parse_double(value, key);
+        else if (key == "q9CorrectionLimiterThermalKBT" || key == "q9CorrectionVelocityLimiterThermalKBT") p.q9CorrectionLimiterThermalKBT = parse_double(value, key);
         else if (key == "q9LowMassTreatment") p.q9LowMassTreatment = get_lower(kv, key);
         else if (key == "q9MassFloorForCorrection" || key == "q9MassFloor") p.q9MassFloorForCorrection = parse_double(value, key);
         else if (key == "q9LowMassRampStart") p.q9LowMassRampStart = parse_double(value, key);
@@ -746,6 +749,22 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.q9CorrectionVelocityLimiter >= 0.0)) {
         throw std::runtime_error("q9CorrectionVelocityLimiter must be non-negative");
+    }
+    {
+        std::string q9LimiterMode = lower(trim(p.q9CorrectionLimiterMode));
+        std::replace(q9LimiterMode.begin(), q9LimiterMode.end(), '-', '_');
+        if (q9LimiterMode != "none" && q9LimiterMode != "off" &&
+            q9LimiterMode != "absolute" && q9LimiterMode != "absolute_hard" &&
+            q9LimiterMode != "thermal_soft" && q9LimiterMode != "thermal_hard") {
+            throw std::runtime_error("q9CorrectionLimiterMode must be none, absolute, thermal_soft, or thermal_hard");
+        }
+        if (!std::isfinite(p.q9CorrectionVelocityLimiterOverThermal) ||
+            !(p.q9CorrectionVelocityLimiterOverThermal >= 0.0)) {
+            throw std::runtime_error("q9CorrectionVelocityLimiterOverThermal must be finite and non-negative");
+        }
+        if (!std::isfinite(p.q9CorrectionLimiterThermalKBT)) {
+            throw std::runtime_error("q9CorrectionLimiterThermalKBT must be finite; use <=0 to inherit the target kBT");
+        }
     }
 
     {

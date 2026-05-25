@@ -210,7 +210,17 @@ struct SimulationParams {
     int q9OpenBoundaryExclusionCells = 0;
     int q9ImmersedSolidHaloCells = 0;
     double q9MinCellMassForCorrection = 0.0;
+
+    // Q9 correction-kick limiter.  The historical absolute limiter is kept for
+    // compatibility.  New thermal modes express the cap as a fraction of a
+    // reference thermal speed sqrt(kBT), giving a dimensionless safety policy
+    // transferable across inlet/outlet cases.
+    // Modes: none, absolute, thermal_soft, thermal_hard.
     double q9CorrectionVelocityLimiter = 0.0;
+    std::string q9CorrectionLimiterMode = "absolute";
+    double q9CorrectionVelocityLimiterOverThermal = 0.0;
+    double q9CorrectionLimiterThermalKBT = 0.0; // <=0: use thermostatTargetKBT if positive, else kBT
+
     // Low-mass Q9 regularization. suppress = historical hard cutoff;
     // ramp_floor = keep Q9 geometrically active and regularize flux-to-velocity conversion.
     std::string q9LowMassTreatment = "suppress"; // suppress, ramp_floor
