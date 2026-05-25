@@ -5,7 +5,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 %
 %   Optional name/value pairs:
 %     'field'                    : 'omega','Ux','Uy','speed','rho','N','solidFraction','solidAny','q6Active','q6Excluded','q9Active','q9Excluded',
-%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','inletReservoir', 'outletReservoir','maskCode', default 'Uy'
+%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','inletReservoir',                                  'outletReservoir','maskCode', default 'Uy'
 %     'frameStride'              : use every nth frame, default 1
 %     'timeAverageStartFraction' : discard first fraction of frames, default 0.0
 %     'filterType'               : 'none' or 'box', default 'box'
@@ -19,6 +19,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 %     'vectorStride'             : stride for quiver display, default 3
 %     'maskOverlay'              : 'none','solid','q6','q9','all', default 'solid'
 %     'solidSampleSubdiv'        : sub-cell samples per direction for masks, default 5
+%                                  Explicit immersedSolidEnable=false disables visual solid reconstruction.
 %     'writeMaskStats'           : write mask diagnostics CSV in runDir, default false
 %     'circleCx','circleCy','circleR' : optional circle overrides
 %
@@ -42,13 +43,13 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 p = inputParser;
 p.FunctionName = 'play_smpcd_filtered_animation';
 addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'rho', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'q9Active', @(s) ischar(s) || isstring(s));
 addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
 addParameter(p, 'filterType', 'box', @(s) ischar(s) || isstring(s));
 addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'filterDiscreteFields', false, @(x) islogical(x) || isnumeric(x));
-addParameter(p, 'temporalHalfWindow', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'temporalHalfWindow', 3, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
 addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
@@ -235,6 +236,25 @@ for i = 1:numel(keys)
 end
 end
 
+function [present, val] = local_get_bool_param_if_present(params, keys)
+present = false;
+val = false;
+for i = 1:numel(keys)
+    key = keys{i};
+    if isfield(params, key)
+        present = true;
+        s = lower(strtrim(char(string(params.(key)))));
+        val = any(strcmp(s, {'1','true','yes','on','y'}));
+        return;
+    end
+end
+end
+
+function tf = local_immersed_explicitly_disabled(params)
+[present, val] = local_get_bool_param_if_present(params, {'immersedSolidEnable', 'immersedEnable'});
+tf = present && ~val;
+end
+
 function A = local_extract_field(fields, masks, fld)
 f = lower(char(string(fld)));
 switch f
@@ -416,15 +436,26 @@ masks.targetN = targetN;
 end
 
 function tf = local_immersed_enabled(params, solidAny)
+[hasFlag, flagVal] = local_get_bool_param_if_present(params, {'immersedSolidEnable', 'immersedEnable'});
+if hasFlag
+    % If the simulation explicitly disabled the immersed solid, residual
+    % geometry coordinates kept in params_used.kv must not recreate a visual
+    % obstacle.  This preserves legacy inference only when no explicit flag is
+    % available in old runs.
+    tf = flagVal;
+    return;
+end
 shape = lower(strtrim(local_get_string_param(params, {'immersedSolidShape','immersedShape'}, 'none')));
 tfShape = ~any(strcmp(shape, {'none','off','false','0',''}));
-tfFlag = local_get_bool_param(params, {'immersedSolidEnable', 'immersedEnable'}, false);
-tf = tfFlag || tfShape || any(solidAny(:));
+tf = tfShape || any(solidAny(:));
 end
 
 function solidFraction = local_solid_fraction(params, Lx, Ly, Nx, Ny, time, opts, Xc, Yc)
 subdiv = max(1, round(opts.solidSampleSubdiv));
 solidFraction = zeros(Ny, Nx);
+if local_immersed_explicitly_disabled(params)
+    return;
+end
 if subdiv == 1
     solidFraction = double(local_geometry_solid_at(params, Xc, Yc, time, opts));
     return;
@@ -445,6 +476,9 @@ end
 
 function inside = local_geometry_solid_at(params, X, Y, time, opts)
 inside = false(size(X));
+if local_immersed_explicitly_disabled(params)
+    return;
+end
 shape = lower(strtrim(local_get_string_param(params, {'immersedSolidShape','immersedShape'}, 'none')));
 
 hasRect = local_has_any_param(params, {'immersedRectXMin','immersedRectangleXMin', ...
@@ -523,6 +557,10 @@ tf = any(strcmp(bc, names));
 end
 
 function local_draw_immersed_geometry(params, time, Lx, Ly, circleCx, circleCy, circleR, circleVx, circleVy)
+if local_immersed_explicitly_disabled(params)
+    xlim([0 Lx]); ylim([0 Ly]);
+    return;
+end
 shape = lower(strtrim(local_get_string_param(params, {'immersedSolidShape','immersedShape'}, 'none')));
 hasRect = local_has_any_param(params, {'immersedRectXMin','immersedRectangleXMin', ...
     'immersedSolidRectXMin','immersedSolidRectangleXMin','immersedSolidXMin', ...
