@@ -64,11 +64,16 @@ struct Q9ProjectionDiagnostics {
     std::uint64_t openBoundaryExcludedCells = 0;
     std::uint64_t immersedHaloExcludedCells = 0;
     std::uint64_t lowMassSuppressedCells = 0;
+    std::uint64_t lowMassRampedCells = 0;
+    std::uint64_t massFloorAppliedCells = 0;
     std::uint64_t velocityLimitedCells = 0;
     double correctionVelocityRawRms = 0.0;
     double correctionVelocityRawMaxAbs = 0.0;
     double correctionVelocityLimiter = 0.0;
     double minCellMassForCorrection = 0.0;
+    double massFloorForCorrection = 0.0;
+    double lowMassRampStart = 0.0;
+    double lowMassRampEnd = 0.0;
 
     bool openBoundaryEnabled = false;
     double openBoundaryMassFluxXLow = 0.0;

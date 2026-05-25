@@ -687,7 +687,32 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
     const double strength = params.q9MassFluxProjectionStrength;
     const double minMass = std::max(0.0, params.q9MinCellMassForCorrection);
     const double limiter = std::max(0.0, params.q9CorrectionVelocityLimiter);
+    const std::string lowMassTreatment = canonical_filter_name(params.q9LowMassTreatment);
+    const bool useRampFloor = lowMassTreatment == "ramp_floor" || lowMassTreatment == "floor_ramp";
+
+    double massFloor = std::max(0.0, params.q9MassFloorForCorrection);
+    double rampStart = std::max(0.0, params.q9LowMassRampStart);
+    double rampEnd = std::max(0.0, params.q9LowMassRampEnd);
+    if (useRampFloor) {
+        // Keep legacy parameter files usable: if a ramp/floor run only provides
+        // q9MinCellMassForCorrection, use it as both ramp end and mass floor.
+        if (!(massFloor > 0.0)) {
+            massFloor = minMass;
+        }
+        if (!(rampEnd > rampStart)) {
+            rampStart = 0.0;
+            rampEnd = minMass > 0.0 ? minMass : massFloor;
+        }
+        if (!(rampEnd > rampStart)) {
+            rampStart = 0.0;
+            rampEnd = 0.0;
+        }
+    }
+
     diag.minCellMassForCorrection = minMass;
+    diag.massFloorForCorrection = massFloor;
+    diag.lowMassRampStart = rampStart;
+    diag.lowMassRampEnd = rampEnd;
     diag.correctionVelocityLimiter = limiter;
 
     double rawSum2 = 0.0;
@@ -696,8 +721,10 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
     double appliedMaxAbs = 0.0;
     std::uint64_t activeCount = 0u;
     std::uint64_t lowMass = 0u;
+    std::uint64_t ramped = 0u;
+    std::uint64_t floored = 0u;
     std::uint64_t limited = 0u;
-#pragma omp parallel for reduction(+:rawSum2,appliedSum2,activeCount,lowMass,limited) reduction(max:rawMaxAbs,appliedMaxAbs) if(nc > 4096)
+#pragma omp parallel for reduction(+:rawSum2,appliedSum2,activeCount,lowMass,ramped,floored,limited) reduction(max:rawMaxAbs,appliedMaxAbs) if(nc > 4096)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
         appliedCorrectionFlux.x[k] = 0.0;
@@ -707,17 +734,42 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
         }
         activeCount += 1u;
 
-        const double sx = face_strength_for_q9(strength, immersedMask, true, k);
-        const double sy = face_strength_for_q9(strength, immersedMask, false, k);
-        const double dcx = sx * correctionFlux.x[k];
-        const double dcy = sy * correctionFlux.y[k];
-        if (!(cellMass[k] > minMass)) {
-            lowMass += 1u;
-            continue;
+        const double m = cellMass[k];
+        double rampWeight = 1.0;
+        double massDenom = m;
+        if (useRampFloor) {
+            if (!(m > 0.0)) {
+                lowMass += 1u;
+                continue;
+            }
+            if (rampEnd > rampStart) {
+                if (!(m > rampStart)) {
+                    lowMass += 1u;
+                    continue;
+                }
+                if (m < rampEnd) {
+                    rampWeight = (m - rampStart) / (rampEnd - rampStart);
+                    ramped += 1u;
+                }
+            }
+            massDenom = std::max(m, massFloor);
+            if (massFloor > 0.0 && m < massFloor) {
+                floored += 1u;
+            }
+        } else {
+            if (!(m > minMass)) {
+                lowMass += 1u;
+                continue;
+            }
         }
 
-        double ux = dcx / cellMass[k];
-        double uy = dcy / cellMass[k];
+        const double sx = face_strength_for_q9(strength, immersedMask, true, k);
+        const double sy = face_strength_for_q9(strength, immersedMask, false, k);
+        const double dcx = rampWeight * sx * correctionFlux.x[k];
+        const double dcy = rampWeight * sy * correctionFlux.y[k];
+
+        double ux = dcx / massDenom;
+        double uy = dcy / massDenom;
         const double rawMag = std::sqrt(ux * ux + uy * uy);
         rawSum2 += ux * ux + uy * uy;
         rawMaxAbs = std::max(rawMaxAbs, rawMag);
@@ -731,14 +783,16 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
 
         dux[k] = ux;
         duy[k] = uy;
-        appliedCorrectionFlux.x[k] = ux * cellMass[k];
-        appliedCorrectionFlux.y[k] = uy * cellMass[k];
+        appliedCorrectionFlux.x[k] = ux * m;
+        appliedCorrectionFlux.y[k] = uy * m;
 
         const double appliedMag = std::sqrt(ux * ux + uy * uy);
         appliedSum2 += ux * ux + uy * uy;
         appliedMaxAbs = std::max(appliedMaxAbs, appliedMag);
     }
     diag.lowMassSuppressedCells = lowMass;
+    diag.lowMassRampedCells = ramped;
+    diag.massFloorAppliedCells = floored;
     diag.velocityLimitedCells = limited;
     diag.correctionVelocityRawRms = activeCount > 0u ? std::sqrt(rawSum2 / static_cast<double>(activeCount)) : 0.0;
     diag.correctionVelocityRawMaxAbs = rawMaxAbs;

@@ -172,11 +172,16 @@ struct RuntimeSummary {
     std::uint64_t q9OpenBoundaryExcludedCells = 0;
     std::uint64_t q9ImmersedHaloExcludedCells = 0;
     std::uint64_t q9LowMassSuppressedCells = 0;
+    std::uint64_t q9LowMassRampedCells = 0;
+    std::uint64_t q9MassFloorAppliedCells = 0;
     std::uint64_t q9VelocityLimitedCells = 0;
     double q9CorrectionVelocityRawRms = 0.0;
     double q9CorrectionVelocityRawMaxAbs = 0.0;
     double q9CorrectionVelocityLimiter = 0.0;
     double q9MinCellMassForCorrection = 0.0;
+    double q9MassFloorForCorrection = 0.0;
+    double q9LowMassRampStart = 0.0;
+    double q9LowMassRampEnd = 0.0;
     int q9OpenBoundaryEnabled = 0;
     double q9OpenBoundaryMassFluxXLow = 0.0;
     double q9OpenBoundaryMassFluxXHigh = 0.0;
