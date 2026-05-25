@@ -196,6 +196,12 @@ struct SimulationParams {
     int q9ImmersedSolidHaloCells = 0;
     double q9MinCellMassForCorrection = 0.0;
     double q9CorrectionVelocityLimiter = 0.0;
+    // Low-mass Q9 regularization. suppress = historical hard cutoff;
+    // ramp_floor = keep Q9 geometrically active and regularize flux-to-velocity conversion.
+    std::string q9LowMassTreatment = "suppress"; // suppress, ramp_floor
+    double q9MassFloorForCorrection = 0.0;
+    double q9LowMassRampStart = 0.0;
+    double q9LowMassRampEnd = 0.0;
 
 
     // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is

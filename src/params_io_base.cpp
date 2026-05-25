@@ -269,6 +269,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9ImmersedSolidHaloCells" || key == "q9SolidHaloCells") p.q9ImmersedSolidHaloCells = parse_int(value, key);
         else if (key == "q9MinCellMassForCorrection" || key == "q9MinMassForCorrection") p.q9MinCellMassForCorrection = parse_double(value, key);
         else if (key == "q9CorrectionVelocityLimiter" || key == "q9CorrectionVelocityLimit") p.q9CorrectionVelocityLimiter = parse_double(value, key);
+        else if (key == "q9LowMassTreatment") p.q9LowMassTreatment = value;
+        else if (key == "q9MassFloorForCorrection" || key == "q9MassFloor") p.q9MassFloorForCorrection = parse_double(value, key);
+        else if (key == "q9LowMassRampStart") p.q9LowMassRampStart = parse_double(value, key);
+        else if (key == "q9LowMassRampEnd") p.q9LowMassRampEnd = parse_double(value, key);
         else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
         else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
         else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
@@ -716,6 +720,24 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.q9CorrectionVelocityLimiter >= 0.0)) {
         throw std::runtime_error("q9CorrectionVelocityLimiter must be non-negative");
+    }
+
+    {
+        std::string q9LowMassTreatment = p.q9LowMassTreatment;
+        std::replace(q9LowMassTreatment.begin(), q9LowMassTreatment.end(), '-', '_');
+        if (q9LowMassTreatment != "suppress" && q9LowMassTreatment != "ramp_floor" &&
+            q9LowMassTreatment != "floor_ramp") {
+            throw std::runtime_error("q9LowMassTreatment must be suppress or ramp_floor");
+        }
+        if (!(p.q9MassFloorForCorrection >= 0.0)) {
+            throw std::runtime_error("q9MassFloorForCorrection must be non-negative");
+        }
+        if (!(p.q9LowMassRampStart >= 0.0)) {
+            throw std::runtime_error("q9LowMassRampStart must be non-negative");
+        }
+        if (!(p.q9LowMassRampEnd >= 0.0)) {
+            throw std::runtime_error("q9LowMassRampEnd must be non-negative");
+        }
     }
 
     if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
