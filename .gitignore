@@ -56,3 +56,4 @@ CMakeLists.txt
 
 # Generated SRC/MPCD particle state files
 *.smpcd
+*.patch
