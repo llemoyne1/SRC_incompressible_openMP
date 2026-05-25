@@ -100,7 +100,7 @@ for k = 1:nF
 end
 sgtitle(sprintf('%s | frame %d | t=%.4g', caseLabel, frameIndex, t), 'Interpreter','none');
 saveas(fig, outPng);
-%close(fig);
+% Keep the figure visible/open for interactive inspection.
 end
 
 function A = local_extract(fld, fields, masks, geom)
@@ -130,7 +130,11 @@ switch lower(fld)
     case 'q9immersedhalo'
         A = double(masks.q9Halo);
     case 'q9lowmassramp'
-        A = masks.q9LowMassRamp;
+        if isfield(masks, 'q9LowMassRamp')
+            A = masks.q9LowMassRamp;
+        else
+            A = zeros(geom.Ny, geom.Nx);
+        end
     case 'maskcode'
         A = masks.maskCode;
     otherwise
@@ -187,7 +191,6 @@ maskCode(masks.q9Halo) = 3;
 maskCode(masks.q9GeoActive & ramp < 1) = 4;
 maskCode(solid) = 8;
 masks.q9LowMassRamp = ramp .* double(masks.q9GeoActive);
-
 masks.maskCode = maskCode;
 end
 
