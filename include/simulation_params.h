@@ -203,6 +203,17 @@ struct SimulationParams {
     double q9LowMassRampStart = 0.0;
     double q9LowMassRampEnd = 0.0;
 
+    // Gamma-relative Q9 low-mass regularization.  Negative values disable the
+    // relative form and preserve the absolute legacy parameter above.  When a
+    // relative value is provided, the effective absolute threshold is
+    // value * q9ReferenceGamma, with q9ReferenceGamma falling back to
+    // inletTargetOccupancy for hard-inlet runs.
+    double q9ReferenceGamma = 0.0;
+    double q9MinCellMassForCorrectionOverGamma = -1.0;
+    double q9MassFloorForCorrectionOverGamma = -1.0;
+    double q9LowMassRampStartOverGamma = -1.0;
+    double q9LowMassRampEndOverGamma = -1.0;
+
 
     // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is
     // independent from Q6/Q9 and is normally called after Q6/Q9 and before the

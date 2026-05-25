@@ -670,6 +670,31 @@ double face_strength_for_q9(double requestedStrength,
     return requestedStrength;
 }
 
+double q9_reference_gamma_for_thresholds(const SimulationParams& params) {
+    if (params.q9ReferenceGamma > 0.0) {
+        return params.q9ReferenceGamma;
+    }
+    if (params.inletTargetOccupancy > 0) {
+        return static_cast<double>(params.inletTargetOccupancy);
+    }
+    return 0.0;
+}
+
+double q9_effective_mass_threshold(double absoluteValue,
+                                   double overGammaValue,
+                                   const SimulationParams& params,
+                                   const char* keyName) {
+    if (overGammaValue < 0.0) {
+        return std::max(0.0, absoluteValue);
+    }
+    const double gammaRef = q9_reference_gamma_for_thresholds(params);
+    if (!(gammaRef > 0.0)) {
+        throw std::runtime_error(std::string(keyName) +
+                                 " requires q9ReferenceGamma>0 or inletTargetOccupancy>0");
+    }
+    return overGammaValue * gammaRef;
+}
+
 void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
                                       const PeriodicFaceField& correctionFlux,
                                       const EllipticProjectionMask* mask,
@@ -685,14 +710,30 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
     resize_periodic_face_field(appliedCorrectionFlux, nc);
 
     const double strength = params.q9MassFluxProjectionStrength;
-    const double minMass = std::max(0.0, params.q9MinCellMassForCorrection);
+    const double minMass = q9_effective_mass_threshold(
+        params.q9MinCellMassForCorrection,
+        params.q9MinCellMassForCorrectionOverGamma,
+        params,
+        "q9MinCellMassForCorrectionOverGamma");
     const double limiter = std::max(0.0, params.q9CorrectionVelocityLimiter);
     const std::string lowMassTreatment = canonical_filter_name(params.q9LowMassTreatment);
     const bool useRampFloor = lowMassTreatment == "ramp_floor" || lowMassTreatment == "floor_ramp";
 
-    double massFloor = std::max(0.0, params.q9MassFloorForCorrection);
-    double rampStart = std::max(0.0, params.q9LowMassRampStart);
-    double rampEnd = std::max(0.0, params.q9LowMassRampEnd);
+    double massFloor = q9_effective_mass_threshold(
+        params.q9MassFloorForCorrection,
+        params.q9MassFloorForCorrectionOverGamma,
+        params,
+        "q9MassFloorForCorrectionOverGamma");
+    double rampStart = q9_effective_mass_threshold(
+        params.q9LowMassRampStart,
+        params.q9LowMassRampStartOverGamma,
+        params,
+        "q9LowMassRampStartOverGamma");
+    double rampEnd = q9_effective_mass_threshold(
+        params.q9LowMassRampEnd,
+        params.q9LowMassRampEndOverGamma,
+        params,
+        "q9LowMassRampEndOverGamma");
     if (useRampFloor) {
         // Keep legacy parameter files usable: if a ramp/floor run only provides
         // q9MinCellMassForCorrection, use it as both ramp end and mass floor.

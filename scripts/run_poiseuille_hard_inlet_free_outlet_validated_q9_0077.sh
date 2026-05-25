@@ -29,7 +29,18 @@ DT="${DT:-0.001}"
 KBT="${KBT:-0.0025}"
 UIN="${UIN:-0.05}"
 INIT_UX="${INIT_UX:-${UIN}}"
-STATE_FILE="${STATE_FILE:-initial_state_poiseuille_hard_inlet_48x24_g20_kbt0p0025_ux0p05.smpcd}"
+
+safe_tag() {
+  local x="$1"
+  x="${x//- /m}"
+  x="${x//-/m}"
+  x="${x//./p}"
+  echo "$x"
+}
+
+KBT_TAG="$(safe_tag "$KBT")"
+UX_TAG="$(safe_tag "$INIT_UX")"
+STATE_FILE="${STATE_FILE:-initial_state_poiseuille_hard_inlet_${Nx}x${Ny}_g${GAMMA}_kbt${KBT_TAG}_ux${UX_TAG}.smpcd}"
 
 # Boundary bands.  These are open-boundary settings, not immersed-solid settings.
 INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-3}"
@@ -45,11 +56,20 @@ Q9_ELLIPTIC_LOW_PASS_PASSES="${Q9_ELLIPTIC_LOW_PASS_PASSES:-1}"
 Q9_CORRECTION_LIMITER="${Q9_CORRECTION_LIMITER:-0.0}"
 
 # Low-mass regularization remains available for hard-open-boundary runs.
-Q9_MIN_CELL_MASS="${Q9_MIN_CELL_MASS:-8.0}"
+# The defaults are now gamma-relative so that gamma=20, 30, 40 use the same
+# dimensionless safety policy.  They reproduce the previous gamma=20 values:
+# start=1, end=floor=min=8.
 Q9_LOW_MASS_TREATMENT="${Q9_LOW_MASS_TREATMENT:-ramp_floor}"
-Q9_MASS_FLOOR="${Q9_MASS_FLOOR:-8.0}"
-Q9_LOW_MASS_RAMP_START="${Q9_LOW_MASS_RAMP_START:-1.0}"
-Q9_LOW_MASS_RAMP_END="${Q9_LOW_MASS_RAMP_END:-8.0}"
+Q9_MIN_CELL_MASS_OVER_GAMMA="${Q9_MIN_CELL_MASS_OVER_GAMMA:-0.40}"
+Q9_MASS_FLOOR_OVER_GAMMA="${Q9_MASS_FLOOR_OVER_GAMMA:-0.40}"
+Q9_LOW_MASS_RAMP_START_OVER_GAMMA="${Q9_LOW_MASS_RAMP_START_OVER_GAMMA:-0.05}"
+Q9_LOW_MASS_RAMP_END_OVER_GAMMA="${Q9_LOW_MASS_RAMP_END_OVER_GAMMA:-0.40}"
+
+# Absolute legacy overrides remain available for explicit back-compat tests.
+Q9_MIN_CELL_MASS="${Q9_MIN_CELL_MASS:-0.0}"
+Q9_MASS_FLOOR="${Q9_MASS_FLOOR:-0.0}"
+Q9_LOW_MASS_RAMP_START="${Q9_LOW_MASS_RAMP_START:-0.0}"
+Q9_LOW_MASS_RAMP_END="${Q9_LOW_MASS_RAMP_END:-0.0}"
 
 # Virial closure defaults used in the current inlet/outlet branch.
 VIRIAL_K="${VIRIAL_K:-0.50}"
@@ -157,12 +177,17 @@ q9MassFluxProjectionStrength = ${Q9_STRENGTH}
 q9DensityRelaxationBeta = ${Q9_BETA}
 q9OpenBoundaryExclusionCells = ${Q9_OPEN_EXCLUSION_CELLS}
 q9ImmersedSolidHaloCells = 0
+q9ReferenceGamma = ${GAMMA}
 q9MinCellMassForCorrection = ${Q9_MIN_CELL_MASS}
 q9CorrectionVelocityLimiter = ${Q9_CORRECTION_LIMITER}
 q9LowMassTreatment = ${Q9_LOW_MASS_TREATMENT}
 q9MassFloorForCorrection = ${Q9_MASS_FLOOR}
 q9LowMassRampStart = ${Q9_LOW_MASS_RAMP_START}
 q9LowMassRampEnd = ${Q9_LOW_MASS_RAMP_END}
+q9MinCellMassForCorrectionOverGamma = ${Q9_MIN_CELL_MASS_OVER_GAMMA}
+q9MassFloorForCorrectionOverGamma = ${Q9_MASS_FLOOR_OVER_GAMMA}
+q9LowMassRampStartOverGamma = ${Q9_LOW_MASS_RAMP_START_OVER_GAMMA}
+q9LowMassRampEndOverGamma = ${Q9_LOW_MASS_RAMP_END_OVER_GAMMA}
 q9TargetFilter = elliptic_lowpass
 q9LowKMaxIndex = ${Q9_LOWK_MAX_INDEX}
 q9EllipticLowPassPasses = ${Q9_ELLIPTIC_LOW_PASS_PASSES}

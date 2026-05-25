@@ -221,3 +221,7 @@ git add scripts/run_poiseuille_hard_inlet_free_outlet_validated_q9_0077.sh \
 
 git commit -m "0077 add Poiseuille hard-inlet free-outlet validation"
 ```
+
+## 0078 note — gamma-relative low-mass thresholds
+
+Patch 0078 updates this script so that the Q9 low-mass thresholds are gamma-relative by default.  The previous gamma=20 values `rampStart=1`, `rampEnd=8`, `massFloor=8`, `minMass=8` are represented as `0.05`, `0.40`, `0.40`, `0.40` times the reference gamma.  The effective absolute values remain visible in `summary_runtime.csv` under the existing columns `q9LowMassRampStart`, `q9LowMassRampEnd`, `q9MassFloorForCorrection`, and `q9MinCellMassForCorrection`.

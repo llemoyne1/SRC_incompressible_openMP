@@ -273,6 +273,11 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9MassFloorForCorrection" || key == "q9MassFloor") p.q9MassFloorForCorrection = parse_double(value, key);
         else if (key == "q9LowMassRampStart") p.q9LowMassRampStart = parse_double(value, key);
         else if (key == "q9LowMassRampEnd") p.q9LowMassRampEnd = parse_double(value, key);
+        else if (key == "q9ReferenceGamma" || key == "q9Gamma" || key == "q9ReferenceCellMass") p.q9ReferenceGamma = parse_double(value, key);
+        else if (key == "q9MinCellMassForCorrectionOverGamma" || key == "q9MinMassOverGamma") p.q9MinCellMassForCorrectionOverGamma = parse_double(value, key);
+        else if (key == "q9MassFloorForCorrectionOverGamma" || key == "q9MassFloorOverGamma") p.q9MassFloorForCorrectionOverGamma = parse_double(value, key);
+        else if (key == "q9LowMassRampStartOverGamma") p.q9LowMassRampStartOverGamma = parse_double(value, key);
+        else if (key == "q9LowMassRampEndOverGamma") p.q9LowMassRampEndOverGamma = parse_double(value, key);
         else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
         else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
         else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
@@ -737,6 +742,21 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (!(p.q9LowMassRampEnd >= 0.0)) {
             throw std::runtime_error("q9LowMassRampEnd must be non-negative");
+        }
+        if (!std::isfinite(p.q9ReferenceGamma) || !(p.q9ReferenceGamma >= 0.0)) {
+            throw std::runtime_error("q9ReferenceGamma must be finite and non-negative; use 0 to inherit inletTargetOccupancy");
+        }
+        if (!std::isfinite(p.q9MinCellMassForCorrectionOverGamma)) {
+            throw std::runtime_error("q9MinCellMassForCorrectionOverGamma must be finite; use a negative value to disable it");
+        }
+        if (!std::isfinite(p.q9MassFloorForCorrectionOverGamma)) {
+            throw std::runtime_error("q9MassFloorForCorrectionOverGamma must be finite; use a negative value to disable it");
+        }
+        if (!std::isfinite(p.q9LowMassRampStartOverGamma)) {
+            throw std::runtime_error("q9LowMassRampStartOverGamma must be finite; use a negative value to disable it");
+        }
+        if (!std::isfinite(p.q9LowMassRampEndOverGamma)) {
+            throw std::runtime_error("q9LowMassRampEndOverGamma must be finite; use a negative value to disable it");
         }
     }
 
