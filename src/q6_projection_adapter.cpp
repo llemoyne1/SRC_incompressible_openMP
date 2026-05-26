@@ -378,18 +378,57 @@ double q6_open_y_flux_component(const SimulationParams& params, double time) {
     return 0.0;
 }
 
-double poiseuille_y_factor(const SimulationParams& params,
-                           const FluidDomainBounds& domain,
-                           double y) {
-    const std::string profile = params.inletVelocitySpatialProfile;
-    if (profile != "poiseuille_y" && profile != "poiseuille_y_mean" && profile != "poiseuille_y_max") {
-        return 1.0;
-    }
+double smoothstep01(double x) {
+    x = std::clamp(x, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+double flat_taper_y_base_factor(const SimulationParams& params,
+                                const FluidDomainBounds& domain,
+                                double y) {
+    if (!(params.inletVelocityWallTaperCells > 0.0)) return 1.0;
     const double h = domain.yMax - domain.yMin;
     if (!(h > 0.0)) return 1.0;
-    const double eta = std::clamp((y - domain.yMin) / h, 0.0, 1.0);
-    const double shape = eta * (1.0 - eta);
-    return profile == "poiseuille_y_max" ? 4.0 * shape : 6.0 * shape;
+    const double dy = h / static_cast<double>(std::max(1, params.Ny));
+    const double taperWidth = params.inletVelocityWallTaperCells * dy;
+    if (!(taperWidth > 0.0)) return 1.0;
+    const double dist = std::min(y - domain.yMin, domain.yMax - y);
+    return smoothstep01(dist / taperWidth);
+}
+
+double flat_taper_y_mean_factor(const SimulationParams& params,
+                                const FluidDomainBounds& domain,
+                                double y) {
+    const double base = flat_taper_y_base_factor(params, domain, y);
+    const int Ny = std::max(1, params.Ny);
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return base;
+    const double dy = h / static_cast<double>(Ny);
+    double meanBase = 0.0;
+    for (int j = 0; j < Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        meanBase += flat_taper_y_base_factor(params, domain, yc);
+    }
+    meanBase /= static_cast<double>(Ny);
+    if (!(meanBase > 0.0)) return base;
+    return base / meanBase;
+}
+
+double inlet_y_profile_factor(const SimulationParams& params,
+                              const FluidDomainBounds& domain,
+                              double y) {
+    const std::string profile = params.inletVelocitySpatialProfile;
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return 1.0;
+    if (profile == "poiseuille_y" || profile == "poiseuille_y_mean" || profile == "poiseuille_y_max") {
+        const double eta = std::clamp((y - domain.yMin) / h, 0.0, 1.0);
+        const double shape = eta * (1.0 - eta);
+        return profile == "poiseuille_y_max" ? 4.0 * shape : 6.0 * shape;
+    }
+    if (profile == "flat_taper_y" || profile == "flat_taper_y_mean") {
+        return flat_taper_y_mean_factor(params, domain, y);
+    }
+    return 1.0;
 }
 
 struct ApertureInterval { double lo = 0.0; double hi = 0.0; };
@@ -433,7 +472,7 @@ void set_x_boundary_flux_profile(std::vector<double>& profile,
     for (int j = 0; j < params.Ny; ++j) {
         const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
         if (cell_center_in_interval(yc, a)) {
-            profile[static_cast<std::size_t>(j)] = value * poiseuille_y_factor(params, domain, yc);
+            profile[static_cast<std::size_t>(j)] = value * inlet_y_profile_factor(params, domain, yc);
         }
     }
 }

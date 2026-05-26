@@ -101,10 +101,15 @@ struct SimulationParams {
     //   poiseuille_y     : plane-channel parabola across y, using inletUx*
     //                      as cross-section mean velocity;
     //   poiseuille_y_mean: explicit alias of poiseuille_y;
-    //   poiseuille_y_max : parabola using inletUx* as centerline velocity.
+    //   poiseuille_y_max : parabola using inletUx* as centerline velocity;
+    //   flat_taper_y      : plug-like profile with a smooth wall taper. inletUx*
+    //                      is preserved as the discrete cross-section mean;
+    //   flat_taper_y_mean : explicit alias of flat_taper_y.
+    // The wall taper is controlled in cells by inletVelocityWallTaperCells.
     // This deliberately affects only the prescribed boundary velocity/flux;
     // it does not change the SRC/MPCD collision model.
     std::string inletVelocitySpatialProfile = "uniform";
+    double inletVelocityWallTaperCells = 2.0;
 
     double inletKBT = -1.0;             // negative => use kBT
     double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity

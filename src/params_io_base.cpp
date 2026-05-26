@@ -202,6 +202,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             p.inletVelocitySpatialProfile = get_lower(kv, key);
             std::replace(p.inletVelocitySpatialProfile.begin(), p.inletVelocitySpatialProfile.end(), '-', '_');
         }
+        else if (key == "inletVelocityWallTaperCells" || key == "inletWallTaperCells" ||
+                 key == "openBoundaryVelocityWallTaperCells") {
+            p.inletVelocityWallTaperCells = parse_double(value, key);
+        }
         else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
         else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
         else if (key == "inletInjectionMode") p.inletInjectionMode = get_lower(kv, key);
@@ -568,8 +572,13 @@ void validate_simulation_params(const SimulationParams& p) {
             if (spatialProfile != "uniform" &&
                 spatialProfile != "poiseuille_y" &&
                 spatialProfile != "poiseuille_y_mean" &&
-                spatialProfile != "poiseuille_y_max") {
-                throw std::runtime_error("inletVelocitySpatialProfile must be uniform, poiseuille_y, poiseuille_y_mean, or poiseuille_y_max");
+                spatialProfile != "poiseuille_y_max" &&
+                spatialProfile != "flat_taper_y" &&
+                spatialProfile != "flat_taper_y_mean") {
+                throw std::runtime_error("inletVelocitySpatialProfile must be uniform, poiseuille_y, poiseuille_y_mean, poiseuille_y_max, flat_taper_y, or flat_taper_y_mean");
+            }
+            if (!std::isfinite(p.inletVelocityWallTaperCells) || p.inletVelocityWallTaperCells < 0.0) {
+                throw std::runtime_error("inletVelocityWallTaperCells must be finite and non-negative");
             }
         }
 

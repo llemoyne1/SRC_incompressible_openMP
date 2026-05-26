@@ -192,17 +192,60 @@ void inlet_velocity_for_face(const SimulationParams& params,
     uy *= fRamp;
 }
 
-double poiseuille_y_factor(const SimulationParams& params,
-                           const FluidDomainBounds& domain,
-                           double y) {
+double smoothstep01(double x) {
+    x = std::clamp(x, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+double flat_taper_y_base_factor(const SimulationParams& params,
+                                const FluidDomainBounds& domain,
+                                double y) {
+    if (!(params.inletVelocityWallTaperCells > 0.0)) return 1.0;
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return 1.0;
+    const double dy = h / static_cast<double>(std::max(1, params.Ny));
+    const double taperWidth = params.inletVelocityWallTaperCells * dy;
+    if (!(taperWidth > 0.0)) return 1.0;
+    const double dist = std::min(y - domain.yMin, domain.yMax - y);
+    return smoothstep01(dist / taperWidth);
+}
+
+double flat_taper_y_mean_factor(const SimulationParams& params,
+                                const FluidDomainBounds& domain,
+                                double y) {
+    const double base = flat_taper_y_base_factor(params, domain, y);
+    const int Ny = std::max(1, params.Ny);
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return base;
+    const double dy = h / static_cast<double>(Ny);
+    double meanBase = 0.0;
+    for (int j = 0; j < Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        meanBase += flat_taper_y_base_factor(params, domain, yc);
+    }
+    meanBase /= static_cast<double>(Ny);
+    if (!(meanBase > 0.0)) return base;
+    return base / meanBase;
+}
+
+double inlet_y_profile_factor(const SimulationParams& params,
+                              const FluidDomainBounds& domain,
+                              double y) {
+    const std::string profile = params.inletVelocitySpatialProfile;
     const double h = domain.yMax - domain.yMin;
     if (!(h > 0.0)) return 1.0;
     const double eta = std::clamp((y - domain.yMin) / h, 0.0, 1.0);
     const double shape = eta * (1.0 - eta);
-    if (params.inletVelocitySpatialProfile == "poiseuille_y_max") {
+    if (profile == "poiseuille_y_max") {
         return 4.0 * shape;
     }
-    return 6.0 * shape; // poiseuille_y and poiseuille_y_mean use inletUx as mean velocity.
+    if (profile == "poiseuille_y" || profile == "poiseuille_y_mean") {
+        return 6.0 * shape;
+    }
+    if (profile == "flat_taper_y" || profile == "flat_taper_y_mean") {
+        return flat_taper_y_mean_factor(params, domain, y);
+    }
+    return 1.0;
 }
 
 void inlet_velocity_for_face_at_position(const SimulationParams& params,
@@ -217,9 +260,8 @@ void inlet_velocity_for_face_at_position(const SimulationParams& params,
     inlet_velocity_for_face(params, face, time, ux, uy);
     const std::string f(face);
     const std::string profile = params.inletVelocitySpatialProfile;
-    if ((f == "left" || f == "right") &&
-        (profile == "poiseuille_y" || profile == "poiseuille_y_mean" || profile == "poiseuille_y_max")) {
-        ux *= poiseuille_y_factor(params, domain, y);
+    if (f == "left" || f == "right") {
+        ux *= inlet_y_profile_factor(params, domain, y);
     }
 }
 
