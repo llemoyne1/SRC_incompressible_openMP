@@ -860,9 +860,11 @@ void validate_simulation_params(const SimulationParams& p) {
         if (p.virialOpenBoundaryExclusionCells < 0) {
             throw std::runtime_error("virialOpenBoundaryExclusionCells must be non-negative");
         }
-        if (has_io_boundary(p) && p.virialKickEnable && p.virialOpenBoundaryExclusionCells <= 0) {
-            throw std::runtime_error("0064 virial inlet/outlet requires virialOpenBoundaryExclusionCells>0 for reservoir/bulk separation");
-        }
+        // 0087: allow zero open-boundary exclusion for the virial closure.
+        // The full-inlet/full-outlet slip diagnostics showed that the inactive
+        // open-boundary band can act as a numerical impedance/interface for Q9.
+        // A zero-width exclusion is now a valid mode; it means the virial closure
+        // uses all non-solid fluid cells, including the open-boundary bands.
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");
