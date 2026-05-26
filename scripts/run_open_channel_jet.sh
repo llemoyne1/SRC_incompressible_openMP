@@ -21,12 +21,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-AUTO_BUILD="${AUTO_BUILD:-1}"
+AUTO_BUILD="${AUTO_BUILD:-0}"
 AUTO_ANALYZE="${AUTO_ANALYZE:-0}"
 CASE_STEPS="${CASE_STEPS:-60000}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
-NUM_THREADS="${NUM_THREADS:-16}"
+NUM_THREADS="${NUM_THREADS:-12}"
 RUN_ROOT="${RUN_ROOT:-runs/open_channel_jet}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-0}"
 
@@ -282,7 +282,7 @@ immersedSolidOmega = 0.0
 
 # Solid thermal top/bottom walls.  This is the first no-slip/VP-like
 # compatibility test after the clean full-IO slip baseline.
-wallVpEnable = false
+wallVpEnable = true
 wallAccommodation = 1.0
 wallVpGamma = 0.0
 wallVpMass = 1.0
