@@ -919,24 +919,6 @@ inline bool q9_face_is_immersed_boundary(const ImmersedSolidProjectionMask& mask
     return a != b;
 }
 
-void accumulate_q9_solid_leak_value(Q9SolidLeakStats& stats,
-                                    double value,
-                                    bool cutClosed) {
-    const double a = std::abs(value);
-    stats.sum2 += a * a;
-    stats.maxAbs = std::max(stats.maxAbs, a);
-    stats.faceCount += 1u;
-    if (cutClosed) {
-        stats.cutSum2 += a * a;
-        stats.cutMaxAbs = std::max(stats.cutMaxAbs, a);
-        stats.cutFaceCount += 1u;
-    } else {
-        stats.cellSum2 += a * a;
-        stats.cellMaxAbs = std::max(stats.cellMaxAbs, a);
-        stats.cellFaceCount += 1u;
-    }
-}
-
 Q9SolidLeakStats measure_q9_solid_boundary_leak(const PeriodicFaceField& projectedMassFlux,
                                                 const ImmersedSolidProjectionMask& mask,
                                                 const SimulationParams& params) {

@@ -125,6 +125,12 @@ struct RuntimeSummary {
     double q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs = 0.0;
     double q6ImmersedSolidLeakCutProjectedFluxRms = 0.0;
     double q6ImmersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
+    std::uint64_t q6ImmersedSolidLeakFaceCount = 0;
+    double q6ImmersedSolidAppliedLeakBeforeClosureRms = 0.0;
+    double q6ImmersedSolidAppliedLeakBeforeClosureMaxAbs = 0.0;
+    std::uint64_t q6ImmersedSolidClosedFaceFluxEnforcedFaces = 0;
+    double q6ImmersedSolidClosedFaceFluxEnforcedRms = 0.0;
+    double q6ImmersedSolidClosedFaceFluxEnforcedMaxAbs = 0.0;
     double q6CorrectionVelocityRms = 0.0;
     double q6CorrectionVelocityMaxAbs = 0.0;
     int q6OpenBoundaryEnabled = 0;

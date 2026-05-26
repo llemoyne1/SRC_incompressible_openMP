@@ -58,6 +58,12 @@ struct Q6ProjectionDiagnostics {
     double immersedSolidLeakCellClosedProjectedFluxMaxAbs = 0.0;
     double immersedSolidLeakCutProjectedFluxRms = 0.0;
     double immersedSolidLeakCutProjectedFluxMaxAbs = 0.0;
+    std::uint64_t immersedSolidLeakFaceCount = 0;
+    double immersedSolidAppliedLeakBeforeClosureRms = 0.0;
+    double immersedSolidAppliedLeakBeforeClosureMaxAbs = 0.0;
+    std::uint64_t immersedSolidClosedFaceFluxEnforcedFaces = 0;
+    double immersedSolidClosedFaceFluxEnforcedRms = 0.0;
+    double immersedSolidClosedFaceFluxEnforcedMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
 
