@@ -378,6 +378,20 @@ double q6_open_y_flux_component(const SimulationParams& params, double time) {
     return 0.0;
 }
 
+double poiseuille_y_factor(const SimulationParams& params,
+                           const FluidDomainBounds& domain,
+                           double y) {
+    const std::string profile = params.inletVelocitySpatialProfile;
+    if (profile != "poiseuille_y" && profile != "poiseuille_y_mean" && profile != "poiseuille_y_max") {
+        return 1.0;
+    }
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return 1.0;
+    const double eta = std::clamp((y - domain.yMin) / h, 0.0, 1.0);
+    const double shape = eta * (1.0 - eta);
+    return profile == "poiseuille_y_max" ? 4.0 * shape : 6.0 * shape;
+}
+
 struct ApertureInterval { double lo = 0.0; double hi = 0.0; };
 
 ApertureInterval normalize_aperture_interval(double requestedLo, double requestedHi, double domainLo, double domainHi) {
@@ -410,16 +424,17 @@ bool cell_center_in_interval(double center, const ApertureInterval& a) {
 }
 
 void set_x_boundary_flux_profile(std::vector<double>& profile,
-                                 int Ny,
-                                 double yMin,
-                                 double yMax,
+                                 const SimulationParams& params,
+                                 const FluidDomainBounds& domain,
                                  double value,
                                  const ApertureInterval& a) {
-    profile.assign(static_cast<std::size_t>(Ny), 0.0);
-    const double dy = (yMax - yMin) / static_cast<double>(std::max(1, Ny));
-    for (int j = 0; j < Ny; ++j) {
-        const double yc = yMin + (static_cast<double>(j) + 0.5) * dy;
-        if (cell_center_in_interval(yc, a)) profile[static_cast<std::size_t>(j)] = value;
+    profile.assign(static_cast<std::size_t>(params.Ny), 0.0);
+    const double dy = (domain.yMax - domain.yMin) / static_cast<double>(std::max(1, params.Ny));
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) {
+            profile[static_cast<std::size_t>(j)] = value * poiseuille_y_factor(params, domain, yc);
+        }
     }
 }
 
@@ -466,10 +481,10 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         const double ux = q6_open_x_flux_component(params, time);
         bc.xLowFlux = ux;
         bc.xHighFlux = ux;
-        if (params.openBoundaryApertureEnable) {
-            set_x_boundary_flux_profile(bc.xLowFluxProfile, params.Ny, domain.yMin, domain.yMax, ux,
+        if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+            set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, ux,
                                         x_face_aperture_y(params, domain, "left"));
-            set_x_boundary_flux_profile(bc.xHighFluxProfile, params.Ny, domain.yMin, domain.yMax, ux,
+            set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, ux,
                                         x_face_aperture_y(params, domain, "right"));
             bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, ux);
             bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, ux);

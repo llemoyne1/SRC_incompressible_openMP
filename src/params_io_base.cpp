@@ -197,6 +197,11 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletVelocityRampInitialFactor" || key == "inletRampInitialFactor") p.inletVelocityRampInitialFactor = parse_double(value, key);
         else if (key == "inletVelocityRampFinalFactor" || key == "inletRampFinalFactor") p.inletVelocityRampFinalFactor = parse_double(value, key);
         else if (key == "inletVelocityRampProfile" || key == "inletRampProfile") p.inletVelocityRampProfile = get_lower(kv, key);
+        else if (key == "inletVelocitySpatialProfile" || key == "inletSpatialProfile" ||
+                 key == "inletProfile" || key == "openBoundaryVelocityProfile") {
+            p.inletVelocitySpatialProfile = get_lower(kv, key);
+            std::replace(p.inletVelocitySpatialProfile.begin(), p.inletVelocitySpatialProfile.end(), '-', '_');
+        }
         else if (key == "inletKBT") p.inletKBT = parse_double(value, key);
         else if (key == "inletThermalNoise") p.inletThermalNoise = parse_double(value, key);
         else if (key == "inletInjectionMode") p.inletInjectionMode = get_lower(kv, key);
@@ -557,6 +562,17 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!std::isfinite(inletSpeedScale)) {
             throw std::runtime_error("Inlet velocities must be finite");
         }
+        {
+            std::string spatialProfile = p.inletVelocitySpatialProfile;
+            std::replace(spatialProfile.begin(), spatialProfile.end(), '-', '_');
+            if (spatialProfile != "uniform" &&
+                spatialProfile != "poiseuille_y" &&
+                spatialProfile != "poiseuille_y_mean" &&
+                spatialProfile != "poiseuille_y_max") {
+                throw std::runtime_error("inletVelocitySpatialProfile must be uniform, poiseuille_y, poiseuille_y_mean, or poiseuille_y_max");
+            }
+        }
+
         if (p.inletVelocityRampEnable) {
             if (!std::isfinite(p.inletVelocityRampStartTime) ||
                 !std::isfinite(p.inletVelocityRampEndTime) ||

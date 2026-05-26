@@ -192,6 +192,37 @@ void inlet_velocity_for_face(const SimulationParams& params,
     uy *= fRamp;
 }
 
+double poiseuille_y_factor(const SimulationParams& params,
+                           const FluidDomainBounds& domain,
+                           double y) {
+    const double h = domain.yMax - domain.yMin;
+    if (!(h > 0.0)) return 1.0;
+    const double eta = std::clamp((y - domain.yMin) / h, 0.0, 1.0);
+    const double shape = eta * (1.0 - eta);
+    if (params.inletVelocitySpatialProfile == "poiseuille_y_max") {
+        return 4.0 * shape;
+    }
+    return 6.0 * shape; // poiseuille_y and poiseuille_y_mean use inletUx as mean velocity.
+}
+
+void inlet_velocity_for_face_at_position(const SimulationParams& params,
+                                         const FluidDomainBounds& domain,
+                                         const char* face,
+                                         double x,
+                                         double y,
+                                         double time,
+                                         double& ux,
+                                         double& uy) {
+    (void)x;
+    inlet_velocity_for_face(params, face, time, ux, uy);
+    const std::string f(face);
+    const std::string profile = params.inletVelocitySpatialProfile;
+    if ((f == "left" || f == "right") &&
+        (profile == "poiseuille_y" || profile == "poiseuille_y_mean" || profile == "poiseuille_y_max")) {
+        ux *= poiseuille_y_factor(params, domain, y);
+    }
+}
+
 std::uint64_t face_tag(const char* face) {
     const std::string f(face);
     if (f == "left") return 0x4c454654ULL;
@@ -340,15 +371,19 @@ double random_inside_interval(const SimulationParams& params,
     return clamp_strictly_inside(lo + u * (hi - lo), lo, hi);
 }
 
-void sample_inlet_velocity(const SimulationParams& params,
-                           const char* face,
-                           std::size_t particleIndex,
-                           std::uint64_t step,
-                           double mass,
-                           double& vx,
-                           double& vy) {
+void sample_inlet_velocity_at(const SimulationParams& params,
+                              const FluidDomainBounds& domain,
+                              const char* face,
+                              double x,
+                              double y,
+                              std::size_t particleIndex,
+                              std::uint64_t step,
+                              double mass,
+                              double& vx,
+                              double& vy) {
     double ux = 0.0, uy = 0.0;
-    inlet_velocity_for_face(params, face, static_cast<double>(step) * params.dt, ux, uy);
+    inlet_velocity_for_face_at_position(params, domain, face, x, y,
+                                        static_cast<double>(step) * params.dt, ux, uy);
     vx = ux;
     vy = uy;
 
@@ -404,7 +439,7 @@ void inject_from_x_inlet(double& x,
     } else {
         y = clamp_strictly_inside(y, ay.lo, ay.hi);
     }
-    sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
+    sample_inlet_velocity_at(params, domain, inletFace, x, y, particleIndex, step, mass, vx, vy);
 }
 
 void inject_from_y_inlet(double& x,
@@ -433,7 +468,7 @@ void inject_from_y_inlet(double& x,
     } else {
         x = clamp_strictly_inside(x, ax.lo, ax.hi);
     }
-    sample_inlet_velocity(params, inletFace, particleIndex, step, mass, vx, vy);
+    sample_inlet_velocity_at(params, domain, inletFace, x, y, particleIndex, step, mass, vx, vy);
 }
 
 void clamp_backflow_x(double& x, const FluidDomainBounds& domain, bool lowSide) {
@@ -766,6 +801,7 @@ void append_particle(ParticleState& state,
 
 void sample_hard_inlet_cell_particles(ParticleState& state,
                                       const SimulationParams& params,
+                                      const FluidDomainBounds& domain,
                                       const HardReservoirCell& cell,
                                       const char* inletFace,
                                       std::uint64_t step,
@@ -776,8 +812,6 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     const int targetN = params.inletTargetOccupancy;
     if (targetN <= 0) return;
 
-    double ux = 0.0, uy = 0.0;
-    inlet_velocity_for_face(params, inletFace, static_cast<double>(step) * params.dt, ux, uy);
     const double effectiveKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
     const double sigma = (effectiveKBT > 0.0 && particleMass > 0.0)
         ? params.inletThermalNoise * std::sqrt(effectiveKBT / particleMass)
@@ -787,6 +821,8 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     std::vector<double> ys(static_cast<std::size_t>(targetN));
     std::vector<double> vxs(static_cast<std::size_t>(targetN));
     std::vector<double> vys(static_cast<std::size_t>(targetN));
+    std::vector<double> uxTarget(static_cast<std::size_t>(targetN));
+    std::vector<double> uyTarget(static_cast<std::size_t>(targetN));
 
     std::mt19937_64 rng(splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
                                    (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^ face_tag(inletFace)));
@@ -798,12 +834,16 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     for (int n = 0; n < targetN; ++n) {
         const double rx = uni(rng);
         const double ry = uni(rng);
-        xs[static_cast<std::size_t>(n)] = clamp_strictly_inside(cell.x0 + rx * (cell.x1 - cell.x0), cell.x0, cell.x1);
-        ys[static_cast<std::size_t>(n)] = clamp_strictly_inside(cell.y0 + ry * (cell.y1 - cell.y0), cell.y0, cell.y1);
+        const std::size_t k = static_cast<std::size_t>(n);
+        xs[k] = clamp_strictly_inside(cell.x0 + rx * (cell.x1 - cell.x0), cell.x0, cell.x1);
+        ys[k] = clamp_strictly_inside(cell.y0 + ry * (cell.y1 - cell.y0), cell.y0, cell.y1);
+        inlet_velocity_for_face_at_position(params, domain, inletFace, xs[k], ys[k],
+                                            static_cast<double>(step) * params.dt,
+                                            uxTarget[k], uyTarget[k]);
         const double fx = sigma > 0.0 ? sigma * normal(rng) : 0.0;
         const double fy = sigma > 0.0 ? sigma * normal(rng) : 0.0;
-        vxs[static_cast<std::size_t>(n)] = ux + fx;
-        vys[static_cast<std::size_t>(n)] = uy + fy;
+        vxs[k] = uxTarget[k] + fx;
+        vys[k] = uyTarget[k] + fy;
         meanFlucX += fx;
         meanFlucY += fy;
     }
@@ -812,24 +852,27 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
 
     if (params.inletHardCellVelocityMean) {
         for (int n = 0; n < targetN; ++n) {
-            vxs[static_cast<std::size_t>(n)] -= meanFlucX;
-            vys[static_cast<std::size_t>(n)] -= meanFlucY;
+            const std::size_t k = static_cast<std::size_t>(n);
+            vxs[k] -= meanFlucX;
+            vys[k] -= meanFlucY;
         }
     }
 
     if (params.inletHardCellThermalRescale && effectiveKBT > 0.0 && particleMass > 0.0 && targetN > 1) {
         double thermal = 0.0;
         for (int n = 0; n < targetN; ++n) {
-            const double dx = vxs[static_cast<std::size_t>(n)] - ux;
-            const double dy = vys[static_cast<std::size_t>(n)] - uy;
+            const std::size_t k = static_cast<std::size_t>(n);
+            const double dx = vxs[k] - uxTarget[k];
+            const double dy = vys[k] - uyTarget[k];
             thermal += particleMass * (dx * dx + dy * dy);
         }
         const double desired = 2.0 * static_cast<double>(targetN) * effectiveKBT;
         if (thermal > 0.0 && desired > 0.0) {
             const double scale = std::sqrt(desired / thermal);
             for (int n = 0; n < targetN; ++n) {
-                vxs[static_cast<std::size_t>(n)] = ux + scale * (vxs[static_cast<std::size_t>(n)] - ux);
-                vys[static_cast<std::size_t>(n)] = uy + scale * (vys[static_cast<std::size_t>(n)] - uy);
+                const std::size_t k = static_cast<std::size_t>(n);
+                vxs[k] = uxTarget[k] + scale * (vxs[k] - uxTarget[k]);
+                vys[k] = uyTarget[k] + scale * (vys[k] - uyTarget[k]);
             }
         }
     }
@@ -839,8 +882,8 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
         append_particle(state, xs[k], ys[k], vxs[k], vys[k], particleType, particleMass);
         diag.inletMeanUx += vxs[k];
         diag.inletMeanUy += vys[k];
-        const double dvx = vxs[k] - ux;
-        const double dvy = vys[k] - uy;
+        const double dvx = vxs[k] - uxTarget[k];
+        const double dvy = vys[k] - uyTarget[k];
         diag.inletKBT += particleMass * (dvx * dvx + dvy * dvy);
     }
     diag.inletParticlesInserted += static_cast<std::uint64_t>(targetN);
@@ -975,7 +1018,7 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
                                          static_cast<std::uint64_t>(std::max(0, params.inletTargetOccupancy));
     std::uint64_t ordinal = 0u;
     for (const auto& cell : cells) {
-        sample_hard_inlet_cell_particles(state, params, cell, inletFace, step, ordinal++,
+        sample_hard_inlet_cell_particles(state, params, domain, cell, inletFace, step, ordinal++,
                                          refType, refMass, diag);
     }
 

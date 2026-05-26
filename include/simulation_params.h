@@ -95,6 +95,17 @@ struct SimulationParams {
     double inletVelocityRampFinalFactor = 1.0;
     std::string inletVelocityRampProfile = "linear";
 
+    // Optional spatial profile for the imposed inlet velocity and matching
+    // Q6/Q9 open-boundary fluxes.  Supported values:
+    //   uniform          : historical constant U on the open face;
+    //   poiseuille_y     : plane-channel parabola across y, using inletUx*
+    //                      as cross-section mean velocity;
+    //   poiseuille_y_mean: explicit alias of poiseuille_y;
+    //   poiseuille_y_max : parabola using inletUx* as centerline velocity.
+    // This deliberately affects only the prescribed boundary velocity/flux;
+    // it does not change the SRC/MPCD collision model.
+    std::string inletVelocitySpatialProfile = "uniform";
+
     double inletKBT = -1.0;             // negative => use kBT
     double inletThermalNoise = 1.0;     // 0 => deterministic inlet velocity
     std::string inletInjectionMode = "cuda_recycle"; // currently: cuda_recycle/thin_slab/hard_cell_density
