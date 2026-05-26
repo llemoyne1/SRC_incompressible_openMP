@@ -887,61 +887,212 @@ bool mask_active(const EllipticProjectionMask* mask, std::size_t k) {
     return !mask || mask->activeCell[k] != 0u;
 }
 
-void compute_q9_solid_leak(const PeriodicFaceField& projectedMassFlux,
-                           const ImmersedSolidProjectionMask& mask,
-                           Q9ProjectionDiagnostics& diag) {
-    if (mask.activeCell.empty()) return;
-    const std::size_t n = mask.activeCell.size();
+struct Q9SolidLeakStats {
+    std::uint64_t faceCount = 0u;
     double sum2 = 0.0;
     double maxAbs = 0.0;
-    double sum2Cell = 0.0;
-    double maxAbsCell = 0.0;
-    double sum2Cut = 0.0;
-    double maxAbsCut = 0.0;
+    std::uint64_t cellFaceCount = 0u;
+    double cellSum2 = 0.0;
+    double cellMaxAbs = 0.0;
+    std::uint64_t cutFaceCount = 0u;
+    double cutSum2 = 0.0;
+    double cutMaxAbs = 0.0;
+};
+
+inline bool q9_face_is_immersed_boundary(const ImmersedSolidProjectionMask& mask,
+                                         int owner,
+                                         int neighbour,
+                                         bool xFace) {
+    const std::size_t k = static_cast<std::size_t>(owner);
+    const bool cutClosed = xFace ? (!mask.faceClosedByCutX.empty() && mask.faceClosedByCutX[k] != 0u)
+                                 : (!mask.faceClosedByCutY.empty() && mask.faceClosedByCutY[k] != 0u);
+    if (cutClosed) {
+        return true;
+    }
+    const bool cellClosed = xFace ? (!mask.faceClosedByCellX.empty() && mask.faceClosedByCellX[k] != 0u)
+                                  : (!mask.faceClosedByCellY.empty() && mask.faceClosedByCellY[k] != 0u);
+    if (!cellClosed) {
+        return false;
+    }
+    const bool a = mask.activeCell[static_cast<std::size_t>(owner)] != 0u;
+    const bool b = mask.activeCell[static_cast<std::size_t>(neighbour)] != 0u;
+    return a != b;
+}
+
+void accumulate_q9_solid_leak_value(Q9SolidLeakStats& stats,
+                                    double value,
+                                    bool cutClosed) {
+    const double a = std::abs(value);
+    stats.sum2 += a * a;
+    stats.maxAbs = std::max(stats.maxAbs, a);
+    stats.faceCount += 1u;
+    if (cutClosed) {
+        stats.cutSum2 += a * a;
+        stats.cutMaxAbs = std::max(stats.cutMaxAbs, a);
+        stats.cutFaceCount += 1u;
+    } else {
+        stats.cellSum2 += a * a;
+        stats.cellMaxAbs = std::max(stats.cellMaxAbs, a);
+        stats.cellFaceCount += 1u;
+    }
+}
+
+Q9SolidLeakStats measure_q9_solid_boundary_leak(const PeriodicFaceField& projectedMassFlux,
+                                                const ImmersedSolidProjectionMask& mask,
+                                                const SimulationParams& params) {
+    Q9SolidLeakStats stats{};
+    if (mask.activeCell.empty()) return stats;
+    const int Nx = std::max(1, params.Nx);
+    const int Ny = std::max(1, params.Ny);
+    const bool periodicX = is_x_periodic(params);
+    const bool periodicY = is_y_periodic(params);
+
+    double sum2 = 0.0;
+    double maxAbs = 0.0;
+    double cellSum2 = 0.0;
+    double cellMaxAbs = 0.0;
+    double cutSum2 = 0.0;
+    double cutMaxAbs = 0.0;
     std::uint64_t count = 0u;
-    std::uint64_t countCell = 0u;
-    std::uint64_t countCut = 0u;
-#pragma omp parallel for reduction(+:sum2,count,sum2Cell,countCell,sum2Cut,countCut) reduction(max:maxAbs,maxAbsCell,maxAbsCut) if(n > 4096)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t k = static_cast<std::size_t>(ii);
-        if (mask.faceOpen.x[k] == 0.0) {
-            const double a = std::abs(projectedMassFlux.x[k]);
-            sum2 += a * a;
-            maxAbs = std::max(maxAbs, a);
-            count += 1u;
-            if (!mask.faceClosedByCutX.empty() && mask.faceClosedByCutX[k] != 0u) {
-                sum2Cut += a * a;
-                maxAbsCut = std::max(maxAbsCut, a);
-                countCut += 1u;
-            } else {
-                sum2Cell += a * a;
-                maxAbsCell = std::max(maxAbsCell, a);
-                countCell += 1u;
+    std::uint64_t cellCount = 0u;
+    std::uint64_t cutCount = 0u;
+#pragma omp parallel for reduction(+:sum2,count,cellSum2,cellCount,cutSum2,cutCount) reduction(max:maxAbs,cellMaxAbs,cutMaxAbs) if(Nx * Ny > 4096)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            const int c = q9_cell_index(i, j, Nx);
+            const std::size_t k = static_cast<std::size_t>(c);
+
+            if (periodicX || i < Nx - 1) {
+                const int ip = periodicX ? ((i + 1) % Nx) : (i + 1);
+                const int e = q9_cell_index(ip, j, Nx);
+                if (q9_face_is_immersed_boundary(mask, c, e, true)) {
+                    const bool cutClosed = !mask.faceClosedByCutX.empty() && mask.faceClosedByCutX[k] != 0u;
+                    const double a = std::abs(projectedMassFlux.x[k]);
+                    sum2 += a * a;
+                    maxAbs = std::max(maxAbs, a);
+                    count += 1u;
+                    if (cutClosed) {
+                        cutSum2 += a * a;
+                        cutMaxAbs = std::max(cutMaxAbs, a);
+                        cutCount += 1u;
+                    } else {
+                        cellSum2 += a * a;
+                        cellMaxAbs = std::max(cellMaxAbs, a);
+                        cellCount += 1u;
+                    }
+                }
             }
-        }
-        if (mask.faceOpen.y[k] == 0.0) {
-            const double a = std::abs(projectedMassFlux.y[k]);
-            sum2 += a * a;
-            maxAbs = std::max(maxAbs, a);
-            count += 1u;
-            if (!mask.faceClosedByCutY.empty() && mask.faceClosedByCutY[k] != 0u) {
-                sum2Cut += a * a;
-                maxAbsCut = std::max(maxAbsCut, a);
-                countCut += 1u;
-            } else {
-                sum2Cell += a * a;
-                maxAbsCell = std::max(maxAbsCell, a);
-                countCell += 1u;
+
+            if (periodicY || j < Ny - 1) {
+                const int jp = periodicY ? ((j + 1) % Ny) : (j + 1);
+                const int n = q9_cell_index(i, jp, Nx);
+                if (q9_face_is_immersed_boundary(mask, c, n, false)) {
+                    const bool cutClosed = !mask.faceClosedByCutY.empty() && mask.faceClosedByCutY[k] != 0u;
+                    const double a = std::abs(projectedMassFlux.y[k]);
+                    sum2 += a * a;
+                    maxAbs = std::max(maxAbs, a);
+                    count += 1u;
+                    if (cutClosed) {
+                        cutSum2 += a * a;
+                        cutMaxAbs = std::max(cutMaxAbs, a);
+                        cutCount += 1u;
+                    } else {
+                        cellSum2 += a * a;
+                        cellMaxAbs = std::max(cellMaxAbs, a);
+                        cellCount += 1u;
+                    }
+                }
             }
         }
     }
-    diag.immersedSolidLeakMassFluxRms = count > 0u ? std::sqrt(sum2 / static_cast<double>(count)) : 0.0;
-    diag.immersedSolidLeakMassFluxMaxAbs = maxAbs;
-    diag.immersedSolidLeakCellClosedMassFluxRms = countCell > 0u ? std::sqrt(sum2Cell / static_cast<double>(countCell)) : 0.0;
-    diag.immersedSolidLeakCellClosedMassFluxMaxAbs = maxAbsCell;
-    diag.immersedSolidLeakCutMassFluxRms = countCut > 0u ? std::sqrt(sum2Cut / static_cast<double>(countCut)) : 0.0;
-    diag.immersedSolidLeakCutMassFluxMaxAbs = maxAbsCut;
+    stats.faceCount = count;
+    stats.sum2 = sum2;
+    stats.maxAbs = maxAbs;
+    stats.cellFaceCount = cellCount;
+    stats.cellSum2 = cellSum2;
+    stats.cellMaxAbs = cellMaxAbs;
+    stats.cutFaceCount = cutCount;
+    stats.cutSum2 = cutSum2;
+    stats.cutMaxAbs = cutMaxAbs;
+    return stats;
 }
+
+void store_q9_solid_leak_stats(const Q9SolidLeakStats& stats,
+                               Q9ProjectionDiagnostics& diag) {
+    diag.immersedSolidLeakFaceCount = stats.faceCount;
+    diag.immersedSolidLeakMassFluxRms = stats.faceCount > 0u ?
+        std::sqrt(stats.sum2 / static_cast<double>(stats.faceCount)) : 0.0;
+    diag.immersedSolidLeakMassFluxMaxAbs = stats.maxAbs;
+    diag.immersedSolidLeakCellClosedMassFluxRms = stats.cellFaceCount > 0u ?
+        std::sqrt(stats.cellSum2 / static_cast<double>(stats.cellFaceCount)) : 0.0;
+    diag.immersedSolidLeakCellClosedMassFluxMaxAbs = stats.cellMaxAbs;
+    diag.immersedSolidLeakCutMassFluxRms = stats.cutFaceCount > 0u ?
+        std::sqrt(stats.cutSum2 / static_cast<double>(stats.cutFaceCount)) : 0.0;
+    diag.immersedSolidLeakCutMassFluxMaxAbs = stats.cutMaxAbs;
+}
+
+void compute_q9_solid_leak(const PeriodicFaceField& projectedMassFlux,
+                           const ImmersedSolidProjectionMask& mask,
+                           const SimulationParams& params,
+                           Q9ProjectionDiagnostics& diag) {
+    store_q9_solid_leak_stats(measure_q9_solid_boundary_leak(projectedMassFlux, mask, params), diag);
+}
+
+void enforce_q9_immersed_closed_face_flux(const SimulationParams& params,
+                                          Q9ProjectionWorkspace& ws,
+                                          Q9ProjectionDiagnostics& diag) {
+    const ImmersedSolidProjectionMask& mask = ws.immersedMask;
+    if (mask.activeCell.empty()) return;
+    const int Nx = std::max(1, params.Nx);
+    const int Ny = std::max(1, params.Ny);
+    const bool periodicX = is_x_periodic(params);
+    const bool periodicY = is_y_periodic(params);
+
+    const Q9SolidLeakStats before = measure_q9_solid_boundary_leak(ws.projectedMassFlux, mask, params);
+    diag.immersedSolidAppliedLeakBeforeClosureRms = before.faceCount > 0u ?
+        std::sqrt(before.sum2 / static_cast<double>(before.faceCount)) : 0.0;
+    diag.immersedSolidAppliedLeakBeforeClosureMaxAbs = before.maxAbs;
+
+    double sum2 = 0.0;
+    double maxAbs = 0.0;
+    std::uint64_t count = 0u;
+#pragma omp parallel for reduction(+:sum2,count) reduction(max:maxAbs) if(Nx * Ny > 4096)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            const int c = q9_cell_index(i, j, Nx);
+            const std::size_t k = static_cast<std::size_t>(c);
+            if (periodicX || i < Nx - 1) {
+                const int ip = periodicX ? ((i + 1) % Nx) : (i + 1);
+                const int e = q9_cell_index(ip, j, Nx);
+                if (q9_face_is_immersed_boundary(mask, c, e, true)) {
+                    const double a = std::abs(ws.projectedMassFlux.x[k]);
+                    sum2 += a * a;
+                    maxAbs = std::max(maxAbs, a);
+                    count += 1u;
+                    ws.appliedCorrectionFlux.x[k] = -ws.baseMassFlux.x[k];
+                    ws.projectedMassFlux.x[k] = 0.0;
+                }
+            }
+            if (periodicY || j < Ny - 1) {
+                const int jp = periodicY ? ((j + 1) % Ny) : (j + 1);
+                const int n = q9_cell_index(i, jp, Nx);
+                if (q9_face_is_immersed_boundary(mask, c, n, false)) {
+                    const double a = std::abs(ws.projectedMassFlux.y[k]);
+                    sum2 += a * a;
+                    maxAbs = std::max(maxAbs, a);
+                    count += 1u;
+                    ws.appliedCorrectionFlux.y[k] = -ws.baseMassFlux.y[k];
+                    ws.projectedMassFlux.y[k] = 0.0;
+                }
+            }
+        }
+    }
+    diag.immersedSolidClosedFaceFluxEnforcedFaces = count;
+    diag.immersedSolidClosedFaceFluxEnforcedRms = count > 0u ?
+        std::sqrt(sum2 / static_cast<double>(count)) : 0.0;
+    diag.immersedSolidClosedFaceFluxEnforcedMaxAbs = maxAbs;
+}
+
 
 std::string canonical_filter_name(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) {
@@ -1541,6 +1692,9 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
         workspace.projectedMassFlux.x[k] = workspace.baseMassFlux.x[k] + workspace.appliedCorrectionFlux.x[k];
         workspace.projectedMassFlux.y[k] = workspace.baseMassFlux.y[k] + workspace.appliedCorrectionFlux.y[k];
     }
+    if (mask != nullptr && params.immersedSolidEnable) {
+        enforce_q9_immersed_closed_face_flux(params, workspace, diag);
+    }
     const std::vector<double> divApplied = compute_face_divergence(egrid, workspace.projectedMassFlux, bc, mask);
     double div2 = 0.0;
     double divMax = 0.0;
@@ -1559,7 +1713,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     compute_estimated_density_after(params, workspace.cellMass, divApplied, mask, workspace.massAfterEstimate, diag);
 
     if (mask != nullptr) {
-        compute_q9_solid_leak(workspace.projectedMassFlux, workspace.immersedMask, diag);
+        compute_q9_solid_leak(workspace.projectedMassFlux, workspace.immersedMask, params, diag);
     }
 
     apply_cell_velocity_kick(state, workspace, diag, params.q9MomentumCorrectionEnable);
