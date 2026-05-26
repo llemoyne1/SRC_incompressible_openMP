@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 0083 Poiseuille/open-channel segmented hard-inlet / segmented free-outlet
-# validation with a progressive inlet velocity ramp and a thermal soft Q9
-# correction limiter.  Scope: inlet/outlet only, no immersed solid.  The open
-# aperture excludes wall/outlet corners so the complementary boundary portions
-# behave as particle walls.
+# 0083 legacy segmented-aperture stress test.
+#
+# This script is kept for reproducibility of the early aperture experiments,
+# but it is not the nominal Poiseuille/open-channel validation.  Segmented
+# apertures are physical slit/window geometries, not a correction mechanism for
+# the canonical full-height Poiseuille channel.  The validated open-boundary
+# policy uses zero Q9/virial exclusion cells.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -49,6 +51,7 @@ INLET_RAMP_END_TIME="${INLET_RAMP_END_TIME:-20.0}"
 INLET_RAMP_INITIAL_FACTOR="${INLET_RAMP_INITIAL_FACTOR:-0.0}"
 INLET_RAMP_FINAL_FACTOR="${INLET_RAMP_FINAL_FACTOR:-1.0}"
 INLET_RAMP_PROFILE="${INLET_RAMP_PROFILE:-smoothstep}"
+INLET_VELOCITY_SPATIAL_PROFILE="${INLET_VELOCITY_SPATIAL_PROFILE:-poiseuille_y_mean}"
 
 safe_tag() {
   local x="$1"
@@ -63,9 +66,10 @@ UX_TAG="$(safe_tag "$INIT_UX")"
 STATE_FILE="${STATE_FILE:-initial_state_poiseuille_hard_inlet_${Nx}x${Ny}_g${GAMMA}_kbt${KBT_TAG}_ux${UX_TAG}.smpcd}"
 
 # Boundary bands.  These are open-boundary settings, not immersed-solid settings.
+# Keep zero exclusions unless deliberately reproducing the pre-0087 impedance test.
 INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-3}"
-Q9_OPEN_EXCLUSION_CELLS="${Q9_OPEN_EXCLUSION_CELLS:-3}"
-VIRIAL_OPEN_EXCLUSION_CELLS="${VIRIAL_OPEN_EXCLUSION_CELLS:-3}"
+Q9_OPEN_EXCLUSION_CELLS="${Q9_OPEN_EXCLUSION_CELLS:-0}"
+VIRIAL_OPEN_EXCLUSION_CELLS="${VIRIAL_OPEN_EXCLUSION_CELLS:-0}"
 
 # Validated Q6/Q9 model parameters from feature/elliptic-q6-core Poiseuille.
 Q6_STRENGTH="${Q6_STRENGTH:-1.0}"
@@ -174,12 +178,15 @@ bcTop = solid
 
 inletUxLeft = ${UIN}
 inletUyLeft = 0.0
+inletUxRight = ${UIN}
+inletUyRight = 0.0
 inletVelocityRampEnable = ${INLET_RAMP_ENABLE}
 inletVelocityRampStartTime = ${INLET_RAMP_START_TIME}
 inletVelocityRampEndTime = ${INLET_RAMP_END_TIME}
 inletVelocityRampInitialFactor = ${INLET_RAMP_INITIAL_FACTOR}
 inletVelocityRampFinalFactor = ${INLET_RAMP_FINAL_FACTOR}
 inletVelocityRampProfile = ${INLET_RAMP_PROFILE}
+inletVelocitySpatialProfile = ${INLET_VELOCITY_SPATIAL_PROFILE}
 inletKBT = ${KBT}
 inletThermalNoise = 1.0
 inletReservoirMode = hard_cell_density
@@ -302,21 +309,23 @@ EOF_KV
 }
 
 echo "[0083] inlet velocity ramp: enable=${INLET_RAMP_ENABLE}, factor ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
+echo "[0083] Q9/virial open exclusions: q9=${Q9_OPEN_EXCLUSION_CELLS}, virial=${VIRIAL_OPEN_EXCLUSION_CELLS}"
 echo "[0083] Q9 correction limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
-echo "[0083] apertures: enable=${OPEN_APERTURE_ENABLE}, leftY=[${LEFT_OPEN_YMIN},${LEFT_OPEN_YMAX}], rightY=[${RIGHT_OPEN_YMIN},${RIGHT_OPEN_YMAX}]"
+echo "[0083] legacy/stress-test apertures: enable=${OPEN_APERTURE_ENABLE}, leftY=[${LEFT_OPEN_YMIN},${LEFT_OPEN_YMAX}], rightY=[${RIGHT_OPEN_YMIN},${RIGHT_OPEN_YMAX}]"
 
 SECONDS=0
+TAG="u${UIN//./p}_${Nx}x${Ny}"
 if [[ "$RUN_CLASSIC" == "1" ]]; then
-  write_case "poiseuille_classic_segmented_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "classic" "false" "false"
+  write_case "poiseuille_classic_segmented_ramped_softlimited_hard_inlet_${TAG}" "classic" "false" "false"
 fi
 if [[ "$RUN_Q6" == "1" ]]; then
-  write_case "poiseuille_q6_segmented_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q6" "false" "false"
+  write_case "poiseuille_q6_segmented_ramped_softlimited_hard_inlet_${TAG}" "q6" "false" "false"
 fi
 if [[ "$RUN_Q9" == "1" ]]; then
-  write_case "poiseuille_q9_segmented_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q9" "true" "false"
+  write_case "poiseuille_q9_segmented_ramped_softlimited_hard_inlet_${TAG}" "q9" "true" "false"
 fi
 if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
-  write_case "poiseuille_q9_virial_segmented_ramped_softlimited_hard_inlet_u${UIN//./p}_48x24" "q9_virial" "true" "true"
+  write_case "poiseuille_q9_virial_segmented_ramped_softlimited_hard_inlet_${TAG}" "q9_virial" "true" "true"
 fi
 
 elapsed=$SECONDS

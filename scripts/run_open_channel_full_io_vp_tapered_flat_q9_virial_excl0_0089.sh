@@ -309,16 +309,16 @@ echo "[0089] Q9 limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CO
 SECONDS=0
 TAG="u${UIN//./p}_${Nx}x${Ny}"
 if [[ "$RUN_CLASSIC" == "1" ]]; then
-  write_case "openchan_classic_fullio_vp_poiseuille_${TAG}" "classic" "false" "false"
+  write_case "openchan_classic_fullio_vp_tapered_flat_${TAG}" "classic" "false" "false"
 fi
 if [[ "$RUN_Q6" == "1" ]]; then
-  write_case "openchan_q6_fullio_vp_poiseuille_${TAG}" "q6" "false" "false"
+  write_case "openchan_q6_fullio_vp_tapered_flat_${TAG}" "q6" "false" "false"
 fi
 if [[ "$RUN_Q9" == "1" ]]; then
-  write_case "openchan_q9_fullio_vp_poiseuille_excl0_${TAG}" "q9" "true" "false"
+  write_case "openchan_q9_fullio_vp_tapered_flat_excl0_${TAG}" "q9" "true" "false"
 fi
 if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
-  write_case "openchan_q9_virial_fullio_vp_poiseuille_excl0_${TAG}" "q9_virial" "true" "true"
+  write_case "openchan_q9_virial_fullio_vp_tapered_flat_excl0_${TAG}" "q9_virial" "true" "true"
 fi
 
 elapsed=$SECONDS

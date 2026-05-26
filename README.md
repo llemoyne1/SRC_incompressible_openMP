@@ -1,32 +1,44 @@
-# SRC/MPCD C++ base refactor
+# SRC/MPCD C++ incompressible OpenMP
 
-This branch contains the cleaned starting point for a generic C++ SRC/MPCD code.
-It deliberately removes the historical validation/benchmark scripts from the
-working tree so that the new base architecture remains visible.
+This repository contains a compact C++/OpenMP SRC/MPCD solver used to develop
+and validate quasi-incompressible extensions of the classical compressible
+SRC/MPCD method.
 
-The historical OpenMP redistribution version is kept in Git history through the
-reference tag/branch created before the cleanup.
+The current working branch is `feature/inlet-outlet`.  It keeps the classical
+compressible mode available while adding Q6 velocity projection, Q9 mass-flux
+projection and optional virial/EOS closure on top of the same generic finite-
+volume elliptic projection core.
 
-## Current scope
+## Current branch status: `feature/inlet-outlet`
 
-Implemented:
+Validated in this branch:
 
-- binary `.smpcd` particle state format with `x, y, vx, vy, type, mass`;
-- MATLAB writer/reader/generator/inspector for `.smpcd` states;
-- C++ reader/writer for `.smpcd` states;
-- first rectangular 2-D SRC/MPCD base executable;
-- mass-aware cell velocity in the SRC/MPCD collision;
-- OpenMP-parallelized base kernels with preallocated collision workspace;
-- minimal runtime summary CSV and optional `.smpcd` state dumps.
+- classical compressible SRC/MPCD still runs through `method = classic`;
+- Q6 projection uses the generic elliptic operator for velocity/flux correction;
+- Q9 mass-flux projection uses the same generic elliptic machinery and the
+  elliptic low-pass filter path, with no case-specific FFT solver added;
+- optional virial/liquid closure can be combined with Q9 as `method = q9_virial`;
+- full inlet/outlet open-channel configurations are validated for channels
+  without immersed solids;
+- particle inlet ramping is applied consistently to the particle inlet, Q6 open
+  flux and Q9 open mass flux;
+- full-height inlet/outlet has been validated with both slip/specular walls and
+  VP/no-slip solid thermal walls;
+- segmented inlet/outlet apertures exist and should be treated as physical
+  slit/nozzle geometries, not as a correction for the canonical Poiseuille
+  channel.
 
-Not implemented yet in the base executable:
+Out of scope for the validated inlet/outlet closure:
 
-- explicit solid geometry/cylinder virtual particles;
-- incompressible redistribution;
-- Q6/Q9 pressure or mass-flux projection;
-- virial/liquid EOS closure;
-- case-specific physical diagnostics;
-- inlet/outlet internal-flow boundary layer support.
+- Q9/virial behavior in cells adjacent to immersed solids;
+- backward-step/obstacle/cylinder runs with Q9/virial active next to the solid;
+- any workaround based on trimming the Poiseuille inlet/outlet aperture to hide
+  wall-corner artifacts.
+
+Those immersed-solid issues should be developed separately, for example on a
+branch such as `feature/q9-immersed-solid-boundary`, using a face/cell mask in
+which fluid cells adjacent to the solid remain active and the solid-normal flux
+is closed.
 
 ## Build
 
@@ -34,233 +46,200 @@ Not implemented yet in the base executable:
 ./scripts/build_src_mpcd_base.sh
 ```
 
-The executable is written to:
+The main executable is written to:
 
 ```text
 build/src_mpcd_base
 ```
 
-## Run
-
-Generate an initial `.smpcd` state from MATLAB, then use a parameter file such as:
+A small elliptic-core validation executable is also built:
 
 ```text
-examples/params_periodic_base.kv
-examples/params_channel_y_bounceback.kv
-examples/params_channel_y_specular.kv
-examples/params_channel_x_bounceback.kv
-examples/params_poiseuille_y_bounceback_vp.kv
+build/validate_elliptic_projection
 ```
 
-Run for example:
+Run it with:
+
+```bash
+./build/validate_elliptic_projection
+```
+
+## Running the solver
+
+The solver is parameter-file driven:
 
 ```bash
 ./build/src_mpcd_base examples/params_periodic_base.kv
 ./build/src_mpcd_base examples/params_channel_y_bounceback.kv
 ```
 
-Make sure that `inputState` in the parameter file points to the generated
-`.smpcd` state. Use `numThreads` in the parameter file or `OMP_NUM_THREADS` in
-the shell to control OpenMP parallelism. Example files use `numThreads = 4`; set it to `0` to leave the choice to the OpenMP runtime.
+Most examples require an `.smpcd` initial state.  MATLAB helpers in `matlab/`
+can generate and inspect those binary particle-state files.  Typical workflow:
 
-## Documentation
+```matlab
+addpath('matlab')
+% Generate the state required by the chosen parameter file, then run from bash.
+```
 
-- `docs/SRCMPCD_STATE_BIN_V1.md`: binary particle-state format.
-- `docs/SRC_MPCD_BASE.md`: periodic base executable and runtime contract.
+Useful runtime controls include:
+
+```text
+method = classic | q6 | q9 | q9_virial
+projectionOperator = elliptic_fv_cg
+q9TargetFilter = elliptic_lowpass
+numThreads = 4
+summaryEvery = 100
+dumpStateEvery = 5000
+```
+
+## Inlet/outlet nominal settings
+
+For the validated full open-channel inlet/outlet cases, use full-height open
+boundaries and keep Q9/virial active up to the open boundary:
+
+```text
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+openBoundaryApertureEnable = false
+q9OpenBoundaryExclusionCells = 0
+virialOpenBoundaryExclusionCells = 0
+```
+
+The zero-exclusion setting is important.  Non-zero open-boundary exclusions were
+found to create an artificial active/inactive interface near the outlet, which
+behaves like a numerical wall or impedance layer.
+
+The nominal Q9 correction limiter is thermal-soft:
+
+```text
+q9CorrectionLimiterMode = thermal_soft
+q9CorrectionVelocityLimiterOverThermal = 0.5
+q9CorrectionLimiterThermalKBT = 0.0
+```
+
+For `kBT = 0.0025`, this gives:
+
+```text
+dU_limit = 0.5 * sqrt(kBT) = 0.025
+```
+
+The nominal low-mass policy is gamma-relative:
+
+```text
+q9LowMassTreatment = ramp_floor
+q9LowMassRampStartOverGamma = 0.05
+q9LowMassRampEndOverGamma = 0.40
+q9MassFloorForCorrectionOverGamma = 0.40
+q9MinCellMassForCorrectionOverGamma = 0.40
+```
+
+Keep the inlet velocity ramp enabled for long runs unless deliberately running a
+start-up shock/stress test:
+
+```text
+inletVelocityRampEnable = true
+inletVelocityRampStartTime = 0.0
+inletVelocityRampEndTime = 20.0   # or longer for production runs
+inletVelocityRampInitialFactor = 0.0
+inletVelocityRampFinalFactor = 1.0
+inletVelocityRampProfile = smoothstep
+```
+
+The ramp factor is used coherently by the particle inlet, Q6 open-boundary flux
+and Q9 open-boundary mass flux.
+
+## Recommended inlet/outlet scripts
+
+Validated or nominal full-channel scripts:
+
+```bash
+# Full inlet/outlet, slip/specular wall baseline.
+./scripts/run_open_channel_full_io_q9_virial_excl0_0087.sh
+
+# Full inlet/outlet, VP/no-slip walls, Poiseuille mean profile.
+./scripts/run_open_channel_full_io_vp_poiseuille_q9_virial_excl0_0088.sh
+
+# Full inlet/outlet, VP/no-slip walls, tapered-flat mean profile.
+./scripts/run_open_channel_full_io_vp_tapered_flat_q9_virial_excl0_0089.sh
+```
+
+Physical segmented aperture / slit-nozzle prototype:
+
+```bash
+./scripts/run_open_channel_jet.sh
+```
+
+The segmented-aperture script is intentionally not a canonical Poiseuille
+validation.  It represents a physical slit/nozzle configuration with distinct
+left/right open apertures.
+
+Legacy/stress-test script:
+
+```bash
+./scripts/run_poiseuille_segmented_inlet_outlet_softlimited_q9_0083.sh
+```
+
+This keeps the early segmented aperture experiment available, but it should not
+be used to claim canonical Poiseuille validation.
 
 ## MATLAB post-processing
 
-The base solver writes primitive dumps only. MATLAB helpers in `matlab/` provide
-summary plots, sequential dump visualization and binned fields:
+MATLAB helpers in `matlab/` provide run summaries, field reconstruction and
+visual checks.  Launch MATLAB from the repository root or from `matlab/` as
+required by each script.  For the recent inlet/outlet runs, the common analysis
+entry point is:
 
 ```matlab
-addpath('matlab')
-out = postprocess_smpcd_run('runs/periodic_base', 'field', 'rho');
+cd matlab
+R = analyze_poiseuille_hard_inlet_free_outlet_0077( ...
+    'root','..', ...
+    'runRoot','../runs/<run-root>', ...
+    'caseGlob','openchan_*');
 ```
 
-Useful fields are `particles`, `N`, `rho`, `Ux`, `Uy`, `speed`, `omega` and
-`type`. See `docs/MATLAB_POSTPROCESSING.md` for the full workflow.
+The useful fields for visual inspection include `rho`, `N`, `Ux`, `Uy`, `speed`,
+`omega`, `particles` and wall-band diagnostics where available.
 
+## Documentation map
 
-## Rectangular wall virtual particles
+Older branch-level documentation is in `docs/`.  Newer development notes from
+the inlet/outlet validation campaign are in `doc/`.
 
-The base executable now supports aggregate stochastic wall virtual particles for rectangular walls. They are enabled by `wallVpEnable = true` and contribute only to the collision-cell mass/momentum; they are not stored in `.smpcd` dumps. See `docs/WALL_VIRTUAL_PARTICLES.md` and the examples:
+Current key notes:
 
-```bash
-build/src_mpcd_base examples/params_channel_y_bounceback_vp.kv
-build/src_mpcd_base examples/params_channel_x_bounceback_vp.kv
-```
+- `doc/README_0090_INLET_OUTLET_VALIDATION_STATUS.md`: final validation status
+  of full inlet/outlet channel cases;
+- `doc/README_0091_INLET_OUTLET_ROOT_CLEANUP.md`: root README/script cleanup and
+  slit/nozzle separation;
+- `doc/NEXT_CHAT_PROMPT_0091_SEGMENTED_INLET_OUTLET.md`: continuation prompt for
+  developing physical segmented inlet/outlet cases.
 
+Core method documents remain in `docs/`:
 
-## First Poiseuille validation
+- `docs/ELLIPTIC_PROJECTION_CORE.md`;
+- `docs/Q6_PERIODIC_ADAPTER.md`;
+- `docs/Q6_CHANNEL_POISEUILLE_VALIDATION.md`;
+- `docs/Q9_PERIODIC_ADAPTER.md`;
+- `docs/POISEUILLE_Q9_FILTERED_CHANNEL_VALIDATION.md`;
+- `docs/VIRIAL_EOS_PISTON.md`;
+- `docs/IMMERSED_SOLID_Q6_Q9_MASK.md`.
 
-The branch includes a lightweight MATLAB validation workflow for the primitive
-`.smpcd` dumps. Run the first channel cases with:
+## Repository hygiene
 
-```bash
-./build/src_mpcd_base examples/params_poiseuille_y_specular.kv
-./build/src_mpcd_base examples/params_poiseuille_y_bounceback.kv
-./build/src_mpcd_base examples/params_poiseuille_y_bounceback_vp.kv
-```
-
-Then compare the profiles in MATLAB:
-
-```matlab
-addpath('matlab')
-cmp = compare_poiseuille_runs({ ...
-    'runs/poiseuille_y_specular', ...
-    'runs/poiseuille_y_bounceback', ...
-    'runs/poiseuille_y_bounceback_vp'}, ...
-    'labels', {'specular', 'bounceback', 'bounceback+VP'}, ...
-    'flowComponent', 'Ux', ...
-    'profileDirection', 'y', ...
-    'fitStartFraction', 0.5, ...
-    'excludeWallCells', 2);
-```
-
-See `docs/POISEUILLE_VALIDATION.md` for details.
-
-- `docs/MASS_AWARE_THERMOSTAT.md` documents the optional mass-aware cell-relative thermostat for forced channel calibration runs.
-
-## Generic solid thermal wall model
-
-The recommended solid-wall path is now `bcFace = solid` with aggregate thermal wall coupling controlled by a small set of parameters:
+Generated files should not be committed:
 
 ```text
-wallAccommodation = 1.0
-wallVpGamma = 0.0
-wallKBT = -1.0
-wallThermalNoise = 1.0
+build/
+runs/
+outputs/
+*.smpcd
+*.zip
+*.patch
+*Zone.Identifier
 ```
 
-See `docs/SOLID_THERMAL_BOUNDARIES.md` and the examples `params_channel_y_solid_thermal.kv`, `params_channel_x_solid_thermal.kv`, and `params_poiseuille_y_solid_thermal_thermostat.kv`.
-
-## Solid-thermal Poiseuille symmetry validation
-
-The generic solid-wall model can be validated by transposing the Poiseuille channel:
-
-```bash
-./build/src_mpcd_base examples/params_poiseuille_y_solid_thermal_long.kv
-./build/src_mpcd_base examples/params_poiseuille_x_solid_thermal_long.kv
-```
-
-Then in MATLAB:
-
-```matlab
-addpath('matlab')
-out = validate_solid_thermal_poiseuille_symmetry( ...
-    'runs/poiseuille_y_solid_thermal_long', ...
-    'runs/poiseuille_x_solid_thermal_long', ...
-    'fitStartFraction', 0.5, ...
-    'excludeWallCells', 2);
-```
-
-This compares `Ux(y)` for solid y-walls with `Uy(x)` for solid x-walls. Agreement of the two profiles is the first axis-symmetry check for the generic `solid` thermal boundary condition.
-
-## Sliding-wall Couette validation
-
-Tangential solid-wall motion is tested with transposed Couette runs:
-
-```bash
-./build/src_mpcd_base examples/params_couette_y_solid_thermal_long.kv
-./build/src_mpcd_base examples/params_couette_x_solid_thermal_long.kv
-```
-
-MATLAB post-processing:
-
-```matlab
-addpath('matlab')
-out = validate_solid_thermal_couette_sliding( ...
-    'runs/couette_y_solid_thermal_long', ...
-    'runs/couette_x_solid_thermal_long', ...
-    'fitStartFraction', 0.5, ...
-    'excludeWallCells', 2, ...
-    'stationaryWindowFraction', 0.25);
-```
-
-See `docs/SOLID_THERMAL_COUETTE_SLIDING.md`.
-
-## Active fluid domain
-
-The code separates the fixed numerical box (`Lx`, `Ly`, `Nx`, `Ny`) from the active fluid domain used by solid-wall reflection and solid-thermal wall coupling. By default they coincide. The active-domain bounds are controlled by `fluidXMin0`, `fluidXMax0`, `fluidYMin0`, `fluidYMax0` and optional boundary velocities. The aliases `fluidYTop0` and `fluidYTopVelocity` are available for future top-piston/EOS tests. Runtime summaries record `fluidArea` and `meanPhysicalDensity`; detailed field analysis remains in MATLAB post-processing.
-
-See `docs/ACTIVE_FLUID_DOMAIN.md`.
-
-### Active-domain smoke tests
-
-The active-domain refactor includes two smoke-test parameter files:
-
-```text
-examples/params_active_domain_y_top_static.kv
-examples/params_active_domain_y_top_slow_motion.kv
-```
-
-They require a reduced-domain initial state, `initial_state_active_y095.smpcd`, generated from MATLAB with particles inside `0 <= y <= 0.95`. The helper `matlab/validate_active_fluid_domain_refactor.m` summarizes `fluidYMax`, `fluidArea`, mean physical density and thermal control from `summary_runtime.csv`.
-
-See `docs/ACTIVE_FLUID_DOMAIN_SMOKE_TESTS.md`.
-
-## Immersed analytic circle
-
-The base solver now supports a first fixed immersed analytic circular solid via
-`immersedCircleEnable=true`. It reuses the generic `solid_thermal` wall coupling
-and adds only runtime control diagnostics (`hitsImmersed`,
-`virtualMassImmersed`). See `docs/IMMERSED_ANALYTIC_CIRCLE.md` for parameters,
-state generation and smoke-test commands.
-
-## Recent immersed-circle validation example
-
-- `examples/params_immersed_circle_rotating_64x64.kv`: fixed circular immersed solid with prescribed angular wall velocity.
-
-### Translating immersed circle
-
-A first slowly translating immersed circular solid is provided in
-`examples/params_immersed_circle_translating_64x64.kv`. The moving center uses
-`immersedCircleVx/Vy`; the local wall velocity used by reflection and
-`solid_thermal` coupling is the rigid-body velocity of the moving circle. See
-`docs/IMMERSED_CIRCLE_TRANSLATION.md`.
-
-## Incompressible Q6/Q9 development branch
-
-The incompressible development is carried on `feature/elliptic-q6-core`, while
-`clean/src-mpcd-base` remains the validated compressible baseline. The
-incompressible branch is built around a single generic elliptic projection core,
-not separate Q6/Q9-specific solvers.
-
-The core solves generic face-flux projection problems of the form:
-
-```text
-F_new = F_base - alpha grad(phi)
-div(F_new) = target
-```
-
-The same module is used for periodic projection, channel projection,
-Q9 mass-flux projection and elliptic low-pass filtering. This is intended to
-remain close to the validated MATLAB `general_bc` / `relax_to_uniform_lowk`
-method and to prepare later MPI/CUDA and surface-tension development.
-
-Current validation documents:
-
-- `docs/INCOMPRESSIBLE_Q6_Q9_STATUS.md`: current Q6/Q9 status and validation numbers.
-- `docs/ELLIPTIC_PROJECTION_CORE.md`: generic elliptic projection core.
-- `docs/Q6_PERIODIC_ADAPTER.md`: periodic Q6 adapter.
-- `docs/Q6_CHANNEL_POISEUILLE_VALIDATION.md`: Q6 channel validation.
-- `docs/Q9_PERIODIC_ADAPTER.md`: periodic Q9 mass-flux adapter.
-- `docs/Q9_BETA_SWEEP_VALIDATION.md`: Q9 beta sweep and raw-vs-filtered behavior.
-- `docs/TAYLOR_GREEN_Q9_FILTERED_VALIDATION.md`: filtered Q9 Taylor-Green validation.
-- `docs/POISEUILLE_Q9_FILTERED_CHANNEL_VALIDATION.md`: filtered Q9 channel validation.
-- `docs/Q9_LOWK_FILTERING_INCIDENT.md`: documented Q9 channel instability and low-k mismatch fix.
-- `docs/PISTON_ACTIVE_DOMAIN_Q6_Q9.md`: moving active-domain piston with Q6/Q9.
-- `docs/VIRIAL_EOS_PISTON.md`: optional virial EOS pressure kick.
-- `docs/VIRIAL_EOS_SWEEP.md`: piston virial parameter sweep and `PtotMeanRatio` diagnostics.
-- `docs/IMMERSED_SOLID_Q6_Q9_MASK.md`: immersed-solid mask for Q6/Q9 projections.
-- `docs/BACKWARD_STEP_PARAMETRIC_Q6_Q9.md`: backward-step Q6/Q9 parameter sweep.
-- `docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md`: frozen immersed-solid liquid-closure default from the backward-step validation.
-- `docs/VON_KARMAN_LONG_COMPARISON.md`: periodic forced von-Karman-style cylinder comparison setup.
-
-For MATLAB scripts in this branch, the intended workflow is to launch MATLAB
-from the `matlab/` directory and use `../runs/...` paths, for example:
-
-```matlab
-addpath('.')
-out = validate_poiseuille_q9_channel_long('makePlots', true);
-```
+No `.patch` files should be produced for future handoffs.  Use differential
+archives named `*_files_only.zip` containing only modified or added files.

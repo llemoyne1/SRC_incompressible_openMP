@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 0088 open-channel full inlet/outlet with VP/no-slip walls and Poiseuille inlet/outlet profile.
+# Physical segmented inlet/outlet slit/nozzle prototype.
 #
-# Purpose
-# -------
-# The 0086 boundary-mode sweep showed that Q9 is clean when
-# q9OpenBoundaryExclusionCells=0, while any inactive open-boundary band can
-# act as a numerical impedance/interface.  This runner tests the complete
-# q9_virial method with both Q9 and virial active up to the full open boundary:
+# This script is intentionally separate from the validated full-height
+# Poiseuille/open-channel runners.  Segmented apertures are interpreted here as
+# real geometric openings: a left inlet slit and a right outlet window.  They are
+# not used as a numerical fix for the canonical full-height channel.
+#
+# The nominal Q9/virial open-boundary policy remains the validated one:
 #
 #   q9OpenBoundaryExclusionCells = 0
 #   virialOpenBoundaryExclusionCells = 0
 #
-# The geometry remains full-height inlet/outlet with no immersed solid, but the
-# top/bottom boundaries are now solid thermal/VP-like walls.  The imposed
-# x-face velocity/flux profile is Poiseuille in y and uses UIN as the cross-
-# section mean velocity.
+# so that Q9 and virial corrections remain active up to the open aperture.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -25,13 +22,12 @@ AUTO_BUILD="${AUTO_BUILD:-0}"
 AUTO_ANALYZE="${AUTO_ANALYZE:-0}"
 CASE_STEPS="${CASE_STEPS:-60000}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
-DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-5000}"
 NUM_THREADS="${NUM_THREADS:-12}"
-RUN_ROOT="${RUN_ROOT:-runs/open_channel_jet}"
+RUN_ROOT="${RUN_ROOT:-runs/open_channel_segmented_slit_nozzle_0091}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-0}"
 
-# Channel and particle scales.  Default gamma=30 matches the recent open-channel
-# hard-inlet tests; override GAMMA=20 for direct comparison.
+# Physical channel and particle scales.
 Lx="${Lx:-4.0}"
 Ly="${Ly:-1.0}"
 Nx="${Nx:-96}"
@@ -42,15 +38,18 @@ KBT="${KBT:-0.0025}"
 UIN="${UIN:-0.05}"
 INIT_UX="${INIT_UX:-0.0}"
 
-# Smooth start-up avoids the impulsive hard-inlet shock while preserving the
-# final target Uin=Uex.  For smokes, use INLET_RAMP_END_TIME=1.0.
+# Smooth start-up.  For short smoke tests, override INLET_RAMP_END_TIME=1.0.
 INLET_RAMP_ENABLE="${INLET_RAMP_ENABLE:-true}"
 INLET_RAMP_START_TIME="${INLET_RAMP_START_TIME:-0.0}"
 INLET_RAMP_END_TIME="${INLET_RAMP_END_TIME:-10.0}"
 INLET_RAMP_INITIAL_FACTOR="${INLET_RAMP_INITIAL_FACTOR:-0.0}"
 INLET_RAMP_FINAL_FACTOR="${INLET_RAMP_FINAL_FACTOR:-1.0}"
 INLET_RAMP_PROFILE="${INLET_RAMP_PROFILE:-smoothstep}"
-INLET_VELOCITY_SPATIAL_PROFILE="${INLET_VELOCITY_SPATIAL_PROFILE:-poiseuille_y_mean}"
+
+# Velocity profile over the aperture.  uniform is the least ambiguous slit/nozzle
+# prototype; override with poiseuille_y_mean or flat_taper_y for stress tests.
+INLET_VELOCITY_SPATIAL_PROFILE="${INLET_VELOCITY_SPATIAL_PROFILE:-uniform}"
+INLET_VELOCITY_WALL_TAPER_CELLS="${INLET_VELOCITY_WALL_TAPER_CELLS:-2.0}"
 
 safe_tag() {
   local x="$1"
@@ -62,27 +61,21 @@ safe_tag() {
 
 KBT_TAG="$(safe_tag "$KBT")"
 UX_TAG="$(safe_tag "$INIT_UX")"
-STATE_FILE="${STATE_FILE:-initial_state_open_channel_full_io_vp_poiseuille_${Nx}x${Ny}_g${GAMMA}_kbt${KBT_TAG}_ux${UX_TAG}.smpcd}"
+STATE_FILE="${STATE_FILE:-initial_state_open_channel_segmented_${Nx}x${Ny}_g${GAMMA}_kbt${KBT_TAG}_ux${UX_TAG}.smpcd}"
 
-# Open-boundary bands are full height here.  The reservoir width is still a few
-# cells in x, but there is no aperture trimming in y.
 INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-3}"
 Q9_OPEN_EXCLUSION_CELLS="${Q9_OPEN_EXCLUSION_CELLS:-0}"
 VIRIAL_OPEN_EXCLUSION_CELLS="${VIRIAL_OPEN_EXCLUSION_CELLS:-0}"
 
-# Segmented left/right open-boundary apertures.  Defaults close two cell rows
-# near each horizontal wall for Ny=24, avoiding the wall/outlet corner
-# contradiction.  For other Ny, override LEFT_OPEN_YMIN/YMAX and
-# RIGHT_OPEN_YMIN/YMAX explicitly.
+# Segmented left/right open-boundary apertures.  Defaults define a narrow inlet
+# slit and a wider downstream outlet window.  These are physical geometry
+# parameters, not wall-corner masks.
 OPEN_APERTURE_ENABLE="${OPEN_APERTURE_ENABLE:-true}"
-LEFT_OPEN_YMIN="${LEFT_OPEN_YMIN:-0.4}"
-LEFT_OPEN_YMAX="${LEFT_OPEN_YMAX:-0.6}"
-RIGHT_OPEN_YMIN="${RIGHT_OPEN_YMIN:-0.2}"
-RIGHT_OPEN_YMAX="${RIGHT_OPEN_YMAX:-0.8}"
+LEFT_OPEN_YMIN="${LEFT_OPEN_YMIN:-0.40}"
+LEFT_OPEN_YMAX="${LEFT_OPEN_YMAX:-0.60}"
+RIGHT_OPEN_YMIN="${RIGHT_OPEN_YMIN:-0.20}"
+RIGHT_OPEN_YMAX="${RIGHT_OPEN_YMAX:-0.80}"
 
-
-
-# Validated Q6/Q9 model parameters from feature/elliptic-q6-core Poiseuille.
 Q6_STRENGTH="${Q6_STRENGTH:-1.0}"
 Q9_STRENGTH="${Q9_STRENGTH:-1.0}"
 Q9_BETA="${Q9_BETA:-0.0005}"
@@ -95,7 +88,7 @@ Q9_CORRECTION_LIMITER_OVER_THERMAL="${Q9_CORRECTION_LIMITER_OVER_THERMAL:-0.5}"
 Q9_CORRECTION_LIMITER_THERMAL_KBT="${Q9_CORRECTION_LIMITER_THERMAL_KBT:-0.0}"
 Q9_CORRECTION_LIMITER="${Q9_CORRECTION_LIMITER:-0.0}"
 
-# Gamma-relative low-mass policy.  For gamma=30: start=1.5, end/floor/min=12.
+# Gamma-relative low-mass policy.
 Q9_LOW_MASS_TREATMENT="${Q9_LOW_MASS_TREATMENT:-ramp_floor}"
 Q9_MIN_CELL_MASS_OVER_GAMMA="${Q9_MIN_CELL_MASS_OVER_GAMMA:-0.40}"
 Q9_MASS_FLOOR_OVER_GAMMA="${Q9_MASS_FLOOR_OVER_GAMMA:-0.40}"
@@ -108,12 +101,8 @@ Q9_MASS_FLOOR="${Q9_MASS_FLOOR:-0.0}"
 Q9_LOW_MASS_RAMP_START="${Q9_LOW_MASS_RAMP_START:-0.0}"
 Q9_LOW_MASS_RAMP_END="${Q9_LOW_MASS_RAMP_END:-0.0}"
 
-# Virial closure defaults used in the current inlet/outlet branch.
 VIRIAL_K="${VIRIAL_K:-0.50}"
 VIRIAL_BETA="${VIRIAL_BETA:-0.05}"
-
-# Do not reset global mean flow in this diagnostic.  The imposed open-boundary
-# fluxes already set Uin=Uex in Q6/Q9.
 KEEP_MEAN_FLOW="${KEEP_MEAN_FLOW:-false}"
 
 RUN_CLASSIC="${RUN_CLASSIC:-0}"
@@ -180,6 +169,7 @@ bcRight = outlet
 bcBottom = solid
 bcTop = solid
 
+# Physical segmented apertures.
 openBoundaryApertureEnable = ${OPEN_APERTURE_ENABLE}
 leftOpenYMin = ${LEFT_OPEN_YMIN}
 leftOpenYMax = ${LEFT_OPEN_YMAX}
@@ -190,9 +180,7 @@ bottomOpenXMax = ${Lx}
 topOpenXMin = 0.0
 topOpenXMax = ${Lx}
 
-# Full-height hard inlet.  The matching Uex=Uin condition is imposed in Q6/Q9
-# by the balanced open-boundary flux pair.  The spatial profile is Poiseuille
-# in y and UIN is interpreted as the cross-section mean velocity.
+# The same ramped velocity is exposed to particle inlet, Q6 flux and Q9 mass flux.
 inletUxLeft = ${UIN}
 inletUyLeft = 0.0
 inletUxRight = ${UIN}
@@ -204,6 +192,7 @@ inletVelocityRampInitialFactor = ${INLET_RAMP_INITIAL_FACTOR}
 inletVelocityRampFinalFactor = ${INLET_RAMP_FINAL_FACTOR}
 inletVelocityRampProfile = ${INLET_RAMP_PROFILE}
 inletVelocitySpatialProfile = ${INLET_VELOCITY_SPATIAL_PROFILE}
+inletVelocityWallTaperCells = ${INLET_VELOCITY_WALL_TAPER_CELLS}
 inletKBT = ${KBT}
 inletThermalNoise = 1.0
 inletReservoirMode = hard_cell_density
@@ -268,21 +257,10 @@ virialMomentumCorrectionEnable = true
 virialOpenBoundaryExclusionCells = ${VIRIAL_OPEN_EXCLUSION_CELLS}
 
 immersedSolidEnable = false
-immersedSolidShape = rectangle
-immersedSolidXMin = 0.25
-immersedSolidXMax = 0.65
-immersedSolidYMin = 0.0
-immersedSolidYMax = 0.50
-immersedSolidFractionSamples = 4
-immersedSolidVx = 0.0
-immersedSolidVy = 0.0
-immersedSolidWallUx = 0.0
-immersedSolidWallUy = 0.0
-immersedSolidOmega = 0.0
+projectionAllowUnmaskedImmersedSolid = false
 
-# Solid thermal top/bottom walls.  This is the first no-slip/VP-like
-# compatibility test after the clean full-IO slip baseline.
-wallVpEnable = true
+# Solid thermal top/bottom walls.  No immersed solid is present.
+wallVpEnable = false
 wallAccommodation = 1.0
 wallVpGamma = 0.0
 wallVpMass = 1.0
@@ -305,8 +283,8 @@ dumpStateEvery = ${DUMP_STATE_EVERY}
 numThreads = ${NUM_THREADS}
 EOF_KV
 
-  echo "[0088] running ${label}"
-  echo "[0088] params: ${params_file}"
+  echo "[0091-jet] running ${label}"
+  echo "[0091-jet] params: ${params_file}"
 
   if [[ "$CONTINUE_ON_ERROR" == "1" ]]; then
     set +e
@@ -314,7 +292,7 @@ EOF_KV
     local rc=${PIPESTATUS[0]}
     set -e
     if [[ "$rc" -ne 0 ]]; then
-      echo "[0088] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
+      echo "[0091-jet] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
       return 0
     fi
   else
@@ -322,34 +300,36 @@ EOF_KV
   fi
 }
 
-echo "[0088] full-height inlet/outlet, VP/no-slip y walls, Poiseuille x-profile, no immersed solid"
-echo "[0088] Umean=Uin=Uex=${UIN}; spatialProfile=${INLET_VELOCITY_SPATIAL_PROFILE}; ramp ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
-echo "[0088] Q9 limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
+echo "[0091-jet] segmented physical inlet/outlet aperture, no immersed solid"
+echo "[0091-jet] apertures: leftY=[${LEFT_OPEN_YMIN},${LEFT_OPEN_YMAX}], rightY=[${RIGHT_OPEN_YMIN},${RIGHT_OPEN_YMAX}], profile=${INLET_VELOCITY_SPATIAL_PROFILE}"
+echo "[0091-jet] ramp ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
+echo "[0091-jet] Q9/virial open exclusions: q9=${Q9_OPEN_EXCLUSION_CELLS}, virial=${VIRIAL_OPEN_EXCLUSION_CELLS}"
+echo "[0091-jet] Q9 limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
 
 SECONDS=0
-TAG="u${UIN//./p}_${Nx}x${Ny}"
+TAG="u${UIN//./p}_${Nx}x${Ny}_left${LEFT_OPEN_YMIN//./p}-${LEFT_OPEN_YMAX//./p}_right${RIGHT_OPEN_YMIN//./p}-${RIGHT_OPEN_YMAX//./p}"
 if [[ "$RUN_CLASSIC" == "1" ]]; then
-  write_case "openchan_classic_jet_${TAG}" "classic" "false" "false"
+  write_case "openchan_classic_segmented_slit_${TAG}" "classic" "false" "false"
 fi
 if [[ "$RUN_Q6" == "1" ]]; then
-  write_case "openchan_q6_jet_${TAG}" "q6" "false" "false"
+  write_case "openchan_q6_segmented_slit_${TAG}" "q6" "false" "false"
 fi
 if [[ "$RUN_Q9" == "1" ]]; then
-  write_case "openchan_q9_fullio_jet_${TAG}" "q9" "true" "false"
+  write_case "openchan_q9_segmented_slit_excl0_${TAG}" "q9" "true" "false"
 fi
 if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
-  write_case "openchan_q9_virial_jet_${TAG}" "q9_virial" "true" "true"
+  write_case "openchan_q9_virial_segmented_slit_excl0_${TAG}" "q9_virial" "true" "true"
 fi
 
 elapsed=$SECONDS
-printf '[0088] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
+printf '[0091-jet] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
 
-echo "[0088] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
+echo "[0091-jet] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
 
 if [[ "$AUTO_ANALYZE" == "1" ]]; then
   if command -v matlab >/dev/null 2>&1; then
     matlab -batch "cd('matlab'); analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
   else
-    echo "[0088] AUTO_ANALYZE=1 requested but matlab is not available." >&2
+    echo "[0091-jet] AUTO_ANALYZE=1 requested but matlab is not available." >&2
   fi
 fi
