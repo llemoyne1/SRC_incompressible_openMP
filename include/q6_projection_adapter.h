@@ -34,6 +34,9 @@ struct Q6ProjectionDiagnostics {
     std::uint64_t emptyCells = 0;
     std::uint64_t immersedSolidFluidCells = 0;
     std::uint64_t immersedSolidSolidCells = 0;
+    std::uint64_t immersedSolidCutCells = 0;
+    std::uint64_t immersedSolidActiveCutCells = 0;
+    std::uint64_t immersedSolidActiveAdjacentCells = 0;
     std::uint64_t immersedSolidClosedXFaces = 0;
     std::uint64_t immersedSolidClosedYFaces = 0;
     std::uint64_t immersedSolidCellClosedXFaces = 0;

@@ -109,6 +109,13 @@ int main(int argc, char** argv) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
         }
 
+        if (params.immersedSolidEnable && params.q9ImmersedSolidHaloCells > 0) {
+            std::cerr << "[src_mpcd_base] WARNING: q9ImmersedSolidHaloCells="
+                      << params.q9ImmersedSolidHaloCells
+                      << " enables legacy conservative Q9 halo exclusion near the immersed solid. "
+                      << "For nominal face/cell solid-boundary validation, use q9ImmersedSolidHaloCells=0.\n";
+        }
+
         std::cout << "[src_mpcd_base] Np=" << state.Np
                   << " grid=" << params.Nx << "x" << params.Ny
                   << " bc=[L:" << params.bcLeft

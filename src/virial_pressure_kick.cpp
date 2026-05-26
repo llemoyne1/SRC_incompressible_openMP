@@ -355,6 +355,9 @@ const ImmersedSolidProjectionMask* prepare_virial_immersed_mask(const Simulation
             params, grid, domain, static_cast<double>(0.0), params.projectionImmersedSolidFluidFractionThreshold);
         diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
         diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+        diag.immersedSolidCutCells = ws.immersedMask.cutCells;
+        diag.immersedSolidActiveCutCells = ws.immersedMask.activeCutCells;
+        diag.immersedSolidActiveAdjacentCells = ws.immersedMask.activeSolidAdjacentCells;
     } else {
         const int nc = params.Nx * params.Ny;
         ws.immersedMask = ImmersedSolidProjectionMask{};
@@ -590,6 +593,127 @@ void compute_boundary_aware_gradient(const SimulationParams& params,
     diag.gradPdriveMaxAbs = maxAbs;
 }
 
+
+bool immersed_solid_closed_east_face(const SimulationParams& params,
+                                     const ImmersedSolidProjectionMask* mask,
+                                     int ix,
+                                     int iy) {
+    if (mask == nullptr || mask->activeCell.empty()) return false;
+    const int Nx = params.Nx;
+    const bool periodicX = is_x_periodic(params);
+    if (!(periodicX || ix < Nx - 1)) return false;
+    const int ip = periodicX ? ((ix + 1) % Nx) : (ix + 1);
+    const std::size_t k = static_cast<std::size_t>(ix + Nx * iy);
+    const std::size_t ek = static_cast<std::size_t>(ip + Nx * iy);
+    const bool neighborSolid = mask->activeCell[ek] == 0u;
+    const bool cutClosed = !mask->faceClosedByCutX.empty() && mask->faceClosedByCutX[k] != 0u;
+    const bool closed = !mask->faceOpen.x.empty() && mask->faceOpen.x[k] == 0.0;
+    return closed && (neighborSolid || cutClosed);
+}
+
+bool immersed_solid_closed_west_face(const SimulationParams& params,
+                                     const ImmersedSolidProjectionMask* mask,
+                                     int ix,
+                                     int iy) {
+    if (mask == nullptr || mask->activeCell.empty()) return false;
+    const int Nx = params.Nx;
+    const bool periodicX = is_x_periodic(params);
+    if (!(periodicX || ix > 0)) return false;
+    const int im = periodicX ? ((ix + Nx - 1) % Nx) : (ix - 1);
+    const std::size_t wk = static_cast<std::size_t>(im + Nx * iy);
+    const bool neighborSolid = mask->activeCell[wk] == 0u;
+    const bool cutClosed = !mask->faceClosedByCutX.empty() && mask->faceClosedByCutX[wk] != 0u;
+    const bool closed = !mask->faceOpen.x.empty() && mask->faceOpen.x[wk] == 0.0;
+    return closed && (neighborSolid || cutClosed);
+}
+
+bool immersed_solid_closed_north_face(const SimulationParams& params,
+                                      const ImmersedSolidProjectionMask* mask,
+                                      int ix,
+                                      int iy) {
+    if (mask == nullptr || mask->activeCell.empty()) return false;
+    const int Nx = params.Nx;
+    const int Ny = params.Ny;
+    const bool periodicY = is_y_periodic(params);
+    if (!(periodicY || iy < Ny - 1)) return false;
+    const int jp = periodicY ? ((iy + 1) % Ny) : (iy + 1);
+    const std::size_t k = static_cast<std::size_t>(ix + Nx * iy);
+    const std::size_t nk = static_cast<std::size_t>(ix + Nx * jp);
+    const bool neighborSolid = mask->activeCell[nk] == 0u;
+    const bool cutClosed = !mask->faceClosedByCutY.empty() && mask->faceClosedByCutY[k] != 0u;
+    const bool closed = !mask->faceOpen.y.empty() && mask->faceOpen.y[k] == 0.0;
+    return closed && (neighborSolid || cutClosed);
+}
+
+bool immersed_solid_closed_south_face(const SimulationParams& params,
+                                      const ImmersedSolidProjectionMask* mask,
+                                      int ix,
+                                      int iy) {
+    if (mask == nullptr || mask->activeCell.empty()) return false;
+    const int Nx = params.Nx;
+    const int Ny = params.Ny;
+    const bool periodicY = is_y_periodic(params);
+    if (!(periodicY || iy > 0)) return false;
+    const int jm = periodicY ? ((iy + Ny - 1) % Ny) : (iy - 1);
+    const std::size_t sk = static_cast<std::size_t>(ix + Nx * jm);
+    const bool neighborSolid = mask->activeCell[sk] == 0u;
+    const bool cutClosed = !mask->faceClosedByCutY.empty() && mask->faceClosedByCutY[sk] != 0u;
+    const bool closed = !mask->faceOpen.y.empty() && mask->faceOpen.y[sk] == 0.0;
+    return closed && (neighborSolid || cutClosed);
+}
+
+struct VirialSolidNormalClipResult {
+    double removed2 = 0.0;
+    double removedMaxAbs = 0.0;
+    std::uint64_t cells = 0u;
+    std::uint64_t components = 0u;
+};
+
+VirialSolidNormalClipResult clip_virial_kick_normal_to_immersed_solid(const SimulationParams& params,
+                                                                      const ImmersedSolidProjectionMask* mask,
+                                                                      int c,
+                                                                      double& dux,
+                                                                      double& duy) {
+    VirialSolidNormalClipResult r{};
+    if (mask == nullptr || mask->activeSolidAdjacentCell.empty()) return r;
+    const std::size_t k = static_cast<std::size_t>(c);
+    if (mask->activeSolidAdjacentCell[k] == 0u) return r;
+
+    const int Nx = params.Nx;
+    const int ix = c % Nx;
+    const int iy = c / Nx;
+    bool clippedCell = false;
+
+    auto remove_component = [&](double value) {
+        const double a = std::abs(value);
+        r.removed2 += value * value;
+        r.removedMaxAbs = std::max(r.removedMaxAbs, a);
+        r.components += 1u;
+        clippedCell = true;
+    };
+
+    if (dux > 0.0 && immersed_solid_closed_east_face(params, mask, ix, iy)) {
+        remove_component(dux);
+        dux = 0.0;
+    } else if (dux < 0.0 && immersed_solid_closed_west_face(params, mask, ix, iy)) {
+        remove_component(dux);
+        dux = 0.0;
+    }
+
+    if (duy > 0.0 && immersed_solid_closed_north_face(params, mask, ix, iy)) {
+        remove_component(duy);
+        duy = 0.0;
+    } else if (duy < 0.0 && immersed_solid_closed_south_face(params, mask, ix, iy)) {
+        remove_component(duy);
+        duy = 0.0;
+    }
+
+    if (clippedCell) {
+        r.cells = 1u;
+    }
+    return r;
+}
+
 void compute_virial_velocity_kick(const SimulationParams& params,
                                   const ImmersedSolidProjectionMask* mask,
                                   const VirialPressureWorkspace& ws,
@@ -602,7 +726,11 @@ void compute_virial_velocity_kick(const SimulationParams& params,
     double raw2 = 0.0;
     double applied2 = 0.0;
     double appliedMax = 0.0;
-#pragma omp parallel for reduction(+:raw2,applied2) reduction(max:appliedMax) if(nc > 256)
+    double clipped2 = 0.0;
+    double clippedMax = 0.0;
+    std::uint64_t clippedCells = 0u;
+    std::uint64_t clippedComponents = 0u;
+#pragma omp parallel for reduction(+:raw2,applied2,clipped2,clippedCells,clippedComponents) reduction(max:appliedMax,clippedMax) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
         if (!virial_cell_active(mask, k)) {
@@ -623,18 +751,29 @@ void compute_virial_velocity_kick(const SimulationParams& params,
             duxRaw = -params.dt * out.gradPx[k] / rhoKick;
             duyRaw = -params.dt * out.gradPy[k] / rhoKick;
         }
-        const double dux = params.virialBeta * duxRaw;
-        const double duy = params.virialBeta * duyRaw;
+        double dux = params.virialBeta * duxRaw;
+        double duy = params.virialBeta * duyRaw;
+        const VirialSolidNormalClipResult clip =
+            clip_virial_kick_normal_to_immersed_solid(params, mask, c, dux, duy);
         out.dux[k] = dux;
         out.duy[k] = duy;
         raw2 += duxRaw * duxRaw + duyRaw * duyRaw;
         applied2 += dux * dux + duy * duy;
         appliedMax = std::max(appliedMax, std::sqrt(dux * dux + duy * duy));
+        clipped2 += clip.removed2;
+        clippedMax = std::max(clippedMax, clip.removedMaxAbs);
+        clippedCells += clip.cells;
+        clippedComponents += clip.components;
     }
     const std::uint64_t activeCells = virial_active_cell_count(mask, nc);
     diag.duVirialRawRms = activeCells > 0u ? std::sqrt(raw2 / static_cast<double>(activeCells)) : 0.0;
     diag.duVirialAppliedRms = activeCells > 0u ? std::sqrt(applied2 / static_cast<double>(activeCells)) : 0.0;
     diag.duVirialAppliedMaxAbs = appliedMax;
+    diag.immersedSolidNormalKickClippedCells = clippedCells;
+    diag.immersedSolidNormalKickClippedComponents = clippedComponents;
+    diag.immersedSolidNormalKickClippedRms = clippedComponents > 0u ?
+        std::sqrt(clipped2 / static_cast<double>(clippedComponents)) : 0.0;
+    diag.immersedSolidNormalKickClippedMaxAbs = clippedMax;
     const double thermal = params.kBT > 0.0 ? std::sqrt(params.kBT) : 0.0;
     diag.duVirialOverThermalRms = thermal > 0.0 ? diag.duVirialAppliedRms / thermal : 0.0;
 }

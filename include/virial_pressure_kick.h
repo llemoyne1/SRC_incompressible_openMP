@@ -35,6 +35,13 @@ struct VirialPressureDiagnostics {
 
     std::uint64_t immersedSolidFluidCells = 0;
     std::uint64_t immersedSolidSolidCells = 0;
+    std::uint64_t immersedSolidCutCells = 0;
+    std::uint64_t immersedSolidActiveCutCells = 0;
+    std::uint64_t immersedSolidActiveAdjacentCells = 0;
+    std::uint64_t immersedSolidNormalKickClippedCells = 0;
+    std::uint64_t immersedSolidNormalKickClippedComponents = 0;
+    double immersedSolidNormalKickClippedRms = 0.0;
+    double immersedSolidNormalKickClippedMaxAbs = 0.0;
     std::uint64_t openBoundaryExcludedCells = 0;
     std::uint64_t activeCells = 0;
 

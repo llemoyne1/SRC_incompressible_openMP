@@ -22,8 +22,13 @@ struct ImmersedSolidProjectionMask {
     std::vector<std::uint8_t> faceClosedByCutX;
     std::vector<std::uint8_t> faceClosedByCutY;
     std::vector<double> fluidFraction;
+    std::vector<std::uint8_t> cutCell;
+    std::vector<std::uint8_t> activeSolidAdjacentCell;
     std::uint64_t fluidCells = 0;
     std::uint64_t solidCells = 0;
+    std::uint64_t cutCells = 0;
+    std::uint64_t activeCutCells = 0;
+    std::uint64_t activeSolidAdjacentCells = 0;
     std::uint64_t closedXFaces = 0;
     std::uint64_t closedYFaces = 0;
     std::uint64_t cellClosedXFaces = 0;

@@ -457,6 +457,8 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
     const int nc = grid.numCells;
     mask.activeCell.assign(static_cast<std::size_t>(nc), 1u);
     mask.fluidFraction.assign(static_cast<std::size_t>(nc), 1.0);
+    mask.cutCell.assign(static_cast<std::size_t>(nc), 0u);
+    mask.activeSolidAdjacentCell.assign(static_cast<std::size_t>(nc), 0u);
     resize_periodic_face_field(mask.faceOpen, nc);
     std::fill(mask.faceOpen.x.begin(), mask.faceOpen.x.end(), 1.0);
     std::fill(mask.faceOpen.y.begin(), mask.faceOpen.y.end(), 1.0);
@@ -474,7 +476,9 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
     const double thr = clamp(fluidFractionThreshold, 0.0, 1.0);
     std::uint64_t fluidCells = 0u;
     std::uint64_t solidCells = 0u;
-#pragma omp parallel for reduction(+:fluidCells,solidCells) if(nc > 1024)
+    std::uint64_t cutCells = 0u;
+    std::uint64_t activeCutCells = 0u;
+#pragma omp parallel for reduction(+:fluidCells,solidCells,cutCells,activeCutCells) if(nc > 1024)
     for (int j = 0; j < grid.Ny; ++j) {
         for (int i = 0; i < grid.Nx; ++i) {
             const int c = i + grid.Nx * j;
@@ -483,13 +487,19 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
             const double fluidFraction = clamp(1.0 - solidFraction, 0.0, 1.0);
             mask.fluidFraction[k] = fluidFraction;
             const bool active = fluidFraction >= thr;
+            const bool cut = solidFraction > 0.0 && fluidFraction > 0.0;
             mask.activeCell[k] = active ? 1u : 0u;
+            mask.cutCell[k] = cut ? 1u : 0u;
             if (active) ++fluidCells;
             else ++solidCells;
+            if (cut) ++cutCells;
+            if (cut && active) ++activeCutCells;
         }
     }
     mask.fluidCells = fluidCells;
     mask.solidCells = solidCells;
+    mask.cutCells = cutCells;
+    mask.activeCutCells = activeCutCells;
 
     const bool periodicX = is_x_periodic(params);
     const bool periodicY = is_y_periodic(params);
@@ -559,6 +569,50 @@ ImmersedSolidProjectionMask build_immersed_solid_projection_mask(const Simulatio
     mask.cellClosedYFaces = cellClosedY;
     mask.cutClosedXFaces = cutClosedX;
     mask.cutClosedYFaces = cutClosedY;
+
+    std::uint64_t activeAdjacent = 0u;
+#pragma omp parallel for reduction(+:activeAdjacent) if(nc > 1024)
+    for (int j = 0; j < grid.Ny; ++j) {
+        for (int i = 0; i < grid.Nx; ++i) {
+            const int c = i + grid.Nx * j;
+            const std::size_t k = static_cast<std::size_t>(c);
+            if (mask.activeCell[k] == 0u) {
+                continue;
+            }
+
+            bool touchesSolid = false;
+            if (periodicX || i < grid.Nx - 1) {
+                const int ip = periodicX ? ((i + 1) % grid.Nx) : (i + 1);
+                const int e = ip + grid.Nx * j;
+                const std::size_t ek = static_cast<std::size_t>(e);
+                if (mask.activeCell[ek] == 0u || mask.faceClosedByCutX[k] != 0u) touchesSolid = true;
+            }
+            if (periodicX || i > 0) {
+                const int im = periodicX ? ((i + grid.Nx - 1) % grid.Nx) : (i - 1);
+                const int w = im + grid.Nx * j;
+                const std::size_t wk = static_cast<std::size_t>(w);
+                if (mask.activeCell[wk] == 0u || mask.faceClosedByCutX[wk] != 0u) touchesSolid = true;
+            }
+            if (periodicY || j < grid.Ny - 1) {
+                const int jp = periodicY ? ((j + 1) % grid.Ny) : (j + 1);
+                const int n = i + grid.Nx * jp;
+                const std::size_t nk = static_cast<std::size_t>(n);
+                if (mask.activeCell[nk] == 0u || mask.faceClosedByCutY[k] != 0u) touchesSolid = true;
+            }
+            if (periodicY || j > 0) {
+                const int jm = periodicY ? ((j + grid.Ny - 1) % grid.Ny) : (j - 1);
+                const int s = i + grid.Nx * jm;
+                const std::size_t sk = static_cast<std::size_t>(s);
+                if (mask.activeCell[sk] == 0u || mask.faceClosedByCutY[sk] != 0u) touchesSolid = true;
+            }
+
+            if (touchesSolid) {
+                mask.activeSolidAdjacentCell[k] = 1u;
+                ++activeAdjacent;
+            }
+        }
+    }
+    mask.activeSolidAdjacentCells = activeAdjacent;
     return mask;
 }
 

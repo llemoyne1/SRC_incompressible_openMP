@@ -103,6 +103,9 @@ struct RuntimeSummary {
     std::uint64_t q6EmptyCells = 0;
     std::uint64_t q6ImmersedSolidFluidCells = 0;
     std::uint64_t q6ImmersedSolidSolidCells = 0;
+    std::uint64_t q6ImmersedSolidCutCells = 0;
+    std::uint64_t q6ImmersedSolidActiveCutCells = 0;
+    std::uint64_t q6ImmersedSolidActiveAdjacentCells = 0;
     std::uint64_t q6ImmersedSolidClosedXFaces = 0;
     std::uint64_t q6ImmersedSolidClosedYFaces = 0;
     std::uint64_t q6ImmersedSolidCellClosedXFaces = 0;
@@ -141,6 +144,9 @@ struct RuntimeSummary {
     std::uint64_t q9EmptyCells = 0;
     std::uint64_t q9ImmersedSolidFluidCells = 0;
     std::uint64_t q9ImmersedSolidSolidCells = 0;
+    std::uint64_t q9ImmersedSolidCutCells = 0;
+    std::uint64_t q9ImmersedSolidActiveCutCells = 0;
+    std::uint64_t q9ImmersedSolidActiveAdjacentCells = 0;
     std::uint64_t q9ImmersedSolidClosedXFaces = 0;
     std::uint64_t q9ImmersedSolidClosedYFaces = 0;
     std::uint64_t q9ImmersedSolidCellClosedXFaces = 0;
@@ -201,6 +207,13 @@ struct RuntimeSummary {
     double virialBeta = 0.0;
     std::uint64_t virialImmersedSolidFluidCells = 0;
     std::uint64_t virialImmersedSolidSolidCells = 0;
+    std::uint64_t virialImmersedSolidCutCells = 0;
+    std::uint64_t virialImmersedSolidActiveCutCells = 0;
+    std::uint64_t virialImmersedSolidActiveAdjacentCells = 0;
+    std::uint64_t virialImmersedSolidNormalKickClippedCells = 0;
+    std::uint64_t virialImmersedSolidNormalKickClippedComponents = 0;
+    double virialImmersedSolidNormalKickClippedRms = 0.0;
+    double virialImmersedSolidNormalKickClippedMaxAbs = 0.0;
     std::uint64_t virialOpenBoundaryExcludedCells = 0;
     std::uint64_t virialActiveCells = 0;
     double virialRhoMean = 0.0;

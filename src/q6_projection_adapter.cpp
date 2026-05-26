@@ -192,6 +192,9 @@ const EllipticProjectionMask* prepare_immersed_projection_mask(const SimulationP
     ws.ellipticMask.inactiveCells = ws.immersedMask.solidCells;
     diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
     diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+    diag.immersedSolidCutCells = ws.immersedMask.cutCells;
+    diag.immersedSolidActiveCutCells = ws.immersedMask.activeCutCells;
+    diag.immersedSolidActiveAdjacentCells = ws.immersedMask.activeSolidAdjacentCells;
     diag.immersedSolidClosedXFaces = ws.immersedMask.closedXFaces;
     diag.immersedSolidClosedYFaces = ws.immersedMask.closedYFaces;
     diag.immersedSolidCellClosedXFaces = ws.immersedMask.cellClosedXFaces;

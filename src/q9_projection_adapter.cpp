@@ -850,6 +850,9 @@ const EllipticProjectionMask* prepare_q9_projection_mask(const SimulationParams&
         ws.ellipticMask.inactiveCells = ws.immersedMask.solidCells;
         diag.immersedSolidFluidCells = ws.immersedMask.fluidCells;
         diag.immersedSolidSolidCells = ws.immersedMask.solidCells;
+        diag.immersedSolidCutCells = ws.immersedMask.cutCells;
+        diag.immersedSolidActiveCutCells = ws.immersedMask.activeCutCells;
+        diag.immersedSolidActiveAdjacentCells = ws.immersedMask.activeSolidAdjacentCells;
         diag.immersedSolidClosedXFaces = ws.immersedMask.closedXFaces;
         diag.immersedSolidClosedYFaces = ws.immersedMask.closedYFaces;
         diag.immersedSolidCellClosedXFaces = ws.immersedMask.cellClosedXFaces;
@@ -1595,6 +1598,16 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
     require_size(workspace.cellMassFloorApplied.size(), "cellMassFloorApplied");
     require_size(workspace.cellSafetyActive.size(), "cellSafetyActive");
 
+    const bool hasImmersedFieldMask = workspace.immersedMask.activeCell.size() == nc;
+    if (hasImmersedFieldMask) {
+        require_size(workspace.immersedMask.activeCell.size(), "immersedMask.activeCell");
+        require_size(workspace.immersedMask.cutCell.size(), "immersedMask.cutCell");
+        require_size(workspace.immersedMask.activeSolidAdjacentCell.size(), "immersedMask.activeSolidAdjacentCell");
+    }
+    auto optional_flag_value = [hasImmersedFieldMask](const std::vector<std::uint8_t>& src, std::size_t k) -> int {
+        return hasImmersedFieldMask && !src.empty() ? static_cast<int>(src[k]) : 0;
+    };
+
     std::ostringstream base;
     base << outputDir << "/q9_diagnostics_step_"
          << std::setw(8) << std::setfill('0') << step;
@@ -1611,7 +1624,8 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
             << "q9CorrectionAppliedDUx,q9CorrectionAppliedDUy,"
             << "q9CorrectionRawMag,q9CorrectionAppliedMag,"
             << "q9CorrectionLimiterRatio,q9LimiterActive,"
-            << "q9LowMassSuppressed,q9LowMassRamped,q9MassFloorApplied,q9SafetyActive\n";
+            << "q9LowMassSuppressed,q9LowMassRamped,q9MassFloorApplied,q9SafetyActive,"
+            << "q9ImmersedSolidActive,q9ImmersedSolidCut,q9ImmersedSolidAdjacentActive\n";
 
         for (int iy = 0; iy < params.Ny; ++iy) {
             for (int ix = 0; ix < params.Nx; ++ix) {
@@ -1628,7 +1642,10 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
                     << static_cast<int>(workspace.cellLowMassSuppressed[k]) << ','
                     << static_cast<int>(workspace.cellLowMassRamped[k]) << ','
                     << static_cast<int>(workspace.cellMassFloorApplied[k]) << ','
-                    << static_cast<int>(workspace.cellSafetyActive[k]) << '\n';
+                    << static_cast<int>(workspace.cellSafetyActive[k]) << ','
+                    << optional_flag_value(workspace.immersedMask.activeCell, k) << ','
+                    << optional_flag_value(workspace.immersedMask.cutCell, k) << ','
+                    << optional_flag_value(workspace.immersedMask.activeSolidAdjacentCell, k) << '\n';
             }
         }
         return;
@@ -1646,7 +1663,7 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
     const std::int32_t ny = static_cast<std::int32_t>(params.Ny);
     const std::int32_t st = static_cast<std::int32_t>(step);
     const std::int32_t nFloatFields = 8;
-    const std::int32_t nFlagFields = 5;
+    const std::int32_t nFlagFields = 8;
     out.write(magic, sizeof(magic));
     out.write(reinterpret_cast<const char*>(&version), sizeof(version));
     out.write(reinterpret_cast<const char*>(&st), sizeof(st));
@@ -1663,9 +1680,17 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
         out.write(reinterpret_cast<const char*>(buffer.data()),
                   static_cast<std::streamsize>(buffer.size() * sizeof(float)));
     };
+    std::vector<std::uint8_t> zeroFlagField(nc, 0u);
     auto write_flag_field = [&out](const std::vector<std::uint8_t>& src) {
         out.write(reinterpret_cast<const char*>(src.data()),
                   static_cast<std::streamsize>(src.size() * sizeof(std::uint8_t)));
+    };
+    auto write_optional_flag_field = [&write_flag_field, &zeroFlagField, hasImmersedFieldMask](const std::vector<std::uint8_t>& src) {
+        if (hasImmersedFieldMask && !src.empty()) {
+            write_flag_field(src);
+        } else {
+            write_flag_field(zeroFlagField);
+        }
     };
 
     // Float fields, fixed order.  MATLAB reader maps this order to names.
@@ -1684,6 +1709,9 @@ void write_q9_diagnostic_field_dump(const std::string& outputDir,
     write_flag_field(workspace.cellLowMassRamped);
     write_flag_field(workspace.cellMassFloorApplied);
     write_flag_field(workspace.cellSafetyActive);
+    write_optional_flag_field(workspace.immersedMask.activeCell);
+    write_optional_flag_field(workspace.immersedMask.cutCell);
+    write_optional_flag_field(workspace.immersedMask.activeSolidAdjacentCell);
 
     if (!out) {
         throw std::runtime_error("Error while writing compact Q9 diagnostic field dump: " + path);
