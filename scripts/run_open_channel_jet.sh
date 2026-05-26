@@ -14,23 +14,30 @@ set -euo pipefail
 #   virialOpenBoundaryExclusionCells = 0
 #
 # so that Q9 and virial corrections remain active up to the open aperture.
+#
+# Unlike the full-channel validation runners, this physical slit/nozzle
+# prototype defaults to openBoundaryOutletMode=hybrid: the outlet Q6/Q9
+# boundary flux starts from the current local Neumann face flux, optionally
+# blends weakly toward the balanced-flux profile, and applies a weak outlet-only
+# global flux-balance feedback.  Use OUTLET_MODE=neumann or balanced_flux for
+# direct comparisons.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-AUTO_BUILD="${AUTO_BUILD:-0}"
+AUTO_BUILD="${AUTO_BUILD:-1}"
 AUTO_ANALYZE="${AUTO_ANALYZE:-0}"
-CASE_STEPS="${CASE_STEPS:-60000}"
+CASE_STEPS="${CASE_STEPS:-40000}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
-DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-5000}"
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-500}"
 NUM_THREADS="${NUM_THREADS:-12}"
-RUN_ROOT="${RUN_ROOT:-runs/open_channel_segmented_slit_nozzle_0091}"
+RUN_ROOT="${RUN_ROOT:-runs/open_channel_segmented_slit_nozzle_0097}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-0}"
 
 # Physical channel and particle scales.
-Lx="${Lx:-4.0}"
+Lx="${Lx:-2.0}"
 Ly="${Ly:-1.0}"
-Nx="${Nx:-96}"
+Nx="${Nx:-48}"
 Ny="${Ny:-24}"
 GAMMA="${GAMMA:-20}"
 DT="${DT:-0.001}"
@@ -48,7 +55,7 @@ INLET_RAMP_PROFILE="${INLET_RAMP_PROFILE:-smoothstep}"
 
 # Velocity profile over the aperture.  uniform is the least ambiguous slit/nozzle
 # prototype; override with poiseuille_y_mean or flat_taper_y for stress tests.
-INLET_VELOCITY_SPATIAL_PROFILE="${INLET_VELOCITY_SPATIAL_PROFILE:-uniform}"
+INLET_VELOCITY_SPATIAL_PROFILE="${INLET_VELOCITY_SPATIAL_PROFILE:-poiseuille_y_mean}"
 INLET_VELOCITY_WALL_TAPER_CELLS="${INLET_VELOCITY_WALL_TAPER_CELLS:-2.0}"
 
 safe_tag() {
@@ -73,8 +80,11 @@ VIRIAL_OPEN_EXCLUSION_CELLS="${VIRIAL_OPEN_EXCLUSION_CELLS:-0}"
 OPEN_APERTURE_ENABLE="${OPEN_APERTURE_ENABLE:-true}"
 LEFT_OPEN_YMIN="${LEFT_OPEN_YMIN:-0.40}"
 LEFT_OPEN_YMAX="${LEFT_OPEN_YMAX:-0.60}"
-RIGHT_OPEN_YMIN="${RIGHT_OPEN_YMIN:-0.20}"
-RIGHT_OPEN_YMAX="${RIGHT_OPEN_YMAX:-0.80}"
+RIGHT_OPEN_YMIN="${RIGHT_OPEN_YMIN:-0.0}"
+RIGHT_OPEN_YMAX="${RIGHT_OPEN_YMAX:-1.0}"
+OUTLET_MODE="${OUTLET_MODE:-hybrid}"
+OUTLET_HYBRID_BLEND="${OUTLET_HYBRID_BLEND:-0.10}"
+OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GAIN:-0.50}"
 
 Q6_STRENGTH="${Q6_STRENGTH:-1.0}"
 Q9_STRENGTH="${Q9_STRENGTH:-1.0}"
@@ -83,6 +93,12 @@ Q9_LOWK_MAX_INDEX="${Q9_LOWK_MAX_INDEX:-2}"
 Q9_ELLIPTIC_LOW_PASS_PASSES="${Q9_ELLIPTIC_LOW_PASS_PASSES:-1}"
 
 # Universal Q9 correction limiter.  C=0.5 gives dU_limit=0.025 for kBT=0.0025.
+# The sidecar field dump is diagnostic-only; by default it writes compact
+# q9_diagnostics_step_*.q9bin files next to state_step_*.smpcd dumps so
+# MATLAB can visualize limiter activation.  Use format=csv for inspection.
+Q9_DIAGNOSTIC_FIELD_DUMP_ENABLE="${Q9_DIAGNOSTIC_FIELD_DUMP_ENABLE:-true}"
+Q9_DIAGNOSTIC_FIELD_DUMP_EVERY="${Q9_DIAGNOSTIC_FIELD_DUMP_EVERY:-0}"
+Q9_DIAGNOSTIC_FIELD_DUMP_FORMAT="${Q9_DIAGNOSTIC_FIELD_DUMP_FORMAT:-binary}"
 Q9_CORRECTION_LIMITER_MODE="${Q9_CORRECTION_LIMITER_MODE:-thermal_soft}"
 Q9_CORRECTION_LIMITER_OVER_THERMAL="${Q9_CORRECTION_LIMITER_OVER_THERMAL:-0.5}"
 Q9_CORRECTION_LIMITER_THERMAL_KBT="${Q9_CORRECTION_LIMITER_THERMAL_KBT:-0.0}"
@@ -101,7 +117,7 @@ Q9_MASS_FLOOR="${Q9_MASS_FLOOR:-0.0}"
 Q9_LOW_MASS_RAMP_START="${Q9_LOW_MASS_RAMP_START:-0.0}"
 Q9_LOW_MASS_RAMP_END="${Q9_LOW_MASS_RAMP_END:-0.0}"
 
-VIRIAL_K="${VIRIAL_K:-0.50}"
+VIRIAL_K="${VIRIAL_K:-1.0}"
 VIRIAL_BETA="${VIRIAL_BETA:-0.05}"
 KEEP_MEAN_FLOW="${KEEP_MEAN_FLOW:-false}"
 
@@ -179,6 +195,9 @@ bottomOpenXMin = 0.0
 bottomOpenXMax = ${Lx}
 topOpenXMin = 0.0
 topOpenXMax = ${Lx}
+openBoundaryOutletMode = ${OUTLET_MODE}
+openBoundaryOutletHybridBlend = ${OUTLET_HYBRID_BLEND}
+openBoundaryOutletFeedbackGain = ${OUTLET_FEEDBACK_GAIN}
 
 # The same ramped velocity is exposed to particle inlet, Q6 flux and Q9 mass flux.
 inletUxLeft = ${UIN}
@@ -243,6 +262,9 @@ q9TargetFilter = elliptic_lowpass
 q9LowKMaxIndex = ${Q9_LOWK_MAX_INDEX}
 q9EllipticLowPassPasses = ${Q9_ELLIPTIC_LOW_PASS_PASSES}
 q9MomentumCorrectionEnable = true
+q9DiagnosticFieldDumpEnable = ${Q9_DIAGNOSTIC_FIELD_DUMP_ENABLE}
+q9DiagnosticFieldDumpEvery = ${Q9_DIAGNOSTIC_FIELD_DUMP_EVERY}
+q9DiagnosticFieldDumpFormat = ${Q9_DIAGNOSTIC_FIELD_DUMP_FORMAT}
 
 virialDiagnosticsEnable = ${virial}
 virialKickEnable = ${virial}
@@ -283,8 +305,8 @@ dumpStateEvery = ${DUMP_STATE_EVERY}
 numThreads = ${NUM_THREADS}
 EOF_KV
 
-  echo "[0091-jet] running ${label}"
-  echo "[0091-jet] params: ${params_file}"
+  echo "[0094-jet] running ${label}"
+  echo "[0094-jet] params: ${params_file}"
 
   if [[ "$CONTINUE_ON_ERROR" == "1" ]]; then
     set +e
@@ -292,7 +314,7 @@ EOF_KV
     local rc=${PIPESTATUS[0]}
     set -e
     if [[ "$rc" -ne 0 ]]; then
-      echo "[0091-jet] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
+      echo "[0094-jet] WARNING: ${label} failed with exit code ${rc}" | tee -a "$RUN_ROOT/FAILED_CASES.txt"
       return 0
     fi
   else
@@ -300,11 +322,13 @@ EOF_KV
   fi
 }
 
-echo "[0091-jet] segmented physical inlet/outlet aperture, no immersed solid"
-echo "[0091-jet] apertures: leftY=[${LEFT_OPEN_YMIN},${LEFT_OPEN_YMAX}], rightY=[${RIGHT_OPEN_YMIN},${RIGHT_OPEN_YMAX}], profile=${INLET_VELOCITY_SPATIAL_PROFILE}"
-echo "[0091-jet] ramp ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
-echo "[0091-jet] Q9/virial open exclusions: q9=${Q9_OPEN_EXCLUSION_CELLS}, virial=${VIRIAL_OPEN_EXCLUSION_CELLS}"
-echo "[0091-jet] Q9 limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
+echo "[0094-jet] segmented physical inlet/outlet aperture, no immersed solid"
+echo "[0094-jet] apertures: leftY=[${LEFT_OPEN_YMIN},${LEFT_OPEN_YMAX}], rightY=[${RIGHT_OPEN_YMIN},${RIGHT_OPEN_YMAX}], profile=${INLET_VELOCITY_SPATIAL_PROFILE}"
+echo "[0094-jet] ramp ${INLET_RAMP_INITIAL_FACTOR}->${INLET_RAMP_FINAL_FACTOR}, t=${INLET_RAMP_START_TIME}->${INLET_RAMP_END_TIME}, profile=${INLET_RAMP_PROFILE}"
+echo "[0094-jet] Q9/virial open exclusions: q9=${Q9_OPEN_EXCLUSION_CELLS}, virial=${VIRIAL_OPEN_EXCLUSION_CELLS}"
+echo "[0094-jet] outlet projection mode: ${OUTLET_MODE}, hybridBlend=${OUTLET_HYBRID_BLEND}, feedbackGain=${OUTLET_FEEDBACK_GAIN}"
+echo "[0094-jet] Q9 limiter: mode=${Q9_CORRECTION_LIMITER_MODE}, overThermal=${Q9_CORRECTION_LIMITER_OVER_THERMAL}, thermalKBT=${Q9_CORRECTION_LIMITER_THERMAL_KBT}, legacyAbs=${Q9_CORRECTION_LIMITER}"
+echo "[0094-jet] Q9 diagnostic field dumps: enable=${Q9_DIAGNOSTIC_FIELD_DUMP_ENABLE}, every=${Q9_DIAGNOSTIC_FIELD_DUMP_EVERY:-0} (0 => dumpStateEvery), format=${Q9_DIAGNOSTIC_FIELD_DUMP_FORMAT}"
 
 SECONDS=0
 TAG="u${UIN//./p}_${Nx}x${Ny}_left${LEFT_OPEN_YMIN//./p}-${LEFT_OPEN_YMAX//./p}_right${RIGHT_OPEN_YMIN//./p}-${RIGHT_OPEN_YMAX//./p}"
@@ -322,14 +346,15 @@ if [[ "$RUN_Q9_VIRIAL" == "1" ]]; then
 fi
 
 elapsed=$SECONDS
-printf '[0091-jet] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
+printf '[0094-jet] done in %02d:%02d:%02d\n' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
 
-echo "[0091-jet] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
+echo "[0094-jet] Analyze with: cd matlab && R = analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
+echo "[0094-jet] Visualize limiter with: cd matlab && play_smpcd_filtered_animation('../${RUN_ROOT}/<case>','field','q9LimiterRatio','clim',[0 2]);"
 
 if [[ "$AUTO_ANALYZE" == "1" ]]; then
   if command -v matlab >/dev/null 2>&1; then
     matlab -batch "cd('matlab'); analyze_poiseuille_hard_inlet_free_outlet_0077('root','..','runRoot','${RUN_ROOT}','caseGlob','openchan_*');"
   else
-    echo "[0091-jet] AUTO_ANALYZE=1 requested but matlab is not available." >&2
+    echo "[0094-jet] AUTO_ANALYZE=1 requested but matlab is not available." >&2
   fi
 fi

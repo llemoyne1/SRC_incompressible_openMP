@@ -151,6 +151,47 @@ inletVelocityRampProfile = smoothstep
 The ramp factor is used coherently by the particle inlet, Q6 open-boundary flux
 and Q9 open-boundary mass flux.
 
+### Outlet projection mode
+
+The validated full-channel runners keep the historical balanced-flux policy:
+
+```text
+openBoundaryOutletMode = balanced_flux
+```
+
+In that mode, the Q6 outlet velocity flux and Q9 outlet mass flux are prescribed
+from the same ramped inlet target.  This is the conservative setting used for
+the full-height channel validation.
+
+For physical slit/nozzle experiments, two less-constrained outlet modes are
+available:
+
+```text
+openBoundaryOutletMode = neumann
+openBoundaryOutletMode = hybrid
+```
+
+In `neumann` mode the inlet face remains prescribed, while the outlet face uses
+the current local base face flux as its Q6/Q9 boundary flux.  Equivalently, the
+projection applies zero normal correction on the open part of the outlet.  If
+segmented apertures are enabled, the open outlet segment is free and the
+complementary wall part remains impermeable.
+
+The `hybrid` mode starts from the same local Neumann outlet profile, optionally
+blends it weakly toward the balanced-flux profile, then applies an outlet-only
+global flux-balance feedback.  It is intended for violent slit/nozzle injection
+runs where pure Neumann can allow mass accumulation but fully balanced flux is
+too constraining.  The control parameters are:
+
+```text
+openBoundaryOutletHybridBlend = 0.0   # 0: Neumann profile, 1: balanced profile
+openBoundaryOutletFeedbackGain = 0.0  # 0: off, 1: cancel current flux imbalance
+```
+
+For both `neumann` and `hybrid`, monitor `q6OpenBoundaryFluxBalance`,
+`q6OpenBoundaryMeanDivergence`, `q9OpenBoundaryMassFluxBalance` and
+`q9OpenBoundaryMeanDivergence` in `summary_runtime.csv`.
+
 ## Recommended inlet/outlet scripts
 
 Validated or nominal full-channel scripts:
@@ -174,7 +215,9 @@ Physical segmented aperture / slit-nozzle prototype:
 
 The segmented-aperture script is intentionally not a canonical Poiseuille
 validation.  It represents a physical slit/nozzle configuration with distinct
-left/right open apertures.
+left/right open apertures.  It defaults to `OUTLET_MODE=neumann`; set
+`OUTLET_MODE=balanced_flux` to compare against the validated full-channel
+projection policy.
 
 Legacy/stress-test script:
 
@@ -203,6 +246,47 @@ R = analyze_poiseuille_hard_inlet_free_outlet_0077( ...
 The useful fields for visual inspection include `rho`, `N`, `Ux`, `Uy`, `speed`,
 `omega`, `particles` and wall-band diagnostics where available.
 
+### Q9 limiter spatial diagnostics
+
+For delicate inlet/outlet cases with imposed density gradients, enable the Q9
+sidecar field dump:
+
+```text
+q9DiagnosticFieldDumpEnable = true
+q9DiagnosticFieldDumpEvery = 0      # 0 means: use dumpStateEvery
+q9DiagnosticFieldDumpFormat = binary # binary, csv
+```
+
+At dump steps the solver writes compact files named:
+
+```text
+q9_diagnostics_step_XXXXXXXX.q9bin
+```
+
+The legacy human-readable CSV form remains available with
+`q9DiagnosticFieldDumpFormat=csv`, but it is much larger and is intended mainly
+for debugging.  The diagnostic fields include the raw Q9 correction, the applied
+correction after safeguards, the limiter ratio and binary flags for limiter
+activation, low-mass suppression, low-mass ramping and mass-floor use.  These
+fields are diagnostic-only and do not modify the dynamics.
+
+Visualize them from MATLAB, for example:
+
+```matlab
+play_smpcd_filtered_animation('../runs/<run>/<case>', ...
+    'field','q9LimiterRatio', ...
+    'filterType','none', ...
+    'clim',[0 2]);
+
+play_smpcd_filtered_animation('../runs/<run>/<case>', ...
+    'field','q9LimiterActive', ...
+    'filterType','none', ...
+    'clim',[0 1]);
+```
+
+`q9LimiterRatio > 1` marks cells where the raw Q9 correction exceeded the
+nominal limiter threshold.  `q9LimiterActive` is the corresponding binary mask.
+
 ## Documentation map
 
 Older branch-level documentation is in `docs/`.  Newer development notes from
@@ -214,6 +298,12 @@ Current key notes:
   of full inlet/outlet channel cases;
 - `doc/README_0091_INLET_OUTLET_ROOT_CLEANUP.md`: root README/script cleanup and
   slit/nozzle separation;
+- `doc/README_0092_OUTLET_NEUMANN_MODE.md`: Q6/Q9 Neumann-like outlet mode for
+  physical slit/nozzle experiments;
+- `doc/README_0093_Q9_LIMITER_SPATIAL_DIAGNOSTICS.md`: cell-wise Q9 limiter and
+  safeguard field dumps;
+- `doc/README_0097_HYBRID_OUTLET_BOUNDARY.md`: hybrid Neumann/feedback outlet
+  mode for violent segmented slit/nozzle injection tests;
 - `doc/NEXT_CHAT_PROMPT_0091_SEGMENTED_INLET_OUTLET.md`: continuation prompt for
   developing physical segmented inlet/outlet cases.
 

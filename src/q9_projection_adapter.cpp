@@ -5,9 +5,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <vector>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -64,6 +67,16 @@ void resize_q9_workspace(Q9ProjectionWorkspace& ws,
     ws.cellPy.assign(nc, 0.0);
     ws.cellDUx.assign(nc, 0.0);
     ws.cellDUy.assign(nc, 0.0);
+    ws.cellDUxRaw.assign(nc, 0.0);
+    ws.cellDUyRaw.assign(nc, 0.0);
+    ws.cellCorrectionRawMag.assign(nc, 0.0);
+    ws.cellCorrectionAppliedMag.assign(nc, 0.0);
+    ws.cellCorrectionLimiterRatio.assign(nc, 0.0);
+    ws.cellCorrectionLimiterActive.assign(nc, 0u);
+    ws.cellLowMassSuppressed.assign(nc, 0u);
+    ws.cellLowMassRamped.assign(nc, 0u);
+    ws.cellMassFloorApplied.assign(nc, 0u);
+    ws.cellSafetyActive.assign(nc, 0u);
     ws.localMass.assign(nLocal, 0.0);
     ws.localPx.assign(nLocal, 0.0);
     ws.localPy.assign(nLocal, 0.0);
@@ -288,7 +301,190 @@ double mean_profile_value(const std::vector<double>& v, double fallback) {
     return s / static_cast<double>(v.size());
 }
 
+std::string normalized_open_boundary_outlet_mode(const SimulationParams& params) {
+    std::string m = params.openBoundaryOutletMode;
+    std::replace(m.begin(), m.end(), '-', '_');
+    return m;
+}
+
+bool open_boundary_outlet_mode_is_neumann(const SimulationParams& params) {
+    const std::string m = normalized_open_boundary_outlet_mode(params);
+    return m == "neumann" || m == "free" ||
+           m == "zero_gradient" || m == "zero_normal_gradient";
+}
+
+bool open_boundary_outlet_mode_is_hybrid(const SimulationParams& params) {
+    const std::string m = normalized_open_boundary_outlet_mode(params);
+    return m == "hybrid" || m == "neumann_feedback" || m == "hybrid_feedback";
+}
+
+bool open_boundary_outlet_uses_local_base(const SimulationParams& params) {
+    return open_boundary_outlet_mode_is_neumann(params) || open_boundary_outlet_mode_is_hybrid(params);
+}
+
+double outlet_hybrid_blend(const SimulationParams& params) {
+    if (!open_boundary_outlet_mode_is_hybrid(params)) return 0.0;
+    return std::max(0.0, std::min(1.0, params.openBoundaryOutletHybridBlend));
+}
+
+double outlet_feedback_gain(const SimulationParams& params) {
+    if (!open_boundary_outlet_mode_is_hybrid(params)) return 0.0;
+    return std::max(0.0, std::min(1.0, params.openBoundaryOutletFeedbackGain));
+}
+
+void blend_boundary_profiles(std::vector<double>& localProfile,
+                             const std::vector<double>& balancedProfile,
+                             double blend) {
+    if (blend <= 0.0 || localProfile.empty() || balancedProfile.size() != localProfile.size()) return;
+    const double a = std::max(0.0, std::min(1.0, blend));
+    for (std::size_t i = 0; i < localProfile.size(); ++i) {
+        localProfile[i] = (1.0 - a) * localProfile[i] + a * balancedProfile[i];
+    }
+}
+
+double x_profile_integral(const std::vector<double>& profile, const SimulationParams& params, const FluidDomainBounds& domain, double fallback) {
+    const double height = fluid_domain_height(domain);
+    if (profile.empty()) return fallback * height;
+    const double dy = height / static_cast<double>(std::max(1, params.Ny));
+    return std::accumulate(profile.begin(), profile.end(), 0.0) * dy;
+}
+
+double y_profile_integral(const std::vector<double>& profile, const SimulationParams& params, const FluidDomainBounds& domain, double fallback) {
+    const double width = fluid_domain_width(domain);
+    if (profile.empty()) return fallback * width;
+    const double dx = width / static_cast<double>(std::max(1, params.Nx));
+    return std::accumulate(profile.begin(), profile.end(), 0.0) * dx;
+}
+
+double x_aperture_length(const SimulationParams& params, const FluidDomainBounds& domain, const ApertureInterval& a) {
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    double length = 0.0;
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) length += dy;
+    }
+    return length;
+}
+
+double y_aperture_length(const SimulationParams& params, const FluidDomainBounds& domain, const ApertureInterval& a) {
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    double length = 0.0;
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) length += dx;
+    }
+    return length;
+}
+
+void add_uniform_to_x_aperture_profile(std::vector<double>& profile,
+                                       const SimulationParams& params,
+                                       const FluidDomainBounds& domain,
+                                       const ApertureInterval& a,
+                                       double delta) {
+    if (profile.empty() || delta == 0.0) return;
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) profile[static_cast<std::size_t>(j)] += delta;
+    }
+}
+
+void add_uniform_to_y_aperture_profile(std::vector<double>& profile,
+                                       const SimulationParams& params,
+                                       const FluidDomainBounds& domain,
+                                       const ApertureInterval& a,
+                                       double delta) {
+    if (profile.empty() || delta == 0.0) return;
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) profile[static_cast<std::size_t>(i)] += delta;
+    }
+}
+
+void set_x_boundary_flux_profile_from_base(std::vector<double>& profile,
+                                           const SimulationParams& params,
+                                           const FluidDomainBounds& domain,
+                                           const PeriodicFaceField& baseFlux,
+                                           bool highFace,
+                                           const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(params.Ny), 0.0);
+    const int i = highFace ? (params.Nx - 1) : 0;
+    const double dy = (domain.yMax - domain.yMin) / static_cast<double>(std::max(1, params.Ny));
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) {
+            const int c = i + params.Nx * j;
+            profile[static_cast<std::size_t>(j)] = baseFlux.x[static_cast<std::size_t>(c)];
+        }
+    }
+}
+
+void set_y_boundary_flux_profile_from_base(std::vector<double>& profile,
+                                           const SimulationParams& params,
+                                           const FluidDomainBounds& domain,
+                                           const PeriodicFaceField& baseFlux,
+                                           bool highFace,
+                                           const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(params.Nx), 0.0);
+    const int j = highFace ? (params.Ny - 1) : 0;
+    const double dx = (domain.xMax - domain.xMin) / static_cast<double>(std::max(1, params.Nx));
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) {
+            const int c = i + params.Nx * j;
+            profile[static_cast<std::size_t>(i)] = baseFlux.y[static_cast<std::size_t>(c)];
+        }
+    }
+}
+
+void apply_hybrid_feedback_to_q9_open_boundaries(EllipticProjectionBC& bc,
+                                                  const SimulationParams& params,
+                                                  const FluidDomainBounds& domain,
+                                                  const ApertureInterval& leftA,
+                                                  const ApertureInterval& rightA,
+                                                  const ApertureInterval& bottomA,
+                                                  const ApertureInterval& topA) {
+    const double gain = outlet_feedback_gain(params);
+    if (gain <= 0.0) return;
+
+    const bool leftOutlet = is_outlet_boundary_mode(params.bcLeft);
+    const bool rightOutlet = is_outlet_boundary_mode(params.bcRight);
+    const bool bottomOutlet = is_outlet_boundary_mode(params.bcBottom);
+    const bool topOutlet = is_outlet_boundary_mode(params.bcTop);
+
+    const double xLowIntegral = x_profile_integral(bc.xLowFluxProfile, params, domain, bc.xLowFlux);
+    const double xHighIntegral = x_profile_integral(bc.xHighFluxProfile, params, domain, bc.xHighFlux);
+    const double yLowIntegral = y_profile_integral(bc.yLowFluxProfile, params, domain, bc.yLowFlux);
+    const double yHighIntegral = y_profile_integral(bc.yHighFluxProfile, params, domain, bc.yHighFlux);
+    const double balance = (xHighIntegral - xLowIntegral) + (yHighIntegral - yLowIntegral);
+    if (balance == 0.0) return;
+
+    double outletLength = 0.0;
+    if (leftOutlet) outletLength += x_aperture_length(params, domain, leftA);
+    if (rightOutlet) outletLength += x_aperture_length(params, domain, rightA);
+    if (bottomOutlet) outletLength += y_aperture_length(params, domain, bottomA);
+    if (topOutlet) outletLength += y_aperture_length(params, domain, topA);
+    if (outletLength <= 0.0) return;
+
+    // Positive balance means net mass flux is leaving the domain in the
+    // elliptic sign convention.  The outlet-only correction below reduces this
+    // balance by gain*balance while preserving the local Neumann profile up to
+    // a weak uniform feedback over all open outlet cells.
+    const double perLength = gain * balance / outletLength;
+    if (leftOutlet) add_uniform_to_x_aperture_profile(bc.xLowFluxProfile, params, domain, leftA, +perLength);
+    if (rightOutlet) add_uniform_to_x_aperture_profile(bc.xHighFluxProfile, params, domain, rightA, -perLength);
+    if (bottomOutlet) add_uniform_to_y_aperture_profile(bc.yLowFluxProfile, params, domain, bottomA, +perLength);
+    if (topOutlet) add_uniform_to_y_aperture_profile(bc.yHighFluxProfile, params, domain, topA, -perLength);
+
+    bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, bc.xLowFlux);
+    bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, bc.xHighFlux);
+    bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, bc.yLowFlux);
+    bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, bc.yHighFlux);
+}
+
 void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
+                                       const PeriodicFaceField& baseMassFlux,
                                        const SimulationParams& params,
                                        const FluidDomainBounds& domain,
                                        double time,
@@ -303,37 +499,109 @@ void add_boundary_mass_fluxes_to_q9_bc(EllipticProjectionBC& bc,
         bc.yHighFlux = meanCellMass * domain.vyMax;
     }
 
-    // 0063 minimal open-boundary policy for Q9: use the same balanced face
-    // flux convention as 0062/Q6, but in mass-flux units.  The prescribed
-    // velocity is multiplied by the current mean cell mass, matching the Q9
-    // compact face-field convention baseMassFlux = cellMass * cellVelocity.
+    // Open-boundary mass-flux policy.  The validated default
+    // openBoundaryOutletMode=balanced_flux prescribes the ramped inlet velocity
+    // times the current mean cell mass on both open faces.  Neumann samples the
+    // outlet mass flux from the current base face field.  Hybrid starts from
+    // Neumann, optionally blends toward balanced_flux, then applies an
+    // outlet-only weak feedback that reduces the global open-boundary mass-flux
+    // imbalance.
+    ApertureInterval leftA{0.0, 0.0};
+    ApertureInterval rightA{0.0, 0.0};
+    ApertureInterval bottomA{0.0, 0.0};
+    ApertureInterval topA{0.0, 0.0};
+
     if (has_x_io_pair(params)) {
         const double jx = meanCellMass * q9_open_x_velocity_component(params, time);
-        bc.xLowFlux = jx;
-        bc.xHighFlux = jx;
-        if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
-            set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, jx,
-                                        x_face_aperture_y(params, domain, "left"));
-            set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, jx,
-                                        x_face_aperture_y(params, domain, "right"));
-            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, jx);
-            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, jx);
+        const bool localOutlet = open_boundary_outlet_uses_local_base(params);
+        const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
+        const double blend = outlet_hybrid_blend(params);
+        const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
+        const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
+        leftA = x_face_aperture_y(params, domain, "left");
+        rightA = x_face_aperture_y(params, domain, "right");
+
+        if (leftInlet || !localOutlet) {
+            bc.xLowFlux = jx;
+            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, jx, leftA);
+                bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, jx);
+            }
+        } else {
+            set_x_boundary_flux_profile_from_base(bc.xLowFluxProfile, params, domain, baseMassFlux, false, leftA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_x_boundary_flux_profile(balanced, params, domain, jx, leftA);
+                blend_boundary_profiles(bc.xLowFluxProfile, balanced, blend);
+            }
+            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
         }
+
+        if (rightInlet || !localOutlet) {
+            bc.xHighFlux = jx;
+            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, jx, rightA);
+                bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, jx);
+            }
+        } else {
+            set_x_boundary_flux_profile_from_base(bc.xHighFluxProfile, params, domain, baseMassFlux, true, rightA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_x_boundary_flux_profile(balanced, params, domain, jx, rightA);
+                blend_boundary_profiles(bc.xHighFluxProfile, balanced, blend);
+            }
+            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
+        }
+
         diag.openBoundaryEnabled = true;
     }
     if (has_y_io_pair(params)) {
         const double jy = meanCellMass * q9_open_y_velocity_component(params, time);
-        bc.yLowFlux = jy;
-        bc.yHighFlux = jy;
-        if (params.openBoundaryApertureEnable) {
-            set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, jy,
-                                        y_face_aperture_x(params, domain, "bottom"));
-            set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, jy,
-                                        y_face_aperture_x(params, domain, "top"));
-            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, jy);
-            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, jy);
+        const bool localOutlet = open_boundary_outlet_uses_local_base(params);
+        const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
+        const double blend = outlet_hybrid_blend(params);
+        const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
+        const bool topInlet = is_inlet_boundary_mode(params.bcTop);
+        bottomA = y_face_aperture_x(params, domain, "bottom");
+        topA = y_face_aperture_x(params, domain, "top");
+
+        if (bottomInlet || !localOutlet) {
+            bc.yLowFlux = jy;
+            if (params.openBoundaryApertureEnable) {
+                set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, jy, bottomA);
+                bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, jy);
+            }
+        } else {
+            set_y_boundary_flux_profile_from_base(bc.yLowFluxProfile, params, domain, baseMassFlux, false, bottomA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, jy, bottomA);
+                blend_boundary_profiles(bc.yLowFluxProfile, balanced, blend);
+            }
+            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
         }
+
+        if (topInlet || !localOutlet) {
+            bc.yHighFlux = jy;
+            if (params.openBoundaryApertureEnable) {
+                set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, jy, topA);
+                bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, jy);
+            }
+        } else {
+            set_y_boundary_flux_profile_from_base(bc.yHighFluxProfile, params, domain, baseMassFlux, true, topA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, jy, topA);
+                blend_boundary_profiles(bc.yHighFluxProfile, balanced, blend);
+            }
+            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
+        }
+
         diag.openBoundaryEnabled = true;
+    }
+
+    if (open_boundary_outlet_mode_is_hybrid(params)) {
+        apply_hybrid_feedback_to_q9_open_boundaries(bc, params, domain, leftA, rightA, bottomA, topA);
     }
 
     diag.openBoundaryMassFluxXLow = bc.xLowFlux;
@@ -919,19 +1187,26 @@ Q9VelocityLimiterConfig q9_velocity_limiter_config(const SimulationParams& param
     return cfg;
 }
 
-void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
-                                      const PeriodicFaceField& correctionFlux,
+void correction_flux_to_velocity_kick(const PeriodicFaceField& correctionFlux,
                                       const EllipticProjectionMask* mask,
                                       const ImmersedSolidProjectionMask* immersedMask,
                                       const SimulationParams& params,
-                                      std::vector<double>& dux,
-                                      std::vector<double>& duy,
-                                      PeriodicFaceField& appliedCorrectionFlux,
+                                      Q9ProjectionWorkspace& ws,
                                       Q9ProjectionDiagnostics& diag) {
-    const int nc = static_cast<int>(cellMass.size());
-    dux.assign(static_cast<std::size_t>(nc), 0.0);
-    duy.assign(static_cast<std::size_t>(nc), 0.0);
-    resize_periodic_face_field(appliedCorrectionFlux, nc);
+    const int nc = static_cast<int>(ws.cellMass.size());
+    ws.cellDUx.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellDUy.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellDUxRaw.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellDUyRaw.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellCorrectionRawMag.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellCorrectionAppliedMag.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellCorrectionLimiterRatio.assign(static_cast<std::size_t>(nc), 0.0);
+    ws.cellCorrectionLimiterActive.assign(static_cast<std::size_t>(nc), 0u);
+    ws.cellLowMassSuppressed.assign(static_cast<std::size_t>(nc), 0u);
+    ws.cellLowMassRamped.assign(static_cast<std::size_t>(nc), 0u);
+    ws.cellMassFloorApplied.assign(static_cast<std::size_t>(nc), 0u);
+    ws.cellSafetyActive.assign(static_cast<std::size_t>(nc), 0u);
+    resize_periodic_face_field(ws.appliedCorrectionFlux, nc);
 
     const double strength = params.q9MassFluxProjectionStrength;
     const double minMass = q9_effective_mass_threshold(
@@ -992,38 +1267,44 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
 #pragma omp parallel for reduction(+:rawSum2,appliedSum2,activeCount,lowMass,ramped,floored,limited) reduction(max:rawMaxAbs,appliedMaxAbs) if(nc > 4096)
     for (int c = 0; c < nc; ++c) {
         const std::size_t k = static_cast<std::size_t>(c);
-        appliedCorrectionFlux.x[k] = 0.0;
-        appliedCorrectionFlux.y[k] = 0.0;
+        ws.appliedCorrectionFlux.x[k] = 0.0;
+        ws.appliedCorrectionFlux.y[k] = 0.0;
         if (!mask_active(mask, k)) {
             continue;
         }
         activeCount += 1u;
+        ws.cellSafetyActive[k] = 1u;
 
-        const double m = cellMass[k];
+        const double m = ws.cellMass[k];
         double rampWeight = 1.0;
         double massDenom = m;
         if (useRampFloor) {
             if (!(m > 0.0)) {
                 lowMass += 1u;
+                ws.cellLowMassSuppressed[k] = 1u;
                 continue;
             }
             if (rampEnd > rampStart) {
                 if (!(m > rampStart)) {
                     lowMass += 1u;
+                    ws.cellLowMassSuppressed[k] = 1u;
                     continue;
                 }
                 if (m < rampEnd) {
                     rampWeight = (m - rampStart) / (rampEnd - rampStart);
                     ramped += 1u;
+                    ws.cellLowMassRamped[k] = 1u;
                 }
             }
             massDenom = std::max(m, massFloor);
             if (massFloor > 0.0 && m < massFloor) {
                 floored += 1u;
+                ws.cellMassFloorApplied[k] = 1u;
             }
         } else {
             if (!(m > minMass)) {
                 lowMass += 1u;
+                ws.cellLowMassSuppressed[k] = 1u;
                 continue;
             }
         }
@@ -1038,6 +1319,11 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
         const double rawMag = std::sqrt(ux * ux + uy * uy);
         rawSum2 += ux * ux + uy * uy;
         rawMaxAbs = std::max(rawMaxAbs, rawMag);
+        ws.cellDUxRaw[k] = ux;
+        ws.cellDUyRaw[k] = uy;
+        ws.cellCorrectionRawMag[k] = rawMag;
+        ws.cellCorrectionLimiterRatio[k] = limiter.limit > 0.0 ? rawMag / limiter.limit : 0.0;
+        ws.cellCorrectionLimiterActive[k] = (limiter.limit > 0.0 && rawMag > limiter.limit) ? 1u : 0u;
 
         if (limiter.limit > 0.0 && rawMag > 0.0) {
             double scale = 1.0;
@@ -1056,12 +1342,13 @@ void correction_flux_to_velocity_kick(const std::vector<double>& cellMass,
             }
         }
 
-        dux[k] = ux;
-        duy[k] = uy;
-        appliedCorrectionFlux.x[k] = ux * m;
-        appliedCorrectionFlux.y[k] = uy * m;
+        ws.cellDUx[k] = ux;
+        ws.cellDUy[k] = uy;
+        ws.appliedCorrectionFlux.x[k] = ux * m;
+        ws.appliedCorrectionFlux.y[k] = uy * m;
 
         const double appliedMag = std::sqrt(ux * ux + uy * uy);
+        ws.cellCorrectionAppliedMag[k] = appliedMag;
         appliedSum2 += ux * ux + uy * uy;
         appliedMaxAbs = std::max(appliedMaxAbs, appliedMag);
     }
@@ -1215,7 +1502,7 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
         params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
     EllipticProjectionBC bc = q9_bc_from_particle_boundaries(params);
-    add_boundary_mass_fluxes_to_q9_bc(bc, params, domain, time, diag.densityMean, diag);
+    add_boundary_mass_fluxes_to_q9_bc(bc, workspace.baseMassFlux, params, domain, time, diag.densityMean, diag);
     apply_q9_target_filter(params, egrid, bc, workspace.alpha, mask, workspace.targetDivergence, workspace, diag);
     const std::vector<double> projectionTarget = build_q9_projection_target(
         params, egrid, bc, workspace.baseMassFlux, workspace.alpha, mask, workspace.targetDivergence, workspace);
@@ -1238,14 +1525,11 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     diag.massFluxDivAfterRms = result.diagnostics.divAfterRms;
     diag.massFluxDivAfterMaxAbs = result.diagnostics.divAfterMaxAbs;
 
-    correction_flux_to_velocity_kick(workspace.cellMass,
-                                     result.correctionFlux,
+    correction_flux_to_velocity_kick(result.correctionFlux,
                                      mask,
                                      params.immersedSolidEnable ? &workspace.immersedMask : nullptr,
                                      params,
-                                     workspace.cellDUx,
-                                     workspace.cellDUy,
-                                     workspace.appliedCorrectionFlux,
+                                     workspace,
                                      diag);
 
 #pragma omp parallel for if(nc > 4096)
@@ -1279,4 +1563,130 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
     return diag;
 }
 
+void write_q9_diagnostic_field_dump(const std::string& outputDir,
+                                    int step,
+                                    const SimulationParams& params,
+                                    const Q9ProjectionWorkspace& workspace) {
+    if (!params.q9DiagnosticFieldDumpEnable || !q9_projection_requested(params)) {
+        return;
+    }
+
+    const int expectedCells = params.Nx * params.Ny;
+    if (expectedCells <= 0 || workspace.allocatedCells != expectedCells) {
+        throw std::runtime_error("write_q9_diagnostic_field_dump: Q9 workspace is not allocated for the current grid");
+    }
+    const std::size_t nc = static_cast<std::size_t>(expectedCells);
+    auto require_size = [nc](std::size_t got, const char* name) {
+        if (got != nc) {
+            throw std::runtime_error(std::string("write_q9_diagnostic_field_dump: invalid field size for ") + name);
+        }
+    };
+    require_size(workspace.cellMass.size(), "cellMass");
+    require_size(workspace.cellDUxRaw.size(), "cellDUxRaw");
+    require_size(workspace.cellDUyRaw.size(), "cellDUyRaw");
+    require_size(workspace.cellDUx.size(), "cellDUx");
+    require_size(workspace.cellDUy.size(), "cellDUy");
+    require_size(workspace.cellCorrectionRawMag.size(), "cellCorrectionRawMag");
+    require_size(workspace.cellCorrectionAppliedMag.size(), "cellCorrectionAppliedMag");
+    require_size(workspace.cellCorrectionLimiterRatio.size(), "cellCorrectionLimiterRatio");
+    require_size(workspace.cellCorrectionLimiterActive.size(), "cellCorrectionLimiterActive");
+    require_size(workspace.cellLowMassSuppressed.size(), "cellLowMassSuppressed");
+    require_size(workspace.cellLowMassRamped.size(), "cellLowMassRamped");
+    require_size(workspace.cellMassFloorApplied.size(), "cellMassFloorApplied");
+    require_size(workspace.cellSafetyActive.size(), "cellSafetyActive");
+
+    std::ostringstream base;
+    base << outputDir << "/q9_diagnostics_step_"
+         << std::setw(8) << std::setfill('0') << step;
+
+    if (params.q9DiagnosticFieldDumpFormat == "csv") {
+        const std::string path = base.str() + ".csv";
+        std::ofstream out(path);
+        if (!out) {
+            throw std::runtime_error("Cannot open Q9 diagnostic field dump for writing: " + path);
+        }
+        out << std::setprecision(17);
+        out << "ix,iy,cellIndex,cellMass,"
+            << "q9CorrectionRawDUx,q9CorrectionRawDUy,"
+            << "q9CorrectionAppliedDUx,q9CorrectionAppliedDUy,"
+            << "q9CorrectionRawMag,q9CorrectionAppliedMag,"
+            << "q9CorrectionLimiterRatio,q9LimiterActive,"
+            << "q9LowMassSuppressed,q9LowMassRamped,q9MassFloorApplied,q9SafetyActive\n";
+
+        for (int iy = 0; iy < params.Ny; ++iy) {
+            for (int ix = 0; ix < params.Nx; ++ix) {
+                const int c = ix + params.Nx * iy;
+                const std::size_t k = static_cast<std::size_t>(c);
+                out << ix << ',' << iy << ',' << c << ','
+                    << workspace.cellMass[k] << ','
+                    << workspace.cellDUxRaw[k] << ',' << workspace.cellDUyRaw[k] << ','
+                    << workspace.cellDUx[k] << ',' << workspace.cellDUy[k] << ','
+                    << workspace.cellCorrectionRawMag[k] << ','
+                    << workspace.cellCorrectionAppliedMag[k] << ','
+                    << workspace.cellCorrectionLimiterRatio[k] << ','
+                    << static_cast<int>(workspace.cellCorrectionLimiterActive[k]) << ','
+                    << static_cast<int>(workspace.cellLowMassSuppressed[k]) << ','
+                    << static_cast<int>(workspace.cellLowMassRamped[k]) << ','
+                    << static_cast<int>(workspace.cellMassFloorApplied[k]) << ','
+                    << static_cast<int>(workspace.cellSafetyActive[k]) << '\n';
+            }
+        }
+        return;
+    }
+
+    const std::string path = base.str() + ".q9bin";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        throw std::runtime_error("Cannot open compact Q9 diagnostic field dump for writing: " + path);
+    }
+
+    const char magic[8] = {'Q','9','D','G','0','0','1','\0'};
+    const std::int32_t version = 1;
+    const std::int32_t nx = static_cast<std::int32_t>(params.Nx);
+    const std::int32_t ny = static_cast<std::int32_t>(params.Ny);
+    const std::int32_t st = static_cast<std::int32_t>(step);
+    const std::int32_t nFloatFields = 8;
+    const std::int32_t nFlagFields = 5;
+    out.write(magic, sizeof(magic));
+    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char*>(&st), sizeof(st));
+    out.write(reinterpret_cast<const char*>(&nx), sizeof(nx));
+    out.write(reinterpret_cast<const char*>(&ny), sizeof(ny));
+    out.write(reinterpret_cast<const char*>(&nFloatFields), sizeof(nFloatFields));
+    out.write(reinterpret_cast<const char*>(&nFlagFields), sizeof(nFlagFields));
+
+    std::vector<float> buffer(nc);
+    auto write_float_field = [&out, &buffer, nc](const std::vector<double>& src) {
+        for (std::size_t i = 0; i < nc; ++i) {
+            buffer[i] = static_cast<float>(src[i]);
+        }
+        out.write(reinterpret_cast<const char*>(buffer.data()),
+                  static_cast<std::streamsize>(buffer.size() * sizeof(float)));
+    };
+    auto write_flag_field = [&out](const std::vector<std::uint8_t>& src) {
+        out.write(reinterpret_cast<const char*>(src.data()),
+                  static_cast<std::streamsize>(src.size() * sizeof(std::uint8_t)));
+    };
+
+    // Float fields, fixed order.  MATLAB reader maps this order to names.
+    write_float_field(workspace.cellMass);
+    write_float_field(workspace.cellDUxRaw);
+    write_float_field(workspace.cellDUyRaw);
+    write_float_field(workspace.cellDUx);
+    write_float_field(workspace.cellDUy);
+    write_float_field(workspace.cellCorrectionRawMag);
+    write_float_field(workspace.cellCorrectionAppliedMag);
+    write_float_field(workspace.cellCorrectionLimiterRatio);
+
+    // Flag fields, fixed order.
+    write_flag_field(workspace.cellCorrectionLimiterActive);
+    write_flag_field(workspace.cellLowMassSuppressed);
+    write_flag_field(workspace.cellLowMassRamped);
+    write_flag_field(workspace.cellMassFloorApplied);
+    write_flag_field(workspace.cellSafetyActive);
+
+    if (!out) {
+        throw std::runtime_error("Error while writing compact Q9 diagnostic field dump: " + path);
+    }
+}
 } // namespace mpcd

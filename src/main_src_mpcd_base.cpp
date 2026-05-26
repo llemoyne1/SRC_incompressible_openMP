@@ -28,6 +28,16 @@ std::string state_dump_name(const std::string& outputDir, int step) {
     return oss.str();
 }
 
+bool should_dump_q9_diagnostic_fields(const mpcd::SimulationParams& params, int step) {
+    if (!params.q9DiagnosticFieldDumpEnable) {
+        return false;
+    }
+    const int every = params.q9DiagnosticFieldDumpEvery > 0
+        ? params.q9DiagnosticFieldDumpEvery
+        : params.dumpStateEvery;
+    return every > 0 && (step % every == 0 || step == params.nSteps);
+}
+
 double elapsed_seconds(std::chrono::steady_clock::time_point t0) {
     const auto now = std::chrono::steady_clock::now();
     return std::chrono::duration<double>(now - t0).count();
@@ -147,6 +157,9 @@ int main(int argc, char** argv) {
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
                 mpcd::write_smpcd_state(state_dump_name(params.outputDir, step), state);
+            }
+            if (should_dump_q9_diagnostic_fields(params, step)) {
+                mpcd::write_q9_diagnostic_field_dump(params.outputDir, step, params, workspace.q9);
             }
         }
 

@@ -229,6 +229,15 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "bottomOpenXMax" || key == "inletBottomXMax") p.bottomOpenXMax = parse_double(value, key);
         else if (key == "topOpenXMin" || key == "outletTopXMin") p.topOpenXMin = parse_double(value, key);
         else if (key == "topOpenXMax" || key == "outletTopXMax") p.topOpenXMax = parse_double(value, key);
+        else if (key == "openBoundaryOutletMode" || key == "openOutletBoundaryMode" ||
+                 key == "outletBoundaryMode" || key == "q6q9OutletBoundaryMode") {
+            p.openBoundaryOutletMode = get_lower(kv, key);
+            std::replace(p.openBoundaryOutletMode.begin(), p.openBoundaryOutletMode.end(), '-', '_');
+        }
+        else if (key == "openBoundaryOutletHybridBlend" || key == "outletHybridBlend" ||
+                 key == "openOutletHybridBlend") p.openBoundaryOutletHybridBlend = parse_double(value, key);
+        else if (key == "openBoundaryOutletFeedbackGain" || key == "outletFeedbackGain" ||
+                 key == "openOutletFeedbackGain" || key == "openBoundaryOutletMassFeedbackGain") p.openBoundaryOutletFeedbackGain = parse_double(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -305,6 +314,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q9MassFloorForCorrectionOverGamma" || key == "q9MassFloorOverGamma") p.q9MassFloorForCorrectionOverGamma = parse_double(value, key);
         else if (key == "q9LowMassRampStartOverGamma") p.q9LowMassRampStartOverGamma = parse_double(value, key);
         else if (key == "q9LowMassRampEndOverGamma") p.q9LowMassRampEndOverGamma = parse_double(value, key);
+        else if (key == "q9DiagnosticFieldDumpEnable" || key == "q9LimiterFieldDumpEnable" || key == "q9SafeguardFieldDumpEnable") p.q9DiagnosticFieldDumpEnable = parse_bool(value, key);
+        else if (key == "q9DiagnosticFieldDumpEvery" || key == "q9LimiterFieldDumpEvery" || key == "q9SafeguardFieldDumpEvery") p.q9DiagnosticFieldDumpEvery = parse_int(value, key);
+        else if (key == "q9DiagnosticFieldDumpFormat" || key == "q9LimiterFieldDumpFormat" || key == "q9SafeguardFieldDumpFormat") p.q9DiagnosticFieldDumpFormat = get_lower(kv, key);
         else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
         else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
         else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
@@ -595,6 +607,24 @@ void validate_simulation_params(const SimulationParams& p) {
             if (p.inletVelocityRampProfile != "linear" &&
                 p.inletVelocityRampProfile != "smoothstep") {
                 throw std::runtime_error("inletVelocityRampProfile must be linear or smoothstep");
+            }
+        }
+        {
+            std::string outletMode = lower(trim(p.openBoundaryOutletMode));
+            std::replace(outletMode.begin(), outletMode.end(), '-', '_');
+            if (outletMode != "balanced_flux" && outletMode != "prescribed_flux" &&
+                outletMode != "balanced" && outletMode != "prescribed" &&
+                outletMode != "dirichlet" && outletMode != "neumann" &&
+                outletMode != "free" && outletMode != "zero_gradient" &&
+                outletMode != "zero_normal_gradient" && outletMode != "hybrid" &&
+                outletMode != "neumann_feedback" && outletMode != "hybrid_feedback") {
+                throw std::runtime_error("openBoundaryOutletMode must be balanced_flux, neumann, or hybrid");
+            }
+            if (p.openBoundaryOutletHybridBlend < 0.0 || p.openBoundaryOutletHybridBlend > 1.0) {
+                throw std::runtime_error("openBoundaryOutletHybridBlend must be in [0,1]");
+            }
+            if (p.openBoundaryOutletFeedbackGain < 0.0 || p.openBoundaryOutletFeedbackGain > 1.0) {
+                throw std::runtime_error("openBoundaryOutletFeedbackGain must be in [0,1]");
             }
         }
         if (p.openBoundaryApertureEnable) {
@@ -896,6 +926,15 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.dumpStateEvery < 0) {
         throw std::runtime_error("dumpStateEvery must be non-negative");
+    }
+    if (p.q9DiagnosticFieldDumpEvery < 0) {
+        throw std::runtime_error("q9DiagnosticFieldDumpEvery must be non-negative");
+    }
+    if (p.q9DiagnosticFieldDumpFormat != "binary" && p.q9DiagnosticFieldDumpFormat != "csv") {
+        throw std::runtime_error("q9DiagnosticFieldDumpFormat must be binary or csv");
+    }
+    if (p.q9DiagnosticFieldDumpEnable && p.dumpStateEvery <= 0 && p.q9DiagnosticFieldDumpEvery <= 0) {
+        throw std::runtime_error("q9DiagnosticFieldDumpEnable requires dumpStateEvery>0 or q9DiagnosticFieldDumpEvery>0");
     }
     if (p.numThreads < 0) {
         throw std::runtime_error("numThreads must be non-negative");

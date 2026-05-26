@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "cell_grid.h"
@@ -98,6 +99,16 @@ struct Q9ProjectionWorkspace {
     std::vector<double> cellPy;
     std::vector<double> cellDUx;
     std::vector<double> cellDUy;
+    std::vector<double> cellDUxRaw;
+    std::vector<double> cellDUyRaw;
+    std::vector<double> cellCorrectionRawMag;
+    std::vector<double> cellCorrectionAppliedMag;
+    std::vector<double> cellCorrectionLimiterRatio;
+    std::vector<std::uint8_t> cellCorrectionLimiterActive;
+    std::vector<std::uint8_t> cellLowMassSuppressed;
+    std::vector<std::uint8_t> cellLowMassRamped;
+    std::vector<std::uint8_t> cellMassFloorApplied;
+    std::vector<std::uint8_t> cellSafetyActive;
     std::vector<double> localMass;
     std::vector<double> localPx;
     std::vector<double> localPy;
@@ -122,5 +133,10 @@ Q9ProjectionDiagnostics apply_q9_mass_flux_projection(ParticleState& state,
                                                       const FluidDomainBounds& domain,
                                                       double time,
                                                       Q9ProjectionWorkspace& workspace);
+
+void write_q9_diagnostic_field_dump(const std::string& outputDir,
+                                    int step,
+                                    const SimulationParams& params,
+                                    const Q9ProjectionWorkspace& workspace);
 
 } // namespace mpcd

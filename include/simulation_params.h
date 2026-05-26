@@ -146,6 +146,21 @@ struct SimulationParams {
     double topOpenXMin = 0.0;
     double topOpenXMax = -1.0;
 
+    // Q6/Q9 outlet treatment for inlet/outlet pairs.
+    //   balanced_flux : validated 0062/0063 policy; the outlet projection flux
+    //                   is prescribed equal to the ramped inlet flux.
+    //   neumann       : outlet correction has zero normal gradient in practice:
+    //                   the outlet boundary flux used by Q6/Q9 is the current
+    //                   local base face flux, while the inlet remains prescribed.
+    //                   Segmented aperture complements stay impermeable.
+    //   hybrid        : starts from the local Neumann outlet profile, optionally
+    //                   blends it toward the balanced-flux profile, then applies
+    //                   a weak global outlet-only flux-balance feedback.  This
+    //                   is intended for violent slit/nozzle injection tests.
+    std::string openBoundaryOutletMode = "balanced_flux";
+    double openBoundaryOutletHybridBlend = 0.0;   // 0: pure Neumann local profile, 1: balanced profile
+    double openBoundaryOutletFeedbackGain = 0.0;  // 0: off, 1: cancel current projection flux imbalance
+
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
     // and momentum in boundary-cut collision cells. The recommended path is
@@ -271,6 +286,16 @@ struct SimulationParams {
     double q9LowMassRampStartOverGamma = -1.0;
     double q9LowMassRampEndOverGamma = -1.0;
 
+    // Optional spatial Q9 safeguard diagnostics.  When enabled, the solver
+    // writes one sidecar at dump steps.  The default sidecar format is compact
+    // binary to avoid large CSV outputs during long visual runs.
+    // Formats: binary, csv.
+    // These files contain cell-wise raw/applied Q9 correction magnitudes,
+    // limiter ratio/activation and low-mass ramp/floor flags.  They are
+    // diagnostic-only and do not modify the dynamics.
+    bool q9DiagnosticFieldDumpEnable = false;
+    int q9DiagnosticFieldDumpEvery = 0; // <=0: use dumpStateEvery
+    std::string q9DiagnosticFieldDumpFormat = "binary";
 
     // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is
     // independent from Q6/Q9 and is normally called after Q6/Q9 and before the

@@ -5,7 +5,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 %
 %   Optional name/value pairs:
 %     'field'                    : 'omega','Ux','Uy','speed','rho','N','solidFraction','solidAny','q6Active','q6Excluded','q9Active','q9Excluded',
-%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','inletReservoir', 'outletReservoir','maskCode', default 'Uy'
+%                                  'q9OpenExcluded','q9ImmersedHalo','q9LowMassSuppressed','q9LowMassRamped','q9MassFloorApplied','q9SafetyActive','q9LimiterActive','q9LimiterRatio','q9CorrectionRawMag','q9CorrectionAppliedMag','inletReservoir','outletReservoir','maskCode', default 'Uy'
 %     'frameStride'              : use every nth frame, default 1
 %     'timeAverageStartFraction' : discard first fraction of frames, default 0.0
 %     'filterType'               : 'none' or 'box', default 'box'
@@ -28,7 +28,8 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 %   Practical diagnostics:
 %     play_smpcd_filtered_animation(runDir,'field','N','filterType','none')
 %     play_smpcd_filtered_animation(runDir,'field','q9Active','maskOverlay','all')
-%     play_smpcd_filtered_animation(runDir,'field','maskCode','clim',[0 6])
+%     play_smpcd_filtered_animation(runDir,'field','maskCode','clim',[0 7])
+%     play_smpcd_filtered_animation(runDir,'field','q9LimiterRatio','clim',[0 2])
 %
 %   maskCode convention:
 %     0 = Q6-inactive / solid-excluded cell
@@ -43,13 +44,13 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 p = inputParser;
 p.FunctionName = 'play_smpcd_filtered_animation';
 addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'Ux', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'N', @(s) ischar(s) || isstring(s));
 addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
-addParameter(p, 'filterType', 'box', @(s) ischar(s) || isstring(s));
+addParameter(p, 'filterType', 'none', @(s) ischar(s) || isstring(s));
 addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'filterDiscreteFields', false, @(x) islogical(x) || isnumeric(x));
-addParameter(p, 'temporalHalfWindow', 3, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'temporalHalfWindow', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
 addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
@@ -98,6 +99,10 @@ if isempty(selectedIdx)
 end
 
 fld = char(string(opts.field));
+if local_is_q9_diag_requested_field(fld) || ...
+        (local_prefers_q9_sidecar_field(fld) && local_has_q9_diag_sidecars(runDir))
+    selectedIdx = local_filter_selected_indices_for_q9_sidecars(frameTable, selectedIdx, runDir, fld);
+end
 fieldIsDiscrete = local_is_discrete_field(fld);
 applySpatialFilter = ~(fieldIsDiscrete && ~logical(opts.filterDiscreteFields));
 applyTemporalFilter = ~(fieldIsDiscrete && ~logical(opts.filterDiscreteFields));
@@ -115,6 +120,8 @@ for ii = 1:numel(selectedIdx)
     fields = bin_smpcd_state(state, 'Lx', Lx, 'Ly', Ly, 'Nx', Nx, 'Ny', Ny);
     times(ii) = frameTable.time(idx);
     masks = local_build_projection_masks(params, fields, Lx, Ly, Nx, Ny, times(ii), opts);
+    masks.q9Diag = local_read_q9_diagnostic_fields(runDir, frameTable.step(idx), Nx, Ny);
+    masks = local_apply_q9_diagnostics_to_masks(masks);
     maskData{ii} = masks;
     A = local_extract_field(fields, masks, fld);
     if applySpatialFilter
@@ -256,6 +263,334 @@ function tf = local_immersed_explicitly_disabled(params)
 tf = present && ~val;
 end
 
+function diag = local_read_q9_diagnostic_fields(runDir, step, Nx, Ny)
+diag = struct();
+diag.available = false;
+diag.requestedStep = NaN;
+diag.path = '';
+diag.kind = '';
+if isnan(step)
+    return;
+end
+requestedStep = round(step);
+diag.requestedStep = requestedStep;
+[diagPath, diagKind] = local_find_q9_diag_sidecar(runDir, requestedStep);
+if isempty(diagPath)
+    return;
+end
+switch diagKind
+    case 'binary'
+        diag = local_read_q9_diagnostic_fields_binary(diagPath, requestedStep, Nx, Ny);
+    case 'csv'
+        diag = local_read_q9_diagnostic_fields_csv(diagPath, Nx, Ny);
+    otherwise
+        warning('Unsupported Q9 diagnostic sidecar kind %s for %s', diagKind, diagPath);
+        diag = struct();
+        diag.available = false;
+end
+diag.requestedStep = requestedStep;
+diag.path = diagPath;
+diag.kind = diagKind;
+end
+
+function selectedIdx = local_filter_selected_indices_for_q9_sidecars(frameTable, selectedIdx, runDir, fld)
+keep = false(size(selectedIdx));
+for i = 1:numel(selectedIdx)
+    idx = selectedIdx(i);
+    [diagPath, ~] = local_find_q9_diag_sidecar(runDir, frameTable.step(idx));
+    keep(i) = ~isempty(diagPath);
+end
+if any(keep)
+    selectedIdx = selectedIdx(keep);
+    return;
+end
+available = local_list_q9_diag_sidecar_names(runDir);
+if isempty(available)
+    availableText = 'none';
+else
+    nShow = min(8, numel(available));
+    availableText = strjoin(available(1:nShow), ', ');
+    if numel(available) > nShow
+        availableText = sprintf('%s, ... (%d total)', availableText, numel(available));
+    end
+end
+if isempty(frameTable)
+    stateText = 'none';
+else
+    steps = frameTable.step(selectedIdx);
+    nShow = min(8, numel(steps));
+    stateParts = arrayfun(@(x) sprintf('%d', round(x)), steps(1:nShow), 'UniformOutput', false);
+    stateText = strjoin(stateParts, ', ');
+    if numel(steps) > nShow
+        stateText = sprintf('%s, ... (%d selected frames)', stateText, numel(steps));
+    end
+end
+error(['Requested Q9 diagnostic field %s, but no selected state frame has a matching ', ...
+       'q9_diagnostics_step_* sidecar in %s. Selected state steps: %s. ', ...
+       'Available Q9 sidecars: %s.'], fld, runDir, stateText, availableText);
+end
+
+function [diagPath, diagKind] = local_find_q9_diag_sidecar(runDir, step)
+diagPath = '';
+diagKind = '';
+if isnan(step)
+    return;
+end
+s = round(step);
+
+% Canonical names first.  The binary extension was .bin in one intermediate
+% patch and .q9bin in the compact diagnostic format; accept both.
+candidates = { ...
+    fullfile(runDir, sprintf('q9_diagnostics_step_%08d.q9bin', s)), ...
+    fullfile(runDir, sprintf('q9_diagnostics_step_%08d.bin',   s)), ...
+    fullfile(runDir, sprintf('q9_diagnostics_step_%08d.csv',   s))};
+kinds = {'binary', 'binary', 'csv'};
+for i = 1:numel(candidates)
+    if isfile(candidates{i})
+        diagPath = candidates{i};
+        diagKind = kinds{i};
+        return;
+    end
+end
+
+% Robust fallback: accept non-canonical zero padding, e.g. 0000000.
+patterns = {'q9_diagnostics_step_*.q9bin', ...
+            'q9_diagnostics_step_*.bin', ...
+            'q9_diagnostics_step_*.csv'};
+for ip = 1:numel(patterns)
+    files = dir(fullfile(runDir, patterns{ip}));
+    for k = 1:numel(files)
+        tok = regexp(files(k).name, '^q9_diagnostics_step_(\d+)\.(q9bin|bin|csv)$', 'tokens', 'once');
+        if isempty(tok)
+            continue;
+        end
+        if str2double(tok{1}) == s
+            diagPath = fullfile(files(k).folder, files(k).name);
+            if strcmp(tok{2}, 'csv')
+                diagKind = 'csv';
+            else
+                diagKind = 'binary';
+            end
+            return;
+        end
+    end
+end
+end
+
+function tf = local_has_q9_diag_sidecars(runDir)
+tf = ~isempty(local_list_q9_diag_sidecar_names(runDir));
+end
+
+function names = local_list_q9_diag_sidecar_names(runDir)
+names = {};
+patterns = {'q9_diagnostics_step_*.q9bin', ...
+            'q9_diagnostics_step_*.bin', ...
+            'q9_diagnostics_step_*.csv'};
+for ip = 1:numel(patterns)
+    files = dir(fullfile(runDir, patterns{ip}));
+    for k = 1:numel(files)
+        names{end+1} = files(k).name; %#ok<AGROW>
+    end
+end
+names = unique(names, 'stable');
+end
+
+function diag = local_read_q9_diagnostic_fields_binary(path, requestedStep, Nx, Ny)
+diag = struct();
+diag.available = false;
+fid = fopen(path, 'rb');
+if fid < 0
+    warning('Could not open Q9 diagnostic binary file %s', path);
+    return;
+end
+cleaner = onCleanup(@() fclose(fid));
+magic = fread(fid, 8, '*char')';
+if ~strcmp(magic(1:7), 'Q9DG001')
+    warning('Q9 diagnostic binary file %s has invalid magic header.', path);
+    return;
+end
+header = fread(fid, 6, 'int32=>int32');
+if numel(header) ~= 6
+    warning('Q9 diagnostic binary file %s has a truncated header.', path);
+    return;
+end
+version = double(header(1));
+fileStep = double(header(2));
+nxFile = double(header(3));
+nyFile = double(header(4));
+nFloatFields = double(header(5));
+nFlagFields = double(header(6));
+if version ~= 1 || nxFile ~= Nx || nyFile ~= Ny || nFloatFields ~= 8 || nFlagFields ~= 5
+    warning('Q9 diagnostic binary file %s is incompatible with this reader/grid.', path);
+    return;
+end
+if ~isnan(requestedStep) && fileStep ~= round(requestedStep)
+    warning('Q9 diagnostic binary file %s has step %d, expected %d.', path, fileStep, round(requestedStep));
+end
+nc = Nx * Ny;
+readFloat = @() local_read_q9_binary_float_grid(fid, Nx, Ny, nc, path);
+readFlag = @() local_read_q9_binary_flag_grid(fid, Nx, Ny, nc, path);
+
+diag.available = true;
+diag.cellMass = readFloat();
+diag.q9CorrectionRawDUx = readFloat();
+diag.q9CorrectionRawDUy = readFloat();
+diag.q9CorrectionAppliedDUx = readFloat();
+diag.q9CorrectionAppliedDUy = readFloat();
+diag.q9CorrectionRawMag = readFloat();
+diag.q9CorrectionAppliedMag = readFloat();
+diag.q9CorrectionLimiterRatio = readFloat();
+diag.q9LimiterActive = readFlag();
+diag.q9LowMassSuppressed = readFlag();
+diag.q9LowMassRamped = readFlag();
+diag.q9MassFloorApplied = readFlag();
+diag.q9SafetyActive = readFlag();
+end
+
+function A = local_read_q9_binary_float_grid(fid, Nx, Ny, nc, path)
+vals = fread(fid, nc, 'single=>double');
+if numel(vals) ~= nc
+    error('Q9 diagnostic binary file %s is truncated while reading a float field.', path);
+end
+A = reshape(vals, [Nx, Ny])';
+end
+
+function A = local_read_q9_binary_flag_grid(fid, Nx, Ny, nc, path)
+vals = fread(fid, nc, 'uint8=>double');
+if numel(vals) ~= nc
+    error('Q9 diagnostic binary file %s is truncated while reading a flag field.', path);
+end
+A = reshape(vals, [Nx, Ny])';
+end
+
+function diag = local_read_q9_diagnostic_fields_csv(path, Nx, Ny)
+diag = struct();
+diag.available = false;
+T = readtable(path);
+required = {'ix','iy','q9CorrectionRawMag','q9CorrectionAppliedMag', ...
+    'q9CorrectionLimiterRatio','q9LimiterActive'};
+for k = 1:numel(required)
+    if ~ismember(required{k}, T.Properties.VariableNames)
+        warning('Q9 diagnostic field file %s misses column %s', path, required{k});
+        return;
+    end
+end
+mk = @(col, fill) local_table_to_grid(T, col, Nx, Ny, fill);
+diag.available = true;
+diag.cellMass = mk('cellMass', NaN);
+diag.q9CorrectionRawMag = mk('q9CorrectionRawMag', NaN);
+diag.q9CorrectionAppliedMag = mk('q9CorrectionAppliedMag', NaN);
+diag.q9CorrectionLimiterRatio = mk('q9CorrectionLimiterRatio', NaN);
+diag.q9LimiterActive = mk('q9LimiterActive', 0);
+if ismember('q9CorrectionRawDUx', T.Properties.VariableNames)
+    diag.q9CorrectionRawDUx = mk('q9CorrectionRawDUx', NaN);
+end
+if ismember('q9CorrectionRawDUy', T.Properties.VariableNames)
+    diag.q9CorrectionRawDUy = mk('q9CorrectionRawDUy', NaN);
+end
+if ismember('q9CorrectionAppliedDUx', T.Properties.VariableNames)
+    diag.q9CorrectionAppliedDUx = mk('q9CorrectionAppliedDUx', NaN);
+end
+if ismember('q9CorrectionAppliedDUy', T.Properties.VariableNames)
+    diag.q9CorrectionAppliedDUy = mk('q9CorrectionAppliedDUy', NaN);
+end
+if ismember('q9LowMassSuppressed', T.Properties.VariableNames)
+    diag.q9LowMassSuppressed = mk('q9LowMassSuppressed', 0);
+end
+if ismember('q9LowMassRamped', T.Properties.VariableNames)
+    diag.q9LowMassRamped = mk('q9LowMassRamped', 0);
+end
+if ismember('q9MassFloorApplied', T.Properties.VariableNames)
+    diag.q9MassFloorApplied = mk('q9MassFloorApplied', 0);
+end
+if ismember('q9SafetyActive', T.Properties.VariableNames)
+    diag.q9SafetyActive = mk('q9SafetyActive', 0);
+end
+end
+
+function A = local_table_to_grid(T, col, Nx, Ny, fillValue)
+A = fillValue * ones(Ny, Nx);
+vals = T.(col);
+for r = 1:height(T)
+    ix = T.ix(r) + 1;
+    iy = T.iy(r) + 1;
+    if ix >= 1 && ix <= Nx && iy >= 1 && iy <= Ny
+        A(iy, ix) = vals(r);
+    end
+end
+end
+
+
+function masks = local_apply_q9_diagnostics_to_masks(masks)
+% Prefer solver-emitted Q9 sidecar masks when they are available.
+%
+% Some Q9 masks depend on the effective C++ thresholds, including the
+% gamma-relative low-mass policy.  Reconstructing them in MATLAB from
+% params_used.kv can be wrong when legacy absolute thresholds are zero and the
+% effective thresholds come from *OverGamma parameters.  The sidecar fields are
+% the authoritative diagnostics for the time step that was actually run.
+if ~isfield(masks, 'q9Diag') || ~isfield(masks.q9Diag, 'available') || ~masks.q9Diag.available
+    return;
+end
+if ~isfield(masks.q9Diag, 'q9LowMassSuppressed')
+    return;
+end
+
+q6Active = logical(masks.q6Active);
+q9OpenExcluded = logical(masks.q9OpenExcluded);
+q9ImmersedHalo = logical(masks.q9ImmersedHalo);
+q9LowMassSuppressed = logical(masks.q9Diag.q9LowMassSuppressed);
+
+% Keep geometric/open-boundary exclusions from the visual reconstruction, but
+% use the C++ low-mass suppression mask inside the remaining Q6-active fluid
+% cells.  Low-mass ramping and mass-floor application are diagnostics, not hard
+% Q9 deactivation by themselves.
+q9LowMassSuppressed = q9LowMassSuppressed & q6Active & ~q9OpenExcluded & ~q9ImmersedHalo;
+q9Active = q6Active & ~q9OpenExcluded & ~q9ImmersedHalo & ~q9LowMassSuppressed;
+q9Excluded = q6Active & ~q9Active;
+
+maskCode = zeros(size(q6Active));
+maskCode(q9Active) = 1;
+maskCode(q9OpenExcluded & q6Active) = 2;
+maskCode(q9ImmersedHalo & q6Active) = 3;
+maskCode(q9LowMassSuppressed & q6Active) = 4;
+maskCode(q9Excluded & maskCode == 0) = 5;
+if isfield(masks, 'inletReservoir')
+    maskCode(logical(masks.inletReservoir) & q6Active) = 6;
+end
+if isfield(masks, 'outletReservoir')
+    maskCode(logical(masks.outletReservoir) & q6Active) = 7;
+end
+
+masks.q9LowMassSuppressed = q9LowMassSuppressed;
+masks.q9Active = q9Active;
+masks.q9Excluded = q9Excluded;
+masks.maskCode = maskCode;
+end
+
+function A = local_q9_diag_field(masks, name)
+if ~isfield(masks, 'q9Diag') || ~isfield(masks.q9Diag, 'available') || ~masks.q9Diag.available
+    requestedStep = NaN;
+    if isfield(masks, 'q9Diag') && isfield(masks.q9Diag, 'requestedStep')
+        requestedStep = masks.q9Diag.requestedStep;
+    end
+    error(['Requested Q9 diagnostic field %s, but no q9_diagnostics_step_* ', ...
+           'sidecar was found for step %d. Expected extensions are .q9bin, .bin or .csv. ', ...
+           'For Q9 fields, play_smpcd_filtered_animation now skips state frames without ', ...
+           'a matching sidecar; if you still see this error, check that the sidecar step ', ...
+           'number matches the state dump step.'], name, round(requestedStep));
+end
+if ~isfield(masks.q9Diag, name)
+    if isfield(masks.q9Diag, 'path')
+        src = masks.q9Diag.path;
+    else
+        src = '<unknown sidecar>';
+    end
+    error('Q9 diagnostic field %s is not available in sidecar file %s.', name, src);
+end
+A = double(masks.q9Diag.(name));
+end
+
 function A = local_extract_field(fields, masks, fld)
 f = lower(char(string(fld)));
 switch f
@@ -305,6 +640,26 @@ switch f
         A = double(masks.q9ImmersedHalo);
     case {'q9lowmasssuppressed','lowmasssuppressed'}
         A = double(masks.q9LowMassSuppressed);
+    case {'q9limiteractive','q9velocitylimited','limiteractive'}
+        A = local_q9_diag_field(masks, 'q9LimiterActive');
+    case {'q9lowmassramped','lowmassramped'}
+        A = local_q9_diag_field(masks, 'q9LowMassRamped');
+    case {'q9massfloorapplied','massfloorapplied'}
+        A = local_q9_diag_field(masks, 'q9MassFloorApplied');
+    case {'q9safetyactive','safetyactive'}
+        A = local_q9_diag_field(masks, 'q9SafetyActive');
+    case {'q9limiterratio','q9correctionlimiterratio','limiterratio'}
+        A = local_q9_diag_field(masks, 'q9CorrectionLimiterRatio');
+    case {'q9correctionrawmag','q9rawmag','rawcorrectionmag'}
+        A = local_q9_diag_field(masks, 'q9CorrectionRawMag');
+    case {'q9correctionappliedmag','q9appliedmag','appliedcorrectionmag'}
+        A = local_q9_diag_field(masks, 'q9CorrectionAppliedMag');
+    case {'q9correctioncompression','q9limitercompression'}
+        raw = local_q9_diag_field(masks, 'q9CorrectionRawMag');
+        applied = local_q9_diag_field(masks, 'q9CorrectionAppliedMag');
+        A = ones(size(raw));
+        sel = raw > 0;
+        A(sel) = applied(sel) ./ raw(sel);
     case {'inletreservoir','inletband'}
         A = double(masks.inletReservoir);
     case {'outletreservoir','outletband','openband'}
@@ -316,6 +671,27 @@ switch f
 end
 end
 
+function tf = local_is_q9_diag_requested_field(fld)
+f = lower(char(string(fld)));
+tf = any(strcmp(f, {'q9limiteractive','q9velocitylimited','limiteractive', ...
+    'q9lowmassramped','lowmassramped','q9massfloorapplied','massfloorapplied', ...
+    'q9safetyactive','safetyactive','q9limiterratio','q9correctionlimiterratio', ...
+    'limiterratio','q9correctionrawmag','q9rawmag','rawcorrectionmag', ...
+    'q9correctionappliedmag','q9appliedmag','appliedcorrectionmag', ...
+    'q9correctioncompression','q9limitercompression'}));
+end
+
+function tf = local_prefers_q9_sidecar_field(fld)
+f = lower(char(string(fld)));
+% These fields can be reconstructed from particles/params for old runs, but
+% when sidecars exist they should be displayed only on frames where the C++ Q9
+% diagnostics are available, because the effective C++ low-mass mask may use
+% gamma-relative thresholds that MATLAB cannot infer from legacy absolute
+% parameters alone.
+tf = any(strcmp(f, {'q9active','massfluxactive','q9excluded', ...
+    'q9lowmasssuppressed','lowmasssuppressed','maskcode','q9maskcode'}));
+end
+
 function tf = local_is_discrete_field(fld)
 f = lower(char(string(fld)));
 tf = any(strcmp(f, {'n','count','counts','occupancy','solidfraction','fluidfraction', ...
@@ -323,7 +699,10 @@ tf = any(strcmp(f, {'n','count','counts','occupancy','solidfraction','fluidfract
     'q6excluded','q6solidexcluded','solidexcluded','q9active','massfluxactive', ...
     'q9excluded','q9openexcluded','openexcluded','reservoirexcluded', ...
     'q9immersedhalo','q9halo','immersedhalo','q9lowmasssuppressed', ...
-    'lowmasssuppressed','inletreservoir','inletband','outletreservoir', ...
+    'lowmasssuppressed','q9lowmassramped','lowmassramped', ...
+    'q9massfloorapplied','massfloorapplied','q9safetyactive','safetyactive', ...
+    'q9limiteractive','q9velocitylimited','limiteractive', ...
+    'inletreservoir','inletband','outletreservoir', ...
     'outletband','openband','maskcode','q9maskcode'}));
 end
 
@@ -333,7 +712,10 @@ tf = any(strcmp(f, {'solidany','immersedany','immersed','q6active','projectionac
     'q6excluded','q6solidexcluded','solidexcluded','q9active','massfluxactive', ...
     'q9excluded','q9openexcluded','openexcluded','reservoirexcluded', ...
     'q9immersedhalo','q9halo','immersedhalo','q9lowmasssuppressed', ...
-    'lowmasssuppressed','inletreservoir','inletband','outletreservoir', ...
+    'lowmasssuppressed','q9lowmassramped','lowmassramped', ...
+    'q9massfloorapplied','massfloorapplied','q9safetyactive','safetyactive', ...
+    'q9limiteractive','q9velocitylimited','limiteractive', ...
+    'inletreservoir','inletband','outletreservoir', ...
     'outletband','openband'}));
 end
 

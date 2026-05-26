@@ -498,7 +498,190 @@ double mean_profile_value(const std::vector<double>& v, double fallback) {
     return s / static_cast<double>(v.size());
 }
 
+std::string normalized_open_boundary_outlet_mode(const SimulationParams& params) {
+    std::string m = params.openBoundaryOutletMode;
+    std::replace(m.begin(), m.end(), '-', '_');
+    return m;
+}
+
+bool open_boundary_outlet_mode_is_neumann(const SimulationParams& params) {
+    const std::string m = normalized_open_boundary_outlet_mode(params);
+    return m == "neumann" || m == "free" ||
+           m == "zero_gradient" || m == "zero_normal_gradient";
+}
+
+bool open_boundary_outlet_mode_is_hybrid(const SimulationParams& params) {
+    const std::string m = normalized_open_boundary_outlet_mode(params);
+    return m == "hybrid" || m == "neumann_feedback" || m == "hybrid_feedback";
+}
+
+bool open_boundary_outlet_uses_local_base(const SimulationParams& params) {
+    return open_boundary_outlet_mode_is_neumann(params) || open_boundary_outlet_mode_is_hybrid(params);
+}
+
+double outlet_hybrid_blend(const SimulationParams& params) {
+    if (!open_boundary_outlet_mode_is_hybrid(params)) return 0.0;
+    return std::max(0.0, std::min(1.0, params.openBoundaryOutletHybridBlend));
+}
+
+double outlet_feedback_gain(const SimulationParams& params) {
+    if (!open_boundary_outlet_mode_is_hybrid(params)) return 0.0;
+    return std::max(0.0, std::min(1.0, params.openBoundaryOutletFeedbackGain));
+}
+
+void blend_boundary_profiles(std::vector<double>& localProfile,
+                             const std::vector<double>& balancedProfile,
+                             double blend) {
+    if (blend <= 0.0 || localProfile.empty() || balancedProfile.size() != localProfile.size()) return;
+    const double a = std::max(0.0, std::min(1.0, blend));
+    for (std::size_t i = 0; i < localProfile.size(); ++i) {
+        localProfile[i] = (1.0 - a) * localProfile[i] + a * balancedProfile[i];
+    }
+}
+
+double x_profile_integral(const std::vector<double>& profile, const SimulationParams& params, const FluidDomainBounds& domain, double fallback) {
+    const double height = fluid_domain_height(domain);
+    if (profile.empty()) return fallback * height;
+    const double dy = height / static_cast<double>(std::max(1, params.Ny));
+    return std::accumulate(profile.begin(), profile.end(), 0.0) * dy;
+}
+
+double y_profile_integral(const std::vector<double>& profile, const SimulationParams& params, const FluidDomainBounds& domain, double fallback) {
+    const double width = fluid_domain_width(domain);
+    if (profile.empty()) return fallback * width;
+    const double dx = width / static_cast<double>(std::max(1, params.Nx));
+    return std::accumulate(profile.begin(), profile.end(), 0.0) * dx;
+}
+
+double x_aperture_length(const SimulationParams& params, const FluidDomainBounds& domain, const ApertureInterval& a) {
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    double length = 0.0;
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) length += dy;
+    }
+    return length;
+}
+
+double y_aperture_length(const SimulationParams& params, const FluidDomainBounds& domain, const ApertureInterval& a) {
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    double length = 0.0;
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) length += dx;
+    }
+    return length;
+}
+
+void add_uniform_to_x_aperture_profile(std::vector<double>& profile,
+                                       const SimulationParams& params,
+                                       const FluidDomainBounds& domain,
+                                       const ApertureInterval& a,
+                                       double delta) {
+    if (profile.empty() || delta == 0.0) return;
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) profile[static_cast<std::size_t>(j)] += delta;
+    }
+}
+
+void add_uniform_to_y_aperture_profile(std::vector<double>& profile,
+                                       const SimulationParams& params,
+                                       const FluidDomainBounds& domain,
+                                       const ApertureInterval& a,
+                                       double delta) {
+    if (profile.empty() || delta == 0.0) return;
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) profile[static_cast<std::size_t>(i)] += delta;
+    }
+}
+
+void set_x_boundary_flux_profile_from_base(std::vector<double>& profile,
+                                           const SimulationParams& params,
+                                           const FluidDomainBounds& domain,
+                                           const PeriodicFaceField& baseFlux,
+                                           bool highFace,
+                                           const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(params.Ny), 0.0);
+    const int i = highFace ? (params.Nx - 1) : 0;
+    const double dy = (domain.yMax - domain.yMin) / static_cast<double>(std::max(1, params.Ny));
+    for (int j = 0; j < params.Ny; ++j) {
+        const double yc = domain.yMin + (static_cast<double>(j) + 0.5) * dy;
+        if (cell_center_in_interval(yc, a)) {
+            const int c = i + params.Nx * j;
+            profile[static_cast<std::size_t>(j)] = baseFlux.x[static_cast<std::size_t>(c)];
+        }
+    }
+}
+
+void set_y_boundary_flux_profile_from_base(std::vector<double>& profile,
+                                           const SimulationParams& params,
+                                           const FluidDomainBounds& domain,
+                                           const PeriodicFaceField& baseFlux,
+                                           bool highFace,
+                                           const ApertureInterval& a) {
+    profile.assign(static_cast<std::size_t>(params.Nx), 0.0);
+    const int j = highFace ? (params.Ny - 1) : 0;
+    const double dx = (domain.xMax - domain.xMin) / static_cast<double>(std::max(1, params.Nx));
+    for (int i = 0; i < params.Nx; ++i) {
+        const double xc = domain.xMin + (static_cast<double>(i) + 0.5) * dx;
+        if (cell_center_in_interval(xc, a)) {
+            const int c = i + params.Nx * j;
+            profile[static_cast<std::size_t>(i)] = baseFlux.y[static_cast<std::size_t>(c)];
+        }
+    }
+}
+
+void apply_hybrid_feedback_to_q6_open_boundaries(EllipticProjectionBC& bc,
+                                                  const SimulationParams& params,
+                                                  const FluidDomainBounds& domain,
+                                                  const ApertureInterval& leftA,
+                                                  const ApertureInterval& rightA,
+                                                  const ApertureInterval& bottomA,
+                                                  const ApertureInterval& topA) {
+    const double gain = outlet_feedback_gain(params);
+    if (gain <= 0.0) return;
+
+    const bool leftOutlet = is_outlet_boundary_mode(params.bcLeft);
+    const bool rightOutlet = is_outlet_boundary_mode(params.bcRight);
+    const bool bottomOutlet = is_outlet_boundary_mode(params.bcBottom);
+    const bool topOutlet = is_outlet_boundary_mode(params.bcTop);
+
+    const double xLowIntegral = x_profile_integral(bc.xLowFluxProfile, params, domain, bc.xLowFlux);
+    const double xHighIntegral = x_profile_integral(bc.xHighFluxProfile, params, domain, bc.xHighFlux);
+    const double yLowIntegral = y_profile_integral(bc.yLowFluxProfile, params, domain, bc.yLowFlux);
+    const double yHighIntegral = y_profile_integral(bc.yHighFluxProfile, params, domain, bc.yHighFlux);
+    const double balance = (xHighIntegral - xLowIntegral) + (yHighIntegral - yLowIntegral);
+    if (balance == 0.0) return;
+
+    double outletLength = 0.0;
+    if (leftOutlet) outletLength += x_aperture_length(params, domain, leftA);
+    if (rightOutlet) outletLength += x_aperture_length(params, domain, rightA);
+    if (bottomOutlet) outletLength += y_aperture_length(params, domain, bottomA);
+    if (topOutlet) outletLength += y_aperture_length(params, domain, topA);
+    if (outletLength <= 0.0) return;
+
+    // Positive balance means net flux is leaving the domain in the elliptic
+    // sign convention.  The outlet-only correction below reduces this balance
+    // by gain*balance while preserving the local Neumann profile up to a weak
+    // uniform feedback over all open outlet cells.
+    const double perLength = gain * balance / outletLength;
+    if (leftOutlet) add_uniform_to_x_aperture_profile(bc.xLowFluxProfile, params, domain, leftA, +perLength);
+    if (rightOutlet) add_uniform_to_x_aperture_profile(bc.xHighFluxProfile, params, domain, rightA, -perLength);
+    if (bottomOutlet) add_uniform_to_y_aperture_profile(bc.yLowFluxProfile, params, domain, bottomA, +perLength);
+    if (topOutlet) add_uniform_to_y_aperture_profile(bc.yHighFluxProfile, params, domain, topA, -perLength);
+
+    bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, bc.xLowFlux);
+    bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, bc.xHighFlux);
+    bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, bc.yLowFlux);
+    bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, bc.yHighFlux);
+}
+
 void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
+                                  const PeriodicFaceField& baseFlux,
                                   const SimulationParams& params,
                                   const FluidDomainBounds& domain,
                                   double time,
@@ -512,37 +695,108 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         bc.yHighFlux = domain.vyMax;
     }
 
-    // 0062 minimal open-boundary policy: an inlet/outlet pair prescribes a
-    // balanced normal velocity component on both external faces of the open
-    // axis.  This keeps the elliptic RHS compatible with a zero target
-    // divergence while reusing the existing compact face storage.
+    // Open-boundary projection policy.  The validated default
+    // openBoundaryOutletMode=balanced_flux prescribes the same ramped inlet
+    // velocity flux on both open faces.  Neumann samples the outlet flux from
+    // the current base face field.  Hybrid starts from Neumann, optionally
+    // blends toward balanced_flux, then applies an outlet-only weak feedback
+    // that reduces the global open-boundary flux imbalance.
+    ApertureInterval leftA{0.0, 0.0};
+    ApertureInterval rightA{0.0, 0.0};
+    ApertureInterval bottomA{0.0, 0.0};
+    ApertureInterval topA{0.0, 0.0};
+
     if (has_x_io_pair(params)) {
         const double ux = q6_open_x_flux_component(params, time);
-        bc.xLowFlux = ux;
-        bc.xHighFlux = ux;
-        if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
-            set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, ux,
-                                        x_face_aperture_y(params, domain, "left"));
-            set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, ux,
-                                        x_face_aperture_y(params, domain, "right"));
-            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, ux);
-            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, ux);
+        const bool localOutlet = open_boundary_outlet_uses_local_base(params);
+        const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
+        const double blend = outlet_hybrid_blend(params);
+        const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
+        const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
+        leftA = x_face_aperture_y(params, domain, "left");
+        rightA = x_face_aperture_y(params, domain, "right");
+
+        if (leftInlet || !localOutlet) {
+            bc.xLowFlux = ux;
+            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, ux, leftA);
+                bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, ux);
+            }
+        } else {
+            set_x_boundary_flux_profile_from_base(bc.xLowFluxProfile, params, domain, baseFlux, false, leftA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_x_boundary_flux_profile(balanced, params, domain, ux, leftA);
+                blend_boundary_profiles(bc.xLowFluxProfile, balanced, blend);
+            }
+            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
         }
+
+        if (rightInlet || !localOutlet) {
+            bc.xHighFlux = ux;
+            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, ux, rightA);
+                bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, ux);
+            }
+        } else {
+            set_x_boundary_flux_profile_from_base(bc.xHighFluxProfile, params, domain, baseFlux, true, rightA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_x_boundary_flux_profile(balanced, params, domain, ux, rightA);
+                blend_boundary_profiles(bc.xHighFluxProfile, balanced, blend);
+            }
+            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
+        }
+
         diag.openBoundaryEnabled = true;
     }
     if (has_y_io_pair(params)) {
         const double uy = q6_open_y_flux_component(params, time);
-        bc.yLowFlux = uy;
-        bc.yHighFlux = uy;
-        if (params.openBoundaryApertureEnable) {
-            set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, uy,
-                                        y_face_aperture_x(params, domain, "bottom"));
-            set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, uy,
-                                        y_face_aperture_x(params, domain, "top"));
-            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, uy);
-            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, uy);
+        const bool localOutlet = open_boundary_outlet_uses_local_base(params);
+        const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
+        const double blend = outlet_hybrid_blend(params);
+        const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
+        const bool topInlet = is_inlet_boundary_mode(params.bcTop);
+        bottomA = y_face_aperture_x(params, domain, "bottom");
+        topA = y_face_aperture_x(params, domain, "top");
+
+        if (bottomInlet || !localOutlet) {
+            bc.yLowFlux = uy;
+            if (params.openBoundaryApertureEnable) {
+                set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, bottomA);
+                bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, uy);
+            }
+        } else {
+            set_y_boundary_flux_profile_from_base(bc.yLowFluxProfile, params, domain, baseFlux, false, bottomA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, uy, bottomA);
+                blend_boundary_profiles(bc.yLowFluxProfile, balanced, blend);
+            }
+            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
         }
+
+        if (topInlet || !localOutlet) {
+            bc.yHighFlux = uy;
+            if (params.openBoundaryApertureEnable) {
+                set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, topA);
+                bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, uy);
+            }
+        } else {
+            set_y_boundary_flux_profile_from_base(bc.yHighFluxProfile, params, domain, baseFlux, true, topA);
+            if (hybridOutlet && blend > 0.0) {
+                std::vector<double> balanced;
+                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, uy, topA);
+                blend_boundary_profiles(bc.yHighFluxProfile, balanced, blend);
+            }
+            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
+        }
+
         diag.openBoundaryEnabled = true;
+    }
+
+    if (open_boundary_outlet_mode_is_hybrid(params)) {
+        apply_hybrid_feedback_to_q6_open_boundaries(bc, params, domain, leftA, rightA, bottomA, topA);
     }
 
     diag.openBoundaryFluxXLow = bc.xLowFlux;
@@ -709,7 +963,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.removePhiMean = true;
 
     EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
-    add_boundary_fluxes_to_q6_bc(bc, params, domain, time, diag);
+    add_boundary_fluxes_to_q6_bc(bc, workspace.baseFlux, params, domain, time, diag);
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
 
