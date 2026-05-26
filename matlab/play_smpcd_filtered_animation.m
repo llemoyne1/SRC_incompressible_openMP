@@ -420,7 +420,7 @@ nxFile = double(header(3));
 nyFile = double(header(4));
 nFloatFields = double(header(5));
 nFlagFields = double(header(6));
-if version ~= 1 || nxFile ~= Nx || nyFile ~= Ny || nFloatFields ~= 8 || nFlagFields ~= 5
+if version ~= 1 || nxFile ~= Nx || nyFile ~= Ny || nFloatFields ~= 8 || nFlagFields < 5
     warning('Q9 diagnostic binary file %s is incompatible with this reader/grid.', path);
     return;
 end
@@ -445,6 +445,19 @@ diag.q9LowMassSuppressed = readFlag();
 diag.q9LowMassRamped = readFlag();
 diag.q9MassFloorApplied = readFlag();
 diag.q9SafetyActive = readFlag();
+if nFlagFields >= 6
+    diag.q9ImmersedSolidActive = readFlag();
+end
+if nFlagFields >= 7
+    diag.q9ImmersedSolidCut = readFlag();
+end
+if nFlagFields >= 8
+    diag.q9ImmersedSolidAdjacentActive = readFlag();
+end
+for kExtra = 9:nFlagFields
+    %#ok<NASGU> Consume future-compatible flag fields without failing old visualization scripts.
+    unusedFlag = readFlag();
+end
 end
 
 function A = local_read_q9_binary_float_grid(fid, Nx, Ny, nc, path)
@@ -506,6 +519,15 @@ end
 if ismember('q9SafetyActive', T.Properties.VariableNames)
     diag.q9SafetyActive = mk('q9SafetyActive', 0);
 end
+if ismember('q9ImmersedSolidActive', T.Properties.VariableNames)
+    diag.q9ImmersedSolidActive = mk('q9ImmersedSolidActive', 0);
+end
+if ismember('q9ImmersedSolidCut', T.Properties.VariableNames)
+    diag.q9ImmersedSolidCut = mk('q9ImmersedSolidCut', 0);
+end
+if ismember('q9ImmersedSolidAdjacentActive', T.Properties.VariableNames)
+    diag.q9ImmersedSolidAdjacentActive = mk('q9ImmersedSolidAdjacentActive', 0);
+end
 end
 
 function A = local_table_to_grid(T, col, Nx, Ny, fillValue)
@@ -541,12 +563,20 @@ q9OpenExcluded = logical(masks.q9OpenExcluded);
 q9ImmersedHalo = logical(masks.q9ImmersedHalo);
 q9LowMassSuppressed = logical(masks.q9Diag.q9LowMassSuppressed);
 
-% Keep geometric/open-boundary exclusions from the visual reconstruction, but
-% use the C++ low-mass suppression mask inside the remaining Q6-active fluid
-% cells.  Low-mass ramping and mass-floor application are diagnostics, not hard
-% Q9 deactivation by themselves.
-q9LowMassSuppressed = q9LowMassSuppressed & q6Active & ~q9OpenExcluded & ~q9ImmersedHalo;
-q9Active = q6Active & ~q9OpenExcluded & ~q9ImmersedHalo & ~q9LowMassSuppressed;
+% Prefer the exact C++ Q9 active/safety mask when it is present.  This avoids
+% reconstructing geometric exclusions in MATLAB and is especially important for
+% immersed solids, where the intended model is active fluid cells up to the wall
+% plus blocked solid-normal faces, not a dilated inactive halo.
+if isfield(masks.q9Diag, 'q9SafetyActive')
+    q9CandidateActive = logical(masks.q9Diag.q9SafetyActive);
+else
+    q9CandidateActive = q6Active & ~q9OpenExcluded & ~q9ImmersedHalo;
+end
+
+% Low-mass suppression is a C++ correction-application safeguard, not a geometric
+% solid mask.  Ramping and mass-floor application remain diagnostics only.
+q9LowMassSuppressed = q9LowMassSuppressed & q9CandidateActive;
+q9Active = q9CandidateActive & ~q9LowMassSuppressed;
 q9Excluded = q6Active & ~q9Active;
 
 maskCode = zeros(size(q6Active));
@@ -648,6 +678,12 @@ switch f
         A = local_q9_diag_field(masks, 'q9MassFloorApplied');
     case {'q9safetyactive','safetyactive'}
         A = local_q9_diag_field(masks, 'q9SafetyActive');
+    case {'q9immersedsolidactive','q9solidactive','immersedsolidactive'}
+        A = local_q9_diag_field(masks, 'q9ImmersedSolidActive');
+    case {'q9immersedsolidcut','q9solidcut','immersedsolidcut'}
+        A = local_q9_diag_field(masks, 'q9ImmersedSolidCut');
+    case {'q9immersedsolidadjacent','q9solidadjacent','q9immersedsolidadjacentactive','immersedsolidadjacent'}
+        A = local_q9_diag_field(masks, 'q9ImmersedSolidAdjacentActive');
     case {'q9limiterratio','q9correctionlimiterratio','limiterratio'}
         A = local_q9_diag_field(masks, 'q9CorrectionLimiterRatio');
     case {'q9correctionrawmag','q9rawmag','rawcorrectionmag'}
@@ -675,7 +711,10 @@ function tf = local_is_q9_diag_requested_field(fld)
 f = lower(char(string(fld)));
 tf = any(strcmp(f, {'q9limiteractive','q9velocitylimited','limiteractive', ...
     'q9lowmassramped','lowmassramped','q9massfloorapplied','massfloorapplied', ...
-    'q9safetyactive','safetyactive','q9limiterratio','q9correctionlimiterratio', ...
+    'q9safetyactive','safetyactive','q9immersedsolidactive','q9solidactive', ...
+    'immersedsolidactive','q9immersedsolidcut','q9solidcut','immersedsolidcut', ...
+    'q9immersedsolidadjacent','q9solidadjacent','q9immersedsolidadjacentactive', ...
+    'immersedsolidadjacent','q9limiterratio','q9correctionlimiterratio', ...
     'limiterratio','q9correctionrawmag','q9rawmag','rawcorrectionmag', ...
     'q9correctionappliedmag','q9appliedmag','appliedcorrectionmag', ...
     'q9correctioncompression','q9limitercompression'}));
@@ -701,7 +740,10 @@ tf = any(strcmp(f, {'n','count','counts','occupancy','solidfraction','fluidfract
     'q9immersedhalo','q9halo','immersedhalo','q9lowmasssuppressed', ...
     'lowmasssuppressed','q9lowmassramped','lowmassramped', ...
     'q9massfloorapplied','massfloorapplied','q9safetyactive','safetyactive', ...
-    'q9limiteractive','q9velocitylimited','limiteractive', ...
+    'q9immersedsolidactive','q9solidactive','immersedsolidactive', ...
+    'q9immersedsolidcut','q9solidcut','immersedsolidcut', ...
+    'q9immersedsolidadjacent','q9solidadjacent','q9immersedsolidadjacentactive', ...
+    'immersedsolidadjacent','q9limiteractive','q9velocitylimited','limiteractive', ...
     'inletreservoir','inletband','outletreservoir', ...
     'outletband','openband','maskcode','q9maskcode'}));
 end
@@ -714,7 +756,10 @@ tf = any(strcmp(f, {'solidany','immersedany','immersed','q6active','projectionac
     'q9immersedhalo','q9halo','immersedhalo','q9lowmasssuppressed', ...
     'lowmasssuppressed','q9lowmassramped','lowmassramped', ...
     'q9massfloorapplied','massfloorapplied','q9safetyactive','safetyactive', ...
-    'q9limiteractive','q9velocitylimited','limiteractive', ...
+    'q9immersedsolidactive','q9solidactive','immersedsolidactive', ...
+    'q9immersedsolidcut','q9solidcut','immersedsolidcut', ...
+    'q9immersedsolidadjacent','q9solidadjacent','q9immersedsolidadjacentactive', ...
+    'immersedsolidadjacent','q9limiteractive','q9velocitylimited','limiteractive', ...
     'inletreservoir','inletband','outletreservoir', ...
     'outletband','openband'}));
 end
