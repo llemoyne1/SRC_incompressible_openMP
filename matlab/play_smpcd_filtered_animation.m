@@ -44,7 +44,7 @@ function out = play_smpcd_filtered_animation(runDir, varargin)
 p = inputParser;
 p.FunctionName = 'play_smpcd_filtered_animation';
 addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'N', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'speed', @(s) ischar(s) || isstring(s));
 addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
 addParameter(p, 'filterType', 'none', @(s) ischar(s) || isstring(s));
@@ -52,7 +52,7 @@ addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'filterDiscreteFields', false, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'temporalHalfWindow', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
-addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
+addParameter(p, 'clim', [-0. 0.3], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
 addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'maskVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'vectorStride', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
