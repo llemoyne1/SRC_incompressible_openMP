@@ -56,6 +56,35 @@ bool cell_is_active_for_resampling(int ix,
     return fluidFraction > params.resamplingActiveFluidFractionThreshold;
 }
 
+struct PassiveCellPairCandidate {
+    std::int32_t donorCell = kInvalidCellIndex;
+    std::int32_t receiverCell = kInvalidCellIndex;
+    double distance = 0.0;
+};
+
+double passive_cell_distance(std::int32_t a,
+                             std::int32_t b,
+                             const CellGrid& grid,
+                             const SimulationParams& params) {
+    if (a < 0 || b < 0 || grid.Nx <= 0 || grid.Ny <= 0) {
+        return 0.0;
+    }
+    const int ax = static_cast<int>(a) % grid.Nx;
+    const int ay = static_cast<int>(a) / grid.Nx;
+    const int bx = static_cast<int>(b) % grid.Nx;
+    const int by = static_cast<int>(b) / grid.Nx;
+
+    int dx = std::abs(ax - bx);
+    int dy = std::abs(ay - by);
+    if (is_x_periodic(params)) {
+        dx = std::min(dx, grid.Nx - dx);
+    }
+    if (is_y_periodic(params)) {
+        dy = std::min(dy, grid.Ny - dy);
+    }
+    return std::sqrt(static_cast<double>(dx * dx + dy * dy));
+}
+
 } // namespace
 
 
@@ -213,6 +242,7 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.receiverPoorCells.reserve(static_cast<std::size_t>(numCells));
         ws.donorRichCells.reserve(static_cast<std::size_t>(numCells));
         ws.emptyWetReceiverCells.reserve(static_cast<std::size_t>(numCells));
+        ws.transferPlan.reserve(static_cast<std::size_t>(numCells));
     }
 }
 
@@ -253,6 +283,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ws.receiverPoorCells.clear();
     ws.donorRichCells.clear();
     ws.emptyWetReceiverCells.clear();
+    ws.transferPlan.clear();
 
     const ParticleRoleCounts roles = count_particle_roles(state);
 
@@ -504,6 +535,104 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             const double invWet = 1.0 / static_cast<double>(d.nWetCells);
             d.receiverFractionOfWetCells = static_cast<double>(d.nReceiverCells) * invWet;
             d.donorFractionOfWetCells = static_cast<double>(d.nDonorCells) * invWet;
+        }
+
+        if (!ws.receiverPoorCells.empty() && !ws.donorRichCells.empty()) {
+            std::vector<double> receiverRemaining(ws.receiverPoorCells.size(), 0.0);
+            std::vector<double> donorRemaining(ws.donorRichCells.size(), 0.0);
+            std::vector<PassiveCellPairCandidate> candidates;
+            candidates.reserve(ws.receiverPoorCells.size() * ws.donorRichCells.size());
+
+            for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
+                const std::int32_t rc = ws.receiverPoorCells[ir];
+                const double deficit = d.targetCellMass - ws.mass[static_cast<std::size_t>(rc)];
+                receiverRemaining[ir] = deficit > 0.0 ? deficit : 0.0;
+            }
+            for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
+                const std::int32_t dc = ws.donorRichCells[id];
+                const double excess = ws.mass[static_cast<std::size_t>(dc)] - d.targetCellMass;
+                donorRemaining[id] = excess > 0.0 ? excess : 0.0;
+            }
+
+            for (const std::int32_t dc : ws.donorRichCells) {
+                for (const std::int32_t rc : ws.receiverPoorCells) {
+                    candidates.push_back(PassiveCellPairCandidate{
+                        dc, rc, passive_cell_distance(dc, rc, grid, params)});
+                }
+            }
+            std::sort(candidates.begin(), candidates.end(),
+                      [](const PassiveCellPairCandidate& a, const PassiveCellPairCandidate& b) {
+                          if (a.distance != b.distance) return a.distance < b.distance;
+                          if (a.donorCell != b.donorCell) return a.donorCell < b.donorCell;
+                          return a.receiverCell < b.receiverCell;
+                      });
+
+            double plannedMass = 0.0;
+            double massWeightedDistance = 0.0;
+            double maxDistance = 0.0;
+            std::uint64_t adjacentPairs = 0u;
+            constexpr double eps = 1.0e-14;
+            const double adjacentLimit = std::sqrt(2.0) + 1.0e-12;
+
+            for (const PassiveCellPairCandidate& cand : candidates) {
+                auto idIt = std::find(ws.donorRichCells.begin(), ws.donorRichCells.end(), cand.donorCell);
+                auto irIt = std::find(ws.receiverPoorCells.begin(), ws.receiverPoorCells.end(), cand.receiverCell);
+                if (idIt == ws.donorRichCells.end() || irIt == ws.receiverPoorCells.end()) {
+                    continue;
+                }
+                const std::size_t id = static_cast<std::size_t>(idIt - ws.donorRichCells.begin());
+                const std::size_t ir = static_cast<std::size_t>(irIt - ws.receiverPoorCells.begin());
+                if (donorRemaining[id] <= eps || receiverRemaining[ir] <= eps) {
+                    continue;
+                }
+                const double transfer = std::min(donorRemaining[id], receiverRemaining[ir]);
+                if (transfer <= eps) {
+                    continue;
+                }
+                donorRemaining[id] -= transfer;
+                receiverRemaining[ir] -= transfer;
+                ws.transferPlan.push_back(ResamplingTransferPlanEntry{
+                    cand.donorCell,
+                    cand.receiverCell,
+                    transfer,
+                    cand.distance,
+                    donorRemaining[id],
+                    receiverRemaining[ir]});
+                plannedMass += transfer;
+                massWeightedDistance += transfer * cand.distance;
+                maxDistance = std::max(maxDistance, cand.distance);
+                if (cand.distance <= adjacentLimit) {
+                    adjacentPairs += 1u;
+                }
+            }
+
+            double remainingReceiver = 0.0;
+            double remainingDonor = 0.0;
+            for (double v : receiverRemaining) remainingReceiver += v;
+            for (double v : donorRemaining) remainingDonor += v;
+
+            d.transferPlanBuilt = true;
+            d.nTransferPairs = static_cast<std::uint64_t>(ws.transferPlan.size());
+            d.nAdjacentTransferPairs = adjacentPairs;
+            d.plannedTransferMass = plannedMass;
+            d.remainingReceiverDeficitAfterPlan = remainingReceiver;
+            d.remainingDonorExcessAfterPlan = remainingDonor;
+            d.transferMassCoverageFraction = d.receiverMassDeficitToTarget > 0.0
+                ? plannedMass / d.receiverMassDeficitToTarget : 0.0;
+            d.transferMeanCellDistance = plannedMass > 0.0 ? massWeightedDistance / plannedMass : 0.0;
+            d.transferMaxCellDistance = maxDistance;
+            d.transferPlanDonorLimited = remainingReceiver > eps && remainingDonor <= eps;
+            d.transferPlanReceiverLimited = remainingDonor > eps && remainingReceiver <= eps;
+            if (!ws.transferPlan.empty()) {
+                d.firstTransferDonorCell = ws.transferPlan.front().donorCell;
+                d.firstTransferReceiverCell = ws.transferPlan.front().receiverCell;
+                d.lastTransferDonorCell = ws.transferPlan.back().donorCell;
+                d.lastTransferReceiverCell = ws.transferPlan.back().receiverCell;
+            }
+        } else {
+            d.transferPlanBuilt = d.candidateListsBuilt;
+            d.remainingReceiverDeficitAfterPlan = d.receiverMassDeficitToTarget;
+            d.remainingDonorExcessAfterPlan = d.donorMassExcessAboveTarget;
         }
     }
 

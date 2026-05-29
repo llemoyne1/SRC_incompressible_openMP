@@ -210,3 +210,38 @@ receivers=2 donors=1 emptyReceivers=1 deficit=7 excess=4 potential=4 poolCanSeed
 ```
 
 See `doc/README_0115_RESAMPLING_CANDIDATE_LISTS.md`.
+
+### Patch 0116 — passive local donor/receiver transfer plan
+
+Patch 0116 keeps the candidate lists passive but converts them into a
+non-mutating local transfer plan.  All donor/receiver cell pairs are sorted by
+periodic-aware grid distance; the planner greedily assigns the minimum of donor
+excess and receiver deficit.
+
+The plan records only cell-level intentions:
+
+```text
+resampTransferPairs
+resampPlannedTransferMass
+resampRemainingReceiverDeficitAfterPlan
+resampRemainingDonorExcessAfterPlan
+resampTransferMeanCellDistance
+resampTransferMaxCellDistance
+```
+
+No particle is moved, no mass is changed, no role is changed and the inactive
+pool is not consumed.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_transfer_plan_smoke_0116.sh
+```
+
+Expected diagnostic core:
+
+```text
+transferPairs=2 planned=4 remainingReceiver=3 remainingDonor=0 coverage=0.5714285714285714
+```
+
+See `doc/README_0116_RESAMPLING_TRANSFER_PLAN.md`.

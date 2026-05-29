@@ -47,6 +47,15 @@ struct ResamplingParticlePoolWorkspace {
     ResamplingParticlePoolDiagnostics diagnostics;
 };
 
+struct ResamplingTransferPlanEntry {
+    std::int32_t donorCell = kInvalidCellIndex;
+    std::int32_t receiverCell = kInvalidCellIndex;
+    double plannedMass = 0.0;
+    double cellDistance = 0.0;
+    double donorRemainingAfter = 0.0;
+    double receiverRemainingAfter = 0.0;
+};
+
 // Real-fluid weighted deposit used by the resampling branch.
 //
 // This deposit is deliberately distinct from CollisionWorkspace:
@@ -87,6 +96,11 @@ struct WeightedRealFluidDepositWorkspace {
     std::vector<std::int32_t> receiverPoorCells;
     std::vector<std::int32_t> donorRichCells;
     std::vector<std::int32_t> emptyWetReceiverCells;
+
+    // Passive local donor->receiver transfer plan prepared by patch 0116.
+    // Entries are diagnostic only: no mass, momentum, role or pool state is
+    // changed by this plan builder.
+    std::vector<ResamplingTransferPlanEntry> transferPlan;
 };
 
 struct WeightedResamplingDiagnostics {
@@ -157,6 +171,26 @@ struct WeightedResamplingDiagnostics {
     double receiverFractionOfWetCells = 0.0;
     double donorFractionOfWetCells = 0.0;
     bool poolCanSeedReceivers = false;
+
+    // Passive local donor->receiver transfer plan (patch 0116).  The plan is
+    // built by sorting all donor/receiver candidate pairs by grid distance and
+    // greedily assigning only the mass permitted by donor excess and receiver
+    // deficit.  It is diagnostic only: the particle state is unchanged.
+    bool transferPlanBuilt = false;
+    std::uint64_t nTransferPairs = 0;
+    std::uint64_t nAdjacentTransferPairs = 0;
+    std::int32_t firstTransferDonorCell = kInvalidCellIndex;
+    std::int32_t firstTransferReceiverCell = kInvalidCellIndex;
+    std::int32_t lastTransferDonorCell = kInvalidCellIndex;
+    std::int32_t lastTransferReceiverCell = kInvalidCellIndex;
+    double plannedTransferMass = 0.0;
+    double remainingReceiverDeficitAfterPlan = 0.0;
+    double remainingDonorExcessAfterPlan = 0.0;
+    double transferMassCoverageFraction = 0.0;
+    double transferMeanCellDistance = 0.0;
+    double transferMaxCellDistance = 0.0;
+    bool transferPlanDonorLimited = false;
+    bool transferPlanReceiverLimited = false;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
