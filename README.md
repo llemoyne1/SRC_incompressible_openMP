@@ -289,3 +289,49 @@ selected=4 selectedMass=4 overshoot=0 coverage=1 firstParticle=1 lastParticle=4
 ```
 
 See `doc/README_0117_RESAMPLING_DONOR_PARTICLE_SELECTION.md`.
+
+### Patch 0118 — passive extraction operation plan
+
+Patch 0118 converts the passive donor-particle selection from 0117 into an
+explicit extraction-operation list.  Each operation records which true `Fluid`
+particle would later be extracted from a donor cell, the receiver cell attached
+to that transfer entry, and the carried mass, momentum and kinetic energy.
+
+This is still diagnostic only:
+
+```text
+no particle role is changed
+no particle is moved
+no particle mass is changed
+no inactive pool slot is consumed
+no remap is applied
+```
+
+The new diagnostic block records:
+
+```text
+resampExtractionPlanBuilt
+resampExtractionOps
+resampExtractionParticles
+resampExtractionMass
+resampExtractionMomentumX
+resampExtractionMomentumY
+resampExtractionKineticEnergy
+resampHypotheticalPoolFreeSlotsAfterExtraction
+resampExtractionAllSelectedAreFluid
+resampExtractionNoDuplicateParticles
+```
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_passive_extraction_smoke_0118.sh
+```
+
+Expected diagnostic core:
+
+```text
+ops=4 particles=4 mass=4 coverage=1 poolAfter=11 allFluid=1 noDup=1
+```
+
+See `doc/README_0118_RESAMPLING_PASSIVE_EXTRACTION.md`.

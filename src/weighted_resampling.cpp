@@ -198,6 +198,8 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
     diagnostics.poolFreeSlotFraction = poolDiagnostics.freeSlotFraction;
     diagnostics.poolDormantSlotFraction = poolDiagnostics.dormantSlotFraction;
     diagnostics.poolCanSeedReceivers = poolDiagnostics.freeSlots >= diagnostics.nReceiverCells;
+    diagnostics.hypotheticalPoolFreeSlotsAfterExtraction =
+        poolDiagnostics.freeSlots + diagnostics.nExtractionParticles;
 }
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
@@ -244,6 +246,7 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.emptyWetReceiverCells.reserve(static_cast<std::size_t>(numCells));
         ws.transferPlan.reserve(static_cast<std::size_t>(numCells));
         ws.selectedDonorParticles.reserve(static_cast<std::size_t>(numParticles));
+        ws.passiveExtractionOperations.reserve(static_cast<std::size_t>(numParticles));
         ws.donorSelectedParticleCount.assign(static_cast<std::size_t>(numCells), 0u);
         ws.donorSelectedMass.assign(static_cast<std::size_t>(numCells), 0.0);
     }
@@ -288,6 +291,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ws.emptyWetReceiverCells.clear();
     ws.transferPlan.clear();
     ws.selectedDonorParticles.clear();
+    ws.passiveExtractionOperations.clear();
     std::fill(ws.donorSelectedParticleCount.begin(), ws.donorSelectedParticleCount.end(), 0u);
     std::fill(ws.donorSelectedMass.begin(), ws.donorSelectedMass.end(), 0.0);
 
@@ -731,6 +735,118 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                     d.lastSelectedDonorCell = last.donorCell;
                     d.firstSelectedReceiverCell = first.receiverCell;
                     d.lastSelectedReceiverCell = last.receiverCell;
+                }
+
+                // Patch 0118: passive extraction operation plan.
+                //
+                // Convert the 0117 selected donor-particle list into explicit
+                // extraction operations that a future mutating patch can apply
+                // by changing role Fluid -> Inactive and pushing the extracted
+                // slots into the free-list.  This builder is deliberately
+                // read-only: it records mass, momentum and kinetic energy but
+                // never changes state.role, state.mass, state.x or state.v.
+                if (!ws.selectedDonorParticles.empty()) {
+                    std::vector<std::uint8_t> seenExtracted(static_cast<std::size_t>(state.Np), 0u);
+                    std::vector<std::uint8_t> donorCellSeen(static_cast<std::size_t>(nc), 0u);
+                    std::vector<std::uint8_t> receiverCellSeen(static_cast<std::size_t>(nc), 0u);
+                    double extractionMass = 0.0;
+                    double extractionPx = 0.0;
+                    double extractionPy = 0.0;
+                    double extractionKinetic = 0.0;
+                    double extractionMaxMass = 0.0;
+                    bool allSelectedAreFluid = true;
+                    bool noDuplicateParticles = true;
+                    std::uint64_t donorCells = 0u;
+                    std::uint64_t receiverCells = 0u;
+
+                    for (const ResamplingSelectedDonorParticle& selectedParticle : ws.selectedDonorParticles) {
+                        const std::uint64_t pi64 = selectedParticle.particleIndex;
+                        if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
+                            allSelectedAreFluid = false;
+                            noDuplicateParticles = false;
+                            continue;
+                        }
+                        const std::size_t pi = static_cast<std::size_t>(pi64);
+                        if (seenExtracted[pi]) {
+                            noDuplicateParticles = false;
+                            continue;
+                        }
+                        seenExtracted[pi] = 1u;
+
+                        const bool isFluid = is_fluid_particle(state, pi);
+                        allSelectedAreFluid = allSelectedAreFluid && isFluid;
+                        const double mp = state.mass[pi];
+                        const double vx = state.vx[pi];
+                        const double vy = state.vy[pi];
+                        const double px = mp * vx;
+                        const double py = mp * vy;
+                        const double ke = 0.5 * mp * (vx * vx + vy * vy);
+
+                        if (selectedParticle.donorCell >= 0 && selectedParticle.donorCell < nc) {
+                            const std::size_t dc = static_cast<std::size_t>(selectedParticle.donorCell);
+                            if (!donorCellSeen[dc]) {
+                                donorCellSeen[dc] = 1u;
+                                donorCells += 1u;
+                            }
+                        }
+                        if (selectedParticle.receiverCell >= 0 && selectedParticle.receiverCell < nc) {
+                            const std::size_t rc = static_cast<std::size_t>(selectedParticle.receiverCell);
+                            if (!receiverCellSeen[rc]) {
+                                receiverCellSeen[rc] = 1u;
+                                receiverCells += 1u;
+                            }
+                        }
+
+                        extractionMass += mp;
+                        extractionPx += px;
+                        extractionPy += py;
+                        extractionKinetic += ke;
+                        extractionMaxMass = std::max(extractionMaxMass, mp);
+                        ws.passiveExtractionOperations.push_back(ResamplingPassiveExtractionOperation{
+                            pi64,
+                            selectedParticle.donorCell,
+                            selectedParticle.receiverCell,
+                            mp,
+                            px,
+                            py,
+                            ke,
+                            particle_role_value(state, pi),
+                            static_cast<std::uint8_t>(ParticleRole::Inactive)});
+                    }
+
+                    d.extractionPlanBuilt = d.donorParticleSelectionBuilt;
+                    d.nExtractionOperations = static_cast<std::uint64_t>(ws.passiveExtractionOperations.size());
+                    d.nExtractionParticles = d.nExtractionOperations;
+                    d.nExtractionDonorCells = donorCells;
+                    d.nExtractionReceiverCells = receiverCells;
+                    d.extractionMass = extractionMass;
+                    d.extractionMomentumX = extractionPx;
+                    d.extractionMomentumY = extractionPy;
+                    d.extractionKineticEnergy = extractionKinetic;
+                    d.extractionMeanParticleMass = d.nExtractionParticles > 0u
+                        ? extractionMass / static_cast<double>(d.nExtractionParticles) : 0.0;
+                    d.extractionMaxParticleMass = extractionMaxMass;
+                    d.extractionMassOvershoot = extractionMass - d.plannedTransferMass;
+                    d.extractionMassCoverageFraction = d.plannedTransferMass > 0.0
+                        ? extractionMass / d.plannedTransferMass : 0.0;
+                    d.hypotheticalPoolFreeSlotsAfterExtraction = d.poolFreeSlots + d.nExtractionParticles;
+                    d.extractionAllSelectedAreFluid = allSelectedAreFluid;
+                    d.extractionNoDuplicateParticles = noDuplicateParticles;
+                    if (!ws.passiveExtractionOperations.empty()) {
+                        const auto& first = ws.passiveExtractionOperations.front();
+                        const auto& last = ws.passiveExtractionOperations.back();
+                        d.firstExtractionParticle = first.particleIndex;
+                        d.lastExtractionParticle = last.particleIndex;
+                        d.firstExtractionDonorCell = first.donorCell;
+                        d.lastExtractionDonorCell = last.donorCell;
+                        d.firstExtractionReceiverCell = first.receiverCell;
+                        d.lastExtractionReceiverCell = last.receiverCell;
+                    }
+                } else {
+                    d.extractionPlanBuilt = d.donorParticleSelectionBuilt;
+                    d.hypotheticalPoolFreeSlotsAfterExtraction = d.poolFreeSlots;
+                    d.extractionAllSelectedAreFluid = d.donorParticleSelectionBuilt;
+                    d.extractionNoDuplicateParticles = d.donorParticleSelectionBuilt;
                 }
             }
         } else {

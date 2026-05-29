@@ -65,6 +65,18 @@ struct ResamplingSelectedDonorParticle {
     double selectedMassForEntryAfter = 0.0;
 };
 
+struct ResamplingPassiveExtractionOperation {
+    std::uint64_t particleIndex = kInvalidParticleIndex;
+    std::int32_t donorCell = kInvalidCellIndex;
+    std::int32_t receiverCell = kInvalidCellIndex;
+    double particleMass = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+    double kineticEnergy = 0.0;
+    std::uint8_t currentRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+    std::uint8_t plannedRoleAfterExtraction = static_cast<std::uint8_t>(ParticleRole::Inactive);
+};
+
 // Real-fluid weighted deposit used by the resampling branch.
 //
 // This deposit is deliberately distinct from CollisionWorkspace:
@@ -116,6 +128,13 @@ struct WeightedRealFluidDepositWorkspace {
     // to realize the transfer plan.  The selection is deterministic and does
     // not change role, mass, position or velocity.
     std::vector<ResamplingSelectedDonorParticle> selectedDonorParticles;
+
+    // Passive extraction operations prepared by patch 0118.  They state which
+    // selected Fluid particles would be converted to Inactive by the first
+    // mutating extraction patch.  They are diagnostics only and leave all
+    // roles, masses, positions and velocities unchanged.
+    std::vector<ResamplingPassiveExtractionOperation> passiveExtractionOperations;
+
     std::vector<std::uint32_t> donorSelectedParticleCount;
     std::vector<double> donorSelectedMass;
 };
@@ -231,6 +250,32 @@ struct WeightedResamplingDiagnostics {
     double selectedDonorMaxParticleMass = 0.0;
     bool donorParticleSelectionExactOrOvershoot = false;
     bool donorParticleSelectionUnderfilled = false;
+
+    // Passive extraction operation plan (patch 0118).  This is the last
+    // non-mutating staging level before changing selected donor particles from
+    // Fluid to Inactive in a future patch.
+    bool extractionPlanBuilt = false;
+    std::uint64_t nExtractionOperations = 0;
+    std::uint64_t nExtractionParticles = 0;
+    std::uint64_t nExtractionDonorCells = 0;
+    std::uint64_t nExtractionReceiverCells = 0;
+    std::uint64_t firstExtractionParticle = kInvalidParticleIndex;
+    std::uint64_t lastExtractionParticle = kInvalidParticleIndex;
+    std::int32_t firstExtractionDonorCell = kInvalidCellIndex;
+    std::int32_t lastExtractionDonorCell = kInvalidCellIndex;
+    std::int32_t firstExtractionReceiverCell = kInvalidCellIndex;
+    std::int32_t lastExtractionReceiverCell = kInvalidCellIndex;
+    double extractionMass = 0.0;
+    double extractionMomentumX = 0.0;
+    double extractionMomentumY = 0.0;
+    double extractionKineticEnergy = 0.0;
+    double extractionMeanParticleMass = 0.0;
+    double extractionMaxParticleMass = 0.0;
+    double extractionMassOvershoot = 0.0;
+    double extractionMassCoverageFraction = 0.0;
+    std::uint64_t hypotheticalPoolFreeSlotsAfterExtraction = 0;
+    bool extractionAllSelectedAreFluid = false;
+    bool extractionNoDuplicateParticles = false;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;

@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+./scripts/build_src_mpcd_base.sh
+
+RUN_DIR="runs/resampling_passive_extraction_smoke_0118"
+mkdir -p "$RUN_DIR"
+STATE="$RUN_DIR/initial_passive_extraction_v2.smpcd"
+THREADS="${NUM_THREADS:-2}"
+
+python3 - <<'PY'
+import pathlib
+import struct
+
+root = pathlib.Path("runs/resampling_passive_extraction_smoke_0118")
+root.mkdir(parents=True, exist_ok=True)
+path = root / "initial_passive_extraction_v2.smpcd"
+Nx = 8
+Ny = 4
+gamma = 4
+Nlatent = 5
+Ninactive = 7
+
+x=[]; y=[]; vx=[]; vy=[]; type_=[]; mass=[]; role=[]
+# Cell 0: empty wet receiver, mass 0.
+# Cell 1: poor receiver, mass 1.
+# Cell 2: rich donor, mass 8.
+# Other cells: target-band mass 4.
+for iy in range(Ny):
+    for ix in range(Nx):
+        c = ix + Nx * iy
+        if c == 0:
+            count = 0
+        elif c == 1:
+            count = 1
+        elif c == 2:
+            count = 8
+        else:
+            count = gamma
+        for p in range(count):
+            fx = 0.18 + 0.13 * (p % 4)
+            fy = 0.22 + 0.12 * (p // 4)
+            x.append((ix + fx) / Nx)
+            y.append((iy + fy) / Ny)
+            vx.append(0.0)
+            vy.append(0.0)
+            type_.append(p % 2)
+            mass.append(1.0)
+            role.append(1)  # Fluid
+
+Nfluid = len(x)
+for i in range(Nlatent):
+    x.append(1.2 + 0.01 * i)
+    y.append(1.1 + 0.01 * i)
+    vx.append(3.0)
+    vy.append(-3.0)
+    type_.append(5)
+    mass.append(10.0)
+    role.append(2)  # Latent
+for i in range(Ninactive):
+    x.append(-0.2 - 0.01 * i)
+    y.append(-0.2 - 0.01 * i)
+    vx.append(-4.0)
+    vy.append(4.0)
+    type_.append(6)
+    mass.append(20.0)
+    role.append(0)  # Inactive / future free-list
+
+Np = len(x)
+with path.open("wb") as f:
+    f.write(b"SRCMPCD_STATE" + b"\0\0\0")
+    f.write(struct.pack("<IIIIQIIII", 2, 0x01020304, 2, 1, Np, 1, 1, 8, 4))
+    reserved = [0] * 8
+    reserved[0] = 1
+    reserved[1] = 1
+    f.write(struct.pack("<8Q", *reserved))
+    for arr in (x, y, vx, vy):
+        f.write(struct.pack("<" + "d" * Np, *arr))
+    f.write(struct.pack("<" + "I" * Np, *type_))
+    f.write(struct.pack("<" + "d" * Np, *mass))
+    f.write(struct.pack("<" + "B" * Np, *role))
+print(path)
+print(f"Nfluid={Nfluid} Nlatent={Nlatent} Ninactive={Ninactive} Np={Np}")
+PY
+
+cat > "$RUN_DIR/params_passive_extraction.kv" <<KV
+inputState = $STATE
+outputDir = $RUN_DIR/out
+Lx = 1.0
+Ly = 1.0
+Nx = 8
+Ny = 4
+dt = 0.001
+nSteps = 1
+alphaDeg = 120
+randomRotationSign = true
+gridShiftEnable = false
+rngSeed = 1180
+bcX = periodic
+bcY = periodic
+method = classic
+thermostatEnable = false
+kBT = 0.01
+resamplingTargetCellMass = 4.0
+resamplingWetMaskMode = active_domain
+resamplingWetCellMassThreshold = 0.0
+resamplingPoorCellMassFraction = 0.5
+resamplingRichCellMassFraction = 1.5
+summaryEvery = 1
+dumpStateEvery = 1
+numThreads = $THREADS
+KV
+
+./build/src_mpcd_base "$RUN_DIR/params_passive_extraction.kv"
+
+python3 - <<'PY'
+import csv
+import math
+import pathlib
+
+base = pathlib.Path("runs/resampling_passive_extraction_smoke_0118")
+summary = base / "out" / "summary_runtime.csv"
+with summary.open(newline="") as f:
+    rows = list(csv.DictReader(f))
+assert len(rows) >= 2
+
+Nx, Ny = 8, 4
+nCells = Nx * Ny
+Nfluid = 125
+Nlatent = 5
+Ninactive = 7
+for row in rows:
+    assert int(row["resampComputed"]) == 1
+    assert int(row["resampCellClassificationComputed"]) == 1
+    assert int(row["resampCandidateListsBuilt"]) == 1
+    assert int(row["resampNFluid"]) == Nfluid
+    assert int(row["resampNLatent"]) == Nlatent
+    assert int(row["resampNInactive"]) == Ninactive
+    assert int(row["resampWetCells"]) == nCells
+    assert int(row["resampPoorCells"]) == 2
+    assert int(row["resampRichCells"]) == 1
+    assert int(row["resampReceiverCells"]) == 2
+    assert int(row["resampDonorCells"]) == 1
+    assert int(row["resampEmptyWetCells"]) == 1
+    assert int(row["resampEmptyWetReceiverCells"]) == 1
+    assert int(row["resampFirstReceiverCell"]) == 0
+    assert int(row["resampLastReceiverCell"]) == 1
+    assert int(row["resampFirstDonorCell"]) == 2
+    assert int(row["resampLastDonorCell"]) == 2
+    assert abs(float(row["resampReceiverMassDeficitToTarget"]) - 7.0) < 1e-12
+    assert abs(float(row["resampDonorMassExcessAboveTarget"]) - 4.0) < 1e-12
+    assert abs(float(row["resampDonorReceiverMassBalance"]) + 3.0) < 1e-12
+    assert abs(float(row["resampPotentialTransferMass"]) - 4.0) < 1e-12
+    assert abs(float(row["resampReceiverFractionOfWetCells"]) - 2 / nCells) < 1e-15
+    assert abs(float(row["resampDonorFractionOfWetCells"]) - 1 / nCells) < 1e-15
+    assert int(row["resampTransferPlanBuilt"]) == 1
+    assert int(row["resampTransferPairs"]) == 2
+    assert int(row["resampAdjacentTransferPairs"]) == 1
+    assert int(row["resampFirstTransferDonorCell"]) == 2
+    assert int(row["resampFirstTransferReceiverCell"]) == 1
+    assert int(row["resampLastTransferDonorCell"]) == 2
+    assert int(row["resampLastTransferReceiverCell"]) == 0
+    assert abs(float(row["resampPlannedTransferMass"]) - 4.0) < 1e-12
+    assert abs(float(row["resampRemainingReceiverDeficitAfterPlan"]) - 3.0) < 1e-12
+    assert abs(float(row["resampRemainingDonorExcessAfterPlan"])) < 1e-12
+    assert abs(float(row["resampTransferMassCoverageFraction"]) - 4.0 / 7.0) < 1e-14
+    assert abs(float(row["resampTransferMeanCellDistance"]) - 1.25) < 1e-14
+    assert abs(float(row["resampTransferMaxCellDistance"]) - 2.0) < 1e-14
+    assert int(row["resampTransferPlanDonorLimited"]) == 1
+    assert int(row["resampTransferPlanReceiverLimited"]) == 0
+    assert int(row["resampPoolBuilt"]) == 1
+    assert int(row["resampPoolFreeSlots"]) == Ninactive
+    assert int(row["resampPoolCanSeedReceivers"]) == 1
+    assert int(row["resampDonorParticleSelectionBuilt"]) == 1
+    assert int(row["resampSelectedDonorParticles"]) == 4
+    assert int(row["resampDonorCellsWithSelectedParticles"]) == 1
+    assert int(row["resampMaxSelectedParticlesForTransferEntry"]) == 3
+    assert int(row["resampMaxSelectedParticlesPerDonorCell"]) == 4
+    assert int(row["resampFirstSelectedDonorParticle"]) == 1
+    assert int(row["resampLastSelectedDonorParticle"]) == 4
+    assert int(row["resampFirstSelectedDonorCell"]) == 2
+    assert int(row["resampLastSelectedDonorCell"]) == 2
+    assert int(row["resampFirstSelectedReceiverCell"]) == 1
+    assert int(row["resampLastSelectedReceiverCell"]) == 0
+    assert abs(float(row["resampSelectedDonorParticleMass"]) - 4.0) < 1e-12
+    assert abs(float(row["resampSelectedDonorMassOvershoot"])) < 1e-12
+    assert abs(float(row["resampSelectedDonorMassCoverageFraction"]) - 1.0) < 1e-12
+    assert abs(float(row["resampSelectedDonorMeanParticleMass"]) - 1.0) < 1e-12
+    assert abs(float(row["resampSelectedDonorMaxParticleMass"]) - 1.0) < 1e-12
+    assert int(row["resampDonorParticleSelectionExactOrOvershoot"]) == 1
+    assert int(row["resampDonorParticleSelectionUnderfilled"]) == 0
+    assert int(row["resampExtractionPlanBuilt"]) == 1
+    assert int(row["resampExtractionOps"]) == 4
+    assert int(row["resampExtractionParticles"]) == 4
+    assert int(row["resampExtractionDonorCells"]) == 1
+    assert int(row["resampExtractionReceiverCells"]) == 2
+    assert int(row["resampFirstExtractionParticle"]) == 1
+    assert int(row["resampLastExtractionParticle"]) == 4
+    assert int(row["resampFirstExtractionDonorCell"]) == 2
+    assert int(row["resampLastExtractionDonorCell"]) == 2
+    assert int(row["resampFirstExtractionReceiverCell"]) == 1
+    assert int(row["resampLastExtractionReceiverCell"]) == 0
+    assert abs(float(row["resampExtractionMass"]) - 4.0) < 1e-12
+    assert abs(float(row["resampExtractionMomentumX"])) < 1e-12
+    assert abs(float(row["resampExtractionMomentumY"])) < 1e-12
+    assert abs(float(row["resampExtractionKineticEnergy"])) < 1e-12
+    assert abs(float(row["resampExtractionMeanParticleMass"]) - 1.0) < 1e-12
+    assert abs(float(row["resampExtractionMaxParticleMass"]) - 1.0) < 1e-12
+    assert abs(float(row["resampExtractionMassOvershoot"])) < 1e-12
+    assert abs(float(row["resampExtractionMassCoverageFraction"]) - 1.0) < 1e-12
+    assert int(row["resampHypotheticalPoolFreeSlotsAfterExtraction"]) == Ninactive + 4
+    assert int(row["resampExtractionAllSelectedAreFluid"]) == 1
+    assert int(row["resampExtractionNoDuplicateParticles"]) == 1
+
+last = rows[-1]
+print(
+    "passive extraction:",
+    f"ops={last['resampExtractionOps']}",
+    f"particles={last['resampExtractionParticles']}",
+    f"mass={last['resampExtractionMass']}",
+    f"coverage={last['resampExtractionMassCoverageFraction']}",
+    f"firstParticle={last['resampFirstExtractionParticle']}",
+    f"lastParticle={last['resampLastExtractionParticle']}",
+    f"poolAfter={last['resampHypotheticalPoolFreeSlotsAfterExtraction']}",
+    f"allFluid={last['resampExtractionAllSelectedAreFluid']}",
+    f"noDup={last['resampExtractionNoDuplicateParticles']}",
+)
+PY
+
+printf '\n[0118 resampling passive extraction smoke] OK: extraction operations are explicit, passive, and pool-aware.\n'

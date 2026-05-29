@@ -240,6 +240,29 @@ struct RuntimeSummary {
     int resampDonorParticleSelectionExactOrOvershoot = 0;
     int resampDonorParticleSelectionUnderfilled = 0;
 
+    int resampExtractionPlanBuilt = 0;
+    std::uint64_t resampExtractionOps = 0;
+    std::uint64_t resampExtractionParticles = 0;
+    std::uint64_t resampExtractionDonorCells = 0;
+    std::uint64_t resampExtractionReceiverCells = 0;
+    std::int64_t resampFirstExtractionParticle = -1;
+    std::int64_t resampLastExtractionParticle = -1;
+    std::int32_t resampFirstExtractionDonorCell = -1;
+    std::int32_t resampLastExtractionDonorCell = -1;
+    std::int32_t resampFirstExtractionReceiverCell = -1;
+    std::int32_t resampLastExtractionReceiverCell = -1;
+    double resampExtractionMass = 0.0;
+    double resampExtractionMomentumX = 0.0;
+    double resampExtractionMomentumY = 0.0;
+    double resampExtractionKineticEnergy = 0.0;
+    double resampExtractionMeanParticleMass = 0.0;
+    double resampExtractionMaxParticleMass = 0.0;
+    double resampExtractionMassOvershoot = 0.0;
+    double resampExtractionMassCoverageFraction = 0.0;
+    std::uint64_t resampHypotheticalPoolFreeSlotsAfterExtraction = 0;
+    int resampExtractionAllSelectedAreFluid = 0;
+    int resampExtractionNoDuplicateParticles = 0;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;
