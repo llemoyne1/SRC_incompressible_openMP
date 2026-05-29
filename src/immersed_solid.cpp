@@ -365,6 +365,9 @@ ImmersedSolidDiagnostics apply_immersed_solid_reflection(ParticleState& state,
 #pragma omp parallel for reduction(+:hits) if(n > 10000)
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const double dx = state.x[i] - cx;
             const double dy = state.y[i] - cy;
             const double r2 = dx * dx + dy * dy;
@@ -405,6 +408,9 @@ ImmersedSolidDiagnostics apply_immersed_solid_reflection(ParticleState& state,
 #pragma omp parallel for reduction(+:hits) if(n > 10000)
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const double xNow = state.x[i];
             const double yNow = state.y[i];
             if (!(xNow >= xMin && xNow <= xMax && yNow >= yMin && yNow <= yMax)) continue;

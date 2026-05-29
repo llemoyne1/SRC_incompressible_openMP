@@ -243,6 +243,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     validate_particle_state(state, "src_collision_step");
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const ParticleRoleCounts roleCounts = count_particle_roles(state);
     const int nc = grid.numCells;
     if (nc <= 0) {
         throw std::runtime_error("src_collision_step: invalid number of cells");
@@ -258,6 +259,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     std::fill(ws.cellMass.begin(), ws.cellMass.end(), 0.0);
     std::fill(ws.cellUx.begin(), ws.cellUx.end(), 0.0);
     std::fill(ws.cellUy.begin(), ws.cellUy.end(), 0.0);
+    std::fill(ws.cellId.begin(), ws.cellId.end(), -1);
     std::fill(ws.localCount.begin(), ws.localCount.end(), 0u);
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
@@ -271,6 +273,9 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const int c = cell_index_from_position(state.x[i], state.y[i], grid, diag.shift, params);
             ws.cellId[i] = c;
             const std::size_t k = offset + static_cast<std::size_t>(c);
@@ -282,7 +287,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         }
     }
 
-    const double inferredGamma = static_cast<double>(n) / static_cast<double>(nc);
+    const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
     const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
     const double wallKBT = params.wallKBT > 0.0 ? params.wallKBT :
                            (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
@@ -439,7 +444,13 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
 #pragma omp parallel for if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
         const int c = ws.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
         const std::size_t k = static_cast<std::size_t>(c);
         const double ux = ws.cellUx[k];
         const double uy = ws.cellUy[k];

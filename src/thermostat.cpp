@@ -122,6 +122,9 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const int c = cellId[i];
             if (c < 0 || c >= nc) {
                 continue;
@@ -165,6 +168,9 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const int c = cellId[i];
             if (c < 0 || c >= nc) {
                 continue;
@@ -220,6 +226,9 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
 #pragma omp parallel for if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
         const int c = cellId[i];
         if (c < 0 || c >= nc) {
             continue;

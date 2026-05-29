@@ -28,16 +28,6 @@ std::string state_dump_name(const std::string& outputDir, int step) {
     return oss.str();
 }
 
-bool should_dump_q9_diagnostic_fields(const mpcd::SimulationParams& params, int step) {
-    if (!params.q9DiagnosticFieldDumpEnable) {
-        return false;
-    }
-    const int every = params.q9DiagnosticFieldDumpEvery > 0
-        ? params.q9DiagnosticFieldDumpEvery
-        : params.dumpStateEvery;
-    return every > 0 && (step % every == 0 || step == params.nSteps);
-}
-
 double elapsed_seconds(std::chrono::steady_clock::time_point t0) {
     const auto now = std::chrono::steady_clock::now();
     return std::chrono::duration<double>(now - t0).count();
@@ -91,6 +81,8 @@ int main(int argc, char** argv) {
                                    std::filesystem::copy_options::overwrite_existing, ec);
 
         mpcd::ParticleState state = mpcd::read_smpcd_state(params.inputState);
+        mpcd::ensure_particle_roles(state, mpcd::ParticleRole::Fluid);
+        const mpcd::ParticleRoleCounts initialRoleCounts = mpcd::count_particle_roles(state);
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
         const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
         mpcd::apply_boundary_conditions(state, params, initialDomain, 0u, 0.0);
@@ -103,20 +95,17 @@ int main(int argc, char** argv) {
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
-                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
         }
 
-        if (params.immersedSolidEnable && params.q9ImmersedSolidHaloCells > 0) {
-            std::cerr << "[src_mpcd_base] WARNING: q9ImmersedSolidHaloCells="
-                      << params.q9ImmersedSolidHaloCells
-                      << " enables legacy conservative Q9 halo exclusion near the immersed solid. "
-                      << "For nominal face/cell solid-boundary validation, use q9ImmersedSolidHaloCells=0.\n";
-        }
 
         std::cout << "[src_mpcd_base] Np=" << state.Np
+                  << " fluid=" << initialRoleCounts.fluid
+                  << " latent=" << initialRoleCounts.latent
+                  << " inactive=" << initialRoleCounts.inactive
                   << " grid=" << params.Nx << "x" << params.Ny
                   << " bc=[L:" << params.bcLeft
                   << ", R:" << params.bcRight
@@ -146,8 +135,6 @@ int main(int argc, char** argv) {
                                                            &stepResult.immersed,
                                                            &stepResult.collision,
                                                            &stepResult.q6,
-                                                           &stepResult.q9,
-                                                           &stepResult.virial,
                                                            &stepResult.thermostat,
                                                            ompActiveThreads);
                 summary.append(s);
@@ -157,16 +144,12 @@ int main(int argc, char** argv) {
           << " kBT=" << std::scientific << std::setprecision(3) << s.kBTEstimate
           << " stdN=" << std::fixed << std::setprecision(3) << s.stdN
           << " q6=" << std::scientific << std::setprecision(2) << s.q6DivAfterProjectedFluxRms
-          << " q9r=" << std::fixed << std::setprecision(4) << s.q9DensityStdRatioEstimate
           << " wall=" << std::fixed << std::setprecision(1) << wallTime << "s"
           << std::flush;
             }
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
                 mpcd::write_smpcd_state(state_dump_name(params.outputDir, step), state);
-            }
-            if (should_dump_q9_diagnostic_fields(params, step)) {
-                mpcd::write_q9_diagnostic_field_dump(params.outputDir, step, params, workspace.q9);
             }
         }
 

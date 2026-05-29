@@ -97,6 +97,7 @@ void deposit_cell_velocity(const ParticleState& state,
     std::fill(ws.cellPy.begin(), ws.cellPy.end(), 0.0);
     std::fill(ws.cellUx.begin(), ws.cellUx.end(), 0.0);
     std::fill(ws.cellUy.begin(), ws.cellUy.end(), 0.0);
+    std::fill(ws.cellId.begin(), ws.cellId.end(), -1);
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
@@ -109,6 +110,9 @@ void deposit_cell_velocity(const ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const int c = active_domain_cell_index(state.x[i], state.y[i], domain, params);
             ws.cellId[i] = c;
             const std::size_t k = offset + static_cast<std::size_t>(c);
@@ -1037,7 +1041,13 @@ void apply_cell_velocity_correction(ParticleState& state,
 #pragma omp parallel for reduction(+:mass,dpx,dpy) if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
         const int c = ws.cellId[i];
+        if (c < 0) {
+            continue;
+        }
         const std::size_t k = static_cast<std::size_t>(c);
         const double m = state.mass[i];
         mass += m;
@@ -1056,6 +1066,9 @@ void apply_cell_velocity_correction(ParticleState& state,
 #pragma omp parallel for if(n > 10000)
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             state.vx[i] -= cvx;
             state.vy[i] -= cvy;
         }

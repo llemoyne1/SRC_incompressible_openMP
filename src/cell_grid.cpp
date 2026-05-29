@@ -113,6 +113,9 @@ std::vector<std::uint32_t> compute_cell_counts(const ParticleState& state,
 #pragma omp for
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
             const int c = cell_index_from_position(state.x[i], state.y[i], grid, shift, params);
             local[offset + static_cast<std::size_t>(c)] += 1u;
         }

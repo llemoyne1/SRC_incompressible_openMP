@@ -831,13 +831,18 @@ void append_particle(ParticleState& state,
                      double vx,
                      double vy,
                      std::uint32_t type,
-                     double mass) {
+                     double mass,
+                     ParticleRole role = ParticleRole::Fluid) {
+    if (state.role.empty() && state.Np > 0u) {
+        state.role.assign(static_cast<std::size_t>(state.Np), kParticleRoleFluid);
+    }
     state.x.push_back(x);
     state.y.push_back(y);
     state.vx.push_back(vx);
     state.vy.push_back(vy);
     state.type.push_back(type);
     state.mass.push_back(mass);
+    state.role.push_back(static_cast<std::uint8_t>(role));
     state.Np = static_cast<std::uint64_t>(state.x.size());
 }
 
@@ -947,8 +952,15 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
                             is_inlet_boundary_mode(params.bcRight) ? "right" :
                             is_inlet_boundary_mode(params.bcBottom) ? "bottom" : "top";
 
-    const std::uint32_t refType = state.type.empty() ? 0u : state.type.front();
-    const double refMass = state.mass.empty() ? 1.0 : state.mass.front();
+    std::uint32_t refType = 0u;
+    double refMass = 1.0;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (is_fluid_particle(state, i)) {
+            refType = state.type[i];
+            refMass = state.mass[i];
+            break;
+        }
+    }
 
     ParticleState kept{};
     kept.dim = state.dim;
@@ -958,6 +970,7 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
     kept.vy.reserve(state.vy.size());
     kept.type.reserve(state.type.size());
     kept.mass.reserve(state.mass.size());
+    kept.role.reserve(state.role.size());
 
     ReflectionFailure firstFailure{};
     int maxXReflections = 0;
@@ -971,6 +984,12 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
         double vy = state.vy[i];
         const std::uint32_t type = state.type[i];
         const double mass = state.mass[i];
+        const std::uint8_t roleValue = particle_role_value(state, i);
+
+        if (!is_fluid_role(roleValue)) {
+            append_particle(kept, x, y, vx, vy, type, mass, static_cast<ParticleRole>(roleValue));
+            continue;
+        }
 
         if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(vx) || !std::isfinite(vy)) {
             firstFailure.failed = true;
@@ -1044,7 +1063,7 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
         }
 
         if (!remove && !firstFailure.failed) {
-            append_particle(kept, x, y, vx, vy, type, mass);
+            append_particle(kept, x, y, vx, vy, type, mass, ParticleRole::Fluid);
         }
     }
 
@@ -1117,6 +1136,9 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
         ReflectionFailure localFailure{};
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
 
         if (!std::isfinite(state.x[i]) || !std::isfinite(state.y[i]) ||
             !std::isfinite(state.vx[i]) || !std::isfinite(state.vy[i])) {

@@ -9,7 +9,8 @@ namespace mpcd {
 namespace {
 
 constexpr std::array<char, 16> kMagic{{'S','R','C','M','P','C','D','_','S','T','A','T','E','\0','\0','\0'}};
-constexpr std::uint32_t kVersion = 1u;
+constexpr std::uint32_t kVersionV1 = 1u;
+constexpr std::uint32_t kVersionV2 = 2u;
 constexpr std::uint32_t kEndianMarker = 0x01020304u;
 constexpr std::uint32_t kDim2 = 2u;
 constexpr std::uint32_t kLayoutSoA = 1u;
@@ -17,6 +18,8 @@ constexpr std::uint32_t kHasType = 1u;
 constexpr std::uint32_t kHasMass = 1u;
 constexpr std::uint32_t kRealSize = 8u;
 constexpr std::uint32_t kTypeSize = 4u;
+constexpr std::uint32_t kRoleSize = 1u;
+constexpr std::uint64_t kHasRoleReservedFlag = 1u;
 constexpr std::size_t kReservedCount = 8u;
 
 // Header layout, written field-by-field to avoid compiler padding ambiguity:
@@ -31,6 +34,10 @@ constexpr std::size_t kReservedCount = 8u;
 // realSize uint32
 // typeSize uint32
 // reserved[8] uint64
+//
+// V1 payload: x, y, vx, vy, type, mass.
+// V2 payload: x, y, vx, vy, type, mass, role.  reserved[0]=1 flags that
+// the role array is present while preserving the compact V1 header shape.
 
 template <typename T>
 void read_exact(std::ifstream& fin, T& value, const std::string& label) {
@@ -91,6 +98,12 @@ void require_equal(std::uint32_t got, std::uint32_t expected, const std::string&
     }
 }
 
+void require_supported_version(std::uint32_t version) {
+    if (version != kVersionV1 && version != kVersionV2) {
+        throw std::runtime_error("Unsupported .smpcd version");
+    }
+}
+
 } // namespace
 
 ParticleState read_smpcd_state(const std::string& filepath) {
@@ -125,12 +138,12 @@ ParticleState read_smpcd_state(const std::string& filepath) {
     read_exact(fin, realSize, "realSize");
     read_exact(fin, typeSize, "typeSize");
 
+    std::array<std::uint64_t, kReservedCount> reserved{};
     for (std::size_t i = 0; i < kReservedCount; ++i) {
-        std::uint64_t reserved = 0u;
-        read_exact(fin, reserved, "reserved");
+        read_exact(fin, reserved[i], "reserved");
     }
 
-    require_equal(version, kVersion, "version");
+    require_supported_version(version);
     require_equal(endian, kEndianMarker, "endianness or byte order");
     require_equal(dim, kDim2, "dimension");
     require_equal(layout, kLayoutSoA, "layout");
@@ -154,13 +167,23 @@ ParticleState read_smpcd_state(const std::string& filepath) {
     read_vector(fin, state.vy, n, "vy");
     read_vector(fin, state.type, n, "type");
     read_vector(fin, state.mass, n, "mass");
+    if (version == kVersionV2) {
+        if (reserved[0] != kHasRoleReservedFlag) {
+            throw std::runtime_error("Unsupported .smpcd V2 role flag");
+        }
+        read_vector(fin, state.role, n, "role");
+    } else {
+        state.role.assign(n, kParticleRoleFluid);
+    }
 
     validate_particle_state(state, "read_smpcd_state");
     return state;
 }
 
 void write_smpcd_state(const std::string& filepath, const ParticleState& state) {
-    validate_particle_state(state, "write_smpcd_state");
+    ParticleState normalized = state;
+    ensure_particle_roles(normalized, ParticleRole::Fluid);
+    validate_particle_state(normalized, "write_smpcd_state");
 
     std::ofstream fout(filepath, std::ios::binary);
     if (!fout) {
@@ -169,11 +192,11 @@ void write_smpcd_state(const std::string& filepath, const ParticleState& state) 
 
     write_bytes(fout, kMagic.data(), kMagic.size(), "magic");
 
-    const std::uint32_t version = kVersion;
+    const std::uint32_t version = kVersionV2;
     const std::uint32_t endian = kEndianMarker;
     const std::uint32_t dim = kDim2;
     const std::uint32_t layout = kLayoutSoA;
-    const std::uint64_t Np = state.Np;
+    const std::uint64_t Np = normalized.Np;
     const std::uint32_t hasType = kHasType;
     const std::uint32_t hasMass = kHasMass;
     const std::uint32_t realSize = kRealSize;
@@ -189,17 +212,20 @@ void write_smpcd_state(const std::string& filepath, const ParticleState& state) 
     write_exact(fout, realSize, "realSize");
     write_exact(fout, typeSize, "typeSize");
 
-    const std::uint64_t zero = 0u;
+    std::array<std::uint64_t, kReservedCount> reserved{};
+    reserved[0] = kHasRoleReservedFlag;
+    reserved[1] = kRoleSize;
     for (std::size_t i = 0; i < kReservedCount; ++i) {
-        write_exact(fout, zero, "reserved");
+        write_exact(fout, reserved[i], "reserved");
     }
 
-    write_vector(fout, state.x, "x");
-    write_vector(fout, state.y, "y");
-    write_vector(fout, state.vx, "vx");
-    write_vector(fout, state.vy, "vy");
-    write_vector(fout, state.type, "type");
-    write_vector(fout, state.mass, "mass");
+    write_vector(fout, normalized.x, "x");
+    write_vector(fout, normalized.y, "y");
+    write_vector(fout, normalized.vx, "vx");
+    write_vector(fout, normalized.vy, "vy");
+    write_vector(fout, normalized.type, "type");
+    write_vector(fout, normalized.mass, "mass");
+    write_vector(fout, normalized.role, "role");
 }
 
 } // namespace mpcd
