@@ -309,6 +309,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingPoorCellMassFraction" || key == "resamplingPoorMassFraction") p.resamplingPoorCellMassFraction = parse_double(value, key);
         else if (key == "resamplingRichCellMassFraction" || key == "resamplingRichMassFraction") p.resamplingRichCellMassFraction = parse_double(value, key);
         else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
+        else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);

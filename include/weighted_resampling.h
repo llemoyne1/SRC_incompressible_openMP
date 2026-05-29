@@ -77,6 +77,34 @@ struct ResamplingPassiveExtractionOperation {
     std::uint8_t plannedRoleAfterExtraction = static_cast<std::uint8_t>(ParticleRole::Inactive);
 };
 
+struct ResamplingExtractionApplyDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t operationsConsidered = 0;
+    std::uint64_t operationsApplied = 0;
+    std::uint64_t roleChanges = 0;
+    std::uint64_t skippedInvalidParticles = 0;
+    std::uint64_t skippedNonFluidParticles = 0;
+    std::uint64_t skippedDuplicateParticles = 0;
+
+    std::uint64_t poolFreeSlotsBefore = 0;
+    std::uint64_t poolFreeSlotsAfter = 0;
+    std::uint64_t poolFreeSlotDelta = 0;
+
+    double appliedMass = 0.0;
+    double appliedMomentumX = 0.0;
+    double appliedMomentumY = 0.0;
+    double appliedKineticEnergy = 0.0;
+    double plannedExtractionMass = 0.0;
+    double massResidualVsPlan = 0.0;
+
+    std::uint64_t firstAppliedParticle = kInvalidParticleIndex;
+    std::uint64_t lastAppliedParticle = kInvalidParticleIndex;
+    bool noDuplicateParticles = true;
+    bool allAppliedWereFluid = true;
+};
+
 // Real-fluid weighted deposit used by the resampling branch.
 //
 // This deposit is deliberately distinct from CollisionWorkspace:
@@ -277,6 +305,31 @@ struct WeightedResamplingDiagnostics {
     bool extractionAllSelectedAreFluid = false;
     bool extractionNoDuplicateParticles = false;
 
+    // First mutating extraction application (patch 0119).  These diagnostics
+    // report the actual Fluid->Inactive role changes applied from the passive
+    // extraction plan.  Insertion/remap is not implemented yet.
+    bool extractionApplyAttempted = false;
+    bool extractionApplied = false;
+    std::uint64_t extractionApplyOpsConsidered = 0;
+    std::uint64_t extractionApplyOpsApplied = 0;
+    std::uint64_t extractionApplyRoleChanges = 0;
+    std::uint64_t extractionApplySkippedInvalidParticles = 0;
+    std::uint64_t extractionApplySkippedNonFluidParticles = 0;
+    std::uint64_t extractionApplySkippedDuplicateParticles = 0;
+    std::uint64_t extractionApplyPoolFreeSlotsBefore = 0;
+    std::uint64_t extractionApplyPoolFreeSlotsAfter = 0;
+    std::uint64_t extractionApplyPoolFreeSlotDelta = 0;
+    double extractionApplyMass = 0.0;
+    double extractionApplyMomentumX = 0.0;
+    double extractionApplyMomentumY = 0.0;
+    double extractionApplyKineticEnergy = 0.0;
+    double extractionApplyPlannedMass = 0.0;
+    double extractionApplyMassResidualVsPlan = 0.0;
+    std::uint64_t firstAppliedExtractionParticle = kInvalidParticleIndex;
+    std::uint64_t lastAppliedExtractionParticle = kInvalidParticleIndex;
+    bool extractionApplyNoDuplicateParticles = true;
+    bool extractionApplyAllAppliedWereFluid = true;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -307,6 +360,15 @@ void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::
 
 void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
                                         const ResamplingParticlePoolDiagnostics& poolDiagnostics);
+
+ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace);
+
+void attach_resampling_extraction_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingExtractionApplyDiagnostics& extractionDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

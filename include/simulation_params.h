@@ -258,6 +258,14 @@ struct SimulationParams {
     double resamplingRichCellMassFraction = 1.5;
     double resamplingActiveFluidFractionThreshold = 0.5;
 
+    // First mutating resampling switch (patch 0119).  Disabled by default so
+    // all legacy SRC/Q6 validations remain unchanged.  When enabled, selected
+    // donor particles from the passive extraction plan are converted from
+    // Fluid to Inactive after the SRC/Q6/thermostat step and before the final
+    // runtime resampling diagnostics are recorded.  No insertion/remap is done
+    // yet, so this option is intended only for controlled smoke tests.
+    bool resamplingExtractionEnable = false;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

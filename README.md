@@ -335,3 +335,39 @@ ops=4 particles=4 mass=4 coverage=1 poolAfter=11 allFluid=1 noDup=1
 ```
 
 See `doc/README_0118_RESAMPLING_PASSIVE_EXTRACTION.md`.
+
+### Patch 0119 — mutating extraction Fluid -> Inactive
+
+Patch 0119 is the first deliberately mutating resampling step.  It adds the
+parameter:
+
+```text
+resamplingExtractionEnable = false
+```
+
+The default is `false`, so all classic SRC/Q6 runs and all passive resampling
+smokes remain unchanged.  When enabled, the code applies the passive extraction
+operations prepared in 0118 by converting selected donor particles:
+
+```text
+Fluid -> Inactive
+```
+
+No insertion, mass remap, momentum remap, or renormalisation is performed yet.
+After the role mutation, the inactive pool is rebuilt and the real-fluid deposit
+is recomputed, so the runtime summary reports the post-extraction transported
+fluid plus a separate `resampExtractionApply*` diagnostic block.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_mutating_extraction_smoke_0119.sh
+```
+
+Expected diagnostic core:
+
+```text
+applied=4 mass=4 fluid=121 inactive=11 poolFree=11 richAfter=0
+```
+
+See `doc/README_0119_RESAMPLING_MUTATING_EXTRACTION.md`.

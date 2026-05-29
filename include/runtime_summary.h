@@ -263,6 +263,28 @@ struct RuntimeSummary {
     int resampExtractionAllSelectedAreFluid = 0;
     int resampExtractionNoDuplicateParticles = 0;
 
+    int resampExtractionApplyAttempted = 0;
+    int resampExtractionApplied = 0;
+    std::uint64_t resampExtractionApplyOpsConsidered = 0;
+    std::uint64_t resampExtractionApplyOpsApplied = 0;
+    std::uint64_t resampExtractionApplyRoleChanges = 0;
+    std::uint64_t resampExtractionApplySkippedInvalidParticles = 0;
+    std::uint64_t resampExtractionApplySkippedNonFluidParticles = 0;
+    std::uint64_t resampExtractionApplySkippedDuplicateParticles = 0;
+    std::uint64_t resampExtractionApplyPoolFreeSlotsBefore = 0;
+    std::uint64_t resampExtractionApplyPoolFreeSlotsAfter = 0;
+    std::uint64_t resampExtractionApplyPoolFreeSlotDelta = 0;
+    double resampExtractionApplyMass = 0.0;
+    double resampExtractionApplyMomentumX = 0.0;
+    double resampExtractionApplyMomentumY = 0.0;
+    double resampExtractionApplyKineticEnergy = 0.0;
+    double resampExtractionApplyPlannedMass = 0.0;
+    double resampExtractionApplyMassResidualVsPlan = 0.0;
+    std::int64_t resampFirstAppliedExtractionParticle = -1;
+    std::int64_t resampLastAppliedExtractionParticle = -1;
+    int resampExtractionApplyNoDuplicateParticles = 1;
+    int resampExtractionApplyAllAppliedWereFluid = 1;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

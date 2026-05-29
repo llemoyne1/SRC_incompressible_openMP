@@ -202,6 +202,101 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
         poolDiagnostics.freeSlots + diagnostics.nExtractionParticles;
 }
 
+
+ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace) {
+    validate_particle_state(state, "apply_resampling_extraction_operations");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingExtractionApplyDiagnostics d{};
+    d.attempted = true;
+    d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
+    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    std::vector<std::uint8_t> seen(n, 0u);
+
+    for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
+        d.plannedExtractionMass += op.particleMass;
+        const std::uint64_t pi64 = op.particleIndex;
+        if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
+            d.skippedInvalidParticles += 1u;
+            d.noDuplicateParticles = false;
+            continue;
+        }
+        const std::size_t pi = static_cast<std::size_t>(pi64);
+        if (seen[pi]) {
+            d.skippedDuplicateParticles += 1u;
+            d.noDuplicateParticles = false;
+            continue;
+        }
+        seen[pi] = 1u;
+
+        if (!is_fluid_particle(state, pi)) {
+            d.skippedNonFluidParticles += 1u;
+            d.allAppliedWereFluid = false;
+            continue;
+        }
+
+        const double mp = state.mass[pi];
+        const double vx = state.vx[pi];
+        const double vy = state.vy[pi];
+        const double px = mp * vx;
+        const double py = mp * vy;
+        const double ke = 0.5 * mp * (vx * vx + vy * vy);
+
+        set_particle_role(state, pi, ParticleRole::Inactive);
+        resampling_pool_push_free_slot(pool, pi64);
+
+        d.operationsApplied += 1u;
+        d.roleChanges += 1u;
+        d.appliedMass += mp;
+        d.appliedMomentumX += px;
+        d.appliedMomentumY += py;
+        d.appliedKineticEnergy += ke;
+        if (d.firstAppliedParticle == kInvalidParticleIndex) {
+            d.firstAppliedParticle = pi64;
+        }
+        d.lastAppliedParticle = pi64;
+    }
+
+    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotDelta = d.poolFreeSlotsAfter >= d.poolFreeSlotsBefore
+        ? d.poolFreeSlotsAfter - d.poolFreeSlotsBefore : 0u;
+    d.massResidualVsPlan = d.appliedMass - d.plannedExtractionMass;
+    d.applied = d.operationsApplied > 0u;
+    d.allAppliedWereFluid = d.allAppliedWereFluid && d.skippedNonFluidParticles == 0u;
+    return d;
+}
+
+void attach_resampling_extraction_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingExtractionApplyDiagnostics& extractionDiagnostics) {
+    diagnostics.extractionApplyAttempted = extractionDiagnostics.attempted;
+    diagnostics.extractionApplied = extractionDiagnostics.applied;
+    diagnostics.extractionApplyOpsConsidered = extractionDiagnostics.operationsConsidered;
+    diagnostics.extractionApplyOpsApplied = extractionDiagnostics.operationsApplied;
+    diagnostics.extractionApplyRoleChanges = extractionDiagnostics.roleChanges;
+    diagnostics.extractionApplySkippedInvalidParticles = extractionDiagnostics.skippedInvalidParticles;
+    diagnostics.extractionApplySkippedNonFluidParticles = extractionDiagnostics.skippedNonFluidParticles;
+    diagnostics.extractionApplySkippedDuplicateParticles = extractionDiagnostics.skippedDuplicateParticles;
+    diagnostics.extractionApplyPoolFreeSlotsBefore = extractionDiagnostics.poolFreeSlotsBefore;
+    diagnostics.extractionApplyPoolFreeSlotsAfter = extractionDiagnostics.poolFreeSlotsAfter;
+    diagnostics.extractionApplyPoolFreeSlotDelta = extractionDiagnostics.poolFreeSlotDelta;
+    diagnostics.extractionApplyMass = extractionDiagnostics.appliedMass;
+    diagnostics.extractionApplyMomentumX = extractionDiagnostics.appliedMomentumX;
+    diagnostics.extractionApplyMomentumY = extractionDiagnostics.appliedMomentumY;
+    diagnostics.extractionApplyKineticEnergy = extractionDiagnostics.appliedKineticEnergy;
+    diagnostics.extractionApplyPlannedMass = extractionDiagnostics.plannedExtractionMass;
+    diagnostics.extractionApplyMassResidualVsPlan = extractionDiagnostics.massResidualVsPlan;
+    diagnostics.firstAppliedExtractionParticle = extractionDiagnostics.firstAppliedParticle;
+    diagnostics.lastAppliedExtractionParticle = extractionDiagnostics.lastAppliedParticle;
+    diagnostics.extractionApplyNoDuplicateParticles = extractionDiagnostics.noDuplicateParticles;
+    diagnostics.extractionApplyAllAppliedWereFluid = extractionDiagnostics.allAppliedWereFluid;
+}
+
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,
                                         int numCells,
