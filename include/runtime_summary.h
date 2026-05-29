@@ -401,6 +401,34 @@ struct RuntimeSummary {
     std::int32_t resampLastMassGuardedCell = -1;
     int resampMassGuardAllCellsFeasible = 1;
 
+    int resampLatentActivationAttempted = 0;
+    int resampLatentActivationApplied = 0;
+    std::uint64_t resampLatentActivationReceiverCellsConsidered = 0;
+    std::uint64_t resampLatentActivationCellsActivated = 0;
+    std::uint64_t resampLatentActivationParticlesActivated = 0;
+    std::uint64_t resampLatentActivationRoleChanges = 0;
+    std::uint64_t resampLatentActivationSkippedNoLatentSlots = 0;
+    std::uint64_t resampLatentActivationSkippedInvalidReceiverCells = 0;
+    std::uint64_t resampLatentActivationSkippedReceiverNotWet = 0;
+    std::uint64_t resampLatentActivationSkippedReceiverNotPoor = 0;
+    std::uint64_t resampLatentActivationSkippedMaxPerCell = 0;
+    std::uint64_t resampLatentActivationLatentSlotsBefore = 0;
+    std::uint64_t resampLatentActivationLatentSlotsAfter = 0;
+    std::uint64_t resampLatentActivationFluidSlotsBefore = 0;
+    std::uint64_t resampLatentActivationFluidSlotsAfter = 0;
+    double resampLatentActivationTargetCellMass = 0.0;
+    double resampLatentActivationParticleMass = 0.0;
+    double resampLatentActivationMass = 0.0;
+    double resampLatentActivationMomentumX = 0.0;
+    double resampLatentActivationMomentumY = 0.0;
+    double resampLatentActivationKineticEnergy = 0.0;
+    std::int64_t resampFirstLatentActivatedParticle = -1;
+    std::int64_t resampLastLatentActivatedParticle = -1;
+    std::int32_t resampFirstLatentActivatedCell = -1;
+    std::int32_t resampLastLatentActivatedCell = -1;
+    int resampLatentActivationAllSourcesWereLatent = 1;
+    int resampLatentActivationNoDryCellsActivated = 1;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

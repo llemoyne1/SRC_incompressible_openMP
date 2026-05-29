@@ -224,6 +224,169 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
         poolDiagnostics.freeSlots + diagnostics.nExtractionParticles;
 }
 
+ResamplingLatentActivationDiagnostics apply_resampling_latent_activation(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    const SimulationParams& params,
+    const CellGrid& grid) {
+    validate_particle_state(state, "apply_resampling_latent_activation");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingLatentActivationDiagnostics d{};
+    d.attempted = true;
+    d.latentSlotsBefore = static_cast<std::uint64_t>(pool.latentSlots.size());
+    d.fluidSlotsBefore = static_cast<std::uint64_t>(pool.fluidSlots.size());
+    d.targetCellMass = depositDiagnostics.targetCellMass;
+
+    const int nc = depositWorkspace.allocatedCells;
+    if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||
+        depositWorkspace.poorCell.size() != static_cast<std::size_t>(nc)) {
+        throw std::runtime_error("apply_resampling_latent_activation: invalid deposit workspace");
+    }
+    const int maxPerCell = std::max(1, params.resamplingLatentActivationMaxPerCell);
+    d.activationParticleMass = params.resamplingLatentActivationParticleMass > 0.0
+        ? params.resamplingLatentActivationParticleMass
+        : (d.targetCellMass > 0.0 ? d.targetCellMass / static_cast<double>(maxPerCell) : 1.0);
+    if (!(d.activationParticleMass > 0.0) || !std::isfinite(d.activationParticleMass)) {
+        return d;
+    }
+
+    std::vector<std::int32_t> receiverCells;
+    receiverCells.reserve(depositWorkspace.receiverPoorCells.size());
+    std::vector<std::uint8_t> seenCell(static_cast<std::size_t>(nc), 0u);
+    auto add_receiver = [&](std::int32_t c) {
+        if (c < 0 || c >= nc) {
+            return;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!seenCell[kk]) {
+            seenCell[kk] = 1u;
+            receiverCells.push_back(c);
+        }
+    };
+    for (const std::int32_t c : depositWorkspace.emptyWetReceiverCells) {
+        add_receiver(c);
+    }
+    for (const std::int32_t c : depositWorkspace.receiverPoorCells) {
+        add_receiver(c);
+    }
+
+    std::vector<std::uint32_t> activatedPerCell(static_cast<std::size_t>(nc), 0u);
+    std::vector<std::uint8_t> activatedCell(static_cast<std::size_t>(nc), 0u);
+
+    for (const std::int32_t c : receiverCells) {
+        d.receiverCellsConsidered += 1u;
+        if (c < 0 || c >= nc) {
+            d.skippedInvalidReceiverCells += 1u;
+            continue;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.wetCell[kk]) {
+            d.skippedReceiverNotWet += 1u;
+            d.noDryCellsActivated = false;
+            continue;
+        }
+        if (!depositWorkspace.poorCell[kk]) {
+            d.skippedReceiverNotPoor += 1u;
+            continue;
+        }
+
+        for (int q = 0; q < maxPerCell; ++q) {
+            if (pool.latentSlots.empty()) {
+                d.skippedNoLatentSlots += 1u;
+                break;
+            }
+            const std::uint64_t slot64 = pool.latentSlots.back();
+            pool.latentSlots.pop_back();
+            if (slot64 == kInvalidParticleIndex || slot64 >= state.Np) {
+                d.allSourcesWereLatent = false;
+                continue;
+            }
+            const std::size_t slot = static_cast<std::size_t>(slot64);
+            if (!is_latent_particle(state, slot)) {
+                d.allSourcesWereLatent = false;
+                continue;
+            }
+
+            double newX = 0.0;
+            double newY = 0.0;
+            deterministic_receiver_position(c, activatedPerCell[kk], grid, newX, newY);
+
+            const double ux = depositWorkspace.mass[kk] > 0.0 ? depositWorkspace.ux[kk] : 0.0;
+            const double uy = depositWorkspace.mass[kk] > 0.0 ? depositWorkspace.uy[kk] : 0.0;
+            state.x[slot] = newX;
+            state.y[slot] = newY;
+            state.vx[slot] = ux;
+            state.vy[slot] = uy;
+            state.mass[slot] = d.activationParticleMass;
+            set_particle_role(state, slot, ParticleRole::Fluid);
+            pool.fluidSlots.push_back(slot64);
+
+            activatedPerCell[kk] += 1u;
+            activatedCell[kk] = 1u;
+            d.particlesActivated += 1u;
+            d.roleChanges += 1u;
+            d.activatedMass += d.activationParticleMass;
+            d.activatedMomentumX += d.activationParticleMass * ux;
+            d.activatedMomentumY += d.activationParticleMass * uy;
+            d.activatedKineticEnergy += 0.5 * d.activationParticleMass * (ux * ux + uy * uy);
+            if (d.firstActivatedParticle == kInvalidParticleIndex) {
+                d.firstActivatedParticle = slot64;
+                d.firstActivatedCell = c;
+            }
+            d.lastActivatedParticle = slot64;
+            d.lastActivatedCell = c;
+        }
+        if (activatedPerCell[kk] >= static_cast<std::uint32_t>(maxPerCell)) {
+            d.skippedMaxPerCell += 1u;
+        }
+    }
+
+    for (const std::uint8_t flag : activatedCell) {
+        d.cellsActivated += flag ? 1u : 0u;
+    }
+    d.latentSlotsAfter = static_cast<std::uint64_t>(pool.latentSlots.size());
+    d.fluidSlotsAfter = static_cast<std::uint64_t>(pool.fluidSlots.size());
+    d.applied = d.particlesActivated > 0u;
+    d.allSourcesWereLatent = d.allSourcesWereLatent && d.roleChanges == d.particlesActivated;
+    d.noDryCellsActivated = d.noDryCellsActivated && d.skippedReceiverNotWet == 0u;
+    return d;
+}
+
+void attach_resampling_latent_activation_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingLatentActivationDiagnostics& activationDiagnostics) {
+    diagnostics.latentActivationAttempted = activationDiagnostics.attempted;
+    diagnostics.latentActivationApplied = activationDiagnostics.applied;
+    diagnostics.latentActivationReceiverCellsConsidered = activationDiagnostics.receiverCellsConsidered;
+    diagnostics.latentActivationCellsActivated = activationDiagnostics.cellsActivated;
+    diagnostics.latentActivationParticlesActivated = activationDiagnostics.particlesActivated;
+    diagnostics.latentActivationRoleChanges = activationDiagnostics.roleChanges;
+    diagnostics.latentActivationSkippedNoLatentSlots = activationDiagnostics.skippedNoLatentSlots;
+    diagnostics.latentActivationSkippedInvalidReceiverCells = activationDiagnostics.skippedInvalidReceiverCells;
+    diagnostics.latentActivationSkippedReceiverNotWet = activationDiagnostics.skippedReceiverNotWet;
+    diagnostics.latentActivationSkippedReceiverNotPoor = activationDiagnostics.skippedReceiverNotPoor;
+    diagnostics.latentActivationSkippedMaxPerCell = activationDiagnostics.skippedMaxPerCell;
+    diagnostics.latentActivationLatentSlotsBefore = activationDiagnostics.latentSlotsBefore;
+    diagnostics.latentActivationLatentSlotsAfter = activationDiagnostics.latentSlotsAfter;
+    diagnostics.latentActivationFluidSlotsBefore = activationDiagnostics.fluidSlotsBefore;
+    diagnostics.latentActivationFluidSlotsAfter = activationDiagnostics.fluidSlotsAfter;
+    diagnostics.latentActivationTargetCellMass = activationDiagnostics.targetCellMass;
+    diagnostics.latentActivationParticleMass = activationDiagnostics.activationParticleMass;
+    diagnostics.latentActivationMass = activationDiagnostics.activatedMass;
+    diagnostics.latentActivationMomentumX = activationDiagnostics.activatedMomentumX;
+    diagnostics.latentActivationMomentumY = activationDiagnostics.activatedMomentumY;
+    diagnostics.latentActivationKineticEnergy = activationDiagnostics.activatedKineticEnergy;
+    diagnostics.firstLatentActivatedParticle = activationDiagnostics.firstActivatedParticle;
+    diagnostics.lastLatentActivatedParticle = activationDiagnostics.lastActivatedParticle;
+    diagnostics.firstLatentActivatedCell = activationDiagnostics.firstActivatedCell;
+    diagnostics.lastLatentActivatedCell = activationDiagnostics.lastActivatedCell;
+    diagnostics.latentActivationAllSourcesWereLatent = activationDiagnostics.allSourcesWereLatent;
+    diagnostics.latentActivationNoDryCellsActivated = activationDiagnostics.noDryCellsActivated;
+}
+
 
 ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
     ParticleState& state,

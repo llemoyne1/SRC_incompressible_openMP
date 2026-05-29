@@ -316,6 +316,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingMassGuardEnable" || key == "resamplingMassSafetyEnable") p.resamplingMassGuardEnable = parse_bool(value, key);
         else if (key == "resamplingParticleMassMin" || key == "resamplingMassMin") p.resamplingParticleMassMin = parse_double(value, key);
         else if (key == "resamplingParticleMassMax" || key == "resamplingMassMax") p.resamplingParticleMassMax = parse_double(value, key);
+        else if (key == "resamplingLatentActivationEnable" || key == "resamplingLatentToFluidEnable") p.resamplingLatentActivationEnable = parse_bool(value, key);
+        else if (key == "resamplingLatentActivationMaxPerCell") p.resamplingLatentActivationMaxPerCell = parse_int(value, key);
+        else if (key == "resamplingLatentActivationParticleMass" || key == "resamplingLatentParticleMass") p.resamplingLatentActivationParticleMass = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -794,6 +797,12 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.resamplingParticleMassMax > p.resamplingParticleMassMin)) {
         throw std::runtime_error("resamplingParticleMassMax must be greater than resamplingParticleMassMin");
+    }
+    if (p.resamplingLatentActivationEnable && p.resamplingLatentActivationMaxPerCell <= 0) {
+        throw std::runtime_error("resamplingLatentActivationMaxPerCell must be positive when latent activation is enabled");
+    }
+    if (!(p.resamplingLatentActivationParticleMass >= 0.0)) {
+        throw std::runtime_error("resamplingLatentActivationParticleMass must be non-negative; use 0 to infer target/maxPerCell");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

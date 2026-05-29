@@ -83,6 +83,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
     attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
 
+    ResamplingLatentActivationDiagnostics latentActivation{};
+    if (params.resamplingLatentActivationEnable && result.resampling.candidateListsBuilt) {
+        latentActivation = apply_resampling_latent_activation(
+            state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
+        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        result.resampling = deposit_weighted_real_fluid(
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
+    }
+
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
         const ResamplingExtractionApplyDiagnostics extractionApply =
@@ -135,6 +146,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (massGuardApply.attempted) {
             attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
+        }
+        if (latentActivation.attempted) {
+            attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
         }
     }
     return result;

@@ -497,3 +497,35 @@ belowBefore>0 aboveBefore>0 belowAfter=0 aboveAfter=0 MRelRms~1e-16
 ```
 
 See `doc/README_0123_RESAMPLING_MASS_GUARD.md`.
+
+### Patch 0124 — controlled wet/latent activation
+
+Patch 0124 adds an optional latent-particle activation stage:
+
+```text
+resamplingLatentActivationEnable = false
+resamplingLatentActivationMaxPerCell = 1
+resamplingLatentActivationParticleMass = 0.0   # <=0: M_target / maxPerCell
+```
+
+When enabled, the stage converts preallocated `Latent` slots into `Fluid`
+particles inside poor wet receiver cells, with empty wet cells treated first.
+It does not consume `Inactive` free-list slots, so conservative donor/receiver
+recycling remains separate from explicit wet/dry filling.  Newly activated
+particles inherit their `type`/species from the latent slot, are positioned by a
+deterministic in-cell stencil, and use the receiver cell velocity if available
+or zero velocity in empty wet cells.  The stage is disabled by default.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_latent_activation_smoke_0124.sh
+```
+
+Expected diagnostic core:
+
+```text
+activated=4 cells=1 fluid=128 latent=1 inactive=3 MRelRms=0
+```
+
+See `doc/README_0124_RESAMPLING_LATENT_ACTIVATION.md`.

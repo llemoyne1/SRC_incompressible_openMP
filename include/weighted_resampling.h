@@ -78,6 +78,40 @@ struct ResamplingPassiveExtractionOperation {
     std::uint8_t plannedRoleAfterExtraction = static_cast<std::uint8_t>(ParticleRole::Inactive);
 };
 
+struct ResamplingLatentActivationDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t receiverCellsConsidered = 0;
+    std::uint64_t cellsActivated = 0;
+    std::uint64_t particlesActivated = 0;
+    std::uint64_t roleChanges = 0;
+    std::uint64_t skippedNoLatentSlots = 0;
+    std::uint64_t skippedInvalidReceiverCells = 0;
+    std::uint64_t skippedReceiverNotWet = 0;
+    std::uint64_t skippedReceiverNotPoor = 0;
+    std::uint64_t skippedMaxPerCell = 0;
+
+    std::uint64_t latentSlotsBefore = 0;
+    std::uint64_t latentSlotsAfter = 0;
+    std::uint64_t fluidSlotsBefore = 0;
+    std::uint64_t fluidSlotsAfter = 0;
+
+    double targetCellMass = 0.0;
+    double activationParticleMass = 0.0;
+    double activatedMass = 0.0;
+    double activatedMomentumX = 0.0;
+    double activatedMomentumY = 0.0;
+    double activatedKineticEnergy = 0.0;
+
+    std::uint64_t firstActivatedParticle = kInvalidParticleIndex;
+    std::uint64_t lastActivatedParticle = kInvalidParticleIndex;
+    std::int32_t firstActivatedCell = kInvalidCellIndex;
+    std::int32_t lastActivatedCell = kInvalidCellIndex;
+    bool allSourcesWereLatent = true;
+    bool noDryCellsActivated = true;
+};
+
 struct ResamplingInsertionApplyDiagnostics {
     bool attempted = false;
     bool applied = false;
@@ -608,6 +642,38 @@ struct WeightedResamplingDiagnostics {
     std::int32_t lastMassGuardedCell = kInvalidCellIndex;
     bool massGuardAllCellsFeasible = true;
 
+    // Latent -> Fluid wet/dry activation (patch 0124).  This optional stage
+    // consumes only role=Latent particles and seeds poor/empty wet receiver
+    // cells.  It is separated from the Inactive pool so extraction/insertion
+    // recycling remains conservative when latent activation is disabled.
+    bool latentActivationAttempted = false;
+    bool latentActivationApplied = false;
+    std::uint64_t latentActivationReceiverCellsConsidered = 0;
+    std::uint64_t latentActivationCellsActivated = 0;
+    std::uint64_t latentActivationParticlesActivated = 0;
+    std::uint64_t latentActivationRoleChanges = 0;
+    std::uint64_t latentActivationSkippedNoLatentSlots = 0;
+    std::uint64_t latentActivationSkippedInvalidReceiverCells = 0;
+    std::uint64_t latentActivationSkippedReceiverNotWet = 0;
+    std::uint64_t latentActivationSkippedReceiverNotPoor = 0;
+    std::uint64_t latentActivationSkippedMaxPerCell = 0;
+    std::uint64_t latentActivationLatentSlotsBefore = 0;
+    std::uint64_t latentActivationLatentSlotsAfter = 0;
+    std::uint64_t latentActivationFluidSlotsBefore = 0;
+    std::uint64_t latentActivationFluidSlotsAfter = 0;
+    double latentActivationTargetCellMass = 0.0;
+    double latentActivationParticleMass = 0.0;
+    double latentActivationMass = 0.0;
+    double latentActivationMomentumX = 0.0;
+    double latentActivationMomentumY = 0.0;
+    double latentActivationKineticEnergy = 0.0;
+    std::uint64_t firstLatentActivatedParticle = kInvalidParticleIndex;
+    std::uint64_t lastLatentActivatedParticle = kInvalidParticleIndex;
+    std::int32_t firstLatentActivatedCell = kInvalidCellIndex;
+    std::int32_t lastLatentActivatedCell = kInvalidCellIndex;
+    bool latentActivationAllSourcesWereLatent = true;
+    bool latentActivationNoDryCellsActivated = true;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -638,6 +704,18 @@ void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::
 
 void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
                                         const ResamplingParticlePoolDiagnostics& poolDiagnostics);
+
+ResamplingLatentActivationDiagnostics apply_resampling_latent_activation(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    const SimulationParams& params,
+    const CellGrid& grid);
+
+void attach_resampling_latent_activation_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingLatentActivationDiagnostics& activationDiagnostics);
 
 ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
     ParticleState& state,

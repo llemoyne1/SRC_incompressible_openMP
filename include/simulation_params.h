@@ -281,6 +281,14 @@ struct SimulationParams {
     double resamplingParticleMassMin = 0.25;
     double resamplingParticleMassMax = 4.0;
 
+    // Optional latent-particle activation for wet/dry filling.  Latent slots
+    // are preallocated particles that are ignored by all dynamics until they
+    // are explicitly activated.  This switch seeds poor/empty wet receiver
+    // cells by converting Latent -> Fluid without touching Inactive free slots.
+    bool resamplingLatentActivationEnable = false;
+    int resamplingLatentActivationMaxPerCell = 1;
+    double resamplingLatentActivationParticleMass = 0.0; // <=0: targetCellMass / maxPerCell
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 
