@@ -371,3 +371,40 @@ applied=4 mass=4 fluid=121 inactive=11 poolFree=11 richAfter=0
 ```
 
 See `doc/README_0119_RESAMPLING_MUTATING_EXTRACTION.md`.
+
+### Patch 0120 — controlled insertion Inactive -> Fluid
+
+Patch 0120 adds the first controlled mutating insertion step.  It introduces:
+
+```text
+resamplingInsertionEnable = false
+```
+
+The option is disabled by default and currently requires
+`resamplingExtractionEnable = true`.  When both switches are enabled, the code
+first applies the 0119 extraction plan (`Fluid -> Inactive`), then immediately
+reactivates the extracted free-list slots into receiver cells:
+
+```text
+Inactive -> Fluid
+```
+
+The inserted particles preserve the mass, momentum and `type` carried by the
+corresponding extraction operation.  Positions are assigned deterministically in
+the receiver cell using a small interior stencil.  This is intentionally still a
+minimal recycling step: no local mass/momentum remap, no thermal correction and
+no renormalisation are applied yet.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_mutating_insertion_smoke_0120.sh
+```
+
+Expected diagnostic core:
+
+```text
+inserted=4 mass=4 fluid=125 inactive=7 poolFree=7 poorAfter=1
+```
+
+See `doc/README_0120_RESAMPLING_MUTATING_INSERTION.md`.

@@ -88,15 +88,24 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         const ResamplingExtractionApplyDiagnostics extractionApply =
             apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
 
-        // Rebuild the pool from roles after the mutation, then recompute the
-        // real-fluid deposit so runtime summaries describe the post-extraction
-        // transported fluid.  Attach the mutating extraction diagnostics to the
-        // post-extraction snapshot.
+        ResamplingInsertionApplyDiagnostics insertionApply{};
+        if (params.resamplingInsertionEnable && extractionApply.applied) {
+            insertionApply = apply_resampling_insertion_operations(
+                state, workspace.resamplingPool, workspace.resampling, grid);
+        }
+
+        // Rebuild the pool from roles after the mutation(s), then recompute the
+        // real-fluid deposit so runtime summaries describe the post-resampling
+        // transported fluid.  Attach the mutating extraction/insertion
+        // diagnostics to the final snapshot.
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
         attach_resampling_extraction_apply_diagnostics(result.resampling, extractionApply);
+        if (insertionApply.attempted) {
+            attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
+        }
     }
     return result;
 }

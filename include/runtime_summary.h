@@ -285,6 +285,32 @@ struct RuntimeSummary {
     int resampExtractionApplyNoDuplicateParticles = 1;
     int resampExtractionApplyAllAppliedWereFluid = 1;
 
+    int resampInsertionApplyAttempted = 0;
+    int resampInsertionApplied = 0;
+    std::uint64_t resampInsertionApplyOpsConsidered = 0;
+    std::uint64_t resampInsertionApplyOpsApplied = 0;
+    std::uint64_t resampInsertionApplyRoleChanges = 0;
+    std::uint64_t resampInsertionApplySkippedInvalidSourceParticles = 0;
+    std::uint64_t resampInsertionApplySkippedSourceNotInactive = 0;
+    std::uint64_t resampInsertionApplySkippedInvalidReceiverCells = 0;
+    std::uint64_t resampInsertionApplySkippedNoFreeSlots = 0;
+    std::uint64_t resampInsertionApplySkippedInvalidMass = 0;
+    std::uint64_t resampInsertionApplyPoolFreeSlotsBefore = 0;
+    std::uint64_t resampInsertionApplyPoolFreeSlotsAfter = 0;
+    std::uint64_t resampInsertionApplyPoolFreeSlotDelta = 0;
+    double resampInsertionApplyMass = 0.0;
+    double resampInsertionApplyMomentumX = 0.0;
+    double resampInsertionApplyMomentumY = 0.0;
+    double resampInsertionApplyKineticEnergy = 0.0;
+    double resampInsertionApplyPlannedMass = 0.0;
+    double resampInsertionApplyMassResidualVsPlan = 0.0;
+    std::int64_t resampFirstAppliedInsertionParticle = -1;
+    std::int64_t resampLastAppliedInsertionParticle = -1;
+    std::int32_t resampFirstAppliedInsertionReceiverCell = -1;
+    std::int32_t resampLastAppliedInsertionReceiverCell = -1;
+    int resampInsertionApplyNoInvalidReceiverCells = 1;
+    int resampInsertionApplyAllSourcesWereInactive = 1;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

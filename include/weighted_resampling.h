@@ -69,12 +69,45 @@ struct ResamplingPassiveExtractionOperation {
     std::uint64_t particleIndex = kInvalidParticleIndex;
     std::int32_t donorCell = kInvalidCellIndex;
     std::int32_t receiverCell = kInvalidCellIndex;
+    std::uint32_t particleType = 0u;
     double particleMass = 0.0;
     double momentumX = 0.0;
     double momentumY = 0.0;
     double kineticEnergy = 0.0;
     std::uint8_t currentRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
     std::uint8_t plannedRoleAfterExtraction = static_cast<std::uint8_t>(ParticleRole::Inactive);
+};
+
+struct ResamplingInsertionApplyDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t operationsConsidered = 0;
+    std::uint64_t operationsApplied = 0;
+    std::uint64_t roleChanges = 0;
+    std::uint64_t skippedInvalidSourceParticles = 0;
+    std::uint64_t skippedSourceNotInactive = 0;
+    std::uint64_t skippedInvalidReceiverCells = 0;
+    std::uint64_t skippedNoFreeSlots = 0;
+    std::uint64_t skippedInvalidMass = 0;
+
+    std::uint64_t poolFreeSlotsBefore = 0;
+    std::uint64_t poolFreeSlotsAfter = 0;
+    std::uint64_t poolFreeSlotDelta = 0;
+
+    double insertedMass = 0.0;
+    double insertedMomentumX = 0.0;
+    double insertedMomentumY = 0.0;
+    double insertedKineticEnergy = 0.0;
+    double plannedInsertionMass = 0.0;
+    double massResidualVsPlan = 0.0;
+
+    std::uint64_t firstInsertedParticle = kInvalidParticleIndex;
+    std::uint64_t lastInsertedParticle = kInvalidParticleIndex;
+    std::int32_t firstInsertionReceiverCell = kInvalidCellIndex;
+    std::int32_t lastInsertionReceiverCell = kInvalidCellIndex;
+    bool noInvalidReceiverCells = true;
+    bool allSourcesWereInactive = true;
 };
 
 struct ResamplingExtractionApplyDiagnostics {
@@ -307,7 +340,7 @@ struct WeightedResamplingDiagnostics {
 
     // First mutating extraction application (patch 0119).  These diagnostics
     // report the actual Fluid->Inactive role changes applied from the passive
-    // extraction plan.  Insertion/remap is not implemented yet.
+    // extraction plan.
     bool extractionApplyAttempted = false;
     bool extractionApplied = false;
     std::uint64_t extractionApplyOpsConsidered = 0;
@@ -329,6 +362,37 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t lastAppliedExtractionParticle = kInvalidParticleIndex;
     bool extractionApplyNoDuplicateParticles = true;
     bool extractionApplyAllAppliedWereFluid = true;
+
+    // First mutating insertion application (patch 0120).  These diagnostics
+    // report the controlled Inactive->Fluid activation of free-list slots into
+    // receiver cells, driven by the 0118 extraction operations.  It preserves
+    // each extracted particle's mass, momentum and type, but still performs no
+    // local remap/renormalisation.
+    bool insertionApplyAttempted = false;
+    bool insertionApplied = false;
+    std::uint64_t insertionApplyOpsConsidered = 0;
+    std::uint64_t insertionApplyOpsApplied = 0;
+    std::uint64_t insertionApplyRoleChanges = 0;
+    std::uint64_t insertionApplySkippedInvalidSourceParticles = 0;
+    std::uint64_t insertionApplySkippedSourceNotInactive = 0;
+    std::uint64_t insertionApplySkippedInvalidReceiverCells = 0;
+    std::uint64_t insertionApplySkippedNoFreeSlots = 0;
+    std::uint64_t insertionApplySkippedInvalidMass = 0;
+    std::uint64_t insertionApplyPoolFreeSlotsBefore = 0;
+    std::uint64_t insertionApplyPoolFreeSlotsAfter = 0;
+    std::uint64_t insertionApplyPoolFreeSlotDelta = 0;
+    double insertionApplyMass = 0.0;
+    double insertionApplyMomentumX = 0.0;
+    double insertionApplyMomentumY = 0.0;
+    double insertionApplyKineticEnergy = 0.0;
+    double insertionApplyPlannedMass = 0.0;
+    double insertionApplyMassResidualVsPlan = 0.0;
+    std::uint64_t firstAppliedInsertionParticle = kInvalidParticleIndex;
+    std::uint64_t lastAppliedInsertionParticle = kInvalidParticleIndex;
+    std::int32_t firstAppliedInsertionReceiverCell = kInvalidCellIndex;
+    std::int32_t lastAppliedInsertionReceiverCell = kInvalidCellIndex;
+    bool insertionApplyNoInvalidReceiverCells = true;
+    bool insertionApplyAllSourcesWereInactive = true;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
@@ -369,6 +433,16 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
 void attach_resampling_extraction_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
     const ResamplingExtractionApplyDiagnostics& extractionDiagnostics);
+
+ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const CellGrid& grid);
+
+void attach_resampling_insertion_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingInsertionApplyDiagnostics& insertionDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

@@ -85,6 +85,28 @@ double passive_cell_distance(std::int32_t a,
     return std::sqrt(static_cast<double>(dx * dx + dy * dy));
 }
 
+void deterministic_receiver_position(std::int32_t cell,
+                                     std::uint64_t ordinal,
+                                     const CellGrid& grid,
+                                     double& x,
+                                     double& y) {
+    if (cell < 0 || cell >= grid.numCells || grid.Nx <= 0 || grid.Ny <= 0) {
+        throw std::runtime_error("deterministic_receiver_position: invalid receiver cell");
+    }
+    const int ix = static_cast<int>(cell) % grid.Nx;
+    const int iy = static_cast<int>(cell) / grid.Nx;
+
+    // Deterministic 4x4 interior stencil.  It avoids exact particle overlap in
+    // simple smoke tests while staying safely inside the receiver cell.  Later
+    // remap/thermalisation patches may replace this by a local stochastic or
+    // energy-preserving placement rule.
+    const std::uint64_t q = ordinal % 16u;
+    const double fx = 0.2 + 0.2 * static_cast<double>(q % 4u);
+    const double fy = 0.2 + 0.2 * static_cast<double>(q / 4u);
+    x = (static_cast<double>(ix) + fx) * grid.dx;
+    y = (static_cast<double>(iy) + fy) * grid.dy;
+}
+
 } // namespace
 
 
@@ -295,6 +317,123 @@ void attach_resampling_extraction_apply_diagnostics(
     diagnostics.lastAppliedExtractionParticle = extractionDiagnostics.lastAppliedParticle;
     diagnostics.extractionApplyNoDuplicateParticles = extractionDiagnostics.noDuplicateParticles;
     diagnostics.extractionApplyAllAppliedWereFluid = extractionDiagnostics.allAppliedWereFluid;
+}
+
+ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const CellGrid& grid) {
+    validate_particle_state(state, "apply_resampling_insertion_operations");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingInsertionApplyDiagnostics d{};
+    d.attempted = true;
+    d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
+    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+
+    for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
+        if (op.particleMass > 0.0 && std::isfinite(op.particleMass)) {
+            d.plannedInsertionMass += op.particleMass;
+        }
+
+        if (op.particleIndex == kInvalidParticleIndex || op.particleIndex >= state.Np) {
+            d.skippedInvalidSourceParticles += 1u;
+            d.allSourcesWereInactive = false;
+            continue;
+        }
+        const std::size_t sourceIndex = static_cast<std::size_t>(op.particleIndex);
+        if (!is_inactive_particle(state, sourceIndex)) {
+            d.skippedSourceNotInactive += 1u;
+            d.allSourcesWereInactive = false;
+            continue;
+        }
+        if (op.receiverCell < 0 || op.receiverCell >= grid.numCells) {
+            d.skippedInvalidReceiverCells += 1u;
+            d.noInvalidReceiverCells = false;
+            continue;
+        }
+        if (!(op.particleMass > 0.0) || !std::isfinite(op.particleMass)) {
+            d.skippedInvalidMass += 1u;
+            continue;
+        }
+        auto freeIt = std::find(pool.freeInactiveSlots.begin(),
+                                pool.freeInactiveSlots.end(),
+                                op.particleIndex);
+        if (freeIt == pool.freeInactiveSlots.end()) {
+            d.skippedNoFreeSlots += 1u;
+            continue;
+        }
+
+        const std::uint64_t slot64 = op.particleIndex;
+        pool.freeInactiveSlots.erase(freeIt);
+        const std::size_t slot = static_cast<std::size_t>(slot64);
+
+        double newX = 0.0;
+        double newY = 0.0;
+        deterministic_receiver_position(op.receiverCell, d.operationsApplied, grid, newX, newY);
+
+        const double invM = 1.0 / op.particleMass;
+        state.x[slot] = newX;
+        state.y[slot] = newY;
+        state.vx[slot] = op.momentumX * invM;
+        state.vy[slot] = op.momentumY * invM;
+        state.mass[slot] = op.particleMass;
+        state.type[slot] = op.particleType;
+        set_particle_role(state, slot, ParticleRole::Fluid);
+
+        d.operationsApplied += 1u;
+        d.roleChanges += 1u;
+        d.insertedMass += op.particleMass;
+        d.insertedMomentumX += op.momentumX;
+        d.insertedMomentumY += op.momentumY;
+        d.insertedKineticEnergy += op.kineticEnergy;
+        if (d.firstInsertedParticle == kInvalidParticleIndex) {
+            d.firstInsertedParticle = slot64;
+            d.firstInsertionReceiverCell = op.receiverCell;
+        }
+        d.lastInsertedParticle = slot64;
+        d.lastInsertionReceiverCell = op.receiverCell;
+    }
+
+    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotDelta = d.poolFreeSlotsBefore >= d.poolFreeSlotsAfter
+        ? d.poolFreeSlotsBefore - d.poolFreeSlotsAfter : 0u;
+    d.massResidualVsPlan = d.insertedMass - d.plannedInsertionMass;
+    d.applied = d.operationsApplied > 0u;
+    d.allSourcesWereInactive = d.allSourcesWereInactive && d.skippedSourceNotInactive == 0u;
+    d.noInvalidReceiverCells = d.noInvalidReceiverCells && d.skippedInvalidReceiverCells == 0u;
+    return d;
+}
+
+void attach_resampling_insertion_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingInsertionApplyDiagnostics& insertionDiagnostics) {
+    diagnostics.insertionApplyAttempted = insertionDiagnostics.attempted;
+    diagnostics.insertionApplied = insertionDiagnostics.applied;
+    diagnostics.insertionApplyOpsConsidered = insertionDiagnostics.operationsConsidered;
+    diagnostics.insertionApplyOpsApplied = insertionDiagnostics.operationsApplied;
+    diagnostics.insertionApplyRoleChanges = insertionDiagnostics.roleChanges;
+    diagnostics.insertionApplySkippedInvalidSourceParticles = insertionDiagnostics.skippedInvalidSourceParticles;
+    diagnostics.insertionApplySkippedSourceNotInactive = insertionDiagnostics.skippedSourceNotInactive;
+    diagnostics.insertionApplySkippedInvalidReceiverCells = insertionDiagnostics.skippedInvalidReceiverCells;
+    diagnostics.insertionApplySkippedNoFreeSlots = insertionDiagnostics.skippedNoFreeSlots;
+    diagnostics.insertionApplySkippedInvalidMass = insertionDiagnostics.skippedInvalidMass;
+    diagnostics.insertionApplyPoolFreeSlotsBefore = insertionDiagnostics.poolFreeSlotsBefore;
+    diagnostics.insertionApplyPoolFreeSlotsAfter = insertionDiagnostics.poolFreeSlotsAfter;
+    diagnostics.insertionApplyPoolFreeSlotDelta = insertionDiagnostics.poolFreeSlotDelta;
+    diagnostics.insertionApplyMass = insertionDiagnostics.insertedMass;
+    diagnostics.insertionApplyMomentumX = insertionDiagnostics.insertedMomentumX;
+    diagnostics.insertionApplyMomentumY = insertionDiagnostics.insertedMomentumY;
+    diagnostics.insertionApplyKineticEnergy = insertionDiagnostics.insertedKineticEnergy;
+    diagnostics.insertionApplyPlannedMass = insertionDiagnostics.plannedInsertionMass;
+    diagnostics.insertionApplyMassResidualVsPlan = insertionDiagnostics.massResidualVsPlan;
+    diagnostics.firstAppliedInsertionParticle = insertionDiagnostics.firstInsertedParticle;
+    diagnostics.lastAppliedInsertionParticle = insertionDiagnostics.lastInsertedParticle;
+    diagnostics.firstAppliedInsertionReceiverCell = insertionDiagnostics.firstInsertionReceiverCell;
+    diagnostics.lastAppliedInsertionReceiverCell = insertionDiagnostics.lastInsertionReceiverCell;
+    diagnostics.insertionApplyNoInvalidReceiverCells = insertionDiagnostics.noInvalidReceiverCells;
+    diagnostics.insertionApplyAllSourcesWereInactive = insertionDiagnostics.allSourcesWereInactive;
 }
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
@@ -901,6 +1040,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                             pi64,
                             selectedParticle.donorCell,
                             selectedParticle.receiverCell,
+                            state.type[pi],
                             mp,
                             px,
                             py,

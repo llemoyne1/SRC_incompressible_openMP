@@ -310,6 +310,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingRichCellMassFraction" || key == "resamplingRichMassFraction") p.resamplingRichCellMassFraction = parse_double(value, key);
         else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
         else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
+        else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -770,6 +771,9 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.resamplingActiveFluidFractionThreshold >= 0.0 && p.resamplingActiveFluidFractionThreshold <= 1.0)) {
         throw std::runtime_error("resamplingActiveFluidFractionThreshold must lie in [0,1]");
+    }
+    if (p.resamplingInsertionEnable && !p.resamplingExtractionEnable) {
+        throw std::runtime_error("resamplingInsertionEnable currently requires resamplingExtractionEnable=true");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");
