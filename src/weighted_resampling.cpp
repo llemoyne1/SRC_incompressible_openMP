@@ -32,6 +32,118 @@ int thread_id() {
 
 } // namespace
 
+
+ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
+    const ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool) {
+    validate_particle_state(state, "rebuild_resampling_particle_pool");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+
+    pool.allocatedParticles = state.Np;
+    pool.freeInactiveSlots.clear();
+    pool.latentSlots.clear();
+    pool.fluidSlots.clear();
+    pool.freeInactiveSlots.reserve(n);
+    pool.latentSlots.reserve(n);
+    pool.fluidSlots.reserve(n);
+
+    ResamplingParticlePoolDiagnostics d{};
+    d.built = true;
+    d.storageSlots = state.Np;
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint8_t r = particle_role_value(state, i);
+        const std::uint64_t index = static_cast<std::uint64_t>(i);
+        if (is_fluid_role(r)) {
+            pool.fluidSlots.push_back(index);
+        } else if (is_latent_role(r)) {
+            pool.latentSlots.push_back(index);
+        } else if (is_inactive_role(r)) {
+            pool.freeInactiveSlots.push_back(index);
+        } else {
+            throw std::runtime_error("rebuild_resampling_particle_pool: invalid particle role");
+        }
+    }
+
+    d.fluidSlots = static_cast<std::uint64_t>(pool.fluidSlots.size());
+    d.latentSlots = static_cast<std::uint64_t>(pool.latentSlots.size());
+    d.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.nFluid = d.fluidSlots;
+    d.nLatent = d.latentSlots;
+    d.nInactive = d.freeSlots;
+
+    if (!pool.freeInactiveSlots.empty()) {
+        d.firstFreeIndex = pool.freeInactiveSlots.front();
+        d.lastFreeIndex = pool.freeInactiveSlots.back();
+    }
+    if (d.storageSlots > 0u) {
+        const double invStorage = 1.0 / static_cast<double>(d.storageSlots);
+        d.freeSlotFraction = static_cast<double>(d.freeSlots) * invStorage;
+        d.dormantSlotFraction = static_cast<double>(d.freeSlots + d.latentSlots) * invStorage;
+    }
+
+    pool.diagnostics = d;
+    return d;
+}
+
+bool resampling_pool_has_free_slot(const ResamplingParticlePoolWorkspace& pool) {
+    return !pool.freeInactiveSlots.empty();
+}
+
+std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& pool) {
+    if (pool.freeInactiveSlots.empty()) {
+        throw std::runtime_error("resampling_pool_pop_free_slot: no inactive slot available");
+    }
+    const std::uint64_t index = pool.freeInactiveSlots.back();
+    pool.freeInactiveSlots.pop_back();
+    pool.diagnostics.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    if (pool.freeInactiveSlots.empty()) {
+        pool.diagnostics.firstFreeIndex = kInvalidParticleIndex;
+        pool.diagnostics.lastFreeIndex = kInvalidParticleIndex;
+    } else {
+        pool.diagnostics.firstFreeIndex = pool.freeInactiveSlots.front();
+        pool.diagnostics.lastFreeIndex = pool.freeInactiveSlots.back();
+    }
+    if (pool.diagnostics.storageSlots > 0u) {
+        pool.diagnostics.freeSlotFraction =
+            static_cast<double>(pool.diagnostics.freeSlots) / static_cast<double>(pool.diagnostics.storageSlots);
+        pool.diagnostics.dormantSlotFraction =
+            static_cast<double>(pool.diagnostics.freeSlots + pool.diagnostics.latentSlots) /
+            static_cast<double>(pool.diagnostics.storageSlots);
+    }
+    return index;
+}
+
+void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index) {
+    if (index == kInvalidParticleIndex) {
+        throw std::runtime_error("resampling_pool_push_free_slot: invalid index");
+    }
+    pool.freeInactiveSlots.push_back(index);
+    pool.diagnostics.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    pool.diagnostics.firstFreeIndex = pool.freeInactiveSlots.front();
+    pool.diagnostics.lastFreeIndex = pool.freeInactiveSlots.back();
+    if (pool.diagnostics.storageSlots > 0u) {
+        pool.diagnostics.freeSlotFraction =
+            static_cast<double>(pool.diagnostics.freeSlots) / static_cast<double>(pool.diagnostics.storageSlots);
+        pool.diagnostics.dormantSlotFraction =
+            static_cast<double>(pool.diagnostics.freeSlots + pool.diagnostics.latentSlots) /
+            static_cast<double>(pool.diagnostics.storageSlots);
+    }
+}
+
+void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
+                                        const ResamplingParticlePoolDiagnostics& poolDiagnostics) {
+    diagnostics.poolBuilt = poolDiagnostics.built;
+    diagnostics.poolStorageSlots = poolDiagnostics.storageSlots;
+    diagnostics.poolFreeSlots = poolDiagnostics.freeSlots;
+    diagnostics.poolLatentSlots = poolDiagnostics.latentSlots;
+    diagnostics.poolFluidSlots = poolDiagnostics.fluidSlots;
+    diagnostics.poolFirstFreeIndex = poolDiagnostics.firstFreeIndex;
+    diagnostics.poolLastFreeIndex = poolDiagnostics.lastFreeIndex;
+    diagnostics.poolFreeSlotFraction = poolDiagnostics.freeSlotFraction;
+    diagnostics.poolDormantSlotFraction = poolDiagnostics.dormantSlotFraction;
+}
+
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,
                                         int numCells,

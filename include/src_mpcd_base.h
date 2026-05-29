@@ -22,6 +22,7 @@ struct StepResult {
     Q6ProjectionDiagnostics q6;
     ThermostatDiagnostics thermostat;
     WeightedResamplingDiagnostics resampling;
+    ResamplingParticlePoolDiagnostics resamplingPool;
 };
 
 struct SrcMpcdBaseWorkspace {
@@ -29,6 +30,7 @@ struct SrcMpcdBaseWorkspace {
     Q6ProjectionWorkspace q6;
     ThermostatWorkspace thermostat;
     WeightedRealFluidDepositWorkspace resampling;
+    ResamplingParticlePoolWorkspace resamplingPool;
 };
 
 StepResult run_src_mpcd_base_step(ParticleState& state,

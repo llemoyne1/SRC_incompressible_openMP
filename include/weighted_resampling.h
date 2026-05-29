@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "cell_grid.h"
@@ -8,6 +9,41 @@
 #include "simulation_params.h"
 
 namespace mpcd {
+
+constexpr std::uint64_t kInvalidParticleIndex = std::numeric_limits<std::uint64_t>::max();
+
+struct ResamplingParticlePoolDiagnostics {
+    bool built = false;
+
+    std::uint64_t storageSlots = 0;
+    std::uint64_t nFluid = 0;
+    std::uint64_t nLatent = 0;
+    std::uint64_t nInactive = 0;
+
+    std::uint64_t freeSlots = 0;
+    std::uint64_t latentSlots = 0;
+    std::uint64_t fluidSlots = 0;
+
+    std::uint64_t firstFreeIndex = kInvalidParticleIndex;
+    std::uint64_t lastFreeIndex = kInvalidParticleIndex;
+
+    double freeSlotFraction = 0.0;
+    double dormantSlotFraction = 0.0;
+};
+
+struct ResamplingParticlePoolWorkspace {
+    std::uint64_t allocatedParticles = 0;
+
+    // Stack of slots immediately available for future insertion.  The list is
+    // rebuilt from role=Inactive and is not yet consumed by this passive patch.
+    std::vector<std::uint64_t> freeInactiveSlots;
+
+    // Auxiliary role-index lists used by smoke tests and future wet/dry logic.
+    std::vector<std::uint64_t> latentSlots;
+    std::vector<std::uint64_t> fluidSlots;
+
+    ResamplingParticlePoolDiagnostics diagnostics;
+};
 
 // Real-fluid weighted deposit used by the resampling branch.
 //
@@ -73,7 +109,31 @@ struct WeightedResamplingDiagnostics {
     double particleMassRelStd = 0.0;
     double particleMassMin = 0.0;
     double particleMassMax = 0.0;
+
+    // Passive pool/free-list diagnostics.  These are filled by the 0113 pool
+    // builder and are kept with the resampling diagnostics so runtime summaries
+    // have one coherent resampling block.
+    bool poolBuilt = false;
+    std::uint64_t poolStorageSlots = 0;
+    std::uint64_t poolFreeSlots = 0;
+    std::uint64_t poolLatentSlots = 0;
+    std::uint64_t poolFluidSlots = 0;
+    std::uint64_t poolFirstFreeIndex = kInvalidParticleIndex;
+    std::uint64_t poolLastFreeIndex = kInvalidParticleIndex;
+    double poolFreeSlotFraction = 0.0;
+    double poolDormantSlotFraction = 0.0;
 };
+
+ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
+    const ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool);
+
+bool resampling_pool_has_free_slot(const ResamplingParticlePoolWorkspace& pool);
+std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& pool);
+void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index);
+
+void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
+                                        const ResamplingParticlePoolDiagnostics& poolDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

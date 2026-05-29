@@ -170,6 +170,16 @@ struct RuntimeSummary {
     double resampMeanUy = 0.0;
     double resampCellUxRms = 0.0;
     double resampCellUyRms = 0.0;
+
+    int resampPoolBuilt = 0;
+    std::uint64_t resampPoolStorageSlots = 0;
+    std::uint64_t resampPoolFreeSlots = 0;
+    std::uint64_t resampPoolLatentSlots = 0;
+    std::uint64_t resampPoolFluidSlots = 0;
+    std::int64_t resampPoolFirstFreeIndex = -1;
+    std::int64_t resampPoolLastFreeIndex = -1;
+    double resampPoolFreeSlotFraction = 0.0;
+    double resampPoolDormantSlotFraction = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,

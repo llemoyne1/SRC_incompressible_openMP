@@ -95,8 +95,11 @@ int main(int argc, char** argv) {
 
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
-        const mpcd::WeightedResamplingDiagnostics initialResampling =
+        const mpcd::ResamplingParticlePoolDiagnostics initialPool =
+            mpcd::rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        mpcd::WeightedResamplingDiagnostics initialResampling =
             mpcd::deposit_weighted_real_fluid(state, params, grid, mpcd::GridShift{}, workspace.resampling);
+        mpcd::attach_resampling_pool_diagnostics(initialResampling, initialPool);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
                                                      &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      &initialResampling, ompActiveThreads));

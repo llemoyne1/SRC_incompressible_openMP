@@ -145,3 +145,12 @@ contains `resamp*` diagnostics, including `resampMRelRms` and
 ```
 
 See `doc/README_0112_WEIGHTED_REAL_FLUID_DEPOSIT.md`.
+
+### Patch 0113 — resampling inactive pool/free-list
+
+The resampling branch now rebuilds a passive particle pool from particle roles:
+`Fluid`, `Latent`, and `Inactive`.  `Inactive` slots form the future free-list for
+particle insertion, while `Latent` slots are tracked separately and are not treated
+as free.  This patch remains diagnostic/passive: it does not activate, deactivate,
+insert, extract, or remap particles.  See
+`doc/README_0113_RESAMPLING_INACTIVE_POOL.md`.
