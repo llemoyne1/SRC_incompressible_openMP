@@ -56,6 +56,15 @@ struct ResamplingTransferPlanEntry {
     double receiverRemainingAfter = 0.0;
 };
 
+struct ResamplingSelectedDonorParticle {
+    std::uint64_t particleIndex = kInvalidParticleIndex;
+    std::int32_t donorCell = kInvalidCellIndex;
+    std::int32_t receiverCell = kInvalidCellIndex;
+    double particleMass = 0.0;
+    double planEntryMass = 0.0;
+    double selectedMassForEntryAfter = 0.0;
+};
+
 // Real-fluid weighted deposit used by the resampling branch.
 //
 // This deposit is deliberately distinct from CollisionWorkspace:
@@ -101,6 +110,14 @@ struct WeightedRealFluidDepositWorkspace {
     // Entries are diagnostic only: no mass, momentum, role or pool state is
     // changed by this plan builder.
     std::vector<ResamplingTransferPlanEntry> transferPlan;
+
+    // Passive donor particle selections prepared by patch 0117.  These are
+    // candidate particle indices that could be extracted from rich donor cells
+    // to realize the transfer plan.  The selection is deterministic and does
+    // not change role, mass, position or velocity.
+    std::vector<ResamplingSelectedDonorParticle> selectedDonorParticles;
+    std::vector<std::uint32_t> donorSelectedParticleCount;
+    std::vector<double> donorSelectedMass;
 };
 
 struct WeightedResamplingDiagnostics {
@@ -191,6 +208,29 @@ struct WeightedResamplingDiagnostics {
     double transferMaxCellDistance = 0.0;
     bool transferPlanDonorLimited = false;
     bool transferPlanReceiverLimited = false;
+
+    // Passive donor-particle selection (patch 0117).  Particle indices are
+    // selected deterministically from rich donor cells, following the passive
+    // transfer plan.  The selected mass may overshoot the planned continuous
+    // mass because individual particles are indivisible at this stage.
+    bool donorParticleSelectionBuilt = false;
+    std::uint64_t nSelectedDonorParticles = 0;
+    std::uint64_t nDonorCellsWithSelectedParticles = 0;
+    std::uint64_t maxSelectedParticlesForTransferEntry = 0;
+    std::uint64_t maxSelectedParticlesPerDonorCell = 0;
+    std::uint64_t firstSelectedDonorParticle = kInvalidParticleIndex;
+    std::uint64_t lastSelectedDonorParticle = kInvalidParticleIndex;
+    std::int32_t firstSelectedDonorCell = kInvalidCellIndex;
+    std::int32_t lastSelectedDonorCell = kInvalidCellIndex;
+    std::int32_t firstSelectedReceiverCell = kInvalidCellIndex;
+    std::int32_t lastSelectedReceiverCell = kInvalidCellIndex;
+    double selectedDonorParticleMass = 0.0;
+    double selectedDonorMassOvershoot = 0.0;
+    double selectedDonorMassCoverageFraction = 0.0;
+    double selectedDonorMeanParticleMass = 0.0;
+    double selectedDonorMaxParticleMass = 0.0;
+    bool donorParticleSelectionExactOrOvershoot = false;
+    bool donorParticleSelectionUnderfilled = false;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;

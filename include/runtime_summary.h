@@ -221,6 +221,25 @@ struct RuntimeSummary {
     int resampTransferPlanDonorLimited = 0;
     int resampTransferPlanReceiverLimited = 0;
 
+    int resampDonorParticleSelectionBuilt = 0;
+    std::uint64_t resampSelectedDonorParticles = 0;
+    std::uint64_t resampDonorCellsWithSelectedParticles = 0;
+    std::uint64_t resampMaxSelectedParticlesForTransferEntry = 0;
+    std::uint64_t resampMaxSelectedParticlesPerDonorCell = 0;
+    std::int64_t resampFirstSelectedDonorParticle = -1;
+    std::int64_t resampLastSelectedDonorParticle = -1;
+    std::int32_t resampFirstSelectedDonorCell = -1;
+    std::int32_t resampLastSelectedDonorCell = -1;
+    std::int32_t resampFirstSelectedReceiverCell = -1;
+    std::int32_t resampLastSelectedReceiverCell = -1;
+    double resampSelectedDonorParticleMass = 0.0;
+    double resampSelectedDonorMassOvershoot = 0.0;
+    double resampSelectedDonorMassCoverageFraction = 0.0;
+    double resampSelectedDonorMeanParticleMass = 0.0;
+    double resampSelectedDonorMaxParticleMass = 0.0;
+    int resampDonorParticleSelectionExactOrOvershoot = 0;
+    int resampDonorParticleSelectionUnderfilled = 0;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

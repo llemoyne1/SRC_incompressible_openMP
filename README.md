@@ -245,3 +245,47 @@ transferPairs=2 planned=4 remainingReceiver=3 remainingDonor=0 coverage=0.571428
 ```
 
 See `doc/README_0116_RESAMPLING_TRANSFER_PLAN.md`.
+
+### Patch 0117 — passive donor particle selection
+
+Patch 0117 keeps the 0116 transfer plan passive but selects deterministic
+candidate particle indices from rich donor cells.  The selection follows the
+ordered donor→receiver transfer entries and scans true `Fluid` particle indices
+in increasing order, skipping particles already selected by earlier plan
+entries.
+
+The selected set is diagnostic only:
+
+```text
+no particle is moved
+no mass is changed
+no role is changed
+no inactive pool slot is consumed
+no remap is applied
+```
+
+The diagnostic block records the selected donor mass and any overshoot produced
+by particle indivisibility:
+
+```text
+resampDonorParticleSelectionBuilt
+resampSelectedDonorParticles
+resampDonorCellsWithSelectedParticles
+resampSelectedDonorParticleMass
+resampSelectedDonorMassOvershoot
+resampSelectedDonorMassCoverageFraction
+```
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_donor_particle_selection_smoke_0117.sh
+```
+
+Expected diagnostic core:
+
+```text
+selected=4 selectedMass=4 overshoot=0 coverage=1 firstParticle=1 lastParticle=4
+```
+
+See `doc/README_0117_RESAMPLING_DONOR_PARTICLE_SELECTION.md`.

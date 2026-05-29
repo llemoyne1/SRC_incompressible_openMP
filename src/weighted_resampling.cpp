@@ -243,6 +243,9 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.donorRichCells.reserve(static_cast<std::size_t>(numCells));
         ws.emptyWetReceiverCells.reserve(static_cast<std::size_t>(numCells));
         ws.transferPlan.reserve(static_cast<std::size_t>(numCells));
+        ws.selectedDonorParticles.reserve(static_cast<std::size_t>(numParticles));
+        ws.donorSelectedParticleCount.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.donorSelectedMass.assign(static_cast<std::size_t>(numCells), 0.0);
     }
 }
 
@@ -284,6 +287,9 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ws.donorRichCells.clear();
     ws.emptyWetReceiverCells.clear();
     ws.transferPlan.clear();
+    ws.selectedDonorParticles.clear();
+    std::fill(ws.donorSelectedParticleCount.begin(), ws.donorSelectedParticleCount.end(), 0u);
+    std::fill(ws.donorSelectedMass.begin(), ws.donorSelectedMass.end(), 0.0);
 
     const ParticleRoleCounts roles = count_particle_roles(state);
 
@@ -628,6 +634,104 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 d.firstTransferReceiverCell = ws.transferPlan.front().receiverCell;
                 d.lastTransferDonorCell = ws.transferPlan.back().donorCell;
                 d.lastTransferReceiverCell = ws.transferPlan.back().receiverCell;
+            }
+
+            // Patch 0117: passive donor particle selection.
+            //
+            // Follow the passive transfer plan and select true Fluid particle
+            // indices from each donor cell.  The state is deliberately left
+            // untouched.  Selection is deterministic: for each plan entry, scan
+            // particle indices in increasing order and skip particles already
+            // selected by an earlier entry.  Because future extraction operates
+            // on indivisible particle slots before exact mass/momentum remap,
+            // the selected mass can overshoot the continuous planned mass.
+            if (!ws.transferPlan.empty()) {
+                std::vector<std::uint8_t> selected(static_cast<std::size_t>(state.Np), 0u);
+                double selectedMassTotal = 0.0;
+                double selectedMaxMass = 0.0;
+                std::uint64_t maxPerEntry = 0u;
+                constexpr double selectEps = 1.0e-14;
+
+                for (const ResamplingTransferPlanEntry& entry : ws.transferPlan) {
+                    if (entry.donorCell < 0 || entry.plannedMass <= selectEps) {
+                        continue;
+                    }
+                    double selectedForEntry = 0.0;
+                    std::uint64_t countForEntry = 0u;
+                    for (std::size_t i = 0; i < n; ++i) {
+                        if (selected[i]) {
+                            continue;
+                        }
+                        if (!is_fluid_particle(state, i)) {
+                            continue;
+                        }
+                        if (ws.cellId[i] != entry.donorCell) {
+                            continue;
+                        }
+                        const double mp = state.mass[i];
+                        if (!(mp > 0.0)) {
+                            continue;
+                        }
+                        selected[i] = 1u;
+                        selectedForEntry += mp;
+                        selectedMassTotal += mp;
+                        selectedMaxMass = std::max(selectedMaxMass, mp);
+                        countForEntry += 1u;
+                        const std::size_t dc = static_cast<std::size_t>(entry.donorCell);
+                        if (dc < ws.donorSelectedParticleCount.size()) {
+                            ws.donorSelectedParticleCount[dc] += 1u;
+                            ws.donorSelectedMass[dc] += mp;
+                        }
+                        ws.selectedDonorParticles.push_back(ResamplingSelectedDonorParticle{
+                            static_cast<std::uint64_t>(i),
+                            entry.donorCell,
+                            entry.receiverCell,
+                            mp,
+                            entry.plannedMass,
+                            selectedForEntry});
+                        if (selectedForEntry + selectEps >= entry.plannedMass) {
+                            break;
+                        }
+                    }
+                    maxPerEntry = std::max(maxPerEntry, countForEntry);
+                }
+
+                std::uint64_t donorCellsWithSelection = 0u;
+                std::uint64_t maxPerCell = 0u;
+                for (int c = 0; c < nc; ++c) {
+                    const std::uint32_t cc = ws.donorSelectedParticleCount[static_cast<std::size_t>(c)];
+                    if (cc > 0u) {
+                        donorCellsWithSelection += 1u;
+                        maxPerCell = std::max(maxPerCell, static_cast<std::uint64_t>(cc));
+                    }
+                }
+
+                d.donorParticleSelectionBuilt = d.transferPlanBuilt;
+                d.nSelectedDonorParticles = static_cast<std::uint64_t>(ws.selectedDonorParticles.size());
+                d.nDonorCellsWithSelectedParticles = donorCellsWithSelection;
+                d.maxSelectedParticlesForTransferEntry = maxPerEntry;
+                d.maxSelectedParticlesPerDonorCell = maxPerCell;
+                d.selectedDonorParticleMass = selectedMassTotal;
+                d.selectedDonorMassOvershoot = selectedMassTotal - d.plannedTransferMass;
+                d.selectedDonorMassCoverageFraction = d.plannedTransferMass > 0.0
+                    ? selectedMassTotal / d.plannedTransferMass : 0.0;
+                d.selectedDonorMeanParticleMass = d.nSelectedDonorParticles > 0u
+                    ? selectedMassTotal / static_cast<double>(d.nSelectedDonorParticles) : 0.0;
+                d.selectedDonorMaxParticleMass = selectedMaxMass;
+                d.donorParticleSelectionExactOrOvershoot =
+                    selectedMassTotal + selectEps >= d.plannedTransferMass;
+                d.donorParticleSelectionUnderfilled =
+                    selectedMassTotal + selectEps < d.plannedTransferMass;
+                if (!ws.selectedDonorParticles.empty()) {
+                    const auto& first = ws.selectedDonorParticles.front();
+                    const auto& last = ws.selectedDonorParticles.back();
+                    d.firstSelectedDonorParticle = first.particleIndex;
+                    d.lastSelectedDonorParticle = last.particleIndex;
+                    d.firstSelectedDonorCell = first.donorCell;
+                    d.lastSelectedDonorCell = last.donorCell;
+                    d.firstSelectedReceiverCell = first.receiverCell;
+                    d.lastSelectedReceiverCell = last.receiverCell;
+                }
             }
         } else {
             d.transferPlanBuilt = d.candidateListsBuilt;
