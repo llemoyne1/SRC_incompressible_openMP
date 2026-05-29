@@ -15,6 +15,7 @@ function fields = bin_smpcd_state(state, varargin)
     addParameter(p, 'Ny', [], @isnumeric);
     addParameter(p, 'periodicX', true, @islogical);
     addParameter(p, 'periodicY', true, @islogical);
+    addParameter(p, 'fluidOnly', true, @(x) islogical(x) || isnumeric(x));
     parse(p, state, varargin{:});
 
     Lx = p.Results.Lx;
@@ -35,6 +36,21 @@ function fields = bin_smpcd_state(state, varargin)
     vy = double(state.vy(:));
     mass = double(state.mass(:));
     type = double(state.type(:));
+
+    if isfield(state, 'role') && ~isempty(state.role)
+        role = uint8(state.role(:));
+    else
+        role = ones(numel(x), 1, 'uint8');
+    end
+    if logical(p.Results.fluidOnly)
+        keep = role == uint8(1);
+        x = x(keep);
+        y = y(keep);
+        vx = vx(keep);
+        vy = vy(keep);
+        mass = mass(keep);
+        type = type(keep);
+    end
 
     dx = Lx / Nx;
     dy = Ly / Ny;

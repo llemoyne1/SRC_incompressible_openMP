@@ -534,3 +534,32 @@ See `doc/README_0124_RESAMPLING_LATENT_ACTIVATION.md`.
 ## 0125 integrated resampling validator
 
 - `scripts/run_resampling_integrated_void_rich_latent_smoke_0125.sh`: integrated void/rich/latent validator for activation, recycle, remap, thermal renormalisation and mass guard. See `doc/README_0125_RESAMPLING_INTEGRATED_VOID_RICH_LATENT.md`.
+
+## 0126 periodic Taylor--Green resampling validation
+
+Patch 0126 adds the first dynamic, fully periodic validation for the OpenMP
+resampling branch.  It provides a MATLAB V2 `.smpcd` Taylor--Green initial-state
+generator, MATLAB V1/V2 state readers/writers, fluid-only field binning for
+role-aware dumps, a bash runner for `classic`, `q6` and `q6_resampling`, and a
+MATLAB analyzer with visible figures and CSV summaries.
+
+Main command:
+
+```bash
+./scripts/run_taylor_green_resampling_validation_0126.sh
+```
+
+Useful larger run:
+
+```bash
+TG_NX=64 TG_NY=64 TG_GAMMA=20 TG_STEPS=3000 TG_DUMP_EVERY=100 TG_THREADS=8 \
+./scripts/run_taylor_green_resampling_validation_0126.sh
+```
+
+The main post-processing output is:
+
+```text
+runs/taylor_green_resampling_0126/analysis/tg_summary.csv
+```
+
+See `doc/README_0126_TAYLOR_GREEN_RESAMPLING_VALIDATION.md`.
