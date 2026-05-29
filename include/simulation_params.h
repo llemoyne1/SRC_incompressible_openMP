@@ -273,6 +273,14 @@ struct SimulationParams {
     bool resamplingRemapEnable = false;
     bool resamplingThermalRenormalizationEnable = false;
 
+    // Optional particle-mass guard applied after the local M,U,E_th remap.
+    // It solves a bounded per-cell mass projection so mMin <= m_p <= mMax
+    // and sum_p m_p = M_target whenever feasible, then recenters/rescales
+    // velocities so the cell velocity and relative thermal energy are restored.
+    bool resamplingMassGuardEnable = false;
+    double resamplingParticleMassMin = 0.25;
+    double resamplingParticleMassMax = 4.0;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

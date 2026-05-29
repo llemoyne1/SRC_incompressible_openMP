@@ -105,12 +105,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
         ResamplingRemapApplyDiagnostics remapApply{};
         ResamplingThermalRenormalizationDiagnostics thermalApply{};
+        ResamplingMassGuardDiagnostics massGuardApply{};
         if (params.resamplingRemapEnable && insertionApply.applied) {
             remapApply = apply_resampling_local_mass_momentum_remap(
                 state, workspace.resampling, result.resampling);
             if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
                 thermalApply = apply_resampling_local_thermal_renormalization(
                     state, workspace.resampling, remapApply);
+            }
+            if (params.resamplingMassGuardEnable && remapApply.applied) {
+                massGuardApply = apply_resampling_particle_mass_guards(
+                    state, params, workspace.resampling, result.resampling);
             }
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
@@ -127,6 +132,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (thermalApply.attempted) {
             attach_resampling_thermal_renormalization_diagnostics(result.resampling, thermalApply);
+        }
+        if (massGuardApply.attempted) {
+            attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
         }
     }
     return result;

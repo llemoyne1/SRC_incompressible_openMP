@@ -170,6 +170,55 @@ struct ResamplingThermalRenormalizationDiagnostics {
     bool allRenormalizedCellsNonEmpty = true;
 };
 
+
+struct ResamplingMassGuardDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t cellsConsidered = 0;
+    std::uint64_t cellsGuarded = 0;
+    std::uint64_t particlesConsidered = 0;
+    std::uint64_t particlesAdjusted = 0;
+    std::uint64_t skippedDryCells = 0;
+    std::uint64_t skippedEmptyCells = 0;
+    std::uint64_t skippedInfeasibleCells = 0;
+    std::uint64_t skippedInvalidMassCells = 0;
+
+    double massMinBound = 0.0;
+    double massMaxBound = 0.0;
+    double targetCellMass = 0.0;
+    double massBefore = 0.0;
+    double massAfter = 0.0;
+    double massTargetSum = 0.0;
+    double massResidualRms = 0.0;
+    double massResidualMaxAbs = 0.0;
+
+    double particleMassMinBefore = 0.0;
+    double particleMassMaxBefore = 0.0;
+    double particleMassMinAfter = 0.0;
+    double particleMassMaxAfter = 0.0;
+    std::uint64_t particlesBelowMinBefore = 0;
+    std::uint64_t particlesAboveMaxBefore = 0;
+    std::uint64_t particlesBelowMinAfter = 0;
+    std::uint64_t particlesAboveMaxAfter = 0;
+    std::uint64_t particlesAtMinAfter = 0;
+    std::uint64_t particlesAtMaxAfter = 0;
+
+    double thermalEnergyTarget = 0.0;
+    double thermalEnergyBefore = 0.0;
+    double thermalEnergyAfter = 0.0;
+    double thermalEnergyResidualRms = 0.0;
+    double thermalEnergyResidualMaxAbs = 0.0;
+    double velocityScaleMin = 1.0;
+    double velocityScaleMax = 1.0;
+
+    double momentumResidualRms = 0.0;
+    double momentumResidualMaxAbs = 0.0;
+    std::int32_t firstGuardedCell = kInvalidCellIndex;
+    std::int32_t lastGuardedCell = kInvalidCellIndex;
+    bool allGuardedCellsFeasible = true;
+};
+
 struct ResamplingExtractionApplyDiagnostics {
     bool attempted = false;
     bool applied = false;
@@ -514,6 +563,51 @@ struct WeightedResamplingDiagnostics {
     std::int32_t lastThermalRenormCell = kInvalidCellIndex;
     bool thermalRenormAllCellsNonEmpty = true;
 
+    // Particle-mass guard and bounded local renormalisation (patch 0123).
+    // After extraction/insertion/remap/thermalisation, masses are projected
+    // inside [m_min,m_max] while preserving M_c; velocities are then recentered
+    // and rescaled so U_c and E_th,c are restored.
+    bool massGuardAttempted = false;
+    bool massGuardApplied = false;
+    std::uint64_t massGuardCellsConsidered = 0;
+    std::uint64_t massGuardCellsGuarded = 0;
+    std::uint64_t massGuardParticlesConsidered = 0;
+    std::uint64_t massGuardParticlesAdjusted = 0;
+    std::uint64_t massGuardSkippedDryCells = 0;
+    std::uint64_t massGuardSkippedEmptyCells = 0;
+    std::uint64_t massGuardSkippedInfeasibleCells = 0;
+    std::uint64_t massGuardSkippedInvalidMassCells = 0;
+    double massGuardMinBound = 0.0;
+    double massGuardMaxBound = 0.0;
+    double massGuardTargetCellMass = 0.0;
+    double massGuardMassBefore = 0.0;
+    double massGuardMassAfter = 0.0;
+    double massGuardMassTargetSum = 0.0;
+    double massGuardMassResidualRms = 0.0;
+    double massGuardMassResidualMaxAbs = 0.0;
+    double massGuardParticleMassMinBefore = 0.0;
+    double massGuardParticleMassMaxBefore = 0.0;
+    double massGuardParticleMassMinAfter = 0.0;
+    double massGuardParticleMassMaxAfter = 0.0;
+    std::uint64_t massGuardParticlesBelowMinBefore = 0;
+    std::uint64_t massGuardParticlesAboveMaxBefore = 0;
+    std::uint64_t massGuardParticlesBelowMinAfter = 0;
+    std::uint64_t massGuardParticlesAboveMaxAfter = 0;
+    std::uint64_t massGuardParticlesAtMinAfter = 0;
+    std::uint64_t massGuardParticlesAtMaxAfter = 0;
+    double massGuardThermalEnergyTarget = 0.0;
+    double massGuardThermalEnergyBefore = 0.0;
+    double massGuardThermalEnergyAfter = 0.0;
+    double massGuardThermalEnergyResidualRms = 0.0;
+    double massGuardThermalEnergyResidualMaxAbs = 0.0;
+    double massGuardVelocityScaleMin = 1.0;
+    double massGuardVelocityScaleMax = 1.0;
+    double massGuardMomentumResidualRms = 0.0;
+    double massGuardMomentumResidualMaxAbs = 0.0;
+    std::int32_t firstMassGuardedCell = kInvalidCellIndex;
+    std::int32_t lastMassGuardedCell = kInvalidCellIndex;
+    bool massGuardAllCellsFeasible = true;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -581,6 +675,16 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
 void attach_resampling_thermal_renormalization_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
     const ResamplingThermalRenormalizationDiagnostics& thermalDiagnostics);
+
+ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
+    ParticleState& state,
+    const SimulationParams& params,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics);
+
+void attach_resampling_mass_guard_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingMassGuardDiagnostics& massGuardDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

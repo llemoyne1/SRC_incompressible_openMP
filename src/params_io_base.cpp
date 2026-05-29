@@ -313,6 +313,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
         else if (key == "resamplingRemapEnable") p.resamplingRemapEnable = parse_bool(value, key);
         else if (key == "resamplingThermalRenormalizationEnable" || key == "resamplingThermalRenormalisationEnable") p.resamplingThermalRenormalizationEnable = parse_bool(value, key);
+        else if (key == "resamplingMassGuardEnable" || key == "resamplingMassSafetyEnable") p.resamplingMassGuardEnable = parse_bool(value, key);
+        else if (key == "resamplingParticleMassMin" || key == "resamplingMassMin") p.resamplingParticleMassMin = parse_double(value, key);
+        else if (key == "resamplingParticleMassMax" || key == "resamplingMassMax") p.resamplingParticleMassMax = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -782,6 +785,15 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.resamplingThermalRenormalizationEnable && !p.resamplingRemapEnable) {
         throw std::runtime_error("resamplingThermalRenormalizationEnable currently requires resamplingRemapEnable=true");
+    }
+    if (p.resamplingMassGuardEnable && !p.resamplingRemapEnable) {
+        throw std::runtime_error("resamplingMassGuardEnable currently requires resamplingRemapEnable=true");
+    }
+    if (!(p.resamplingParticleMassMin >= 0.0)) {
+        throw std::runtime_error("resamplingParticleMassMin must be non-negative");
+    }
+    if (!(p.resamplingParticleMassMax > p.resamplingParticleMassMin)) {
+        throw std::runtime_error("resamplingParticleMassMax must be greater than resamplingParticleMassMin");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

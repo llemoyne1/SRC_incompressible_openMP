@@ -825,6 +825,303 @@ void attach_resampling_thermal_renormalization_diagnostics(
     diagnostics.thermalRenormAllCellsNonEmpty = thermalDiagnostics.allRenormalizedCellsNonEmpty;
 }
 
+
+
+ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
+    ParticleState& state,
+    const SimulationParams& params,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics) {
+    validate_particle_state(state, "apply_resampling_particle_mass_guards");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingMassGuardDiagnostics d{};
+    d.attempted = true;
+    d.massMinBound = params.resamplingParticleMassMin;
+    d.massMaxBound = params.resamplingParticleMassMax;
+    d.targetCellMass = depositDiagnostics.targetCellMass;
+
+    const int nc = depositWorkspace.allocatedCells;
+    if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||
+        depositWorkspace.cellId.size() < static_cast<std::size_t>(state.Np)) {
+        throw std::runtime_error("apply_resampling_particle_mass_guards: invalid deposit workspace");
+    }
+    if (!(d.massMinBound >= 0.0) || !(d.massMaxBound > d.massMinBound) ||
+        !(d.targetCellMass > 0.0) || !std::isfinite(d.targetCellMass)) {
+        d.skippedInvalidMassCells = static_cast<std::uint64_t>(nc);
+        d.allGuardedCellsFeasible = false;
+        return d;
+    }
+
+    std::vector<std::vector<std::size_t>> particlesByCell(static_cast<std::size_t>(nc));
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        const int c = depositWorkspace.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        particlesByCell[static_cast<std::size_t>(c)].push_back(i);
+    }
+
+    constexpr double eps = 1.0e-12;
+    constexpr double energyEps = 1.0e-30;
+    double massResidual2 = 0.0;
+    double thermalResidual2 = 0.0;
+    double momentumResidual2 = 0.0;
+    std::uint64_t residualCount = 0u;
+    d.particleMassMinBefore = std::numeric_limits<double>::infinity();
+    d.particleMassMaxBefore = 0.0;
+    d.particleMassMinAfter = std::numeric_limits<double>::infinity();
+    d.particleMassMaxAfter = 0.0;
+    d.velocityScaleMin = std::numeric_limits<double>::infinity();
+    d.velocityScaleMax = 0.0;
+
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.wetCell[kk]) {
+            d.skippedDryCells += 1u;
+            continue;
+        }
+        auto& ids = particlesByCell[kk];
+        if (ids.empty()) {
+            d.skippedEmptyCells += 1u;
+            continue;
+        }
+        d.cellsConsidered += 1u;
+        d.particlesConsidered += static_cast<std::uint64_t>(ids.size());
+
+        const double feasibleMin = static_cast<double>(ids.size()) * d.massMinBound;
+        const double feasibleMax = static_cast<double>(ids.size()) * d.massMaxBound;
+        if (d.targetCellMass < feasibleMin - eps || d.targetCellMass > feasibleMax + eps) {
+            d.skippedInfeasibleCells += 1u;
+            d.allGuardedCellsFeasible = false;
+            continue;
+        }
+
+        double massBefore = 0.0;
+        double pxBefore = 0.0;
+        double pyBefore = 0.0;
+        double minOld = std::numeric_limits<double>::infinity();
+        double maxOld = -std::numeric_limits<double>::infinity();
+        bool invalid = false;
+        std::vector<double> oldMass(ids.size(), 0.0);
+        for (std::size_t j = 0; j < ids.size(); ++j) {
+            const std::size_t i = ids[j];
+            const double m = state.mass[i];
+            if (!(m > 0.0) || !std::isfinite(m)) {
+                invalid = true;
+                break;
+            }
+            oldMass[j] = m;
+            massBefore += m;
+            pxBefore += m * state.vx[i];
+            pyBefore += m * state.vy[i];
+            minOld = std::min(minOld, m);
+            maxOld = std::max(maxOld, m);
+            d.particleMassMinBefore = std::min(d.particleMassMinBefore, m);
+            d.particleMassMaxBefore = std::max(d.particleMassMaxBefore, m);
+            d.particlesBelowMinBefore += (m < d.massMinBound - eps) ? 1u : 0u;
+            d.particlesAboveMaxBefore += (m > d.massMaxBound + eps) ? 1u : 0u;
+        }
+        if (invalid || !(massBefore > 0.0)) {
+            d.skippedInvalidMassCells += 1u;
+            d.allGuardedCellsFeasible = false;
+            continue;
+        }
+
+        const double uxTarget = pxBefore / massBefore;
+        const double uyTarget = pyBefore / massBefore;
+        double thermalTarget = 0.0;
+        for (const std::size_t i : ids) {
+            const double dux = state.vx[i] - uxTarget;
+            const double duy = state.vy[i] - uyTarget;
+            thermalTarget += 0.5 * state.mass[i] * (dux * dux + duy * duy);
+        }
+
+        // Project m_old onto the box [m_min,m_max] with the affine constraint
+        // sum(m_new)=M_target.  The additive Lagrange multiplier gives the
+        // closest bounded vector to the current masses in Euclidean norm.
+        double lo = d.massMinBound - maxOld - std::abs(d.targetCellMass) - 1.0;
+        double hi = d.massMaxBound - minOld + std::abs(d.targetCellMass) + 1.0;
+        for (int it = 0; it < 96; ++it) {
+            const double mid = 0.5 * (lo + hi);
+            double sum = 0.0;
+            for (double m : oldMass) {
+                sum += std::min(d.massMaxBound, std::max(d.massMinBound, m + mid));
+            }
+            if (sum < d.targetCellMass) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        const double lambda = 0.5 * (lo + hi);
+        std::vector<double> newMass(ids.size(), 0.0);
+        double massAfter = 0.0;
+        double pxMassOnly = 0.0;
+        double pyMassOnly = 0.0;
+        bool changed = false;
+        for (std::size_t j = 0; j < ids.size(); ++j) {
+            const std::size_t i = ids[j];
+            const double m = std::min(d.massMaxBound, std::max(d.massMinBound, oldMass[j] + lambda));
+            newMass[j] = m;
+            massAfter += m;
+            pxMassOnly += m * state.vx[i];
+            pyMassOnly += m * state.vy[i];
+            changed = changed || (std::abs(m - oldMass[j]) > eps * std::max(1.0, std::abs(oldMass[j])));
+        }
+        if (!(massAfter > 0.0) || !std::isfinite(massAfter)) {
+            d.skippedInvalidMassCells += 1u;
+            d.allGuardedCellsFeasible = false;
+            continue;
+        }
+        const double uxCurrent = pxMassOnly / massAfter;
+        const double uyCurrent = pyMassOnly / massAfter;
+        double thermalBeforeVelocityRenorm = 0.0;
+        for (std::size_t j = 0; j < ids.size(); ++j) {
+            const std::size_t i = ids[j];
+            const double dux = state.vx[i] - uxCurrent;
+            const double duy = state.vy[i] - uyCurrent;
+            thermalBeforeVelocityRenorm += 0.5 * newMass[j] * (dux * dux + duy * duy);
+        }
+
+        double vscale = 1.0;
+        if (thermalBeforeVelocityRenorm > energyEps) {
+            vscale = std::sqrt(std::max(0.0, thermalTarget) / thermalBeforeVelocityRenorm);
+        } else if (thermalTarget > energyEps) {
+            d.skippedInvalidMassCells += 1u;
+            d.allGuardedCellsFeasible = false;
+            continue;
+        }
+        if (!(vscale >= 0.0) || !std::isfinite(vscale)) {
+            d.skippedInvalidMassCells += 1u;
+            d.allGuardedCellsFeasible = false;
+            continue;
+        }
+
+        for (std::size_t j = 0; j < ids.size(); ++j) {
+            const std::size_t i = ids[j];
+            state.mass[i] = newMass[j];
+            state.vx[i] = uxTarget + vscale * (state.vx[i] - uxCurrent);
+            state.vy[i] = uyTarget + vscale * (state.vy[i] - uyCurrent);
+            d.particlesAdjusted += (std::abs(newMass[j] - oldMass[j]) > eps * std::max(1.0, std::abs(oldMass[j]))) ? 1u : 0u;
+            d.particleMassMinAfter = std::min(d.particleMassMinAfter, newMass[j]);
+            d.particleMassMaxAfter = std::max(d.particleMassMaxAfter, newMass[j]);
+            d.particlesBelowMinAfter += (newMass[j] < d.massMinBound - 1.0e-10) ? 1u : 0u;
+            d.particlesAboveMaxAfter += (newMass[j] > d.massMaxBound + 1.0e-10) ? 1u : 0u;
+            d.particlesAtMinAfter += (std::abs(newMass[j] - d.massMinBound) <= 1.0e-10) ? 1u : 0u;
+            d.particlesAtMaxAfter += (std::abs(newMass[j] - d.massMaxBound) <= 1.0e-10) ? 1u : 0u;
+        }
+
+        double pxAfter = 0.0;
+        double pyAfter = 0.0;
+        double thermalAfter = 0.0;
+        for (const std::size_t i : ids) {
+            pxAfter += state.mass[i] * state.vx[i];
+            pyAfter += state.mass[i] * state.vy[i];
+            const double dux = state.vx[i] - uxTarget;
+            const double duy = state.vy[i] - uyTarget;
+            thermalAfter += 0.5 * state.mass[i] * (dux * dux + duy * duy);
+        }
+
+        d.massBefore += massBefore;
+        d.massAfter += massAfter;
+        d.massTargetSum += d.targetCellMass;
+        d.thermalEnergyTarget += thermalTarget;
+        d.thermalEnergyBefore += thermalBeforeVelocityRenorm;
+        d.thermalEnergyAfter += thermalAfter;
+        d.velocityScaleMin = std::min(d.velocityScaleMin, vscale);
+        d.velocityScaleMax = std::max(d.velocityScaleMax, vscale);
+        const double mr = massAfter - d.targetCellMass;
+        const double er = thermalAfter - thermalTarget;
+        const double rx = pxAfter - d.targetCellMass * uxTarget;
+        const double ry = pyAfter - d.targetCellMass * uyTarget;
+        massResidual2 += mr * mr;
+        thermalResidual2 += er * er;
+        momentumResidual2 += rx * rx + ry * ry;
+        residualCount += 1u;
+        d.massResidualMaxAbs = std::max(d.massResidualMaxAbs, std::abs(mr));
+        d.thermalEnergyResidualMaxAbs = std::max(d.thermalEnergyResidualMaxAbs, std::abs(er));
+        d.momentumResidualMaxAbs = std::max(d.momentumResidualMaxAbs, std::max(std::abs(rx), std::abs(ry)));
+
+        if (changed || std::abs(vscale - 1.0) > eps) {
+            d.cellsGuarded += 1u;
+            if (d.firstGuardedCell == kInvalidCellIndex) {
+                d.firstGuardedCell = static_cast<std::int32_t>(c);
+            }
+            d.lastGuardedCell = static_cast<std::int32_t>(c);
+        }
+    }
+
+    if (!std::isfinite(d.particleMassMinBefore)) {
+        d.particleMassMinBefore = 0.0;
+    }
+    if (!std::isfinite(d.particleMassMinAfter)) {
+        d.particleMassMinAfter = 0.0;
+    }
+    if (!std::isfinite(d.velocityScaleMin)) {
+        d.velocityScaleMin = 1.0;
+    }
+    if (!(d.velocityScaleMax > 0.0)) {
+        d.velocityScaleMax = 1.0;
+    }
+    if (residualCount > 0u) {
+        const double inv = 1.0 / static_cast<double>(residualCount);
+        d.massResidualRms = std::sqrt(massResidual2 * inv);
+        d.thermalEnergyResidualRms = std::sqrt(thermalResidual2 * inv);
+        d.momentumResidualRms = std::sqrt(momentumResidual2 * inv);
+    }
+    d.applied = d.cellsGuarded > 0u || d.particlesAdjusted > 0u;
+    return d;
+}
+
+void attach_resampling_mass_guard_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingMassGuardDiagnostics& massGuardDiagnostics) {
+    diagnostics.massGuardAttempted = massGuardDiagnostics.attempted;
+    diagnostics.massGuardApplied = massGuardDiagnostics.applied;
+    diagnostics.massGuardCellsConsidered = massGuardDiagnostics.cellsConsidered;
+    diagnostics.massGuardCellsGuarded = massGuardDiagnostics.cellsGuarded;
+    diagnostics.massGuardParticlesConsidered = massGuardDiagnostics.particlesConsidered;
+    diagnostics.massGuardParticlesAdjusted = massGuardDiagnostics.particlesAdjusted;
+    diagnostics.massGuardSkippedDryCells = massGuardDiagnostics.skippedDryCells;
+    diagnostics.massGuardSkippedEmptyCells = massGuardDiagnostics.skippedEmptyCells;
+    diagnostics.massGuardSkippedInfeasibleCells = massGuardDiagnostics.skippedInfeasibleCells;
+    diagnostics.massGuardSkippedInvalidMassCells = massGuardDiagnostics.skippedInvalidMassCells;
+    diagnostics.massGuardMinBound = massGuardDiagnostics.massMinBound;
+    diagnostics.massGuardMaxBound = massGuardDiagnostics.massMaxBound;
+    diagnostics.massGuardTargetCellMass = massGuardDiagnostics.targetCellMass;
+    diagnostics.massGuardMassBefore = massGuardDiagnostics.massBefore;
+    diagnostics.massGuardMassAfter = massGuardDiagnostics.massAfter;
+    diagnostics.massGuardMassTargetSum = massGuardDiagnostics.massTargetSum;
+    diagnostics.massGuardMassResidualRms = massGuardDiagnostics.massResidualRms;
+    diagnostics.massGuardMassResidualMaxAbs = massGuardDiagnostics.massResidualMaxAbs;
+    diagnostics.massGuardParticleMassMinBefore = massGuardDiagnostics.particleMassMinBefore;
+    diagnostics.massGuardParticleMassMaxBefore = massGuardDiagnostics.particleMassMaxBefore;
+    diagnostics.massGuardParticleMassMinAfter = massGuardDiagnostics.particleMassMinAfter;
+    diagnostics.massGuardParticleMassMaxAfter = massGuardDiagnostics.particleMassMaxAfter;
+    diagnostics.massGuardParticlesBelowMinBefore = massGuardDiagnostics.particlesBelowMinBefore;
+    diagnostics.massGuardParticlesAboveMaxBefore = massGuardDiagnostics.particlesAboveMaxBefore;
+    diagnostics.massGuardParticlesBelowMinAfter = massGuardDiagnostics.particlesBelowMinAfter;
+    diagnostics.massGuardParticlesAboveMaxAfter = massGuardDiagnostics.particlesAboveMaxAfter;
+    diagnostics.massGuardParticlesAtMinAfter = massGuardDiagnostics.particlesAtMinAfter;
+    diagnostics.massGuardParticlesAtMaxAfter = massGuardDiagnostics.particlesAtMaxAfter;
+    diagnostics.massGuardThermalEnergyTarget = massGuardDiagnostics.thermalEnergyTarget;
+    diagnostics.massGuardThermalEnergyBefore = massGuardDiagnostics.thermalEnergyBefore;
+    diagnostics.massGuardThermalEnergyAfter = massGuardDiagnostics.thermalEnergyAfter;
+    diagnostics.massGuardThermalEnergyResidualRms = massGuardDiagnostics.thermalEnergyResidualRms;
+    diagnostics.massGuardThermalEnergyResidualMaxAbs = massGuardDiagnostics.thermalEnergyResidualMaxAbs;
+    diagnostics.massGuardVelocityScaleMin = massGuardDiagnostics.velocityScaleMin;
+    diagnostics.massGuardVelocityScaleMax = massGuardDiagnostics.velocityScaleMax;
+    diagnostics.massGuardMomentumResidualRms = massGuardDiagnostics.momentumResidualRms;
+    diagnostics.massGuardMomentumResidualMaxAbs = massGuardDiagnostics.momentumResidualMaxAbs;
+    diagnostics.firstMassGuardedCell = massGuardDiagnostics.firstGuardedCell;
+    diagnostics.lastMassGuardedCell = massGuardDiagnostics.lastGuardedCell;
+    diagnostics.massGuardAllCellsFeasible = massGuardDiagnostics.allGuardedCellsFeasible;
+}
+
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,
                                         int numCells,

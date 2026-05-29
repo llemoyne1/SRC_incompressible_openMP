@@ -458,3 +458,42 @@ preserving `M_c` and `U_c`.  Validate with:
 ```bash
 ./scripts/run_resampling_thermal_renormalization_smoke_0122.sh
 ```
+
+### Patch 0123 — bounded particle-mass guard and local renormalization
+
+Patch 0123 adds an optional mass-safety stage after extraction, insertion,
+local mass remap and optional thermal renormalization:
+
+```text
+resamplingMassGuardEnable = false
+resamplingParticleMassMin = 0.25
+resamplingParticleMassMax = 4.0
+```
+
+When enabled, each non-empty wet cell solves a bounded local mass projection:
+
+```text
+m_min <= m_p <= m_max,
+Σ_p m_p = M_target
+```
+
+when the constraint is feasible.  The projected masses are the closest bounded
+masses to the current values under an additive Lagrange multiplier.  The stage
+then recenters and rescales velocities so the local cell velocity `U_c` and the
+relative thermal energy `E_th,c` measured before mass projection are restored.
+Thus the guard is not a simple clamp: it is a bounded local `M,U,E_th`
+renormalization stage.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_mass_guard_smoke_0123.sh
+```
+
+Expected diagnostic core:
+
+```text
+belowBefore>0 aboveBefore>0 belowAfter=0 aboveAfter=0 MRelRms~1e-16
+```
+
+See `doc/README_0123_RESAMPLING_MASS_GUARD.md`.
