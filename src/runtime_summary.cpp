@@ -18,6 +18,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const CollisionDiagnostics* collision,
                                        const Q6ProjectionDiagnostics* q6,
                                        const ThermostatDiagnostics* thermostat,
+                                       const WeightedResamplingDiagnostics* resampling,
                                        int numThreadsUsed) {
     validate_particle_state(state, "compute_runtime_summary");
     RuntimeSummary s{};
@@ -200,6 +201,37 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
         s.thermostatScaleMax = thermostat->scaleMax;
     }
 
+
+    if (resampling != nullptr && resampling->computed) {
+        s.resampComputed = 1;
+        s.resampNFluid = resampling->nFluid;
+        s.resampNLatent = resampling->nLatent;
+        s.resampNInactive = resampling->nInactive;
+        s.resampNonEmptyCells = resampling->nNonEmptyCells;
+        s.resampEmptyCells = resampling->nEmptyCells;
+        s.resampMeanN = resampling->meanN;
+        s.resampStdN = resampling->stdN;
+        s.resampMinN = resampling->minN;
+        s.resampMaxN = resampling->maxN;
+        s.resampTotalMass = resampling->totalMass;
+        s.resampMeanMass = resampling->meanMass;
+        s.resampStdMass = resampling->stdMass;
+        s.resampMinMass = resampling->minMass;
+        s.resampMaxMass = resampling->maxMass;
+        s.resampTargetCellMass = resampling->targetCellMass;
+        s.resampMRelRms = resampling->mRelRms;
+        s.resampMRelMaxAbs = resampling->mRelMaxAbs;
+        s.resampParticleMassMean = resampling->particleMassMean;
+        s.resampParticleMassStd = resampling->particleMassStd;
+        s.resampParticleMassRelStd = resampling->particleMassRelStd;
+        s.resampParticleMassMin = resampling->particleMassMin;
+        s.resampParticleMassMax = resampling->particleMassMax;
+        s.resampMeanUx = resampling->meanUx;
+        s.resampMeanUy = resampling->meanUy;
+        s.resampCellUxRms = resampling->cellUxRms;
+        s.resampCellUyRms = resampling->cellUyRms;
+    }
+
     if (cellCount != nullptr && !cellCount->empty()) {
         const auto& count = *cellCount;
         const std::size_t nc = count.size();
@@ -236,7 +268,7 @@ RuntimeSummaryWriter::RuntimeSummaryWriter(const std::string& filepath) : out_(f
     if (!out_) {
         throw std::runtime_error("Cannot open runtime summary file for writing: " + filepath);
     }
-    out_ << "step,time,wallTime,numThreadsUsed,Np,nFluidParticles,nInactiveParticles,nLatentParticles,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,inletHardReservoirEnabled,inletReservoirCells,inletReservoirTargetParticles,inletReservoirDeleted,inletBackflowDeleted,outletParticlesDeleted,inletParticlesInserted,inletNetParticleDelta,inletReservoirMeanN,inletReservoirStdN,inletReservoirMinN,inletReservoirMaxN,inletReservoirEmptyFraction,inletMeanUx,inletMeanUy,inletKBT,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6ProjectionStrength,q6Converged,q6Iterations,q6EmptyCells,q6ImmersedSolidFluidCells,q6ImmersedSolidSolidCells,q6ImmersedSolidCutCells,q6ImmersedSolidActiveCutCells,q6ImmersedSolidActiveAdjacentCells,q6ImmersedSolidClosedXFaces,q6ImmersedSolidClosedYFaces,q6ImmersedSolidCellClosedXFaces,q6ImmersedSolidCellClosedYFaces,q6ImmersedSolidCutClosedXFaces,q6ImmersedSolidCutClosedYFaces,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6ImmersedSolidLeakProjectedFluxRms,q6ImmersedSolidLeakProjectedFluxMaxAbs,q6ImmersedSolidLeakCellClosedProjectedFluxRms,q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs,q6ImmersedSolidLeakCutProjectedFluxRms,q6ImmersedSolidLeakCutProjectedFluxMaxAbs,q6ImmersedSolidLeakFaceCount,q6ImmersedSolidAppliedLeakBeforeClosureRms,q6ImmersedSolidAppliedLeakBeforeClosureMaxAbs,q6ImmersedSolidClosedFaceFluxEnforcedFaces,q6ImmersedSolidClosedFaceFluxEnforcedRms,q6ImmersedSolidClosedFaceFluxEnforcedMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6OpenBoundaryEnabled,q6OpenBoundaryFluxXLow,q6OpenBoundaryFluxXHigh,q6OpenBoundaryFluxYLow,q6OpenBoundaryFluxYHigh,q6OpenBoundaryFluxBalance,q6OpenBoundaryMeanDivergence,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection\n";
+    out_ << "step,time,wallTime,numThreadsUsed,Np,nFluidParticles,nInactiveParticles,nLatentParticles,totalMass,Px,Py,meanVx,meanVy,meanKinetic,kBTEstimate,meanParticleSpeed,maxParticleSpeed,maxParticleAbsVx,maxParticleAbsVy,fluidXMin,fluidXMax,fluidYMin,fluidYMax,fluidArea,meanPhysicalDensity,meanN,stdN,minN,maxN,hitsLeft,hitsRight,hitsBottom,hitsTop,maxXWallReflectionsPerParticle,maxYWallReflectionsPerParticle,hitsImmersed,inletHardReservoirEnabled,inletReservoirCells,inletReservoirTargetParticles,inletReservoirDeleted,inletBackflowDeleted,outletParticlesDeleted,inletParticlesInserted,inletNetParticleDelta,inletReservoirMeanN,inletReservoirStdN,inletReservoirMinN,inletReservoirMaxN,inletReservoirEmptyFraction,inletMeanUx,inletMeanUy,inletKBT,virtualParticleCount,virtualParticleEquivalent,virtualMass,virtualMassLeft,virtualMassRight,virtualMassBottom,virtualMassTop,virtualMassImmersed,virtualMomentumX,virtualMomentumY,thermostatApplied,thermostatCells,thermostatParticles,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,q6Applied,q6ProjectionStrength,q6Converged,q6Iterations,q6EmptyCells,q6ImmersedSolidFluidCells,q6ImmersedSolidSolidCells,q6ImmersedSolidCutCells,q6ImmersedSolidActiveCutCells,q6ImmersedSolidActiveAdjacentCells,q6ImmersedSolidClosedXFaces,q6ImmersedSolidClosedYFaces,q6ImmersedSolidCellClosedXFaces,q6ImmersedSolidCellClosedYFaces,q6ImmersedSolidCutClosedXFaces,q6ImmersedSolidCutClosedYFaces,q6ResidualRel,q6DivBeforeRms,q6DivBeforeMaxAbs,q6DivAfterProjectedFluxRms,q6DivAfterProjectedFluxMaxAbs,q6DivAfterCellVelocityRms,q6DivAfterCellVelocityMaxAbs,q6ImmersedSolidLeakProjectedFluxRms,q6ImmersedSolidLeakProjectedFluxMaxAbs,q6ImmersedSolidLeakCellClosedProjectedFluxRms,q6ImmersedSolidLeakCellClosedProjectedFluxMaxAbs,q6ImmersedSolidLeakCutProjectedFluxRms,q6ImmersedSolidLeakCutProjectedFluxMaxAbs,q6ImmersedSolidLeakFaceCount,q6ImmersedSolidAppliedLeakBeforeClosureRms,q6ImmersedSolidAppliedLeakBeforeClosureMaxAbs,q6ImmersedSolidClosedFaceFluxEnforcedFaces,q6ImmersedSolidClosedFaceFluxEnforcedRms,q6ImmersedSolidClosedFaceFluxEnforcedMaxAbs,q6CorrectionVelocityRms,q6CorrectionVelocityMaxAbs,q6OpenBoundaryEnabled,q6OpenBoundaryFluxXLow,q6OpenBoundaryFluxXHigh,q6OpenBoundaryFluxYLow,q6OpenBoundaryFluxYHigh,q6OpenBoundaryFluxBalance,q6OpenBoundaryMeanDivergence,q6MomentumCorrectionVx,q6MomentumCorrectionVy,q6MomentumResidualBeforeCorrection,resampComputed,resampNFluid,resampNLatent,resampNInactive,resampNonEmptyCells,resampEmptyCells,resampMeanN,resampStdN,resampMinN,resampMaxN,resampTotalMass,resampMeanMass,resampStdMass,resampMinMass,resampMaxMass,resampTargetCellMass,resampMRelRms,resampMRelMaxAbs,resampParticleMassMean,resampParticleMassStd,resampParticleMassRelStd,resampParticleMassMin,resampParticleMassMax,resampMeanUx,resampMeanUy,resampCellUxRms,resampCellUyRms\n";
 }
 
 void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
@@ -359,7 +391,34 @@ void RuntimeSummaryWriter::append(const RuntimeSummary& s) {
          << s.q6OpenBoundaryMeanDivergence << ','
          << s.q6MomentumCorrectionVx << ','
          << s.q6MomentumCorrectionVy << ','
-         << s.q6MomentumResidualBeforeCorrection << '\n';
+         << s.q6MomentumResidualBeforeCorrection << ','
+         << s.resampComputed << ','
+         << s.resampNFluid << ','
+         << s.resampNLatent << ','
+         << s.resampNInactive << ','
+         << s.resampNonEmptyCells << ','
+         << s.resampEmptyCells << ','
+         << s.resampMeanN << ','
+         << s.resampStdN << ','
+         << s.resampMinN << ','
+         << s.resampMaxN << ','
+         << s.resampTotalMass << ','
+         << s.resampMeanMass << ','
+         << s.resampStdMass << ','
+         << s.resampMinMass << ','
+         << s.resampMaxMass << ','
+         << s.resampTargetCellMass << ','
+         << s.resampMRelRms << ','
+         << s.resampMRelMaxAbs << ','
+         << s.resampParticleMassMean << ','
+         << s.resampParticleMassStd << ','
+         << s.resampParticleMassRelStd << ','
+         << s.resampParticleMassMin << ','
+         << s.resampParticleMassMax << ','
+         << s.resampMeanUx << ','
+         << s.resampMeanUy << ','
+         << s.resampCellUxRms << ','
+         << s.resampCellUyRms << '\n';
 }
 
 } // namespace mpcd

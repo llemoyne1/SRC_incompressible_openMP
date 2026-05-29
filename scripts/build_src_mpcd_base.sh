@@ -21,6 +21,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/runtime_summary.cpp \
   src/particle_state.cpp \
   src/state_smpcd_io.cpp \
+  src/weighted_resampling.cpp \
   -o build/src_mpcd_base
 
 

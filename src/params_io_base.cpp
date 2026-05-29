@@ -300,6 +300,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionAllowUnmaskedImmersedSolid") p.projectionAllowUnmaskedImmersedSolid = parse_bool(value, key);
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
         else if (key == "projectionImmersedSolidCloseCutFaces") p.projectionImmersedSolidCloseCutFaces = parse_bool(value, key);
+        else if (key == "resamplingTargetCellMass" || key == "weightedResamplingTargetCellMass") p.resamplingTargetCellMass = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -742,6 +743,9 @@ void validate_simulation_params(const SimulationParams& p) {
         p.immersedSolidEnable && p.projectionImmersedSolidMaskEnable &&
         (std::abs(p.immersedSolidVx) > 0.0 || std::abs(p.immersedSolidVy) > 0.0 || std::abs(p.immersedSolidOmega) > 0.0)) {
         throw std::runtime_error("Q6 immersed-solid projection mask currently supports fixed immersed solids only");
+    }
+    if (!(p.resamplingTargetCellMass >= 0.0)) {
+        throw std::runtime_error("resamplingTargetCellMass must be non-negative; use 0 to infer the current mean real-fluid cell mass");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

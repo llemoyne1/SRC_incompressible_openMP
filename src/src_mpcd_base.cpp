@@ -78,6 +78,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     result.thermostat = apply_cell_relative_rescale_thermostat(
         state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
     apply_keep_mean_flow(state, params);
+    result.resampling = deposit_weighted_real_fluid(
+        state, params, grid, GridShift{}, workspace.resampling);
     return result;
 }
 

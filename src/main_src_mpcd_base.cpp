@@ -6,6 +6,7 @@
 #include "immersed_solid.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
+#include "weighted_resampling.h"
 
 #include <chrono>
 #include <exception>
@@ -94,9 +95,11 @@ int main(int argc, char** argv) {
 
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
+        const mpcd::WeightedResamplingDiagnostics initialResampling =
+            mpcd::deposit_weighted_real_fluid(state, params, grid, mpcd::GridShift{}, workspace.resampling);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
                                                      &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                                     ompActiveThreads));
+                                                     &initialResampling, ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
         }
@@ -136,6 +139,7 @@ int main(int argc, char** argv) {
                                                            &stepResult.collision,
                                                            &stepResult.q6,
                                                            &stepResult.thermostat,
+                                                           &stepResult.resampling,
                                                            ompActiveThreads);
                 summary.append(s);
     std::cout << "\r\033[K[src_mpcd_base] step=" << step
@@ -143,6 +147,7 @@ int main(int argc, char** argv) {
           << " t=" << std::fixed << std::setprecision(3) << s.time
           << " kBT=" << std::scientific << std::setprecision(3) << s.kBTEstimate
           << " stdN=" << std::fixed << std::setprecision(3) << s.stdN
+          << " resM=" << std::scientific << std::setprecision(2) << s.resampMRelRms
           << " q6=" << std::scientific << std::setprecision(2) << s.q6DivAfterProjectedFluxRms
           << " wall=" << std::fixed << std::setprecision(1) << wallTime << "s"
           << std::flush;

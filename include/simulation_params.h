@@ -239,6 +239,12 @@ struct SimulationParams {
     double projectionImmersedSolidFluidFractionThreshold = 0.5;
     bool projectionImmersedSolidCloseCutFaces = true;
 
+    // Weighted-resampling diagnostic target.  A non-positive value means that
+    // the current mean real-fluid cell mass is used as the reference, so the
+    // diagnostic measures relative cell-to-cell dispersion without imposing a
+    // prescribed mass yet.  The recycling/remap core will use this field as the
+    // physical target in later patches.
+    double resamplingTargetCellMass = 0.0;
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

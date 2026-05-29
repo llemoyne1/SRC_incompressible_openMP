@@ -12,6 +12,7 @@
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
+#include "weighted_resampling.h"
 
 namespace mpcd {
 
@@ -141,6 +142,34 @@ struct RuntimeSummary {
     double q6MomentumCorrectionVx = 0.0;
     double q6MomentumCorrectionVy = 0.0;
     double q6MomentumResidualBeforeCorrection = 0.0;
+
+    int resampComputed = 0;
+    std::uint64_t resampNFluid = 0;
+    std::uint64_t resampNLatent = 0;
+    std::uint64_t resampNInactive = 0;
+    std::uint64_t resampNonEmptyCells = 0;
+    std::uint64_t resampEmptyCells = 0;
+    double resampMeanN = 0.0;
+    double resampStdN = 0.0;
+    std::uint32_t resampMinN = 0;
+    std::uint32_t resampMaxN = 0;
+    double resampTotalMass = 0.0;
+    double resampMeanMass = 0.0;
+    double resampStdMass = 0.0;
+    double resampMinMass = 0.0;
+    double resampMaxMass = 0.0;
+    double resampTargetCellMass = 0.0;
+    double resampMRelRms = 0.0;
+    double resampMRelMaxAbs = 0.0;
+    double resampParticleMassMean = 0.0;
+    double resampParticleMassStd = 0.0;
+    double resampParticleMassRelStd = 0.0;
+    double resampParticleMassMin = 0.0;
+    double resampParticleMassMax = 0.0;
+    double resampMeanUx = 0.0;
+    double resampMeanUy = 0.0;
+    double resampCellUxRms = 0.0;
+    double resampCellUyRms = 0.0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,
@@ -153,6 +182,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const Q6ProjectionDiagnostics* q6 = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
+                                       const WeightedResamplingDiagnostics* resampling = nullptr,
                                        int numThreadsUsed = 1);
 
 class RuntimeSummaryWriter {

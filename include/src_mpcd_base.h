@@ -10,6 +10,7 @@
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
+#include "weighted_resampling.h"
 
 namespace mpcd {
 
@@ -20,12 +21,14 @@ struct StepResult {
     CollisionDiagnostics collision;
     Q6ProjectionDiagnostics q6;
     ThermostatDiagnostics thermostat;
+    WeightedResamplingDiagnostics resampling;
 };
 
 struct SrcMpcdBaseWorkspace {
     CollisionWorkspace collision;
     Q6ProjectionWorkspace q6;
     ThermostatWorkspace thermostat;
+    WeightedRealFluidDepositWorkspace resampling;
 };
 
 StepResult run_src_mpcd_base_step(ParticleState& state,

@@ -120,3 +120,28 @@ Validation:
 ```bash
 ./scripts/run_particle_roles_smoke_0111.sh
 ```
+
+### 0112 — weighted real-fluid deposit diagnostics
+
+The branch now includes a first non-mutating resampling deposit:
+
+```text
+WeightedRealFluidDepositWorkspace
+```
+
+It accumulates per cell, using only particles with `role=Fluid`:
+
+```text
+N_c, M_c, P_x,c, P_y,c, U_x,c, U_y,c
+```
+
+It deliberately excludes wall virtual particles and immersed-solid virtual
+particles, unlike the SRC collision effective deposit.  The runtime summary now
+contains `resamp*` diagnostics, including `resampMRelRms` and
+`resampParticleMassRelStd`.  Validate with:
+
+```bash
+./scripts/run_weighted_resampling_deposit_smoke_0112.sh
+```
+
+See `doc/README_0112_WEIGHTED_REAL_FLUID_DEPOSIT.md`.
