@@ -7,11 +7,9 @@
 #include "immersed_solid.h"
 #include "particle_state.h"
 #include "q6_projection_adapter.h"
-#include "q9_projection_adapter.h"
 #include "simulation_params.h"
 #include "src_collision.h"
 #include "thermostat.h"
-#include "virial_pressure_kick.h"
 
 namespace mpcd {
 
@@ -21,16 +19,12 @@ struct StepResult {
     ImmersedSolidDiagnostics immersed;
     CollisionDiagnostics collision;
     Q6ProjectionDiagnostics q6;
-    Q9ProjectionDiagnostics q9;
-    VirialPressureDiagnostics virial;
     ThermostatDiagnostics thermostat;
 };
 
 struct SrcMpcdBaseWorkspace {
     CollisionWorkspace collision;
     Q6ProjectionWorkspace q6;
-    Q9ProjectionWorkspace q9;
-    VirialPressureWorkspace virial;
     ThermostatWorkspace thermostat;
 };
 

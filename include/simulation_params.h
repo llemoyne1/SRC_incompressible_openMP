@@ -47,8 +47,8 @@ struct SimulationParams {
 
     // Optional global mean-flow controller. This is useful for periodic wake
     // tests around immersed solids: it mimics the CUDA VK keepMeanFlow path by
-    // applying a spatially uniform velocity shift after the SRC/Q6/Q9/virial/
-    // thermostat sequence, while preserving relative thermal velocities.
+    // applying a spatially uniform velocity shift after the SRC/Q6/thermostat
+    // sequence, while preserving relative thermal velocities.
     bool keepMeanFlowEnable = false;
     double targetMeanUx = 0.0;
     double targetMeanUy = 0.0;
@@ -69,7 +69,7 @@ struct SimulationParams {
     // Maxwellian thermal noise. The 0061b default follows the legacy CUDA
     // inlet-injection path: reinject into a thin inlet slab and randomize the
     // tangential coordinate to keep the inlet density homogeneous. This
-    // deliberately remains a particle-only boundary mechanism; Q6/Q9/virial
+    // deliberately remains a particle-only boundary mechanism; Q6
     // open-boundary compatibility is added in later patches through the
     // elliptic face-flux machinery.
     double inletUxLeft = 0.0;
@@ -81,7 +81,7 @@ struct SimulationParams {
     double inletUxTop = 0.0;
     double inletUyTop = 0.0;
 
-    // Optional time ramp for inlet velocities and matching Q6/Q9 open-boundary
+    // Optional time ramp for inlet velocities and matching Q6 open-boundary
     // flux targets.  The stored inletUx*/inletUy* values remain the final
     // target values.  When enabled, they are scaled by a factor interpolating
     // from inletVelocityRampInitialFactor to inletVelocityRampFinalFactor over
@@ -96,7 +96,7 @@ struct SimulationParams {
     std::string inletVelocityRampProfile = "linear";
 
     // Optional spatial profile for the imposed inlet velocity and matching
-    // Q6/Q9 open-boundary fluxes.  Supported values:
+    // Q6 open-boundary fluxes.  Supported values:
     //   uniform          : historical constant U on the open face;
     //   poiseuille_y     : plane-channel parabola across y, using inletUx*
     //                      as cross-section mean velocity;
@@ -131,7 +131,7 @@ struct SimulationParams {
     bool inletHardCellThermalRescale = true;
 
     // Optional segmented open-boundary apertures.  When enabled, inlet/outlet
-    // particle exchange and Q6/Q9 open-boundary fluxes are restricted to the
+    // particle exchange and Q6 open-boundary fluxes are restricted to the
     // specified aperture on each face.  The complementary parts of the boundary
     // behave as impermeable solid walls.  Negative high bounds inherit the
     // active-domain high coordinate, preserving the historical full-face
@@ -146,11 +146,11 @@ struct SimulationParams {
     double topOpenXMin = 0.0;
     double topOpenXMax = -1.0;
 
-    // Q6/Q9 outlet treatment for inlet/outlet pairs.
+    // Q6 outlet treatment for inlet/outlet pairs.
     //   balanced_flux : validated 0062/0063 policy; the outlet projection flux
     //                   is prescribed equal to the ramped inlet flux.
     //   neumann       : outlet correction has zero normal gradient in practice:
-    //                   the outlet boundary flux used by Q6/Q9 is the current
+    //                   the outlet boundary flux used by Q6 is the current
     //                   local base face flux, while the inlet remains prescribed.
     //                   Segmented aperture complements stay impermeable.
     //   hybrid        : starts from the local Neumann outlet profile, optionally
@@ -223,11 +223,11 @@ struct SimulationParams {
     double thermostatEpsilon = 1.0e-30;
     double kBT = 0.0;
 
-    // Optional incompressible/projection modules. The current Q6 adapter is the
-    // first consumer of the generic elliptic projection core. The supported and
-    // validated first use case is a fully periodic fixed box, but this scope is
-    // documented rather than guarded by extra runtime restrictions.
-    std::string method = "classic";          // classic, q6, q9; q9_virial reserved for later
+    // Optional incompressible/projection module. The openMP-resampling baseline
+    // keeps only classic SRC/MPCD and Q6 velocity projection active. Q9
+    // mass-flux projection and the virial EOS/kick were deliberately removed
+    // from this branch to expose a clean core for weighted resampling.
+    std::string method = "classic";          // classic, q6
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
     int projectionMaxIterations = 300;
@@ -239,82 +239,6 @@ struct SimulationParams {
     double projectionImmersedSolidFluidFractionThreshold = 0.5;
     bool projectionImmersedSolidCloseCutFaces = true;
 
-    // Optional Q9 mass-flux projection adapter. Q9 reuses the same generic
-    // elliptic face-field core as Q6 but projects a mass/momentum flux toward
-    // a uniform-density relaxation target. The first validated scope is
-    // periodic boxes; other configurations are documented progressively.
-    bool q9MassFluxProjectionEnable = false;
-    double q9MassFluxProjectionStrength = 1.0;
-    double q9DensityRelaxationBeta = 5.0e-4;
-    std::string q9TargetFilter = "elliptic_lowpass"; // none, elliptic_lowpass; MATLAB-compatible aliases accepted
-    int q9LowKMaxIndex = 2;
-    int q9EllipticLowPassPasses = 1;
-    double q9EllipticLowPassLengthCells = -1.0; // negative => MATLAB-like default from low-k index
-    bool q9MomentumCorrectionEnable = true;
-
-    // Q9 safeguards for open-boundary domains containing immersed solids.
-    // Inactive by default. Required for Q9 + inlet/outlet + immersed solid.
-    int q9OpenBoundaryExclusionCells = 0;
-    int q9ImmersedSolidHaloCells = 0;
-    double q9MinCellMassForCorrection = 0.0;
-
-    // Q9 correction-kick limiter.  The historical absolute limiter is kept for
-    // compatibility.  New thermal modes express the cap as a fraction of a
-    // reference thermal speed sqrt(kBT), giving a dimensionless safety policy
-    // transferable across inlet/outlet cases.
-    // Modes: none, absolute, thermal_soft, thermal_hard.
-    double q9CorrectionVelocityLimiter = 0.0;
-    std::string q9CorrectionLimiterMode = "absolute";
-    double q9CorrectionVelocityLimiterOverThermal = 0.0;
-    double q9CorrectionLimiterThermalKBT = 0.0; // <=0: use thermostatTargetKBT if positive, else kBT
-
-    // Low-mass Q9 regularization. suppress = historical hard cutoff;
-    // ramp_floor = keep Q9 geometrically active and regularize flux-to-velocity conversion.
-    std::string q9LowMassTreatment = "suppress"; // suppress, ramp_floor
-    double q9MassFloorForCorrection = 0.0;
-    double q9LowMassRampStart = 0.0;
-    double q9LowMassRampEnd = 0.0;
-
-    // Gamma-relative Q9 low-mass regularization.  Negative values disable the
-    // relative form and preserve the absolute legacy parameter above.  When a
-    // relative value is provided, the effective absolute threshold is
-    // value * q9ReferenceGamma, with q9ReferenceGamma falling back to
-    // inletTargetOccupancy for hard-inlet runs.
-    double q9ReferenceGamma = 0.0;
-    double q9MinCellMassForCorrectionOverGamma = -1.0;
-    double q9MassFloorForCorrectionOverGamma = -1.0;
-    double q9LowMassRampStartOverGamma = -1.0;
-    double q9LowMassRampEndOverGamma = -1.0;
-
-    // Optional spatial Q9 safeguard diagnostics.  When enabled, the solver
-    // writes one sidecar at dump steps.  The default sidecar format is compact
-    // binary to avoid large CSV outputs during long visual runs.
-    // Formats: binary, csv.
-    // These files contain cell-wise raw/applied Q9 correction magnitudes,
-    // limiter ratio/activation and low-mass ramp/floor flags.  They are
-    // diagnostic-only and do not modify the dynamics.
-    bool q9DiagnosticFieldDumpEnable = false;
-    int q9DiagnosticFieldDumpEvery = 0; // <=0: use dumpStateEvery
-    std::string q9DiagnosticFieldDumpFormat = "binary";
-
-    // Optional MATLAB-like virial EOS pressure diagnostic/kick. This module is
-    // independent from Q6/Q9 and is normally called after Q6/Q9 and before the
-    // final thermostat. It is disabled by default. method=q9_virial enables
-    // diagnostics and kick, with zero effect unless Kvirial and virialBeta are
-    // non-zero.
-    bool virialDiagnosticsEnable = false;
-    bool virialKickEnable = false;
-    double Kvirial = 0.0;
-    double virialBeta = 0.0;
-    std::string virialRhoEOSRefMode = "initial_physical_density"; // initial_physical_density, current_uniform, explicit
-    double virialRhoEOSRef = 0.0;
-    std::string virialRhoUniformMode = "reference_gamma_current_volume"; // current-volume uniform reference
-    double virialRhoUniformNow = 0.0;
-    std::string virialDriveTargetMode = "current_uniform"; // current_uniform, eos_ref, zero
-    std::string virialRhoKickMode = "uniform_now"; // uniform_now, local
-    double virialRhoKickMinFraction = 0.1;
-    bool virialMomentumCorrectionEnable = true;
-    int virialOpenBoundaryExclusionCells = 3; // 0064: skip inlet/outlet reservoir cells in virial EOS/kick
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

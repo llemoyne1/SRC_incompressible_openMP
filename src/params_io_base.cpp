@@ -131,6 +131,16 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
 
     SimulationParams p{};
     for (const auto& item : kv) {
+        const std::string lk = lower(trim(item.first));
+        if (lk.rfind("q9", 0) == 0 || lk.rfind("virial", 0) == 0 ||
+            lk == "kvirial" || lk == "betaeos" ||
+            lk.rfind("massflux", 0) == 0 || lk.rfind("lowk", 0) == 0) {
+            throw std::runtime_error("Unsupported parameter on openMP-resampling baseline: " + item.first +
+                                     ". This branch intentionally supports only classic SRC/MPCD and Q6 projection.");
+        }
+    }
+
+    for (const auto& item : kv) {
         const std::string& key = item.first;
         const std::string& value = item.second;
 
@@ -290,46 +300,6 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionAllowUnmaskedImmersedSolid") p.projectionAllowUnmaskedImmersedSolid = parse_bool(value, key);
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
         else if (key == "projectionImmersedSolidCloseCutFaces") p.projectionImmersedSolidCloseCutFaces = parse_bool(value, key);
-        else if (key == "q9MassFluxProjectionEnable") p.q9MassFluxProjectionEnable = parse_bool(value, key);
-        else if (key == "q9MassFluxProjectionStrength") p.q9MassFluxProjectionStrength = parse_double(value, key);
-        else if (key == "q9DensityRelaxationBeta") p.q9DensityRelaxationBeta = parse_double(value, key);
-        else if (key == "q9TargetFilter" || key == "massFluxTargetFilter") p.q9TargetFilter = get_lower(kv, key);
-        else if (key == "q9LowKMaxIndex" || key == "massFluxLowKMaxIndex" || key == "lowKMaxIndex") p.q9LowKMaxIndex = parse_int(value, key);
-        else if (key == "q9EllipticLowPassPasses" || key == "massFluxEllipticLowPassPasses") p.q9EllipticLowPassPasses = parse_int(value, key);
-        else if (key == "q9EllipticLowPassLengthCells" || key == "massFluxEllipticLowPassLengthCells") p.q9EllipticLowPassLengthCells = parse_double(value, key);
-        else if (key == "q9MomentumCorrectionEnable") p.q9MomentumCorrectionEnable = parse_bool(value, key);
-        else if (key == "q9OpenBoundaryExclusionCells" || key == "q9ReservoirExclusionCells") p.q9OpenBoundaryExclusionCells = parse_int(value, key);
-        else if (key == "q9ImmersedSolidHaloCells" || key == "q9SolidHaloCells") p.q9ImmersedSolidHaloCells = parse_int(value, key);
-        else if (key == "q9MinCellMassForCorrection" || key == "q9MinMassForCorrection") p.q9MinCellMassForCorrection = parse_double(value, key);
-        else if (key == "q9CorrectionVelocityLimiter" || key == "q9CorrectionVelocityLimit") p.q9CorrectionVelocityLimiter = parse_double(value, key);
-        else if (key == "q9CorrectionLimiterMode") p.q9CorrectionLimiterMode = get_lower(kv, key);
-        else if (key == "q9CorrectionVelocityLimiterOverThermal" || key == "q9CorrectionVelocityLimitOverThermal") p.q9CorrectionVelocityLimiterOverThermal = parse_double(value, key);
-        else if (key == "q9CorrectionLimiterThermalKBT" || key == "q9CorrectionVelocityLimiterThermalKBT") p.q9CorrectionLimiterThermalKBT = parse_double(value, key);
-        else if (key == "q9LowMassTreatment") p.q9LowMassTreatment = get_lower(kv, key);
-        else if (key == "q9MassFloorForCorrection" || key == "q9MassFloor") p.q9MassFloorForCorrection = parse_double(value, key);
-        else if (key == "q9LowMassRampStart") p.q9LowMassRampStart = parse_double(value, key);
-        else if (key == "q9LowMassRampEnd") p.q9LowMassRampEnd = parse_double(value, key);
-        else if (key == "q9ReferenceGamma" || key == "q9Gamma" || key == "q9ReferenceCellMass") p.q9ReferenceGamma = parse_double(value, key);
-        else if (key == "q9MinCellMassForCorrectionOverGamma" || key == "q9MinMassOverGamma") p.q9MinCellMassForCorrectionOverGamma = parse_double(value, key);
-        else if (key == "q9MassFloorForCorrectionOverGamma" || key == "q9MassFloorOverGamma") p.q9MassFloorForCorrectionOverGamma = parse_double(value, key);
-        else if (key == "q9LowMassRampStartOverGamma") p.q9LowMassRampStartOverGamma = parse_double(value, key);
-        else if (key == "q9LowMassRampEndOverGamma") p.q9LowMassRampEndOverGamma = parse_double(value, key);
-        else if (key == "q9DiagnosticFieldDumpEnable" || key == "q9LimiterFieldDumpEnable" || key == "q9SafeguardFieldDumpEnable") p.q9DiagnosticFieldDumpEnable = parse_bool(value, key);
-        else if (key == "q9DiagnosticFieldDumpEvery" || key == "q9LimiterFieldDumpEvery" || key == "q9SafeguardFieldDumpEvery") p.q9DiagnosticFieldDumpEvery = parse_int(value, key);
-        else if (key == "q9DiagnosticFieldDumpFormat" || key == "q9LimiterFieldDumpFormat" || key == "q9SafeguardFieldDumpFormat") p.q9DiagnosticFieldDumpFormat = get_lower(kv, key);
-        else if (key == "virialDiagnosticsEnable") p.virialDiagnosticsEnable = parse_bool(value, key);
-        else if (key == "virialKickEnable") p.virialKickEnable = parse_bool(value, key);
-        else if (key == "Kvirial" || key == "virialK") p.Kvirial = parse_double(value, key);
-        else if (key == "virialBeta" || key == "betaEOS") p.virialBeta = parse_double(value, key);
-        else if (key == "virialRhoEOSRefMode") p.virialRhoEOSRefMode = get_lower(kv, key);
-        else if (key == "virialRhoEOSRef") p.virialRhoEOSRef = parse_double(value, key);
-        else if (key == "virialRhoUniformMode") p.virialRhoUniformMode = get_lower(kv, key);
-        else if (key == "virialRhoUniformNow") p.virialRhoUniformNow = parse_double(value, key);
-        else if (key == "virialDriveTargetMode") p.virialDriveTargetMode = get_lower(kv, key);
-        else if (key == "virialRhoKickMode") p.virialRhoKickMode = get_lower(kv, key);
-        else if (key == "virialRhoKickMinFraction") p.virialRhoKickMinFraction = parse_double(value, key);
-        else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
-        else if (key == "virialOpenBoundaryExclusionCells" || key == "virialReservoirExclusionCells") p.virialOpenBoundaryExclusionCells = parse_int(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -364,14 +334,6 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
 
     if (p.method == "q6") {
         p.projectionEnable = true;
-    }
-    if (p.method == "q9" || p.method == "q9_virial") {
-        p.projectionEnable = true;
-        p.q9MassFluxProjectionEnable = true;
-    }
-    if (p.method == "q9_virial") {
-        p.virialDiagnosticsEnable = true;
-        p.virialKickEnable = true;
     }
 
     validate_simulation_params(p);
@@ -514,16 +476,11 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("0062 inlet/outlet supports one open axis at a time");
         }
         const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
-        const bool q9OpenBoundary = (p.method == "q9") || p.q9MassFluxProjectionEnable;
-        if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
-            throw std::runtime_error("0064 inlet/outlet currently supports method=classic, method=q6, method=q9 or method=q9_virial");
-        }
-        const bool virialOpenBoundary = p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial";
-        if (virialOpenBoundary && !q9OpenBoundary) {
-            throw std::runtime_error("0064 virial inlet/outlet requires the Q9 mass-flux path; use method=q9_virial or enable q9MassFluxProjectionEnable");
+        if (p.method != "classic" && p.method != "q6") {
+            throw std::runtime_error("openMP-resampling inlet/outlet supports method=classic or method=q6 only");
         }
         const bool hardInletReservoir = hard_inlet_reservoir_requested(p);
-        if ((q6OpenBoundary || q9OpenBoundary) && p.immersedSolidEnable) {
+        if (q6OpenBoundary && p.immersedSolidEnable) {
             std::string solidShapeForOpen = p.immersedSolidShape;
             std::replace(solidShapeForOpen.begin(), solidShapeForOpen.end(), '-', '_');
             const bool staticRectangle =
@@ -534,7 +491,7 @@ void validate_simulation_params(const SimulationParams& p) {
                 std::abs(p.immersedSolidOmega) == 0.0;
             if (!hardInletReservoir || !staticRectangle || !p.projectionImmersedSolidMaskEnable ||
                 p.projectionAllowUnmaskedImmersedSolid) {
-                throw std::runtime_error("0067 Q6/Q9 inlet/outlet with immersed solids requires hard_cell_density inlet, fixed rectangle, projectionImmersedSolidMaskEnable=true and projectionAllowUnmaskedImmersedSolid=false");
+                throw std::runtime_error("0067 Q6 inlet/outlet with immersed solids requires hard_cell_density inlet, fixed rectangle, projectionImmersedSolidMaskEnable=true and projectionAllowUnmaskedImmersedSolid=false");
             }
         }
         std::string inletInjectionMode = p.inletInjectionMode;
@@ -752,10 +709,10 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
         }
     }
-    if (p.method != "classic" && p.method != "q6" && p.method != "q9" && p.method != "q9_virial") {
-        throw std::runtime_error("method currently accepts: classic, q6, q9, q9_virial");
+    if (p.method != "classic" && p.method != "q6") {
+        throw std::runtime_error("method currently accepts: classic, q6");
     }
-    const bool q6OrProjectionRequested = p.projectionEnable || p.method == "q6" || p.method == "q9" || p.method == "q9_virial";
+    const bool q6OrProjectionRequested = p.projectionEnable || p.method == "q6";
     if (q6OrProjectionRequested) {
         if (p.projectionOperator != "periodic_fv_cg" &&
             p.projectionOperator != "channel_fv_cg" &&
@@ -777,164 +734,20 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("projectionImmersedSolidFluidFractionThreshold must lie in [0,1]");
         }
     }
-    if ((q6OrProjectionRequested || p.q9MassFluxProjectionEnable) &&
+    if (q6OrProjectionRequested &&
         p.immersedSolidEnable && !p.projectionImmersedSolidMaskEnable && !p.projectionAllowUnmaskedImmersedSolid) {
-        throw std::runtime_error("Q6/Q9 with immersedSolidEnable requires projectionImmersedSolidMaskEnable=true; use projectionAllowUnmaskedImmersedSolid=true only for explicit debug controls");
+        throw std::runtime_error("Q6 with immersedSolidEnable requires projectionImmersedSolidMaskEnable=true; use projectionAllowUnmaskedImmersedSolid=true only for explicit debug controls");
     }
-    if ((q6OrProjectionRequested || p.q9MassFluxProjectionEnable) &&
+    if (q6OrProjectionRequested &&
         p.immersedSolidEnable && p.projectionImmersedSolidMaskEnable &&
         (std::abs(p.immersedSolidVx) > 0.0 || std::abs(p.immersedSolidVy) > 0.0 || std::abs(p.immersedSolidOmega) > 0.0)) {
-        throw std::runtime_error("Q6/Q9 immersed-solid projection mask currently supports fixed immersed solids only");
-    }
-    if (p.q9MassFluxProjectionEnable) {
-        if (!(p.q9MassFluxProjectionStrength >= 0.0 && p.q9MassFluxProjectionStrength <= 1.0)) {
-            throw std::runtime_error("q9MassFluxProjectionStrength must lie in [0,1]");
-        }
-        if (!(p.q9DensityRelaxationBeta >= 0.0 && p.q9DensityRelaxationBeta <= 1.0)) {
-            throw std::runtime_error("q9DensityRelaxationBeta must lie in [0,1]");
-        }
-        std::string q9Filter = p.q9TargetFilter;
-        std::replace(q9Filter.begin(), q9Filter.end(), '-', '_');
-        if (q9Filter != "none" && q9Filter != "off" && q9Filter != "identity" && q9Filter != "raw" &&
-            q9Filter != "elliptic_lowpass" && q9Filter != "operator_lowpass" &&
-            q9Filter != "lowpass_operator" && q9Filter != "lowpass_elliptic" &&
-            q9Filter != "lowk_elliptic") {
-            throw std::runtime_error("q9TargetFilter supports: none, elliptic_lowpass");
-        }
-        if (p.q9LowKMaxIndex < 0) {
-            throw std::runtime_error("q9LowKMaxIndex must be non-negative");
-        }
-        if (p.q9EllipticLowPassPasses < 0) {
-            throw std::runtime_error("q9EllipticLowPassPasses must be non-negative");
-        }
-        if (!(p.q9EllipticLowPassLengthCells < 0.0 || p.q9EllipticLowPassLengthCells > 0.0)) {
-            throw std::runtime_error("q9EllipticLowPassLengthCells must be positive, or negative to use the default");
-        }
-    }
-    if (p.q9OpenBoundaryExclusionCells < 0) {
-        throw std::runtime_error("q9OpenBoundaryExclusionCells must be non-negative");
-    }
-    if (p.q9ImmersedSolidHaloCells < 0) {
-        throw std::runtime_error("q9ImmersedSolidHaloCells must be non-negative");
-    }
-    if (!(p.q9MinCellMassForCorrection >= 0.0)) {
-        throw std::runtime_error("q9MinCellMassForCorrection must be non-negative");
-    }
-    if (!(p.q9CorrectionVelocityLimiter >= 0.0)) {
-        throw std::runtime_error("q9CorrectionVelocityLimiter must be non-negative");
-    }
-    {
-        std::string q9LimiterMode = lower(trim(p.q9CorrectionLimiterMode));
-        std::replace(q9LimiterMode.begin(), q9LimiterMode.end(), '-', '_');
-        if (q9LimiterMode != "none" && q9LimiterMode != "off" &&
-            q9LimiterMode != "absolute" && q9LimiterMode != "absolute_hard" &&
-            q9LimiterMode != "thermal_soft" && q9LimiterMode != "thermal_hard") {
-            throw std::runtime_error("q9CorrectionLimiterMode must be none, absolute, thermal_soft, or thermal_hard");
-        }
-        if (!std::isfinite(p.q9CorrectionVelocityLimiterOverThermal) ||
-            !(p.q9CorrectionVelocityLimiterOverThermal >= 0.0)) {
-            throw std::runtime_error("q9CorrectionVelocityLimiterOverThermal must be finite and non-negative");
-        }
-        if (!std::isfinite(p.q9CorrectionLimiterThermalKBT)) {
-            throw std::runtime_error("q9CorrectionLimiterThermalKBT must be finite; use <=0 to inherit the target kBT");
-        }
-    }
-
-    {
-        std::string q9LowMassTreatment = lower(trim(p.q9LowMassTreatment));
-        std::replace(q9LowMassTreatment.begin(), q9LowMassTreatment.end(), '-', '_');
-        if (q9LowMassTreatment != "suppress" && q9LowMassTreatment != "ramp_floor" &&
-            q9LowMassTreatment != "floor_ramp") {
-            throw std::runtime_error("q9LowMassTreatment must be suppress or ramp_floor");
-        }
-        if (!(p.q9MassFloorForCorrection >= 0.0)) {
-            throw std::runtime_error("q9MassFloorForCorrection must be non-negative");
-        }
-        if (!(p.q9LowMassRampStart >= 0.0)) {
-            throw std::runtime_error("q9LowMassRampStart must be non-negative");
-        }
-        if (!(p.q9LowMassRampEnd >= 0.0)) {
-            throw std::runtime_error("q9LowMassRampEnd must be non-negative");
-        }
-        if (!std::isfinite(p.q9ReferenceGamma) || !(p.q9ReferenceGamma >= 0.0)) {
-            throw std::runtime_error("q9ReferenceGamma must be finite and non-negative; use 0 to inherit inletTargetOccupancy");
-        }
-        if (!std::isfinite(p.q9MinCellMassForCorrectionOverGamma)) {
-            throw std::runtime_error("q9MinCellMassForCorrectionOverGamma must be finite; use a negative value to disable it");
-        }
-        if (!std::isfinite(p.q9MassFloorForCorrectionOverGamma)) {
-            throw std::runtime_error("q9MassFloorForCorrectionOverGamma must be finite; use a negative value to disable it");
-        }
-        if (!std::isfinite(p.q9LowMassRampStartOverGamma)) {
-            throw std::runtime_error("q9LowMassRampStartOverGamma must be finite; use a negative value to disable it");
-        }
-        if (!std::isfinite(p.q9LowMassRampEndOverGamma)) {
-            throw std::runtime_error("q9LowMassRampEndOverGamma must be finite; use a negative value to disable it");
-        }
-    }
-
-    if (p.virialDiagnosticsEnable || p.virialKickEnable || p.method == "q9_virial") {
-        if (!(p.Kvirial >= 0.0)) {
-            throw std::runtime_error("Kvirial/virialK must be non-negative");
-        }
-        if (!(p.virialBeta >= 0.0)) {
-            throw std::runtime_error("virialBeta/betaEOS must be non-negative");
-        }
-        std::string eosMode = p.virialRhoEOSRefMode;
-        std::replace(eosMode.begin(), eosMode.end(), '-', '_');
-        if (eosMode != "initial_physical_density" && eosMode != "initial" && eosMode != "rho0" &&
-            eosMode != "current_uniform" && eosMode != "uniform_now" && eosMode != "rho_mean" &&
-            eosMode != "explicit" && eosMode != "user") {
-            throw std::runtime_error("virialRhoEOSRefMode supports: initial_physical_density, current_uniform, explicit");
-        }
-        std::string uniformMode = p.virialRhoUniformMode;
-        std::replace(uniformMode.begin(), uniformMode.end(), '-', '_');
-        if (uniformMode != "reference_gamma_current_volume" && uniformMode != "current_volume" &&
-            uniformMode != "gamma_current_volume" && uniformMode != "particle_mean" &&
-            uniformMode != "rho_mean" && uniformMode != "actual" &&
-            uniformMode != "explicit" && uniformMode != "user") {
-            throw std::runtime_error("virialRhoUniformMode supports: reference_gamma_current_volume, particle_mean, explicit");
-        }
-        std::string driveMode = p.virialDriveTargetMode;
-        std::replace(driveMode.begin(), driveMode.end(), '-', '_');
-        if (driveMode != "current_uniform" && driveMode != "uniform_now" && driveMode != "rho_uniform_now" &&
-            driveMode != "historical" && driveMode != "eos_ref" && driveMode != "initial" &&
-            driveMode != "initial_density" && driveMode != "rho_eos_ref" && driveMode != "zero" &&
-            driveMode != "none") {
-            throw std::runtime_error("virialDriveTargetMode supports: current_uniform, eos_ref, zero");
-        }
-        std::string kickMode = p.virialRhoKickMode;
-        std::replace(kickMode.begin(), kickMode.end(), '-', '_');
-        if (kickMode != "uniform_now" && kickMode != "current_uniform" && kickMode != "constant" &&
-            kickMode != "local" && kickMode != "cell" && kickMode != "rho_local") {
-            throw std::runtime_error("virialRhoKickMode supports: uniform_now, local");
-        }
-        if (!(p.virialRhoKickMinFraction > 0.0)) {
-            throw std::runtime_error("virialRhoKickMinFraction must be positive");
-        }
-        if (p.virialOpenBoundaryExclusionCells < 0) {
-            throw std::runtime_error("virialOpenBoundaryExclusionCells must be non-negative");
-        }
-        // 0087: allow zero open-boundary exclusion for the virial closure.
-        // The full-inlet/full-outlet slip diagnostics showed that the inactive
-        // open-boundary band can act as a numerical impedance/interface for Q9.
-        // A zero-width exclusion is now a valid mode; it means the virial closure
-        // uses all non-solid fluid cells, including the open-boundary bands.
+        throw std::runtime_error("Q6 immersed-solid projection mask currently supports fixed immersed solids only");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");
     }
     if (p.dumpStateEvery < 0) {
         throw std::runtime_error("dumpStateEvery must be non-negative");
-    }
-    if (p.q9DiagnosticFieldDumpEvery < 0) {
-        throw std::runtime_error("q9DiagnosticFieldDumpEvery must be non-negative");
-    }
-    if (p.q9DiagnosticFieldDumpFormat != "binary" && p.q9DiagnosticFieldDumpFormat != "csv") {
-        throw std::runtime_error("q9DiagnosticFieldDumpFormat must be binary or csv");
-    }
-    if (p.q9DiagnosticFieldDumpEnable && p.dumpStateEvery <= 0 && p.q9DiagnosticFieldDumpEvery <= 0) {
-        throw std::runtime_error("q9DiagnosticFieldDumpEnable requires dumpStateEvery>0 or q9DiagnosticFieldDumpEvery>0");
     }
     if (p.numThreads < 0) {
         throw std::runtime_error("numThreads must be non-negative");
