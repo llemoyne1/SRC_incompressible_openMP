@@ -529,3 +529,8 @@ activated=4 cells=1 fluid=128 latent=1 inactive=3 MRelRms=0
 ```
 
 See `doc/README_0124_RESAMPLING_LATENT_ACTIVATION.md`.
+
+
+## 0125 integrated resampling validator
+
+- `scripts/run_resampling_integrated_void_rich_latent_smoke_0125.sh`: integrated void/rich/latent validator for activation, recycle, remap, thermal renormalisation and mass guard. See `doc/README_0125_RESAMPLING_INTEGRATED_VOID_RICH_LATENT.md`.
