@@ -265,11 +265,13 @@ struct SimulationParams {
     // resamplingRemapEnable performs the first local conservative remap stage:
     // in each non-empty wet cell it scales all true-fluid particle masses so
     // M_c -> resamplingTargetCellMass while keeping velocities unchanged, hence
-    // preserving the cell velocity U_c.  Thermal/energy renormalisation remains
-    // a later patch.
+    // preserving the cell velocity U_c.  resamplingThermalRenormalizationEnable
+    // then rescales relative velocities in those remapped cells so the local
+    // thermal energy E_th,c measured just before mass scaling is restored.
     bool resamplingExtractionEnable = false;
     bool resamplingInsertionEnable = false;
     bool resamplingRemapEnable = false;
+    bool resamplingThermalRenormalizationEnable = false;
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

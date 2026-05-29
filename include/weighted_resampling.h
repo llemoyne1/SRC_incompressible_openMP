@@ -144,6 +144,32 @@ struct ResamplingRemapApplyDiagnostics {
     bool allRemappedCellsNonEmpty = true;
 };
 
+struct ResamplingThermalRenormalizationDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t cellsConsidered = 0;
+    std::uint64_t cellsRenormalized = 0;
+    std::uint64_t particlesRenormalized = 0;
+    std::uint64_t skippedDryCells = 0;
+    std::uint64_t skippedEmptyCells = 0;
+    std::uint64_t skippedInvalidEnergyCells = 0;
+
+    double targetThermalEnergy = 0.0;
+    double thermalEnergyBefore = 0.0;
+    double thermalEnergyAfter = 0.0;
+    double thermalEnergyResidualRms = 0.0;
+    double thermalEnergyResidualMaxAbs = 0.0;
+    double velocityScaleMin = 1.0;
+    double velocityScaleMax = 1.0;
+
+    double momentumResidualRms = 0.0;
+    double momentumResidualMaxAbs = 0.0;
+    std::int32_t firstRenormalizedCell = kInvalidCellIndex;
+    std::int32_t lastRenormalizedCell = kInvalidCellIndex;
+    bool allRenormalizedCellsNonEmpty = true;
+};
+
 struct ResamplingExtractionApplyDiagnostics {
     bool attempted = false;
     bool applied = false;
@@ -232,6 +258,12 @@ struct WeightedRealFluidDepositWorkspace {
 
     std::vector<std::uint32_t> donorSelectedParticleCount;
     std::vector<double> donorSelectedMass;
+
+    // Filled by the 0121 mass remap before particle masses are scaled.  Patch
+    // 0122 uses this per-cell target to restore the local relative thermal
+    // energy after mass scaling while preserving the remapped cell velocity.
+    std::vector<double> remapThermalEnergyTarget;
+    std::vector<std::uint8_t> remapThermalCell;
 };
 
 struct WeightedResamplingDiagnostics {
@@ -458,6 +490,30 @@ struct WeightedResamplingDiagnostics {
     std::int32_t lastRemappedCell = kInvalidCellIndex;
     bool remapAllRemappedCellsNonEmpty = true;
 
+    // Local thermal renormalisation (patch 0122).  After mass scaling, relative
+    // velocities are scaled about the remapped cell velocity so E_th,c matches
+    // the pre-mass-remap target recorded in the workspace.
+    bool thermalRenormAttempted = false;
+    bool thermalRenormApplied = false;
+    std::uint64_t thermalRenormCellsConsidered = 0;
+    std::uint64_t thermalRenormCellsRenormalized = 0;
+    std::uint64_t thermalRenormParticlesRenormalized = 0;
+    std::uint64_t thermalRenormSkippedDryCells = 0;
+    std::uint64_t thermalRenormSkippedEmptyCells = 0;
+    std::uint64_t thermalRenormSkippedInvalidEnergyCells = 0;
+    double thermalRenormTargetEnergy = 0.0;
+    double thermalRenormEnergyBefore = 0.0;
+    double thermalRenormEnergyAfter = 0.0;
+    double thermalRenormEnergyResidualRms = 0.0;
+    double thermalRenormEnergyResidualMaxAbs = 0.0;
+    double thermalRenormVelocityScaleMin = 1.0;
+    double thermalRenormVelocityScaleMax = 1.0;
+    double thermalRenormMomentumResidualRms = 0.0;
+    double thermalRenormMomentumResidualMaxAbs = 0.0;
+    std::int32_t firstThermalRenormCell = kInvalidCellIndex;
+    std::int32_t lastThermalRenormCell = kInvalidCellIndex;
+    bool thermalRenormAllCellsNonEmpty = true;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -510,12 +566,21 @@ void attach_resampling_insertion_apply_diagnostics(
 
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics);
 
 void attach_resampling_remap_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
     const ResamplingRemapApplyDiagnostics& remapDiagnostics);
+
+ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renormalization(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const ResamplingRemapApplyDiagnostics& remapDiagnostics);
+
+void attach_resampling_thermal_renormalization_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingThermalRenormalizationDiagnostics& thermalDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

@@ -339,6 +339,27 @@ struct RuntimeSummary {
     std::int32_t resampLastRemappedCell = -1;
     int resampRemapAllRemappedCellsNonEmpty = 1;
 
+    int resampThermalRenormAttempted = 0;
+    int resampThermalRenormApplied = 0;
+    std::uint64_t resampThermalRenormCellsConsidered = 0;
+    std::uint64_t resampThermalRenormCellsRenormalized = 0;
+    std::uint64_t resampThermalRenormParticlesRenormalized = 0;
+    std::uint64_t resampThermalRenormSkippedDryCells = 0;
+    std::uint64_t resampThermalRenormSkippedEmptyCells = 0;
+    std::uint64_t resampThermalRenormSkippedInvalidEnergyCells = 0;
+    double resampThermalRenormTargetEnergy = 0.0;
+    double resampThermalRenormEnergyBefore = 0.0;
+    double resampThermalRenormEnergyAfter = 0.0;
+    double resampThermalRenormEnergyResidualRms = 0.0;
+    double resampThermalRenormEnergyResidualMaxAbs = 0.0;
+    double resampThermalRenormVelocityScaleMin = 1.0;
+    double resampThermalRenormVelocityScaleMax = 1.0;
+    double resampThermalRenormMomentumResidualRms = 0.0;
+    double resampThermalRenormMomentumResidualMaxAbs = 0.0;
+    std::int32_t resampFirstThermalRenormCell = -1;
+    std::int32_t resampLastThermalRenormCell = -1;
+    int resampThermalRenormAllCellsNonEmpty = 1;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

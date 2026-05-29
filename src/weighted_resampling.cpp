@@ -439,7 +439,7 @@ void attach_resampling_insertion_apply_diagnostics(
 
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics) {
     validate_particle_state(state, "apply_resampling_local_mass_momentum_remap");
     ensure_particle_roles(state, ParticleRole::Fluid);
@@ -527,6 +527,42 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
         d.scaleMax = std::max(d.scaleMax, scale);
     }
 
+    if (depositWorkspace.remapThermalEnergyTarget.size() == static_cast<std::size_t>(nc) &&
+        depositWorkspace.remapThermalCell.size() == static_cast<std::size_t>(nc)) {
+        std::fill(depositWorkspace.remapThermalEnergyTarget.begin(),
+                  depositWorkspace.remapThermalEnergyTarget.end(),
+                  0.0);
+        std::fill(depositWorkspace.remapThermalCell.begin(),
+                  depositWorkspace.remapThermalCell.end(),
+                  0u);
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (remapCell[kk]) {
+                depositWorkspace.remapThermalCell[kk] = 1u;
+            }
+        }
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            if (i >= depositWorkspace.cellId.size()) {
+                continue;
+            }
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!remapCell[kk]) {
+                continue;
+            }
+            const double dux = state.vx[i] - depositWorkspace.ux[kk];
+            const double duy = state.vy[i] - depositWorkspace.uy[kk];
+            depositWorkspace.remapThermalEnergyTarget[kk] +=
+                0.5 * state.mass[i] * (dux * dux + duy * duy);
+        }
+    }
+
     for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
         if (!is_fluid_particle(state, i)) {
             continue;
@@ -591,6 +627,204 @@ void attach_resampling_remap_apply_diagnostics(
     diagnostics.remapAllRemappedCellsNonEmpty = remapDiagnostics.allRemappedCellsNonEmpty;
 }
 
+
+ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renormalization(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const ResamplingRemapApplyDiagnostics& remapDiagnostics) {
+    validate_particle_state(state, "apply_resampling_local_thermal_renormalization");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingThermalRenormalizationDiagnostics d{};
+    d.attempted = true;
+
+    const int nc = depositWorkspace.allocatedCells;
+    if (nc <= 0 || depositWorkspace.mass.size() != static_cast<std::size_t>(nc) ||
+        depositWorkspace.remapThermalEnergyTarget.size() != static_cast<std::size_t>(nc) ||
+        depositWorkspace.remapThermalCell.size() != static_cast<std::size_t>(nc)) {
+        throw std::runtime_error("apply_resampling_local_thermal_renormalization: invalid deposit workspace");
+    }
+    if (!remapDiagnostics.applied) {
+        return d;
+    }
+
+    std::vector<double> currentEnergy(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> massByCell(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> pxBefore(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> pyBefore(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
+    std::vector<std::uint8_t> renormCell(static_cast<std::size_t>(nc), 0u);
+
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        if (i >= depositWorkspace.cellId.size()) {
+            continue;
+        }
+        const int c = depositWorkspace.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        const double mp = state.mass[i];
+        const double vx = state.vx[i];
+        const double vy = state.vy[i];
+        const double dux = vx - depositWorkspace.ux[kk];
+        const double duy = vy - depositWorkspace.uy[kk];
+        currentEnergy[kk] += 0.5 * mp * (dux * dux + duy * duy);
+        massByCell[kk] += mp;
+        pxBefore[kk] += mp * vx;
+        pyBefore[kk] += mp * vy;
+    }
+
+    constexpr double eps = 1.0e-30;
+    double residual2 = 0.0;
+    double momentumResidual2 = 0.0;
+    std::uint64_t residualCount = 0u;
+    d.velocityScaleMin = std::numeric_limits<double>::infinity();
+    d.velocityScaleMax = 0.0;
+
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.remapThermalCell[kk]) {
+            continue;
+        }
+        if (!depositWorkspace.wetCell[kk]) {
+            d.skippedDryCells += 1u;
+            continue;
+        }
+        if (depositWorkspace.count[kk] == 0u || !(massByCell[kk] > 0.0)) {
+            d.skippedEmptyCells += 1u;
+            continue;
+        }
+        d.cellsConsidered += 1u;
+        const double targetE = depositWorkspace.remapThermalEnergyTarget[kk];
+        const double beforeE = currentEnergy[kk];
+        if (!(targetE >= 0.0) || !std::isfinite(targetE) || !(beforeE >= 0.0) || !std::isfinite(beforeE)) {
+            d.skippedInvalidEnergyCells += 1u;
+            d.allRenormalizedCellsNonEmpty = false;
+            continue;
+        }
+
+        double scale = 1.0;
+        if (beforeE > eps) {
+            scale = std::sqrt(std::max(0.0, targetE) / beforeE);
+        } else if (targetE > eps) {
+            d.skippedInvalidEnergyCells += 1u;
+            continue;
+        } else {
+            scale = 1.0;
+        }
+        if (!(scale >= 0.0) || !std::isfinite(scale)) {
+            d.skippedInvalidEnergyCells += 1u;
+            continue;
+        }
+
+        scaleByCell[kk] = scale;
+        renormCell[kk] = 1u;
+        d.cellsRenormalized += (std::abs(scale - 1.0) > 1.0e-13) ? 1u : 0u;
+        if (std::abs(scale - 1.0) > 1.0e-13) {
+            if (d.firstRenormalizedCell == kInvalidCellIndex) {
+                d.firstRenormalizedCell = static_cast<std::int32_t>(c);
+            }
+            d.lastRenormalizedCell = static_cast<std::int32_t>(c);
+        }
+        d.targetThermalEnergy += targetE;
+        d.thermalEnergyBefore += beforeE;
+        const double afterE = scale * scale * beforeE;
+        d.thermalEnergyAfter += afterE;
+        const double er = afterE - targetE;
+        residual2 += er * er;
+        residualCount += 1u;
+        d.thermalEnergyResidualMaxAbs = std::max(d.thermalEnergyResidualMaxAbs, std::abs(er));
+        d.velocityScaleMin = std::min(d.velocityScaleMin, scale);
+        d.velocityScaleMax = std::max(d.velocityScaleMax, scale);
+    }
+
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        if (i >= depositWorkspace.cellId.size()) {
+            continue;
+        }
+        const int c = depositWorkspace.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!renormCell[kk]) {
+            continue;
+        }
+        const double ux = depositWorkspace.ux[kk];
+        const double uy = depositWorkspace.uy[kk];
+        const double scale = scaleByCell[kk];
+        state.vx[i] = ux + scale * (state.vx[i] - ux);
+        state.vy[i] = uy + scale * (state.vy[i] - uy);
+        d.particlesRenormalized += 1u;
+    }
+
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!renormCell[kk]) {
+            continue;
+        }
+        double pxAfter = 0.0;
+        double pyAfter = 0.0;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+            if (!is_fluid_particle(state, i) || i >= depositWorkspace.cellId.size() || depositWorkspace.cellId[i] != c) {
+                continue;
+            }
+            pxAfter += state.mass[i] * state.vx[i];
+            pyAfter += state.mass[i] * state.vy[i];
+        }
+        const double rx = pxAfter - pxBefore[kk];
+        const double ry = pyAfter - pyBefore[kk];
+        momentumResidual2 += rx * rx + ry * ry;
+        d.momentumResidualMaxAbs = std::max(d.momentumResidualMaxAbs, std::max(std::abs(rx), std::abs(ry)));
+    }
+
+    d.thermalEnergyResidualRms = residualCount > 0u
+        ? std::sqrt(residual2 / static_cast<double>(residualCount)) : 0.0;
+    d.momentumResidualRms = residualCount > 0u
+        ? std::sqrt(momentumResidual2 / static_cast<double>(residualCount)) : 0.0;
+    if (!std::isfinite(d.velocityScaleMin)) {
+        d.velocityScaleMin = 1.0;
+    }
+    if (!(d.velocityScaleMax > 0.0)) {
+        d.velocityScaleMax = 1.0;
+    }
+    d.applied = d.particlesRenormalized > 0u;
+    d.allRenormalizedCellsNonEmpty = d.allRenormalizedCellsNonEmpty && d.skippedInvalidEnergyCells == 0u;
+    return d;
+}
+
+void attach_resampling_thermal_renormalization_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingThermalRenormalizationDiagnostics& thermalDiagnostics) {
+    diagnostics.thermalRenormAttempted = thermalDiagnostics.attempted;
+    diagnostics.thermalRenormApplied = thermalDiagnostics.applied;
+    diagnostics.thermalRenormCellsConsidered = thermalDiagnostics.cellsConsidered;
+    diagnostics.thermalRenormCellsRenormalized = thermalDiagnostics.cellsRenormalized;
+    diagnostics.thermalRenormParticlesRenormalized = thermalDiagnostics.particlesRenormalized;
+    diagnostics.thermalRenormSkippedDryCells = thermalDiagnostics.skippedDryCells;
+    diagnostics.thermalRenormSkippedEmptyCells = thermalDiagnostics.skippedEmptyCells;
+    diagnostics.thermalRenormSkippedInvalidEnergyCells = thermalDiagnostics.skippedInvalidEnergyCells;
+    diagnostics.thermalRenormTargetEnergy = thermalDiagnostics.targetThermalEnergy;
+    diagnostics.thermalRenormEnergyBefore = thermalDiagnostics.thermalEnergyBefore;
+    diagnostics.thermalRenormEnergyAfter = thermalDiagnostics.thermalEnergyAfter;
+    diagnostics.thermalRenormEnergyResidualRms = thermalDiagnostics.thermalEnergyResidualRms;
+    diagnostics.thermalRenormEnergyResidualMaxAbs = thermalDiagnostics.thermalEnergyResidualMaxAbs;
+    diagnostics.thermalRenormVelocityScaleMin = thermalDiagnostics.velocityScaleMin;
+    diagnostics.thermalRenormVelocityScaleMax = thermalDiagnostics.velocityScaleMax;
+    diagnostics.thermalRenormMomentumResidualRms = thermalDiagnostics.momentumResidualRms;
+    diagnostics.thermalRenormMomentumResidualMaxAbs = thermalDiagnostics.momentumResidualMaxAbs;
+    diagnostics.firstThermalRenormCell = thermalDiagnostics.firstRenormalizedCell;
+    diagnostics.lastThermalRenormCell = thermalDiagnostics.lastRenormalizedCell;
+    diagnostics.thermalRenormAllCellsNonEmpty = thermalDiagnostics.allRenormalizedCellsNonEmpty;
+}
+
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,
                                         int numCells,
@@ -638,6 +872,8 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.passiveExtractionOperations.reserve(static_cast<std::size_t>(numParticles));
         ws.donorSelectedParticleCount.assign(static_cast<std::size_t>(numCells), 0u);
         ws.donorSelectedMass.assign(static_cast<std::size_t>(numCells), 0.0);
+        ws.remapThermalEnergyTarget.assign(static_cast<std::size_t>(numCells), 0.0);
+        ws.remapThermalCell.assign(static_cast<std::size_t>(numCells), 0u);
     }
 }
 
@@ -683,6 +919,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ws.passiveExtractionOperations.clear();
     std::fill(ws.donorSelectedParticleCount.begin(), ws.donorSelectedParticleCount.end(), 0u);
     std::fill(ws.donorSelectedMass.begin(), ws.donorSelectedMass.end(), 0.0);
+    std::fill(ws.remapThermalEnergyTarget.begin(), ws.remapThermalEnergyTarget.end(), 0.0);
+    std::fill(ws.remapThermalCell.begin(), ws.remapThermalCell.end(), 0u);
 
     const ParticleRoleCounts roles = count_particle_roles(state);
 

@@ -446,3 +446,15 @@ remappedCells=2 particles=125 MRelRms~2e-17 scaleMin<1 scaleMax>1
 ```
 
 See `doc/README_0121_RESAMPLING_LOCAL_REMAP.md`.
+
+### Patch 0122 — local thermal renormalization
+
+Patch 0122 adds the optional switch
+`resamplingThermalRenormalizationEnable`.  When extraction, insertion and local
+mass remap are enabled, this final local stage rescales velocities relative to
+cell velocity so the pre-remap relative thermal energy `E_th,c` is restored while
+preserving `M_c` and `U_c`.  Validate with:
+
+```bash
+./scripts/run_resampling_thermal_renormalization_smoke_0122.sh
+```
