@@ -189,6 +189,22 @@ struct RuntimeSummary {
     double resampRichCellFraction = 0.0;
     double resampEmptyWetCellFraction = 0.0;
 
+    int resampCandidateListsBuilt = 0;
+    std::uint64_t resampReceiverCells = 0;
+    std::uint64_t resampDonorCells = 0;
+    std::uint64_t resampEmptyWetReceiverCells = 0;
+    std::int32_t resampFirstReceiverCell = -1;
+    std::int32_t resampLastReceiverCell = -1;
+    std::int32_t resampFirstDonorCell = -1;
+    std::int32_t resampLastDonorCell = -1;
+    double resampReceiverMassDeficitToTarget = 0.0;
+    double resampDonorMassExcessAboveTarget = 0.0;
+    double resampDonorReceiverMassBalance = 0.0;
+    double resampPotentialTransferMass = 0.0;
+    double resampReceiverFractionOfWetCells = 0.0;
+    double resampDonorFractionOfWetCells = 0.0;
+    int resampPoolCanSeedReceivers = 0;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

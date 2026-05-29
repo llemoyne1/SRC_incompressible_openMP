@@ -168,6 +168,7 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
     diagnostics.poolLastFreeIndex = poolDiagnostics.lastFreeIndex;
     diagnostics.poolFreeSlotFraction = poolDiagnostics.freeSlotFraction;
     diagnostics.poolDormantSlotFraction = poolDiagnostics.dormantSlotFraction;
+    diagnostics.poolCanSeedReceivers = poolDiagnostics.freeSlots >= diagnostics.nReceiverCells;
 }
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
@@ -209,6 +210,9 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.poorCell.assign(static_cast<std::size_t>(numCells), 0u);
         ws.richCell.assign(static_cast<std::size_t>(numCells), 0u);
         ws.targetBandCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.receiverPoorCells.reserve(static_cast<std::size_t>(numCells));
+        ws.donorRichCells.reserve(static_cast<std::size_t>(numCells));
+        ws.emptyWetReceiverCells.reserve(static_cast<std::size_t>(numCells));
     }
 }
 
@@ -246,6 +250,9 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     std::fill(ws.poorCell.begin(), ws.poorCell.end(), 0u);
     std::fill(ws.richCell.begin(), ws.richCell.end(), 0u);
     std::fill(ws.targetBandCell.begin(), ws.targetBandCell.end(), 0u);
+    ws.receiverPoorCells.clear();
+    ws.donorRichCells.clear();
+    ws.emptyWetReceiverCells.clear();
 
     const ParticleRoleCounts roles = count_particle_roles(state);
 
@@ -448,6 +455,56 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         d.poorCellFraction = static_cast<double>(nPoor) * invWet;
         d.richCellFraction = static_cast<double>(nRich) * invWet;
         d.emptyWetCellFraction = static_cast<double>(nEmptyWet) * invWet;
+    }
+
+    if (d.cellClassificationComputed && d.targetCellMass > 0.0) {
+        double receiverDeficit = 0.0;
+        double donorExcess = 0.0;
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!ws.wetCell[kk]) {
+                continue;
+            }
+            if (ws.poorCell[kk]) {
+                ws.receiverPoorCells.push_back(static_cast<std::int32_t>(c));
+                const double deficit = d.targetCellMass - ws.mass[kk];
+                if (deficit > 0.0) {
+                    receiverDeficit += deficit;
+                }
+                if (ws.count[kk] == 0u) {
+                    ws.emptyWetReceiverCells.push_back(static_cast<std::int32_t>(c));
+                }
+            }
+            if (ws.richCell[kk]) {
+                ws.donorRichCells.push_back(static_cast<std::int32_t>(c));
+                const double excess = ws.mass[kk] - d.targetCellMass;
+                if (excess > 0.0) {
+                    donorExcess += excess;
+                }
+            }
+        }
+
+        d.candidateListsBuilt = true;
+        d.nReceiverCells = static_cast<std::uint64_t>(ws.receiverPoorCells.size());
+        d.nDonorCells = static_cast<std::uint64_t>(ws.donorRichCells.size());
+        d.nEmptyWetReceiverCells = static_cast<std::uint64_t>(ws.emptyWetReceiverCells.size());
+        if (!ws.receiverPoorCells.empty()) {
+            d.firstReceiverCell = ws.receiverPoorCells.front();
+            d.lastReceiverCell = ws.receiverPoorCells.back();
+        }
+        if (!ws.donorRichCells.empty()) {
+            d.firstDonorCell = ws.donorRichCells.front();
+            d.lastDonorCell = ws.donorRichCells.back();
+        }
+        d.receiverMassDeficitToTarget = receiverDeficit;
+        d.donorMassExcessAboveTarget = donorExcess;
+        d.donorReceiverMassBalance = donorExcess - receiverDeficit;
+        d.potentialTransferMass = std::min(receiverDeficit, donorExcess);
+        if (d.nWetCells > 0u) {
+            const double invWet = 1.0 / static_cast<double>(d.nWetCells);
+            d.receiverFractionOfWetCells = static_cast<double>(d.nReceiverCells) * invWet;
+            d.donorFractionOfWetCells = static_cast<double>(d.nDonorCells) * invWet;
+        }
     }
 
     if (totalMass > 0.0) {

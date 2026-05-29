@@ -12,6 +12,7 @@
 namespace mpcd {
 
 constexpr std::uint64_t kInvalidParticleIndex = std::numeric_limits<std::uint64_t>::max();
+constexpr std::int32_t kInvalidCellIndex = -1;
 
 struct ResamplingParticlePoolDiagnostics {
     bool built = false;
@@ -80,6 +81,12 @@ struct WeightedRealFluidDepositWorkspace {
     std::vector<std::uint8_t> poorCell;
     std::vector<std::uint8_t> richCell;
     std::vector<std::uint8_t> targetBandCell;
+
+    // Passive receiver/donor lists prepared by patch 0115.  The lists are
+    // rebuilt from the 0114 masks but are not consumed yet.
+    std::vector<std::int32_t> receiverPoorCells;
+    std::vector<std::int32_t> donorRichCells;
+    std::vector<std::int32_t> emptyWetReceiverCells;
 };
 
 struct WeightedResamplingDiagnostics {
@@ -131,6 +138,25 @@ struct WeightedResamplingDiagnostics {
     double poorCellFraction = 0.0;
     double richCellFraction = 0.0;
     double emptyWetCellFraction = 0.0;
+
+    // Passive donor/receiver candidate lists (patch 0115).  Poor wet cells are
+    // receivers; rich wet cells are donors.  These diagnostics quantify the
+    // future extraction/insertion problem but do not modify particles.
+    bool candidateListsBuilt = false;
+    std::uint64_t nReceiverCells = 0;
+    std::uint64_t nDonorCells = 0;
+    std::uint64_t nEmptyWetReceiverCells = 0;
+    std::int32_t firstReceiverCell = kInvalidCellIndex;
+    std::int32_t lastReceiverCell = kInvalidCellIndex;
+    std::int32_t firstDonorCell = kInvalidCellIndex;
+    std::int32_t lastDonorCell = kInvalidCellIndex;
+    double receiverMassDeficitToTarget = 0.0;
+    double donorMassExcessAboveTarget = 0.0;
+    double donorReceiverMassBalance = 0.0;
+    double potentialTransferMass = 0.0;
+    double receiverFractionOfWetCells = 0.0;
+    double donorFractionOfWetCells = 0.0;
+    bool poolCanSeedReceivers = false;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;

@@ -180,3 +180,33 @@ wet=32 dry=0 poor=2 rich=1 emptyWet=1 targetBand=29
 ```
 
 See `doc/README_0114_RESAMPLING_CELL_CLASSIFICATION.md`.
+
+### Patch 0115 — passive donor/receiver candidate lists
+
+Patch 0115 turns the 0114 masks into deterministic passive lists for the future
+resampling operator:
+
+```text
+receiverPoorCells      = wet cells below the poor threshold
+donorRichCells         = wet cells above the rich threshold
+emptyWetReceiverCells  = poor wet cells with N_c = 0
+```
+
+The patch also reports deficit/excess diagnostics relative to
+`resamplingTargetCellMass`, plus a lower-bound pool sufficiency flag
+`resampPoolCanSeedReceivers`.  No particle is moved and the free-list is not
+consumed.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_candidate_lists_smoke_0115.sh
+```
+
+Expected diagnostic core:
+
+```text
+receivers=2 donors=1 emptyReceivers=1 deficit=7 excess=4 potential=4 poolCanSeed=1
+```
+
+See `doc/README_0115_RESAMPLING_CANDIDATE_LISTS.md`.
