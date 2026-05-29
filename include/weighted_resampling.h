@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "cell_grid.h"
+#include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -70,6 +71,15 @@ struct WeightedRealFluidDepositWorkspace {
     std::vector<double> localMass;
     std::vector<double> localPx;
     std::vector<double> localPy;
+
+    // Passive cell classification prepared by patch 0114.  These masks are
+    // diagnostic only at this stage: no particle is moved or reweighted.
+    std::vector<std::uint8_t> activeCell;
+    std::vector<std::uint8_t> wetCell;
+    std::vector<std::uint8_t> dryCell;
+    std::vector<std::uint8_t> poorCell;
+    std::vector<std::uint8_t> richCell;
+    std::vector<std::uint8_t> targetBandCell;
 };
 
 struct WeightedResamplingDiagnostics {
@@ -103,6 +113,24 @@ struct WeightedResamplingDiagnostics {
     double meanUy = 0.0;
     double cellUxRms = 0.0;
     double cellUyRms = 0.0;
+
+    bool cellClassificationComputed = false;
+    std::uint64_t nActiveCells = 0;
+    std::uint64_t nWetCells = 0;
+    std::uint64_t nDryCells = 0;
+    std::uint64_t nPoorCells = 0;
+    std::uint64_t nRichCells = 0;
+    std::uint64_t nTargetBandCells = 0;
+    std::uint64_t nEmptyWetCells = 0;
+    std::uint64_t nOccupiedDryCells = 0;
+    double wetMassThreshold = 0.0;
+    double poorMassThreshold = 0.0;
+    double richMassThreshold = 0.0;
+    double wetCellFraction = 0.0;
+    double dryCellFraction = 0.0;
+    double poorCellFraction = 0.0;
+    double richCellFraction = 0.0;
+    double emptyWetCellFraction = 0.0;
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
@@ -143,6 +171,8 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
 WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& state,
                                                           const SimulationParams& params,
                                                           const CellGrid& grid,
+                                                          const FluidDomainBounds& domain,
+                                                          double time,
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws);
 

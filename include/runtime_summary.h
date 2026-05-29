@@ -171,6 +171,24 @@ struct RuntimeSummary {
     double resampCellUxRms = 0.0;
     double resampCellUyRms = 0.0;
 
+    int resampCellClassificationComputed = 0;
+    std::uint64_t resampActiveCells = 0;
+    std::uint64_t resampWetCells = 0;
+    std::uint64_t resampDryCells = 0;
+    std::uint64_t resampPoorCells = 0;
+    std::uint64_t resampRichCells = 0;
+    std::uint64_t resampTargetBandCells = 0;
+    std::uint64_t resampEmptyWetCells = 0;
+    std::uint64_t resampOccupiedDryCells = 0;
+    double resampWetMassThreshold = 0.0;
+    double resampPoorMassThreshold = 0.0;
+    double resampRichMassThreshold = 0.0;
+    double resampWetCellFraction = 0.0;
+    double resampDryCellFraction = 0.0;
+    double resampPoorCellFraction = 0.0;
+    double resampRichCellFraction = 0.0;
+    double resampEmptyWetCellFraction = 0.0;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

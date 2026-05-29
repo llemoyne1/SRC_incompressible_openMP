@@ -246,6 +246,18 @@ struct SimulationParams {
     // physical target in later patches.
     double resamplingTargetCellMass = 0.0;
 
+    // Passive wet/dry and poor/rich cell classification prepared for the
+    // extraction/insertion resampling core.  active_domain is the safe default
+    // for bulk/channel tests: empty cells inside the active fluid domain are
+    // flagged as poor void pockets, not ignored as dry free-surface cells.
+    // occupied is reserved for later free-surface/injection tests where empty
+    // cells should remain dry/latent.
+    std::string resamplingWetMaskMode = "active_domain"; // active_domain, occupied
+    double resamplingWetCellMassThreshold = 0.0;
+    double resamplingPoorCellMassFraction = 0.5;
+    double resamplingRichCellMassFraction = 1.5;
+    double resamplingActiveFluidFractionThreshold = 0.5;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

@@ -154,3 +154,29 @@ particle insertion, while `Latent` slots are tracked separately and are not trea
 as free.  This patch remains diagnostic/passive: it does not activate, deactivate,
 insert, extract, or remap particles.  See
 `doc/README_0113_RESAMPLING_INACTIVE_POOL.md`.
+
+### Patch 0114 — wet/dry and poor/rich cell classification
+
+Patch 0114 adds passive cell masks for the future resampling core:
+
+```text
+activeCell, wetCell, dryCell, poorCell, richCell, targetBandCell
+```
+
+The default wet-mask mode is `active_domain`, so a void pocket inside the
+active fluid domain is classified as a poor wet cell rather than ignored as dry.
+The optional `occupied` mode is reserved for later injection/free-surface tests.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_cell_classification_smoke_0114.sh
+```
+
+Expected diagnostic core:
+
+```text
+wet=32 dry=0 poor=2 rich=1 emptyWet=1 targetBand=29
+```
+
+See `doc/README_0114_RESAMPLING_CELL_CLASSIFICATION.md`.

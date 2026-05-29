@@ -1,5 +1,7 @@
 #include "weighted_resampling.h"
 
+#include "immersed_solid.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -28,6 +30,30 @@ int thread_id() {
 #else
     return 0;
 #endif
+}
+
+bool cell_center_inside_domain(int ix, int iy, const CellGrid& grid, const FluidDomainBounds& domain) {
+    const double x = (static_cast<double>(ix) + 0.5) * grid.dx;
+    const double y = (static_cast<double>(iy) + 0.5) * grid.dy;
+    return point_is_inside_fluid_domain(x, y, domain);
+}
+
+bool cell_is_active_for_resampling(int ix,
+                                   int iy,
+                                   const CellGrid& grid,
+                                   const SimulationParams& params,
+                                   const FluidDomainBounds& domain,
+                                   double time) {
+    if (!cell_center_inside_domain(ix, iy, grid, domain)) {
+        return false;
+    }
+    if (!immersed_solid_enabled(params)) {
+        return true;
+    }
+    const double solidFraction = immersed_solid_fraction_in_cell(
+        ix, iy, grid, GridShift{}, params, domain, time);
+    const double fluidFraction = 1.0 - solidFraction;
+    return fluidFraction > params.resamplingActiveFluidFractionThreshold;
 }
 
 } // namespace
@@ -176,12 +202,21 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.localMass.assign(localSize, 0.0);
         ws.localPx.assign(localSize, 0.0);
         ws.localPy.assign(localSize, 0.0);
+
+        ws.activeCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.wetCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.dryCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.poorCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.richCell.assign(static_cast<std::size_t>(numCells), 0u);
+        ws.targetBandCell.assign(static_cast<std::size_t>(numCells), 0u);
     }
 }
 
 WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& state,
                                                           const SimulationParams& params,
                                                           const CellGrid& grid,
+                                                          const FluidDomainBounds& domain,
+                                                          double time,
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws) {
     validate_particle_state(state, "deposit_weighted_real_fluid");
@@ -205,6 +240,12 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
+    std::fill(ws.activeCell.begin(), ws.activeCell.end(), 0u);
+    std::fill(ws.wetCell.begin(), ws.wetCell.end(), 0u);
+    std::fill(ws.dryCell.begin(), ws.dryCell.end(), 0u);
+    std::fill(ws.poorCell.begin(), ws.poorCell.end(), 0u);
+    std::fill(ws.richCell.begin(), ws.richCell.end(), 0u);
+    std::fill(ws.targetBandCell.begin(), ws.targetBandCell.end(), 0u);
 
     const ParticleRoleCounts roles = count_particle_roles(state);
 
@@ -316,21 +357,97 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     d.stdMass = std::sqrt(std::max(0.0, sumM2 * invNc - d.meanMass * d.meanMass));
     d.minMass = std::isfinite(minMass) ? minMass : 0.0;
     d.maxMass = maxMass;
+    // Passive active/wet/dry and poor/rich classification.  The default
+    // active_domain mask marks every active fluid-domain cell as wet, so a true
+    // void pocket inside the fluid is classified as poor instead of being
+    // silently treated as a dry/free-surface cell.  The optional occupied mode
+    // is provided for future free-surface/injection tests where empty cells must
+    // remain dry/latent.
+    std::uint64_t nActive = 0u;
+    std::uint64_t nWet = 0u;
+    std::uint64_t nDry = 0u;
+    std::uint64_t nOccupiedDry = 0u;
+    double activeMassSum = 0.0;
+
+#pragma omp parallel for reduction(+:nActive,nWet,nDry,nOccupiedDry,activeMassSum) if(nc > 256)
+    for (int c = 0; c < nc; ++c) {
+        const int ix = c % grid.Nx;
+        const int iy = c / grid.Nx;
+        const bool active = cell_is_active_for_resampling(ix, iy, grid, params, domain, time);
+        const double mc = ws.mass[static_cast<std::size_t>(c)];
+        bool wet = false;
+        if (active) {
+            if (params.resamplingWetMaskMode == "occupied") {
+                wet = mc > params.resamplingWetCellMassThreshold;
+            } else {
+                wet = true;
+            }
+        }
+        const bool dry = !wet;
+        ws.activeCell[static_cast<std::size_t>(c)] = active ? 1u : 0u;
+        ws.wetCell[static_cast<std::size_t>(c)] = wet ? 1u : 0u;
+        ws.dryCell[static_cast<std::size_t>(c)] = dry ? 1u : 0u;
+        nActive += active ? 1u : 0u;
+        nWet += wet ? 1u : 0u;
+        nDry += dry ? 1u : 0u;
+        nOccupiedDry += (dry && mc > params.resamplingWetCellMassThreshold) ? 1u : 0u;
+        activeMassSum += wet ? mc : 0.0;
+    }
+
     d.targetCellMass = params.resamplingTargetCellMass > 0.0
         ? params.resamplingTargetCellMass
-        : d.meanMass;
+        : (nWet > 0u ? activeMassSum / static_cast<double>(nWet) : d.meanMass);
+
+    d.cellClassificationComputed = true;
+    d.nActiveCells = nActive;
+    d.nWetCells = nWet;
+    d.nDryCells = nDry;
+    d.nOccupiedDryCells = nOccupiedDry;
+    d.wetMassThreshold = params.resamplingWetCellMassThreshold;
+    d.poorMassThreshold = d.targetCellMass * params.resamplingPoorCellMassFraction;
+    d.richMassThreshold = d.targetCellMass * params.resamplingRichCellMassFraction;
+    d.wetCellFraction = invNc > 0.0 ? static_cast<double>(nWet) * invNc : 0.0;
+    d.dryCellFraction = invNc > 0.0 ? static_cast<double>(nDry) * invNc : 0.0;
 
     if (d.targetCellMass > 0.0) {
         double rel2 = 0.0;
         double relMax = 0.0;
-#pragma omp parallel for reduction(+:rel2) reduction(max:relMax) if(nc > 256)
+        std::uint64_t nPoor = 0u;
+        std::uint64_t nRich = 0u;
+        std::uint64_t nTargetBand = 0u;
+        std::uint64_t nEmptyWet = 0u;
+#pragma omp parallel for reduction(+:rel2,nPoor,nRich,nTargetBand,nEmptyWet) reduction(max:relMax) if(nc > 256)
         for (int c = 0; c < nc; ++c) {
-            const double rel = (ws.mass[static_cast<std::size_t>(c)] - d.targetCellMass) / d.targetCellMass;
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!ws.wetCell[kk]) {
+                continue;
+            }
+            const double mc = ws.mass[kk];
+            const double rel = (mc - d.targetCellMass) / d.targetCellMass;
             rel2 += rel * rel;
             relMax = std::max(relMax, std::abs(rel));
+
+            const bool poor = mc < d.poorMassThreshold;
+            const bool rich = mc > d.richMassThreshold;
+            const bool emptyWet = ws.count[kk] == 0u;
+            ws.poorCell[kk] = poor ? 1u : 0u;
+            ws.richCell[kk] = rich ? 1u : 0u;
+            ws.targetBandCell[kk] = (!poor && !rich) ? 1u : 0u;
+            nPoor += poor ? 1u : 0u;
+            nRich += rich ? 1u : 0u;
+            nTargetBand += (!poor && !rich) ? 1u : 0u;
+            nEmptyWet += emptyWet ? 1u : 0u;
         }
-        d.mRelRms = std::sqrt(rel2 * invNc);
+        const double invWet = nWet > 0u ? 1.0 / static_cast<double>(nWet) : 0.0;
+        d.mRelRms = std::sqrt(rel2 * invWet);
         d.mRelMaxAbs = relMax;
+        d.nPoorCells = nPoor;
+        d.nRichCells = nRich;
+        d.nTargetBandCells = nTargetBand;
+        d.nEmptyWetCells = nEmptyWet;
+        d.poorCellFraction = static_cast<double>(nPoor) * invWet;
+        d.richCellFraction = static_cast<double>(nRich) * invWet;
+        d.emptyWetCellFraction = static_cast<double>(nEmptyWet) * invWet;
     }
 
     if (totalMass > 0.0) {

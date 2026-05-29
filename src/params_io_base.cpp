@@ -301,6 +301,14 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
         else if (key == "projectionImmersedSolidCloseCutFaces") p.projectionImmersedSolidCloseCutFaces = parse_bool(value, key);
         else if (key == "resamplingTargetCellMass" || key == "weightedResamplingTargetCellMass") p.resamplingTargetCellMass = parse_double(value, key);
+        else if (key == "resamplingWetMaskMode") {
+            p.resamplingWetMaskMode = get_lower(kv, key);
+            std::replace(p.resamplingWetMaskMode.begin(), p.resamplingWetMaskMode.end(), '-', '_');
+        }
+        else if (key == "resamplingWetCellMassThreshold" || key == "resamplingWetMassThreshold") p.resamplingWetCellMassThreshold = parse_double(value, key);
+        else if (key == "resamplingPoorCellMassFraction" || key == "resamplingPoorMassFraction") p.resamplingPoorCellMassFraction = parse_double(value, key);
+        else if (key == "resamplingRichCellMassFraction" || key == "resamplingRichMassFraction") p.resamplingRichCellMassFraction = parse_double(value, key);
+        else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -746,6 +754,21 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.resamplingTargetCellMass >= 0.0)) {
         throw std::runtime_error("resamplingTargetCellMass must be non-negative; use 0 to infer the current mean real-fluid cell mass");
+    }
+    if (p.resamplingWetMaskMode != "active_domain" && p.resamplingWetMaskMode != "occupied") {
+        throw std::runtime_error("resamplingWetMaskMode supports: active_domain, occupied");
+    }
+    if (!(p.resamplingWetCellMassThreshold >= 0.0)) {
+        throw std::runtime_error("resamplingWetCellMassThreshold must be non-negative");
+    }
+    if (!(p.resamplingPoorCellMassFraction >= 0.0)) {
+        throw std::runtime_error("resamplingPoorCellMassFraction must be non-negative");
+    }
+    if (!(p.resamplingRichCellMassFraction > p.resamplingPoorCellMassFraction)) {
+        throw std::runtime_error("resamplingRichCellMassFraction must be greater than resamplingPoorCellMassFraction");
+    }
+    if (!(p.resamplingActiveFluidFractionThreshold >= 0.0 && p.resamplingActiveFluidFractionThreshold <= 1.0)) {
+        throw std::runtime_error("resamplingActiveFluidFractionThreshold must lie in [0,1]");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");
