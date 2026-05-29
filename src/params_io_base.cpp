@@ -311,6 +311,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
         else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
         else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
+        else if (key == "resamplingRemapEnable") p.resamplingRemapEnable = parse_bool(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -774,6 +775,9 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.resamplingInsertionEnable && !p.resamplingExtractionEnable) {
         throw std::runtime_error("resamplingInsertionEnable currently requires resamplingExtractionEnable=true");
+    }
+    if (p.resamplingRemapEnable && !p.resamplingInsertionEnable) {
+        throw std::runtime_error("resamplingRemapEnable currently requires resamplingInsertionEnable=true");
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

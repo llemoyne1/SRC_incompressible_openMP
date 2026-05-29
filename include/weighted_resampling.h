@@ -110,6 +110,40 @@ struct ResamplingInsertionApplyDiagnostics {
     bool allSourcesWereInactive = true;
 };
 
+struct ResamplingRemapApplyDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    std::uint64_t cellsConsidered = 0;
+    std::uint64_t cellsRemapped = 0;
+    std::uint64_t particlesRemapped = 0;
+    std::uint64_t skippedDryCells = 0;
+    std::uint64_t skippedEmptyCells = 0;
+    std::uint64_t skippedInvalidMassCells = 0;
+
+    double targetCellMass = 0.0;
+    double massBefore = 0.0;
+    double massAfter = 0.0;
+    double massTargetSum = 0.0;
+    double massDelta = 0.0;
+
+    double momentumXBefore = 0.0;
+    double momentumYBefore = 0.0;
+    double momentumXAfter = 0.0;
+    double momentumYAfter = 0.0;
+    double momentumXTarget = 0.0;
+    double momentumYTarget = 0.0;
+    double momentumResidualRms = 0.0;
+    double momentumResidualMaxAbs = 0.0;
+
+    double maxCellMassRelResidual = 0.0;
+    double scaleMin = 1.0;
+    double scaleMax = 1.0;
+    std::int32_t firstRemappedCell = kInvalidCellIndex;
+    std::int32_t lastRemappedCell = kInvalidCellIndex;
+    bool allRemappedCellsNonEmpty = true;
+};
+
 struct ResamplingExtractionApplyDiagnostics {
     bool attempted = false;
     bool applied = false;
@@ -394,6 +428,36 @@ struct WeightedResamplingDiagnostics {
     bool insertionApplyNoInvalidReceiverCells = true;
     bool insertionApplyAllSourcesWereInactive = true;
 
+    // First local mass/momentum remap (patch 0121).  The remap scales masses
+    // inside non-empty wet cells to target M_c while preserving cell velocity.
+    bool remapApplyAttempted = false;
+    bool remapApplied = false;
+    std::uint64_t remapCellsConsidered = 0;
+    std::uint64_t remapCellsRemapped = 0;
+    std::uint64_t remapParticlesRemapped = 0;
+    std::uint64_t remapSkippedDryCells = 0;
+    std::uint64_t remapSkippedEmptyCells = 0;
+    std::uint64_t remapSkippedInvalidMassCells = 0;
+    double remapTargetCellMass = 0.0;
+    double remapMassBefore = 0.0;
+    double remapMassAfter = 0.0;
+    double remapMassTargetSum = 0.0;
+    double remapMassDelta = 0.0;
+    double remapMomentumXBefore = 0.0;
+    double remapMomentumYBefore = 0.0;
+    double remapMomentumXAfter = 0.0;
+    double remapMomentumYAfter = 0.0;
+    double remapMomentumXTarget = 0.0;
+    double remapMomentumYTarget = 0.0;
+    double remapMomentumResidualRms = 0.0;
+    double remapMomentumResidualMaxAbs = 0.0;
+    double remapMaxCellMassRelResidual = 0.0;
+    double remapScaleMin = 1.0;
+    double remapScaleMax = 1.0;
+    std::int32_t firstRemappedCell = kInvalidCellIndex;
+    std::int32_t lastRemappedCell = kInvalidCellIndex;
+    bool remapAllRemappedCellsNonEmpty = true;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -443,6 +507,15 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
 void attach_resampling_insertion_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
     const ResamplingInsertionApplyDiagnostics& insertionDiagnostics);
+
+ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics);
+
+void attach_resampling_remap_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingRemapApplyDiagnostics& remapDiagnostics);
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,

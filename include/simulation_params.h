@@ -261,10 +261,15 @@ struct SimulationParams {
     // First mutating resampling switches.  Disabled by default so all legacy
     // SRC/Q6 validations remain unchanged.  resamplingExtractionEnable converts
     // selected donor particles Fluid->Inactive.  resamplingInsertionEnable then
-    // reactivates free slots Inactive->Fluid in receiver cells, preserving the
-    // extracted mass, momentum and type but without a local remap/renormalisation.
+    // reactivates free slots Inactive->Fluid in receiver cells.
+    // resamplingRemapEnable performs the first local conservative remap stage:
+    // in each non-empty wet cell it scales all true-fluid particle masses so
+    // M_c -> resamplingTargetCellMass while keeping velocities unchanged, hence
+    // preserving the cell velocity U_c.  Thermal/energy renormalisation remains
+    // a later patch.
     bool resamplingExtractionEnable = false;
     bool resamplingInsertionEnable = false;
+    bool resamplingRemapEnable = false;
 
     int summaryEvery = 10;
     int dumpStateEvery = 0;

@@ -311,6 +311,34 @@ struct RuntimeSummary {
     int resampInsertionApplyNoInvalidReceiverCells = 1;
     int resampInsertionApplyAllSourcesWereInactive = 1;
 
+    int resampRemapApplyAttempted = 0;
+    int resampRemapApplied = 0;
+    std::uint64_t resampRemapCellsConsidered = 0;
+    std::uint64_t resampRemapCellsRemapped = 0;
+    std::uint64_t resampRemapParticlesRemapped = 0;
+    std::uint64_t resampRemapSkippedDryCells = 0;
+    std::uint64_t resampRemapSkippedEmptyCells = 0;
+    std::uint64_t resampRemapSkippedInvalidMassCells = 0;
+    double resampRemapTargetCellMass = 0.0;
+    double resampRemapMassBefore = 0.0;
+    double resampRemapMassAfter = 0.0;
+    double resampRemapMassTargetSum = 0.0;
+    double resampRemapMassDelta = 0.0;
+    double resampRemapMomentumXBefore = 0.0;
+    double resampRemapMomentumYBefore = 0.0;
+    double resampRemapMomentumXAfter = 0.0;
+    double resampRemapMomentumYAfter = 0.0;
+    double resampRemapMomentumXTarget = 0.0;
+    double resampRemapMomentumYTarget = 0.0;
+    double resampRemapMomentumResidualRms = 0.0;
+    double resampRemapMomentumResidualMaxAbs = 0.0;
+    double resampRemapMaxCellMassRelResidual = 0.0;
+    double resampRemapScaleMin = 1.0;
+    double resampRemapScaleMax = 1.0;
+    std::int32_t resampFirstRemappedCell = -1;
+    std::int32_t resampLastRemappedCell = -1;
+    int resampRemapAllRemappedCellsNonEmpty = 1;
+
     int resampPoolBuilt = 0;
     std::uint64_t resampPoolStorageSlots = 0;
     std::uint64_t resampPoolFreeSlots = 0;

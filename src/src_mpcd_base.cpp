@@ -94,17 +94,31 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 state, workspace.resamplingPool, workspace.resampling, grid);
         }
 
-        // Rebuild the pool from roles after the mutation(s), then recompute the
-        // real-fluid deposit so runtime summaries describe the post-resampling
-        // transported fluid.  Attach the mutating extraction/insertion
-        // diagnostics to the final snapshot.
+        // Rebuild the pool from roles after extraction/insertion, then compute
+        // the post-edit real-fluid deposit.  If requested, apply the first
+        // local mass/momentum remap on that post-edit deposit and deposit once
+        // more so summaries report the final transported fluid.
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+
+        ResamplingRemapApplyDiagnostics remapApply{};
+        if (params.resamplingRemapEnable && insertionApply.applied) {
+            remapApply = apply_resampling_local_mass_momentum_remap(
+                state, workspace.resampling, result.resampling);
+            result.resampling = deposit_weighted_real_fluid(
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        }
+
         attach_resampling_extraction_apply_diagnostics(result.resampling, extractionApply);
         if (insertionApply.attempted) {
             attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
+        }
+        if (remapApply.attempted) {
+            attach_resampling_remap_apply_diagnostics(result.resampling, remapApply);
         }
     }
     return result;

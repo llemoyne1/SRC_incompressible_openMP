@@ -436,6 +436,161 @@ void attach_resampling_insertion_apply_diagnostics(
     diagnostics.insertionApplyAllSourcesWereInactive = insertionDiagnostics.allSourcesWereInactive;
 }
 
+
+ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics) {
+    validate_particle_state(state, "apply_resampling_local_mass_momentum_remap");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingRemapApplyDiagnostics d{};
+    d.attempted = true;
+    d.targetCellMass = depositDiagnostics.targetCellMass;
+
+    const int nc = depositWorkspace.allocatedCells;
+    if (nc <= 0 || depositWorkspace.mass.size() != static_cast<std::size_t>(nc)) {
+        throw std::runtime_error("apply_resampling_local_mass_momentum_remap: invalid deposit workspace");
+    }
+    if (!(d.targetCellMass > 0.0) || !std::isfinite(d.targetCellMass)) {
+        d.skippedInvalidMassCells = static_cast<std::uint64_t>(nc);
+        return d;
+    }
+
+    std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
+    std::vector<std::uint8_t> remapCell(static_cast<std::size_t>(nc), 0u);
+
+    constexpr double eps = 1.0e-13;
+    double residual2 = 0.0;
+    std::uint64_t residualCount = 0u;
+    d.scaleMin = std::numeric_limits<double>::infinity();
+    d.scaleMax = 0.0;
+
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (kk >= depositWorkspace.wetCell.size() || !depositWorkspace.wetCell[kk]) {
+            d.skippedDryCells += 1u;
+            continue;
+        }
+        d.cellsConsidered += 1u;
+        const std::uint32_t count = depositWorkspace.count[kk];
+        const double mass = depositWorkspace.mass[kk];
+        const double px = depositWorkspace.px[kk];
+        const double py = depositWorkspace.py[kk];
+        if (count == 0u) {
+            d.skippedEmptyCells += 1u;
+            continue;
+        }
+        if (!(mass > 0.0) || !std::isfinite(mass)) {
+            d.skippedInvalidMassCells += 1u;
+            d.allRemappedCellsNonEmpty = false;
+            continue;
+        }
+
+        const double scale = d.targetCellMass / mass;
+        if (!(scale > 0.0) || !std::isfinite(scale)) {
+            d.skippedInvalidMassCells += 1u;
+            continue;
+        }
+        scaleByCell[kk] = scale;
+        remapCell[kk] = 1u;
+
+        d.massBefore += mass;
+        d.massAfter += d.targetCellMass;
+        d.massTargetSum += d.targetCellMass;
+        d.momentumXBefore += px;
+        d.momentumYBefore += py;
+        const double targetPx = d.targetCellMass * depositWorkspace.ux[kk];
+        const double targetPy = d.targetCellMass * depositWorkspace.uy[kk];
+        d.momentumXTarget += targetPx;
+        d.momentumYTarget += targetPy;
+        d.momentumXAfter += scale * px;
+        d.momentumYAfter += scale * py;
+
+        const double cellMassRelResidual = std::abs((d.targetCellMass - scale * mass) / d.targetCellMass);
+        d.maxCellMassRelResidual = std::max(d.maxCellMassRelResidual, cellMassRelResidual);
+        const double rx = scale * px - targetPx;
+        const double ry = scale * py - targetPy;
+        const double rnorm = std::sqrt(rx * rx + ry * ry);
+        residual2 += rnorm * rnorm;
+        residualCount += 1u;
+        d.momentumResidualMaxAbs = std::max(d.momentumResidualMaxAbs, std::max(std::abs(rx), std::abs(ry)));
+
+        if (std::abs(scale - 1.0) > eps) {
+            d.cellsRemapped += 1u;
+            if (d.firstRemappedCell == kInvalidCellIndex) {
+                d.firstRemappedCell = static_cast<std::int32_t>(c);
+            }
+            d.lastRemappedCell = static_cast<std::int32_t>(c);
+        }
+        d.scaleMin = std::min(d.scaleMin, scale);
+        d.scaleMax = std::max(d.scaleMax, scale);
+    }
+
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        if (i >= depositWorkspace.cellId.size()) {
+            continue;
+        }
+        const int c = depositWorkspace.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!remapCell[kk]) {
+            continue;
+        }
+        state.mass[i] *= scaleByCell[kk];
+        d.particlesRemapped += 1u;
+    }
+
+    d.massDelta = d.massAfter - d.massBefore;
+    d.momentumResidualRms = residualCount > 0u ? std::sqrt(residual2 / static_cast<double>(residualCount)) : 0.0;
+    if (!std::isfinite(d.scaleMin)) {
+        d.scaleMin = 1.0;
+    }
+    if (!(d.scaleMax > 0.0)) {
+        d.scaleMax = 1.0;
+    }
+    d.applied = d.particlesRemapped > 0u;
+    d.allRemappedCellsNonEmpty = d.allRemappedCellsNonEmpty && d.skippedInvalidMassCells == 0u;
+    return d;
+}
+
+void attach_resampling_remap_apply_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingRemapApplyDiagnostics& remapDiagnostics) {
+    diagnostics.remapApplyAttempted = remapDiagnostics.attempted;
+    diagnostics.remapApplied = remapDiagnostics.applied;
+    diagnostics.remapCellsConsidered = remapDiagnostics.cellsConsidered;
+    diagnostics.remapCellsRemapped = remapDiagnostics.cellsRemapped;
+    diagnostics.remapParticlesRemapped = remapDiagnostics.particlesRemapped;
+    diagnostics.remapSkippedDryCells = remapDiagnostics.skippedDryCells;
+    diagnostics.remapSkippedEmptyCells = remapDiagnostics.skippedEmptyCells;
+    diagnostics.remapSkippedInvalidMassCells = remapDiagnostics.skippedInvalidMassCells;
+    diagnostics.remapTargetCellMass = remapDiagnostics.targetCellMass;
+    diagnostics.remapMassBefore = remapDiagnostics.massBefore;
+    diagnostics.remapMassAfter = remapDiagnostics.massAfter;
+    diagnostics.remapMassTargetSum = remapDiagnostics.massTargetSum;
+    diagnostics.remapMassDelta = remapDiagnostics.massDelta;
+    diagnostics.remapMomentumXBefore = remapDiagnostics.momentumXBefore;
+    diagnostics.remapMomentumYBefore = remapDiagnostics.momentumYBefore;
+    diagnostics.remapMomentumXAfter = remapDiagnostics.momentumXAfter;
+    diagnostics.remapMomentumYAfter = remapDiagnostics.momentumYAfter;
+    diagnostics.remapMomentumXTarget = remapDiagnostics.momentumXTarget;
+    diagnostics.remapMomentumYTarget = remapDiagnostics.momentumYTarget;
+    diagnostics.remapMomentumResidualRms = remapDiagnostics.momentumResidualRms;
+    diagnostics.remapMomentumResidualMaxAbs = remapDiagnostics.momentumResidualMaxAbs;
+    diagnostics.remapMaxCellMassRelResidual = remapDiagnostics.maxCellMassRelResidual;
+    diagnostics.remapScaleMin = remapDiagnostics.scaleMin;
+    diagnostics.remapScaleMax = remapDiagnostics.scaleMax;
+    diagnostics.firstRemappedCell = remapDiagnostics.firstRemappedCell;
+    diagnostics.lastRemappedCell = remapDiagnostics.lastRemappedCell;
+    diagnostics.remapAllRemappedCellsNonEmpty = remapDiagnostics.allRemappedCellsNonEmpty;
+}
+
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
                                         std::uint64_t numParticles,
                                         int numCells,

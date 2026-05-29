@@ -408,3 +408,41 @@ inserted=4 mass=4 fluid=125 inactive=7 poolFree=7 poorAfter=1
 ```
 
 See `doc/README_0120_RESAMPLING_MUTATING_INSERTION.md`.
+
+### Patch 0121 — local mass/momentum remap after insertion
+
+Patch 0121 adds the first local remap stage after controlled extraction and
+insertion.  It introduces:
+
+```text
+resamplingRemapEnable = false
+```
+
+The option is disabled by default and currently requires both
+`resamplingExtractionEnable = true` and `resamplingInsertionEnable = true`.
+When enabled, the code applies the 0119/0120 extraction-insertion cycle, builds
+the post-edit real-fluid deposit, then remaps each non-empty wet cell by a
+uniform mass scale:
+
+```text
+m_p <- s_c m_p,      s_c = M_target / M_c
+```
+
+Particle velocities are not changed in this first remap patch.  Therefore each
+remapped cell satisfies `M_c -> M_target` while preserving its cell velocity
+`U_c`; the target cell momentum is consequently `M_target U_c`.  Full thermal
+renormalisation / preservation of `E_th,c` remains a later patch.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_local_remap_smoke_0121.sh
+```
+
+Expected diagnostic core:
+
+```text
+remappedCells=2 particles=125 MRelRms~2e-17 scaleMin<1 scaleMax>1
+```
+
+See `doc/README_0121_RESAMPLING_LOCAL_REMAP.md`.
