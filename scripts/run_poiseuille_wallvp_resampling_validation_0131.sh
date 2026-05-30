@@ -21,6 +21,7 @@ POIS_BODY_ACCEL=${POIS_BODY_ACCEL:-0.02}
 POIS_SUMMARY_EVERY=${POIS_SUMMARY_EVERY:-10}
 POIS_DUMP_EVERY=${POIS_DUMP_EVERY:-100}
 POIS_THREADS=${POIS_THREADS:-8}
+POIS_PROJECTION_OPERATOR=${POIS_PROJECTION_OPERATOR:-channel_fv_cg}
 
 POIS_WALL_ACCOMMODATION=${POIS_WALL_ACCOMMODATION:-1.0}
 POIS_WALL_VP_GAMMA=${POIS_WALL_VP_GAMMA:-$POIS_GAMMA}
@@ -104,7 +105,7 @@ wallUxTop = 0.0
 wallUyTop = 0.0
 
 method = $method
-projectionOperator = periodic_x_wall_y_fv_cg
+projectionOperator = $POIS_PROJECTION_OPERATOR
 projectionMaxIterations = 500
 projectionTolerance = 1.0e-10
 projectionMomentumCorrectionEnable = true
