@@ -4,40 +4,53 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/taylor_green_resampling_0126}
+RUN_ROOT=${RUN_ROOT:-runs/taylor_green_random_population_resampling_0128}
+INIT_ROOT=${INIT_ROOT:-init/taylor_green_random_population_resampling_0128}
+STATE=${TG_INITIAL_STATE:-$INIT_ROOT/initial_state_tg_random_pop_0128.smpcd}
 TG_NX=${TG_NX:-32}
 TG_NY=${TG_NY:-32}
 TG_GAMMA=${TG_GAMMA:-20}
-TG_STEPS=${TG_STEPS:-1000}
+TG_STEPS=${TG_STEPS:-200}
 TG_DT=${TG_DT:-0.001}
-TG_U0=${TG_U0:-0.08}
 TG_KBT=${TG_KBT:-0.001}
-TG_SEED=${TG_SEED:-1260126}
-TG_SUMMARY_EVERY=${TG_SUMMARY_EVERY:-10}
-TG_DUMP_EVERY=${TG_DUMP_EVERY:-100}
+TG_SEED=${TG_SEED:-1280128}
+TG_SUMMARY_EVERY=${TG_SUMMARY_EVERY:-5}
+TG_DUMP_EVERY=${TG_DUMP_EVERY:-50}
 TG_THREADS=${TG_THREADS:-4}
-TG_RESAMP_POOR_FRACTION=${TG_RESAMP_POOR_FRACTION:-0.75}
-TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.25}
-TG_MASS_MIN=${TG_MASS_MIN:-0.25}
-TG_MASS_MAX=${TG_MASS_MAX:-4.0}
-TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-10}
-MATLAB_BIN=${MATLAB_BIN:-matlab}
-RUN_ANALYSIS=${RUN_ANALYSIS:-1}
-
-STATE="$RUN_ROOT/initial_state_tg_0126.smpcd"
-mkdir -p "$RUN_ROOT"
+TG_RESAMP_POOR_FRACTION=${TG_RESAMP_POOR_FRACTION:-0.90}
+TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.10}
+TG_MASS_MIN=${TG_MASS_MIN:-0.5}
+TG_MASS_MAX=${TG_MASS_MAX:-2.0}
+TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-1000}
 
 if [[ ! -x build/src_mpcd_base ]]; then
     ./scripts/build_src_mpcd_base.sh
 fi
 
-if ! command -v "$MATLAB_BIN" >/dev/null 2>&1; then
-    echo "MATLAB executable '$MATLAB_BIN' was not found. Set MATLAB_BIN=/path/to/matlab or generate $STATE manually." >&2
-    exit 127
+if [[ ! -f "$STATE" ]]; then
+    cat >&2 <<MSG
+Missing initial state:
+  $STATE
+
+Generate it from MATLAB before launching OpenMP. From the repository root, run:
+
+  cd matlab
+
+then in MATLAB:
+
+  prepare_taylor_green_random_population_resampling_0128( ...
+      'output', '../$STATE', ...
+      'Nx', $TG_NX, 'Ny', $TG_NY, 'gamma', $TG_GAMMA, ...
+      'populationStd', 6.0, 'populationMin', 4, 'populationMax', 36, ...
+      'kBT', $TG_KBT, 'seed', $TG_SEED);
+
+Then return to the repository root and rerun:
+  $0
+MSG
+    exit 2
 fi
 
-echo "[0126] Generating Taylor--Green V2 initial state: $STATE"
-"$MATLAB_BIN" -batch "addpath('matlab'); generate_taylor_green_resampling_state_0126('output','$STATE','Nx',$TG_NX,'Ny',$TG_NY,'gamma',$TG_GAMMA,'flowAmplitude',$TG_U0,'kBT',$TG_KBT,'seed',$TG_SEED);"
+mkdir -p "$RUN_ROOT"
 
 write_params() {
     local label=$1
@@ -91,7 +104,7 @@ PARAMS
     if [[ "$resampling" == "on" ]]; then
         cat >> "$params_file" <<PARAMS
 
-# Weighted-resampling core, fully periodic Taylor--Green validation.
+# Weighted-resampling random-population Taylor--Green validation.
 resamplingEnable = true
 resamplingTargetCellMass = $TG_GAMMA
 resamplingWetMaskMode = active_domain
@@ -119,7 +132,7 @@ run_case() {
     local resampling=$3
     local params_file
     params_file=$(write_params "$label" "$method" "$resampling")
-    echo "[0126] Running $label ($method, resampling=$resampling)"
+    echo "[0128] Running $label ($method, resampling=$resampling)"
     ./build/src_mpcd_base "$params_file"
 }
 
@@ -127,9 +140,11 @@ run_case classic classic off
 run_case q6 q6 off
 run_case q6_resampling q6 on
 
-if [[ "$RUN_ANALYSIS" == "1" || "$RUN_ANALYSIS" == "true" || "$RUN_ANALYSIS" == "on" ]]; then
-    echo "[0126] MATLAB post-processing"
-    "$MATLAB_BIN" -batch "addpath('matlab'); analyze_taylor_green_resampling_0126('$RUN_ROOT','makePlots',true);"
-fi
+cat <<MSG
+[0128] Taylor--Green random-population resampling validation completed.
+Run root: $RUN_ROOT
 
-echo "[0126] Taylor--Green resampling validation completed. Run root: $RUN_ROOT"
+MATLAB post-processing command from the repository root:
+  cd matlab
+  analyze_taylor_green_random_population_resampling_0128('../$RUN_ROOT');
+MSG

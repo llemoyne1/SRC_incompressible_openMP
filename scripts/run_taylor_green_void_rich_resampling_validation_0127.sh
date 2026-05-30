@@ -21,6 +21,7 @@ TG_RESAMP_POOR_FRACTION=${TG_RESAMP_POOR_FRACTION:-0.95}
 TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.05}
 TG_MASS_MIN=${TG_MASS_MIN:-0.5}
 TG_MASS_MAX=${TG_MASS_MAX:-2.0}
+TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-10}
 
 if [[ ! -x build/src_mpcd_base ]]; then
     ./scripts/build_src_mpcd_base.sh
@@ -103,6 +104,7 @@ PARAMS
         cat >> "$params_file" <<PARAMS
 
 # Weighted-resampling triggered void/rich validation.
+resamplingEnable = true
 resamplingTargetCellMass = $TG_GAMMA
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0
@@ -112,6 +114,7 @@ resamplingActiveFluidFractionThreshold = 0.5
 resamplingExtractionEnable = true
 resamplingInsertionEnable = true
 resamplingRemapEnable = true
+resamplingMassRenormalizationPeriod = $TG_MASS_RENORM_PERIOD
 resamplingThermalRenormalizationEnable = true
 resamplingMassGuardEnable = true
 resamplingParticleMassMin = $TG_MASS_MIN

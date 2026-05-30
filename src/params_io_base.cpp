@@ -309,10 +309,15 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingPoorCellMassFraction" || key == "resamplingPoorMassFraction") p.resamplingPoorCellMassFraction = parse_double(value, key);
         else if (key == "resamplingRichCellMassFraction" || key == "resamplingRichMassFraction") p.resamplingRichCellMassFraction = parse_double(value, key);
         else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
+        else if (key == "resamplingEnable" || key == "weightedResamplingEnable") p.resamplingEnable = parse_bool(value, key);
         else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
         else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
         else if (key == "resamplingRemapEnable") p.resamplingRemapEnable = parse_bool(value, key);
         else if (key == "resamplingThermalRenormalizationEnable" || key == "resamplingThermalRenormalisationEnable") p.resamplingThermalRenormalizationEnable = parse_bool(value, key);
+        else if (key == "resamplingMassRenormalizationPeriod" || key == "resamplingMassRenormalisationPeriod" ||
+                 key == "resamplingRemapPeriod" || key == "resamplingMassRemapPeriod") {
+            p.resamplingMassRenormalizationPeriod = parse_int(value, key);
+        }
         else if (key == "resamplingMassGuardEnable" || key == "resamplingMassSafetyEnable") p.resamplingMassGuardEnable = parse_bool(value, key);
         else if (key == "resamplingParticleMassMin" || key == "resamplingMassMin") p.resamplingParticleMassMin = parse_double(value, key);
         else if (key == "resamplingParticleMassMax" || key == "resamplingMassMax") p.resamplingParticleMassMax = parse_double(value, key);
@@ -783,14 +788,11 @@ void validate_simulation_params(const SimulationParams& p) {
     if (p.resamplingInsertionEnable && !p.resamplingExtractionEnable) {
         throw std::runtime_error("resamplingInsertionEnable currently requires resamplingExtractionEnable=true");
     }
-    if (p.resamplingRemapEnable && !p.resamplingInsertionEnable) {
-        throw std::runtime_error("resamplingRemapEnable currently requires resamplingInsertionEnable=true");
-    }
-    if (p.resamplingThermalRenormalizationEnable && !p.resamplingRemapEnable) {
-        throw std::runtime_error("resamplingThermalRenormalizationEnable currently requires resamplingRemapEnable=true");
-    }
     if (p.resamplingMassGuardEnable && !p.resamplingRemapEnable) {
         throw std::runtime_error("resamplingMassGuardEnable currently requires resamplingRemapEnable=true");
+    }
+    if (p.resamplingMassRenormalizationPeriod < 0) {
+        throw std::runtime_error("resamplingMassRenormalizationPeriod must be non-negative; use 0 to disable mass remap/guard");
     }
     if (!(p.resamplingParticleMassMin >= 0.0)) {
         throw std::runtime_error("resamplingParticleMassMin must be non-negative");

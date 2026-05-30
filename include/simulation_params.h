@@ -258,25 +258,33 @@ struct SimulationParams {
     double resamplingRichCellMassFraction = 1.5;
     double resamplingActiveFluidFractionThreshold = 0.5;
 
-    // First mutating resampling switches.  Disabled by default so all legacy
-    // SRC/Q6 validations remain unchanged.  resamplingExtractionEnable converts
-    // selected donor particles Fluid->Inactive.  resamplingInsertionEnable then
-    // reactivates free slots Inactive->Fluid in receiver cells.
-    // resamplingRemapEnable performs the first local conservative remap stage:
-    // in each non-empty wet cell it scales all true-fluid particle masses so
-    // M_c -> resamplingTargetCellMass while keeping velocities unchanged, hence
-    // preserving the cell velocity U_c.  resamplingThermalRenormalizationEnable
-    // then rescales relative velocities in those remapped cells so the local
-    // thermal energy E_th,c measured just before mass scaling is restored.
+    // Mutating weighted-resampling controls.  The top-level
+    // resamplingEnable switch gates all role-changing operations so a run can
+    // return to pure classic SRC/Q6 while keeping diagnostic columns and even
+    // individual sub-switches present in params.kv.
+    //
+    // Discrete resampling is intended to run every step when enabled:
+    //   Fluid -> Inactive  extraction from rich donor cells;
+    //   Inactive -> Fluid  insertion into poor receiver cells;
+    //   Latent -> Fluid    optional wet/dry activation.
+    //
+    // Mass renormalisation is deliberately cadenced by
+    // resamplingMassRenormalizationPeriod.  K=1 reproduces the historical
+    // behaviour, K>1 applies remap/mass-guard every K steps, and K=0 disables
+    // the mass renormalisation stages even if their sub-switches are true.
+    // Thermal renormalisation remains a per-step correction when enabled.
+    bool resamplingEnable = false;
     bool resamplingExtractionEnable = false;
     bool resamplingInsertionEnable = false;
     bool resamplingRemapEnable = false;
     bool resamplingThermalRenormalizationEnable = false;
+    int resamplingMassRenormalizationPeriod = 1;
 
-    // Optional particle-mass guard applied after the local M,U,E_th remap.
-    // It solves a bounded per-cell mass projection so mMin <= m_p <= mMax
-    // and sum_p m_p = M_target whenever feasible, then recenters/rescales
-    // velocities so the cell velocity and relative thermal energy are restored.
+    // Optional particle-mass guard applied on mass-renormalisation steps after
+    // the local remap.  It solves a bounded per-cell mass projection so
+    // mMin <= m_p <= mMax and sum_p m_p = M_target whenever feasible, then
+    // recenters/rescales velocities so the cell velocity and relative thermal
+    // energy are restored.
     bool resamplingMassGuardEnable = false;
     double resamplingParticleMassMin = 0.25;
     double resamplingParticleMassMax = 4.0;

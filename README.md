@@ -563,3 +563,28 @@ runs/taylor_green_resampling_0126/analysis/tg_summary.csv
 ```
 
 See `doc/README_0126_TAYLOR_GREEN_RESAMPLING_VALIDATION.md`.
+
+## 0129 resampling cadence and global switch
+
+Patch 0129 separates the three operational levels explicitly:
+
+```text
+resamplingEnable = true/false                 # gates role-changing resampling
+resamplingMassRenormalizationPeriod = K        # K=1 old behaviour, K>1 periodic, K=0 disabled
+resamplingThermalRenormalizationEnable = true  # thermal renormalisation is attempted every step
+```
+
+When `resamplingEnable=false`, the mutating resampling path is bypassed even if
+individual sub-switches remain present in `params.kv`.  When enabled, extraction,
+insertion and latent activation can operate every step, while mass remap and mass
+guard are only applied on steps satisfying `step % K == 0`.  The thermal
+renormalisation remains per-step so discrete role changes do not create an
+uncontrolled thermal drift between mass-remap events.
+
+Smoke test:
+
+```bash
+./scripts/run_resampling_cadence_smoke_0129.sh
+```
+
+See `doc/README_0129_RESAMPLING_CADENCE_AND_SWITCH.md`.

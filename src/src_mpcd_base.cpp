@@ -1,10 +1,79 @@
 #include "src_mpcd_base.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace mpcd {
 namespace {
+
+
+bool is_mass_renormalization_step(const SimulationParams& params, std::uint64_t step) {
+    return params.resamplingMassRenormalizationPeriod > 0 &&
+           (step % static_cast<std::uint64_t>(params.resamplingMassRenormalizationPeriod) == 0u);
+}
+
+void capture_resampling_thermal_reference(const ParticleState& state,
+                                          const WeightedRealFluidDepositWorkspace& deposit,
+                                          std::vector<double>& targetEnergy,
+                                          std::vector<std::uint8_t>& targetCell) {
+    const int nc = deposit.allocatedCells;
+    targetEnergy.assign(static_cast<std::size_t>(std::max(0, nc)), 0.0);
+    targetCell.assign(static_cast<std::size_t>(std::max(0, nc)), 0u);
+    if (nc <= 0 || deposit.wetCell.size() != static_cast<std::size_t>(nc) ||
+        deposit.count.size() != static_cast<std::size_t>(nc)) {
+        return;
+    }
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (deposit.wetCell[kk] && deposit.count[kk] > 0u && deposit.mass[kk] > 0.0) {
+            targetCell[kk] = 1u;
+        }
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i) || i >= deposit.cellId.size()) {
+            continue;
+        }
+        const int c = deposit.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!targetCell[kk]) {
+            continue;
+        }
+        const double dux = state.vx[i] - deposit.ux[kk];
+        const double duy = state.vy[i] - deposit.uy[kk];
+        targetEnergy[kk] += 0.5 * state.mass[i] * (dux * dux + duy * duy);
+    }
+}
+
+void install_resampling_thermal_reference(WeightedRealFluidDepositWorkspace& deposit,
+                                          const std::vector<double>& targetEnergy,
+                                          const std::vector<std::uint8_t>& targetCell) {
+    if (targetEnergy.empty() || targetEnergy.size() != targetCell.size()) {
+        return;
+    }
+    if (deposit.remapThermalEnergyTarget.size() != targetEnergy.size() ||
+        deposit.remapThermalCell.size() != targetCell.size()) {
+        return;
+    }
+    deposit.remapThermalEnergyTarget = targetEnergy;
+    deposit.remapThermalCell = targetCell;
+}
+
+ResamplingRemapApplyDiagnostics make_thermal_reference_gate(const std::vector<std::uint8_t>& targetCell) {
+    ResamplingRemapApplyDiagnostics d{};
+    d.attempted = true;
+    for (const std::uint8_t v : targetCell) {
+        if (v) {
+            d.applied = true;
+            break;
+        }
+    }
+    return d;
+}
 
 void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) {
     if (!params.keepMeanFlowEnable) {
@@ -83,73 +152,100 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
     attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
 
+    if (!params.resamplingEnable) {
+        return result;
+    }
+
+    std::vector<double> preEditThermalEnergyTarget;
+    std::vector<std::uint8_t> preEditThermalCell;
+    if (params.resamplingThermalRenormalizationEnable) {
+        capture_resampling_thermal_reference(
+            state, workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell);
+    }
+
+    bool roleOrPositionEdited = false;
     ResamplingLatentActivationDiagnostics latentActivation{};
     if (params.resamplingLatentActivationEnable && result.resampling.candidateListsBuilt) {
         latentActivation = apply_resampling_latent_activation(
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
-        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-        result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
-        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
-        attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
+        roleOrPositionEdited = roleOrPositionEdited || latentActivation.applied;
     }
 
+    ResamplingExtractionApplyDiagnostics extractionApply{};
+    ResamplingInsertionApplyDiagnostics insertionApply{};
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
-        const ResamplingExtractionApplyDiagnostics extractionApply =
+        extractionApply =
             apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
+        roleOrPositionEdited = roleOrPositionEdited || extractionApply.applied;
 
-        ResamplingInsertionApplyDiagnostics insertionApply{};
         if (params.resamplingInsertionEnable && extractionApply.applied) {
             insertionApply = apply_resampling_insertion_operations(
                 state, workspace.resamplingPool, workspace.resampling, grid);
+            roleOrPositionEdited = roleOrPositionEdited || insertionApply.applied;
         }
+    }
 
-        // Rebuild the pool from roles after extraction/insertion, then compute
-        // the post-edit real-fluid deposit.  If requested, apply the first
-        // local mass/momentum remap on that post-edit deposit and deposit once
-        // more so summaries report the final transported fluid.
+    if (roleOrPositionEdited) {
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+    }
 
-        ResamplingRemapApplyDiagnostics remapApply{};
-        ResamplingThermalRenormalizationDiagnostics thermalApply{};
-        ResamplingMassGuardDiagnostics massGuardApply{};
-        if (params.resamplingRemapEnable && insertionApply.applied) {
-            remapApply = apply_resampling_local_mass_momentum_remap(
-                state, workspace.resampling, result.resampling);
-            if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
-                thermalApply = apply_resampling_local_thermal_renormalization(
-                    state, workspace.resampling, remapApply);
-            }
-            if (params.resamplingMassGuardEnable && remapApply.applied) {
-                massGuardApply = apply_resampling_particle_mass_guards(
-                    state, params, workspace.resampling, result.resampling);
-            }
+    const bool massRenormalizationStep = is_mass_renormalization_step(params, step);
+    ResamplingRemapApplyDiagnostics remapApply{};
+    ResamplingThermalRenormalizationDiagnostics thermalApply{};
+    ResamplingMassGuardDiagnostics massGuardApply{};
+
+    if (params.resamplingRemapEnable && massRenormalizationStep) {
+        remapApply = apply_resampling_local_mass_momentum_remap(
+            state, workspace.resampling, result.resampling);
+        if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
+            thermalApply = apply_resampling_local_thermal_renormalization(
+                state, workspace.resampling, remapApply);
+        }
+        if (params.resamplingMassGuardEnable && remapApply.applied) {
+            massGuardApply = apply_resampling_particle_mass_guards(
+                state, params, workspace.resampling, result.resampling);
+        }
+        result.resampling = deposit_weighted_real_fluid(
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+    }
+
+    if (params.resamplingThermalRenormalizationEnable && !thermalApply.attempted) {
+        install_resampling_thermal_reference(
+            workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell);
+        const ResamplingRemapApplyDiagnostics thermalGate = make_thermal_reference_gate(preEditThermalCell);
+        thermalApply = apply_resampling_local_thermal_renormalization(
+            state, workspace.resampling, thermalGate);
+        if (thermalApply.applied) {
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
             attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
         }
+    }
 
+    if (extractionApply.attempted) {
         attach_resampling_extraction_apply_diagnostics(result.resampling, extractionApply);
-        if (insertionApply.attempted) {
-            attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
-        }
-        if (remapApply.attempted) {
-            attach_resampling_remap_apply_diagnostics(result.resampling, remapApply);
-        }
-        if (thermalApply.attempted) {
-            attach_resampling_thermal_renormalization_diagnostics(result.resampling, thermalApply);
-        }
-        if (massGuardApply.attempted) {
-            attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
-        }
-        if (latentActivation.attempted) {
-            attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
-        }
+    }
+    if (insertionApply.attempted) {
+        attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
+    }
+    if (remapApply.attempted) {
+        attach_resampling_remap_apply_diagnostics(result.resampling, remapApply);
+    }
+    if (thermalApply.attempted) {
+        attach_resampling_thermal_renormalization_diagnostics(result.resampling, thermalApply);
+    }
+    if (massGuardApply.attempted) {
+        attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
+    }
+    if (latentActivation.attempted) {
+        attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
     }
     return result;
 }

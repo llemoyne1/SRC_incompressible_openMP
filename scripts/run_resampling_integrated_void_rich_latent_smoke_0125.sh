@@ -120,6 +120,7 @@ bcY = periodic
 method = classic
 thermostatEnable = false
 kBT = 0.01
+resamplingEnable = true
 resamplingTargetCellMass = 4.0
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0
