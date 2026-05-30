@@ -328,6 +328,16 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingLatentActivationEnable" || key == "resamplingLatentToFluidEnable") p.resamplingLatentActivationEnable = parse_bool(value, key);
         else if (key == "resamplingLatentActivationMaxPerCell") p.resamplingLatentActivationMaxPerCell = parse_int(value, key);
         else if (key == "resamplingLatentActivationParticleMass" || key == "resamplingLatentParticleMass") p.resamplingLatentActivationParticleMass = parse_double(value, key);
+        else if (key == "resamplingPopulationGuardEnable" || key == "resamplingNGuardEnable" || key == "resamplingSupportGuardEnable") p.resamplingPopulationGuardEnable = parse_bool(value, key);
+        else if (key == "resamplingPopulationNMin" || key == "resamplingNMin") p.resamplingPopulationNMin = parse_int(value, key);
+        else if (key == "resamplingPopulationNTarget" || key == "resamplingNTarget") p.resamplingPopulationNTarget = parse_int(value, key);
+        else if (key == "resamplingPopulationNMax" || key == "resamplingNMax") p.resamplingPopulationNMax = parse_int(value, key);
+        else if (key == "resamplingPopulationNMinFraction" || key == "resamplingNMinFraction") p.resamplingPopulationNMinFraction = parse_double(value, key);
+        else if (key == "resamplingPopulationNMaxFraction" || key == "resamplingNMaxFraction") p.resamplingPopulationNMaxFraction = parse_double(value, key);
+        else if (key == "resamplingPopulationMaxSplitsPerCell" || key == "resamplingNMaxSplitsPerCell") p.resamplingPopulationMaxSplitsPerCell = parse_int(value, key);
+        else if (key == "resamplingPopulationMaxSplitsPerStep" || key == "resamplingNMaxSplitsPerStep") p.resamplingPopulationMaxSplitsPerStep = parse_int(value, key);
+        else if (key == "resamplingPopulationMaxExtractionsPerCell" || key == "resamplingNMaxExtractionsPerCell") p.resamplingPopulationMaxExtractionsPerCell = parse_int(value, key);
+        else if (key == "resamplingPopulationMaxExtractionsPerStep" || key == "resamplingNMaxExtractionsPerStep") p.resamplingPopulationMaxExtractionsPerStep = parse_int(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
@@ -823,6 +833,21 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (!(p.resamplingLatentActivationParticleMass >= 0.0)) {
         throw std::runtime_error("resamplingLatentActivationParticleMass must be non-negative; use 0 to infer target/maxPerCell");
+    }
+    if (p.resamplingPopulationGuardEnable) {
+        if (p.resamplingPopulationNMin < 0 || p.resamplingPopulationNTarget < 0 || p.resamplingPopulationNMax < 0) {
+            throw std::runtime_error("resamplingPopulationNMin/NTarget/NMax must be non-negative; use 0 to infer defaults");
+        }
+        if (!(p.resamplingPopulationNMinFraction > 0.0 && p.resamplingPopulationNMinFraction <= 1.0)) {
+            throw std::runtime_error("resamplingPopulationNMinFraction must lie in (0,1]");
+        }
+        if (!(p.resamplingPopulationNMaxFraction >= 1.0)) {
+            throw std::runtime_error("resamplingPopulationNMaxFraction must be >= 1");
+        }
+        if (p.resamplingPopulationMaxSplitsPerCell < 0 || p.resamplingPopulationMaxSplitsPerStep < 0 ||
+            p.resamplingPopulationMaxExtractionsPerCell < 0 || p.resamplingPopulationMaxExtractionsPerStep < 0) {
+            throw std::runtime_error("resampling population guard per-cell/per-step limits must be non-negative");
+        }
     }
     if (p.summaryEvery <= 0) {
         throw std::runtime_error("summaryEvery must be positive");

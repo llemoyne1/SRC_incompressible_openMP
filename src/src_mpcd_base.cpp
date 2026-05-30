@@ -197,6 +197,22 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     bool roleOrPositionEdited = false;
+    ResamplingPopulationGuardDiagnostics populationGuard{};
+    if (params.resamplingPopulationGuardEnable) {
+        populationGuard = apply_resampling_population_support_guard(
+            state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
+        roleOrPositionEdited = roleOrPositionEdited || populationGuard.applied;
+    }
+
+    if (roleOrPositionEdited) {
+        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        result.resampling = deposit_weighted_real_fluid(
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+            params.resamplingExtractionEnable);
+        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+    }
+
     ResamplingLatentActivationDiagnostics latentActivation{};
     if (params.resamplingLatentActivationEnable && result.resampling.candidateListsBuilt) {
         latentActivation = apply_resampling_latent_activation(
@@ -279,6 +295,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     if (latentActivation.attempted) {
         attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
+    }
+    if (populationGuard.attempted) {
+        attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
     }
     return result;
 }

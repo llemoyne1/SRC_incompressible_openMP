@@ -401,6 +401,37 @@ struct RuntimeSummary {
     std::int32_t resampLastMassGuardedCell = -1;
     int resampMassGuardAllCellsFeasible = 1;
 
+    int resampPopulationGuardAttempted = 0;
+    int resampPopulationGuardApplied = 0;
+    int resampPopulationGuardNMin = 0;
+    int resampPopulationGuardNTarget = 0;
+    int resampPopulationGuardNMax = 0;
+    std::uint64_t resampPopulationGuardWetCellsConsidered = 0;
+    std::uint64_t resampPopulationGuardUnderfullCells = 0;
+    std::uint64_t resampPopulationGuardEmptyUnderfullCells = 0;
+    std::uint64_t resampPopulationGuardOverfullCells = 0;
+    std::uint64_t resampPopulationGuardCellsSplit = 0;
+    std::uint64_t resampPopulationGuardCellsExtracted = 0;
+    std::uint64_t resampPopulationGuardSplitParticlesCreated = 0;
+    std::uint64_t resampPopulationGuardExtractedParticles = 0;
+    std::uint64_t resampPopulationGuardSkippedNoFreeSlots = 0;
+    std::uint64_t resampPopulationGuardSkippedEmptyCells = 0;
+    std::uint64_t resampPopulationGuardSkippedSplitLimit = 0;
+    std::uint64_t resampPopulationGuardSkippedExtractionLimit = 0;
+    std::uint64_t resampPopulationGuardFreeSlotsBefore = 0;
+    std::uint64_t resampPopulationGuardFreeSlotsAfter = 0;
+    std::int64_t resampPopulationGuardActiveParticleDelta = 0;
+    double resampPopulationGuardSplitMass = 0.0;
+    double resampPopulationGuardExtractedMass = 0.0;
+    double resampPopulationGuardWetNMeanBefore = 0.0;
+    double resampPopulationGuardWetNMeanAfter = 0.0;
+    double resampPopulationGuardWetNStdBefore = 0.0;
+    double resampPopulationGuardWetNStdAfter = 0.0;
+    std::uint32_t resampPopulationGuardWetNMinBefore = 0;
+    std::uint32_t resampPopulationGuardWetNMinAfter = 0;
+    double resampPopulationGuardWetLowNFractionBefore = 0.0;
+    double resampPopulationGuardWetLowNFractionAfter = 0.0;
+
     int resampLatentActivationAttempted = 0;
     int resampLatentActivationApplied = 0;
     std::uint64_t resampLatentActivationReceiverCellsConsidered = 0;

@@ -306,6 +306,28 @@ struct SimulationParams {
     int resamplingLatentActivationMaxPerCell = 1;
     double resamplingLatentActivationParticleMass = 0.0; // <=0: targetCellMass / maxPerCell
 
+    // Population-support guard matching the MATLAB weighted-resampling logic.
+    // This is a discrete resampling stage, intended to run every step when
+    // resampling is enabled.  It controls the active particle support N_c,
+    // independently from the mass remap M_c -> M_target:
+    //   N_c < NMin : split local heavy Fluid particles into inactive slots
+    //                until NTarget is reached when possible;
+    //   N_c > NMax : extract excess Fluid particles to Inactive until
+    //                NTarget is reached.
+    // Non-positive N thresholds are inferred from the current target cell
+    // mass and mean active particle mass; with m≈1 this gives the MATLAB
+    // default 14/20/26 for gamma=20.
+    bool resamplingPopulationGuardEnable = false;
+    int resamplingPopulationNMin = 0;
+    int resamplingPopulationNTarget = 0;
+    int resamplingPopulationNMax = 0;
+    double resamplingPopulationNMinFraction = 0.70;
+    double resamplingPopulationNMaxFraction = 1.30;
+    int resamplingPopulationMaxSplitsPerCell = 16;
+    int resamplingPopulationMaxSplitsPerStep = 200000;
+    int resamplingPopulationMaxExtractionsPerCell = 64;
+    int resamplingPopulationMaxExtractionsPerStep = 200000;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

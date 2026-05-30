@@ -8,12 +8,12 @@ RUN_ROOT=${RUN_ROOT:-runs/backward_step_resampling_0136}
 INIT_ROOT=${INIT_ROOT:-init/backward_step_resampling_0136}
 STATE=${BSTEP_INITIAL_STATE:-$INIT_ROOT/initial_state_backward_step_0136.smpcd}
 
-BSTEP_LX=${BSTEP_LX:-3.0}
+BSTEP_LX=${BSTEP_LX:-4.0}
 BSTEP_LY=${BSTEP_LY:-1.0}
-BSTEP_NX=${BSTEP_NX:-144}
-BSTEP_NY=${BSTEP_NY:-56}
+BSTEP_NX=${BSTEP_NX:-192}
+BSTEP_NY=${BSTEP_NY:-48}
 BSTEP_GAMMA=${BSTEP_GAMMA:-20}
-BSTEP_STEPS=${BSTEP_STEPS:-12000}
+BSTEP_STEPS=${BSTEP_STEPS:-3000}
 BSTEP_DT=${BSTEP_DT:-0.001}
 BSTEP_KBT=${BSTEP_KBT:-0.001}
 BSTEP_SEED=${BSTEP_SEED:-1360136}
@@ -26,7 +26,7 @@ BSTEP_STEP_XMAX=${BSTEP_STEP_XMAX:-0.8}
 BSTEP_STEP_HEIGHT=${BSTEP_STEP_HEIGHT:-0.5}
 BSTEP_FRACTION_SAMPLES=${BSTEP_FRACTION_SAMPLES:-4}
 
-BSTEP_INLET_UX=${BSTEP_INLET_UX:-0.5}
+BSTEP_INLET_UX=${BSTEP_INLET_UX:-0.08}
 BSTEP_INLET_PROFILE=${BSTEP_INLET_PROFILE:-flat_taper_y}
 BSTEP_INLET_TAPER_CELLS=${BSTEP_INLET_TAPER_CELLS:-2.0}
 BSTEP_INLET_RESERVOIR_CELLS=${BSTEP_INLET_RESERVOIR_CELLS:-3}
@@ -194,6 +194,14 @@ PARAMS
 
 # Weighted-resampling backward-step validation.
 resamplingEnable = true
+resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
+resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
+resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
+resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
+resamplingPopulationMaxSplitsPerCell = ${RESAMP_POP_MAX_SPLITS_PER_CELL:-16}
+resamplingPopulationMaxSplitsPerStep = ${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}
+resamplingPopulationMaxExtractionsPerCell = ${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}
+resamplingPopulationMaxExtractionsPerStep = ${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}
 resamplingTargetCellMass = $BSTEP_GAMMA
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0

@@ -594,6 +594,339 @@ void attach_resampling_insertion_apply_diagnostics(
 }
 
 
+namespace {
+
+void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
+                                const ParticleState& state,
+                                int nc) {
+    ws.cellParticleOffsets.assign(static_cast<std::size_t>(nc) + 1u, 0u);
+    for (int c = 0; c < nc; ++c) {
+        ws.cellParticleOffsets[static_cast<std::size_t>(c) + 1u] =
+            ws.cellParticleOffsets[static_cast<std::size_t>(c)] +
+            static_cast<std::uint64_t>(ws.count[static_cast<std::size_t>(c)]);
+    }
+    ws.cellParticleIndices.assign(static_cast<std::size_t>(ws.cellParticleOffsets.back()),
+                                  kInvalidParticleIndex);
+    ws.cellParticleCursor.assign(ws.cellParticleOffsets.begin(), ws.cellParticleOffsets.end() - 1);
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        if (i >= ws.cellId.size()) {
+            continue;
+        }
+        const int c = ws.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        const std::size_t cc = static_cast<std::size_t>(c);
+        const std::size_t pos = static_cast<std::size_t>(ws.cellParticleCursor[cc]++);
+        if (pos < ws.cellParticleIndices.size()) {
+            ws.cellParticleIndices[pos] = static_cast<std::uint64_t>(i);
+        }
+    }
+}
+
+void accumulate_wet_population_stats(const WeightedRealFluidDepositWorkspace& ws,
+                                      const std::vector<std::uint32_t>& counts,
+                                      int nMin,
+                                      std::uint64_t& wetCells,
+                                      std::uint32_t& minWetN,
+                                      double& meanWetN,
+                                      double& stdWetN,
+                                      double& lowFraction) {
+    wetCells = 0u;
+    minWetN = std::numeric_limits<std::uint32_t>::max();
+    double sum = 0.0;
+    double sum2 = 0.0;
+    std::uint64_t low = 0u;
+    const int nc = ws.allocatedCells;
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (kk >= ws.wetCell.size() || !ws.wetCell[kk]) {
+            continue;
+        }
+        const std::uint32_t n = counts[kk];
+        wetCells += 1u;
+        minWetN = std::min(minWetN, n);
+        const double dn = static_cast<double>(n);
+        sum += dn;
+        sum2 += dn * dn;
+        if (static_cast<int>(n) < nMin) {
+            low += 1u;
+        }
+    }
+    if (wetCells == 0u) {
+        minWetN = 0u;
+        meanWetN = 0.0;
+        stdWetN = 0.0;
+        lowFraction = 0.0;
+        return;
+    }
+    const double inv = 1.0 / static_cast<double>(wetCells);
+    meanWetN = sum * inv;
+    stdWetN = std::sqrt(std::max(0.0, sum2 * inv - meanWetN * meanWetN));
+    lowFraction = static_cast<double>(low) * inv;
+}
+
+} // namespace
+
+ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    const SimulationParams& params,
+    const CellGrid& /*grid*/) {
+    validate_particle_state(state, "apply_resampling_population_support_guard");
+    ensure_particle_roles(state, ParticleRole::Fluid);
+
+    ResamplingPopulationGuardDiagnostics d{};
+    d.attempted = true;
+    d.freeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+
+    const int nc = depositWorkspace.allocatedCells;
+    if (nc <= 0 || depositWorkspace.count.size() != static_cast<std::size_t>(nc) ||
+        depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc)) {
+        return d;
+    }
+
+    const double meanParticleMass = depositDiagnostics.particleMassMean > 0.0
+        ? depositDiagnostics.particleMassMean : 1.0;
+    const int inferredTarget = std::max(1, static_cast<int>(std::llround(
+        (depositDiagnostics.targetCellMass > 0.0 ? depositDiagnostics.targetCellMass : meanParticleMass) /
+        meanParticleMass)));
+    d.nTarget = params.resamplingPopulationNTarget > 0
+        ? params.resamplingPopulationNTarget : inferredTarget;
+    d.nMin = params.resamplingPopulationNMin > 0
+        ? params.resamplingPopulationNMin
+        : std::max(1, static_cast<int>(std::floor(params.resamplingPopulationNMinFraction * static_cast<double>(d.nTarget))));
+    d.nMax = params.resamplingPopulationNMax > 0
+        ? params.resamplingPopulationNMax
+        : std::max(d.nTarget, static_cast<int>(std::ceil(params.resamplingPopulationNMaxFraction * static_cast<double>(d.nTarget))));
+    d.nMin = std::min(d.nMin, d.nTarget);
+    d.nMax = std::max(d.nMax, d.nTarget);
+
+    std::vector<std::uint32_t> countAfter = depositWorkspace.count;
+    accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
+                                    d.wetCellsConsidered, d.wetNMinBefore,
+                                    d.wetNMeanBefore, d.wetNStdBefore,
+                                    d.wetLowNFractionBefore);
+    if (d.wetCellsConsidered == 0u) {
+        d.freeSlotsAfter = d.freeSlotsBefore;
+        return d;
+    }
+
+    ensure_cell_particle_index(depositWorkspace, state, nc);
+
+    std::uint64_t extractionBudget = params.resamplingPopulationMaxExtractionsPerStep > 0
+        ? static_cast<std::uint64_t>(params.resamplingPopulationMaxExtractionsPerStep)
+        : std::numeric_limits<std::uint64_t>::max();
+    const int maxExtractPerCell = params.resamplingPopulationMaxExtractionsPerCell > 0
+        ? params.resamplingPopulationMaxExtractionsPerCell : std::numeric_limits<int>::max();
+
+    for (int c = 0; c < nc && extractionBudget > 0u; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.wetCell[kk]) {
+            continue;
+        }
+        if (static_cast<int>(countAfter[kk]) <= d.nMax) {
+            continue;
+        }
+        d.overfullCells += 1u;
+        int need = static_cast<int>(countAfter[kk]) - d.nTarget;
+        if (need <= 0) {
+            continue;
+        }
+        const int allowed = std::min(need, maxExtractPerCell);
+        int doneCell = 0;
+        const std::uint64_t begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+            ? depositWorkspace.cellParticleOffsets[kk] : 0u;
+        const std::uint64_t end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+            ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+        while (doneCell < allowed && extractionBudget > 0u && static_cast<int>(countAfter[kk]) > d.nTarget) {
+            std::uint64_t victim64 = kInvalidParticleIndex;
+            std::uint64_t survivor64 = kInvalidParticleIndex;
+            double victimMass = std::numeric_limits<double>::infinity();
+            double survivorMass = -1.0;
+            for (std::uint64_t pp = begin; pp < end; ++pp) {
+                if (pp >= depositWorkspace.cellParticleIndices.size()) break;
+                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
+                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
+                const std::size_t pi = static_cast<std::size_t>(pi64);
+                if (!is_fluid_particle(state, pi)) continue;
+                const double mp = state.mass[pi];
+                if (!(mp > 0.0)) continue;
+                if (mp < victimMass) { victimMass = mp; victim64 = pi64; }
+                if (mp > survivorMass) { survivorMass = mp; survivor64 = pi64; }
+            }
+            if (victim64 == kInvalidParticleIndex || survivor64 == kInvalidParticleIndex || victim64 == survivor64) {
+                d.skippedExtractionLimit += 1u;
+                break;
+            }
+            const std::size_t victim = static_cast<std::size_t>(victim64);
+            const std::size_t survivor = static_cast<std::size_t>(survivor64);
+            const double mv = state.mass[victim];
+            const double ms = state.mass[survivor];
+            const double mNew = mv + ms;
+            if (!(mNew > 0.0)) {
+                d.skippedExtractionLimit += 1u;
+                break;
+            }
+            const double vxNew = (ms * state.vx[survivor] + mv * state.vx[victim]) / mNew;
+            const double vyNew = (ms * state.vy[survivor] + mv * state.vy[victim]) / mNew;
+            d.extractedMass += mv;
+            d.extractedMomentumX += mv * state.vx[victim];
+            d.extractedMomentumY += mv * state.vy[victim];
+            state.mass[survivor] = mNew;
+            state.vx[survivor] = vxNew;
+            state.vy[survivor] = vyNew;
+            set_particle_role(state, victim, ParticleRole::Inactive);
+            resampling_pool_push_free_slot(pool, victim64);
+            countAfter[kk] -= 1u;
+            d.extractedParticles += 1u;
+            doneCell += 1;
+            extractionBudget -= 1u;
+        }
+        if (doneCell > 0) {
+            d.cellsExtracted += 1u;
+        }
+        if (need > doneCell) {
+            d.skippedExtractionLimit += static_cast<std::uint64_t>(need - doneCell);
+        }
+    }
+
+    std::uint64_t splitBudget = params.resamplingPopulationMaxSplitsPerStep > 0
+        ? static_cast<std::uint64_t>(params.resamplingPopulationMaxSplitsPerStep)
+        : std::numeric_limits<std::uint64_t>::max();
+    const int maxSplitPerCell = params.resamplingPopulationMaxSplitsPerCell > 0
+        ? params.resamplingPopulationMaxSplitsPerCell : std::numeric_limits<int>::max();
+
+    for (int c = 0; c < nc && splitBudget > 0u; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.wetCell[kk]) {
+            continue;
+        }
+        if (static_cast<int>(countAfter[kk]) >= d.nMin) {
+            continue;
+        }
+        d.underfullCells += 1u;
+        if (countAfter[kk] == 0u) {
+            d.emptyUnderfullCells += 1u;
+            d.skippedEmptyCells += 1u;
+            continue;
+        }
+        int need = d.nTarget - static_cast<int>(countAfter[kk]);
+        if (need <= 0) {
+            continue;
+        }
+        const int allowed = std::min(need, maxSplitPerCell);
+        int doneCell = 0;
+        const std::uint64_t begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+            ? depositWorkspace.cellParticleOffsets[kk] : 0u;
+        const std::uint64_t end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+            ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+        while (doneCell < allowed && splitBudget > 0u && static_cast<int>(countAfter[kk]) < d.nTarget) {
+            if (!resampling_pool_has_free_slot(pool)) {
+                d.skippedNoFreeSlots += static_cast<std::uint64_t>(allowed - doneCell);
+                break;
+            }
+            std::uint64_t parent64 = kInvalidParticleIndex;
+            double parentMass = -1.0;
+            for (std::uint64_t pp = begin; pp < end; ++pp) {
+                if (pp >= depositWorkspace.cellParticleIndices.size()) break;
+                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
+                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
+                const std::size_t pi = static_cast<std::size_t>(pi64);
+                if (!is_fluid_particle(state, pi)) continue;
+                const double mp = state.mass[pi];
+                if (mp > parentMass) { parentMass = mp; parent64 = pi64; }
+            }
+            if (parent64 == kInvalidParticleIndex || !(parentMass > 0.0)) {
+                d.skippedSplitLimit += 1u;
+                break;
+            }
+            const std::uint64_t child64 = resampling_pool_pop_free_slot(pool);
+            if (child64 == kInvalidParticleIndex || child64 >= state.Np) {
+                d.skippedNoFreeSlots += 1u;
+                break;
+            }
+            const std::size_t parent = static_cast<std::size_t>(parent64);
+            const std::size_t child = static_cast<std::size_t>(child64);
+            const double halfMass = 0.5 * state.mass[parent];
+            state.mass[parent] = halfMass;
+            state.x[child] = state.x[parent];
+            state.y[child] = state.y[parent];
+            state.vx[child] = state.vx[parent];
+            state.vy[child] = state.vy[parent];
+            state.mass[child] = halfMass;
+            state.type[child] = state.type[parent];
+            set_particle_role(state, child, ParticleRole::Fluid);
+            pool.fluidSlots.push_back(child64);
+            countAfter[kk] += 1u;
+            d.splitParticlesCreated += 1u;
+            d.splitMass += halfMass;
+            d.splitMomentumX += halfMass * state.vx[child];
+            d.splitMomentumY += halfMass * state.vy[child];
+            doneCell += 1;
+            splitBudget -= 1u;
+        }
+        if (doneCell > 0) {
+            d.cellsSplit += 1u;
+        }
+        if (need > doneCell) {
+            d.skippedSplitLimit += static_cast<std::uint64_t>(need - doneCell);
+        }
+    }
+
+    std::uint64_t wetAfter = 0u;
+    accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
+                                    wetAfter, d.wetNMinAfter, d.wetNMeanAfter,
+                                    d.wetNStdAfter, d.wetLowNFractionAfter);
+    d.freeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.activeParticleDelta = static_cast<std::int64_t>(d.splitParticlesCreated) -
+                            static_cast<std::int64_t>(d.extractedParticles);
+    d.applied = d.splitParticlesCreated > 0u || d.extractedParticles > 0u;
+    return d;
+}
+
+void attach_resampling_population_guard_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingPopulationGuardDiagnostics& pop) {
+    diagnostics.populationGuardAttempted = pop.attempted;
+    diagnostics.populationGuardApplied = pop.applied;
+    diagnostics.populationGuardNMin = pop.nMin;
+    diagnostics.populationGuardNTarget = pop.nTarget;
+    diagnostics.populationGuardNMax = pop.nMax;
+    diagnostics.populationGuardWetCellsConsidered = pop.wetCellsConsidered;
+    diagnostics.populationGuardUnderfullCells = pop.underfullCells;
+    diagnostics.populationGuardEmptyUnderfullCells = pop.emptyUnderfullCells;
+    diagnostics.populationGuardOverfullCells = pop.overfullCells;
+    diagnostics.populationGuardCellsSplit = pop.cellsSplit;
+    diagnostics.populationGuardCellsExtracted = pop.cellsExtracted;
+    diagnostics.populationGuardSplitParticlesCreated = pop.splitParticlesCreated;
+    diagnostics.populationGuardExtractedParticles = pop.extractedParticles;
+    diagnostics.populationGuardSkippedNoFreeSlots = pop.skippedNoFreeSlots;
+    diagnostics.populationGuardSkippedEmptyCells = pop.skippedEmptyCells;
+    diagnostics.populationGuardSkippedSplitLimit = pop.skippedSplitLimit;
+    diagnostics.populationGuardSkippedExtractionLimit = pop.skippedExtractionLimit;
+    diagnostics.populationGuardFreeSlotsBefore = pop.freeSlotsBefore;
+    diagnostics.populationGuardFreeSlotsAfter = pop.freeSlotsAfter;
+    diagnostics.populationGuardActiveParticleDelta = pop.activeParticleDelta;
+    diagnostics.populationGuardSplitMass = pop.splitMass;
+    diagnostics.populationGuardExtractedMass = pop.extractedMass;
+    diagnostics.populationGuardWetNMeanBefore = pop.wetNMeanBefore;
+    diagnostics.populationGuardWetNMeanAfter = pop.wetNMeanAfter;
+    diagnostics.populationGuardWetNStdBefore = pop.wetNStdBefore;
+    diagnostics.populationGuardWetNStdAfter = pop.wetNStdAfter;
+    diagnostics.populationGuardWetNMinBefore = pop.wetNMinBefore;
+    diagnostics.populationGuardWetNMinAfter = pop.wetNMinAfter;
+    diagnostics.populationGuardWetLowNFractionBefore = pop.wetLowNFractionBefore;
+    diagnostics.populationGuardWetLowNFractionAfter = pop.wetLowNFractionAfter;
+}
+
+
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
     WeightedRealFluidDepositWorkspace& depositWorkspace,

@@ -281,6 +281,50 @@ struct ResamplingExtractionApplyDiagnostics {
     bool allAppliedWereFluid = true;
 };
 
+
+struct ResamplingPopulationGuardDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+
+    int nMin = 0;
+    int nTarget = 0;
+    int nMax = 0;
+
+    std::uint64_t wetCellsConsidered = 0;
+    std::uint64_t underfullCells = 0;
+    std::uint64_t emptyUnderfullCells = 0;
+    std::uint64_t overfullCells = 0;
+    std::uint64_t cellsSplit = 0;
+    std::uint64_t cellsExtracted = 0;
+
+    std::uint64_t splitParticlesCreated = 0;
+    std::uint64_t extractedParticles = 0;
+    std::uint64_t skippedNoFreeSlots = 0;
+    std::uint64_t skippedEmptyCells = 0;
+    std::uint64_t skippedSplitLimit = 0;
+    std::uint64_t skippedExtractionLimit = 0;
+
+    std::uint64_t freeSlotsBefore = 0;
+    std::uint64_t freeSlotsAfter = 0;
+    std::int64_t activeParticleDelta = 0;
+
+    double splitMass = 0.0;
+    double extractedMass = 0.0;
+    double splitMomentumX = 0.0;
+    double splitMomentumY = 0.0;
+    double extractedMomentumX = 0.0;
+    double extractedMomentumY = 0.0;
+
+    std::uint32_t wetNMinBefore = 0;
+    std::uint32_t wetNMinAfter = 0;
+    double wetNMeanBefore = 0.0;
+    double wetNMeanAfter = 0.0;
+    double wetNStdBefore = 0.0;
+    double wetNStdAfter = 0.0;
+    double wetLowNFractionBefore = 0.0;
+    double wetLowNFractionAfter = 0.0;
+};
+
 // Real-fluid weighted deposit used by the resampling branch.
 //
 // This deposit is deliberately distinct from CollisionWorkspace:
@@ -681,6 +725,39 @@ struct WeightedResamplingDiagnostics {
     bool latentActivationAllSourcesWereLatent = true;
     bool latentActivationNoDryCellsActivated = true;
 
+    // Population-support guard diagnostics (patch 0140).  This is the
+    // MATLAB-compatible Nmin/Ntarget/Nmax discrete resampling stage.
+    bool populationGuardAttempted = false;
+    bool populationGuardApplied = false;
+    int populationGuardNMin = 0;
+    int populationGuardNTarget = 0;
+    int populationGuardNMax = 0;
+    std::uint64_t populationGuardWetCellsConsidered = 0;
+    std::uint64_t populationGuardUnderfullCells = 0;
+    std::uint64_t populationGuardEmptyUnderfullCells = 0;
+    std::uint64_t populationGuardOverfullCells = 0;
+    std::uint64_t populationGuardCellsSplit = 0;
+    std::uint64_t populationGuardCellsExtracted = 0;
+    std::uint64_t populationGuardSplitParticlesCreated = 0;
+    std::uint64_t populationGuardExtractedParticles = 0;
+    std::uint64_t populationGuardSkippedNoFreeSlots = 0;
+    std::uint64_t populationGuardSkippedEmptyCells = 0;
+    std::uint64_t populationGuardSkippedSplitLimit = 0;
+    std::uint64_t populationGuardSkippedExtractionLimit = 0;
+    std::uint64_t populationGuardFreeSlotsBefore = 0;
+    std::uint64_t populationGuardFreeSlotsAfter = 0;
+    std::int64_t populationGuardActiveParticleDelta = 0;
+    double populationGuardSplitMass = 0.0;
+    double populationGuardExtractedMass = 0.0;
+    double populationGuardWetNMeanBefore = 0.0;
+    double populationGuardWetNMeanAfter = 0.0;
+    double populationGuardWetNStdBefore = 0.0;
+    double populationGuardWetNStdAfter = 0.0;
+    std::uint32_t populationGuardWetNMinBefore = 0;
+    std::uint32_t populationGuardWetNMinAfter = 0;
+    double populationGuardWetLowNFractionBefore = 0.0;
+    double populationGuardWetLowNFractionAfter = 0.0;
+
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;
     double particleMassRelStd = 0.0;
@@ -742,6 +819,18 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
 void attach_resampling_insertion_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
     const ResamplingInsertionApplyDiagnostics& insertionDiagnostics);
+
+ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
+    ParticleState& state,
+    ResamplingParticlePoolWorkspace& pool,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    const SimulationParams& params,
+    const CellGrid& grid);
+
+void attach_resampling_population_guard_diagnostics(
+    WeightedResamplingDiagnostics& diagnostics,
+    const ResamplingPopulationGuardDiagnostics& populationDiagnostics);
 
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,

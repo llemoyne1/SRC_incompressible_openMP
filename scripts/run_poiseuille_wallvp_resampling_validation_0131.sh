@@ -128,6 +128,14 @@ PARAMS
 
 # Weighted-resampling Poiseuille wallVP validation.
 resamplingEnable = true
+resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
+resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
+resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
+resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
+resamplingPopulationMaxSplitsPerCell = ${RESAMP_POP_MAX_SPLITS_PER_CELL:-16}
+resamplingPopulationMaxSplitsPerStep = ${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}
+resamplingPopulationMaxExtractionsPerCell = ${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}
+resamplingPopulationMaxExtractionsPerStep = ${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}
 resamplingTargetCellMass = $POIS_GAMMA
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0

@@ -616,3 +616,8 @@ resampling thermal renormalization.  The operation remains physically unchanged,
 but the post-renormalization momentum residual is accumulated in the particle
 loop and reduced over cells.  This is essential for Poiseuille/channel cases
 where thermal renormalization runs every step.
+
+### Patch 0140 — MATLAB-compatible population-support guard
+
+Patch 0140 restores the MATLAB `Nmin/Ntarget/Nmax` support-control mechanism in the OpenMP resampling branch.  The new `resamplingPopulationGuardEnable` stage runs as a discrete resampling step before mass renormalisation: under-populated wet cells are locally split up to `Ntarget`, over-populated wet cells are merge-extracted down to `Ntarget`, and mass/momentum are preserved locally by construction.  This separates support control (`N_c`) from weighted-mass remap (`M_c`) and avoids the previous failure mode where `M_c` was correct but the active particle support became too sparse.
+

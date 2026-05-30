@@ -21,7 +21,7 @@ TG_RESAMP_POOR_FRACTION=${TG_RESAMP_POOR_FRACTION:-0.90}
 TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.10}
 TG_MASS_MIN=${TG_MASS_MIN:-0.5}
 TG_MASS_MAX=${TG_MASS_MAX:-2.0}
-TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-1}
+TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-10}
 TG_FORCING_ENABLE=${TG_FORCING_ENABLE:-true}
 TG_FORCING_AMPLITUDE=${TG_FORCING_AMPLITUDE:-0.02}
 TG_FORCING_MODE_X=${TG_FORCING_MODE_X:-1}
@@ -116,6 +116,14 @@ PARAMS
 
 # Weighted-resampling random-population Taylor--Green validation.
 resamplingEnable = true
+resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
+resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
+resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
+resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
+resamplingPopulationMaxSplitsPerCell = ${RESAMP_POP_MAX_SPLITS_PER_CELL:-16}
+resamplingPopulationMaxSplitsPerStep = ${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}
+resamplingPopulationMaxExtractionsPerCell = ${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}
+resamplingPopulationMaxExtractionsPerStep = ${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}
 resamplingTargetCellMass = $TG_GAMMA
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0
