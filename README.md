@@ -616,3 +616,18 @@ resampling thermal renormalization.  The operation remains physically unchanged,
 but the post-renormalization momentum residual is accumulated in the particle
 loop and reduced over cells.  This is essential for Poiseuille/channel cases
 where thermal renormalization runs every step.
+
+## 0137 — Q6 warm-start performance pass
+
+Patch 0137 adds a performance-oriented Q6 option set:
+
+```kv
+q6WarmStartEnable = true
+q6ReuseProjectedDivergenceDiagnostics = true
+```
+
+The warm start reuses the previous elliptic potential as the next CG initial
+guess.  The divergence diagnostic shortcut avoids a redundant corrected-cell
+field divergence reconstruction.  Validation launchers expose the controls via
+`BSTEP_Q6_WARM_START`, `POIS_Q6_WARM_START`, `CCYL_Q6_WARM_START` and matching
+`*_Q6_REUSE_PROJECTED_DIV_DIAG` variables.

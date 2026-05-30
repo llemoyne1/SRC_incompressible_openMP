@@ -91,6 +91,7 @@ struct EllipticProjectionParams {
     double tolerance = 1.0e-12;
     bool removeRhsMean = true;
     bool removePhiMean = true;
+    bool warmStartFromWorkspace = false;
 };
 
 struct EllipticProjectionDiagnostics {
@@ -147,6 +148,12 @@ struct EllipticProjectionWorkspace {
     std::vector<double> r;
     std::vector<double> p;
     std::vector<double> Ap;
+
+    // Optional CG warm-start cache.  It is intentionally kept in the generic
+    // elliptic workspace so Q6 and future modules can reuse the same mechanism
+    // without rebuilding a solver-specific pressure/potential history.
+    std::vector<double> previousPhi;
+    bool hasPreviousPhi = false;
 };
 
 EllipticProjectionGrid make_elliptic_projection_grid(int Nx, int Ny, double Lx, double Ly);
