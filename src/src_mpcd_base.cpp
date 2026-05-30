@@ -178,8 +178,11 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
     apply_keep_mean_flow(state, params);
     result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+    const bool buildInitialResamplingPlan =
+        params.resamplingEnable && params.resamplingExtractionEnable;
     result.resampling = deposit_weighted_real_fluid(
-        state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+        state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+        buildInitialResamplingPlan);
     attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
 
     if (!params.resamplingEnable) {
@@ -219,7 +222,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (roleOrPositionEdited) {
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
     }
 
@@ -240,7 +243,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 state, params, workspace.resampling, result.resampling);
         }
         result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
     }
@@ -253,7 +256,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, workspace.resampling, thermalGate);
         if (thermalApply.applied) {
             result.resampling = deposit_weighted_real_fluid(
-                state, params, grid, result.domain, time, GridShift{}, workspace.resampling);
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
             attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
         }

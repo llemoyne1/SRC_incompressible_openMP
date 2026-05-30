@@ -56,12 +56,6 @@ bool cell_is_active_for_resampling(int ix,
     return fluidFraction > params.resamplingActiveFluidFractionThreshold;
 }
 
-struct PassiveCellPairCandidate {
-    std::int32_t donorCell = kInvalidCellIndex;
-    std::int32_t receiverCell = kInvalidCellIndex;
-    double distance = 0.0;
-};
-
 double passive_cell_distance(std::int32_t a,
                              std::int32_t b,
                              const CellGrid& grid,
@@ -1332,6 +1326,9 @@ void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
         ws.passiveExtractionOperations.reserve(static_cast<std::size_t>(numParticles));
         ws.donorSelectedParticleCount.assign(static_cast<std::size_t>(numCells), 0u);
         ws.donorSelectedMass.assign(static_cast<std::size_t>(numCells), 0.0);
+        ws.cellParticleOffsets.reserve(static_cast<std::size_t>(numCells) + 1u);
+        ws.cellParticleCursor.reserve(static_cast<std::size_t>(numCells));
+        ws.cellParticleIndices.reserve(static_cast<std::size_t>(numParticles));
         ws.remapThermalEnergyTarget.assign(static_cast<std::size_t>(numCells), 0.0);
         ws.remapThermalCell.assign(static_cast<std::size_t>(numCells), 0u);
     }
@@ -1343,7 +1340,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           const FluidDomainBounds& domain,
                                                           double time,
                                                           const GridShift& shift,
-                                                          WeightedRealFluidDepositWorkspace& ws) {
+                                                          WeightedRealFluidDepositWorkspace& ws,
+                                                          bool buildMutationPlan) {
     validate_particle_state(state, "deposit_weighted_real_fluid");
 
     const int nc = grid.numCells;
@@ -1377,6 +1375,11 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ws.transferPlan.clear();
     ws.selectedDonorParticles.clear();
     ws.passiveExtractionOperations.clear();
+    if (!buildMutationPlan) {
+        ws.cellParticleOffsets.clear();
+        ws.cellParticleCursor.clear();
+        ws.cellParticleIndices.clear();
+    }
     std::fill(ws.donorSelectedParticleCount.begin(), ws.donorSelectedParticleCount.end(), 0u);
     std::fill(ws.donorSelectedMass.begin(), ws.donorSelectedMass.end(), 0.0);
     std::fill(ws.remapThermalEnergyTarget.begin(), ws.remapThermalEnergyTarget.end(), 0.0);
@@ -1634,12 +1637,40 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             d.donorFractionOfWetCells = static_cast<double>(d.nDonorCells) * invWet;
         }
 
-        if (!ws.receiverPoorCells.empty() && !ws.donorRichCells.empty()) {
+        const bool buildFullMutationPlan = buildMutationPlan && params.resamplingEnable && params.resamplingExtractionEnable;
+
+        if (buildFullMutationPlan && !ws.receiverPoorCells.empty() && !ws.donorRichCells.empty()) {
+            // Build a compact cell -> particle index once per planning pass.
+            // The earlier implementation scanned all particles for every
+            // donor/receiver transfer entry, which is catastrophic in channel
+            // runs with many weak poor/rich cells.
+            ws.cellParticleOffsets.assign(static_cast<std::size_t>(nc) + 1u, 0u);
+            for (int c = 0; c < nc; ++c) {
+                ws.cellParticleOffsets[static_cast<std::size_t>(c) + 1u] =
+                    ws.cellParticleOffsets[static_cast<std::size_t>(c)] +
+                    static_cast<std::uint64_t>(ws.count[static_cast<std::size_t>(c)]);
+            }
+            ws.cellParticleIndices.assign(static_cast<std::size_t>(ws.cellParticleOffsets.back()),
+                                          kInvalidParticleIndex);
+            ws.cellParticleCursor.assign(ws.cellParticleOffsets.begin(),
+                                         ws.cellParticleOffsets.end() - 1);
+            for (std::size_t i = 0; i < n; ++i) {
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                const int c = ws.cellId[i];
+                if (c < 0 || c >= nc) {
+                    continue;
+                }
+                const std::size_t cc = static_cast<std::size_t>(c);
+                const std::size_t pos = static_cast<std::size_t>(ws.cellParticleCursor[cc]++);
+                if (pos < ws.cellParticleIndices.size()) {
+                    ws.cellParticleIndices[pos] = static_cast<std::uint64_t>(i);
+                }
+            }
+
             std::vector<double> receiverRemaining(ws.receiverPoorCells.size(), 0.0);
             std::vector<double> donorRemaining(ws.donorRichCells.size(), 0.0);
-            std::vector<PassiveCellPairCandidate> candidates;
-            candidates.reserve(ws.receiverPoorCells.size() * ws.donorRichCells.size());
-
             for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
                 const std::int32_t rc = ws.receiverPoorCells[ir];
                 const double deficit = d.targetCellMass - ws.mass[static_cast<std::size_t>(rc)];
@@ -1651,19 +1682,6 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 donorRemaining[id] = excess > 0.0 ? excess : 0.0;
             }
 
-            for (const std::int32_t dc : ws.donorRichCells) {
-                for (const std::int32_t rc : ws.receiverPoorCells) {
-                    candidates.push_back(PassiveCellPairCandidate{
-                        dc, rc, passive_cell_distance(dc, rc, grid, params)});
-                }
-            }
-            std::sort(candidates.begin(), candidates.end(),
-                      [](const PassiveCellPairCandidate& a, const PassiveCellPairCandidate& b) {
-                          if (a.distance != b.distance) return a.distance < b.distance;
-                          if (a.donorCell != b.donorCell) return a.donorCell < b.donorCell;
-                          return a.receiverCell < b.receiverCell;
-                      });
-
             double plannedMass = 0.0;
             double massWeightedDistance = 0.0;
             double maxDistance = 0.0;
@@ -1671,35 +1689,51 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             constexpr double eps = 1.0e-14;
             const double adjacentLimit = std::sqrt(2.0) + 1.0e-12;
 
-            for (const PassiveCellPairCandidate& cand : candidates) {
-                auto idIt = std::find(ws.donorRichCells.begin(), ws.donorRichCells.end(), cand.donorCell);
-                auto irIt = std::find(ws.receiverPoorCells.begin(), ws.receiverPoorCells.end(), cand.receiverCell);
-                if (idIt == ws.donorRichCells.end() || irIt == ws.receiverPoorCells.end()) {
-                    continue;
-                }
-                const std::size_t id = static_cast<std::size_t>(idIt - ws.donorRichCells.begin());
-                const std::size_t ir = static_cast<std::size_t>(irIt - ws.receiverPoorCells.begin());
-                if (donorRemaining[id] <= eps || receiverRemaining[ir] <= eps) {
-                    continue;
-                }
-                const double transfer = std::min(donorRemaining[id], receiverRemaining[ir]);
-                if (transfer <= eps) {
-                    continue;
-                }
-                donorRemaining[id] -= transfer;
-                receiverRemaining[ir] -= transfer;
-                ws.transferPlan.push_back(ResamplingTransferPlanEntry{
-                    cand.donorCell,
-                    cand.receiverCell,
-                    transfer,
-                    cand.distance,
-                    donorRemaining[id],
-                    receiverRemaining[ir]});
-                plannedMass += transfer;
-                massWeightedDistance += transfer * cand.distance;
-                maxDistance = std::max(maxDistance, cand.distance);
-                if (cand.distance <= adjacentLimit) {
-                    adjacentPairs += 1u;
+            // Greedy nearest-donor planner without materialising and sorting the
+            // complete donor x receiver Cartesian product.  It preserves the
+            // locality bias but avoids the O(R*D log(R*D)) allocation/sort and
+            // the additional O(R*D*(R+D)) std::find lookups of the prototype.
+            for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
+                const std::int32_t rc = ws.receiverPoorCells[ir];
+                while (receiverRemaining[ir] > eps) {
+                    std::size_t bestDonor = ws.donorRichCells.size();
+                    double bestDistance = std::numeric_limits<double>::infinity();
+                    std::int32_t bestCell = kInvalidCellIndex;
+                    for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
+                        if (donorRemaining[id] <= eps) {
+                            continue;
+                        }
+                        const std::int32_t dc = ws.donorRichCells[id];
+                        const double dist = passive_cell_distance(dc, rc, grid, params);
+                        if (dist < bestDistance ||
+                            (dist == bestDistance && dc < bestCell)) {
+                            bestDistance = dist;
+                            bestDonor = id;
+                            bestCell = dc;
+                        }
+                    }
+                    if (bestDonor == ws.donorRichCells.size()) {
+                        break;
+                    }
+                    const double transfer = std::min(donorRemaining[bestDonor], receiverRemaining[ir]);
+                    if (transfer <= eps) {
+                        break;
+                    }
+                    donorRemaining[bestDonor] -= transfer;
+                    receiverRemaining[ir] -= transfer;
+                    ws.transferPlan.push_back(ResamplingTransferPlanEntry{
+                        bestCell,
+                        rc,
+                        transfer,
+                        bestDistance,
+                        donorRemaining[bestDonor],
+                        receiverRemaining[ir]});
+                    plannedMass += transfer;
+                    massWeightedDistance += transfer * bestDistance;
+                    maxDistance = std::max(maxDistance, bestDistance);
+                    if (bestDistance <= adjacentLimit) {
+                        adjacentPairs += 1u;
+                    }
                 }
             }
 
@@ -1749,14 +1783,21 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                     }
                     double selectedForEntry = 0.0;
                     std::uint64_t countForEntry = 0u;
-                    for (std::size_t i = 0; i < n; ++i) {
+                    const std::size_t donorCell = static_cast<std::size_t>(entry.donorCell);
+                    const std::uint64_t begin = donorCell + 1u < ws.cellParticleOffsets.size()
+                        ? ws.cellParticleOffsets[donorCell] : 0u;
+                    const std::uint64_t end = donorCell + 1u < ws.cellParticleOffsets.size()
+                        ? ws.cellParticleOffsets[donorCell + 1u] : 0u;
+                    for (std::uint64_t pp = begin; pp < end; ++pp) {
+                        if (pp >= ws.cellParticleIndices.size()) {
+                            break;
+                        }
+                        const std::uint64_t pi64 = ws.cellParticleIndices[static_cast<std::size_t>(pp)];
+                        if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
+                            continue;
+                        }
+                        const std::size_t i = static_cast<std::size_t>(pi64);
                         if (selected[i]) {
-                            continue;
-                        }
-                        if (!is_fluid_particle(state, i)) {
-                            continue;
-                        }
-                        if (ws.cellId[i] != entry.donorCell) {
                             continue;
                         }
                         const double mp = state.mass[i];

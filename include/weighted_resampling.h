@@ -342,6 +342,13 @@ struct WeightedRealFluidDepositWorkspace {
     std::vector<std::uint32_t> donorSelectedParticleCount;
     std::vector<double> donorSelectedMass;
 
+    // Fast per-cell particle index used by the mutating resampling planner.
+    // This avoids scanning all particles for every donor->receiver transfer
+    // entry. It is built only when the caller requests a mutation plan.
+    std::vector<std::uint64_t> cellParticleOffsets;
+    std::vector<std::uint64_t> cellParticleCursor;
+    std::vector<std::uint64_t> cellParticleIndices;
+
     // Filled by the 0121 mass remap before particle masses are scaled.  Patch
     // 0122 uses this per-cell target to restore the local relative thermal
     // energy after mass scaling while preserving the remapped cell velocity.
@@ -775,6 +782,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           const FluidDomainBounds& domain,
                                                           double time,
                                                           const GridShift& shift,
-                                                          WeightedRealFluidDepositWorkspace& ws);
+                                                          WeightedRealFluidDepositWorkspace& ws,
+                                                          bool buildMutationPlan = true);
 
 } // namespace mpcd
