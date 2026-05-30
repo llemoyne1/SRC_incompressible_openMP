@@ -608,3 +608,11 @@ bash launchers only write `params.kv` and run the OpenMP executable. See
 ### 0132 — Resampling performance triage
 
 Patch 0132 removes the first major performance bottleneck in the weighted-resampling path. The full donor/receiver mutation plan is now built only once per step, before role-changing operations. Post-edit deposits are lightweight diagnostics. The planner also avoids the previous donor×receiver Cartesian sort and uses a cell→particle index for donor particle selection. See `doc/README_0132_RESAMPLING_PERFORMANCE_TRIAGE.md`.
+
+### 0133 thermal renormalization performance fix
+
+Patch 0133 removes an accidental `O(Ncells*Nparticles)` diagnostic loop from
+resampling thermal renormalization.  The operation remains physically unchanged,
+but the post-renormalization momentum residual is accumulated in the particle
+loop and reduced over cells.  This is essential for Poiseuille/channel cases
+where thermal renormalization runs every step.

@@ -809,6 +809,8 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
     std::vector<double> massByCell(static_cast<std::size_t>(nc), 0.0);
     std::vector<double> pxBefore(static_cast<std::size_t>(nc), 0.0);
     std::vector<double> pyBefore(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> pxAfter(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> pyAfter(static_cast<std::size_t>(nc), 0.0);
     std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
     std::vector<std::uint8_t> renormCell(static_cast<std::size_t>(nc), 0u);
 
@@ -919,25 +921,23 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
         const double scale = scaleByCell[kk];
         state.vx[i] = ux + scale * (state.vx[i] - ux);
         state.vy[i] = uy + scale * (state.vy[i] - uy);
+        pxAfter[kk] += state.mass[i] * state.vx[i];
+        pyAfter[kk] += state.mass[i] * state.vy[i];
         d.particlesRenormalized += 1u;
     }
 
+    // The previous diagnostic path scanned all particles once for every
+    // renormalized cell, which made thermal renormalization O(Ncells*Np) in
+    // fully wet periodic/channel cases.  The post-renormalization momentum is
+    // now accumulated in the particle loop above, so this residual pass is
+    // only O(Ncells).
     for (int c = 0; c < nc; ++c) {
         const std::size_t kk = static_cast<std::size_t>(c);
         if (!renormCell[kk]) {
             continue;
         }
-        double pxAfter = 0.0;
-        double pyAfter = 0.0;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-            if (!is_fluid_particle(state, i) || i >= depositWorkspace.cellId.size() || depositWorkspace.cellId[i] != c) {
-                continue;
-            }
-            pxAfter += state.mass[i] * state.vx[i];
-            pyAfter += state.mass[i] * state.vy[i];
-        }
-        const double rx = pxAfter - pxBefore[kk];
-        const double ry = pyAfter - pyBefore[kk];
+        const double rx = pxAfter[kk] - pxBefore[kk];
+        const double ry = pyAfter[kk] - pyBefore[kk];
         momentumResidual2 += rx * rx + ry * ry;
         d.momentumResidualMaxAbs = std::max(d.momentumResidualMaxAbs, std::max(std::abs(rx), std::abs(ry)));
     }
