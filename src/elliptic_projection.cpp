@@ -180,24 +180,8 @@ void solve_cg(const EllipticProjectionGrid& grid,
     require_scalar_size(workspace.rhs, nc, "workspace.rhs");
     require_mask(mask, nc, "solve_cg.mask");
 
-    const bool useWarmStart = params.warmStartFromWorkspace &&
-                              workspace.hasPreviousPhi &&
-                              static_cast<int>(workspace.previousPhi.size()) == nc;
-    if (useWarmStart) {
-        phi = workspace.previousPhi;
-        if (params.removePhiMean) {
-            subtract_mean(phi, mask);
-        }
-        apply_elliptic_operator(grid, alpha, phi, workspace.Ap, bc, mask);
-#pragma omp parallel for if(nc > 4096)
-        for (int c = 0; c < nc; ++c) {
-            const std::size_t k = static_cast<std::size_t>(c);
-            workspace.r[k] = mask_active(mask, c) ? (workspace.rhs[k] - workspace.Ap[k]) : 0.0;
-        }
-    } else {
-        phi.assign(static_cast<std::size_t>(nc), 0.0);
-        workspace.r = workspace.rhs;
-    }
+    phi.assign(static_cast<std::size_t>(nc), 0.0);
+    workspace.r = workspace.rhs;
     workspace.p = workspace.r;
 
     const double rhsNorm2 = dot_product(workspace.rhs, workspace.rhs);
@@ -268,13 +252,6 @@ void solve_cg(const EllipticProjectionGrid& grid,
         diag.residualAbs = std::sqrt(dot_product(workspace.r, workspace.r));
         diag.residualRel = diag.residualAbs / rhsNorm;
     }
-
-    if (params.warmStartFromWorkspace) {
-        workspace.previousPhi = phi;
-        workspace.hasPreviousPhi = static_cast<int>(workspace.previousPhi.size()) == nc;
-    } else {
-        workspace.hasPreviousPhi = false;
-    }
 }
 
 } // namespace
@@ -305,19 +282,10 @@ void resize_elliptic_projection_workspace(EllipticProjectionWorkspace& workspace
         throw std::runtime_error("resize_elliptic_projection_workspace: negative cell count");
     }
     const std::size_t n = static_cast<std::size_t>(numCells);
-    const bool sameSize = workspace.rhs.size() == n &&
-                          workspace.r.size() == n &&
-                          workspace.p.size() == n &&
-                          workspace.Ap.size() == n;
-    if (sameSize) {
-        return;
-    }
     workspace.rhs.assign(n, 0.0);
     workspace.r.assign(n, 0.0);
     workspace.p.assign(n, 0.0);
     workspace.Ap.assign(n, 0.0);
-    workspace.previousPhi.assign(n, 0.0);
-    workspace.hasPreviousPhi = false;
 }
 
 std::vector<double> compute_face_divergence(const EllipticProjectionGrid& grid,

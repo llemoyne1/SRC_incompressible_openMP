@@ -298,8 +298,6 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionOperator") p.projectionOperator = get_lower(kv, key);
         else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
-        else if (key == "q6WarmStartEnable") p.q6WarmStartEnable = parse_bool(value, key);
-        else if (key == "q6ReuseProjectedDivergenceDiagnostics") p.q6ReuseProjectedDivergenceDiagnostics = parse_bool(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "q6ProjectionStrength" || key == "projectionStrength") p.q6ProjectionStrength = parse_double(value, key);
         else if (key == "projectionImmersedSolidMaskEnable") p.projectionImmersedSolidMaskEnable = parse_bool(value, key);

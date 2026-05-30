@@ -241,8 +241,6 @@ struct SimulationParams {
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
     int projectionMaxIterations = 300;
     double projectionTolerance = 1.0e-10;
-    bool q6WarmStartEnable = true; // reuse previous elliptic potential as CG initial guess
-    bool q6ReuseProjectedDivergenceDiagnostics = true; // skip redundant cell-divergence reconstruction
     bool projectionMomentumCorrectionEnable = true;
     double q6ProjectionStrength = 1.0; // under-relax Q6 fluid-fluid correction; immersed-solid no-flux remains hard
     bool projectionImmersedSolidMaskEnable = false;

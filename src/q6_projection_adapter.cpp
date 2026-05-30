@@ -1115,7 +1115,6 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.tolerance = params.projectionTolerance;
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
-    eparams.warmStartFromWorkspace = params.q6WarmStartEnable;
 
     EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
     add_boundary_fluxes_to_q6_bc(bc, workspace.baseFlux, params, domain, time, diag);
@@ -1166,40 +1165,27 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     }
     face_correction_to_cell_velocity(grid, workspace.appliedCorrectionFlux, workspace.cellDUx, workspace.cellDUy, diag);
 
-    // In this Q6 adapter convention, the corrected cell-centered velocity is
-    // represented by the same stored east/north face values as
-    // appliedProjectedFlux: U_corrected = U_cell + DU_cell, with DU_cell equal
-    // to the applied correction flux component.  Rebuilding a second face field
-    // and recomputing its divergence costs a full grid pass every Q6 step while
-    // yielding the same diagnostic.  Keep the historical columns but reuse the
-    // projected-flux divergence by default; the old explicit reconstruction can
-    // be restored with q6ReuseProjectedDivergenceDiagnostics=false.
-    if (params.q6ReuseProjectedDivergenceDiagnostics) {
-        diag.divAfterCellVelocityRms = diag.divAfterProjectedFluxRms;
-        diag.divAfterCellVelocityMaxAbs = diag.divAfterProjectedFluxMaxAbs;
-    } else {
 #pragma omp parallel for if(nc > 4096)
-        for (int c = 0; c < nc; ++c) {
-            const std::size_t k = static_cast<std::size_t>(c);
-            workspace.correctedCellUx[k] = workspace.cellUx[k] + workspace.cellDUx[k];
-            workspace.correctedCellUy[k] = workspace.cellUy[k] + workspace.cellDUy[k];
-        }
-        build_face_velocity_from_cells(grid, workspace.correctedCellUx, workspace.correctedCellUy, workspace.correctedCellFlux);
-        std::vector<double> divCellAfter = compute_face_divergence(egrid, workspace.correctedCellFlux, bc, mask);
-        double div2 = 0.0;
-        double divMax = 0.0;
-        std::uint64_t divCount = 0u;
-#pragma omp parallel for reduction(+:div2,divCount) reduction(max:divMax) if(nc > 4096)
-        for (int c = 0; c < nc; ++c) {
-            if (mask != nullptr && mask->activeCell[static_cast<std::size_t>(c)] == 0u) continue;
-            const double d = divCellAfter[static_cast<std::size_t>(c)];
-            div2 += d * d;
-            divMax = std::max(divMax, std::abs(d));
-            divCount += 1u;
-        }
-        diag.divAfterCellVelocityRms = divCount > 0u ? std::sqrt(div2 / static_cast<double>(divCount)) : 0.0;
-        diag.divAfterCellVelocityMaxAbs = divMax;
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t k = static_cast<std::size_t>(c);
+        workspace.correctedCellUx[k] = workspace.cellUx[k] + workspace.cellDUx[k];
+        workspace.correctedCellUy[k] = workspace.cellUy[k] + workspace.cellDUy[k];
     }
+    build_face_velocity_from_cells(grid, workspace.correctedCellUx, workspace.correctedCellUy, workspace.correctedCellFlux);
+    std::vector<double> divCellAfter = compute_face_divergence(egrid, workspace.correctedCellFlux, bc, mask);
+    double div2 = 0.0;
+    double divMax = 0.0;
+    std::uint64_t divCount = 0u;
+#pragma omp parallel for reduction(+:div2,divCount) reduction(max:divMax) if(nc > 4096)
+    for (int c = 0; c < nc; ++c) {
+        if (mask != nullptr && mask->activeCell[static_cast<std::size_t>(c)] == 0u) continue;
+        const double d = divCellAfter[static_cast<std::size_t>(c)];
+        div2 += d * d;
+        divMax = std::max(divMax, std::abs(d));
+        divCount += 1u;
+    }
+    diag.divAfterCellVelocityRms = divCount > 0u ? std::sqrt(div2 / static_cast<double>(divCount)) : 0.0;
+    diag.divAfterCellVelocityMaxAbs = divMax;
 
     apply_cell_velocity_correction(state, workspace, diag, params.projectionMomentumCorrectionEnable);
     return diag;
