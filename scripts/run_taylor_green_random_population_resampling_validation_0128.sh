@@ -21,7 +21,11 @@ TG_RESAMP_POOR_FRACTION=${TG_RESAMP_POOR_FRACTION:-0.90}
 TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.10}
 TG_MASS_MIN=${TG_MASS_MIN:-0.5}
 TG_MASS_MAX=${TG_MASS_MAX:-2.0}
-TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-1000}
+TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-10}
+TG_FORCING_ENABLE=${TG_FORCING_ENABLE:-false}
+TG_FORCING_AMPLITUDE=${TG_FORCING_AMPLITUDE:-0.0}
+TG_FORCING_MODE_X=${TG_FORCING_MODE_X:-1}
+TG_FORCING_MODE_Y=${TG_FORCING_MODE_Y:-1}
 
 if [[ ! -x build/src_mpcd_base ]]; then
     ./scripts/build_src_mpcd_base.sh
@@ -78,6 +82,10 @@ rngSeed = $TG_SEED
 
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
+taylorGreenForcingEnable = $TG_FORCING_ENABLE
+taylorGreenForcingAmplitude = $TG_FORCING_AMPLITUDE
+taylorGreenForcingModeX = $TG_FORCING_MODE_X
+taylorGreenForcingModeY = $TG_FORCING_MODE_Y
 
 bcX = periodic
 bcY = periodic

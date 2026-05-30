@@ -45,6 +45,15 @@ struct SimulationParams {
     double bodyAccelerationX = 0.0;
     double bodyAccelerationY = 0.0;
 
+    // Optional periodic Taylor--Green body acceleration applied before streaming:
+    //   ax = A sin(2*pi*m_x*x/Lx) cos(2*pi*m_y*y/Ly)
+    //   ay =-A cos(2*pi*m_x*x/Lx) sin(2*pi*m_y*y/Ly)
+    // This forcing is divergence-free and has zero spatial mean on a periodic box.
+    bool taylorGreenForcingEnable = false;
+    double taylorGreenForcingAmplitude = 0.0;
+    int taylorGreenForcingModeX = 1;
+    int taylorGreenForcingModeY = 1;
+
     // Optional global mean-flow controller. This is useful for periodic wake
     // tests around immersed solids: it mimics the CUDA VK keepMeanFlow path by
     // applying a spatially uniform velocity shift after the SRC/Q6/thermostat

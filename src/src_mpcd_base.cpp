@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <vector>
 
 namespace mpcd {
@@ -12,6 +13,29 @@ namespace {
 bool is_mass_renormalization_step(const SimulationParams& params, std::uint64_t step) {
     return params.resamplingMassRenormalizationPeriod > 0 &&
            (step % static_cast<std::uint64_t>(params.resamplingMassRenormalizationPeriod) == 0u);
+}
+
+void taylor_green_body_acceleration(const SimulationParams& params,
+                                    double x,
+                                    double y,
+                                    double& ax,
+                                    double& ay) {
+    ax = 0.0;
+    ay = 0.0;
+    if (!params.taylorGreenForcingEnable || !(params.taylorGreenForcingAmplitude > 0.0)) {
+        return;
+    }
+
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double kx = 2.0 * pi * static_cast<double>(params.taylorGreenForcingModeX) / params.Lx;
+    const double ky = 2.0 * pi * static_cast<double>(params.taylorGreenForcingModeY) / params.Ly;
+    const double sx = std::sin(kx * x);
+    const double cx = std::cos(kx * x);
+    const double sy = std::sin(ky * y);
+    const double cy = std::cos(ky * y);
+
+    ax = params.taylorGreenForcingAmplitude * sx * cy;
+    ay = -params.taylorGreenForcingAmplitude * cx * sy;
 }
 
 void capture_resampling_thermal_reference(const ParticleState& state,
@@ -124,15 +148,21 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ensure_particle_roles(state, ParticleRole::Fluid);
     const std::size_t n = static_cast<std::size_t>(state.Np);
 
-    // Uniform body acceleration, then free streaming in the fixed numerical box.
+    // Uniform and optional Taylor--Green body acceleration, then free streaming
+    // in the fixed numerical box. Taylor--Green forcing is evaluated at the
+    // pre-stream particle position and is therefore independent of boundary
+    // wrapping done later in the step.
 #pragma omp parallel for if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
         if (!is_fluid_particle(state, i)) {
             continue;
         }
-        state.vx[i] += params.bodyAccelerationX * params.dt;
-        state.vy[i] += params.bodyAccelerationY * params.dt;
+        double tgAx = 0.0;
+        double tgAy = 0.0;
+        taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
+        state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
+        state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
         state.x[i] += state.vx[i] * params.dt;
         state.y[i] += state.vy[i] * params.dt;
     }

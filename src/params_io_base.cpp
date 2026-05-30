@@ -169,6 +169,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "bodyAccelerationY") p.bodyAccelerationY = parse_double(value, key);
         else if (key == "bodyForceX") p.bodyAccelerationX = parse_double(value, key);
         else if (key == "bodyForceY") p.bodyAccelerationY = parse_double(value, key);
+        else if (key == "taylorGreenForcingEnable" || key == "tgForcingEnable") p.taylorGreenForcingEnable = parse_bool(value, key);
+        else if (key == "taylorGreenForcingAmplitude" || key == "tgForcingAmplitude" || key == "tgForceAmplitude") p.taylorGreenForcingAmplitude = parse_double(value, key);
+        else if (key == "taylorGreenForcingModeX" || key == "tgForcingModeX") p.taylorGreenForcingModeX = parse_int(value, key);
+        else if (key == "taylorGreenForcingModeY" || key == "tgForcingModeY") p.taylorGreenForcingModeY = parse_int(value, key);
         else if (key == "keepMeanFlowEnable" || key == "keepMeanFlow") p.keepMeanFlowEnable = parse_bool(value, key);
         else if (key == "targetMeanUx" || key == "meanFlowUx" || key == "U0") p.targetMeanUx = parse_double(value, key);
         else if (key == "targetMeanUy" || key == "meanFlowUy") p.targetMeanUy = parse_double(value, key);
@@ -766,6 +770,20 @@ void validate_simulation_params(const SimulationParams& p) {
         p.immersedSolidEnable && p.projectionImmersedSolidMaskEnable &&
         (std::abs(p.immersedSolidVx) > 0.0 || std::abs(p.immersedSolidVy) > 0.0 || std::abs(p.immersedSolidOmega) > 0.0)) {
         throw std::runtime_error("Q6 immersed-solid projection mask currently supports fixed immersed solids only");
+    }
+    if (p.taylorGreenForcingEnable) {
+        if (!(p.Lx > 0.0) || !(p.Ly > 0.0)) {
+            throw std::runtime_error("Taylor--Green forcing requires positive Lx and Ly");
+        }
+        if (!(p.taylorGreenForcingAmplitude >= 0.0)) {
+            throw std::runtime_error("taylorGreenForcingAmplitude must be non-negative");
+        }
+        if (p.taylorGreenForcingModeX <= 0 || p.taylorGreenForcingModeY <= 0) {
+            throw std::runtime_error("taylorGreenForcingModeX/Y must be positive integers");
+        }
+        if (!is_x_periodic(p) || !is_y_periodic(p)) {
+            throw std::runtime_error("Taylor--Green forcing is currently restricted to periodic-x/periodic-y runs");
+        }
     }
     if (!(p.resamplingTargetCellMass >= 0.0)) {
         throw std::runtime_error("resamplingTargetCellMass must be non-negative; use 0 to infer the current mean real-fluid cell mass");

@@ -588,3 +588,19 @@ Smoke test:
 ```
 
 See `doc/README_0129_RESAMPLING_CADENCE_AND_SWITCH.md`.
+
+## Resampling branch milestone 0130: Taylor--Green forcing
+
+The C++ runtime now supports an optional periodic Taylor--Green body acceleration:
+
+```text
+taylorGreenForcingEnable = true
+taylorGreenForcingAmplitude = 0.02
+taylorGreenForcingModeX = 1
+taylorGreenForcingModeY = 1
+```
+
+The forcing is divergence-free and only available for fully periodic Taylor--Green
+validation runs. MATLAB remains responsible for preparing initial `.smpcd` files;
+bash launchers only write `params.kv` and run the OpenMP executable. See
+`doc/README_0130_TAYLOR_GREEN_FORCING.md`.
