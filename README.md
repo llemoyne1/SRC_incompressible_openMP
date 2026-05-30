@@ -604,3 +604,32 @@ The forcing is divergence-free and only available for fully periodic Taylor--Gre
 validation runs. MATLAB remains responsible for preparing initial `.smpcd` files;
 bash launchers only write `params.kv` and run the OpenMP executable. See
 `doc/README_0130_TAYLOR_GREEN_FORCING.md`.
+
+## 0131 — Poiseuille wallVP resampling validation
+
+Patch 0131 adds a wall-bounded Poiseuille validation using the established
+workflow: MATLAB prepares the initial `.smpcd` state in `init/`, bash writes
+`params_*.kv` and launches `classic`, `q6`, and `q6_resampling`, then MATLAB
+post-processes the run directory.
+
+Typical commands:
+
+```matlab
+cd('/path/to/SRC_openMP_resampling/matlab')
+prepare_poiseuille_wallvp_resampling_0131( ...
+    'output', '../init/poiseuille_wallvp_resampling_0131/initial_state_poiseuille_wallvp_0131.smpcd', ...
+    'Lx', 2.0, 'Ly', 1.0, 'Nx', 64, 'Ny', 32, 'gamma', 20, ...
+    'kBT', 0.001, 'seed', 1310131);
+```
+
+```bash
+POIS_STEPS=3000 POIS_DUMP_EVERY=100 POIS_THREADS=8 \
+./scripts/run_poiseuille_wallvp_resampling_validation_0131.sh
+```
+
+```matlab
+cd('/path/to/SRC_openMP_resampling/matlab')
+analyze_poiseuille_wallvp_resampling_0131('../runs/poiseuille_wallvp_resampling_0131');
+```
+
+See `doc/README_0131_POISEUILLE_WALLVP_RESAMPLING.md` for details.
