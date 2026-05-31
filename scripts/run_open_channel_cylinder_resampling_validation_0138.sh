@@ -138,11 +138,6 @@ inletHardCellThermalRescale = true
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-openBoundaryApertureEnable = true
-leftOpenYMin = 0.0
-leftOpenYMax = $OCYL_LY
-rightOpenYMin = 0.0
-rightOpenYMax = $OCYL_LY
 openBoundaryOutletMode = $OCYL_OUTLET_MODE
 openBoundaryOutletHybridBlend = $OCYL_OUTLET_HYBRID_BLEND
 openBoundaryOutletFeedbackGain = $OCYL_OUTLET_FEEDBACK_GAIN

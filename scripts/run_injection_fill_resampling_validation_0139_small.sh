@@ -4,16 +4,16 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/injection_fill_resampling_0139_0140}
+RUN_ROOT=${RUN_ROOT:-runs/injection_fill_resampling_0139_0140_small}
 INIT_ROOT=${INIT_ROOT:-init/injection_fill_resampling_0139_small}
-STATE=${FILL_INITIAL_STATE:-$INIT_ROOT/initial_state_injection_fill_0139.smpcd}
+STATE=${FILL_INITIAL_STATE:-$INIT_ROOT/initial_state_injection_fill_0139_small.smpcd}
 
 FILL_LX=${FILL_LX:-1.0}
 FILL_LY=${FILL_LY:-1.0}
 FILL_NX=${FILL_NX:-48}
 FILL_NY=${FILL_NY:-48}
 FILL_GAMMA=${FILL_GAMMA:-20}
-FILL_STEPS=${FILL_STEPS:-9000}
+FILL_STEPS=${FILL_STEPS:-6000}
 FILL_DT=${FILL_DT:-0.001}
 FILL_KBT=${FILL_KBT:-0.001}
 FILL_SEED=${FILL_SEED:-1390139}
@@ -22,8 +22,8 @@ FILL_DUMP_EVERY=${FILL_DUMP_EVERY:-100}
 FILL_THREADS=${FILL_THREADS:-8}
 
 FILL_INLET_UX=${FILL_INLET_UX:-0.10}
-FILL_INLET_CENTER_Y=${FILL_INLET_CENTER_Y:-0.25}
-FILL_INLET_HEIGHT_CELLS=${FILL_INLET_HEIGHT_CELLS:-10.0}
+FILL_INLET_CENTER_Y=${FILL_INLET_CENTER_Y:-0.5}
+FILL_INLET_HEIGHT_CELLS=${FILL_INLET_HEIGHT_CELLS:-1.0}
 FILL_INLET_RESERVOIR_CELLS=${FILL_INLET_RESERVOIR_CELLS:-1}
 FILL_INLET_PROFILE=${FILL_INLET_PROFILE:-uniform}
 FILL_INLET_TAPER_CELLS=${FILL_INLET_TAPER_CELLS:-0.0}
@@ -62,7 +62,7 @@ Generate it from MATLAB before launching OpenMP. From the repository root:
 
 then in MATLAB:
 
-  prepare_injection_fill_resampling_0139( ...
+  prepare_injection_fill_resampling_0139_small( ...
       'output', '../$STATE', ...
       'Lx', $FILL_LX, 'Ly', $FILL_LY, ...
       'Nx', $FILL_NX, 'Ny', $FILL_NY, 'gamma', $FILL_GAMMA, ...
@@ -114,21 +114,17 @@ rngSeed = $FILL_SEED
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
 
-bcLeft = inlet
+bcLeft = solid
 bcRight = solid
 bcBottom = solid
 bcTop = solid
 
-inletUxLeft = $FILL_INLET_UX
-inletUyLeft = 0.0
 inletVelocityRampEnable = true
 inletVelocityRampStartTime = 0.0
 inletVelocityRampEndTime = $FILL_RAMP_END_TIME
 inletVelocityRampInitialFactor = 0.0
 inletVelocityRampFinalFactor = 1.0
 inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = $FILL_INLET_PROFILE
-inletVelocityWallTaperCells = $FILL_INLET_TAPER_CELLS
 inletKBT = -1.0
 inletThermalNoise = $FILL_INLET_THERMAL_NOISE
 inletInjectionMode = hard_cell_density
@@ -140,14 +136,21 @@ inletHardCellThermalRescale = true
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-openBoundaryApertureEnable = true
-leftOpenYMin = $FILL_INLET_YMIN
-leftOpenYMax = $FILL_INLET_YMAX
-rightOpenYMin = 0.0
-rightOpenYMax = $FILL_LY
-openBoundaryOutletMode = $FILL_OUTLET_MODE
-openBoundaryOutletHybridBlend = $FILL_OUTLET_HYBRID_BLEND
-openBoundaryOutletFeedbackGain = $FILL_OUTLET_FEEDBACK_GAIN
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 2
+openBoundarySegment0 = left inlet  0.1 0.3 0.5 0 0 1
+openBoundarySegment1 = left outlet 0.7 0.9 0.0 0.0 0 1
+openBoundaryOutletMode = neumann
+openBoundaryOutletHybridBlend = 0.0
+openBoundaryOutletFeedbackGain = 0.0
+
+
+# openBoundarySegmentsEnable = true
+# openBoundarySegmentCount = 1
+# openBoundarySegment0 = left inlet $(awk -v y="$FILL_INLET_YMIN" -v ly="$FILL_LY" 'BEGIN{printf "%.17g", y/ly}') $(awk -v y="$FILL_INLET_YMAX" -v ly="$FILL_LY" 'BEGIN{printf "%.17g", y/ly}') $FILL_INLET_UX 0.0 0 1.0
+# openBoundaryOutletMode = $FILL_OUTLET_MODE
+# openBoundaryOutletHybridBlend = $FILL_OUTLET_HYBRID_BLEND
+# openBoundaryOutletFeedbackGain = $FILL_OUTLET_FEEDBACK_GAIN
 
 method = $method
 projectionOperator = $FILL_PROJECTION_OPERATOR

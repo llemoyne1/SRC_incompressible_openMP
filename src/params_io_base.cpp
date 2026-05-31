@@ -1,14 +1,17 @@
 #include "params_io_base.h"
+#include "open_boundary_segments.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace mpcd {
 namespace {
@@ -86,6 +89,75 @@ bool is_reserved_io_mode(const std::string& mode) {
 
 bool is_known_boundary_mode(const std::string& mode) {
     return mode == "periodic" || is_wall_mode(mode) || is_reserved_io_mode(mode);
+}
+
+
+bool is_removed_open_aperture_key(const std::string& key) {
+    return key == "openBoundaryApertureEnable" || key == "ioApertureEnable" ||
+           key == "leftOpenYMin" || key == "inletLeftYMin" ||
+           key == "leftOpenYMax" || key == "inletLeftYMax" ||
+           key == "rightOpenYMin" || key == "outletRightYMin" ||
+           key == "rightOpenYMax" || key == "outletRightYMax" ||
+           key == "bottomOpenXMin" || key == "inletBottomXMin" ||
+           key == "bottomOpenXMax" || key == "inletBottomXMax" ||
+           key == "topOpenXMin" || key == "outletTopXMin" ||
+           key == "topOpenXMax" || key == "outletTopXMax";
+}
+
+bool is_open_boundary_segment_key(const std::string& key) {
+    const std::string prefix = "openBoundarySegment";
+    if (key.rfind(prefix, 0) != 0) return false;
+    if (key == "openBoundarySegmentsEnable" || key == "openBoundarySegmentCount") return false;
+    const std::string suffix = key.substr(prefix.size());
+    if (suffix.empty()) return false;
+    return std::all_of(suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c); });
+}
+
+OpenBoundarySegment parse_open_boundary_segment_value(const std::string& value,
+                                                      const std::string& key) {
+    std::istringstream iss(value);
+    OpenBoundarySegment seg{};
+    long long typeValue = 0;
+    if (!(iss >> seg.face >> seg.mode >> seg.sMin >> seg.sMax >> seg.ux >> seg.uy >> typeValue >> seg.mass)) {
+        throw std::runtime_error("Malformed " + key + ": expected 'face mode sMin sMax ux uy type mass'");
+    }
+    std::string extra;
+    if (iss >> extra) {
+        throw std::runtime_error("Malformed " + key + ": too many fields; expected exactly 'face mode sMin sMax ux uy type mass'");
+    }
+    seg.face = lower(trim(seg.face));
+    seg.mode = lower(trim(seg.mode));
+    std::replace(seg.face.begin(), seg.face.end(), '-', '_');
+    std::replace(seg.mode.begin(), seg.mode.end(), '-', '_');
+    if (seg.face != "left" && seg.face != "right" && seg.face != "bottom" && seg.face != "top") {
+        throw std::runtime_error(key + ": face must be left, right, bottom or top");
+    }
+    if (!is_io_boundary_mode(seg.mode)) {
+        throw std::runtime_error(key + ": mode must be inlet or outlet");
+    }
+    if (!std::isfinite(seg.sMin) || !std::isfinite(seg.sMax) ||
+        seg.sMin < 0.0 || seg.sMax > 1.0 || !(seg.sMax > seg.sMin)) {
+        throw std::runtime_error(key + ": sMin/sMax must be finite relative coordinates with 0 <= sMin < sMax <= 1");
+    }
+    if (!std::isfinite(seg.ux) || !std::isfinite(seg.uy)) {
+        throw std::runtime_error(key + ": ux/uy must be finite");
+    }
+    if (typeValue < 0 || typeValue > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
+        throw std::runtime_error(key + ": type must be a non-negative uint32 value");
+    }
+    seg.type = static_cast<std::uint32_t>(typeValue);
+    if (!std::isfinite(seg.mass) || !(seg.mass > 0.0)) {
+        throw std::runtime_error(key + ": mass must be finite and positive");
+    }
+    return seg;
+}
+
+std::string boundary_mode_for_face(const SimulationParams& p, const std::string& face) {
+    if (face == "left") return p.bcLeft;
+    if (face == "right") return p.bcRight;
+    if (face == "bottom") return p.bcBottom;
+    if (face == "top") return p.bcTop;
+    return "";
 }
 
 } // namespace
@@ -234,15 +306,14 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletTargetOccupancy" || key == "inletTargetN" || key == "inletGamma") p.inletTargetOccupancy = parse_int(value, key);
         else if (key == "inletHardCellVelocityMean") p.inletHardCellVelocityMean = parse_bool(value, key);
         else if (key == "inletHardCellThermalRescale") p.inletHardCellThermalRescale = parse_bool(value, key);
-        else if (key == "openBoundaryApertureEnable" || key == "ioApertureEnable") p.openBoundaryApertureEnable = parse_bool(value, key);
-        else if (key == "leftOpenYMin" || key == "inletLeftYMin") p.leftOpenYMin = parse_double(value, key);
-        else if (key == "leftOpenYMax" || key == "inletLeftYMax") p.leftOpenYMax = parse_double(value, key);
-        else if (key == "rightOpenYMin" || key == "outletRightYMin") p.rightOpenYMin = parse_double(value, key);
-        else if (key == "rightOpenYMax" || key == "outletRightYMax") p.rightOpenYMax = parse_double(value, key);
-        else if (key == "bottomOpenXMin" || key == "inletBottomXMin") p.bottomOpenXMin = parse_double(value, key);
-        else if (key == "bottomOpenXMax" || key == "inletBottomXMax") p.bottomOpenXMax = parse_double(value, key);
-        else if (key == "topOpenXMin" || key == "outletTopXMin") p.topOpenXMin = parse_double(value, key);
-        else if (key == "topOpenXMax" || key == "outletTopXMax") p.topOpenXMax = parse_double(value, key);
+        else if (key == "openBoundarySegmentsEnable") p.openBoundarySegmentsEnable = parse_bool(value, key);
+        else if (key == "openBoundarySegmentCount") p.openBoundarySegmentCount = parse_int(value, key);
+        else if (is_open_boundary_segment_key(key)) {
+            // Parsed after the generic loop, once openBoundarySegmentCount is known.
+        }
+        else if (is_removed_open_aperture_key(key)) {
+            throw std::runtime_error("Parameter '" + key + "' was removed in 0143. Use compact relative segments: openBoundarySegmentsEnable=true, openBoundarySegmentCount=N, openBoundarySegmentK='face mode sMin sMax ux uy type mass'.");
+        }
         else if (key == "openBoundaryOutletMode" || key == "openOutletBoundaryMode" ||
                  key == "outletBoundaryMode" || key == "q6q9OutletBoundaryMode") {
             p.openBoundaryOutletMode = get_lower(kv, key);
@@ -363,6 +434,33 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     if (has_key(kv, "boundaryBottom")) p.bcBottom = get_lower(kv, "boundaryBottom");
     if (has_key(kv, "boundaryTop")) p.bcTop = get_lower(kv, "boundaryTop");
 
+    p.openBoundarySegments.clear();
+    if (p.openBoundarySegmentsEnable) {
+        if (p.openBoundarySegmentCount <= 0) {
+            throw std::runtime_error("openBoundarySegmentsEnable=true requires openBoundarySegmentCount>0");
+        }
+        if (p.openBoundarySegmentCount > kOpenBoundaryMaxSegments) {
+            throw std::runtime_error("openBoundarySegmentCount exceeds the 0143 safety limit of " + std::to_string(kOpenBoundaryMaxSegments));
+        }
+        p.openBoundarySegments.reserve(static_cast<std::size_t>(p.openBoundarySegmentCount));
+        for (int k = 0; k < p.openBoundarySegmentCount; ++k) {
+            const std::string segKey = "openBoundarySegment" + std::to_string(k);
+            if (!has_key(kv, segKey)) {
+                throw std::runtime_error("Missing required segmented boundary entry: " + segKey);
+            }
+            p.openBoundarySegments.push_back(parse_open_boundary_segment_value(kv.at(segKey), segKey));
+        }
+    } else {
+        if (p.openBoundarySegmentCount != 0) {
+            throw std::runtime_error("openBoundarySegmentCount is set but openBoundarySegmentsEnable=false; enable segments explicitly or remove the segment keys");
+        }
+        for (const auto& item : kv) {
+            if (is_open_boundary_segment_key(item.first)) {
+                throw std::runtime_error("Found " + item.first + " but openBoundarySegmentsEnable=false; enable segments explicitly");
+            }
+        }
+    }
+
     if (has_key(kv, "immersedCircleEnable") && !has_key(kv, "immersedSolidShape")) {
         p.immersedSolidShape = "circle";
     }
@@ -409,7 +507,8 @@ bool has_solid_wall(const SimulationParams& p) {
 
 bool has_io_boundary(const SimulationParams& p) {
     return is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight) ||
-           is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop);
+           is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop) ||
+           has_open_boundary_segments(p);
 }
 
 std::string normalized_inlet_reservoir_mode(const SimulationParams& p) {
@@ -495,9 +594,11 @@ void validate_simulation_params(const SimulationParams& p) {
         ((is_inlet_boundary_mode(p.bcBottom) && is_outlet_boundary_mode(p.bcTop)) ||
          (is_outlet_boundary_mode(p.bcBottom) && is_inlet_boundary_mode(p.bcTop)));
     const bool xHasIO = !leftPeriodic &&
-        (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight));
+        (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight) ||
+         has_open_boundary_segments_on_x_axis(p));
     const bool yHasIO = !bottomPeriodic &&
-        (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop));
+        (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop) ||
+         has_open_boundary_segments_on_y_axis(p));
     const bool xBoundaryModesSupported = !leftPeriodic &&
         (is_wall_mode(p.bcLeft) || is_io_boundary_mode(p.bcLeft)) &&
         (is_wall_mode(p.bcRight) || is_io_boundary_mode(p.bcRight));
@@ -517,7 +618,8 @@ void validate_simulation_params(const SimulationParams& p) {
         if (xHasIO && yHasIO) {
             throw std::runtime_error("0142 standalone/open-boundary support keeps one open axis at a time");
         }
-        const bool standaloneOpenBoundary = (xHasIO && !xIoPair) || (yHasIO && !yIoPair);
+        const bool standaloneOpenBoundary = (xHasIO && (!xIoPair || has_open_boundary_segments_on_x_axis(p))) ||
+                                            (yHasIO && (!yIoPair || has_open_boundary_segments_on_y_axis(p)));
         const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
         if (p.method != "classic" && p.method != "q6") {
             throw std::runtime_error("openMP-resampling inlet/outlet supports method=classic or method=q6 only");
@@ -573,11 +675,16 @@ void validate_simulation_params(const SimulationParams& p) {
                 throw std::runtime_error("inletKBT is negative, so kBT must be positive when inletThermalNoise>0");
             }
         }
-        const double inletSpeedScale = std::max({
+        double inletSpeedScale = std::max({
             std::abs(p.inletUxLeft), std::abs(p.inletUyLeft),
             std::abs(p.inletUxRight), std::abs(p.inletUyRight),
             std::abs(p.inletUxBottom), std::abs(p.inletUyBottom),
             std::abs(p.inletUxTop), std::abs(p.inletUyTop)});
+        for (const auto& seg : p.openBoundarySegments) {
+            if (open_boundary_segment_is_inlet(seg)) {
+                inletSpeedScale = std::max(inletSpeedScale, std::max(std::abs(seg.ux), std::abs(seg.uy)));
+            }
+        }
         if (!std::isfinite(inletSpeedScale)) {
             throw std::runtime_error("Inlet velocities must be finite");
         }
@@ -630,12 +737,49 @@ void validate_simulation_params(const SimulationParams& p) {
                 throw std::runtime_error("openBoundaryOutletFeedbackGain must be in [0,1]");
             }
         }
-        if (p.openBoundaryApertureEnable) {
-            const double vals[] = {p.leftOpenYMin, p.leftOpenYMax, p.rightOpenYMin, p.rightOpenYMax,
-                                   p.bottomOpenXMin, p.bottomOpenXMax, p.topOpenXMin, p.topOpenXMax};
-            for (const double v : vals) {
-                if (!std::isfinite(v)) {
-                    throw std::runtime_error("open-boundary aperture bounds must be finite; use negative high bounds to inherit the domain maximum");
+        if (p.openBoundarySegmentsEnable) {
+            if (p.openBoundarySegments.size() != static_cast<std::size_t>(p.openBoundarySegmentCount)) {
+                throw std::runtime_error("openBoundarySegmentCount does not match parsed openBoundarySegments size");
+            }
+            std::string segmentOutletMode = lower(trim(p.openBoundaryOutletMode));
+            std::replace(segmentOutletMode.begin(), segmentOutletMode.end(), '-', '_');
+            if (has_outlet_open_boundary_segment(p)) {
+                const bool outletModeOk = segmentOutletMode == "neumann" || segmentOutletMode == "free" ||
+                    segmentOutletMode == "zero_gradient" || segmentOutletMode == "zero_normal_gradient" ||
+                    segmentOutletMode == "hybrid" || segmentOutletMode == "neumann_feedback" || segmentOutletMode == "hybrid_feedback";
+                if (!outletModeOk) {
+                    throw std::runtime_error("0143 segmented outlets require openBoundaryOutletMode=neumann or hybrid; balanced_flux is ambiguous for same-face/multiple outlets");
+                }
+                if ((segmentOutletMode == "hybrid" || segmentOutletMode == "neumann_feedback" || segmentOutletMode == "hybrid_feedback") &&
+                    p.openBoundaryOutletHybridBlend != 0.0) {
+                    throw std::runtime_error("0143 segmented hybrid outlets support feedback only; set openBoundaryOutletHybridBlend=0");
+                }
+            }
+            for (const auto& seg : p.openBoundarySegments) {
+                const std::string faceMode = boundary_mode_for_face(p, seg.face);
+                if (faceMode == "periodic") {
+                    throw std::runtime_error("openBoundarySegment on face '" + seg.face + "' is incompatible with a periodic boundary face");
+                }
+                if (is_io_boundary_mode(faceMode)) {
+                    throw std::runtime_error("openBoundarySegment on face '" + seg.face + "' must be used with bcFace=solid/specular/bounceback, not a full-face inlet/outlet");
+                }
+                if (!is_wall_mode(faceMode)) {
+                    throw std::runtime_error("openBoundarySegment on face '" + seg.face + "' requires a wall-like bcFace mode");
+                }
+            }
+            const char* faces[] = {"left", "right", "bottom", "top"};
+            for (const char* face : faces) {
+                std::vector<OpenBoundarySegment> local;
+                for (const auto& seg : p.openBoundarySegments) {
+                    if (seg.face == face) local.push_back(seg);
+                }
+                std::sort(local.begin(), local.end(), [](const OpenBoundarySegment& a, const OpenBoundarySegment& b) {
+                    return a.sMin < b.sMin;
+                });
+                for (std::size_t i = 1; i < local.size(); ++i) {
+                    if (local[i].sMin < local[i - 1].sMax) {
+                        throw std::runtime_error("openBoundarySegment intervals overlap on face '" + std::string(face) + "'");
+                    }
                 }
             }
         }

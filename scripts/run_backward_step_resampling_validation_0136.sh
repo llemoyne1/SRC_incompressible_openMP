@@ -138,11 +138,6 @@ inletHardCellThermalRescale = true
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-openBoundaryApertureEnable = true
-leftOpenYMin = $BSTEP_STEP_HEIGHT
-leftOpenYMax = $BSTEP_LY
-rightOpenYMin = 0.0
-rightOpenYMax = $BSTEP_LY
 openBoundaryOutletMode = $BSTEP_OUTLET_MODE
 openBoundaryOutletHybridBlend = $BSTEP_OUTLET_HYBRID_BLEND
 openBoundaryOutletFeedbackGain = $BSTEP_OUTLET_FEEDBACK_GAIN

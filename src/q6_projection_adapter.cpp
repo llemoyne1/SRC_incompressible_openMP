@@ -1,4 +1,5 @@
 #include "q6_projection_adapter.h"
+#include "open_boundary_segments.h"
 
 #include <algorithm>
 #include <cmath>
@@ -476,11 +477,13 @@ double active_domain_divergence_rate(const FluidDomainBounds& domain) {
 }
 
 bool has_x_io_boundary(const SimulationParams& params) {
-    return is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight);
+    return is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight) ||
+           has_open_boundary_segments_on_x_axis(params);
 }
 
 bool has_y_io_boundary(const SimulationParams& params) {
-    return is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop);
+    return is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop) ||
+           has_open_boundary_segments_on_y_axis(params);
 }
 
 double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
@@ -582,28 +585,11 @@ double inlet_y_profile_factor(const SimulationParams& params,
 
 struct ApertureInterval { double lo = 0.0; double hi = 0.0; };
 
-ApertureInterval normalize_aperture_interval(double requestedLo, double requestedHi, double domainLo, double domainHi) {
-    ApertureInterval a{};
-    a.lo = std::clamp(requestedLo, domainLo, domainHi);
-    const double hiRaw = requestedHi < 0.0 ? domainHi : requestedHi;
-    a.hi = std::clamp(hiRaw, domainLo, domainHi);
-    if (a.hi < a.lo) a.hi = a.lo;
-    return a;
-}
-
-ApertureInterval x_face_aperture_y(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
-    if (!params.openBoundaryApertureEnable) return {domain.yMin, domain.yMax};
-    const std::string f(face);
-    if (f == "left") return normalize_aperture_interval(params.leftOpenYMin, params.leftOpenYMax, domain.yMin, domain.yMax);
-    if (f == "right") return normalize_aperture_interval(params.rightOpenYMin, params.rightOpenYMax, domain.yMin, domain.yMax);
+ApertureInterval x_face_aperture_y(const SimulationParams&, const FluidDomainBounds& domain, const char*) {
     return {domain.yMin, domain.yMax};
 }
 
-ApertureInterval y_face_aperture_x(const SimulationParams& params, const FluidDomainBounds& domain, const char* face) {
-    if (!params.openBoundaryApertureEnable) return {domain.xMin, domain.xMax};
-    const std::string f(face);
-    if (f == "bottom") return normalize_aperture_interval(params.bottomOpenXMin, params.bottomOpenXMax, domain.xMin, domain.xMax);
-    if (f == "top") return normalize_aperture_interval(params.topOpenXMin, params.topOpenXMax, domain.xMin, domain.xMax);
+ApertureInterval y_face_aperture_x(const SimulationParams&, const FluidDomainBounds& domain, const char*) {
     return {domain.xMin, domain.xMax};
 }
 
@@ -784,6 +770,132 @@ void set_y_boundary_flux_profile_from_base(std::vector<double>& profile,
     }
 }
 
+
+void ensure_x_profile(std::vector<double>& profile, int Ny) {
+    if (profile.empty()) profile.assign(static_cast<std::size_t>(Ny), 0.0);
+}
+
+void ensure_y_profile(std::vector<double>& profile, int Nx) {
+    if (profile.empty()) profile.assign(static_cast<std::size_t>(Nx), 0.0);
+}
+
+std::vector<double>& profile_for_segment_face(EllipticProjectionBC& bc, const std::string& face) {
+    if (face == "left") return bc.xLowFluxProfile;
+    if (face == "right") return bc.xHighFluxProfile;
+    if (face == "bottom") return bc.yLowFluxProfile;
+    return bc.yHighFluxProfile;
+}
+
+void set_segmented_face_fluxes(EllipticProjectionBC& bc,
+                               const PeriodicFaceField& baseFlux,
+                               const SimulationParams& params,
+                               double time) {
+    const double ramp = inlet_velocity_ramp_factor(params, time);
+    for (const auto& seg : params.openBoundarySegments) {
+        std::vector<double>& profile = profile_for_segment_face(bc, seg.face);
+        if (open_boundary_face_is_x(seg.face)) {
+            ensure_x_profile(profile, params.Ny);
+            const int i = (seg.face == "right") ? (params.Nx - 1) : 0;
+            for (int j = 0; j < params.Ny; ++j) {
+                const double sc = open_boundary_segment_center_s_x_face(j, params.Ny);
+                if (!open_boundary_s_in_segment(sc, seg)) continue;
+                const std::size_t k = static_cast<std::size_t>(j);
+                if (open_boundary_segment_is_inlet(seg)) {
+                    profile[k] = ramp * seg.ux;
+                } else {
+                    const int c = i + params.Nx * j;
+                    profile[k] = baseFlux.x[static_cast<std::size_t>(c)];
+                }
+            }
+        } else {
+            ensure_y_profile(profile, params.Nx);
+            const int j = (seg.face == "top") ? (params.Ny - 1) : 0;
+            for (int i = 0; i < params.Nx; ++i) {
+                const double sc = open_boundary_segment_center_s_y_face(i, params.Nx);
+                if (!open_boundary_s_in_segment(sc, seg)) continue;
+                const std::size_t k = static_cast<std::size_t>(i);
+                if (open_boundary_segment_is_inlet(seg)) {
+                    profile[k] = ramp * seg.uy;
+                } else {
+                    const int c = i + params.Nx * j;
+                    profile[k] = baseFlux.y[static_cast<std::size_t>(c)];
+                }
+            }
+        }
+    }
+    if (!bc.xLowFluxProfile.empty()) bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
+    if (!bc.xHighFluxProfile.empty()) bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
+    if (!bc.yLowFluxProfile.empty()) bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
+    if (!bc.yHighFluxProfile.empty()) bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
+}
+
+void add_uniform_to_segmented_outlet_profile(std::vector<double>& profile,
+                                             const OpenBoundarySegment& seg,
+                                             int n,
+                                             double delta) {
+    if (n <= 0 || delta == 0.0) return;
+    if (profile.empty()) profile.assign(static_cast<std::size_t>(n), 0.0);
+    for (int k = 0; k < n; ++k) {
+        const double sc = (static_cast<double>(k) + 0.5) / static_cast<double>(n);
+        if (open_boundary_s_in_segment(sc, seg)) profile[static_cast<std::size_t>(k)] += delta;
+    }
+}
+
+double segmented_outlet_length(const SimulationParams& params,
+                               const FluidDomainBounds& domain) {
+    double length = 0.0;
+    const double dy = fluid_domain_height(domain) / static_cast<double>(std::max(1, params.Ny));
+    const double dx = fluid_domain_width(domain) / static_cast<double>(std::max(1, params.Nx));
+    for (const auto& seg : params.openBoundarySegments) {
+        if (!open_boundary_segment_is_outlet(seg)) continue;
+        if (open_boundary_face_is_x(seg.face)) {
+            for (int j = 0; j < params.Ny; ++j) {
+                const double sc = open_boundary_segment_center_s_x_face(j, params.Ny);
+                if (open_boundary_s_in_segment(sc, seg)) length += dy;
+            }
+        } else {
+            for (int i = 0; i < params.Nx; ++i) {
+                const double sc = open_boundary_segment_center_s_y_face(i, params.Nx);
+                if (open_boundary_s_in_segment(sc, seg)) length += dx;
+            }
+        }
+    }
+    return length;
+}
+
+void apply_segmented_hybrid_feedback(EllipticProjectionBC& bc,
+                                     const SimulationParams& params,
+                                     const FluidDomainBounds& domain) {
+    const double gain = outlet_feedback_gain(params);
+    if (gain <= 0.0) return;
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    const double xLowIntegral = bc.xLowFluxProfile.empty() ? bc.xLowFlux * height :
+        std::accumulate(bc.xLowFluxProfile.begin(), bc.xLowFluxProfile.end(), 0.0) * (height / static_cast<double>(params.Ny));
+    const double xHighIntegral = bc.xHighFluxProfile.empty() ? bc.xHighFlux * height :
+        std::accumulate(bc.xHighFluxProfile.begin(), bc.xHighFluxProfile.end(), 0.0) * (height / static_cast<double>(params.Ny));
+    const double yLowIntegral = bc.yLowFluxProfile.empty() ? bc.yLowFlux * width :
+        std::accumulate(bc.yLowFluxProfile.begin(), bc.yLowFluxProfile.end(), 0.0) * (width / static_cast<double>(params.Nx));
+    const double yHighIntegral = bc.yHighFluxProfile.empty() ? bc.yHighFlux * width :
+        std::accumulate(bc.yHighFluxProfile.begin(), bc.yHighFluxProfile.end(), 0.0) * (width / static_cast<double>(params.Nx));
+    const double balance = (xHighIntegral - xLowIntegral) + (yHighIntegral - yLowIntegral);
+    if (balance == 0.0) return;
+    const double outletLength = segmented_outlet_length(params, domain);
+    if (!(outletLength > 0.0)) return;
+    const double perLength = gain * balance / outletLength;
+    for (const auto& seg : params.openBoundarySegments) {
+        if (!open_boundary_segment_is_outlet(seg)) continue;
+        if (seg.face == "left") add_uniform_to_segmented_outlet_profile(bc.xLowFluxProfile, seg, params.Ny, +perLength);
+        else if (seg.face == "right") add_uniform_to_segmented_outlet_profile(bc.xHighFluxProfile, seg, params.Ny, -perLength);
+        else if (seg.face == "bottom") add_uniform_to_segmented_outlet_profile(bc.yLowFluxProfile, seg, params.Nx, +perLength);
+        else if (seg.face == "top") add_uniform_to_segmented_outlet_profile(bc.yHighFluxProfile, seg, params.Nx, -perLength);
+    }
+    if (!bc.xLowFluxProfile.empty()) bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, bc.xLowFlux);
+    if (!bc.xHighFluxProfile.empty()) bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, bc.xHighFlux);
+    if (!bc.yLowFluxProfile.empty()) bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, bc.yLowFlux);
+    if (!bc.yHighFluxProfile.empty()) bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, bc.yHighFlux);
+}
+
 void apply_hybrid_feedback_to_q6_open_boundaries(EllipticProjectionBC& bc,
                                                   const SimulationParams& params,
                                                   const FluidDomainBounds& domain,
@@ -855,6 +967,14 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
     ApertureInterval bottomA{0.0, 0.0};
     ApertureInterval topA{0.0, 0.0};
 
+    if (params.openBoundarySegmentsEnable) {
+        set_segmented_face_fluxes(bc, baseFlux, params, time);
+        diag.openBoundaryEnabled = true;
+        if (open_boundary_outlet_mode_is_hybrid(params)) {
+            apply_segmented_hybrid_feedback(bc, params, domain);
+        }
+    } else {
+
     if (has_x_io_boundary(params)) {
         const bool localOutlet = open_boundary_outlet_uses_local_base(params);
         const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
@@ -871,7 +991,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         if (leftInlet) {
             const double ux = q6_inlet_x_flux_for_face(params, "left", time);
             bc.xLowFlux = ux;
-            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+            if (params.inletVelocitySpatialProfile != "uniform") {
                 set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, ux, leftA);
                 bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, ux);
             }
@@ -886,7 +1006,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
                 bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
             } else {
                 bc.xLowFlux = balancedUx;
-                if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                if (params.inletVelocitySpatialProfile != "uniform") {
                     set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, balancedUx, leftA);
                     bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, balancedUx);
                 }
@@ -896,7 +1016,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         if (rightInlet) {
             const double ux = q6_inlet_x_flux_for_face(params, "right", time);
             bc.xHighFlux = ux;
-            if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+            if (params.inletVelocitySpatialProfile != "uniform") {
                 set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, ux, rightA);
                 bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, ux);
             }
@@ -911,7 +1031,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
                 bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
             } else {
                 bc.xHighFlux = balancedUx;
-                if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                if (params.inletVelocitySpatialProfile != "uniform") {
                     set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, balancedUx, rightA);
                     bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, balancedUx);
                 }
@@ -936,7 +1056,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         if (bottomInlet) {
             const double uy = q6_inlet_y_flux_for_face(params, "bottom", time);
             bc.yLowFlux = uy;
-            if (params.openBoundaryApertureEnable) {
+            if (false) {
                 set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, bottomA);
                 bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, uy);
             }
@@ -951,7 +1071,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
                 bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
             } else {
                 bc.yLowFlux = balancedUy;
-                if (params.openBoundaryApertureEnable) {
+                if (false) {
                     set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, balancedUy, bottomA);
                     bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, balancedUy);
                 }
@@ -961,7 +1081,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
         if (topInlet) {
             const double uy = q6_inlet_y_flux_for_face(params, "top", time);
             bc.yHighFlux = uy;
-            if (params.openBoundaryApertureEnable) {
+            if (false) {
                 set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, topA);
                 bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, uy);
             }
@@ -976,7 +1096,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
                 bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
             } else {
                 bc.yHighFlux = balancedUy;
-                if (params.openBoundaryApertureEnable) {
+                if (false) {
                     set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, balancedUy, topA);
                     bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, balancedUy);
                 }
@@ -988,6 +1108,7 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
 
     if (open_boundary_outlet_mode_is_hybrid(params)) {
         apply_hybrid_feedback_to_q6_open_boundaries(bc, params, domain, leftA, rightA, bottomA, topA);
+    }
     }
 
     diag.openBoundaryFluxXLow = bc.xLowFlux;

@@ -2,8 +2,20 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace mpcd {
+
+struct OpenBoundarySegment {
+    std::string face;   // left/right/bottom/top
+    std::string mode;   // inlet/outlet
+    double sMin = 0.0;  // relative tangent coordinate in [0,1]
+    double sMax = 0.0;  // relative tangent coordinate in [0,1]
+    double ux = 0.0;    // prescribed inlet velocity component; ignored by outlet
+    double uy = 0.0;    // prescribed inlet velocity component; ignored by outlet
+    std::uint32_t type = 0u;
+    double mass = 1.0;
+};
 
 struct SimulationParams {
     std::string inputState;
@@ -139,21 +151,17 @@ struct SimulationParams {
     bool inletHardCellVelocityMean = true;
     bool inletHardCellThermalRescale = true;
 
-    // Optional segmented open-boundary apertures.  When enabled, inlet/outlet
-    // particle exchange and Q6 open-boundary fluxes are restricted to the
-    // specified aperture on each face.  The complementary parts of the boundary
-    // behave as impermeable solid walls.  Negative high bounds inherit the
-    // active-domain high coordinate, preserving the historical full-face
-    // inlet/outlet behavior by default.
-    bool openBoundaryApertureEnable = false;
-    double leftOpenYMin = 0.0;
-    double leftOpenYMax = -1.0;
-    double rightOpenYMin = 0.0;
-    double rightOpenYMax = -1.0;
-    double bottomOpenXMin = 0.0;
-    double bottomOpenXMax = -1.0;
-    double topOpenXMin = 0.0;
-    double topOpenXMax = -1.0;
+    // Compact relative open-boundary segments.  When enabled, partial inlet/outlet
+    // regions are declared as one line per segment:
+    //   openBoundarySegmentK = face mode sMin sMax ux uy type mass
+    // with face in {left,right,bottom,top}, mode in {inlet,outlet}, and sMin/sMax
+    // the relative tangent-coordinate interval in [0,1].  Portions of a segmented
+    // face not covered by a segment remain impermeable solid wall.  The former
+    // openBoundaryApertureEnable + leftOpenYMin/... path was removed deliberately
+    // in 0143 to avoid ambiguous mixed configurations.
+    bool openBoundarySegmentsEnable = false;
+    int openBoundarySegmentCount = 0;
+    std::vector<OpenBoundarySegment> openBoundarySegments;
 
     // Q6 outlet treatment for inlet/outlet pairs.
     //   balanced_flux : validated 0062/0063 policy; the outlet projection flux

@@ -78,7 +78,7 @@ function meta = prepare_injection_fill_resampling_0139(varargin)
     state.vy = zeros(nSlots, 1);
     state.type = zeros(nSlots, 1, 'uint32');
     state.mass = double(opt.mass) * ones(nSlots, 1);
-    state.role = zeros(nSlots, 1, 'uint8'); % 0=Inactive, 1=Fluid, 2=Latent
+    state.role = ones(nSlots, 1, 'uint8'); % 0=Inactive, 1=Fluid, 2=Latent %%%%%%%%changement zeros->ones reservoir plein
 
     write_smpcd_state(output, state);
 

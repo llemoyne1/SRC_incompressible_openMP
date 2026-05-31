@@ -114,7 +114,7 @@ rngSeed = $FILL_SEED
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
 
-bcLeft = inlet
+bcLeft = solid
 bcRight = solid
 bcBottom = solid
 bcTop = solid
@@ -140,11 +140,9 @@ inletHardCellThermalRescale = true
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-openBoundaryApertureEnable = true
-leftOpenYMin = $FILL_INLET_YMIN
-leftOpenYMax = $FILL_INLET_YMAX
-rightOpenYMin = 0.0
-rightOpenYMax = $FILL_LY
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 1
+openBoundarySegment0 = left inlet $(awk -v y="$FILL_INLET_YMIN" -v ly="$FILL_LY" 'BEGIN{printf "%.17g", y/ly}') $(awk -v y="$FILL_INLET_YMAX" -v ly="$FILL_LY" 'BEGIN{printf "%.17g", y/ly}') $FILL_INLET_UX 0.0 0 1.0
 openBoundaryOutletMode = $FILL_OUTLET_MODE
 openBoundaryOutletHybridBlend = $FILL_OUTLET_HYBRID_BLEND
 openBoundaryOutletFeedbackGain = $FILL_OUTLET_FEEDBACK_GAIN

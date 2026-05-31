@@ -8,7 +8,7 @@ function out = play_smpcd_dumps(runDir, varargin)
 
     p = inputParser;
     addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-    addParameter(p, 'field', 'Ux', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'field', 'N', @(s) ischar(s) || isstring(s));
     addParameter(p, 'Lx', [], @isnumeric);
     addParameter(p, 'Ly', [], @isnumeric);
     addParameter(p, 'Nx', [], @isnumeric);
