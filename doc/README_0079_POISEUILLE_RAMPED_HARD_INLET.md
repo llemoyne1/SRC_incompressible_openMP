@@ -53,7 +53,6 @@ kBT = 0.0025
 Uin = 0.05
 CASE_STEPS = 60000
 INLET_RAMP_END_TIME = 20.0
-method = q9_virial
 q9MassFluxProjectionStrength = 1.0
 q9DensityRelaxationBeta = 0.0005
 q9CorrectionVelocityLimiter = 0.0

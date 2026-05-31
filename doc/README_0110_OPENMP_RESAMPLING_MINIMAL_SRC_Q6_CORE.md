@@ -71,8 +71,6 @@ There is no active Q9 mass-flux projection and no active virial/EOS kick.
 Accepted methods are now only:
 
 ```text
-method = classic
-method = q6
 ```
 
 Unsupported method values are rejected explicitly.  Parameter keys beginning
@@ -132,7 +130,6 @@ Nx = 32
 Ny = 32
 dt = 0.001
 nSteps = 1
-method = q9
 summaryEvery = 1
 KV
 ./build/src_mpcd_base /tmp/q9_reject.kv

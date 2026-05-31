@@ -85,7 +85,6 @@ bcTop = solid
 bodyAccelerationX = 0.015
 bodyAccelerationY = 0.0
 
-method = ${method}
 projectionEnable = true
 projectionOperator = channel_fv_cg
 projectionMaxIterations = 700

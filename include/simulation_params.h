@@ -240,11 +240,9 @@ struct SimulationParams {
     double thermostatEpsilon = 1.0e-30;
     double kBT = 0.0;
 
-    // Optional incompressible/projection module. The openMP-resampling baseline
-    // keeps only classic SRC/MPCD and Q6 velocity projection active. Q9
-    // mass-flux projection and the virial EOS/kick were deliberately removed
-    // from this branch to expose a clean core for weighted resampling.
-    std::string method = "classic";          // classic, q6
+    // Optional incompressible/projection module.  Q6 is controlled only by
+    // projectionEnable.  The former method=classic/q6 switch was removed in
+    // 0144 to avoid redundant or contradictory configurations.
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
     int projectionMaxIterations = 300;
@@ -255,6 +253,30 @@ struct SimulationParams {
     bool projectionAllowUnmaskedImmersedSolid = false;
     double projectionImmersedSolidFluidFractionThreshold = 0.5;
     bool projectionImmersedSolidCloseCutFaces = true;
+
+    // Closed-domain capacity response.  Disabled by default, so all previously
+    // validated open-channel, Poiseuille, Taylor--Green and resampling cases keep
+    // their historical behaviour.  When enabled, the code measures the excess
+    // mass above N_fluid_cells * referenceCellMass and uses this continuous
+    // overfill ratio to attenuate Q6, strengthen a virial pressure kick and
+    // weaken the incompressible mass-remap stage.
+    bool closedCapacityResponseEnable = false;
+    double closedCapacityReferenceCellMass = 0.0;      // <=0: infer from resamplingTargetCellMass or inletTargetOccupancy
+    double closedCapacityReferenceParticleMass = 1.0;  // used only when inferring from inletTargetOccupancy
+    double closedCapacityQ6Eta = 0.005;
+    double closedCapacityQ6Power = 2.0;
+    double closedCapacityMassRemapEta = 0.005;
+    double closedCapacityMassRemapPower = 2.0;
+    bool closedCapacityMassGuardDisableOnOverfill = true;
+    bool closedCapacityVirialKickEnable = false;
+    double closedCapacityVirialBaseK = 0.0;
+    double closedCapacityVirialGain = 20.0;
+    double closedCapacityVirialEta = 0.005;
+    double closedCapacityVirialPower = 2.0;
+    double closedCapacityVirialKickStrength = 1.0;
+    bool closedCapacityVirialMomentumCorrectionEnable = true;
+    bool closedCapacityInletMassFluxEnable = false;
+    double closedCapacityInletMassFluxMultiplier = 1.0;
 
     // Weighted-resampling diagnostic target.  A non-positive value means that
     // the current mean real-fluid cell mass is used as the reference, so the
@@ -315,17 +337,12 @@ struct SimulationParams {
     double resamplingLatentActivationParticleMass = 0.0; // <=0: targetCellMass / maxPerCell
 
     // Population-support guard matching the MATLAB weighted-resampling logic.
-    // This is a discrete resampling stage, intended to run every step when
-    // resampling is enabled.  It controls the active particle support N_c,
-    // independently from the mass remap M_c -> M_target:
-    //   N_c < NMin : split local heavy Fluid particles into inactive slots
-    //                until NTarget is reached when possible;
-    //   N_c > NMax : extract excess Fluid particles to Inactive until
-    //                NTarget is reached.
-    // Non-positive N thresholds are inferred from the current target cell
-    // mass and mean active particle mass; with m≈1 this gives the MATLAB
-    // default 14/20/26 for gamma=20.
-    bool resamplingPopulationGuardEnable = false;
+    // In 0144 this guard is no longer controlled by a separate boolean:
+    // resamplingEnable=true means that the population-driven support guard is
+    // active.  The thresholds below set its target band.  Non-positive N
+    // thresholds are inferred from the current target cell mass and mean active
+    // particle mass; with m≈1 this gives the MATLAB default 14/20/26 for
+    // gamma=20.
     int resamplingPopulationNMin = 0;
     int resamplingPopulationNTarget = 0;
     int resamplingPopulationNMax = 0;

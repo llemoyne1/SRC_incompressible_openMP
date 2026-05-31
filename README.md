@@ -57,8 +57,6 @@ q6DivAfterProjectedFluxRms is finite and small in the q6 summary
 ## Supported method keys
 
 ```text
-method = classic
-method = q6
 ```
 
 For Q6:
@@ -619,5 +617,36 @@ where thermal renormalization runs every step.
 
 ### Patch 0140 — MATLAB-compatible population-support guard
 
-Patch 0140 restores the MATLAB `Nmin/Ntarget/Nmax` support-control mechanism in the OpenMP resampling branch.  The new `resamplingPopulationGuardEnable` stage runs as a discrete resampling step before mass renormalisation: under-populated wet cells are locally split up to `Ntarget`, over-populated wet cells are merge-extracted down to `Ntarget`, and mass/momentum are preserved locally by construction.  This separates support control (`N_c`) from weighted-mass remap (`M_c`) and avoids the previous failure mode where `M_c` was correct but the active particle support became too sparse.
+Patch 0140 restores the MATLAB `Nmin/Ntarget/Nmax` support-control mechanism in the OpenMP resampling branch.  Since patch 0144, this stage is no longer controlled by a separate `resamplingPopulationGuardEnable` key: `resamplingEnable=true` activates the population-driven support guard, while `resamplingPopulationNMin/NTarget/NMax` set the support band.  Under-populated wet cells are locally split up to `Ntarget`, over-populated wet cells are merge-extracted down to `Ntarget`, and mass/momentum are preserved locally by construction.  This separates support control (`N_c`) from weighted-mass remap (`M_c`) and avoids the previous failure mode where `M_c` was correct but the active particle support became too sparse.
 
+
+### Patch 0144 — explicit projection/resampling switches
+
+Patch 0144 removes the historical `method=classic/q6` selector from the active
+OpenMP resampling branch.  Q6 is now controlled only by:
+
+```text
+projectionEnable = true|false
+```
+
+and the population-driven weighted resampling chain is controlled only by:
+
+```text
+resamplingEnable = true|false
+```
+
+This gives the four intended ablation modes:
+
+```text
+projectionEnable=false, resamplingEnable=false  # classic SRC/MPCD
+projectionEnable=false, resamplingEnable=true   # classic SRC + population support guard
+projectionEnable=true,  resamplingEnable=false  # Q6 projection only
+projectionEnable=true,  resamplingEnable=true   # Q6 + weighted resampling
+```
+
+The former `resamplingPopulationGuardEnable` key is also removed.  When
+`resamplingEnable=true`, the population guard is active and is configured by
+`resamplingPopulationNMin`, `resamplingPopulationNTarget`, and
+`resamplingPopulationNMax`; set all three to positive increasing values for an
+explicit band, or set all three to `0` to infer defaults from the target cell
+mass.  See `doc/README_0144_EXPLICIT_PROJECTION_RESAMPLING_SWITCHES.md`.

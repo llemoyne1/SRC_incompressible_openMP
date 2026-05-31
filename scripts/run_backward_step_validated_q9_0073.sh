@@ -158,7 +158,6 @@ keepMeanFlowEnable = ${KEEP_MEAN_FLOW_ENABLE}
 targetMeanUx = ${UIN}
 targetMeanUy = 0.0
 
-method = ${method}
 projectionEnable = true
 projectionOperator = elliptic_fv_cg
 projectionMaxIterations = ${PROJECTION_MAX_ITERATIONS}

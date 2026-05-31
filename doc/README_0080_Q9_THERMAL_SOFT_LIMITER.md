@@ -87,7 +87,6 @@ scripts/run_poiseuille_hard_inlet_free_outlet_ramped_softlimited_q9_0080.sh
 It is the 0079 ramped hard-inlet Poiseuille/open-channel validation with the thermal soft limiter enabled by default.  It launches only the complete method by default:
 
 ```text
-method = q9_virial
 RUN_Q9_VIRIAL = 1
 RUN_Q6 = 0
 RUN_Q9 = 0

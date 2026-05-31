@@ -45,7 +45,7 @@ echo "[0126] Generating Taylor--Green V2 initial state: $STATE"
 
 write_params() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local out_dir="$RUN_ROOT/$label"
     local params_file="$RUN_ROOT/params_${label}.kv"
@@ -77,7 +77,7 @@ taylorGreenForcingModeY = $TG_FORCING_MODE_Y
 bcX = periodic
 bcY = periodic
 
-method = $method
+projectionEnable = $projection
 projectionOperator = periodic_fv_cg
 projectionMaxIterations = 300
 projectionTolerance = 1.0e-10
@@ -123,17 +123,18 @@ PARAMS
 
 run_case() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local params_file
-    params_file=$(write_params "$label" "$method" "$resampling")
-    echo "[0126] Running $label ($method, resampling=$resampling)"
+    params_file=$(write_params "$label" "$projection" "$resampling")
+    echo "[0126] Running $label (projection=$projection, resampling=$resampling)"
     ./build/src_mpcd_base "$params_file"
 }
 
-run_case classic classic off
-run_case q6 q6 off
-run_case q6_resampling q6 on
+run_case classic false off
+run_case classic_resampling false on
+run_case q6 true off
+run_case q6_resampling true on
 
 if [[ "$RUN_ANALYSIS" == "1" || "$RUN_ANALYSIS" == "true" || "$RUN_ANALYSIS" == "on" ]]; then
     echo "[0126] MATLAB post-processing"

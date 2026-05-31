@@ -52,7 +52,6 @@ scripts/run_open_channel_full_io_vp_poiseuille_q9_virial_excl0_0088.sh
 Default case:
 
 ```text
-method = q9_virial
 bcLeft = inlet
 bcRight = outlet
 bcBottom = solid

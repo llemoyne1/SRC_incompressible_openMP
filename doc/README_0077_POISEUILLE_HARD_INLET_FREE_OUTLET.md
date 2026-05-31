@@ -28,7 +28,6 @@ doc/README_0077_POISEUILLE_HARD_INLET_FREE_OUTLET.md
 The default run launches only the complete current method:
 
 ```text
-method = q9_virial
 RUN_Q9_VIRIAL = 1
 RUN_Q6 = 0
 RUN_Q9 = 0

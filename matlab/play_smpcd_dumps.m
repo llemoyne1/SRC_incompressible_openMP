@@ -32,7 +32,7 @@ function out = play_smpcd_dumps(runDir, varargin)
     end
 
     frameStride = max(1, round(p.Results.frameStride));
-    indices = 1:frameStride:height(frameTable);
+    indices =1:frameStride:height(frameTable);
     fig = figure('Name', sprintf('SRC/MPCD dumps: %s', runDir));
     lastFields = [];
 

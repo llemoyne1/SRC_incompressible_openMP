@@ -111,7 +111,6 @@ thermostatTargetKBT = -1.0
 thermostatMinParticles = 3
 kBT = $KBT
 
-method = $method
 projectionOperator = elliptic_fv_cg
 projectionMaxIterations = 600
 projectionTolerance = 1.0e-10

@@ -23,7 +23,6 @@ The 0073 run removes that case-specific weakening and restores the prior validat
 The default run is the complete chain only:
 
 ```text
-method = q9_virial
 Q6 velocity projection enabled through the method
 Q9 mass-flux projection enabled
 virial kick enabled

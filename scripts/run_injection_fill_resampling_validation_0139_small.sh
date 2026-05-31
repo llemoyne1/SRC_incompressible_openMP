@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/injection_fill_resampling_0139_0140_small}
-INIT_ROOT=${INIT_ROOT:-init/injection_fill_resampling_0139_small}
-STATE=${FILL_INITIAL_STATE:-$INIT_ROOT/initial_state_injection_fill_0139_small.smpcd}
+RUN_ROOT=${RUN_ROOT:-runs/injection_fill_resampling_0145_active_domain_small}
+INIT_ROOT=${INIT_ROOT:-init/injection_fill_fluid_uniform_0145}
+STATE=${FILL_INITIAL_STATE:-$INIT_ROOT/initial_state_fluid_uniform_0145_small.smpcd}
 
 FILL_LX=${FILL_LX:-1.0}
 FILL_LY=${FILL_LY:-1.0}
@@ -43,6 +43,7 @@ FILL_RESAMP_RICH_FRACTION=${FILL_RESAMP_RICH_FRACTION:-1.50}
 FILL_MASS_MIN=${FILL_MASS_MIN:-0.5}
 FILL_MASS_MAX=${FILL_MASS_MAX:-2.0}
 FILL_MASS_RENORM_PERIOD=${FILL_MASS_RENORM_PERIOD:-10}
+FILL_RESAMP_WET_MASK_MODE=${FILL_RESAMP_WET_MASK_MODE:-active_domain}
 
 FILL_INLET_YMIN=${FILL_INLET_YMIN:-$(awk -v cy="$FILL_INLET_CENTER_Y" -v h="$FILL_INLET_HEIGHT_CELLS" -v ly="$FILL_LY" -v ny="$FILL_NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y}')}
 FILL_INLET_YMAX=${FILL_INLET_YMAX:-$(awk -v cy="$FILL_INLET_CENTER_Y" -v h="$FILL_INLET_HEIGHT_CELLS" -v ly="$FILL_LY" -v ny="$FILL_NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y}')}
@@ -53,7 +54,7 @@ fi
 
 if [[ ! -f "$STATE" ]]; then
     cat >&2 <<MSG
-Missing initial inactive-pool state:
+Missing full-fluid initial state:
   $STATE
 
 Generate it from MATLAB before launching OpenMP. From the repository root:
@@ -62,15 +63,13 @@ Generate it from MATLAB before launching OpenMP. From the repository root:
 
 then in MATLAB:
 
-  prepare_injection_fill_resampling_0139_small( ...
+  prepare_injection_fill_fluid_uniform_0145( ...
       'output', '../$STATE', ...
       'Lx', $FILL_LX, 'Ly', $FILL_LY, ...
       'Nx', $FILL_NX, 'Ny', $FILL_NY, 'gamma', $FILL_GAMMA, ...
-      'capacityMultiplier', 1.0, ...
+      'capacityMultiplier', 1.25, ...
       'kBT', $FILL_KBT, ...
       'seed', $FILL_SEED, ...
-      'inletYCenter', $FILL_INLET_CENTER_Y, ...
-      'inletHeightCells', $FILL_INLET_HEIGHT_CELLS, ...
       'makePreview', true);
 
 Then return to the repository root and rerun:
@@ -84,7 +83,7 @@ mkdir -p "$RUN_ROOT"
 
 write_params() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local out_dir="$RUN_ROOT/$label"
     local params_file="$RUN_ROOT/params_${label}.kv"
@@ -152,7 +151,7 @@ openBoundaryOutletFeedbackGain = 0.0
 # openBoundaryOutletHybridBlend = $FILL_OUTLET_HYBRID_BLEND
 # openBoundaryOutletFeedbackGain = $FILL_OUTLET_FEEDBACK_GAIN
 
-method = $method
+projectionEnable = $projection
 projectionOperator = $FILL_PROJECTION_OPERATOR
 projectionMaxIterations = 800
 projectionTolerance = 1.0e-10
@@ -185,10 +184,9 @@ PARAMS
     if [[ "$resampling" == "on" ]]; then
         cat >> "$params_file" <<PARAMS
 
-# Wet/dry injection/fill stress test. Empty cells remain dry: they must not be
-# forced to Mtarget before the advected front reaches them.
+# Filled-domain stress test. In active_domain mode, every cell of the active
+# fluid domain remains wet even if it is temporarily emptied near a solid wall.
 resamplingEnable = true
-resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
 resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
 resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
 resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
@@ -197,7 +195,7 @@ resamplingPopulationMaxSplitsPerStep = ${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}
 resamplingPopulationMaxExtractionsPerCell = ${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}
 resamplingPopulationMaxExtractionsPerStep = ${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}
 resamplingTargetCellMass = $FILL_GAMMA
-resamplingWetMaskMode = occupied
+resamplingWetMaskMode = $FILL_RESAMP_WET_MASK_MODE
 resamplingWetCellMassThreshold = 0.0
 resamplingPoorCellMassFraction = $FILL_RESAMP_POOR_FRACTION
 resamplingRichCellMassFraction = $FILL_RESAMP_RICH_FRACTION
@@ -218,20 +216,22 @@ PARAMS
 
 run_case() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local params_file
-    params_file=$(write_params "$label" "$method" "$resampling")
-    echo "[0139] Running $label ($method, resampling=$resampling)"
+    params_file=$(write_params "$label" "$projection" "$resampling")
+    echo "[0146] Running $label (projection=$projection, resampling=$resampling, wetMask=$FILL_RESAMP_WET_MASK_MODE)"
     ./build/src_mpcd_base "$params_file"
 }
 
-#run_case classic classic off
-#run_case q6 q6 off
-run_case q6_resampling q6 on
+# Optional 0144 four-state ablation:
+# run_case classic false off
+# run_case classic_resampling false on
+# run_case q6 true off
+run_case q6_resampling true on
 
 cat <<MSG
-[0139] Injection/fill resampling validation completed.
+[0146] Injection/fill resampling validation completed.
 Run root: $RUN_ROOT
 
 MATLAB post-processing command from the repository root:

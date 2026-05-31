@@ -29,7 +29,6 @@ Each updated `q6_resampling` block contains the 0140 population-support paramete
 
 ```kv
 resamplingEnable = true
-resamplingPopulationGuardEnable = true
 resamplingPopulationNMin = 14
 resamplingPopulationNTarget = 20
 resamplingPopulationNMax = 26

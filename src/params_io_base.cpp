@@ -364,13 +364,29 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "thermostatMinParticles") p.thermostatMinParticles = parse_int(value, key);
         else if (key == "thermostatEpsilon") p.thermostatEpsilon = parse_double(value, key);
         else if (key == "kBT") p.kBT = parse_double(value, key);
-        else if (key == "method") p.method = get_lower(kv, key);
         else if (key == "projectionEnable") p.projectionEnable = parse_bool(value, key);
         else if (key == "projectionOperator") p.projectionOperator = get_lower(kv, key);
         else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "q6ProjectionStrength" || key == "projectionStrength") p.q6ProjectionStrength = parse_double(value, key);
+        else if (key == "closedCapacityResponseEnable") p.closedCapacityResponseEnable = parse_bool(value, key);
+        else if (key == "closedCapacityReferenceCellMass") p.closedCapacityReferenceCellMass = parse_double(value, key);
+        else if (key == "closedCapacityReferenceParticleMass") p.closedCapacityReferenceParticleMass = parse_double(value, key);
+        else if (key == "closedCapacityQ6Eta") p.closedCapacityQ6Eta = parse_double(value, key);
+        else if (key == "closedCapacityQ6Power") p.closedCapacityQ6Power = parse_double(value, key);
+        else if (key == "closedCapacityMassRemapEta") p.closedCapacityMassRemapEta = parse_double(value, key);
+        else if (key == "closedCapacityMassRemapPower") p.closedCapacityMassRemapPower = parse_double(value, key);
+        else if (key == "closedCapacityMassGuardDisableOnOverfill") p.closedCapacityMassGuardDisableOnOverfill = parse_bool(value, key);
+        else if (key == "closedCapacityVirialKickEnable") p.closedCapacityVirialKickEnable = parse_bool(value, key);
+        else if (key == "closedCapacityVirialBaseK") p.closedCapacityVirialBaseK = parse_double(value, key);
+        else if (key == "closedCapacityVirialGain") p.closedCapacityVirialGain = parse_double(value, key);
+        else if (key == "closedCapacityVirialEta") p.closedCapacityVirialEta = parse_double(value, key);
+        else if (key == "closedCapacityVirialPower") p.closedCapacityVirialPower = parse_double(value, key);
+        else if (key == "closedCapacityVirialKickStrength") p.closedCapacityVirialKickStrength = parse_double(value, key);
+        else if (key == "closedCapacityVirialMomentumCorrectionEnable") p.closedCapacityVirialMomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "closedCapacityInletMassFluxEnable") p.closedCapacityInletMassFluxEnable = parse_bool(value, key);
+        else if (key == "closedCapacityInletMassFluxMultiplier") p.closedCapacityInletMassFluxMultiplier = parse_double(value, key);
         else if (key == "projectionImmersedSolidMaskEnable") p.projectionImmersedSolidMaskEnable = parse_bool(value, key);
         else if (key == "projectionAllowUnmaskedImmersedSolid") p.projectionAllowUnmaskedImmersedSolid = parse_bool(value, key);
         else if (key == "projectionImmersedSolidFluidFractionThreshold") p.projectionImmersedSolidFluidFractionThreshold = parse_double(value, key);
@@ -399,7 +415,6 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingLatentActivationEnable" || key == "resamplingLatentToFluidEnable") p.resamplingLatentActivationEnable = parse_bool(value, key);
         else if (key == "resamplingLatentActivationMaxPerCell") p.resamplingLatentActivationMaxPerCell = parse_int(value, key);
         else if (key == "resamplingLatentActivationParticleMass" || key == "resamplingLatentParticleMass") p.resamplingLatentActivationParticleMass = parse_double(value, key);
-        else if (key == "resamplingPopulationGuardEnable" || key == "resamplingNGuardEnable" || key == "resamplingSupportGuardEnable") p.resamplingPopulationGuardEnable = parse_bool(value, key);
         else if (key == "resamplingPopulationNMin" || key == "resamplingNMin") p.resamplingPopulationNMin = parse_int(value, key);
         else if (key == "resamplingPopulationNTarget" || key == "resamplingNTarget") p.resamplingPopulationNTarget = parse_int(value, key);
         else if (key == "resamplingPopulationNMax" || key == "resamplingNMax") p.resamplingPopulationNMax = parse_int(value, key);
@@ -466,10 +481,6 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     }
     if (has_key(kv, "immersedSolidShape")) {
         p.immersedSolidShape = get_lower(kv, "immersedSolidShape");
-    }
-
-    if (p.method == "q6") {
-        p.projectionEnable = true;
     }
 
     validate_simulation_params(p);
@@ -620,10 +631,7 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         const bool standaloneOpenBoundary = (xHasIO && (!xIoPair || has_open_boundary_segments_on_x_axis(p))) ||
                                             (yHasIO && (!yIoPair || has_open_boundary_segments_on_y_axis(p)));
-        const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
-        if (p.method != "classic" && p.method != "q6") {
-            throw std::runtime_error("openMP-resampling inlet/outlet supports method=classic or method=q6 only");
-        }
+        const bool q6OpenBoundary = p.projectionEnable;
         const bool hardInletReservoir = hard_inlet_reservoir_requested(p);
         if (standaloneOpenBoundary && !hardInletReservoir) {
             throw std::runtime_error("0142 standalone inlet/outlet with a solid opposite face requires inletReservoirMode=hard_cell_density so particle roles can deactivate exits and activate the inlet reservoir");
@@ -899,10 +907,7 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
         }
     }
-    if (p.method != "classic" && p.method != "q6") {
-        throw std::runtime_error("method currently accepts: classic, q6");
-    }
-    const bool q6OrProjectionRequested = p.projectionEnable || p.method == "q6";
+    const bool q6OrProjectionRequested = p.projectionEnable;
     if (q6OrProjectionRequested) {
         if (p.projectionOperator != "periodic_fv_cg" &&
             p.projectionOperator != "channel_fv_cg" &&
@@ -922,6 +927,39 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!(p.projectionImmersedSolidFluidFractionThreshold >= 0.0 &&
               p.projectionImmersedSolidFluidFractionThreshold <= 1.0)) {
             throw std::runtime_error("projectionImmersedSolidFluidFractionThreshold must lie in [0,1]");
+        }
+    }
+    if (p.closedCapacityResponseEnable) {
+        if (!(p.closedCapacityReferenceCellMass >= 0.0) || !std::isfinite(p.closedCapacityReferenceCellMass)) {
+            throw std::runtime_error("closedCapacityReferenceCellMass must be finite and non-negative; use 0 to infer it");
+        }
+        if (!(p.closedCapacityReferenceParticleMass > 0.0) || !std::isfinite(p.closedCapacityReferenceParticleMass)) {
+            throw std::runtime_error("closedCapacityReferenceParticleMass must be finite and positive");
+        }
+        if (!(p.closedCapacityQ6Eta > 0.0) || !(p.closedCapacityQ6Power > 0.0) ||
+            !std::isfinite(p.closedCapacityQ6Eta) || !std::isfinite(p.closedCapacityQ6Power)) {
+            throw std::runtime_error("closedCapacityQ6Eta and closedCapacityQ6Power must be finite and positive");
+        }
+        if (!(p.closedCapacityMassRemapEta > 0.0) || !(p.closedCapacityMassRemapPower > 0.0) ||
+            !std::isfinite(p.closedCapacityMassRemapEta) || !std::isfinite(p.closedCapacityMassRemapPower)) {
+            throw std::runtime_error("closedCapacityMassRemapEta and closedCapacityMassRemapPower must be finite and positive");
+        }
+        if (!(p.closedCapacityInletMassFluxMultiplier >= 0.0) || !std::isfinite(p.closedCapacityInletMassFluxMultiplier)) {
+            throw std::runtime_error("closedCapacityInletMassFluxMultiplier must be finite and non-negative");
+        }
+        if (!(p.closedCapacityVirialBaseK >= 0.0) || !(p.closedCapacityVirialGain >= 0.0) ||
+            !(p.closedCapacityVirialEta > 0.0) || !(p.closedCapacityVirialPower > 0.0) ||
+            !(p.closedCapacityVirialKickStrength >= 0.0) ||
+            !std::isfinite(p.closedCapacityVirialBaseK) || !std::isfinite(p.closedCapacityVirialGain) ||
+            !std::isfinite(p.closedCapacityVirialEta) || !std::isfinite(p.closedCapacityVirialPower) ||
+            !std::isfinite(p.closedCapacityVirialKickStrength)) {
+            throw std::runtime_error("closedCapacityVirial* parameters must be finite; K/gain/kickStrength non-negative, eta/power positive");
+        }
+        const bool refCanBeInferred = p.closedCapacityReferenceCellMass > 0.0 ||
+                                      p.resamplingTargetCellMass > 0.0 ||
+                                      p.inletTargetOccupancy > 0;
+        if (!refCanBeInferred) {
+            throw std::runtime_error("closedCapacityResponseEnable=true requires closedCapacityReferenceCellMass>0, or resamplingTargetCellMass>0, or inletTargetOccupancy>0");
         }
     }
     if (q6OrProjectionRequested &&
@@ -986,9 +1024,20 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.resamplingLatentActivationParticleMass >= 0.0)) {
         throw std::runtime_error("resamplingLatentActivationParticleMass must be non-negative; use 0 to infer target/maxPerCell");
     }
-    if (p.resamplingPopulationGuardEnable) {
+    if (p.resamplingEnable) {
         if (p.resamplingPopulationNMin < 0 || p.resamplingPopulationNTarget < 0 || p.resamplingPopulationNMax < 0) {
             throw std::runtime_error("resamplingPopulationNMin/NTarget/NMax must be non-negative; use 0 to infer defaults");
+        }
+        const bool allPopulationBoundsExplicit =
+            p.resamplingPopulationNMin > 0 && p.resamplingPopulationNTarget > 0 && p.resamplingPopulationNMax > 0;
+        const bool allPopulationBoundsInferred =
+            p.resamplingPopulationNMin == 0 && p.resamplingPopulationNTarget == 0 && p.resamplingPopulationNMax == 0;
+        if (!allPopulationBoundsExplicit && !allPopulationBoundsInferred) {
+            throw std::runtime_error("resamplingEnable=true requires either all population bounds NMin/NTarget/NMax positive, or all three set to 0 for inferred defaults");
+        }
+        if (allPopulationBoundsExplicit && !(p.resamplingPopulationNMin < p.resamplingPopulationNTarget &&
+                                            p.resamplingPopulationNTarget < p.resamplingPopulationNMax)) {
+            throw std::runtime_error("resamplingPopulationNMin < resamplingPopulationNTarget < resamplingPopulationNMax is required when bounds are explicit");
         }
         if (!(p.resamplingPopulationNMinFraction > 0.0 && p.resamplingPopulationNMinFraction <= 1.0)) {
             throw std::runtime_error("resamplingPopulationNMinFraction must lie in (0,1]");

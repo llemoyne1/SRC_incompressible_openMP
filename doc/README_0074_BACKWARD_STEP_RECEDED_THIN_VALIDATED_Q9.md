@@ -41,7 +41,6 @@ case.
 The default method is the complete chain only:
 
 ```text
-method = q9_virial
 RUN_Q9_VIRIAL = 1
 RUN_Q6 = 0
 RUN_Q9 = 0

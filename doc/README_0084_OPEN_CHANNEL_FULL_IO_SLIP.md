@@ -42,7 +42,6 @@ bcTop = specular
 wallVpEnable = false
 wallAccommodation = 0.0
 immersedSolidEnable = false
-method = q9_virial
 ```
 
 The inlet velocity is ramped by default:

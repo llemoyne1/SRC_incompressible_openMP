@@ -1,4 +1,5 @@
 #include "q6_projection_adapter.h"
+#include "closed_capacity_response.h"
 #include "open_boundary_segments.h"
 
 #include <algorithm>
@@ -1245,7 +1246,7 @@ void apply_cell_velocity_correction(ParticleState& state,
 } // namespace
 
 bool q6_projection_requested(const SimulationParams& params) {
-    return params.projectionEnable || params.method == "q6";
+    return params.projectionEnable;
 }
 
 Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
@@ -1288,8 +1289,21 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     EllipticProjectionResult result = project_face_field(
         egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
 
+    const ClosedCapacityResponseDiagnostics capacity = compute_closed_capacity_response_from_cell_masses(
+        params, grid, domain, workspace.cellMass,
+        mask != nullptr ? &workspace.ellipticMask.activeCell : nullptr,
+        params.q6ProjectionStrength);
+    const double effectiveQ6Strength = capacity.computed
+        ? capacity.q6ProjectionStrengthEffective
+        : params.q6ProjectionStrength;
+
     diag.applied = true;
-    diag.projectionStrength = params.q6ProjectionStrength;
+    diag.projectionStrength = effectiveQ6Strength;
+    diag.projectionStrengthNominal = params.q6ProjectionStrength;
+    diag.capacityReferenceMass = capacity.referenceMass;
+    diag.capacityTotalMass = capacity.totalMass;
+    diag.capacityOverfillRatio = capacity.overfillRatio;
+    diag.capacityQ6Factor = capacity.q6ProjectionFactor;
     diag.converged = result.diagnostics.converged;
     diag.iterations = result.diagnostics.iterations;
     diag.residualRel = result.diagnostics.residualRel;
@@ -1298,7 +1312,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
 
     build_scaled_q6_fluxes(workspace.baseFlux,
                            result.correctionFlux,
-                           params.q6ProjectionStrength,
+                           effectiveQ6Strength,
                            mask != nullptr ? &workspace.immersedMask : nullptr,
                            workspace.appliedCorrectionFlux,
                            workspace.appliedProjectedFlux);

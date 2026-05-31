@@ -11,7 +11,6 @@ The 0071 straight-channel run showed that the hard inlet and passive outlet can 
 The default run is the complete liquid closure chain only:
 
 ```text
-method = q9_virial
 Q6 velocity projection enabled through the method
 Q9 mass-flux projection enabled
 virial kick enabled

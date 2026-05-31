@@ -1,4 +1,5 @@
 #include "src_mpcd_base.h"
+#include "closed_capacity_response.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -174,6 +175,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
     result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+    result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
     result.thermostat = apply_cell_relative_rescale_thermostat(
         state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
     apply_keep_mean_flow(state, params);
@@ -198,11 +200,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     bool roleOrPositionEdited = false;
     ResamplingPopulationGuardDiagnostics populationGuard{};
-    if (params.resamplingPopulationGuardEnable) {
-        populationGuard = apply_resampling_population_support_guard(
-            state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
-        roleOrPositionEdited = roleOrPositionEdited || populationGuard.applied;
-    }
+    populationGuard = apply_resampling_population_support_guard(
+        state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
+    roleOrPositionEdited = roleOrPositionEdited || populationGuard.applied;
 
     if (roleOrPositionEdited) {
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
@@ -243,18 +243,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     const bool massRenormalizationStep = is_mass_renormalization_step(params, step);
+    const ClosedCapacityResponseDiagnostics remapCapacity = compute_closed_capacity_response_from_cell_masses(
+        params, grid, result.domain, workspace.resampling.mass, nullptr, params.q6ProjectionStrength);
+    const double resamplingMassCorrectionStrength = remapCapacity.computed ? remapCapacity.massRemapFactor : 1.0;
+    const bool massGuardAllowedByCapacity = !params.closedCapacityResponseEnable ||
+        !params.closedCapacityMassGuardDisableOnOverfill || !(remapCapacity.overfillRatio > 0.0);
     ResamplingRemapApplyDiagnostics remapApply{};
     ResamplingThermalRenormalizationDiagnostics thermalApply{};
     ResamplingMassGuardDiagnostics massGuardApply{};
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
         remapApply = apply_resampling_local_mass_momentum_remap(
-            state, workspace.resampling, result.resampling);
+            state, workspace.resampling, result.resampling, resamplingMassCorrectionStrength);
         if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
             thermalApply = apply_resampling_local_thermal_renormalization(
                 state, workspace.resampling, remapApply);
         }
-        if (params.resamplingMassGuardEnable && remapApply.applied) {
+        if (params.resamplingMassGuardEnable && massGuardAllowedByCapacity && remapApply.applied) {
             massGuardApply = apply_resampling_particle_mass_guards(
                 state, params, workspace.resampling, result.resampling);
         }

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "cell_grid.h"
+#include "closed_capacity_response.h"
 #include "elliptic_projection.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
@@ -44,7 +45,12 @@ struct Q6ProjectionDiagnostics {
     std::uint64_t immersedSolidCutClosedXFaces = 0;
     std::uint64_t immersedSolidCutClosedYFaces = 0;
 
-    double projectionStrength = 1.0;
+    double projectionStrength = 1.0;          // effective strength actually applied
+    double projectionStrengthNominal = 1.0;   // params.q6ProjectionStrength
+    double capacityReferenceMass = 0.0;
+    double capacityTotalMass = 0.0;
+    double capacityOverfillRatio = 0.0;
+    double capacityQ6Factor = 1.0;
     double residualRel = 0.0;
     double divBeforeRms = 0.0;
     double divBeforeMaxAbs = 0.0;

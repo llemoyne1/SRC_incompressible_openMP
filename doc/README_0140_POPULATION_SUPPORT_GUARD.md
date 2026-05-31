@@ -7,7 +7,6 @@ not only the weighted cell mass `M_c`.
 The new stage is gated by:
 
 ```kv
-resamplingPopulationGuardEnable = true
 resamplingPopulationNMin = 14
 resamplingPopulationNTarget = 20
 resamplingPopulationNMax = 26

@@ -112,7 +112,6 @@ inletSlabCells = 1.0
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-method = ${method}
 projectionEnable = true
 projectionOperator = elliptic_fv_cg
 projectionMaxIterations = 900

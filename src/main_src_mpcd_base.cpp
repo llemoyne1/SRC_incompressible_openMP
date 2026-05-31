@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
             mpcd::deposit_weighted_real_fluid(state, params, grid, initialDomain, 0.0, mpcd::GridShift{}, workspace.resampling);
         mpcd::attach_resampling_pool_diagnostics(initialResampling, initialPool);
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
-                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                     &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      &initialResampling, ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
@@ -121,8 +121,8 @@ int main(int argc, char** argv) {
                   << " immersedSolid=" << (params.immersedSolidEnable ? "on" : "off")
                   << " fluid=[" << initialDomain.xMin << "," << initialDomain.xMax
                   << "]x[" << initialDomain.yMin << "," << initialDomain.yMax << "]"
-                  << " method=" << params.method
                   << " projection=" << (params.projectionEnable ? params.projectionOperator : std::string("off"))
+                  << " resampling=" << (params.resamplingEnable ? std::string("on") : std::string("off"))
                   << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
                   << " steps=" << params.nSteps
                   << " threadsActive=" << ompActiveThreads
@@ -141,6 +141,7 @@ int main(int argc, char** argv) {
                                                            &stepResult.immersed,
                                                            &stepResult.collision,
                                                            &stepResult.q6,
+                                                           &stepResult.capacity,
                                                            &stepResult.thermostat,
                                                            &stepResult.resampling,
                                                            ompActiveThreads);

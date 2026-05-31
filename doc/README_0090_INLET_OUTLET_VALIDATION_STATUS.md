@@ -107,7 +107,6 @@ bcBottom = specular / slip
 bcTop    = specular / slip
 q9OpenBoundaryExclusionCells = 0
 virialOpenBoundaryExclusionCells = 0
-method = q9_virial
 ```
 
 With `gamma=30`, `Uin=0.05`, ramped inlet, thermal soft limiter, and full-height open boundaries, the run remains stable over long durations. It balances inlet/outlet flux and does not form the previous outlet density band.
@@ -125,7 +124,6 @@ wallAccommodation = 1.0
 inletVelocitySpatialProfile = poiseuille_y_mean
 q9OpenBoundaryExclusionCells = 0
 virialOpenBoundaryExclusionCells = 0
-method = q9_virial
 ```
 
 With the Poiseuille-compatible imposed profile, the channel reaches a clean parabolic profile and stable density/temperature diagnostics. This is the strongest validation case for open inlet/outlet combined with VP/no-slip walls.
@@ -152,7 +150,6 @@ This should be the recommended flat-profile open-channel inlet for VP/no-slip wa
 ## Recommended nominal parameter block for validated inlet/outlet channel runs
 
 ```text
-method = q9_virial
 
 projectionEnable = true
 projectionOperator = elliptic_fv_cg

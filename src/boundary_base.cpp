@@ -699,6 +699,10 @@ bool hard_inlet_reservoir_enabled(const SimulationParams& params) {
     return mode == "hard_cell_density" || mode == "hard_density" || mode == "hard" || mode == "cell_density";
 }
 
+bool closed_capacity_additive_inlet_enabled(const SimulationParams& params) {
+    return params.closedCapacityResponseEnable && params.closedCapacityInletMassFluxEnable;
+}
+
 struct HardReservoirCell {
     int ix = 0;
     int iy = 0;
@@ -719,6 +723,7 @@ bool point_in_inlet_reservoir(double x,
                               const SimulationParams& params,
                               const FluidDomainBounds& domain) {
     if (!hard_inlet_reservoir_enabled(params)) return false;
+    if (closed_capacity_additive_inlet_enabled(params)) return false;
     const int nx = std::max(1, params.Nx);
     const int ny = std::max(1, params.Ny);
     const int cellsX = std::clamp(params.inletReservoirCells, 1, nx);
@@ -943,8 +948,34 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
                                       const std::vector<std::size_t>& inactiveSlots,
                                       std::size_t& inactiveCursor,
                                       BoundaryDiagnostics& diag) {
-    const int targetN = params.inletTargetOccupancy;
+    int targetN = params.inletTargetOccupancy;
     if (targetN <= 0) return;
+
+    std::mt19937_64 rng(splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                                   (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^ face_tag(cell.inletFace.c_str())));
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    std::normal_distribution<double> normal(0.0, 1.0);
+
+    if (closed_capacity_additive_inlet_enabled(params)) {
+        const double ramp = inlet_velocity_ramp_factor(params, static_cast<double>(step) * params.dt);
+        double un = 0.0;
+        double h = 1.0;
+        if (cell.inletFace == "left" || cell.inletFace == "right") {
+            un = std::abs(ramp * (cell.useSegmentVelocity ? cell.ux :
+                (cell.inletFace == "left" ? params.inletUxLeft : params.inletUxRight)));
+            h = std::max(1.0e-300, cell.x1 - cell.x0);
+        } else {
+            un = std::abs(ramp * (cell.useSegmentVelocity ? cell.uy :
+                (cell.inletFace == "bottom" ? params.inletUyBottom : params.inletUyTop)));
+            h = std::max(1.0e-300, cell.y1 - cell.y0);
+        }
+        const double expected = params.closedCapacityInletMassFluxMultiplier *
+            static_cast<double>(params.inletTargetOccupancy) * un * params.dt / h;
+        targetN = static_cast<int>(std::floor(expected));
+        const double frac = expected - static_cast<double>(targetN);
+        if (uni(rng) < frac) ++targetN;
+        if (targetN <= 0) return;
+    }
 
     const double particleMass = cell.particleMass;
     const std::uint32_t particleType = cell.particleType;
@@ -959,11 +990,6 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     std::vector<double> vys(static_cast<std::size_t>(targetN));
     std::vector<double> uxTarget(static_cast<std::size_t>(targetN));
     std::vector<double> uyTarget(static_cast<std::size_t>(targetN));
-
-    std::mt19937_64 rng(splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
-                                   (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^ face_tag(cell.inletFace.c_str())));
-    std::uniform_real_distribution<double> uni(0.0, 1.0);
-    std::normal_distribution<double> normal(0.0, 1.0);
 
     double meanFlucX = 0.0;
     double meanFlucY = 0.0;

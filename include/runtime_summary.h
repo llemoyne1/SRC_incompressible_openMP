@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "boundary_base.h"
+#include "closed_capacity_response.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 #include "particle_state.h"
@@ -97,6 +98,11 @@ struct RuntimeSummary {
 
     int q6Applied = 0;
     double q6ProjectionStrength = 1.0;
+    double q6ProjectionStrengthNominal = 1.0;
+    double q6CapacityReferenceMass = 0.0;
+    double q6CapacityTotalMass = 0.0;
+    double q6CapacityOverfillRatio = 0.0;
+    double q6CapacityQ6Factor = 1.0;
     int q6Converged = 0;
     int q6Iterations = 0;
     std::uint64_t q6EmptyCells = 0;
@@ -142,6 +148,31 @@ struct RuntimeSummary {
     double q6MomentumCorrectionVx = 0.0;
     double q6MomentumCorrectionVy = 0.0;
     double q6MomentumResidualBeforeCorrection = 0.0;
+
+    int capacityResponseEnabled = 0;
+    int capacityResponseComputed = 0;
+    int capacityVirialKickApplied = 0;
+    std::uint64_t capacityReferenceCells = 0;
+    double capacityReferenceCellMass = 0.0;
+    double capacityReferenceMass = 0.0;
+    double capacityTotalMass = 0.0;
+    double capacityOverfillMass = 0.0;
+    double capacityOverfillRatio = 0.0;
+    double capacityQ6ProjectionFactor = 1.0;
+    double capacityQ6ProjectionStrengthEffective = 0.0;
+    double capacityMassRemapFactor = 1.0;
+    double capacityVirialKBase = 0.0;
+    double capacityVirialKFactor = 1.0;
+    double capacityVirialKEffective = 0.0;
+    double capacityVirialPressureMean = 0.0;
+    double capacityVirialPressureRms = 0.0;
+    double capacityVirialPressureMin = 0.0;
+    double capacityVirialPressureMax = 0.0;
+    double capacityVirialKickVelocityRms = 0.0;
+    double capacityVirialKickVelocityMaxAbs = 0.0;
+    double capacityVirialMomentumResidualBeforeCorrection = 0.0;
+    double capacityVirialMomentumCorrectionVx = 0.0;
+    double capacityVirialMomentumCorrectionVy = 0.0;
 
     int resampComputed = 0;
     std::uint64_t resampNFluid = 0;
@@ -320,6 +351,7 @@ struct RuntimeSummary {
     std::uint64_t resampRemapSkippedEmptyCells = 0;
     std::uint64_t resampRemapSkippedInvalidMassCells = 0;
     double resampRemapTargetCellMass = 0.0;
+    double resampRemapMassCorrectionStrength = 1.0;
     double resampRemapMassBefore = 0.0;
     double resampRemapMassAfter = 0.0;
     double resampRemapMassTargetSum = 0.0;
@@ -480,6 +512,7 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
                                        const ImmersedSolidDiagnostics* immersed = nullptr,
                                        const CollisionDiagnostics* collision = nullptr,
                                        const Q6ProjectionDiagnostics* q6 = nullptr,
+                                       const ClosedCapacityResponseDiagnostics* capacity = nullptr,
                                        const ThermostatDiagnostics* thermostat = nullptr,
                                        const WeightedResamplingDiagnostics* resampling = nullptr,
                                        int numThreadsUsed = 1);

@@ -36,7 +36,6 @@ scripts/run_open_channel_full_io_q9_virial_excl0_0087.sh
 Default configuration:
 
 ```text
-method                         = q9_virial
 left boundary                  = full-height hard_cell_density inlet
 right boundary                 = full-height outlet
 bottom/top                     = specular / slip

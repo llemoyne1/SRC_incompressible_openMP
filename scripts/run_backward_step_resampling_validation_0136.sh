@@ -82,7 +82,7 @@ mkdir -p "$RUN_ROOT"
 
 write_params() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local out_dir="$RUN_ROOT/$label"
     local params_file="$RUN_ROOT/params_${label}.kv"
@@ -142,7 +142,7 @@ openBoundaryOutletMode = $BSTEP_OUTLET_MODE
 openBoundaryOutletHybridBlend = $BSTEP_OUTLET_HYBRID_BLEND
 openBoundaryOutletFeedbackGain = $BSTEP_OUTLET_FEEDBACK_GAIN
 
-method = $method
+projectionEnable = $projection
 projectionOperator = $BSTEP_PROJECTION_OPERATOR
 projectionMaxIterations = 800
 projectionTolerance = 1.0e-10
@@ -189,7 +189,6 @@ PARAMS
 
 # Weighted-resampling backward-step validation.
 resamplingEnable = true
-resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
 resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
 resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
 resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
@@ -219,17 +218,18 @@ PARAMS
 
 run_case() {
     local label=$1
-    local method=$2
+    local projection=$2
     local resampling=$3
     local params_file
-    params_file=$(write_params "$label" "$method" "$resampling")
-    echo "[0136] Running $label ($method, resampling=$resampling)"
+    params_file=$(write_params "$label" "$projection" "$resampling")
+    echo "[0136] Running $label (projection=$projection, resampling=$resampling)"
     ./build/src_mpcd_base "$params_file"
 }
 
-#run_case classic classic off
-#run_case q6 q6 off
-run_case q6_resampling q6 on
+run_case classic false off
+run_case classic_resampling false on
+run_case q6 true off
+run_case q6_resampling true on
 
 cat <<MSG
 [0136] Backward-step resampling validation completed.

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "boundary_base.h"
 #include "cell_grid.h"
+#include "closed_capacity_response.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 #include "particle_state.h"
@@ -21,6 +22,7 @@ struct StepResult {
     CollisionDiagnostics collision;
     Q6ProjectionDiagnostics q6;
     ThermostatDiagnostics thermostat;
+    ClosedCapacityResponseDiagnostics capacity;
     WeightedResamplingDiagnostics resampling;
     ResamplingParticlePoolDiagnostics resamplingPool;
 };
@@ -29,6 +31,7 @@ struct SrcMpcdBaseWorkspace {
     CollisionWorkspace collision;
     Q6ProjectionWorkspace q6;
     ThermostatWorkspace thermostat;
+    ClosedCapacityResponseWorkspace capacity;
     WeightedRealFluidDepositWorkspace resampling;
     ResamplingParticlePoolWorkspace resamplingPool;
 };

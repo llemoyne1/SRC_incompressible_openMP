@@ -156,6 +156,7 @@ struct ResamplingRemapApplyDiagnostics {
     std::uint64_t skippedInvalidMassCells = 0;
 
     double targetCellMass = 0.0;
+    double massCorrectionStrength = 1.0;
     double massBefore = 0.0;
     double massAfter = 0.0;
     double massTargetSum = 0.0;
@@ -221,6 +222,7 @@ struct ResamplingMassGuardDiagnostics {
     double massMinBound = 0.0;
     double massMaxBound = 0.0;
     double targetCellMass = 0.0;
+    double massCorrectionStrength = 1.0;
     double massBefore = 0.0;
     double massAfter = 0.0;
     double massTargetSum = 0.0;
@@ -605,6 +607,7 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t remapSkippedEmptyCells = 0;
     std::uint64_t remapSkippedInvalidMassCells = 0;
     double remapTargetCellMass = 0.0;
+    double remapMassCorrectionStrength = 1.0;
     double remapMassBefore = 0.0;
     double remapMassAfter = 0.0;
     double remapMassTargetSum = 0.0;
@@ -835,7 +838,8 @@ void attach_resampling_population_guard_diagnostics(
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
     WeightedRealFluidDepositWorkspace& depositWorkspace,
-    const WeightedResamplingDiagnostics& depositDiagnostics);
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    double massCorrectionStrength = 1.0);
 
 void attach_resampling_remap_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,

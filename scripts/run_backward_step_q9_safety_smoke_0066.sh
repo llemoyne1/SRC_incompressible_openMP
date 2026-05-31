@@ -156,7 +156,6 @@ make_q6() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q6
 q9MassFluxProjectionEnable = false
 virialDiagnosticsEnable = false
 virialKickEnable = false
@@ -169,7 +168,6 @@ make_q9_vsoft() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9
 KV
   append_q9_safety "$f" "$Q9_VSOFT_STRENGTH" "$Q9_VSOFT_LIMITER" "$Q9_VSOFT_OPEN_EXCL" "$Q9_VSOFT_HALO" "$Q9_VSOFT_MIN_MASS"
   cat >> "$f" <<KV
@@ -184,7 +182,6 @@ make_q9_ultra() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9
 KV
   append_q9_safety "$f" "$Q9_VSOFT_STRENGTH" "$Q9_ULTRA_LIMITER" "$Q9_VSOFT_OPEN_EXCL" "$Q9_VSOFT_HALO" "$Q9_VSOFT_MIN_MASS"
   cat >> "$f" <<KV
@@ -199,7 +196,6 @@ make_q9_virial_vsoft() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9_virial
 KV
   append_q9_safety "$f" "$Q9_VSOFT_STRENGTH" "$Q9_VSOFT_LIMITER" "$Q9_VSOFT_OPEN_EXCL" "$Q9_VSOFT_HALO" "$Q9_VSOFT_MIN_MASS"
   cat >> "$f" <<KV
@@ -218,7 +214,6 @@ make_q9_0066b_soft() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9
 KV
   append_q9_safety "$f" "0.10" "0.005" "4" "4" "6.0"
   cat >> "$f" <<KV
@@ -233,7 +228,6 @@ make_q9_0066b_medium() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9
 KV
   append_q9_safety "$f" "0.25" "0.01" "3" "3" "6.0"
   cat >> "$f" <<KV
@@ -248,7 +242,6 @@ make_q9_virial_0066b_soft() {
   local f="$RUN_ROOT/params/${label}.kv"
   write_common_params "$f" "$label"
   cat >> "$f" <<KV
-method = q9_virial
 KV
   append_q9_safety "$f" "0.10" "0.005" "4" "4" "6.0"
   cat >> "$f" <<KV

@@ -930,13 +930,15 @@ void attach_resampling_population_guard_diagnostics(
 ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
     WeightedRealFluidDepositWorkspace& depositWorkspace,
-    const WeightedResamplingDiagnostics& depositDiagnostics) {
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    double massCorrectionStrength) {
     validate_particle_state(state, "apply_resampling_local_mass_momentum_remap");
     ensure_particle_roles(state, ParticleRole::Fluid);
 
     ResamplingRemapApplyDiagnostics d{};
     d.attempted = true;
     d.targetCellMass = depositDiagnostics.targetCellMass;
+    d.massCorrectionStrength = std::clamp(massCorrectionStrength, 0.0, 1.0);
 
     const int nc = depositWorkspace.allocatedCells;
     if (nc <= 0 || depositWorkspace.mass.size() != static_cast<std::size_t>(nc)) {
@@ -977,7 +979,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
             continue;
         }
 
-        const double scale = d.targetCellMass / mass;
+        const double effectiveTargetCellMass = mass + d.massCorrectionStrength * (d.targetCellMass - mass);
+        const double scale = effectiveTargetCellMass / mass;
         if (!(scale > 0.0) || !std::isfinite(scale)) {
             d.skippedInvalidMassCells += 1u;
             continue;
@@ -986,18 +989,18 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
         remapCell[kk] = 1u;
 
         d.massBefore += mass;
-        d.massAfter += d.targetCellMass;
+        d.massAfter += effectiveTargetCellMass;
         d.massTargetSum += d.targetCellMass;
         d.momentumXBefore += px;
         d.momentumYBefore += py;
-        const double targetPx = d.targetCellMass * depositWorkspace.ux[kk];
-        const double targetPy = d.targetCellMass * depositWorkspace.uy[kk];
+        const double targetPx = effectiveTargetCellMass * depositWorkspace.ux[kk];
+        const double targetPy = effectiveTargetCellMass * depositWorkspace.uy[kk];
         d.momentumXTarget += targetPx;
         d.momentumYTarget += targetPy;
         d.momentumXAfter += scale * px;
         d.momentumYAfter += scale * py;
 
-        const double cellMassRelResidual = std::abs((d.targetCellMass - scale * mass) / d.targetCellMass);
+        const double cellMassRelResidual = std::abs((effectiveTargetCellMass - scale * mass) / d.targetCellMass);
         d.maxCellMassRelResidual = std::max(d.maxCellMassRelResidual, cellMassRelResidual);
         const double rx = scale * px - targetPx;
         const double ry = scale * py - targetPy;
@@ -1097,6 +1100,7 @@ void attach_resampling_remap_apply_diagnostics(
     diagnostics.remapSkippedEmptyCells = remapDiagnostics.skippedEmptyCells;
     diagnostics.remapSkippedInvalidMassCells = remapDiagnostics.skippedInvalidMassCells;
     diagnostics.remapTargetCellMass = remapDiagnostics.targetCellMass;
+    diagnostics.remapMassCorrectionStrength = remapDiagnostics.massCorrectionStrength;
     diagnostics.remapMassBefore = remapDiagnostics.massBefore;
     diagnostics.remapMassAfter = remapDiagnostics.massAfter;
     diagnostics.remapMassTargetSum = remapDiagnostics.massTargetSum;
