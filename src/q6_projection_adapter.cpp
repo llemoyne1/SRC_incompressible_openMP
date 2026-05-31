@@ -475,14 +475,12 @@ double active_domain_divergence_rate(const FluidDomainBounds& domain) {
     return rate;
 }
 
-bool has_x_io_pair(const SimulationParams& params) {
-    return (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) ||
-           (is_outlet_boundary_mode(params.bcLeft) && is_inlet_boundary_mode(params.bcRight));
+bool has_x_io_boundary(const SimulationParams& params) {
+    return is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight);
 }
 
-bool has_y_io_pair(const SimulationParams& params) {
-    return (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) ||
-           (is_outlet_boundary_mode(params.bcBottom) && is_inlet_boundary_mode(params.bcTop));
+bool has_y_io_boundary(const SimulationParams& params) {
+    return is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop);
 }
 
 double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
@@ -501,25 +499,31 @@ double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
            a * params.inletVelocityRampFinalFactor;
 }
 
-double q6_open_x_flux_component(const SimulationParams& params, double time) {
+double q6_inlet_x_flux_for_face(const SimulationParams& params, const char* face, double time) {
     const double f = inlet_velocity_ramp_factor(params, time);
-    if (is_inlet_boundary_mode(params.bcLeft) && is_outlet_boundary_mode(params.bcRight)) {
-        return f * params.inletUxLeft;
-    }
-    if (is_inlet_boundary_mode(params.bcRight) && is_outlet_boundary_mode(params.bcLeft)) {
-        return f * params.inletUxRight;
-    }
+    const std::string name(face);
+    if (name == "left" && is_inlet_boundary_mode(params.bcLeft)) return f * params.inletUxLeft;
+    if (name == "right" && is_inlet_boundary_mode(params.bcRight)) return f * params.inletUxRight;
+    return 0.0;
+}
+
+double q6_inlet_y_flux_for_face(const SimulationParams& params, const char* face, double time) {
+    const double f = inlet_velocity_ramp_factor(params, time);
+    const std::string name(face);
+    if (name == "bottom" && is_inlet_boundary_mode(params.bcBottom)) return f * params.inletUyBottom;
+    if (name == "top" && is_inlet_boundary_mode(params.bcTop)) return f * params.inletUyTop;
+    return 0.0;
+}
+
+double q6_open_x_flux_component(const SimulationParams& params, double time) {
+    if (is_inlet_boundary_mode(params.bcLeft)) return q6_inlet_x_flux_for_face(params, "left", time);
+    if (is_inlet_boundary_mode(params.bcRight)) return q6_inlet_x_flux_for_face(params, "right", time);
     return 0.0;
 }
 
 double q6_open_y_flux_component(const SimulationParams& params, double time) {
-    const double f = inlet_velocity_ramp_factor(params, time);
-    if (is_inlet_boundary_mode(params.bcBottom) && is_outlet_boundary_mode(params.bcTop)) {
-        return f * params.inletUyBottom;
-    }
-    if (is_inlet_boundary_mode(params.bcTop) && is_outlet_boundary_mode(params.bcBottom)) {
-        return f * params.inletUyTop;
-    }
+    if (is_inlet_boundary_mode(params.bcBottom)) return q6_inlet_y_flux_for_face(params, "bottom", time);
+    if (is_inlet_boundary_mode(params.bcTop)) return q6_inlet_y_flux_for_face(params, "top", time);
     return 0.0;
 }
 
@@ -851,90 +855,132 @@ void add_boundary_fluxes_to_q6_bc(EllipticProjectionBC& bc,
     ApertureInterval bottomA{0.0, 0.0};
     ApertureInterval topA{0.0, 0.0};
 
-    if (has_x_io_pair(params)) {
-        const double ux = q6_open_x_flux_component(params, time);
+    if (has_x_io_boundary(params)) {
         const bool localOutlet = open_boundary_outlet_uses_local_base(params);
         const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
         const double blend = outlet_hybrid_blend(params);
         const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
         const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
+        const bool leftOutlet = is_outlet_boundary_mode(params.bcLeft);
+        const bool rightOutlet = is_outlet_boundary_mode(params.bcRight);
+        const bool hasInlet = leftInlet || rightInlet;
+        const double balancedUx = q6_open_x_flux_component(params, time);
         leftA = x_face_aperture_y(params, domain, "left");
         rightA = x_face_aperture_y(params, domain, "right");
 
-        if (leftInlet || !localOutlet) {
+        if (leftInlet) {
+            const double ux = q6_inlet_x_flux_for_face(params, "left", time);
             bc.xLowFlux = ux;
             if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
                 set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, ux, leftA);
                 bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, ux);
             }
-        } else {
-            set_x_boundary_flux_profile_from_base(bc.xLowFluxProfile, params, domain, baseFlux, false, leftA);
-            if (hybridOutlet && blend > 0.0) {
-                std::vector<double> balanced;
-                set_x_boundary_flux_profile(balanced, params, domain, ux, leftA);
-                blend_boundary_profiles(bc.xLowFluxProfile, balanced, blend);
+        } else if (leftOutlet) {
+            if (localOutlet || !hasInlet) {
+                set_x_boundary_flux_profile_from_base(bc.xLowFluxProfile, params, domain, baseFlux, false, leftA);
+                if (hybridOutlet && blend > 0.0 && hasInlet) {
+                    std::vector<double> balanced;
+                    set_x_boundary_flux_profile(balanced, params, domain, balancedUx, leftA);
+                    blend_boundary_profiles(bc.xLowFluxProfile, balanced, blend);
+                }
+                bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
+            } else {
+                bc.xLowFlux = balancedUx;
+                if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                    set_x_boundary_flux_profile(bc.xLowFluxProfile, params, domain, balancedUx, leftA);
+                    bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, balancedUx);
+                }
             }
-            bc.xLowFlux = mean_profile_value(bc.xLowFluxProfile, 0.0);
         }
 
-        if (rightInlet || !localOutlet) {
+        if (rightInlet) {
+            const double ux = q6_inlet_x_flux_for_face(params, "right", time);
             bc.xHighFlux = ux;
             if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
                 set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, ux, rightA);
                 bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, ux);
             }
-        } else {
-            set_x_boundary_flux_profile_from_base(bc.xHighFluxProfile, params, domain, baseFlux, true, rightA);
-            if (hybridOutlet && blend > 0.0) {
-                std::vector<double> balanced;
-                set_x_boundary_flux_profile(balanced, params, domain, ux, rightA);
-                blend_boundary_profiles(bc.xHighFluxProfile, balanced, blend);
+        } else if (rightOutlet) {
+            if (localOutlet || !hasInlet) {
+                set_x_boundary_flux_profile_from_base(bc.xHighFluxProfile, params, domain, baseFlux, true, rightA);
+                if (hybridOutlet && blend > 0.0 && hasInlet) {
+                    std::vector<double> balanced;
+                    set_x_boundary_flux_profile(balanced, params, domain, balancedUx, rightA);
+                    blend_boundary_profiles(bc.xHighFluxProfile, balanced, blend);
+                }
+                bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
+            } else {
+                bc.xHighFlux = balancedUx;
+                if (params.openBoundaryApertureEnable || params.inletVelocitySpatialProfile != "uniform") {
+                    set_x_boundary_flux_profile(bc.xHighFluxProfile, params, domain, balancedUx, rightA);
+                    bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, balancedUx);
+                }
             }
-            bc.xHighFlux = mean_profile_value(bc.xHighFluxProfile, 0.0);
         }
 
         diag.openBoundaryEnabled = true;
     }
-    if (has_y_io_pair(params)) {
-        const double uy = q6_open_y_flux_component(params, time);
+    if (has_y_io_boundary(params)) {
         const bool localOutlet = open_boundary_outlet_uses_local_base(params);
         const bool hybridOutlet = open_boundary_outlet_mode_is_hybrid(params);
         const double blend = outlet_hybrid_blend(params);
         const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
         const bool topInlet = is_inlet_boundary_mode(params.bcTop);
+        const bool bottomOutlet = is_outlet_boundary_mode(params.bcBottom);
+        const bool topOutlet = is_outlet_boundary_mode(params.bcTop);
+        const bool hasInlet = bottomInlet || topInlet;
+        const double balancedUy = q6_open_y_flux_component(params, time);
         bottomA = y_face_aperture_x(params, domain, "bottom");
         topA = y_face_aperture_x(params, domain, "top");
 
-        if (bottomInlet || !localOutlet) {
+        if (bottomInlet) {
+            const double uy = q6_inlet_y_flux_for_face(params, "bottom", time);
             bc.yLowFlux = uy;
             if (params.openBoundaryApertureEnable) {
                 set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, bottomA);
                 bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, uy);
             }
-        } else {
-            set_y_boundary_flux_profile_from_base(bc.yLowFluxProfile, params, domain, baseFlux, false, bottomA);
-            if (hybridOutlet && blend > 0.0) {
-                std::vector<double> balanced;
-                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, uy, bottomA);
-                blend_boundary_profiles(bc.yLowFluxProfile, balanced, blend);
+        } else if (bottomOutlet) {
+            if (localOutlet || !hasInlet) {
+                set_y_boundary_flux_profile_from_base(bc.yLowFluxProfile, params, domain, baseFlux, false, bottomA);
+                if (hybridOutlet && blend > 0.0 && hasInlet) {
+                    std::vector<double> balanced;
+                    set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, balancedUy, bottomA);
+                    blend_boundary_profiles(bc.yLowFluxProfile, balanced, blend);
+                }
+                bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
+            } else {
+                bc.yLowFlux = balancedUy;
+                if (params.openBoundaryApertureEnable) {
+                    set_y_boundary_flux_profile(bc.yLowFluxProfile, params.Nx, domain.xMin, domain.xMax, balancedUy, bottomA);
+                    bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, balancedUy);
+                }
             }
-            bc.yLowFlux = mean_profile_value(bc.yLowFluxProfile, 0.0);
         }
 
-        if (topInlet || !localOutlet) {
+        if (topInlet) {
+            const double uy = q6_inlet_y_flux_for_face(params, "top", time);
             bc.yHighFlux = uy;
             if (params.openBoundaryApertureEnable) {
                 set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, uy, topA);
                 bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, uy);
             }
-        } else {
-            set_y_boundary_flux_profile_from_base(bc.yHighFluxProfile, params, domain, baseFlux, true, topA);
-            if (hybridOutlet && blend > 0.0) {
-                std::vector<double> balanced;
-                set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, uy, topA);
-                blend_boundary_profiles(bc.yHighFluxProfile, balanced, blend);
+        } else if (topOutlet) {
+            if (localOutlet || !hasInlet) {
+                set_y_boundary_flux_profile_from_base(bc.yHighFluxProfile, params, domain, baseFlux, true, topA);
+                if (hybridOutlet && blend > 0.0 && hasInlet) {
+                    std::vector<double> balanced;
+                    set_y_boundary_flux_profile(balanced, params.Nx, domain.xMin, domain.xMax, balancedUy, topA);
+                    blend_boundary_profiles(bc.yHighFluxProfile, balanced, blend);
+                }
+                bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
+            } else {
+                bc.yHighFlux = balancedUy;
+                if (params.openBoundaryApertureEnable) {
+                    set_y_boundary_flux_profile(bc.yHighFluxProfile, params.Nx, domain.xMin, domain.xMax, balancedUy, topA);
+                    bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, balancedUy);
+                }
             }
-            bc.yHighFlux = mean_profile_value(bc.yHighFluxProfile, 0.0);
         }
 
         diag.openBoundaryEnabled = true;

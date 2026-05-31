@@ -12,7 +12,7 @@ function h = plot_smpcd_frame(state, fields, varargin)
     addParameter(p, 'step', NaN, @isnumeric);
     addParameter(p, 'time', NaN, @isnumeric);
     addParameter(p, 'particleDecimation', 20, @isnumeric);
-    addParameter(p, 'showParticles', false, @islogical);
+    addParameter(p, 'showParticles', true, @islogical);
     addParameter(p, 'velocityDecimation', 2, @isnumeric);
     addParameter(p, 'showVelocityVectors', false, @islogical);
     addParameter(p, 'clim', [], @isnumeric);
@@ -115,8 +115,9 @@ function local_plot_particles(ax, state, decimation)
     decimation = max(1, round(decimation));
     idx = 1:decimation:state.Np;
     if isfield(state, 'type') && ~isempty(state.type)
-        scatter(ax, state.x(idx), state.y(idx), 6, double(state.type(idx)), 'filled');
+%        scatter(ax, state.x(idx), state.y(idx), 6, double(state.type(idx)), 'filled');
+       scatter(ax, state.x(idx), state.y(idx), 6,'r', 'filled');
     else
-        scatter(ax, state.x(idx), state.y(idx), 6, 'filled');
+        scatter(ax, state.x(idx), state.y(idx), 6,'r', 'filled');
     end
 end

@@ -4,17 +4,17 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/backward_step_resampling_0136}
+RUN_ROOT=${RUN_ROOT:-runs/backward_step_resampling_0136_0140}
 INIT_ROOT=${INIT_ROOT:-init/backward_step_resampling_0136}
-STATE=${BSTEP_INITIAL_STATE:-$INIT_ROOT/initial_state_backward_step_0136.smpcd}
+STATE=${BSTEP_INITIAL_STATE:-$INIT_ROOT/initial_state_backward_step_0136-short.smpcd}
 
-BSTEP_LX=${BSTEP_LX:-4.0}
+BSTEP_LX=${BSTEP_LX:-2.0}
 BSTEP_LY=${BSTEP_LY:-1.0}
-BSTEP_NX=${BSTEP_NX:-192}
+BSTEP_NX=${BSTEP_NX:-96}
 BSTEP_NY=${BSTEP_NY:-48}
 BSTEP_GAMMA=${BSTEP_GAMMA:-20}
-BSTEP_STEPS=${BSTEP_STEPS:-3000}
-BSTEP_DT=${BSTEP_DT:-0.001}
+BSTEP_STEPS=${BSTEP_STEPS:-15000}
+BSTEP_DT=${BSTEP_DT:-0.005}
 BSTEP_KBT=${BSTEP_KBT:-0.001}
 BSTEP_SEED=${BSTEP_SEED:-1360136}
 BSTEP_SUMMARY_EVERY=${BSTEP_SUMMARY_EVERY:-25}
@@ -22,7 +22,7 @@ BSTEP_DUMP_EVERY=${BSTEP_DUMP_EVERY:-100}
 BSTEP_THREADS=${BSTEP_THREADS:-8}
 
 BSTEP_STEP_XMIN=${BSTEP_STEP_XMIN:-0.0}
-BSTEP_STEP_XMAX=${BSTEP_STEP_XMAX:-0.8}
+BSTEP_STEP_XMAX=${BSTEP_STEP_XMAX:-0.5}
 BSTEP_STEP_HEIGHT=${BSTEP_STEP_HEIGHT:-0.5}
 BSTEP_FRACTION_SAMPLES=${BSTEP_FRACTION_SAMPLES:-4}
 
@@ -109,11 +109,11 @@ randomRotationSign = true
 gridShiftEnable = true
 rngSeed = $BSTEP_SEED
 
-bodyAccelerationX = 0.0
+bodyAccelerationX = 0.005
 bodyAccelerationY = 0.0
 
-bcLeft = inlet
-bcRight = outlet
+bcLeft = periodic
+bcRight = periodic
 bcBottom = solid
 bcTop = solid
 
@@ -232,8 +232,8 @@ run_case() {
     ./build/src_mpcd_base "$params_file"
 }
 
-run_case classic classic off
-run_case q6 q6 off
+#run_case classic classic off
+#run_case q6 q6 off
 run_case q6_resampling q6 on
 
 cat <<MSG

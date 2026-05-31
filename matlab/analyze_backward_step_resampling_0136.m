@@ -46,7 +46,10 @@ for c = 1:numel(cases)
 
     lastFile = dumpFiles{end};
     state = read_smpcd_state(lastFile);
-    B = bin_smpcd_state(state, opt.Lx, opt.Ly, opt.Nx, opt.Ny, 'fluidOnly', true);
+    B = bin_smpcd_state(state, ...
+        'Lx', opt.Lx, 'Ly', opt.Ly, 'Nx', opt.Nx, 'Ny', opt.Ny, ...
+        'periodicX', false, 'periodicY', false, ...
+        'fluidOnly', true);
     geom = local_geometry(opt.Lx, opt.Ly, opt.Nx, opt.Ny, opt.stepXMin, opt.stepXMax, opt.stepHeight);
     B = local_mask_solid_fields(B, geom);
     D = local_backward_step_diagnostics(B, geom, S);

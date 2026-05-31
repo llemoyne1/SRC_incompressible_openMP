@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/poiseuille_wallvp_resampling_0131}
+RUN_ROOT=${RUN_ROOT:-runs/poiseuille_wallvp_resampling_0131_0140}
 INIT_ROOT=${INIT_ROOT:-init/poiseuille_wallvp_resampling_0131}
 STATE=${POIS_INITIAL_STATE:-$INIT_ROOT/initial_state_poiseuille_wallvp_0131.smpcd}
 

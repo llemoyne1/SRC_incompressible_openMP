@@ -494,30 +494,38 @@ void validate_simulation_params(const SimulationParams& p) {
     const bool yIoPair = !bottomPeriodic &&
         ((is_inlet_boundary_mode(p.bcBottom) && is_outlet_boundary_mode(p.bcTop)) ||
          (is_outlet_boundary_mode(p.bcBottom) && is_inlet_boundary_mode(p.bcTop)));
+    const bool xHasIO = !leftPeriodic &&
+        (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight));
+    const bool yHasIO = !bottomPeriodic &&
+        (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop));
+    const bool xBoundaryModesSupported = !leftPeriodic &&
+        (is_wall_mode(p.bcLeft) || is_io_boundary_mode(p.bcLeft)) &&
+        (is_wall_mode(p.bcRight) || is_io_boundary_mode(p.bcRight));
+    const bool yBoundaryModesSupported = !bottomPeriodic &&
+        (is_wall_mode(p.bcBottom) || is_io_boundary_mode(p.bcBottom)) &&
+        (is_wall_mode(p.bcTop) || is_io_boundary_mode(p.bcTop));
 
-    if (!leftPeriodic && !xWallPair && !xIoPair) {
-        throw std::runtime_error("Non-periodic x boundaries require either a wall/wall pair or an inlet/outlet pair");
+    if (!leftPeriodic && !xWallPair && !xIoPair && !xBoundaryModesSupported) {
+        throw std::runtime_error("Non-periodic x boundaries require wall/inlet/outlet modes on both faces");
     }
-    if (!bottomPeriodic && !yWallPair && !yIoPair) {
-        throw std::runtime_error("Non-periodic y boundaries require either a wall/wall pair or an inlet/outlet pair");
+    if (!bottomPeriodic && !yWallPair && !yIoPair && !yBoundaryModesSupported) {
+        throw std::runtime_error("Non-periodic y boundaries require wall/inlet/outlet modes on both faces");
     }
 
-    const bool hasIO = xIoPair || yIoPair || has_io_boundary(p);
+    const bool hasIO = xHasIO || yHasIO || has_io_boundary(p);
     if (hasIO) {
-        if (!xIoPair && (is_io_boundary_mode(p.bcLeft) || is_io_boundary_mode(p.bcRight))) {
-            throw std::runtime_error("x inlet/outlet modes must form an inlet/outlet pair");
+        if (xHasIO && yHasIO) {
+            throw std::runtime_error("0142 standalone/open-boundary support keeps one open axis at a time");
         }
-        if (!yIoPair && (is_io_boundary_mode(p.bcBottom) || is_io_boundary_mode(p.bcTop))) {
-            throw std::runtime_error("y inlet/outlet modes must form an inlet/outlet pair");
-        }
-        if (xIoPair && yIoPair) {
-            throw std::runtime_error("0062 inlet/outlet supports one open axis at a time");
-        }
+        const bool standaloneOpenBoundary = (xHasIO && !xIoPair) || (yHasIO && !yIoPair);
         const bool q6OpenBoundary = (p.method == "q6") || (p.method == "classic" && p.projectionEnable);
         if (p.method != "classic" && p.method != "q6") {
             throw std::runtime_error("openMP-resampling inlet/outlet supports method=classic or method=q6 only");
         }
         const bool hardInletReservoir = hard_inlet_reservoir_requested(p);
+        if (standaloneOpenBoundary && !hardInletReservoir) {
+            throw std::runtime_error("0142 standalone inlet/outlet with a solid opposite face requires inletReservoirMode=hard_cell_density so particle roles can deactivate exits and activate the inlet reservoir");
+        }
         if (q6OpenBoundary && p.immersedSolidEnable) {
             std::string solidShapeForOpen = p.immersedSolidShape;
             std::replace(solidShapeForOpen.begin(), solidShapeForOpen.end(), '-', '_');

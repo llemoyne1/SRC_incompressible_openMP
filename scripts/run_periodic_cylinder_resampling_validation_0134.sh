@@ -4,35 +4,37 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/periodic_cylinder_resampling_0134}
+RUN_ROOT=${RUN_ROOT:-runs/periodic_cylinder_resampling_0134_0140}
 INIT_ROOT=${INIT_ROOT:-init/periodic_cylinder_resampling_0134}
-STATE=${CYL_INITIAL_STATE:-$INIT_ROOT/initial_state_periodic_cylinder_0134.smpcd}
+STATE=${CYL_INITIAL_STATE:-$INIT_ROOT/initial_state_periodic_cylinder_0134_0140.smpcd}
 
 CYL_LX=${CYL_LX:-2.0}
 CYL_LY=${CYL_LY:-1.0}
 CYL_NX=${CYL_NX:-96}
 CYL_NY=${CYL_NY:-48}
 CYL_GAMMA=${CYL_GAMMA:-20}
-CYL_STEPS=${CYL_STEPS:-3000}
+CYL_STEPS=${CYL_STEPS:-10000}
 CYL_DT=${CYL_DT:-0.001}
 CYL_KBT=${CYL_KBT:-0.001}
 CYL_SEED=${CYL_SEED:-1340134}
-CYL_BODY_ACCEL=${CYL_BODY_ACCEL:-0.005}
-CYL_SUMMARY_EVERY=${CYL_SUMMARY_EVERY:-25}
+CYL_BODY_ACCEL=${CYL_BODY_ACCEL:-0.075}
+CYL_SUMMARY_EVERY=${CYL_SUMMARY_EVERY:-100}
 CYL_DUMP_EVERY=${CYL_DUMP_EVERY:-100}
 CYL_THREADS=${CYL_THREADS:-8}
 
 CYL_CX=${CYL_CX:-0.5}
-CYL_CY=${CYL_CY:-0.5}
+CYL_CY=${CYL_CY:-0.485}
 CYL_R=${CYL_R:-0.12}
 CYL_FRACTION_SAMPLES=${CYL_FRACTION_SAMPLES:-4}
 CYL_PROJECTION_OPERATOR=${CYL_PROJECTION_OPERATOR:-periodic_fv_cg}
+
+ORECT_WALL_THERMAL_NOISE=${ORECT_WALL_THERMAL_NOISE:-1.0}
 
 CYL_RESAMP_POOR_FRACTION=${CYL_RESAMP_POOR_FRACTION:-0.90}
 CYL_RESAMP_RICH_FRACTION=${CYL_RESAMP_RICH_FRACTION:-1.10}
 CYL_MASS_MIN=${CYL_MASS_MIN:-0.5}
 CYL_MASS_MAX=${CYL_MASS_MAX:-2.0}
-CYL_MASS_RENORM_PERIOD=${CYL_MASS_RENORM_PERIOD:-10}
+CYL_MASS_RENORM_PERIOD=${CYL_MASS_RENORM_PERIOD:-1000}
 
 if [[ ! -x build/src_mpcd_base ]]; then
     ./scripts/build_src_mpcd_base.sh
@@ -100,6 +102,8 @@ bodyAccelerationY = 0.0
 
 bcX = periodic
 bcY = periodic
+bcBottom = solid
+bcTop = solid
 
 method = $method
 projectionOperator = $CYL_PROJECTION_OPERATOR
@@ -125,7 +129,7 @@ immersedSolidWallUy = 0.0
 immersedSolidOmega = 0.0
 
 wallAccommodation = 1.0
-wallVpGamma = 0.0
+wallVpGamma = 20.0
 wallVpMass = 1.0
 wallKBT = -1.0
 wallThermalNoise = 1.0
@@ -147,6 +151,14 @@ PARAMS
 
 # Weighted-resampling periodic-cylinder validation.
 resamplingEnable = true
+resamplingPopulationGuardEnable = ${RESAMP_POP_GUARD_ENABLE:-true}
+resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
+resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
+resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
+resamplingPopulationMaxSplitsPerCell = ${RESAMP_POP_MAX_SPLITS_PER_CELL:-16}
+resamplingPopulationMaxSplitsPerStep = ${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}
+resamplingPopulationMaxExtractionsPerCell = ${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}
+resamplingPopulationMaxExtractionsPerStep = ${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}
 resamplingTargetCellMass = $CYL_GAMMA
 resamplingWetMaskMode = active_domain
 resamplingWetCellMassThreshold = 0.0
@@ -177,8 +189,8 @@ run_case() {
     ./build/src_mpcd_base "$params_file"
 }
 
-run_case classic classic off
-run_case q6 q6 off
+# run_case classic classic off
+# run_case q6 q6 off
 run_case q6_resampling q6 on
 
 cat <<MSG

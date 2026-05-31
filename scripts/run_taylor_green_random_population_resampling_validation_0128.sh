@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/taylor_green_random_population_resampling_0128}
+RUN_ROOT=${RUN_ROOT:-runs/taylor_green_random_population_resampling_0128_0140}
 INIT_ROOT=${INIT_ROOT:-init/taylor_green_random_population_resampling_0128}
 STATE=${TG_INITIAL_STATE:-$INIT_ROOT/initial_state_tg_random_pop_0128.smpcd}
 TG_NX=${TG_NX:-32}
@@ -22,8 +22,8 @@ TG_RESAMP_RICH_FRACTION=${TG_RESAMP_RICH_FRACTION:-1.10}
 TG_MASS_MIN=${TG_MASS_MIN:-0.5}
 TG_MASS_MAX=${TG_MASS_MAX:-2.0}
 TG_MASS_RENORM_PERIOD=${TG_MASS_RENORM_PERIOD:-10}
-TG_FORCING_ENABLE=${TG_FORCING_ENABLE:-false}
-TG_FORCING_AMPLITUDE=${TG_FORCING_AMPLITUDE:-0.0}
+TG_FORCING_ENABLE=${TG_FORCING_ENABLE:-true}
+TG_FORCING_AMPLITUDE=${TG_FORCING_AMPLITUDE:-0.5}
 TG_FORCING_MODE_X=${TG_FORCING_MODE_X:-1}
 TG_FORCING_MODE_Y=${TG_FORCING_MODE_Y:-1}
 

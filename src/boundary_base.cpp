@@ -846,6 +846,34 @@ void append_particle(ParticleState& state,
     state.Np = static_cast<std::uint64_t>(state.x.size());
 }
 
+void activate_or_append_particle(ParticleState& state,
+                                 const std::vector<std::size_t>& inactiveSlots,
+                                 std::size_t& inactiveCursor,
+                                 double x,
+                                 double y,
+                                 double vx,
+                                 double vy,
+                                 std::uint32_t type,
+                                 double mass) {
+    if (state.role.empty() && state.Np > 0u) {
+        state.role.assign(static_cast<std::size_t>(state.Np), kParticleRoleFluid);
+    }
+    while (inactiveCursor < inactiveSlots.size()) {
+        const std::size_t idx = inactiveSlots[inactiveCursor++];
+        if (idx < static_cast<std::size_t>(state.Np) && is_inactive_particle(state, idx)) {
+            state.x[idx] = x;
+            state.y[idx] = y;
+            state.vx[idx] = vx;
+            state.vy[idx] = vy;
+            state.type[idx] = type;
+            state.mass[idx] = mass;
+            state.role[idx] = kParticleRoleFluid;
+            return;
+        }
+    }
+    append_particle(state, x, y, vx, vy, type, mass, ParticleRole::Fluid);
+}
+
 void sample_hard_inlet_cell_particles(ParticleState& state,
                                       const SimulationParams& params,
                                       const FluidDomainBounds& domain,
@@ -855,6 +883,8 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
                                       std::uint64_t cellOrdinal,
                                       std::uint32_t particleType,
                                       double particleMass,
+                                      const std::vector<std::size_t>& inactiveSlots,
+                                      std::size_t& inactiveCursor,
                                       BoundaryDiagnostics& diag) {
     const int targetN = params.inletTargetOccupancy;
     if (targetN <= 0) return;
@@ -926,7 +956,8 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
 
     for (int n = 0; n < targetN; ++n) {
         const std::size_t k = static_cast<std::size_t>(n);
-        append_particle(state, xs[k], ys[k], vxs[k], vys[k], particleType, particleMass);
+        activate_or_append_particle(state, inactiveSlots, inactiveCursor,
+                                    xs[k], ys[k], vxs[k], vys[k], particleType, particleMass);
         diag.inletMeanUx += vxs[k];
         diag.inletMeanUy += vys[k];
         const double dvx = vxs[k] - uxTarget[k];
@@ -1004,7 +1035,8 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
         } else if (ioX) {
             if (x < domain.xMin) {
                 ++diag.hitsLeft;
-                if (point_in_x_face_aperture(params, domain, "left", y)) {
+                if (is_io_boundary_mode(params.bcLeft) &&
+                    point_in_x_face_aperture(params, domain, "left", y)) {
                     if (is_inlet_boundary_mode(params.bcLeft)) ++diag.inletBackflowDeleted;
                     else ++diag.outletParticlesDeleted;
                     remove = true;
@@ -1013,7 +1045,8 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
                 }
             } else if (x > domain.xMax) {
                 ++diag.hitsRight;
-                if (point_in_x_face_aperture(params, domain, "right", y)) {
+                if (is_io_boundary_mode(params.bcRight) &&
+                    point_in_x_face_aperture(params, domain, "right", y)) {
                     if (is_inlet_boundary_mode(params.bcRight)) ++diag.inletBackflowDeleted;
                     else ++diag.outletParticlesDeleted;
                     remove = true;
@@ -1033,7 +1066,8 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
             } else if (ioY) {
                 if (y < domain.yMin) {
                     ++diag.hitsBottom;
-                    if (point_in_y_face_aperture(params, domain, "bottom", x)) {
+                    if (is_io_boundary_mode(params.bcBottom) &&
+                        point_in_y_face_aperture(params, domain, "bottom", x)) {
                         if (is_inlet_boundary_mode(params.bcBottom)) ++diag.inletBackflowDeleted;
                         else ++diag.outletParticlesDeleted;
                         remove = true;
@@ -1042,7 +1076,8 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
                     }
                 } else if (y > domain.yMax) {
                     ++diag.hitsTop;
-                    if (point_in_y_face_aperture(params, domain, "top", x)) {
+                    if (is_io_boundary_mode(params.bcTop) &&
+                        point_in_y_face_aperture(params, domain, "top", x)) {
                         if (is_inlet_boundary_mode(params.bcTop)) ++diag.inletBackflowDeleted;
                         else ++diag.outletParticlesDeleted;
                         remove = true;
@@ -1062,8 +1097,14 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
             remove = true;
         }
 
-        if (!remove && !firstFailure.failed) {
-            append_particle(kept, x, y, vx, vy, type, mass, ParticleRole::Fluid);
+        if (!firstFailure.failed) {
+            if (remove) {
+                const double xi = std::clamp(x, domain.xMin, domain.xMax);
+                const double yi = std::clamp(y, domain.yMin, domain.yMax);
+                append_particle(kept, xi, yi, vx, vy, type, mass, ParticleRole::Inactive);
+            } else {
+                append_particle(kept, x, y, vx, vy, type, mass, ParticleRole::Fluid);
+            }
         }
     }
 
@@ -1073,6 +1114,15 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
 
     state = std::move(kept);
 
+    std::vector<std::size_t> inactiveSlots;
+    inactiveSlots.reserve(static_cast<std::size_t>(state.Np));
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (is_inactive_particle(state, i)) {
+            inactiveSlots.push_back(i);
+        }
+    }
+    std::size_t inactiveCursor = 0u;
+
     const auto cells = build_hard_reservoir_cells(params, domain, time);
     diag.inletReservoirCells = static_cast<std::uint64_t>(cells.size());
     diag.inletReservoirTargetParticles = static_cast<std::uint64_t>(cells.size()) *
@@ -1080,7 +1130,7 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
     std::uint64_t ordinal = 0u;
     for (const auto& cell : cells) {
         sample_hard_inlet_cell_particles(state, params, domain, cell, inletFace, step, ordinal++,
-                                         refType, refMass, diag);
+                                         refType, refMass, inactiveSlots, inactiveCursor, diag);
     }
 
     diag.inletReservoirMeanN = cells.empty() ? 0.0 : static_cast<double>(params.inletTargetOccupancy);

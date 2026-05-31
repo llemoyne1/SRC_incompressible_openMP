@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-RUN_ROOT=${RUN_ROOT:-runs/taylor_green_forced_random_population_resampling_0130}
+RUN_ROOT=${RUN_ROOT:-runs/taylor_green_forced_random_population_resampling_0130_0140}
 INIT_ROOT=${INIT_ROOT:-init/taylor_green_random_population_resampling_0128}
 STATE=${TG_INITIAL_STATE:-$INIT_ROOT/initial_state_tg_random_pop_0128.smpcd}
 TG_NX=${TG_NX:-32}
