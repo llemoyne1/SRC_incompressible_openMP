@@ -13,12 +13,12 @@ LY=${FILL_LY:-1.0}
 NX=${FILL_NX:-48}
 NY=${FILL_NY:-48}
 GAMMA=${FILL_GAMMA:-20}
-STEPS=${FILL_STEPS:-6000}
+STEPS=${FILL_STEPS:-3000}
 DT=${FILL_DT:-0.001}
 KBT=${FILL_KBT:-0.001}
 SEED=${FILL_SEED:-1470147}
 SUMMARY_EVERY=${FILL_SUMMARY_EVERY:-25}
-DUMP_EVERY=${FILL_DUMP_EVERY:-150}
+DUMP_EVERY=${FILL_DUMP_EVERY:-250}
 THREADS=${FILL_THREADS:-8}
 
 INLET_UX=${FILL_INLET_UX:-0.10}
@@ -197,5 +197,7 @@ cat <<MSG
 [0147] Closed-capacity inlet-only smoke completed.
 Run root: $RUN_ROOT
 Key columns: totalMass, capacityOverfillRatio, q6ProjectionStrength,
-capacityVirialKEffective, capacityVirialPressureMean, resampRemapMassCorrectionStrength.
+capacityVirialKEffective, capacityVirialPressureMean,
+capacityWallPressureTotalMeanAll, capacityWallForceTotalX/Y,
+resampRemapMassCorrectionStrength.
 MSG

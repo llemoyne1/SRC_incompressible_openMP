@@ -931,13 +931,16 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
     WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
-    double massCorrectionStrength) {
+    double massCorrectionStrength,
+    double targetCellMassOverride) {
     validate_particle_state(state, "apply_resampling_local_mass_momentum_remap");
     ensure_particle_roles(state, ParticleRole::Fluid);
 
     ResamplingRemapApplyDiagnostics d{};
     d.attempted = true;
-    d.targetCellMass = depositDiagnostics.targetCellMass;
+    d.targetCellMass = (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride))
+        ? targetCellMassOverride
+        : depositDiagnostics.targetCellMass;
     d.massCorrectionStrength = std::clamp(massCorrectionStrength, 0.0, 1.0);
 
     const int nc = depositWorkspace.allocatedCells;
@@ -1325,7 +1328,8 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
     ParticleState& state,
     const SimulationParams& params,
     const WeightedRealFluidDepositWorkspace& depositWorkspace,
-    const WeightedResamplingDiagnostics& depositDiagnostics) {
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    double targetCellMassOverride) {
     validate_particle_state(state, "apply_resampling_particle_mass_guards");
     ensure_particle_roles(state, ParticleRole::Fluid);
 
@@ -1333,7 +1337,9 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
     d.attempted = true;
     d.massMinBound = params.resamplingParticleMassMin;
     d.massMaxBound = params.resamplingParticleMassMax;
-    d.targetCellMass = depositDiagnostics.targetCellMass;
+    d.targetCellMass = (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride))
+        ? targetCellMassOverride
+        : depositDiagnostics.targetCellMass;
 
     const int nc = depositWorkspace.allocatedCells;
     if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||

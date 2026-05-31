@@ -246,6 +246,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const ClosedCapacityResponseDiagnostics remapCapacity = compute_closed_capacity_response_from_cell_masses(
         params, grid, result.domain, workspace.resampling.mass, nullptr, params.q6ProjectionStrength);
     const double resamplingMassCorrectionStrength = remapCapacity.computed ? remapCapacity.massRemapFactor : 1.0;
+    const double capacityRemapTargetCellMass =
+        (params.closedCapacityResponseEnable && remapCapacity.computed &&
+         remapCapacity.overfillRatio > 0.0 &&
+         remapCapacity.massRemapTargetCellMassEffective > 0.0)
+            ? remapCapacity.massRemapTargetCellMassEffective
+            : -1.0;
     const bool massGuardAllowedByCapacity = !params.closedCapacityResponseEnable ||
         !params.closedCapacityMassGuardDisableOnOverfill || !(remapCapacity.overfillRatio > 0.0);
     ResamplingRemapApplyDiagnostics remapApply{};
@@ -254,14 +260,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
         remapApply = apply_resampling_local_mass_momentum_remap(
-            state, workspace.resampling, result.resampling, resamplingMassCorrectionStrength);
+            state, workspace.resampling, result.resampling,
+            resamplingMassCorrectionStrength, capacityRemapTargetCellMass);
         if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
             thermalApply = apply_resampling_local_thermal_renormalization(
                 state, workspace.resampling, remapApply);
         }
         if (params.resamplingMassGuardEnable && massGuardAllowedByCapacity && remapApply.applied) {
             massGuardApply = apply_resampling_particle_mass_guards(
-                state, params, workspace.resampling, result.resampling);
+                state, params, workspace.resampling, result.resampling,
+                capacityRemapTargetCellMass);
         }
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);

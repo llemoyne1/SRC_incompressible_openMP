@@ -839,7 +839,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     ParticleState& state,
     WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
-    double massCorrectionStrength = 1.0);
+    double massCorrectionStrength = 1.0,
+    double targetCellMassOverride = -1.0);
 
 void attach_resampling_remap_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
@@ -858,7 +859,8 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
     ParticleState& state,
     const SimulationParams& params,
     const WeightedRealFluidDepositWorkspace& depositWorkspace,
-    const WeightedResamplingDiagnostics& depositDiagnostics);
+    const WeightedResamplingDiagnostics& depositDiagnostics,
+    double targetCellMassOverride = -1.0);
 
 void attach_resampling_mass_guard_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,

@@ -129,6 +129,172 @@ bool cell_active(const std::vector<std::uint8_t>* mask, std::size_t k) {
     return mask == nullptr || mask->empty() || (*mask)[k] != 0u;
 }
 
+struct WallLoadAccum {
+    double length = 0.0;
+    double kinetic = 0.0;
+    double virial = 0.0;
+    double total = 0.0;
+};
+
+double capacity_wall_kbt_estimate(const SimulationParams& params) {
+    if (params.thermostatTargetKBT > 0.0 && std::isfinite(params.thermostatTargetKBT)) {
+        return params.thermostatTargetKBT;
+    }
+    if (params.kBT > 0.0 && std::isfinite(params.kBT)) {
+        return params.kBT;
+    }
+    return 0.0;
+}
+
+const std::string& face_mode(const SimulationParams& params, const char* face) {
+    const std::string name(face);
+    if (name == "left") return params.bcLeft;
+    if (name == "right") return params.bcRight;
+    if (name == "bottom") return params.bcBottom;
+    return params.bcTop;
+}
+
+bool face_segment_covers(const OpenBoundarySegment& seg, const char* face, double s) {
+    if (seg.face != face) return false;
+    const double a = std::min(seg.sMin, seg.sMax);
+    const double b = std::max(seg.sMin, seg.sMax);
+    return s >= a && s <= b;
+}
+
+bool solid_wall_portion(const SimulationParams& params, const char* face, double s) {
+    const std::string& mode = face_mode(params, face);
+    if (!is_solid_wall_mode(mode)) {
+        return false;
+    }
+    if (params.openBoundarySegmentsEnable) {
+        for (const OpenBoundarySegment& seg : params.openBoundarySegments) {
+            if ((is_inlet_boundary_mode(seg.mode) || is_outlet_boundary_mode(seg.mode)) &&
+                face_segment_covers(seg, face, s)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void add_wall_cell_load(WallLoadAccum& side,
+                        double segmentLength,
+                        double pKin,
+                        double pVir,
+                        double nx,
+                        double ny,
+                        double& fKinX,
+                        double& fKinY,
+                        double& fVirX,
+                        double& fVirY,
+                        double& fTotX,
+                        double& fTotY) {
+    const double pTot = pKin + pVir;
+    side.length += segmentLength;
+    side.kinetic += pKin * segmentLength;
+    side.virial += pVir * segmentLength;
+    side.total += pTot * segmentLength;
+    fKinX += pKin * segmentLength * nx;
+    fKinY += pKin * segmentLength * ny;
+    fVirX += pVir * segmentLength * nx;
+    fVirY += pVir * segmentLength * ny;
+    fTotX += pTot * segmentLength * nx;
+    fTotY += pTot * segmentLength * ny;
+}
+
+double mean_pressure(const WallLoadAccum& a, double load) {
+    return a.length > 0.0 ? load / a.length : 0.0;
+}
+
+void compute_closed_capacity_wall_loads(const SimulationParams& params,
+                                        const CellGrid& grid,
+                                        const FluidDomainBounds& domain,
+                                        const std::vector<double>& cellMass,
+                                        const std::vector<double>& pVir,
+                                        ClosedCapacityResponseDiagnostics& d) {
+    if (!d.enabled || !d.computed || static_cast<int>(cellMass.size()) != grid.numCells ||
+        static_cast<int>(pVir.size()) != grid.numCells) {
+        return;
+    }
+    const double width = fluid_domain_width(domain);
+    const double height = fluid_domain_height(domain);
+    if (!(width > 0.0) || !(height > 0.0) || params.Nx <= 0 || params.Ny <= 0) {
+        return;
+    }
+    const double dx = width / static_cast<double>(params.Nx);
+    const double dy = height / static_cast<double>(params.Ny);
+    const double area = dx * dy;
+    const double kBT = capacity_wall_kbt_estimate(params);
+    d.wallKineticKBT = kBT;
+
+    WallLoadAccum left, right, bottom, top;
+    double fKinX = 0.0, fKinY = 0.0, fVirX = 0.0, fVirY = 0.0, fTotX = 0.0, fTotY = 0.0;
+
+    for (int j = 0; j < params.Ny; ++j) {
+        const double s = (static_cast<double>(j) + 0.5) / static_cast<double>(params.Ny);
+        if (solid_wall_portion(params, "left", s)) {
+            const int c = params.Nx * j;
+            const double pK = (cellMass[static_cast<std::size_t>(c)] / area) * kBT;
+            add_wall_cell_load(left, dy, pK, pVir[static_cast<std::size_t>(c)], -1.0, 0.0,
+                               fKinX, fKinY, fVirX, fVirY, fTotX, fTotY);
+        }
+        if (solid_wall_portion(params, "right", s)) {
+            const int c = (params.Nx - 1) + params.Nx * j;
+            const double pK = (cellMass[static_cast<std::size_t>(c)] / area) * kBT;
+            add_wall_cell_load(right, dy, pK, pVir[static_cast<std::size_t>(c)], 1.0, 0.0,
+                               fKinX, fKinY, fVirX, fVirY, fTotX, fTotY);
+        }
+    }
+    for (int i = 0; i < params.Nx; ++i) {
+        const double s = (static_cast<double>(i) + 0.5) / static_cast<double>(params.Nx);
+        if (solid_wall_portion(params, "bottom", s)) {
+            const int c = i;
+            const double pK = (cellMass[static_cast<std::size_t>(c)] / area) * kBT;
+            add_wall_cell_load(bottom, dx, pK, pVir[static_cast<std::size_t>(c)], 0.0, -1.0,
+                               fKinX, fKinY, fVirX, fVirY, fTotX, fTotY);
+        }
+        if (solid_wall_portion(params, "top", s)) {
+            const int c = i + params.Nx * (params.Ny - 1);
+            const double pK = (cellMass[static_cast<std::size_t>(c)] / area) * kBT;
+            add_wall_cell_load(top, dx, pK, pVir[static_cast<std::size_t>(c)], 0.0, 1.0,
+                               fKinX, fKinY, fVirX, fVirY, fTotX, fTotY);
+        }
+    }
+
+    d.wallSolidLengthLeft = left.length;
+    d.wallSolidLengthRight = right.length;
+    d.wallSolidLengthBottom = bottom.length;
+    d.wallSolidLengthTop = top.length;
+    d.wallSolidLengthTotal = left.length + right.length + bottom.length + top.length;
+
+    d.wallPressureKineticMeanLeft = mean_pressure(left, left.kinetic);
+    d.wallPressureKineticMeanRight = mean_pressure(right, right.kinetic);
+    d.wallPressureKineticMeanBottom = mean_pressure(bottom, bottom.kinetic);
+    d.wallPressureKineticMeanTop = mean_pressure(top, top.kinetic);
+    d.wallPressureVirialMeanLeft = mean_pressure(left, left.virial);
+    d.wallPressureVirialMeanRight = mean_pressure(right, right.virial);
+    d.wallPressureVirialMeanBottom = mean_pressure(bottom, bottom.virial);
+    d.wallPressureVirialMeanTop = mean_pressure(top, top.virial);
+    d.wallPressureTotalMeanLeft = mean_pressure(left, left.total);
+    d.wallPressureTotalMeanRight = mean_pressure(right, right.total);
+    d.wallPressureTotalMeanBottom = mean_pressure(bottom, bottom.total);
+    d.wallPressureTotalMeanTop = mean_pressure(top, top.total);
+
+    const double kinAll = left.kinetic + right.kinetic + bottom.kinetic + top.kinetic;
+    const double virAll = left.virial + right.virial + bottom.virial + top.virial;
+    const double totAll = left.total + right.total + bottom.total + top.total;
+    d.wallPressureKineticMeanAll = d.wallSolidLengthTotal > 0.0 ? kinAll / d.wallSolidLengthTotal : 0.0;
+    d.wallPressureVirialMeanAll = d.wallSolidLengthTotal > 0.0 ? virAll / d.wallSolidLengthTotal : 0.0;
+    d.wallPressureTotalMeanAll = d.wallSolidLengthTotal > 0.0 ? totAll / d.wallSolidLengthTotal : 0.0;
+    d.wallForceKineticX = fKinX;
+    d.wallForceKineticY = fKinY;
+    d.wallForceVirialX = fVirX;
+    d.wallForceVirialY = fVirY;
+    d.wallForceTotalX = fTotX;
+    d.wallForceTotalY = fTotY;
+    d.wallLoadComputed = d.wallSolidLengthTotal > 0.0;
+}
+
 } // namespace
 
 bool closed_capacity_response_requested(const SimulationParams& params) {
@@ -196,6 +362,11 @@ ClosedCapacityResponseDiagnostics compute_closed_capacity_response_from_cell_mas
 
     d.overfillMass = std::max(0.0, totalMass - referenceMass);
     d.overfillRatio = d.overfillMass / referenceMass;
+    d.massRemapTargetCellMassNominal = refCellMass;
+    d.massRemapOverfillPerCell = referenceCells > 0u
+        ? d.overfillMass / static_cast<double>(referenceCells)
+        : 0.0;
+    d.massRemapTargetCellMassEffective = refCellMass + d.massRemapOverfillPerCell;
     d.q6ProjectionFactor = decay_factor(d.overfillRatio,
                                         params.closedCapacityQ6Eta,
                                         params.closedCapacityQ6Power);
@@ -231,10 +402,6 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
         return d;
     }
 
-    if (!params.closedCapacityVirialKickEnable || !(d.virialKEffective > 0.0)) {
-        return d;
-    }
-
     const double refCellMass = d.referenceCellMass;
     double pSum = 0.0;
     double p2 = 0.0;
@@ -254,6 +421,12 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     d.virialPressureRms = nc > 0 ? std::sqrt(p2 / static_cast<double>(nc)) : 0.0;
     d.virialPressureMin = std::isfinite(pMin) ? pMin : 0.0;
     d.virialPressureMax = std::isfinite(pMax) ? pMax : 0.0;
+
+    compute_closed_capacity_wall_loads(params, grid, domain, ws.cellMass, ws.pressure, d);
+
+    if (!params.closedCapacityVirialKickEnable || !(d.virialKEffective > 0.0)) {
+        return d;
+    }
 
     const double width = fluid_domain_width(domain);
     const double height = fluid_domain_height(domain);
