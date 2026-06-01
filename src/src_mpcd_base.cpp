@@ -2,14 +2,78 @@
 #include "closed_capacity_response.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
 #include <vector>
 
+
 namespace mpcd {
 namespace {
 
+using ProfileClock = std::chrono::steady_clock;
+
+struct StepProfilePhaseIndex {
+    enum : std::size_t {
+        ForceStream = 0,
+        Domain = 1,
+        Boundary = 2,
+        Immersed = 3,
+        Collision = 4,
+        Q6Projection = 5,
+        ClosedCapacity = 6,
+        Thermostat = 7,
+        KeepMeanFlow = 8,
+        ResamplingPoolInitial = 9,
+        ResamplingDepositInitial = 10,
+        ResamplingAttachInitial = 11,
+        ResamplingThermalReferenceCapture = 12,
+        ResamplingPopulationGuard = 13,
+        ResamplingPostGuardPool = 14,
+        ResamplingPostGuardDeposit = 15,
+        ResamplingLatentActivation = 16,
+        ResamplingExtraction = 17,
+        ResamplingInsertion = 18,
+        ResamplingPostEditPool = 19,
+        ResamplingPostEditDeposit = 20,
+        ResamplingCapacityForRemap = 21,
+        ResamplingRemap = 22,
+        ResamplingThermalAfterRemap = 23,
+        ResamplingMassGuard = 24,
+        ResamplingPostRemapDeposit = 25,
+        ResamplingPostRemapPool = 26,
+        ResamplingThermalLate = 27,
+        ResamplingPostThermalDeposit = 28,
+        ResamplingPostThermalPool = 29,
+        ResamplingAttachFinalDiagnostics = 30
+    };
+};
+
+static_assert(StepProfilePhaseCount == 31u, "StepProfile phase count mismatch");
+
+class ScopedStepProfileTimer {
+public:
+    ScopedStepProfileTimer(StepProfile& profile, const std::size_t phaseIndex)
+        : profile_(profile), phaseIndex_(phaseIndex), t0_(ProfileClock::now()) {}
+
+    ScopedStepProfileTimer(const ScopedStepProfileTimer&) = delete;
+    ScopedStepProfileTimer& operator=(const ScopedStepProfileTimer&) = delete;
+
+    ~ScopedStepProfileTimer() {
+        if (phaseIndex_ < profile_.seconds.size()) {
+            profile_.seconds[phaseIndex_] += std::chrono::duration<double>(ProfileClock::now() - t0_).count();
+        }
+    }
+
+private:
+    StepProfile& profile_;
+    std::size_t phaseIndex_;
+    ProfileClock::time_point t0_;
+};
+
+#define MPCD_PROFILE_PHASE(profile, phaseName) \
+    ScopedStepProfileTimer mpcdProfileTimer_##phaseName((profile), StepProfilePhaseIndex::phaseName)
 
 bool is_mass_renormalization_step(const SimulationParams& params, std::uint64_t step) {
     return params.resamplingMassRenormalizationPeriod > 0 &&
@@ -140,11 +204,51 @@ void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) 
 
 } // namespace
 
+const char* step_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[StepProfilePhaseCount] = {
+        "force_stream",
+        "domain_bounds",
+        "boundary_conditions",
+        "immersed_solid",
+        "src_collision",
+        "q6_projection",
+        "closed_capacity_virial",
+        "thermostat",
+        "keep_mean_flow",
+        "resampling_pool_initial",
+        "resampling_deposit_initial",
+        "resampling_attach_initial",
+        "resampling_thermal_reference_capture",
+        "resampling_population_guard",
+        "resampling_post_guard_pool",
+        "resampling_post_guard_deposit",
+        "resampling_latent_activation",
+        "resampling_extraction",
+        "resampling_insertion",
+        "resampling_post_edit_pool",
+        "resampling_post_edit_deposit",
+        "resampling_capacity_for_remap",
+        "resampling_remap",
+        "resampling_thermal_after_remap",
+        "resampling_mass_guard",
+        "resampling_post_remap_deposit",
+        "resampling_post_remap_pool",
+        "resampling_thermal_late",
+        "resampling_post_thermal_deposit",
+        "resampling_post_thermal_pool",
+        "resampling_attach_final_diagnostics"
+    };
+    return phaseIndex < StepProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
+
 StepResult run_src_mpcd_base_step(ParticleState& state,
                                   const SimulationParams& params,
                                   const CellGrid& grid,
                                   std::uint64_t step,
-                                  SrcMpcdBaseWorkspace& workspace) {
+                                  SrcMpcdBaseWorkspace& workspace,
+                                  bool collectResamplingDiagnosticsWhenDisabled) {
+    StepResult result{};
+
     validate_particle_state(state, "run_src_mpcd_base_step");
     ensure_particle_roles(state, ParticleRole::Fluid);
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -153,39 +257,82 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
     // pre-stream particle position and is therefore independent of boundary
     // wrapping done later in the step.
+    {
+        MPCD_PROFILE_PHASE(result.profile, ForceStream);
 #pragma omp parallel for if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
-            continue;
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+            const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            double tgAx = 0.0;
+            double tgAy = 0.0;
+            taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
+            state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
+            state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
+            state.x[i] += state.vx[i] * params.dt;
+            state.y[i] += state.vy[i] * params.dt;
         }
-        double tgAx = 0.0;
-        double tgAy = 0.0;
-        taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
-        state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
-        state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
-        state.x[i] += state.vx[i] * params.dt;
-        state.y[i] += state.vy[i] * params.dt;
     }
 
-    StepResult result{};
     const double time = static_cast<double>(step) * params.dt;
-    result.domain = make_fluid_domain_bounds(params, time);
-    result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
-    result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
-    result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
-    result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
-    result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
-    result.thermostat = apply_cell_relative_rescale_thermostat(
-        state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
-    apply_keep_mean_flow(state, params);
-    result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+    {
+        MPCD_PROFILE_PHASE(result.profile, Domain);
+        result.domain = make_fluid_domain_bounds(params, time);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, Boundary);
+        result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, Immersed);
+        result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, Collision);
+        result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, Q6Projection);
+        result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, ClosedCapacity);
+        result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, Thermostat);
+        result.thermostat = apply_cell_relative_rescale_thermostat(
+            state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, KeepMeanFlow);
+        apply_keep_mean_flow(state, params);
+    }
+    // 0158: when resampling is disabled, the pool/deposit diagnostics are only
+    // needed on steps for which the caller will write a runtime summary.  The
+    // default public API keeps the previous conservative behavior; the main
+    // production loop passes false on non-summary steps.
+    if (!params.resamplingEnable && !collectResamplingDiagnosticsWhenDisabled) {
+        return result;
+    }
+
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingPoolInitial);
+        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+    }
     const bool buildInitialResamplingPlan =
         params.resamplingEnable && params.resamplingExtractionEnable;
-    result.resampling = deposit_weighted_real_fluid(
-        state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
-        buildInitialResamplingPlan);
-    attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingDepositInitial);
+        result.resampling = deposit_weighted_real_fluid(
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+            buildInitialResamplingPlan);
+    }
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingAttachInitial);
+        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+    }
 
     if (!params.resamplingEnable) {
         return result;
@@ -194,123 +341,186 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     std::vector<double> preEditThermalEnergyTarget;
     std::vector<std::uint8_t> preEditThermalCell;
     if (params.resamplingThermalRenormalizationEnable) {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingThermalReferenceCapture);
         capture_resampling_thermal_reference(
             state, workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell);
     }
 
-    bool roleOrPositionEdited = false;
+    bool populationGuardEdited = false;
+    bool planOrTransferEdited = false;
     ResamplingPopulationGuardDiagnostics populationGuard{};
-    populationGuard = apply_resampling_population_support_guard(
-        state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
-    roleOrPositionEdited = roleOrPositionEdited || populationGuard.applied;
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingPopulationGuard);
+        populationGuard = apply_resampling_population_support_guard(
+            state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
+    }
+    populationGuardEdited = populationGuard.applied;
 
-    if (roleOrPositionEdited) {
-        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-        result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
-            params.resamplingExtractionEnable);
-        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
-        attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+    if (populationGuardEdited) {
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardPool);
+            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        }
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
+            result.resampling = deposit_weighted_real_fluid(
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+                params.resamplingExtractionEnable);
+        }
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
+            attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+            attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+        }
     }
 
     ResamplingLatentActivationDiagnostics latentActivation{};
     if (params.resamplingLatentActivationEnable && result.resampling.candidateListsBuilt) {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingLatentActivation);
         latentActivation = apply_resampling_latent_activation(
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
-        roleOrPositionEdited = roleOrPositionEdited || latentActivation.applied;
+        planOrTransferEdited = planOrTransferEdited || latentActivation.applied;
     }
 
     ResamplingExtractionApplyDiagnostics extractionApply{};
     ResamplingInsertionApplyDiagnostics insertionApply{};
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
-        extractionApply =
-            apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
-        roleOrPositionEdited = roleOrPositionEdited || extractionApply.applied;
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingExtraction);
+            extractionApply =
+                apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
+        }
+        planOrTransferEdited = planOrTransferEdited || extractionApply.applied;
 
         if (params.resamplingInsertionEnable && extractionApply.applied) {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingInsertion);
             insertionApply = apply_resampling_insertion_operations(
                 state, workspace.resamplingPool, workspace.resampling, grid);
-            roleOrPositionEdited = roleOrPositionEdited || insertionApply.applied;
+            planOrTransferEdited = planOrTransferEdited || insertionApply.applied;
         }
     }
 
-    if (roleOrPositionEdited) {
-        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-        result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
-        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+    if (planOrTransferEdited) {
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostEditPool);
+            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        }
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostEditDeposit);
+            result.resampling = deposit_weighted_real_fluid(
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+        }
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
+            attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        }
     }
 
     const bool massRenormalizationStep = is_mass_renormalization_step(params, step);
-    const ClosedCapacityResponseDiagnostics remapCapacity = compute_closed_capacity_response_from_cell_masses(
-        params, grid, result.domain, workspace.resampling.mass, nullptr, params.q6ProjectionStrength);
-    const double resamplingMassCorrectionStrength = remapCapacity.computed ? remapCapacity.massRemapFactor : 1.0;
-    const double capacityRemapTargetCellMass =
-        (params.closedCapacityResponseEnable && remapCapacity.computed &&
-         remapCapacity.overfillRatio > 0.0 &&
-         remapCapacity.massRemapTargetCellMassEffective > 0.0)
-            ? remapCapacity.massRemapTargetCellMassEffective
-            : -1.0;
-    const bool massGuardAllowedByCapacity = !params.closedCapacityResponseEnable ||
-        !params.closedCapacityMassGuardDisableOnOverfill || !(remapCapacity.overfillRatio > 0.0);
+    ClosedCapacityResponseDiagnostics remapCapacity{};
+    double resamplingMassCorrectionStrength = 1.0;
+    double capacityRemapTargetCellMass = -1.0;
+    bool massGuardAllowedByCapacity = true;
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingCapacityForRemap);
+        remapCapacity = compute_closed_capacity_response_from_cell_masses(
+            params, grid, result.domain, workspace.resampling.mass, nullptr, params.q6ProjectionStrength);
+        resamplingMassCorrectionStrength = remapCapacity.computed ? remapCapacity.massRemapFactor : 1.0;
+        capacityRemapTargetCellMass =
+            (params.closedCapacityResponseEnable && remapCapacity.computed &&
+             remapCapacity.overfillRatio > 0.0 &&
+             remapCapacity.massRemapTargetCellMassEffective > 0.0)
+                ? remapCapacity.massRemapTargetCellMassEffective
+                : -1.0;
+        massGuardAllowedByCapacity = !params.closedCapacityResponseEnable ||
+            !params.closedCapacityMassGuardDisableOnOverfill || !(remapCapacity.overfillRatio > 0.0);
+    }
     ResamplingRemapApplyDiagnostics remapApply{};
     ResamplingThermalRenormalizationDiagnostics thermalApply{};
     ResamplingMassGuardDiagnostics massGuardApply{};
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
-        remapApply = apply_resampling_local_mass_momentum_remap(
-            state, workspace.resampling, result.resampling,
-            resamplingMassCorrectionStrength, capacityRemapTargetCellMass);
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
+            remapApply = apply_resampling_local_mass_momentum_remap(
+                state, workspace.resampling, result.resampling,
+                resamplingMassCorrectionStrength, capacityRemapTargetCellMass);
+        }
         if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingThermalAfterRemap);
             thermalApply = apply_resampling_local_thermal_renormalization(
                 state, workspace.resampling, remapApply);
         }
         if (params.resamplingMassGuardEnable && massGuardAllowedByCapacity && remapApply.applied) {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingMassGuard);
             massGuardApply = apply_resampling_particle_mass_guards(
                 state, params, workspace.resampling, result.resampling,
                 capacityRemapTargetCellMass);
         }
-        result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
-        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
+            result.resampling = deposit_weighted_real_fluid(
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+        }
+        {
+            // Remap, thermal-after-remap and particle-mass guards only update
+            // masses/velocities.  Particle roles and pool membership are
+            // unchanged, so the existing pool diagnostics remain valid and do
+            // not need an O(Np) rebuild on every renormalization step.
+            MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
+            attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        }
     }
 
     if (params.resamplingThermalRenormalizationEnable && !thermalApply.attempted) {
         install_resampling_thermal_reference(
             workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell);
         const ResamplingRemapApplyDiagnostics thermalGate = make_thermal_reference_gate(preEditThermalCell);
-        thermalApply = apply_resampling_local_thermal_renormalization(
-            state, workspace.resampling, thermalGate);
+        {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingThermalLate);
+            thermalApply = apply_resampling_local_thermal_renormalization(
+                state, workspace.resampling, thermalGate);
+        }
         if (thermalApply.applied) {
-            result.resampling = deposit_weighted_real_fluid(
-                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
-            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-            attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+            {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingPostThermalDeposit);
+                result.resampling = deposit_weighted_real_fluid(
+                    state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+            }
+            {
+                // Thermal renormalization changes velocities only; keep the
+                // already valid pool/free-list diagnostics instead of rebuilding
+                // them after each late thermal pass.
+                MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
+                attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+            }
         }
     }
 
-    if (extractionApply.attempted) {
-        attach_resampling_extraction_apply_diagnostics(result.resampling, extractionApply);
-    }
-    if (insertionApply.attempted) {
-        attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
-    }
-    if (remapApply.attempted) {
-        attach_resampling_remap_apply_diagnostics(result.resampling, remapApply);
-    }
-    if (thermalApply.attempted) {
-        attach_resampling_thermal_renormalization_diagnostics(result.resampling, thermalApply);
-    }
-    if (massGuardApply.attempted) {
-        attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
-    }
-    if (latentActivation.attempted) {
-        attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
-    }
-    if (populationGuard.attempted) {
-        attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+    {
+        MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
+        if (extractionApply.attempted) {
+            attach_resampling_extraction_apply_diagnostics(result.resampling, extractionApply);
+        }
+        if (insertionApply.attempted) {
+            attach_resampling_insertion_apply_diagnostics(result.resampling, insertionApply);
+        }
+        if (remapApply.attempted) {
+            attach_resampling_remap_apply_diagnostics(result.resampling, remapApply);
+        }
+        if (thermalApply.attempted) {
+            attach_resampling_thermal_renormalization_diagnostics(result.resampling, thermalApply);
+        }
+        if (massGuardApply.attempted) {
+            attach_resampling_mass_guard_diagnostics(result.resampling, massGuardApply);
+        }
+        if (latentActivation.attempted) {
+            attach_resampling_latent_activation_diagnostics(result.resampling, latentActivation);
+        }
+        if (populationGuard.attempted) {
+            attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+        }
     }
     return result;
 }

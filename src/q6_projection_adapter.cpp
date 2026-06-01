@@ -3,6 +3,7 @@
 #include "open_boundary_segments.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,59 @@
 
 namespace mpcd {
 namespace {
+
+
+using Q6ProfileClock = std::chrono::steady_clock;
+
+struct Q6ProfilePhaseIndex {
+    enum : std::size_t {
+        ResizeWorkspace = 0,
+        DepositCellVelocity = 1,
+        BuildBaseFlux = 2,
+        FillAlpha = 3,
+        PrepareImmersedMask = 4,
+        ApplyImmersedAlpha = 5,
+        TargetDivergence = 6,
+        SetupBoundaryConditions = 7,
+        ProjectFaceField = 8,
+        CapacityStrength = 9,
+        BuildScaledFluxes = 10,
+        EnforceImmersedFlux = 11,
+        DivProjectedAfter = 12,
+        SolidLeakStats = 13,
+        FaceCorrectionToCell = 14,
+        BuildCorrectedCellVelocity = 15,
+        DivCellAfter = 16,
+        ApplyParticleVelocityCorrection = 17
+    };
+};
+
+static_assert(Q6ProjectionProfilePhaseCount == 18u,
+              "Q6 projection profile phase count mismatch");
+
+class ScopedQ6ProfileTimer {
+public:
+    ScopedQ6ProfileTimer(Q6ProjectionProfile& profile, const std::size_t phaseIndex)
+        : profile_(profile), phaseIndex_(phaseIndex), t0_(Q6ProfileClock::now()) {}
+
+    ScopedQ6ProfileTimer(const ScopedQ6ProfileTimer&) = delete;
+    ScopedQ6ProfileTimer& operator=(const ScopedQ6ProfileTimer&) = delete;
+
+    ~ScopedQ6ProfileTimer() {
+        if (phaseIndex_ < profile_.seconds.size()) {
+            profile_.seconds[phaseIndex_] +=
+                std::chrono::duration<double>(Q6ProfileClock::now() - t0_).count();
+        }
+    }
+
+private:
+    Q6ProjectionProfile& profile_;
+    std::size_t phaseIndex_ = 0u;
+    Q6ProfileClock::time_point t0_;
+};
+
+#define MPCD_Q6_PROFILE(profile, phaseName) \
+    ScopedQ6ProfileTimer mpcdQ6ProfileTimer_##phaseName((profile), Q6ProfilePhaseIndex::phaseName)
 
 int thread_count() {
 #ifdef _OPENMP
@@ -1245,6 +1299,31 @@ void apply_cell_velocity_correction(ParticleState& state,
 
 } // namespace
 
+
+const char* q6_projection_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[Q6ProjectionProfilePhaseCount] = {
+        "q6_resize_workspace",
+        "q6_deposit_cell_velocity",
+        "q6_build_base_flux",
+        "q6_fill_alpha",
+        "q6_prepare_immersed_mask",
+        "q6_apply_immersed_alpha",
+        "q6_target_divergence",
+        "q6_setup_boundary_conditions",
+        "q6_project_face_field",
+        "q6_capacity_strength",
+        "q6_build_scaled_fluxes",
+        "q6_enforce_immersed_flux",
+        "q6_div_projected_after",
+        "q6_solid_leak_stats",
+        "q6_face_correction_to_cell",
+        "q6_build_corrected_cell_velocity",
+        "q6_div_cell_after",
+        "q6_apply_particle_velocity_correction"
+    };
+    return phaseIndex < Q6ProjectionProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
+
 bool q6_projection_requested(const SimulationParams& params) {
     return params.projectionEnable;
 }
@@ -1264,17 +1343,38 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
 
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
-    resize_q6_workspace(workspace, state.Np, nc, nt);
+    {
+        MPCD_Q6_PROFILE(diag.profile, ResizeWorkspace);
+        resize_q6_workspace(workspace, state.Np, nc, nt);
+    }
 
-    deposit_cell_velocity(state, params, grid, domain, workspace, diag);
-    build_face_velocity_from_cells(grid, workspace.cellUx, workspace.cellUy, workspace.baseFlux);
-    fill_unit_alpha(workspace.alpha, nc);
-    const EllipticProjectionMask* mask = prepare_immersed_projection_mask(
-        params, grid, domain, static_cast<double>(0.0), workspace, diag);
+    {
+        MPCD_Q6_PROFILE(diag.profile, DepositCellVelocity);
+        deposit_cell_velocity(state, params, grid, domain, workspace, diag);
+    }
+    {
+        MPCD_Q6_PROFILE(diag.profile, BuildBaseFlux);
+        build_face_velocity_from_cells(grid, workspace.cellUx, workspace.cellUy, workspace.baseFlux);
+    }
+    {
+        MPCD_Q6_PROFILE(diag.profile, FillAlpha);
+        fill_unit_alpha(workspace.alpha, nc);
+    }
+
+    const EllipticProjectionMask* mask = nullptr;
+    {
+        MPCD_Q6_PROFILE(diag.profile, PrepareImmersedMask);
+        mask = prepare_immersed_projection_mask(
+            params, grid, domain, static_cast<double>(0.0), workspace, diag);
+    }
     if (mask != nullptr) {
+        MPCD_Q6_PROFILE(diag.profile, ApplyImmersedAlpha);
         apply_immersed_face_alpha(workspace.immersedMask, workspace.alpha);
     }
-    masked_target_divergence(workspace.targetDivergence, active_domain_divergence_rate(domain), mask);
+    {
+        MPCD_Q6_PROFILE(diag.profile, TargetDivergence);
+        masked_target_divergence(workspace.targetDivergence, active_domain_divergence_rate(domain), mask);
+    }
 
     const EllipticProjectionGrid egrid = make_elliptic_projection_grid(
         params.Nx, params.Ny, fluid_domain_width(domain), fluid_domain_height(domain));
@@ -1284,18 +1384,33 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
 
-    EllipticProjectionBC bc = q6_bc_from_particle_boundaries(params);
-    add_boundary_fluxes_to_q6_bc(bc, workspace.baseFlux, params, domain, time, diag);
-    EllipticProjectionResult result = project_face_field(
-        egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
+    EllipticProjectionBC bc{};
+    {
+        MPCD_Q6_PROFILE(diag.profile, SetupBoundaryConditions);
+        bc = q6_bc_from_particle_boundaries(params);
+        add_boundary_fluxes_to_q6_bc(bc, workspace.baseFlux, params, domain, time, diag);
+    }
 
-    const ClosedCapacityResponseDiagnostics capacity = compute_closed_capacity_response_from_cell_masses(
-        params, grid, domain, workspace.cellMass,
-        mask != nullptr ? &workspace.ellipticMask.activeCell : nullptr,
-        params.q6ProjectionStrength);
-    const double effectiveQ6Strength = capacity.computed
-        ? capacity.q6ProjectionStrengthEffective
-        : params.q6ProjectionStrength;
+    EllipticProjectionResult result{};
+    {
+        MPCD_Q6_PROFILE(diag.profile, ProjectFaceField);
+        result = project_face_field(
+            egrid, workspace.baseFlux, workspace.alpha, workspace.targetDivergence, eparams, bc, workspace.elliptic, mask);
+    }
+    diag.ellipticProfile = result.profile;
+
+    ClosedCapacityResponseDiagnostics capacity{};
+    double effectiveQ6Strength = params.q6ProjectionStrength;
+    {
+        MPCD_Q6_PROFILE(diag.profile, CapacityStrength);
+        capacity = compute_closed_capacity_response_from_cell_masses(
+            params, grid, domain, workspace.cellMass,
+            mask != nullptr ? &workspace.ellipticMask.activeCell : nullptr,
+            params.q6ProjectionStrength);
+        effectiveQ6Strength = capacity.computed
+            ? capacity.q6ProjectionStrengthEffective
+            : params.q6ProjectionStrength;
+    }
 
     diag.applied = true;
     diag.projectionStrength = effectiveQ6Strength;
@@ -1310,13 +1425,17 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     diag.divBeforeRms = result.diagnostics.divBeforeRms;
     diag.divBeforeMaxAbs = result.diagnostics.divBeforeMaxAbs;
 
-    build_scaled_q6_fluxes(workspace.baseFlux,
-                           result.correctionFlux,
-                           effectiveQ6Strength,
-                           mask != nullptr ? &workspace.immersedMask : nullptr,
-                           workspace.appliedCorrectionFlux,
-                           workspace.appliedProjectedFlux);
+    {
+        MPCD_Q6_PROFILE(diag.profile, BuildScaledFluxes);
+        build_scaled_q6_fluxes(workspace.baseFlux,
+                               result.correctionFlux,
+                               effectiveQ6Strength,
+                               mask != nullptr ? &workspace.immersedMask : nullptr,
+                               workspace.appliedCorrectionFlux,
+                               workspace.appliedProjectedFlux);
+    }
     if (mask != nullptr && params.immersedSolidEnable) {
+        MPCD_Q6_PROFILE(diag.profile, EnforceImmersedFlux);
         enforce_q6_immersed_closed_face_flux(params,
                                              workspace.baseFlux,
                                              workspace.appliedCorrectionFlux,
@@ -1325,51 +1444,69 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                              diag);
     }
 
-    std::vector<double> divProjectedAfter = compute_face_divergence(egrid, workspace.appliedProjectedFlux, bc, mask);
-    double projectedDiv2 = 0.0;
-    double projectedDivMax = 0.0;
-    std::uint64_t projectedDivCount = 0u;
+    std::vector<double> divProjectedAfter;
+    {
+        MPCD_Q6_PROFILE(diag.profile, DivProjectedAfter);
+        divProjectedAfter = compute_face_divergence(egrid, workspace.appliedProjectedFlux, bc, mask);
+        double projectedDiv2 = 0.0;
+        double projectedDivMax = 0.0;
+        std::uint64_t projectedDivCount = 0u;
 #pragma omp parallel for reduction(+:projectedDiv2,projectedDivCount) reduction(max:projectedDivMax) if(nc > 4096)
-    for (int c = 0; c < nc; ++c) {
-        const std::size_t k = static_cast<std::size_t>(c);
-        if (mask != nullptr && mask->activeCell[k] == 0u) continue;
-        const double d = divProjectedAfter[k];
-        projectedDiv2 += d * d;
-        projectedDivMax = std::max(projectedDivMax, std::abs(d));
-        projectedDivCount += 1u;
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            if (mask != nullptr && mask->activeCell[k] == 0u) continue;
+            const double d = divProjectedAfter[k];
+            projectedDiv2 += d * d;
+            projectedDivMax = std::max(projectedDivMax, std::abs(d));
+            projectedDivCount += 1u;
+        }
+        diag.divAfterProjectedFluxRms = projectedDivCount > 0u ? std::sqrt(projectedDiv2 / static_cast<double>(projectedDivCount)) : 0.0;
+        diag.divAfterProjectedFluxMaxAbs = projectedDivMax;
     }
-    diag.divAfterProjectedFluxRms = projectedDivCount > 0u ? std::sqrt(projectedDiv2 / static_cast<double>(projectedDivCount)) : 0.0;
-    diag.divAfterProjectedFluxMaxAbs = projectedDivMax;
 
     if (mask != nullptr) {
+        MPCD_Q6_PROFILE(diag.profile, SolidLeakStats);
         compute_q6_solid_leak(workspace.appliedProjectedFlux, workspace.immersedMask, params, diag);
     }
-    face_correction_to_cell_velocity(grid, workspace.appliedCorrectionFlux, workspace.cellDUx, workspace.cellDUy, diag);
+    {
+        MPCD_Q6_PROFILE(diag.profile, FaceCorrectionToCell);
+        face_correction_to_cell_velocity(grid, workspace.appliedCorrectionFlux, workspace.cellDUx, workspace.cellDUy, diag);
+    }
 
+    {
+        MPCD_Q6_PROFILE(diag.profile, BuildCorrectedCellVelocity);
 #pragma omp parallel for if(nc > 4096)
-    for (int c = 0; c < nc; ++c) {
-        const std::size_t k = static_cast<std::size_t>(c);
-        workspace.correctedCellUx[k] = workspace.cellUx[k] + workspace.cellDUx[k];
-        workspace.correctedCellUy[k] = workspace.cellUy[k] + workspace.cellDUy[k];
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            workspace.correctedCellUx[k] = workspace.cellUx[k] + workspace.cellDUx[k];
+            workspace.correctedCellUy[k] = workspace.cellUy[k] + workspace.cellDUy[k];
+        }
+        build_face_velocity_from_cells(grid, workspace.correctedCellUx, workspace.correctedCellUy, workspace.correctedCellFlux);
     }
-    build_face_velocity_from_cells(grid, workspace.correctedCellUx, workspace.correctedCellUy, workspace.correctedCellFlux);
-    std::vector<double> divCellAfter = compute_face_divergence(egrid, workspace.correctedCellFlux, bc, mask);
-    double div2 = 0.0;
-    double divMax = 0.0;
-    std::uint64_t divCount = 0u;
+    {
+        MPCD_Q6_PROFILE(diag.profile, DivCellAfter);
+        std::vector<double> divCellAfter = compute_face_divergence(egrid, workspace.correctedCellFlux, bc, mask);
+        double div2 = 0.0;
+        double divMax = 0.0;
+        std::uint64_t divCount = 0u;
 #pragma omp parallel for reduction(+:div2,divCount) reduction(max:divMax) if(nc > 4096)
-    for (int c = 0; c < nc; ++c) {
-        if (mask != nullptr && mask->activeCell[static_cast<std::size_t>(c)] == 0u) continue;
-        const double d = divCellAfter[static_cast<std::size_t>(c)];
-        div2 += d * d;
-        divMax = std::max(divMax, std::abs(d));
-        divCount += 1u;
+        for (int c = 0; c < nc; ++c) {
+            if (mask != nullptr && mask->activeCell[static_cast<std::size_t>(c)] == 0u) continue;
+            const double d = divCellAfter[static_cast<std::size_t>(c)];
+            div2 += d * d;
+            divMax = std::max(divMax, std::abs(d));
+            divCount += 1u;
+        }
+        diag.divAfterCellVelocityRms = divCount > 0u ? std::sqrt(div2 / static_cast<double>(divCount)) : 0.0;
+        diag.divAfterCellVelocityMaxAbs = divMax;
     }
-    diag.divAfterCellVelocityRms = divCount > 0u ? std::sqrt(div2 / static_cast<double>(divCount)) : 0.0;
-    diag.divAfterCellVelocityMaxAbs = divMax;
 
-    apply_cell_velocity_correction(state, workspace, diag, params.projectionMomentumCorrectionEnable);
+    {
+        MPCD_Q6_PROFILE(diag.profile, ApplyParticleVelocityCorrection);
+        apply_cell_velocity_correction(state, workspace, diag, params.projectionMomentumCorrectionEnable);
+    }
     return diag;
 }
+
 
 } // namespace mpcd

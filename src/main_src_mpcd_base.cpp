@@ -8,10 +8,13 @@
 #include "state_smpcd_io.h"
 #include "weighted_resampling.h"
 
+#include <array>
 #include <chrono>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
+#include <limits>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -40,6 +43,64 @@ int openmp_max_threads() {
 #else
     return 1;
 #endif
+}
+
+
+void write_phase_profile_0163(const std::string& outputDir,
+                              const std::array<double, mpcd::StepProfilePhaseCount>& profileSeconds,
+                              const int measuredSteps) {
+    const std::filesystem::path path = std::filesystem::path(outputDir) / "phase_profile_0163.csv";
+    std::ofstream out(path);
+    out << "phase,total_s,ms_per_step,percent_total\n";
+    double total = 0.0;
+    for (double v : profileSeconds) {
+        total += v;
+    }
+    const double steps = measuredSteps > 0 ? static_cast<double>(measuredSteps) : 1.0;
+    out << std::setprecision(17);
+    for (std::size_t i = 0; i < mpcd::StepProfilePhaseCount; ++i) {
+        const double value = profileSeconds[i];
+        const double msPerStep = 1000.0 * value / steps;
+        const double percent = total > std::numeric_limits<double>::min() ? 100.0 * value / total : 0.0;
+        out << mpcd::step_profile_phase_name(i) << ','
+            << value << ','
+            << msPerStep << ','
+            << percent << '\n';
+    }
+    out << "total_profiled," << total << ',' << (1000.0 * total / steps) << ",100\n";
+}
+
+
+void write_q6_cg_profile_0163(const std::string& outputDir,
+                              const std::array<double, mpcd::Q6ProjectionProfilePhaseCount>& q6Seconds,
+                              const std::array<double, mpcd::EllipticProjectionProfilePhaseCount>& ellipticSeconds,
+                              const int measuredQ6Steps) {
+    const std::filesystem::path path = std::filesystem::path(outputDir) / "q6_cg_profile_0163.csv";
+    std::ofstream out(path);
+    out << "group,phase,total_s,ms_per_q6_step,percent_group_total\n";
+    out << std::setprecision(17);
+    const double steps = measuredQ6Steps > 0 ? static_cast<double>(measuredQ6Steps) : 1.0;
+
+    double q6Total = 0.0;
+    for (double v : q6Seconds) q6Total += v;
+    for (std::size_t i = 0; i < mpcd::Q6ProjectionProfilePhaseCount; ++i) {
+        const double value = q6Seconds[i];
+        const double percent = q6Total > std::numeric_limits<double>::min() ? 100.0 * value / q6Total : 0.0;
+        out << "q6_adapter," << mpcd::q6_projection_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / steps) << ',' << percent << '\n';
+    }
+    out << "q6_adapter,total_q6_adapter," << q6Total << ',' << (1000.0 * q6Total / steps) << ",100\n";
+
+    double ellipticTotal = 0.0;
+    for (double v : ellipticSeconds) ellipticTotal += v;
+    for (std::size_t i = 0; i < mpcd::EllipticProjectionProfilePhaseCount; ++i) {
+        const double value = ellipticSeconds[i];
+        const double percent = ellipticTotal > std::numeric_limits<double>::min() ? 100.0 * value / ellipticTotal : 0.0;
+        out << "elliptic_cg," << mpcd::elliptic_projection_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / steps) << ',' << percent << '\n';
+    }
+    out << "elliptic_cg,total_elliptic_cg," << ellipticTotal << ',' << (1000.0 * ellipticTotal / steps) << ",100\n";
+    out << "metadata,q6_applied_steps," << measuredQ6Steps << ",0,0\n";
 }
 
 int openmp_active_threads() {
@@ -91,6 +152,11 @@ int main(int argc, char** argv) {
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::SrcMpcdBaseWorkspace workspace;
+        std::array<double, mpcd::StepProfilePhaseCount> phaseProfileSeconds{};
+        std::array<double, mpcd::Q6ProjectionProfilePhaseCount> q6ProfileSeconds{};
+        std::array<double, mpcd::EllipticProjectionProfilePhaseCount> ellipticProfileSeconds{};
+        int phaseProfileSteps = 0;
+        int q6ProfileSteps = 0;
         const auto t0 = std::chrono::steady_clock::now();
 
         const std::vector<std::uint32_t> initialCellCount =
@@ -130,8 +196,24 @@ int main(int argc, char** argv) {
                   << " outputDir=" << params.outputDir << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
+            const bool collectResamplingDiagnostics =
+                (step % params.summaryEvery == 0) || (step == params.nSteps);
             const mpcd::StepResult stepResult = mpcd::run_src_mpcd_base_step(
-                state, params, grid, static_cast<std::uint64_t>(step), workspace);
+                state, params, grid, static_cast<std::uint64_t>(step), workspace,
+                collectResamplingDiagnostics);
+            for (std::size_t phase = 0; phase < mpcd::StepProfilePhaseCount; ++phase) {
+                phaseProfileSeconds[phase] += stepResult.profile.seconds[phase];
+            }
+            ++phaseProfileSteps;
+            if (stepResult.q6.applied) {
+                for (std::size_t phase = 0; phase < mpcd::Q6ProjectionProfilePhaseCount; ++phase) {
+                    q6ProfileSeconds[phase] += stepResult.q6.profile.seconds[phase];
+                }
+                for (std::size_t phase = 0; phase < mpcd::EllipticProjectionProfilePhaseCount; ++phase) {
+                    ellipticProfileSeconds[phase] += stepResult.q6.ellipticProfile.seconds[phase];
+                }
+                ++q6ProfileSteps;
+            }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
                 const double wallTime = elapsed_seconds(t0);
@@ -162,6 +244,10 @@ int main(int argc, char** argv) {
             }
         }
 
+        write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
+        write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
+        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/phase_profile_0163.csv";
+        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/q6_cg_profile_0163.csv";
         std::cout << "\n[src_mpcd_base] done\n";
         return 0;
     } catch (const std::exception& e) {

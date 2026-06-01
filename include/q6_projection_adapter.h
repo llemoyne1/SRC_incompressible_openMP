@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,6 +29,15 @@ namespace mpcd {
 // Validation scope is documented progressively: periodic boxes first, then
 // periodic-x / wall-y channels. The code itself does not enforce that scope,
 // keeping the runtime path compact and allowing controlled experiments.
+
+
+constexpr std::size_t Q6ProjectionProfilePhaseCount = 18u;
+
+const char* q6_projection_profile_phase_name(std::size_t phaseIndex);
+
+struct Q6ProjectionProfile {
+    std::array<double, Q6ProjectionProfilePhaseCount> seconds{};
+};
 
 struct Q6ProjectionDiagnostics {
     bool applied = false;
@@ -84,6 +95,9 @@ struct Q6ProjectionDiagnostics {
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;
+
+    Q6ProjectionProfile profile;
+    EllipticProjectionProfile ellipticProfile;
 };
 
 struct Q6ProjectionWorkspace {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,6 +29,15 @@ namespace mpcd {
 // This core is deliberately independent of Q6/Q9/particle data. Q6 can pass a
 // velocity face field, Q9 can pass a mass-flux face field, and future surface
 // tension modules can reuse the same discrete div/grad/operator machinery.
+
+
+constexpr std::size_t EllipticProjectionProfilePhaseCount = 25u;
+
+const char* elliptic_projection_profile_phase_name(std::size_t phaseIndex);
+
+struct EllipticProjectionProfile {
+    std::array<double, EllipticProjectionProfilePhaseCount> seconds{};
+};
 
 struct EllipticProjectionGrid {
     int Nx = 0;
@@ -120,6 +131,7 @@ struct EllipticProjectionResult {
     std::vector<double> divBefore;
     std::vector<double> divAfter;
     EllipticProjectionDiagnostics diagnostics;
+    EllipticProjectionProfile profile;
 };
 
 
@@ -142,11 +154,38 @@ struct EllipticLowPassDiagnostics {
     double lastResidualRel = 0.0;
 };
 
+struct EllipticOperatorPlan {
+    int Nx = 0;
+    int Ny = 0;
+    int numCells = 0;
+    double dx = 0.0;
+    double dy = 0.0;
+    EllipticBoundaryType bcX = EllipticBoundaryType::Periodic;
+    EllipticBoundaryType bcY = EllipticBoundaryType::Periodic;
+
+    std::vector<int> activeCells;
+    std::vector<int> inactiveCells;
+
+    std::vector<int> east;
+    std::vector<int> west;
+    std::vector<int> north;
+    std::vector<int> south;
+
+    // Positive finite-volume face coefficients.  Missing/closed/solid faces
+    // use coefficient zero and point back to the center cell, so the hot CG
+    // application loop is branchless for all boundary/mask configurations.
+    std::vector<double> coeffEast;
+    std::vector<double> coeffWest;
+    std::vector<double> coeffNorth;
+    std::vector<double> coeffSouth;
+};
+
 struct EllipticProjectionWorkspace {
     std::vector<double> rhs;
     std::vector<double> r;
     std::vector<double> p;
     std::vector<double> Ap;
+    EllipticOperatorPlan operatorPlan;
 };
 
 EllipticProjectionGrid make_elliptic_projection_grid(int Nx, int Ny, double Lx, double Ly);

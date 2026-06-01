@@ -596,9 +596,37 @@ void attach_resampling_insertion_apply_diagnostics(
 
 namespace {
 
+bool cell_particle_index_available(const WeightedRealFluidDepositWorkspace& ws,
+                                   int nc) {
+    if (nc <= 0) {
+        return false;
+    }
+    if (ws.cellParticleOffsets.size() != static_cast<std::size_t>(nc) + 1u) {
+        return false;
+    }
+    const std::uint64_t total = ws.cellParticleOffsets.back();
+    if (ws.cellParticleIndices.size() != static_cast<std::size_t>(total)) {
+        return false;
+    }
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (ws.cellParticleOffsets[kk + 1u] < ws.cellParticleOffsets[kk]) {
+            return false;
+        }
+        if (ws.cellParticleOffsets[kk + 1u] - ws.cellParticleOffsets[kk] !=
+            static_cast<std::uint64_t>(ws.count[kk])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
                                 const ParticleState& state,
                                 int nc) {
+    if (cell_particle_index_available(ws, nc)) {
+        return;
+    }
     ws.cellParticleOffsets.assign(static_cast<std::size_t>(nc) + 1u, 0u);
     for (int c = 0; c < nc; ++c) {
         ws.cellParticleOffsets[static_cast<std::size_t>(c) + 1u] =
@@ -718,6 +746,36 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         return d;
     }
 
+    // Build compact candidate lists before constructing the cell->particle
+    // index.  In most near-equilibrium steps no cell violates [nMin,nMax]; the
+    // previous code still rebuilt the per-cell particle index and scanned all
+    // cells twice.  This early classification preserves the original cell order
+    // but skips the expensive index build when no population edit is possible.
+    std::vector<int> overfullCells;
+    std::vector<int> underfullCells;
+    overfullCells.reserve(static_cast<std::size_t>(nc / 16 + 1));
+    underfullCells.reserve(static_cast<std::size_t>(nc / 16 + 1));
+    for (int c = 0; c < nc; ++c) {
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (!depositWorkspace.wetCell[kk]) {
+            continue;
+        }
+        const int nCell = static_cast<int>(countAfter[kk]);
+        if (nCell > d.nMax) {
+            overfullCells.push_back(c);
+        } else if (nCell < d.nMin) {
+            underfullCells.push_back(c);
+        }
+    }
+    if (overfullCells.empty() && underfullCells.empty()) {
+        d.wetNMinAfter = d.wetNMinBefore;
+        d.wetNMeanAfter = d.wetNMeanBefore;
+        d.wetNStdAfter = d.wetNStdBefore;
+        d.wetLowNFractionAfter = d.wetLowNFractionBefore;
+        d.freeSlotsAfter = d.freeSlotsBefore;
+        return d;
+    }
+
     ensure_cell_particle_index(depositWorkspace, state, nc);
 
     std::uint64_t extractionBudget = params.resamplingPopulationMaxExtractionsPerStep > 0
@@ -726,11 +784,9 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     const int maxExtractPerCell = params.resamplingPopulationMaxExtractionsPerCell > 0
         ? params.resamplingPopulationMaxExtractionsPerCell : std::numeric_limits<int>::max();
 
-    for (int c = 0; c < nc && extractionBudget > 0u; ++c) {
+    for (std::size_t ic = 0; ic < overfullCells.size() && extractionBudget > 0u; ++ic) {
+        const int c = overfullCells[ic];
         const std::size_t kk = static_cast<std::size_t>(c);
-        if (!depositWorkspace.wetCell[kk]) {
-            continue;
-        }
         if (static_cast<int>(countAfter[kk]) <= d.nMax) {
             continue;
         }
@@ -803,11 +859,9 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     const int maxSplitPerCell = params.resamplingPopulationMaxSplitsPerCell > 0
         ? params.resamplingPopulationMaxSplitsPerCell : std::numeric_limits<int>::max();
 
-    for (int c = 0; c < nc && splitBudget > 0u; ++c) {
+    for (std::size_t ic = 0; ic < underfullCells.size() && splitBudget > 0u; ++ic) {
+        const int c = underfullCells[ic];
         const std::size_t kk = static_cast<std::size_t>(c);
-        if (!depositWorkspace.wetCell[kk]) {
-            continue;
-        }
         if (static_cast<int>(countAfter[kk]) >= d.nMin) {
             continue;
         }
@@ -1154,27 +1208,90 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
     std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
     std::vector<std::uint8_t> renormCell(static_cast<std::size_t>(nc), 0u);
 
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (!is_fluid_particle(state, i)) {
-            continue;
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const int nt = std::max(1, thread_count());
+    const bool parallelParticles = n > 10000u;
+
+    if (parallelParticles) {
+        const std::size_t localSize = static_cast<std::size_t>(nt * nc);
+        std::vector<double> localCurrentEnergy(localSize, 0.0);
+        std::vector<double> localMassByCell(localSize, 0.0);
+        std::vector<double> localPxBefore(localSize, 0.0);
+        std::vector<double> localPyBefore(localSize, 0.0);
+
+#pragma omp parallel
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
+#pragma omp for
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                if (i >= depositWorkspace.cellId.size()) {
+                    continue;
+                }
+                const int c = depositWorkspace.cellId[i];
+                if (c < 0 || c >= nc) {
+                    continue;
+                }
+                const std::size_t kk = static_cast<std::size_t>(c);
+                const std::size_t lk = offset + kk;
+                const double mp = state.mass[i];
+                const double vx = state.vx[i];
+                const double vy = state.vy[i];
+                const double dux = vx - depositWorkspace.ux[kk];
+                const double duy = vy - depositWorkspace.uy[kk];
+                localCurrentEnergy[lk] += 0.5 * mp * (dux * dux + duy * duy);
+                localMassByCell[lk] += mp;
+                localPxBefore[lk] += mp * vx;
+                localPyBefore[lk] += mp * vy;
+            }
         }
-        if (i >= depositWorkspace.cellId.size()) {
-            continue;
+
+#pragma omp parallel for if(nc > 256)
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            double e = 0.0;
+            double m = 0.0;
+            double px = 0.0;
+            double py = 0.0;
+            for (int t = 0; t < nt; ++t) {
+                const std::size_t lk = static_cast<std::size_t>(t * nc + c);
+                e += localCurrentEnergy[lk];
+                m += localMassByCell[lk];
+                px += localPxBefore[lk];
+                py += localPyBefore[lk];
+            }
+            currentEnergy[kk] = e;
+            massByCell[kk] = m;
+            pxBefore[kk] = px;
+            pyBefore[kk] = py;
         }
-        const int c = depositWorkspace.cellId[i];
-        if (c < 0 || c >= nc) {
-            continue;
+    } else {
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            if (i >= depositWorkspace.cellId.size()) {
+                continue;
+            }
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            const double mp = state.mass[i];
+            const double vx = state.vx[i];
+            const double vy = state.vy[i];
+            const double dux = vx - depositWorkspace.ux[kk];
+            const double duy = vy - depositWorkspace.uy[kk];
+            currentEnergy[kk] += 0.5 * mp * (dux * dux + duy * duy);
+            massByCell[kk] += mp;
+            pxBefore[kk] += mp * vx;
+            pyBefore[kk] += mp * vy;
         }
-        const std::size_t kk = static_cast<std::size_t>(c);
-        const double mp = state.mass[i];
-        const double vx = state.vx[i];
-        const double vy = state.vy[i];
-        const double dux = vx - depositWorkspace.ux[kk];
-        const double duy = vy - depositWorkspace.uy[kk];
-        currentEnergy[kk] += 0.5 * mp * (dux * dux + duy * duy);
-        massByCell[kk] += mp;
-        pxBefore[kk] += mp * vx;
-        pyBefore[kk] += mp * vy;
     }
 
     constexpr double eps = 1.0e-30;
@@ -1241,29 +1358,84 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
         d.velocityScaleMax = std::max(d.velocityScaleMax, scale);
     }
 
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (!is_fluid_particle(state, i)) {
-            continue;
+    if (parallelParticles) {
+        const std::size_t localSize = static_cast<std::size_t>(nt * nc);
+        std::vector<double> localPxAfter(localSize, 0.0);
+        std::vector<double> localPyAfter(localSize, 0.0);
+        std::uint64_t particlesRenormalized = 0u;
+
+#pragma omp parallel reduction(+:particlesRenormalized)
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
+#pragma omp for
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                if (i >= depositWorkspace.cellId.size()) {
+                    continue;
+                }
+                const int c = depositWorkspace.cellId[i];
+                if (c < 0 || c >= nc) {
+                    continue;
+                }
+                const std::size_t kk = static_cast<std::size_t>(c);
+                if (!renormCell[kk]) {
+                    continue;
+                }
+                const double ux = depositWorkspace.ux[kk];
+                const double uy = depositWorkspace.uy[kk];
+                const double scale = scaleByCell[kk];
+                state.vx[i] = ux + scale * (state.vx[i] - ux);
+                state.vy[i] = uy + scale * (state.vy[i] - uy);
+                const std::size_t lk = offset + kk;
+                localPxAfter[lk] += state.mass[i] * state.vx[i];
+                localPyAfter[lk] += state.mass[i] * state.vy[i];
+                particlesRenormalized += 1u;
+            }
         }
-        if (i >= depositWorkspace.cellId.size()) {
-            continue;
+
+#pragma omp parallel for if(nc > 256)
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            double px = 0.0;
+            double py = 0.0;
+            for (int t = 0; t < nt; ++t) {
+                const std::size_t lk = static_cast<std::size_t>(t * nc + c);
+                px += localPxAfter[lk];
+                py += localPyAfter[lk];
+            }
+            pxAfter[kk] = px;
+            pyAfter[kk] = py;
         }
-        const int c = depositWorkspace.cellId[i];
-        if (c < 0 || c >= nc) {
-            continue;
+        d.particlesRenormalized = particlesRenormalized;
+    } else {
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            if (i >= depositWorkspace.cellId.size()) {
+                continue;
+            }
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!renormCell[kk]) {
+                continue;
+            }
+            const double ux = depositWorkspace.ux[kk];
+            const double uy = depositWorkspace.uy[kk];
+            const double scale = scaleByCell[kk];
+            state.vx[i] = ux + scale * (state.vx[i] - ux);
+            state.vy[i] = uy + scale * (state.vy[i] - uy);
+            pxAfter[kk] += state.mass[i] * state.vx[i];
+            pyAfter[kk] += state.mass[i] * state.vy[i];
+            d.particlesRenormalized += 1u;
         }
-        const std::size_t kk = static_cast<std::size_t>(c);
-        if (!renormCell[kk]) {
-            continue;
-        }
-        const double ux = depositWorkspace.ux[kk];
-        const double uy = depositWorkspace.uy[kk];
-        const double scale = scaleByCell[kk];
-        state.vx[i] = ux + scale * (state.vx[i] - ux);
-        state.vy[i] = uy + scale * (state.vy[i] - uy);
-        pxAfter[kk] += state.mass[i] * state.vx[i];
-        pyAfter[kk] += state.mass[i] * state.vy[i];
-        d.particlesRenormalized += 1u;
     }
 
     // The previous diagnostic path scanned all particles once for every
@@ -1353,17 +1525,24 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
         return d;
     }
 
-    std::vector<std::vector<std::size_t>> particlesByCell(static_cast<std::size_t>(nc));
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (!is_fluid_particle(state, i)) {
-            continue;
+    const bool useCellParticleIndex = cell_particle_index_available(depositWorkspace, nc);
+    std::vector<std::vector<std::size_t>> particlesByCell;
+    if (!useCellParticleIndex) {
+        particlesByCell.resize(static_cast<std::size_t>(nc));
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            particlesByCell[static_cast<std::size_t>(c)].push_back(i);
         }
-        const int c = depositWorkspace.cellId[i];
-        if (c < 0 || c >= nc) {
-            continue;
-        }
-        particlesByCell[static_cast<std::size_t>(c)].push_back(i);
     }
+    std::vector<std::size_t> idsScratch;
+    std::vector<double> oldMass;
+    std::vector<double> newMass;
 
     constexpr double eps = 1.0e-12;
     constexpr double energyEps = 1.0e-30;
@@ -1384,7 +1563,28 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
             d.skippedDryCells += 1u;
             continue;
         }
-        auto& ids = particlesByCell[kk];
+        const std::vector<std::size_t>* idsPtr = nullptr;
+        if (useCellParticleIndex) {
+            idsScratch.clear();
+            const std::uint64_t begin = depositWorkspace.cellParticleOffsets[kk];
+            const std::uint64_t end = depositWorkspace.cellParticleOffsets[kk + 1u];
+            idsScratch.reserve(static_cast<std::size_t>(end - begin));
+            for (std::uint64_t pp = begin; pp < end; ++pp) {
+                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
+                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
+                    continue;
+                }
+                const std::size_t pi = static_cast<std::size_t>(pi64);
+                if (!is_fluid_particle(state, pi)) {
+                    continue;
+                }
+                idsScratch.push_back(pi);
+            }
+            idsPtr = &idsScratch;
+        } else {
+            idsPtr = &particlesByCell[kk];
+        }
+        const std::vector<std::size_t>& ids = *idsPtr;
         if (ids.empty()) {
             d.skippedEmptyCells += 1u;
             continue;
@@ -1406,7 +1606,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
         double minOld = std::numeric_limits<double>::infinity();
         double maxOld = -std::numeric_limits<double>::infinity();
         bool invalid = false;
-        std::vector<double> oldMass(ids.size(), 0.0);
+        oldMass.assign(ids.size(), 0.0);
         for (std::size_t j = 0; j < ids.size(); ++j) {
             const std::size_t i = ids[j];
             const double m = state.mass[i];
@@ -1458,7 +1658,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
             }
         }
         const double lambda = 0.5 * (lo + hi);
-        std::vector<double> newMass(ids.size(), 0.0);
+        newMass.assign(ids.size(), 0.0);
         double massAfter = 0.0;
         double pxMassOnly = 0.0;
         double pyMassOnly = 0.0;

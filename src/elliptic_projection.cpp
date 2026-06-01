@@ -1,6 +1,7 @@
 #include "elliptic_projection.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +11,66 @@
 
 namespace mpcd {
 namespace {
+
+
+using EllipticProfileClock = std::chrono::steady_clock;
+
+struct EllipticProfilePhaseIndex {
+    enum : std::size_t {
+        ComputeDivBefore = 0,
+        BuildSolveBaseFlux = 1,
+        ZeroAlphaFaces = 2,
+        ComputeDivForSolve = 3,
+        BuildRhs = 4,
+        RhsGauge = 5,
+        CgInitialize = 6,
+        CgRhsNormAndStats = 7,
+        CgApplyOperator = 8,
+        CgDotPAp = 9,
+        CgAxpyPhiResidual = 10,
+        CgPeriodicMeanRemoval = 11,
+        CgDotResidual = 12,
+        CgUpdateDirection = 13,
+        CgOperatorPlanBuild = 14,
+        CgFinalMeanRemoval = 15,
+        CgFinalResidual = 16,
+        BuildCorrectionFlux = 17,
+        ComputeDivAfter = 18,
+        FinalStatsDivBefore = 19,
+        FinalStatsTarget = 20,
+        FinalStatsDivAfter = 21,
+        FinalStatsCorrection = 22,
+        FinalStatsProjected = 23,
+        Other = 24
+    };
+};
+
+static_assert(EllipticProjectionProfilePhaseCount == 25u,
+              "Elliptic projection profile phase count mismatch");
+
+class ScopedEllipticProfileTimer {
+public:
+    ScopedEllipticProfileTimer(EllipticProjectionProfile* profile, const std::size_t phaseIndex)
+        : profile_(profile), phaseIndex_(phaseIndex), t0_(EllipticProfileClock::now()) {}
+
+    ScopedEllipticProfileTimer(const ScopedEllipticProfileTimer&) = delete;
+    ScopedEllipticProfileTimer& operator=(const ScopedEllipticProfileTimer&) = delete;
+
+    ~ScopedEllipticProfileTimer() {
+        if (profile_ && phaseIndex_ < profile_->seconds.size()) {
+            profile_->seconds[phaseIndex_] +=
+                std::chrono::duration<double>(EllipticProfileClock::now() - t0_).count();
+        }
+    }
+
+private:
+    EllipticProjectionProfile* profile_ = nullptr;
+    std::size_t phaseIndex_ = 0u;
+    EllipticProfileClock::time_point t0_;
+};
+
+#define MPCD_ELLIPTIC_PROFILE(profilePtr, phaseName) \
+    ScopedEllipticProfileTimer mpcdEllipticProfileTimer_##phaseName((profilePtr), EllipticProfilePhaseIndex::phaseName)
 
 int cell_index(int i, int j, int Nx) {
     return i + Nx * j;
@@ -165,6 +226,142 @@ ScalarStats face_stats(const PeriodicFaceField& f) {
     return s;
 }
 
+
+void prepare_operator_plan_storage(EllipticOperatorPlan& plan, const int nc) {
+    const std::size_t n = static_cast<std::size_t>(nc);
+    plan.activeCells.clear();
+    plan.inactiveCells.clear();
+    plan.activeCells.reserve(n);
+    plan.inactiveCells.reserve(n / 16u + 1u);
+
+    auto resize_int = [n](std::vector<int>& v) {
+        if (v.size() != n) v.resize(n);
+    };
+    auto resize_double = [n](std::vector<double>& v) {
+        if (v.size() != n) v.resize(n);
+    };
+
+    resize_int(plan.east);
+    resize_int(plan.west);
+    resize_int(plan.north);
+    resize_int(plan.south);
+    resize_double(plan.coeffEast);
+    resize_double(plan.coeffWest);
+    resize_double(plan.coeffNorth);
+    resize_double(plan.coeffSouth);
+}
+
+void build_elliptic_operator_plan(const EllipticProjectionGrid& grid,
+                                  const PeriodicFaceField& alpha,
+                                  const EllipticProjectionBC& bc,
+                                  const EllipticProjectionMask* mask,
+                                  EllipticOperatorPlan& plan) {
+    require_grid(grid);
+    require_face_size(alpha, grid.numCells, "build_elliptic_operator_plan.alpha");
+    require_mask(mask, grid.numCells, "build_elliptic_operator_plan.mask");
+
+    const int nc = grid.numCells;
+    prepare_operator_plan_storage(plan, nc);
+    plan.Nx = grid.Nx;
+    plan.Ny = grid.Ny;
+    plan.numCells = nc;
+    plan.dx = grid.dx;
+    plan.dy = grid.dy;
+    plan.bcX = bc.x;
+    plan.bcY = bc.y;
+
+    const double invDx2 = 1.0 / (grid.dx * grid.dx);
+    const double invDy2 = 1.0 / (grid.dy * grid.dy);
+    const bool periodicX = bc.x == EllipticBoundaryType::Periodic;
+    const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
+
+    for (int j = 0; j < grid.Ny; ++j) {
+        for (int i = 0; i < grid.Nx; ++i) {
+            const int c = cell_index(i, j, grid.Nx);
+            const std::size_t k = static_cast<std::size_t>(c);
+
+            plan.east[k] = c;
+            plan.west[k] = c;
+            plan.north[k] = c;
+            plan.south[k] = c;
+            plan.coeffEast[k] = 0.0;
+            plan.coeffWest[k] = 0.0;
+            plan.coeffNorth[k] = 0.0;
+            plan.coeffSouth[k] = 0.0;
+
+            if (!mask_active(mask, c)) {
+                plan.inactiveCells.push_back(c);
+                continue;
+            }
+            plan.activeCells.push_back(c);
+
+            if (periodicX || i < grid.Nx - 1) {
+                const int ip = periodicX ? wrap_index(i + 1, grid.Nx) : (i + 1);
+                const int e = cell_index(ip, j, grid.Nx);
+                if (mask_active(mask, e)) {
+                    plan.east[k] = e;
+                    plan.coeffEast[k] = alpha.x[k] * invDx2;
+                }
+            }
+            if (periodicX || i > 0) {
+                const int im = periodicX ? wrap_index(i - 1, grid.Nx) : (i - 1);
+                const int w = cell_index(im, j, grid.Nx);
+                if (mask_active(mask, w)) {
+                    plan.west[k] = w;
+                    plan.coeffWest[k] = alpha.x[static_cast<std::size_t>(w)] * invDx2;
+                }
+            }
+            if (periodicY || j < grid.Ny - 1) {
+                const int jp = periodicY ? wrap_index(j + 1, grid.Ny) : (j + 1);
+                const int n = cell_index(i, jp, grid.Nx);
+                if (mask_active(mask, n)) {
+                    plan.north[k] = n;
+                    plan.coeffNorth[k] = alpha.y[k] * invDy2;
+                }
+            }
+            if (periodicY || j > 0) {
+                const int jm = periodicY ? wrap_index(j - 1, grid.Ny) : (j - 1);
+                const int s = cell_index(i, jm, grid.Nx);
+                if (mask_active(mask, s)) {
+                    plan.south[k] = s;
+                    plan.coeffSouth[k] = alpha.y[static_cast<std::size_t>(s)] * invDy2;
+                }
+            }
+        }
+    }
+}
+
+double apply_elliptic_operator_plan_and_dot(const EllipticOperatorPlan& plan,
+                                            const std::vector<double>& phi,
+                                            std::vector<double>& Aphi) {
+    require_scalar_size(phi, plan.numCells, "apply_elliptic_operator_plan_and_dot.phi");
+    require_scalar_size(Aphi, plan.numCells, "apply_elliptic_operator_plan_and_dot.Aphi");
+
+    const std::size_t nInactive = plan.inactiveCells.size();
+#pragma omp parallel for if(nInactive > 4096)
+    for (std::int64_t aa = 0; aa < static_cast<std::int64_t>(nInactive); ++aa) {
+        const int c = plan.inactiveCells[static_cast<std::size_t>(aa)];
+        Aphi[static_cast<std::size_t>(c)] = 0.0;
+    }
+
+    const std::size_t nActive = plan.activeCells.size();
+    double pAp = 0.0;
+#pragma omp parallel for reduction(+:pAp) if(nActive > 4096)
+    for (std::int64_t aa = 0; aa < static_cast<std::int64_t>(nActive); ++aa) {
+        const int c = plan.activeCells[static_cast<std::size_t>(aa)];
+        const std::size_t k = static_cast<std::size_t>(c);
+        const double pc = phi[k];
+        const double v =
+            plan.coeffEast[k]  * (pc - phi[static_cast<std::size_t>(plan.east[k])]) +
+            plan.coeffWest[k]  * (pc - phi[static_cast<std::size_t>(plan.west[k])]) +
+            plan.coeffNorth[k] * (pc - phi[static_cast<std::size_t>(plan.north[k])]) +
+            plan.coeffSouth[k] * (pc - phi[static_cast<std::size_t>(plan.south[k])]);
+        Aphi[k] = v;
+        pAp += pc * v;
+    }
+    return pAp;
+}
+
 void solve_cg(const EllipticProjectionGrid& grid,
               const PeriodicFaceField& alpha,
               const EllipticProjectionParams& params,
@@ -172,7 +369,8 @@ void solve_cg(const EllipticProjectionGrid& grid,
               const EllipticProjectionMask* mask,
               std::vector<double>& phi,
               EllipticProjectionWorkspace& workspace,
-              EllipticProjectionDiagnostics& diag) {
+              EllipticProjectionDiagnostics& diag,
+              EllipticProjectionProfile* profile) {
     const int nc = grid.numCells;
     require_scalar_size(workspace.r, nc, "workspace.r");
     require_scalar_size(workspace.p, nc, "workspace.p");
@@ -180,14 +378,22 @@ void solve_cg(const EllipticProjectionGrid& grid,
     require_scalar_size(workspace.rhs, nc, "workspace.rhs");
     require_mask(mask, nc, "solve_cg.mask");
 
-    phi.assign(static_cast<std::size_t>(nc), 0.0);
-    workspace.r = workspace.rhs;
-    workspace.p = workspace.r;
+    {
+        MPCD_ELLIPTIC_PROFILE(profile, CgInitialize);
+        phi.assign(static_cast<std::size_t>(nc), 0.0);
+        workspace.r = workspace.rhs;
+        workspace.p = workspace.r;
+    }
 
-    const double rhsNorm2 = dot_product(workspace.rhs, workspace.rhs);
-    const std::uint64_t activeCount = mask_active_count(mask, nc);
-    diag.rhsRms = activeCount > 0u ? std::sqrt(rhsNorm2 / static_cast<double>(activeCount)) : 0.0;
-    diag.rhsMaxAbs = scalar_stats(workspace.rhs, mask).maxAbs;
+    double rhsNorm2 = 0.0;
+    std::uint64_t activeCount = 0u;
+    {
+        MPCD_ELLIPTIC_PROFILE(profile, CgRhsNormAndStats);
+        rhsNorm2 = dot_product(workspace.rhs, workspace.rhs);
+        activeCount = mask_active_count(mask, nc);
+        diag.rhsRms = activeCount > 0u ? std::sqrt(rhsNorm2 / static_cast<double>(activeCount)) : 0.0;
+        diag.rhsMaxAbs = scalar_stats(workspace.rhs, mask).maxAbs;
+    }
 
     if (rhsNorm2 <= std::numeric_limits<double>::epsilon()) {
         diag.converged = true;
@@ -205,27 +411,46 @@ void solve_cg(const EllipticProjectionGrid& grid,
     diag.converged = false;
     diag.iterations = 0;
 
+    {
+        MPCD_ELLIPTIC_PROFILE(profile, CgOperatorPlanBuild);
+        build_elliptic_operator_plan(grid, alpha, bc, mask, workspace.operatorPlan);
+    }
+
     for (int it = 0; it < maxIt; ++it) {
-        apply_elliptic_operator(grid, alpha, workspace.p, workspace.Ap, bc, mask);
-        const double pAp = dot_product(workspace.p, workspace.Ap);
+        double pAp = 0.0;
+        {
+            MPCD_ELLIPTIC_PROFILE(profile, CgApplyOperator);
+            pAp = apply_elliptic_operator_plan_and_dot(workspace.operatorPlan, workspace.p, workspace.Ap);
+        }
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
             break;
         }
         const double a = rr / pAp;
 
-#pragma omp parallel for if(nc > 4096)
-        for (int c = 0; c < nc; ++c) {
-            const std::size_t k = static_cast<std::size_t>(c);
-            phi[k] += a * workspace.p[k];
-            workspace.r[k] -= a * workspace.Ap[k];
+        const bool removeMeanThisIteration = params.removePhiMean && ((it + 1) % 25 == 0);
+        double rrNew = 0.0;
+        {
+            MPCD_ELLIPTIC_PROFILE(profile, CgAxpyPhiResidual);
+#pragma omp parallel for reduction(+:rrNew) if(nc > 4096)
+            for (int c = 0; c < nc; ++c) {
+                const std::size_t k = static_cast<std::size_t>(c);
+                phi[k] += a * workspace.p[k];
+                workspace.r[k] -= a * workspace.Ap[k];
+                if (!removeMeanThisIteration) {
+                    rrNew += workspace.r[k] * workspace.r[k];
+                }
+            }
         }
 
-        if (params.removePhiMean && ((it + 1) % 25 == 0)) {
+        if (removeMeanThisIteration) {
+            MPCD_ELLIPTIC_PROFILE(profile, CgPeriodicMeanRemoval);
             subtract_mean(phi, mask);
             subtract_mean(workspace.r, mask);
+            {
+                MPCD_ELLIPTIC_PROFILE(profile, CgDotResidual);
+                rrNew = dot_product(workspace.r, workspace.r);
+            }
         }
-
-        const double rrNew = dot_product(workspace.r, workspace.r);
         diag.iterations = it + 1;
         diag.residualAbs = std::sqrt(rrNew);
         diag.residualRel = diag.residualAbs / rhsNorm;
@@ -236,25 +461,61 @@ void solve_cg(const EllipticProjectionGrid& grid,
         }
 
         const double beta = rrNew / rr;
+        {
+            MPCD_ELLIPTIC_PROFILE(profile, CgUpdateDirection);
 #pragma omp parallel for if(nc > 4096)
-        for (int c = 0; c < nc; ++c) {
-            const std::size_t k = static_cast<std::size_t>(c);
-            workspace.p[k] = workspace.r[k] + beta * workspace.p[k];
+            for (int c = 0; c < nc; ++c) {
+                const std::size_t k = static_cast<std::size_t>(c);
+                workspace.p[k] = workspace.r[k] + beta * workspace.p[k];
+            }
         }
         rr = rrNew;
     }
 
     if (params.removePhiMean) {
+        MPCD_ELLIPTIC_PROFILE(profile, CgFinalMeanRemoval);
         subtract_mean(phi, mask);
     }
 
     if (!diag.converged) {
+        MPCD_ELLIPTIC_PROFILE(profile, CgFinalResidual);
         diag.residualAbs = std::sqrt(dot_product(workspace.r, workspace.r));
         diag.residualRel = diag.residualAbs / rhsNorm;
     }
 }
 
 } // namespace
+
+const char* elliptic_projection_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[EllipticProjectionProfilePhaseCount] = {
+        "project_div_before",
+        "project_build_solve_base_flux",
+        "project_zero_alpha_faces",
+        "project_div_for_solve",
+        "project_build_rhs",
+        "project_rhs_gauge",
+        "cg_initialize",
+        "cg_rhs_norm_and_stats",
+        "cg_apply_operator_dot_pAp",
+        "cg_dot_pAp_legacy_zero",
+        "cg_axpy_phi_residual_dot",
+        "cg_periodic_mean_removal",
+        "cg_dot_residual_separate",
+        "cg_update_direction",
+        "cg_operator_plan_build",
+        "cg_final_mean_removal",
+        "cg_final_residual",
+        "project_build_correction_flux",
+        "project_div_after",
+        "project_stats_div_before",
+        "project_stats_target",
+        "project_stats_div_after",
+        "project_stats_correction_flux",
+        "project_stats_projected_flux",
+        "project_other"
+    };
+    return phaseIndex < EllipticProjectionProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
 
 EllipticProjectionGrid make_elliptic_projection_grid(int Nx, int Ny, double Lx, double Ly) {
     EllipticProjectionGrid grid{};
@@ -451,12 +712,17 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     resize_elliptic_projection_workspace(workspace, grid.numCells);
 
     EllipticProjectionResult result{};
-    result.divBefore = compute_face_divergence(grid, baseFlux, bc, mask);
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, ComputeDivBefore);
+        result.divBefore = compute_face_divergence(grid, baseFlux, bc, mask);
+    }
     result.phi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
     resize_periodic_face_field(result.correctionFlux, grid.numCells);
     resize_periodic_face_field(result.projectedFlux, grid.numCells);
 
     PeriodicFaceField solveBaseFlux = baseFlux;
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, BuildSolveBaseFlux);
     if (bc.x != EllipticBoundaryType::Periodic) {
         for (int j = 0; j < grid.Ny; ++j) {
             const int c = cell_index(grid.Nx - 1, j, grid.Nx);
@@ -471,38 +737,54 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 boundary_flux_value(bc.yHighFluxProfile, i, bc.yHighFlux);
         }
     }
+    }
     // Faces with alpha=0 are internal no-flux faces.  This matters for curved
     // immersed solids where two neighbouring cell centres can both be fluid
     // while the face segment itself is cut by the solid.  The solve RHS must
     // not include base flux through such faces.
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, ZeroAlphaFaces);
 #pragma omp parallel for if(grid.numCells > 4096)
-    for (int c = 0; c < grid.numCells; ++c) {
-        const std::size_t k = static_cast<std::size_t>(c);
-        if (alpha.x[k] == 0.0) solveBaseFlux.x[k] = 0.0;
-        if (alpha.y[k] == 0.0) solveBaseFlux.y[k] = 0.0;
+        for (int c = 0; c < grid.numCells; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            if (alpha.x[k] == 0.0) solveBaseFlux.x[k] = 0.0;
+            if (alpha.y[k] == 0.0) solveBaseFlux.y[k] = 0.0;
+        }
     }
-    const std::vector<double> divForSolve = compute_face_divergence(grid, solveBaseFlux, bc, mask);
-
-    for (int c = 0; c < grid.numCells; ++c) {
-        const std::size_t k = static_cast<std::size_t>(c);
-        workspace.rhs[k] = mask_active(mask, c) ? (targetDivergence[k] - divForSolve[k]) : 0.0;
+    std::vector<double> divForSolve;
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, ComputeDivForSolve);
+        divForSolve = compute_face_divergence(grid, solveBaseFlux, bc, mask);
     }
 
-    result.diagnostics.rhsMeanBeforeGauge = mean_value(workspace.rhs, mask);
-    if (params.removeRhsMean) {
-        subtract_mean(workspace.rhs, mask);
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, BuildRhs);
+        for (int c = 0; c < grid.numCells; ++c) {
+            const std::size_t k = static_cast<std::size_t>(c);
+            workspace.rhs[k] = mask_active(mask, c) ? (targetDivergence[k] - divForSolve[k]) : 0.0;
+        }
     }
-    result.diagnostics.rhsMeanAfterGauge = mean_value(workspace.rhs, mask);
 
-    solve_cg(grid, alpha, params, bc, mask, result.phi, workspace, result.diagnostics);
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, RhsGauge);
+        result.diagnostics.rhsMeanBeforeGauge = mean_value(workspace.rhs, mask);
+        if (params.removeRhsMean) {
+            subtract_mean(workspace.rhs, mask);
+        }
+        result.diagnostics.rhsMeanAfterGauge = mean_value(workspace.rhs, mask);
+    }
+
+    solve_cg(grid, alpha, params, bc, mask, result.phi, workspace, result.diagnostics, &result.profile);
 
     const double invDx = 1.0 / grid.dx;
     const double invDy = 1.0 / grid.dy;
     const bool periodicX = bc.x == EllipticBoundaryType::Periodic;
     const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
 
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, BuildCorrectionFlux);
 #pragma omp parallel for if(grid.numCells > 4096)
-    for (int j = 0; j < grid.Ny; ++j) {
+        for (int j = 0; j < grid.Ny; ++j) {
         for (int i = 0; i < grid.Nx; ++i) {
             const int c = cell_index(i, j, grid.Nx);
             const std::size_t k = static_cast<std::size_t>(c);
@@ -560,13 +842,38 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
         }
     }
 
-    result.divAfter = compute_face_divergence(grid, result.projectedFlux, bc, mask);
+    }
 
-    const ScalarStats divBeforeStats = scalar_stats(result.divBefore, mask);
-    const ScalarStats targetStats = scalar_stats(targetDivergence, mask);
-    const ScalarStats divAfterStats = scalar_stats(result.divAfter, mask);
-    const ScalarStats corrStats = face_stats(result.correctionFlux);
-    const ScalarStats projStats = face_stats(result.projectedFlux);
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, ComputeDivAfter);
+        result.divAfter = compute_face_divergence(grid, result.projectedFlux, bc, mask);
+    }
+
+    ScalarStats divBeforeStats{};
+    ScalarStats targetStats{};
+    ScalarStats divAfterStats{};
+    ScalarStats corrStats{};
+    ScalarStats projStats{};
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, FinalStatsDivBefore);
+        divBeforeStats = scalar_stats(result.divBefore, mask);
+    }
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, FinalStatsTarget);
+        targetStats = scalar_stats(targetDivergence, mask);
+    }
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, FinalStatsDivAfter);
+        divAfterStats = scalar_stats(result.divAfter, mask);
+    }
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, FinalStatsCorrection);
+        corrStats = face_stats(result.correctionFlux);
+    }
+    {
+        MPCD_ELLIPTIC_PROFILE(&result.profile, FinalStatsProjected);
+        projStats = face_stats(result.projectedFlux);
+    }
 
     result.diagnostics.divBeforeRms = divBeforeStats.rms;
     result.diagnostics.divBeforeMaxAbs = divBeforeStats.maxAbs;
