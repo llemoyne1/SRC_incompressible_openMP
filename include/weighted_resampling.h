@@ -16,7 +16,7 @@ constexpr std::uint64_t kInvalidParticleIndex = std::numeric_limits<std::uint64_
 constexpr std::int32_t kInvalidCellIndex = -1;
 
 
-constexpr std::size_t ResamplingPopulationGuardProfilePhaseCount = 7u;
+constexpr std::size_t ResamplingPopulationGuardProfilePhaseCount = 25u;
 constexpr std::size_t ResamplingMassGuardProfilePhaseCount = 4u;
 
 const char* resampling_population_guard_profile_phase_name(std::size_t phaseIndex);
@@ -324,6 +324,21 @@ struct ResamplingPopulationGuardDiagnostics {
     std::uint64_t underfullCandidateCells = 0;
     std::uint64_t overfullEditedCells = 0;
     std::uint64_t underfullEditedCells = 0;
+
+    // 0168 deep population-guard profiling counters.  Candidate particle refs
+    // count the particles present in cells selected by the pre-scan; scan passes
+    // count repeated selection passes inside the same candidate cell; scanned
+    // refs and eligible refs quantify the exact amount of per-particle work.
+    std::uint64_t overfullCandidateParticleRefs = 0;
+    std::uint64_t underfullCandidateParticleRefs = 0;
+    std::uint64_t overfullScanPasses = 0;
+    std::uint64_t underfullScanPasses = 0;
+    std::uint64_t overfullParticleRefsScanned = 0;
+    std::uint64_t underfullParticleRefsScanned = 0;
+    std::uint64_t overfullEligibleParticleRefs = 0;
+    std::uint64_t underfullEligibleParticleRefs = 0;
+    std::uint32_t overfullCandidatePopulationMax = 0;
+    std::uint32_t underfullCandidatePopulationMax = 0;
 
     std::uint64_t splitParticlesCreated = 0;
     std::uint64_t extractedParticles = 0;
@@ -779,6 +794,16 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t populationGuardUnderfullCandidateCells = 0;
     std::uint64_t populationGuardOverfullEditedCells = 0;
     std::uint64_t populationGuardUnderfullEditedCells = 0;
+    std::uint64_t populationGuardOverfullCandidateParticleRefs = 0;
+    std::uint64_t populationGuardUnderfullCandidateParticleRefs = 0;
+    std::uint64_t populationGuardOverfullScanPasses = 0;
+    std::uint64_t populationGuardUnderfullScanPasses = 0;
+    std::uint64_t populationGuardOverfullParticleRefsScanned = 0;
+    std::uint64_t populationGuardUnderfullParticleRefsScanned = 0;
+    std::uint64_t populationGuardOverfullEligibleParticleRefs = 0;
+    std::uint64_t populationGuardUnderfullEligibleParticleRefs = 0;
+    std::uint32_t populationGuardOverfullCandidatePopulationMax = 0;
+    std::uint32_t populationGuardUnderfullCandidatePopulationMax = 0;
     std::uint64_t populationGuardSplitParticlesCreated = 0;
     std::uint64_t populationGuardExtractedParticles = 0;
     std::uint64_t populationGuardSkippedNoFreeSlots = 0;

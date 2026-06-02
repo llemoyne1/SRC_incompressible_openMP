@@ -34,6 +34,21 @@ int thread_id() {
 }
 
 
+inline void set_particle_role_preconditioned(ParticleState& state,
+                                             const std::size_t i,
+                                             const ParticleRole role) {
+#ifndef NDEBUG
+    if (state.role.size() != static_cast<std::size_t>(state.Np)) {
+        throw std::runtime_error("set_particle_role_preconditioned: role array not initialized");
+    }
+    if (i >= state.role.size()) {
+        throw std::runtime_error("set_particle_role_preconditioned: index out of range");
+    }
+#endif
+    state.role[i] = static_cast<std::uint8_t>(role);
+}
+
+
 using ResamplingProfileClock = std::chrono::steady_clock;
 
 struct PopulationGuardProfilePhaseIndex {
@@ -44,7 +59,25 @@ struct PopulationGuardProfilePhaseIndex {
         EnsureCellParticleIndex = 3,
         OverfullExtractionLoop = 4,
         UnderfullSplitLoop = 5,
-        StatsAfterFinalize = 6
+        StatsAfterFinalize = 6,
+        OverfullCandidateSetup = 7,
+        OverfullParticleScan = 8,
+        OverfullApplyMutation = 9,
+        OverfullDiagnostics = 10,
+        UnderfullCandidateSetup = 11,
+        UnderfullParticleScan = 12,
+        UnderfullApplyMutation = 13,
+        UnderfullDiagnostics = 14,
+        OverfullMutationMomentumMerge = 15,
+        OverfullMutationStateWrite = 16,
+        OverfullMutationRoleInactivate = 17,
+        OverfullMutationPoolPush = 18,
+        OverfullMutationCountUpdate = 19,
+        UnderfullMutationPoolPop = 20,
+        UnderfullMutationParticleClone = 21,
+        UnderfullMutationRoleActivate = 22,
+        UnderfullMutationPoolFluidPush = 23,
+        UnderfullMutationCountersUpdate = 24
     };
 };
 
@@ -57,7 +90,7 @@ struct MassGuardProfilePhaseIndex {
     };
 };
 
-static_assert(ResamplingPopulationGuardProfilePhaseCount == 7u, "population-guard profile phase count mismatch");
+static_assert(ResamplingPopulationGuardProfilePhaseCount == 25u, "population-guard profile phase count mismatch");
 static_assert(ResamplingMassGuardProfilePhaseCount == 4u, "mass-guard profile phase count mismatch");
 
 class ScopedPopulationGuardProfileTimer {
@@ -184,7 +217,25 @@ const char* resampling_population_guard_profile_phase_name(const std::size_t pha
         "ensure_cell_particle_index",
         "overfull_extraction_loop",
         "underfull_split_loop",
-        "stats_after_finalize"
+        "stats_after_finalize",
+        "overfull_candidate_setup",
+        "overfull_particle_scan",
+        "overfull_apply_mutation",
+        "overfull_diagnostics",
+        "underfull_candidate_setup",
+        "underfull_particle_scan",
+        "underfull_apply_mutation",
+        "underfull_diagnostics",
+        "overfull_mutation_momentum_merge",
+        "overfull_mutation_state_write",
+        "overfull_mutation_role_inactivate",
+        "overfull_mutation_pool_push",
+        "overfull_mutation_count_update",
+        "underfull_mutation_pool_pop",
+        "underfull_mutation_particle_clone",
+        "underfull_mutation_role_activate",
+        "underfull_mutation_pool_fluid_push",
+        "underfull_mutation_counters_update"
     };
     return phaseIndex < ResamplingPopulationGuardProfilePhaseCount ? names[phaseIndex] : "unknown";
 }
@@ -874,28 +925,44 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         }
         const int allowed = std::min(need, maxExtractPerCell);
         int doneCell = 0;
-        const std::uint64_t begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
-            ? depositWorkspace.cellParticleOffsets[kk] : 0u;
-        const std::uint64_t end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
-            ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+        std::uint64_t begin = 0u;
+        std::uint64_t end = 0u;
+        {
+            MPCD_POP_GUARD_PROFILE(d.profile, OverfullCandidateSetup);
+            begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+                ? depositWorkspace.cellParticleOffsets[kk] : 0u;
+            end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+                ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+            const std::uint64_t span = end >= begin ? (end - begin) : 0u;
+            d.overfullCandidateParticleRefs += span;
+            d.overfullCandidatePopulationMax = std::max(
+                d.overfullCandidatePopulationMax, static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                    span, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()))));
+        }
         while (doneCell < allowed && extractionBudget > 0u && static_cast<int>(countAfter[kk]) > d.nTarget) {
             std::uint64_t victim64 = kInvalidParticleIndex;
             std::uint64_t survivor64 = kInvalidParticleIndex;
             double victimMass = std::numeric_limits<double>::infinity();
             double survivorMass = -1.0;
-            for (std::uint64_t pp = begin; pp < end; ++pp) {
-                if (pp >= depositWorkspace.cellParticleIndices.size()) break;
-                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
-                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
-                const std::size_t pi = static_cast<std::size_t>(pi64);
-                if (!is_fluid_particle(state, pi)) continue;
-                const double mp = state.mass[pi];
-                if (!(mp > 0.0)) continue;
-                if (mp < victimMass) { victimMass = mp; victim64 = pi64; }
-                if (mp > survivorMass) { survivorMass = mp; survivor64 = pi64; }
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, OverfullParticleScan);
+                d.overfullScanPasses += 1u;
+                for (std::uint64_t pp = begin; pp < end; ++pp) {
+                    d.overfullParticleRefsScanned += 1u;
+                    if (pp >= depositWorkspace.cellParticleIndices.size()) break;
+                    const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
+                    if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
+                    const std::size_t pi = static_cast<std::size_t>(pi64);
+                    if (!is_fluid_particle(state, pi)) continue;
+                    const double mp = state.mass[pi];
+                    if (!(mp > 0.0)) continue;
+                    d.overfullEligibleParticleRefs += 1u;
+                    if (mp < victimMass) { victimMass = mp; victim64 = pi64; }
+                    if (mp > survivorMass) { survivorMass = mp; survivor64 = pi64; }
+                }
             }
             if (victim64 == kInvalidParticleIndex || survivor64 == kInvalidParticleIndex || victim64 == survivor64) {
-                d.skippedExtractionLimit += 1u;
+                { MPCD_POP_GUARD_PROFILE(d.profile, OverfullDiagnostics); d.skippedExtractionLimit += 1u; }
                 break;
             }
             const std::size_t victim = static_cast<std::size_t>(victim64);
@@ -904,30 +971,56 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
             const double ms = state.mass[survivor];
             const double mNew = mv + ms;
             if (!(mNew > 0.0)) {
-                d.skippedExtractionLimit += 1u;
+                { MPCD_POP_GUARD_PROFILE(d.profile, OverfullDiagnostics); d.skippedExtractionLimit += 1u; }
                 break;
             }
-            const double vxNew = (ms * state.vx[survivor] + mv * state.vx[victim]) / mNew;
-            const double vyNew = (ms * state.vy[survivor] + mv * state.vy[victim]) / mNew;
-            d.extractedMass += mv;
-            d.extractedMomentumX += mv * state.vx[victim];
-            d.extractedMomentumY += mv * state.vy[victim];
-            state.mass[survivor] = mNew;
-            state.vx[survivor] = vxNew;
-            state.vy[survivor] = vyNew;
-            set_particle_role(state, victim, ParticleRole::Inactive);
-            resampling_pool_push_free_slot(pool, victim64);
-            countAfter[kk] -= 1u;
-            d.extractedParticles += 1u;
-            doneCell += 1;
-            extractionBudget -= 1u;
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, OverfullApplyMutation);
+                double vxNew = 0.0;
+                double vyNew = 0.0;
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationMomentumMerge);
+                    vxNew = (ms * state.vx[survivor] + mv * state.vx[victim]) / mNew;
+                    vyNew = (ms * state.vy[survivor] + mv * state.vy[victim]) / mNew;
+                    d.extractedMass += mv;
+                    d.extractedMomentumX += mv * state.vx[victim];
+                    d.extractedMomentumY += mv * state.vy[victim];
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationStateWrite);
+                    state.mass[survivor] = mNew;
+                    state.vx[survivor] = vxNew;
+                    state.vy[survivor] = vyNew;
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationRoleInactivate);
+                    set_particle_role_preconditioned(state, victim, ParticleRole::Inactive);
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationPoolPush);
+                    resampling_pool_push_free_slot(pool, victim64);
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationCountUpdate);
+                    countAfter[kk] -= 1u;
+                }
+            }
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, OverfullDiagnostics);
+                d.extractedParticles += 1u;
+                doneCell += 1;
+                extractionBudget -= 1u;
+            }
         }
-        if (doneCell > 0) {
-            d.cellsExtracted += 1u;
-            d.overfullEditedCells += 1u;
-        }
-        if (need > doneCell) {
-            d.skippedExtractionLimit += static_cast<std::uint64_t>(need - doneCell);
+        {
+            MPCD_POP_GUARD_PROFILE(d.profile, OverfullDiagnostics);
+            if (doneCell > 0) {
+                d.cellsExtracted += 1u;
+                d.overfullEditedCells += 1u;
+            }
+            if (need > doneCell) {
+                d.skippedExtractionLimit += static_cast<std::uint64_t>(need - doneCell);
+            }
         }
     }
 
@@ -949,8 +1042,11 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         }
         d.underfullCells += 1u;
         if (countAfter[kk] == 0u) {
-            d.emptyUnderfullCells += 1u;
-            d.skippedEmptyCells += 1u;
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, UnderfullDiagnostics);
+                d.emptyUnderfullCells += 1u;
+                d.skippedEmptyCells += 1u;
+            }
             continue;
         }
         int need = d.nTarget - static_cast<int>(countAfter[kk]);
@@ -959,61 +1055,100 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         }
         const int allowed = std::min(need, maxSplitPerCell);
         int doneCell = 0;
-        const std::uint64_t begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
-            ? depositWorkspace.cellParticleOffsets[kk] : 0u;
-        const std::uint64_t end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
-            ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+        std::uint64_t begin = 0u;
+        std::uint64_t end = 0u;
+        {
+            MPCD_POP_GUARD_PROFILE(d.profile, UnderfullCandidateSetup);
+            begin = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+                ? depositWorkspace.cellParticleOffsets[kk] : 0u;
+            end = kk + 1u < depositWorkspace.cellParticleOffsets.size()
+                ? depositWorkspace.cellParticleOffsets[kk + 1u] : 0u;
+            const std::uint64_t span = end >= begin ? (end - begin) : 0u;
+            d.underfullCandidateParticleRefs += span;
+            d.underfullCandidatePopulationMax = std::max(
+                d.underfullCandidatePopulationMax, static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                    span, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()))));
+        }
         while (doneCell < allowed && splitBudget > 0u && static_cast<int>(countAfter[kk]) < d.nTarget) {
             if (!resampling_pool_has_free_slot(pool)) {
-                d.skippedNoFreeSlots += static_cast<std::uint64_t>(allowed - doneCell);
+                { MPCD_POP_GUARD_PROFILE(d.profile, UnderfullDiagnostics); d.skippedNoFreeSlots += static_cast<std::uint64_t>(allowed - doneCell); }
                 break;
             }
             std::uint64_t parent64 = kInvalidParticleIndex;
             double parentMass = -1.0;
-            for (std::uint64_t pp = begin; pp < end; ++pp) {
-                if (pp >= depositWorkspace.cellParticleIndices.size()) break;
-                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
-                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
-                const std::size_t pi = static_cast<std::size_t>(pi64);
-                if (!is_fluid_particle(state, pi)) continue;
-                const double mp = state.mass[pi];
-                if (mp > parentMass) { parentMass = mp; parent64 = pi64; }
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, UnderfullParticleScan);
+                d.underfullScanPasses += 1u;
+                for (std::uint64_t pp = begin; pp < end; ++pp) {
+                    d.underfullParticleRefsScanned += 1u;
+                    if (pp >= depositWorkspace.cellParticleIndices.size()) break;
+                    const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
+                    if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
+                    const std::size_t pi = static_cast<std::size_t>(pi64);
+                    if (!is_fluid_particle(state, pi)) continue;
+                    const double mp = state.mass[pi];
+                    d.underfullEligibleParticleRefs += 1u;
+                    if (mp > parentMass) { parentMass = mp; parent64 = pi64; }
+                }
             }
             if (parent64 == kInvalidParticleIndex || !(parentMass > 0.0)) {
-                d.skippedSplitLimit += 1u;
+                { MPCD_POP_GUARD_PROFILE(d.profile, UnderfullDiagnostics); d.skippedSplitLimit += 1u; }
                 break;
             }
-            const std::uint64_t child64 = resampling_pool_pop_free_slot(pool);
-            if (child64 == kInvalidParticleIndex || child64 >= state.Np) {
-                d.skippedNoFreeSlots += 1u;
-                break;
+            std::uint64_t child64 = kInvalidParticleIndex;
+            {
+                MPCD_POP_GUARD_PROFILE(d.profile, UnderfullApplyMutation);
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationPoolPop);
+                    child64 = resampling_pool_pop_free_slot(pool);
+                }
+                if (child64 == kInvalidParticleIndex || child64 >= state.Np) {
+                    d.skippedNoFreeSlots += 1u;
+                    break;
+                }
+                const std::size_t parent = static_cast<std::size_t>(parent64);
+                const std::size_t child = static_cast<std::size_t>(child64);
+                double halfMass = 0.0;
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationParticleClone);
+                    halfMass = 0.5 * state.mass[parent];
+                    state.mass[parent] = halfMass;
+                    state.x[child] = state.x[parent];
+                    state.y[child] = state.y[parent];
+                    state.vx[child] = state.vx[parent];
+                    state.vy[child] = state.vy[parent];
+                    state.mass[child] = halfMass;
+                    state.type[child] = state.type[parent];
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationRoleActivate);
+                    set_particle_role_preconditioned(state, child, ParticleRole::Fluid);
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationPoolFluidPush);
+                    pool.fluidSlots.push_back(child64);
+                }
+                {
+                    MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationCountersUpdate);
+                    countAfter[kk] += 1u;
+                    d.splitParticlesCreated += 1u;
+                    d.splitMass += halfMass;
+                    d.splitMomentumX += halfMass * state.vx[child];
+                    d.splitMomentumY += halfMass * state.vy[child];
+                    doneCell += 1;
+                    splitBudget -= 1u;
+                }
             }
-            const std::size_t parent = static_cast<std::size_t>(parent64);
-            const std::size_t child = static_cast<std::size_t>(child64);
-            const double halfMass = 0.5 * state.mass[parent];
-            state.mass[parent] = halfMass;
-            state.x[child] = state.x[parent];
-            state.y[child] = state.y[parent];
-            state.vx[child] = state.vx[parent];
-            state.vy[child] = state.vy[parent];
-            state.mass[child] = halfMass;
-            state.type[child] = state.type[parent];
-            set_particle_role(state, child, ParticleRole::Fluid);
-            pool.fluidSlots.push_back(child64);
-            countAfter[kk] += 1u;
-            d.splitParticlesCreated += 1u;
-            d.splitMass += halfMass;
-            d.splitMomentumX += halfMass * state.vx[child];
-            d.splitMomentumY += halfMass * state.vy[child];
-            doneCell += 1;
-            splitBudget -= 1u;
         }
-        if (doneCell > 0) {
-            d.cellsSplit += 1u;
-            d.underfullEditedCells += 1u;
-        }
-        if (need > doneCell) {
-            d.skippedSplitLimit += static_cast<std::uint64_t>(need - doneCell);
+        {
+            MPCD_POP_GUARD_PROFILE(d.profile, UnderfullDiagnostics);
+            if (doneCell > 0) {
+                d.cellsSplit += 1u;
+                d.underfullEditedCells += 1u;
+            }
+            if (need > doneCell) {
+                d.skippedSplitLimit += static_cast<std::uint64_t>(need - doneCell);
+            }
         }
     }
 
@@ -1051,6 +1186,16 @@ void attach_resampling_population_guard_diagnostics(
     diagnostics.populationGuardUnderfullCandidateCells = pop.underfullCandidateCells;
     diagnostics.populationGuardOverfullEditedCells = pop.overfullEditedCells;
     diagnostics.populationGuardUnderfullEditedCells = pop.underfullEditedCells;
+    diagnostics.populationGuardOverfullCandidateParticleRefs = pop.overfullCandidateParticleRefs;
+    diagnostics.populationGuardUnderfullCandidateParticleRefs = pop.underfullCandidateParticleRefs;
+    diagnostics.populationGuardOverfullScanPasses = pop.overfullScanPasses;
+    diagnostics.populationGuardUnderfullScanPasses = pop.underfullScanPasses;
+    diagnostics.populationGuardOverfullParticleRefsScanned = pop.overfullParticleRefsScanned;
+    diagnostics.populationGuardUnderfullParticleRefsScanned = pop.underfullParticleRefsScanned;
+    diagnostics.populationGuardOverfullEligibleParticleRefs = pop.overfullEligibleParticleRefs;
+    diagnostics.populationGuardUnderfullEligibleParticleRefs = pop.underfullEligibleParticleRefs;
+    diagnostics.populationGuardOverfullCandidatePopulationMax = pop.overfullCandidatePopulationMax;
+    diagnostics.populationGuardUnderfullCandidatePopulationMax = pop.underfullCandidatePopulationMax;
     diagnostics.populationGuardSplitParticlesCreated = pop.splitParticlesCreated;
     diagnostics.populationGuardExtractedParticles = pop.extractedParticles;
     diagnostics.populationGuardSkippedNoFreeSlots = pop.skippedNoFreeSlots;

@@ -104,7 +104,7 @@ void write_q6_cg_profile_0163(const std::string& outputDir,
 }
 
 
-void write_resampling_guard_profile_0166(
+void write_resampling_guard_profile_0169(
     const std::string& outputDir,
     const std::array<double, mpcd::ResamplingPopulationGuardProfilePhaseCount>& populationSeconds,
     const int populationSteps,
@@ -112,17 +112,29 @@ void write_resampling_guard_profile_0166(
     const std::uint64_t populationUnderfullCandidateCells,
     const std::uint64_t populationOverfullEditedCells,
     const std::uint64_t populationUnderfullEditedCells,
+    const std::uint64_t populationOverfullCandidateParticleRefs,
+    const std::uint64_t populationUnderfullCandidateParticleRefs,
+    const std::uint64_t populationOverfullScanPasses,
+    const std::uint64_t populationUnderfullScanPasses,
+    const std::uint64_t populationOverfullParticleRefsScanned,
+    const std::uint64_t populationUnderfullParticleRefsScanned,
+    const std::uint64_t populationOverfullEligibleParticleRefs,
+    const std::uint64_t populationUnderfullEligibleParticleRefs,
+    const std::uint32_t populationOverfullCandidatePopulationMax,
+    const std::uint32_t populationUnderfullCandidatePopulationMax,
     const std::array<double, mpcd::ResamplingMassGuardProfilePhaseCount>& massSeconds,
     const int massSteps) {
-    const std::filesystem::path path = std::filesystem::path(outputDir) / "resampling_guard_profile_0166.csv";
+    const std::filesystem::path path = std::filesystem::path(outputDir) / "resampling_guard_profile_0169.csv";
     std::ofstream out(path);
     out << "group,phase,total_s,ms_per_guard_step,percent_group_total\n";
     out << std::setprecision(17);
 
-    double populationTotal = 0.0;
-    for (double v : populationSeconds) populationTotal += v;
     const double populationDenom = populationSteps > 0 ? static_cast<double>(populationSteps) : 1.0;
-    for (std::size_t i = 0; i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
+    double populationTotal = 0.0;
+    for (std::size_t i = 0; i < 7u && i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
+        populationTotal += populationSeconds[i];
+    }
+    for (std::size_t i = 0; i < 7u && i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
         const double value = populationSeconds[i];
         const double percent = populationTotal > std::numeric_limits<double>::min()
             ? 100.0 * value / populationTotal : 0.0;
@@ -131,6 +143,42 @@ void write_resampling_guard_profile_0166(
     }
     out << "population_guard,total_population_guard," << populationTotal << ','
         << (1000.0 * populationTotal / populationDenom) << ",100\n";
+
+    // Phases 7..14 are the first-level deep profile added in 0168.  They are
+    // nested in the high-level population_guard loops and should be interpreted
+    // as a decomposition aid, not summed with population_guard.
+    double populationDeepTotal = 0.0;
+    const std::size_t mutationDetailBegin = 15u;
+    const std::size_t populationDeepEnd = std::min<std::size_t>(
+        mutationDetailBegin, mpcd::ResamplingPopulationGuardProfilePhaseCount);
+    for (std::size_t i = 7u; i < populationDeepEnd; ++i) {
+        populationDeepTotal += populationSeconds[i];
+    }
+    for (std::size_t i = 7u; i < populationDeepEnd; ++i) {
+        const double value = populationSeconds[i];
+        const double percent = populationDeepTotal > std::numeric_limits<double>::min()
+            ? 100.0 * value / populationDeepTotal : 0.0;
+        out << "population_guard_deep," << mpcd::resampling_population_guard_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / populationDenom) << ',' << percent << '\n';
+    }
+    out << "population_guard_deep,total_population_guard_deep," << populationDeepTotal << ','
+        << (1000.0 * populationDeepTotal / populationDenom) << ",100\n";
+
+    // Phases 15..end are the 0169 mutation micro-profile.  They are nested
+    // inside overfull_apply_mutation / underfull_apply_mutation.
+    double mutationDetailTotal = 0.0;
+    for (std::size_t i = mutationDetailBegin; i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
+        mutationDetailTotal += populationSeconds[i];
+    }
+    for (std::size_t i = mutationDetailBegin; i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
+        const double value = populationSeconds[i];
+        const double percent = mutationDetailTotal > std::numeric_limits<double>::min()
+            ? 100.0 * value / mutationDetailTotal : 0.0;
+        out << "population_guard_mutation_detail," << mpcd::resampling_population_guard_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / populationDenom) << ',' << percent << '\n';
+    }
+    out << "population_guard_mutation_detail,total_population_guard_mutation_detail," << mutationDetailTotal << ','
+        << (1000.0 * mutationDetailTotal / populationDenom) << ",100\n";
     out << "metadata,population_guard_steps," << populationSteps << ",0,0\n";
     out << "metadata,population_guard_overfull_candidate_cells_total,"
         << populationOverfullCandidateCells << ','
@@ -144,6 +192,34 @@ void write_resampling_guard_profile_0166(
     out << "metadata,population_guard_underfull_edited_cells_total,"
         << populationUnderfullEditedCells << ','
         << (static_cast<double>(populationUnderfullEditedCells) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_candidate_particle_refs_total,"
+        << populationOverfullCandidateParticleRefs << ','
+        << (static_cast<double>(populationOverfullCandidateParticleRefs) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_candidate_particle_refs_total,"
+        << populationUnderfullCandidateParticleRefs << ','
+        << (static_cast<double>(populationUnderfullCandidateParticleRefs) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_scan_passes_total,"
+        << populationOverfullScanPasses << ','
+        << (static_cast<double>(populationOverfullScanPasses) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_scan_passes_total,"
+        << populationUnderfullScanPasses << ','
+        << (static_cast<double>(populationUnderfullScanPasses) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_particle_refs_scanned_total,"
+        << populationOverfullParticleRefsScanned << ','
+        << (static_cast<double>(populationOverfullParticleRefsScanned) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_particle_refs_scanned_total,"
+        << populationUnderfullParticleRefsScanned << ','
+        << (static_cast<double>(populationUnderfullParticleRefsScanned) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_eligible_particle_refs_total,"
+        << populationOverfullEligibleParticleRefs << ','
+        << (static_cast<double>(populationOverfullEligibleParticleRefs) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_eligible_particle_refs_total,"
+        << populationUnderfullEligibleParticleRefs << ','
+        << (static_cast<double>(populationUnderfullEligibleParticleRefs) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_candidate_population_max,"
+        << populationOverfullCandidatePopulationMax << ",0,0\n";
+    out << "metadata,population_guard_underfull_candidate_population_max,"
+        << populationUnderfullCandidatePopulationMax << ",0,0\n";
 
     double massTotal = 0.0;
     for (double v : massSeconds) massTotal += v;
@@ -222,6 +298,16 @@ int main(int argc, char** argv) {
         std::uint64_t populationGuardUnderfullCandidateCells = 0;
         std::uint64_t populationGuardOverfullEditedCells = 0;
         std::uint64_t populationGuardUnderfullEditedCells = 0;
+        std::uint64_t populationGuardOverfullCandidateParticleRefs = 0;
+        std::uint64_t populationGuardUnderfullCandidateParticleRefs = 0;
+        std::uint64_t populationGuardOverfullScanPasses = 0;
+        std::uint64_t populationGuardUnderfullScanPasses = 0;
+        std::uint64_t populationGuardOverfullParticleRefsScanned = 0;
+        std::uint64_t populationGuardUnderfullParticleRefsScanned = 0;
+        std::uint64_t populationGuardOverfullEligibleParticleRefs = 0;
+        std::uint64_t populationGuardUnderfullEligibleParticleRefs = 0;
+        std::uint32_t populationGuardOverfullCandidatePopulationMax = 0;
+        std::uint32_t populationGuardUnderfullCandidatePopulationMax = 0;
         const auto t0 = std::chrono::steady_clock::now();
 
         const std::vector<std::uint32_t> initialCellCount =
@@ -287,6 +373,20 @@ int main(int argc, char** argv) {
                 populationGuardUnderfullCandidateCells += stepResult.resampling.populationGuardUnderfullCandidateCells;
                 populationGuardOverfullEditedCells += stepResult.resampling.populationGuardOverfullEditedCells;
                 populationGuardUnderfullEditedCells += stepResult.resampling.populationGuardUnderfullEditedCells;
+                populationGuardOverfullCandidateParticleRefs += stepResult.resampling.populationGuardOverfullCandidateParticleRefs;
+                populationGuardUnderfullCandidateParticleRefs += stepResult.resampling.populationGuardUnderfullCandidateParticleRefs;
+                populationGuardOverfullScanPasses += stepResult.resampling.populationGuardOverfullScanPasses;
+                populationGuardUnderfullScanPasses += stepResult.resampling.populationGuardUnderfullScanPasses;
+                populationGuardOverfullParticleRefsScanned += stepResult.resampling.populationGuardOverfullParticleRefsScanned;
+                populationGuardUnderfullParticleRefsScanned += stepResult.resampling.populationGuardUnderfullParticleRefsScanned;
+                populationGuardOverfullEligibleParticleRefs += stepResult.resampling.populationGuardOverfullEligibleParticleRefs;
+                populationGuardUnderfullEligibleParticleRefs += stepResult.resampling.populationGuardUnderfullEligibleParticleRefs;
+                populationGuardOverfullCandidatePopulationMax = std::max(
+                    populationGuardOverfullCandidatePopulationMax,
+                    stepResult.resampling.populationGuardOverfullCandidatePopulationMax);
+                populationGuardUnderfullCandidatePopulationMax = std::max(
+                    populationGuardUnderfullCandidatePopulationMax,
+                    stepResult.resampling.populationGuardUnderfullCandidatePopulationMax);
                 ++populationGuardProfileSteps;
             }
             if (stepResult.resampling.massGuardAttempted) {
@@ -327,16 +427,26 @@ int main(int argc, char** argv) {
 
         write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
         write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
-        write_resampling_guard_profile_0166(params.outputDir,
+        write_resampling_guard_profile_0169(params.outputDir,
                                             populationGuardProfileSeconds, populationGuardProfileSteps,
                                             populationGuardOverfullCandidateCells,
                                             populationGuardUnderfullCandidateCells,
                                             populationGuardOverfullEditedCells,
                                             populationGuardUnderfullEditedCells,
+                                            populationGuardOverfullCandidateParticleRefs,
+                                            populationGuardUnderfullCandidateParticleRefs,
+                                            populationGuardOverfullScanPasses,
+                                            populationGuardUnderfullScanPasses,
+                                            populationGuardOverfullParticleRefsScanned,
+                                            populationGuardUnderfullParticleRefsScanned,
+                                            populationGuardOverfullEligibleParticleRefs,
+                                            populationGuardUnderfullEligibleParticleRefs,
+                                            populationGuardOverfullCandidatePopulationMax,
+                                            populationGuardUnderfullCandidatePopulationMax,
                                             massGuardProfileSeconds, massGuardProfileSteps);
         std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/phase_profile_0163.csv";
         std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/q6_cg_profile_0163.csv";
-        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/resampling_guard_profile_0166.csv";
+        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/resampling_guard_profile_0169.csv";
         std::cout << "\n[src_mpcd_base] done\n";
         return 0;
     } catch (const std::exception& e) {
