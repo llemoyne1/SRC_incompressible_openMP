@@ -327,7 +327,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         MPCD_PROFILE_PHASE(result.profile, ResamplingDepositInitial);
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
-            buildInitialResamplingPlan);
+            buildInitialResamplingPlan,
+            ResamplingDepositProfileContext::Initial);
     }
     {
         MPCD_PROFILE_PHASE(result.profile, ResamplingAttachInitial);
@@ -365,7 +366,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
-                params.resamplingExtractionEnable);
+                params.resamplingExtractionEnable,
+                ResamplingDepositProfileContext::PostGuard);
         }
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
@@ -409,7 +411,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostEditDeposit);
             result.resampling = deposit_weighted_real_fluid(
-                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false,
+                ResamplingDepositProfileContext::PostEdit);
         }
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);
@@ -461,7 +464,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
             result.resampling = deposit_weighted_real_fluid(
-                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false,
+                ResamplingDepositProfileContext::PostRemap);
         }
         {
             // Remap, thermal-after-remap and particle-mass guards only update
@@ -485,8 +489,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (thermalApply.applied) {
             {
                 MPCD_PROFILE_PHASE(result.profile, ResamplingPostThermalDeposit);
-                result.resampling = deposit_weighted_real_fluid(
-                    state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false);
+                // 0172: thermal renormalization changes velocities only.
+                // Reuse the current deposit topology/classification and refresh
+                // only momentum/mean-velocity fields instead of rebuilding the
+                // full particle->cell deposit, candidate lists and plans.
+                const WeightedResamplingDiagnostics beforePostThermalDeposit = result.resampling;
+                result.resampling = refresh_weighted_real_fluid_velocity_deposit(
+                    state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+                    beforePostThermalDeposit, ResamplingDepositProfileContext::PostThermal);
             }
             {
                 // Thermal renormalization changes velocities only; keep the

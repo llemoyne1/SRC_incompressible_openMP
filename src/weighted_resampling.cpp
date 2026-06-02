@@ -3,7 +3,10 @@
 #include "immersed_solid.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -90,8 +93,26 @@ struct MassGuardProfilePhaseIndex {
     };
 };
 
+struct DepositProfilePhaseIndex {
+    enum : std::size_t {
+        ValidateResize = 0,
+        ClearArrays = 1,
+        RoleCounts = 2,
+        ParticleLoopCellAccum = 3,
+        ReduceCellsFinalize = 4,
+        ActiveWetClassification = 5,
+        PoorRichClassification = 6,
+        CandidateLists = 7,
+        MutationPlanCellIndex = 8,
+        TransferPlanBuild = 9,
+        DonorParticleSelection = 10,
+        PassiveExtractionPlan = 11
+    };
+};
+
 static_assert(ResamplingPopulationGuardProfilePhaseCount == 25u, "population-guard profile phase count mismatch");
 static_assert(ResamplingMassGuardProfilePhaseCount == 4u, "mass-guard profile phase count mismatch");
+static_assert(ResamplingDepositProfilePhaseCount == 12u, "deposit profile phase count mismatch");
 
 class ScopedPopulationGuardProfileTimer {
 public:
@@ -134,8 +155,112 @@ private:
 #define MPCD_POP_GUARD_PROFILE(profile, phaseName) \
     ScopedPopulationGuardProfileTimer mpcdPopGuardProfileTimer_##phaseName((profile), PopulationGuardProfilePhaseIndex::phaseName)
 
+class ScopedDepositProfileTimer {
+public:
+    ScopedDepositProfileTimer(std::array<double, ResamplingDepositProfilePhaseCount>& seconds,
+                              const std::size_t phaseIndex)
+        : seconds_(seconds), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+    ScopedDepositProfileTimer(const ScopedDepositProfileTimer&) = delete;
+    ScopedDepositProfileTimer& operator=(const ScopedDepositProfileTimer&) = delete;
+    ~ScopedDepositProfileTimer() {
+        if (phaseIndex_ < seconds_.size()) {
+            seconds_[phaseIndex_] +=
+                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
+        }
+    }
+private:
+    std::array<double, ResamplingDepositProfilePhaseCount>& seconds_;
+    std::size_t phaseIndex_;
+    ResamplingProfileClock::time_point t0_;
+};
+
 #define MPCD_MASS_GUARD_PROFILE(profile, phaseName) \
     ScopedMassGuardProfileTimer mpcdMassGuardProfileTimer_##phaseName((profile), MassGuardProfilePhaseIndex::phaseName)
+
+#define MPCD_DEPOSIT_PROFILE(seconds, phaseName) \
+    ScopedDepositProfileTimer mpcdDepositProfileTimer_##phaseName((seconds), DepositProfilePhaseIndex::phaseName)
+
+struct DepositProfileAccumulator {
+    std::array<std::array<double, ResamplingDepositProfilePhaseCount>,
+               static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> seconds{};
+    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> calls{};
+    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> particlesVisited{};
+    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> fluidParticles{};
+    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> cells{};
+    std::string outputDir;
+
+    void add(const std::string& out,
+             ResamplingDepositProfileContext context,
+             const std::array<double, ResamplingDepositProfilePhaseCount>& localSeconds,
+             std::uint64_t nParticles,
+             std::uint64_t nFluid,
+             std::uint64_t nCells) {
+        const std::size_t idx = static_cast<std::size_t>(context);
+        if (idx >= calls.size()) {
+            return;
+        }
+        if (!out.empty()) {
+            outputDir = out;
+        }
+        calls[idx] += 1u;
+        particlesVisited[idx] += nParticles;
+        fluidParticles[idx] += nFluid;
+        cells[idx] += nCells;
+        for (std::size_t i = 0; i < ResamplingDepositProfilePhaseCount; ++i) {
+            seconds[idx][i] += localSeconds[i];
+        }
+    }
+
+    ~DepositProfileAccumulator() {
+        if (outputDir.empty()) {
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir) / "deposit_profile_0172.csv";
+        std::ofstream out(path);
+        if (!out) {
+            return;
+        }
+        out << "context,phase,total_s,ms_per_call,percent_context_total,calls,particles_visited,fluid_particles,cells\n";
+        out.setf(std::ios::fmtflags(0), std::ios::floatfield);
+        out.precision(17);
+        for (std::size_t c = 0; c < calls.size(); ++c) {
+            if (calls[c] == 0u) {
+                continue;
+            }
+            const auto context = static_cast<ResamplingDepositProfileContext>(c);
+            double total = 0.0;
+            for (double v : seconds[c]) {
+                total += v;
+            }
+            const double denom = static_cast<double>(calls[c]);
+            for (std::size_t p = 0; p < ResamplingDepositProfilePhaseCount; ++p) {
+                const double value = seconds[c][p];
+                const double percent = total > std::numeric_limits<double>::min()
+                    ? 100.0 * value / total : 0.0;
+                out << resampling_deposit_profile_context_name(context) << ','
+                    << resampling_deposit_profile_phase_name(p) << ','
+                    << value << ','
+                    << (1000.0 * value / denom) << ','
+                    << percent << ','
+                    << calls[c] << ','
+                    << particlesVisited[c] << ','
+                    << fluidParticles[c] << ','
+                    << cells[c] << '\n';
+            }
+            out << resampling_deposit_profile_context_name(context) << ",total_deposit,"
+                << total << ',' << (1000.0 * total / denom) << ",100,"
+                << calls[c] << ',' << particlesVisited[c] << ','
+                << fluidParticles[c] << ',' << cells[c] << '\n';
+        }
+    }
+};
+
+DepositProfileAccumulator& deposit_profile_accumulator() {
+    static DepositProfileAccumulator acc;
+    return acc;
+}
 
 
 bool cell_center_inside_domain(int ix, int iy, const CellGrid& grid, const FluidDomainBounds& domain) {
@@ -248,6 +373,38 @@ const char* resampling_mass_guard_profile_phase_name(const std::size_t phaseInde
         "finalize"
     };
     return phaseIndex < ResamplingMassGuardProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
+
+const char* resampling_deposit_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[ResamplingDepositProfilePhaseCount] = {
+        "validate_resize",
+        "clear_arrays",
+        "role_counts",
+        "particle_loop_cell_accum",
+        "reduce_cells_finalize",
+        "active_wet_classification",
+        "poor_rich_classification",
+        "candidate_lists",
+        "mutation_plan_cell_index",
+        "transfer_plan_build",
+        "donor_particle_selection",
+        "passive_extraction_plan"
+    };
+    return phaseIndex < ResamplingDepositProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
+
+const char* resampling_deposit_profile_context_name(const ResamplingDepositProfileContext context) {
+    switch (context) {
+        case ResamplingDepositProfileContext::Generic: return "generic";
+        case ResamplingDepositProfileContext::Initial: return "initial";
+        case ResamplingDepositProfileContext::PostGuard: return "post_guard";
+        case ResamplingDepositProfileContext::PostEdit: return "post_edit";
+        case ResamplingDepositProfileContext::PostRemap: return "post_remap";
+        case ResamplingDepositProfileContext::PostThermal: return "post_thermal";
+        case ResamplingDepositProfileContext::MainInitial: return "main_initial";
+        case ResamplingDepositProfileContext::Count: break;
+    }
+    return "unknown";
 }
 
 
@@ -2109,17 +2266,28 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           double time,
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws,
-                                                          bool buildMutationPlan) {
-    validate_particle_state(state, "deposit_weighted_real_fluid");
+                                                          bool buildMutationPlan,
+                                                          ResamplingDepositProfileContext profileContext) {
+    std::array<double, ResamplingDepositProfilePhaseCount> depositProfileSeconds{};
 
-    const int nc = grid.numCells;
-    if (nc <= 0) {
-        throw std::runtime_error("deposit_weighted_real_fluid: invalid number of cells");
+    int nc = 0;
+    std::size_t n = 0u;
+    int nt = 1;
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ValidateResize);
+        validate_particle_state(state, "deposit_weighted_real_fluid");
+
+        nc = grid.numCells;
+        if (nc <= 0) {
+            throw std::runtime_error("deposit_weighted_real_fluid: invalid number of cells");
+        }
+        n = static_cast<std::size_t>(state.Np);
+        nt = std::max(1, thread_count());
+        resize_weighted_real_fluid_deposit(ws, state.Np, nc, nt);
     }
-    const std::size_t n = static_cast<std::size_t>(state.Np);
-    const int nt = std::max(1, thread_count());
-    resize_weighted_real_fluid_deposit(ws, state.Np, nc, nt);
 
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ClearArrays);
     std::fill(ws.cellId.begin(), ws.cellId.end(), -1);
     std::fill(ws.count.begin(), ws.count.end(), 0u);
     std::fill(ws.mass.begin(), ws.mass.end(), 0.0);
@@ -2152,14 +2320,21 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     std::fill(ws.donorSelectedMass.begin(), ws.donorSelectedMass.end(), 0.0);
     std::fill(ws.remapThermalEnergyTarget.begin(), ws.remapThermalEnergyTarget.end(), 0.0);
     std::fill(ws.remapThermalCell.begin(), ws.remapThermalCell.end(), 0u);
+    }
 
-    const ParticleRoleCounts roles = count_particle_roles(state);
+    ParticleRoleCounts roles{};
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, RoleCounts);
+        roles = count_particle_roles(state);
+    }
 
     double particleMassSum = 0.0;
     double particleMassSum2 = 0.0;
     double particleMassMin = std::numeric_limits<double>::infinity();
     double particleMassMax = 0.0;
 
+{
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ParticleLoopCellAccum);
 #pragma omp parallel reduction(+:particleMassSum,particleMassSum2) reduction(min:particleMassMin) reduction(max:particleMassMax)
     {
         const int tid = thread_id();
@@ -2185,6 +2360,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             particleMassMax = std::max(particleMassMax, m);
         }
     }
+    }
 
     double totalMass = 0.0;
     double totalPx = 0.0;
@@ -2201,6 +2377,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     double cellUxRmsAccum = 0.0;
     double cellUyRmsAccum = 0.0;
 
+{
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ReduceCellsFinalize);
 #pragma omp parallel for reduction(+:totalMass,totalPx,totalPy,sumN,sumN2,sumM,sumM2,nonEmpty,cellUxRmsAccum,cellUyRmsAccum) reduction(min:minMass,minN) reduction(max:maxMass,maxN) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         std::uint32_t count = 0u;
@@ -2241,6 +2419,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         minN = std::min(minN, count);
         maxN = std::max(maxN, count);
     }
+    }
 
     WeightedResamplingDiagnostics d{};
     d.computed = true;
@@ -2275,6 +2454,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     std::uint64_t nOccupiedDry = 0u;
     double activeMassSum = 0.0;
 
+{
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ActiveWetClassification);
 #pragma omp parallel for reduction(+:nActive,nWet,nDry,nOccupiedDry,activeMassSum) if(nc > 256)
     for (int c = 0; c < nc; ++c) {
         const int ix = c % grid.Nx;
@@ -2299,6 +2480,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         nOccupiedDry += (dry && mc > params.resamplingWetCellMassThreshold) ? 1u : 0u;
         activeMassSum += wet ? mc : 0.0;
     }
+    }
 
     d.targetCellMass = params.resamplingTargetCellMass > 0.0
         ? params.resamplingTargetCellMass
@@ -2316,6 +2498,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     d.dryCellFraction = invNc > 0.0 ? static_cast<double>(nDry) * invNc : 0.0;
 
     if (d.targetCellMass > 0.0) {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, PoorRichClassification);
         double rel2 = 0.0;
         double relMax = 0.0;
         std::uint64_t nPoor = 0u;
@@ -2357,6 +2540,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     }
 
     if (d.cellClassificationComputed && d.targetCellMass > 0.0) {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, CandidateLists);
         double receiverDeficit = 0.0;
         double donorExcess = 0.0;
         for (int c = 0; c < nc; ++c) {
@@ -2408,6 +2592,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         const bool buildFullMutationPlan = buildMutationPlan && params.resamplingEnable && params.resamplingExtractionEnable;
 
         if (buildFullMutationPlan && !ws.receiverPoorCells.empty() && !ws.donorRichCells.empty()) {
+            {
+            MPCD_DEPOSIT_PROFILE(depositProfileSeconds, MutationPlanCellIndex);
             // Build a compact cell -> particle index once per planning pass.
             // The earlier implementation scanned all particles for every
             // donor/receiver transfer entry, which is catastrophic in channel
@@ -2437,6 +2623,10 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 }
             }
 
+            }
+
+            {
+            MPCD_DEPOSIT_PROFILE(depositProfileSeconds, TransferPlanBuild);
             std::vector<double> receiverRemaining(ws.receiverPoorCells.size(), 0.0);
             std::vector<double> donorRemaining(ws.donorRichCells.size(), 0.0);
             for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
@@ -2527,6 +2717,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 d.firstTransferReceiverCell = ws.transferPlan.front().receiverCell;
                 d.lastTransferDonorCell = ws.transferPlan.back().donorCell;
                 d.lastTransferReceiverCell = ws.transferPlan.back().receiverCell;
+            }
             }
 
             // Patch 0117: passive donor particle selection.
@@ -2642,6 +2833,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 // read-only: it records mass, momentum and kinetic energy but
                 // never changes state.role, state.mass, state.x or state.v.
                 if (!ws.selectedDonorParticles.empty()) {
+                    MPCD_DEPOSIT_PROFILE(depositProfileSeconds, PassiveExtractionPlan);
                     std::vector<std::uint8_t> seenExtracted(static_cast<std::size_t>(state.Np), 0u);
                     std::vector<std::uint8_t> donorCellSeen(static_cast<std::size_t>(nc), 0u);
                     std::vector<std::uint8_t> receiverCellSeen(static_cast<std::size_t>(nc), 0u);
@@ -2771,6 +2963,166 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         d.particleMassMin = std::isfinite(particleMassMin) ? particleMassMin : 0.0;
         d.particleMassMax = particleMassMax;
     }
+
+    d.depositProfileSeconds = depositProfileSeconds;
+    d.depositProfileParticlesVisited = static_cast<std::uint64_t>(n);
+    d.depositProfileFluidParticles = roles.fluid;
+    d.depositProfileCells = static_cast<std::uint64_t>(std::max(0, nc));
+    d.depositProfileBuildMutationPlan = buildMutationPlan;
+    deposit_profile_accumulator().add(
+        params.outputDir, profileContext, depositProfileSeconds,
+        static_cast<std::uint64_t>(n), roles.fluid,
+        static_cast<std::uint64_t>(std::max(0, nc)));
+
+    return d;
+}
+
+
+WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    const FluidDomainBounds& domain,
+    double time,
+    const GridShift& shift,
+    WeightedRealFluidDepositWorkspace& ws,
+    const WeightedResamplingDiagnostics& previousDiagnostics,
+    ResamplingDepositProfileContext profileContext) {
+    (void)params;
+    (void)domain;
+    (void)time;
+    (void)shift;
+
+    std::array<double, ResamplingDepositProfilePhaseCount> depositProfileSeconds{};
+
+    int nc = 0;
+    std::size_t n = 0u;
+    int nt = 1;
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ValidateResize);
+        validate_particle_state(state, "refresh_weighted_real_fluid_velocity_deposit");
+        nc = grid.numCells;
+        if (nc <= 0) {
+            throw std::runtime_error("refresh_weighted_real_fluid_velocity_deposit: invalid number of cells");
+        }
+        if (ws.allocatedCells != nc || ws.allocatedParticles < state.Np) {
+            // Fall back to the full deposit if the caller did not provide a
+            // valid current deposit workspace.  This preserves correctness for
+            // accidental direct use outside the post-thermal path.
+            return deposit_weighted_real_fluid(
+                state, params, grid, domain, time, shift, ws, false, profileContext);
+        }
+        n = static_cast<std::size_t>(state.Np);
+        nt = std::max(1, thread_count());
+        if (ws.allocatedThreads < nt ||
+            ws.localPx.size() < static_cast<std::size_t>(nt * nc) ||
+            ws.localPy.size() < static_cast<std::size_t>(nt * nc)) {
+            return deposit_weighted_real_fluid(
+                state, params, grid, domain, time, shift, ws, false, profileContext);
+        }
+    }
+
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ClearArrays);
+        std::fill(ws.px.begin(), ws.px.end(), 0.0);
+        std::fill(ws.py.begin(), ws.py.end(), 0.0);
+        std::fill(ws.ux.begin(), ws.ux.end(), 0.0);
+        std::fill(ws.uy.begin(), ws.uy.end(), 0.0);
+        std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
+        std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
+    }
+
+    std::uint64_t fluidParticles = 0u;
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ParticleLoopCellAccum);
+#pragma omp parallel reduction(+:fluidParticles)
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
+#pragma omp for
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                if (i >= ws.cellId.size()) {
+                    continue;
+                }
+                const int c = ws.cellId[i];
+                if (c < 0 || c >= nc) {
+                    continue;
+                }
+                const double m = state.mass[i];
+                const std::size_t k = offset + static_cast<std::size_t>(c);
+                ws.localPx[k] += m * state.vx[i];
+                ws.localPy[k] += m * state.vy[i];
+                fluidParticles += 1u;
+            }
+        }
+    }
+
+    double totalPx = 0.0;
+    double totalPy = 0.0;
+    std::uint64_t nonEmpty = 0u;
+    double cellUxRmsAccum = 0.0;
+    double cellUyRmsAccum = 0.0;
+    {
+        MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ReduceCellsFinalize);
+#pragma omp parallel for reduction(+:totalPx,totalPy,nonEmpty,cellUxRmsAccum,cellUyRmsAccum) if(nc > 256)
+        for (int c = 0; c < nc; ++c) {
+            double px = 0.0;
+            double py = 0.0;
+            for (int t = 0; t < nt; ++t) {
+                const std::size_t k = static_cast<std::size_t>(t * nc + c);
+                px += ws.localPx[k];
+                py += ws.localPy[k];
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            ws.px[kk] = px;
+            ws.py[kk] = py;
+            const double mass = ws.mass[kk];
+            if (mass > 0.0) {
+                const double ux = px / mass;
+                const double uy = py / mass;
+                ws.ux[kk] = ux;
+                ws.uy[kk] = uy;
+                nonEmpty += 1u;
+                cellUxRmsAccum += ux * ux;
+                cellUyRmsAccum += uy * uy;
+            }
+            totalPx += px;
+            totalPy += py;
+        }
+    }
+
+    WeightedResamplingDiagnostics d = previousDiagnostics;
+    d.totalPx = totalPx;
+    d.totalPy = totalPy;
+    if (d.totalMass > 0.0) {
+        d.meanUx = totalPx / d.totalMass;
+        d.meanUy = totalPy / d.totalMass;
+    } else {
+        d.meanUx = 0.0;
+        d.meanUy = 0.0;
+    }
+    if (nonEmpty > 0u) {
+        const double invNonEmpty = 1.0 / static_cast<double>(nonEmpty);
+        d.cellUxRms = std::sqrt(cellUxRmsAccum * invNonEmpty);
+        d.cellUyRms = std::sqrt(cellUyRmsAccum * invNonEmpty);
+    } else {
+        d.cellUxRms = 0.0;
+        d.cellUyRms = 0.0;
+    }
+
+    d.depositProfileSeconds = depositProfileSeconds;
+    d.depositProfileParticlesVisited = static_cast<std::uint64_t>(n);
+    d.depositProfileFluidParticles = fluidParticles;
+    d.depositProfileCells = static_cast<std::uint64_t>(std::max(0, nc));
+    d.depositProfileBuildMutationPlan = false;
+    deposit_profile_accumulator().add(
+        params.outputDir, profileContext, depositProfileSeconds,
+        static_cast<std::uint64_t>(n), fluidParticles,
+        static_cast<std::uint64_t>(std::max(0, nc)));
 
     return d;
 }

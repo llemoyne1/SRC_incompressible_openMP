@@ -18,9 +18,26 @@ constexpr std::int32_t kInvalidCellIndex = -1;
 
 constexpr std::size_t ResamplingPopulationGuardProfilePhaseCount = 25u;
 constexpr std::size_t ResamplingMassGuardProfilePhaseCount = 4u;
+constexpr std::size_t ResamplingDepositProfilePhaseCount = 12u;
 
 const char* resampling_population_guard_profile_phase_name(std::size_t phaseIndex);
 const char* resampling_mass_guard_profile_phase_name(std::size_t phaseIndex);
+const char* resampling_deposit_profile_phase_name(std::size_t phaseIndex);
+
+// Profiling-only context labels for deposit_weighted_real_fluid.  They do not
+// alter the deposit semantics; they only classify calls in deposit_profile_0171.csv.
+enum class ResamplingDepositProfileContext : std::uint8_t {
+    Generic = 0,
+    Initial = 1,
+    PostGuard = 2,
+    PostEdit = 3,
+    PostRemap = 4,
+    PostThermal = 5,
+    MainInitial = 6,
+    Count = 7
+};
+
+const char* resampling_deposit_profile_context_name(ResamplingDepositProfileContext context);
 
 struct ResamplingPopulationGuardProfile {
     std::array<double, ResamplingPopulationGuardProfilePhaseCount> seconds{};
@@ -28,6 +45,10 @@ struct ResamplingPopulationGuardProfile {
 
 struct ResamplingMassGuardProfile {
     std::array<double, ResamplingMassGuardProfilePhaseCount> seconds{};
+};
+
+struct ResamplingDepositProfile {
+    std::array<double, ResamplingDepositProfilePhaseCount> seconds{};
 };
 
 struct ResamplingParticlePoolDiagnostics {
@@ -745,6 +766,15 @@ struct WeightedResamplingDiagnostics {
     bool massGuardAllCellsFeasible = true;
     std::array<double, ResamplingMassGuardProfilePhaseCount> massGuardProfileSeconds{};
 
+    // 0171 fine-grained profile for the last weighted real-fluid deposit call
+    // represented by this diagnostics object.  Aggregated per-context profiles
+    // are written by the deposit profiler at process exit.
+    std::array<double, ResamplingDepositProfilePhaseCount> depositProfileSeconds{};
+    std::uint64_t depositProfileParticlesVisited = 0;
+    std::uint64_t depositProfileFluidParticles = 0;
+    std::uint64_t depositProfileCells = 0;
+    bool depositProfileBuildMutationPlan = false;
+
     // Latent -> Fluid wet/dry activation (patch 0124).  This optional stage
     // consumes only role=Latent particles and seeds poor/empty wet receiver
     // cells.  It is separated from the Inactive pool so extraction/insertion
@@ -942,6 +972,22 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           double time,
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws,
-                                                          bool buildMutationPlan = true);
+                                                          bool buildMutationPlan = true,
+                                                          ResamplingDepositProfileContext profileContext = ResamplingDepositProfileContext::Generic);
+
+// 0172 post-thermal refresh: after thermal renormalization, positions, roles,
+// masses, cellId, and classification masks are unchanged.  This routine updates
+// only momentum/mean-velocity fields and the corresponding diagnostics, avoiding
+// a full particle->cell deposit and mutation-plan rebuild.
+WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    const FluidDomainBounds& domain,
+    double time,
+    const GridShift& shift,
+    WeightedRealFluidDepositWorkspace& ws,
+    const WeightedResamplingDiagnostics& previousDiagnostics,
+    ResamplingDepositProfileContext profileContext = ResamplingDepositProfileContext::PostThermal);
 
 } // namespace mpcd
