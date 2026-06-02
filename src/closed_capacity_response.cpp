@@ -388,6 +388,10 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     const CellGrid& grid,
     const FluidDomainBounds& domain,
     ClosedCapacityResponseWorkspace& ws) {
+    if (!params.closedCapacityResponseEnable) {
+        return ClosedCapacityResponseDiagnostics{};
+    }
+
     validate_particle_state(state, "apply_closed_capacity_virial_kick");
     ensure_particle_roles(state, ParticleRole::Fluid);
 

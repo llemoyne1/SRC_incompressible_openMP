@@ -103,6 +103,63 @@ void write_q6_cg_profile_0163(const std::string& outputDir,
     out << "metadata,q6_applied_steps," << measuredQ6Steps << ",0,0\n";
 }
 
+
+void write_resampling_guard_profile_0166(
+    const std::string& outputDir,
+    const std::array<double, mpcd::ResamplingPopulationGuardProfilePhaseCount>& populationSeconds,
+    const int populationSteps,
+    const std::uint64_t populationOverfullCandidateCells,
+    const std::uint64_t populationUnderfullCandidateCells,
+    const std::uint64_t populationOverfullEditedCells,
+    const std::uint64_t populationUnderfullEditedCells,
+    const std::array<double, mpcd::ResamplingMassGuardProfilePhaseCount>& massSeconds,
+    const int massSteps) {
+    const std::filesystem::path path = std::filesystem::path(outputDir) / "resampling_guard_profile_0166.csv";
+    std::ofstream out(path);
+    out << "group,phase,total_s,ms_per_guard_step,percent_group_total\n";
+    out << std::setprecision(17);
+
+    double populationTotal = 0.0;
+    for (double v : populationSeconds) populationTotal += v;
+    const double populationDenom = populationSteps > 0 ? static_cast<double>(populationSteps) : 1.0;
+    for (std::size_t i = 0; i < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++i) {
+        const double value = populationSeconds[i];
+        const double percent = populationTotal > std::numeric_limits<double>::min()
+            ? 100.0 * value / populationTotal : 0.0;
+        out << "population_guard," << mpcd::resampling_population_guard_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / populationDenom) << ',' << percent << '\n';
+    }
+    out << "population_guard,total_population_guard," << populationTotal << ','
+        << (1000.0 * populationTotal / populationDenom) << ",100\n";
+    out << "metadata,population_guard_steps," << populationSteps << ",0,0\n";
+    out << "metadata,population_guard_overfull_candidate_cells_total,"
+        << populationOverfullCandidateCells << ','
+        << (static_cast<double>(populationOverfullCandidateCells) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_candidate_cells_total,"
+        << populationUnderfullCandidateCells << ','
+        << (static_cast<double>(populationUnderfullCandidateCells) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_overfull_edited_cells_total,"
+        << populationOverfullEditedCells << ','
+        << (static_cast<double>(populationOverfullEditedCells) / populationDenom) << ",0\n";
+    out << "metadata,population_guard_underfull_edited_cells_total,"
+        << populationUnderfullEditedCells << ','
+        << (static_cast<double>(populationUnderfullEditedCells) / populationDenom) << ",0\n";
+
+    double massTotal = 0.0;
+    for (double v : massSeconds) massTotal += v;
+    const double massDenom = massSteps > 0 ? static_cast<double>(massSteps) : 1.0;
+    for (std::size_t i = 0; i < mpcd::ResamplingMassGuardProfilePhaseCount; ++i) {
+        const double value = massSeconds[i];
+        const double percent = massTotal > std::numeric_limits<double>::min()
+            ? 100.0 * value / massTotal : 0.0;
+        out << "mass_guard," << mpcd::resampling_mass_guard_profile_phase_name(i) << ','
+            << value << ',' << (1000.0 * value / massDenom) << ',' << percent << '\n';
+    }
+    out << "mass_guard,total_mass_guard," << massTotal << ','
+        << (1000.0 * massTotal / massDenom) << ",100\n";
+    out << "metadata,mass_guard_steps," << massSteps << ",0,0\n";
+}
+
 int openmp_active_threads() {
     int active = 1;
 #ifdef _OPENMP
@@ -155,8 +212,16 @@ int main(int argc, char** argv) {
         std::array<double, mpcd::StepProfilePhaseCount> phaseProfileSeconds{};
         std::array<double, mpcd::Q6ProjectionProfilePhaseCount> q6ProfileSeconds{};
         std::array<double, mpcd::EllipticProjectionProfilePhaseCount> ellipticProfileSeconds{};
+        std::array<double, mpcd::ResamplingPopulationGuardProfilePhaseCount> populationGuardProfileSeconds{};
+        std::array<double, mpcd::ResamplingMassGuardProfilePhaseCount> massGuardProfileSeconds{};
         int phaseProfileSteps = 0;
         int q6ProfileSteps = 0;
+        int populationGuardProfileSteps = 0;
+        int massGuardProfileSteps = 0;
+        std::uint64_t populationGuardOverfullCandidateCells = 0;
+        std::uint64_t populationGuardUnderfullCandidateCells = 0;
+        std::uint64_t populationGuardOverfullEditedCells = 0;
+        std::uint64_t populationGuardUnderfullEditedCells = 0;
         const auto t0 = std::chrono::steady_clock::now();
 
         const std::vector<std::uint32_t> initialCellCount =
@@ -214,6 +279,22 @@ int main(int argc, char** argv) {
                 }
                 ++q6ProfileSteps;
             }
+            if (stepResult.resampling.populationGuardAttempted) {
+                for (std::size_t phase = 0; phase < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++phase) {
+                    populationGuardProfileSeconds[phase] += stepResult.resampling.populationGuardProfileSeconds[phase];
+                }
+                populationGuardOverfullCandidateCells += stepResult.resampling.populationGuardOverfullCandidateCells;
+                populationGuardUnderfullCandidateCells += stepResult.resampling.populationGuardUnderfullCandidateCells;
+                populationGuardOverfullEditedCells += stepResult.resampling.populationGuardOverfullEditedCells;
+                populationGuardUnderfullEditedCells += stepResult.resampling.populationGuardUnderfullEditedCells;
+                ++populationGuardProfileSteps;
+            }
+            if (stepResult.resampling.massGuardAttempted) {
+                for (std::size_t phase = 0; phase < mpcd::ResamplingMassGuardProfilePhaseCount; ++phase) {
+                    massGuardProfileSeconds[phase] += stepResult.resampling.massGuardProfileSeconds[phase];
+                }
+                ++massGuardProfileSteps;
+            }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
                 const double wallTime = elapsed_seconds(t0);
@@ -246,8 +327,16 @@ int main(int argc, char** argv) {
 
         write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
         write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
+        write_resampling_guard_profile_0166(params.outputDir,
+                                            populationGuardProfileSeconds, populationGuardProfileSteps,
+                                            populationGuardOverfullCandidateCells,
+                                            populationGuardUnderfullCandidateCells,
+                                            populationGuardOverfullEditedCells,
+                                            populationGuardUnderfullEditedCells,
+                                            massGuardProfileSeconds, massGuardProfileSteps);
         std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/phase_profile_0163.csv";
         std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/q6_cg_profile_0163.csv";
+        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/resampling_guard_profile_0166.csv";
         std::cout << "\n[src_mpcd_base] done\n";
         return 0;
     } catch (const std::exception& e) {

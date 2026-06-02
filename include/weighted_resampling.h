@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -13,6 +14,21 @@ namespace mpcd {
 
 constexpr std::uint64_t kInvalidParticleIndex = std::numeric_limits<std::uint64_t>::max();
 constexpr std::int32_t kInvalidCellIndex = -1;
+
+
+constexpr std::size_t ResamplingPopulationGuardProfilePhaseCount = 7u;
+constexpr std::size_t ResamplingMassGuardProfilePhaseCount = 4u;
+
+const char* resampling_population_guard_profile_phase_name(std::size_t phaseIndex);
+const char* resampling_mass_guard_profile_phase_name(std::size_t phaseIndex);
+
+struct ResamplingPopulationGuardProfile {
+    std::array<double, ResamplingPopulationGuardProfilePhaseCount> seconds{};
+};
+
+struct ResamplingMassGuardProfile {
+    std::array<double, ResamplingMassGuardProfilePhaseCount> seconds{};
+};
 
 struct ResamplingParticlePoolDiagnostics {
     bool built = false;
@@ -208,6 +224,7 @@ struct ResamplingThermalRenormalizationDiagnostics {
 
 struct ResamplingMassGuardDiagnostics {
     bool attempted = false;
+    ResamplingMassGuardProfile profile{};
     bool applied = false;
 
     std::uint64_t cellsConsidered = 0;
@@ -286,6 +303,7 @@ struct ResamplingExtractionApplyDiagnostics {
 
 struct ResamplingPopulationGuardDiagnostics {
     bool attempted = false;
+    ResamplingPopulationGuardProfile profile{};
     bool applied = false;
 
     int nMin = 0;
@@ -298,6 +316,14 @@ struct ResamplingPopulationGuardDiagnostics {
     std::uint64_t overfullCells = 0;
     std::uint64_t cellsSplit = 0;
     std::uint64_t cellsExtracted = 0;
+
+    // 0166 profiling/optimization counters: candidates are the cells selected
+    // by the light pre-scan before the mutating overfull/underfull loops;
+    // edited cells are the subset on which an actual extract/split occurred.
+    std::uint64_t overfullCandidateCells = 0;
+    std::uint64_t underfullCandidateCells = 0;
+    std::uint64_t overfullEditedCells = 0;
+    std::uint64_t underfullEditedCells = 0;
 
     std::uint64_t splitParticlesCreated = 0;
     std::uint64_t extractedParticles = 0;
@@ -394,6 +420,13 @@ struct WeightedRealFluidDepositWorkspace {
     std::vector<std::uint64_t> cellParticleOffsets;
     std::vector<std::uint64_t> cellParticleCursor;
     std::vector<std::uint64_t> cellParticleIndices;
+
+    // 0166 population-guard candidate lists.  They are rebuilt from the current
+    // per-cell counts before the mutating guard loops, so the hot overfull and
+    // underfull stages traverse only candidate cells while preserving increasing
+    // cell-index order.
+    std::vector<int> populationGuardOverfullCells;
+    std::vector<int> populationGuardUnderfullCells;
 
     // Filled by the 0121 mass remap before particle masses are scaled.  Patch
     // 0122 uses this per-cell target to restore the local relative thermal
@@ -695,6 +728,7 @@ struct WeightedResamplingDiagnostics {
     std::int32_t firstMassGuardedCell = kInvalidCellIndex;
     std::int32_t lastMassGuardedCell = kInvalidCellIndex;
     bool massGuardAllCellsFeasible = true;
+    std::array<double, ResamplingMassGuardProfilePhaseCount> massGuardProfileSeconds{};
 
     // Latent -> Fluid wet/dry activation (patch 0124).  This optional stage
     // consumes only role=Latent particles and seeds poor/empty wet receiver
@@ -741,6 +775,10 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t populationGuardOverfullCells = 0;
     std::uint64_t populationGuardCellsSplit = 0;
     std::uint64_t populationGuardCellsExtracted = 0;
+    std::uint64_t populationGuardOverfullCandidateCells = 0;
+    std::uint64_t populationGuardUnderfullCandidateCells = 0;
+    std::uint64_t populationGuardOverfullEditedCells = 0;
+    std::uint64_t populationGuardUnderfullEditedCells = 0;
     std::uint64_t populationGuardSplitParticlesCreated = 0;
     std::uint64_t populationGuardExtractedParticles = 0;
     std::uint64_t populationGuardSkippedNoFreeSlots = 0;
@@ -760,6 +798,7 @@ struct WeightedResamplingDiagnostics {
     std::uint32_t populationGuardWetNMinAfter = 0;
     double populationGuardWetLowNFractionBefore = 0.0;
     double populationGuardWetLowNFractionAfter = 0.0;
+    std::array<double, ResamplingPopulationGuardProfilePhaseCount> populationGuardProfileSeconds{};
 
     double particleMassMean = 0.0;
     double particleMassStd = 0.0;

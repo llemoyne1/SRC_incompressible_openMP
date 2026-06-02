@@ -3,6 +3,7 @@
 #include "immersed_solid.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,78 @@ int thread_id() {
     return 0;
 #endif
 }
+
+
+using ResamplingProfileClock = std::chrono::steady_clock;
+
+struct PopulationGuardProfilePhaseIndex {
+    enum : std::size_t {
+        InitThresholds = 0,
+        CountCopy = 1,
+        StatsBefore = 2,
+        EnsureCellParticleIndex = 3,
+        OverfullExtractionLoop = 4,
+        UnderfullSplitLoop = 5,
+        StatsAfterFinalize = 6
+    };
+};
+
+struct MassGuardProfilePhaseIndex {
+    enum : std::size_t {
+        InitValidate = 0,
+        BuildParticlesByCell = 1,
+        CellLoop = 2,
+        Finalize = 3
+    };
+};
+
+static_assert(ResamplingPopulationGuardProfilePhaseCount == 7u, "population-guard profile phase count mismatch");
+static_assert(ResamplingMassGuardProfilePhaseCount == 4u, "mass-guard profile phase count mismatch");
+
+class ScopedPopulationGuardProfileTimer {
+public:
+    ScopedPopulationGuardProfileTimer(ResamplingPopulationGuardProfile& profile,
+                                      const std::size_t phaseIndex)
+        : profile_(profile), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+    ScopedPopulationGuardProfileTimer(const ScopedPopulationGuardProfileTimer&) = delete;
+    ScopedPopulationGuardProfileTimer& operator=(const ScopedPopulationGuardProfileTimer&) = delete;
+    ~ScopedPopulationGuardProfileTimer() {
+        if (phaseIndex_ < profile_.seconds.size()) {
+            profile_.seconds[phaseIndex_] +=
+                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
+        }
+    }
+private:
+    ResamplingPopulationGuardProfile& profile_;
+    std::size_t phaseIndex_;
+    ResamplingProfileClock::time_point t0_;
+};
+
+class ScopedMassGuardProfileTimer {
+public:
+    ScopedMassGuardProfileTimer(ResamplingMassGuardProfile& profile,
+                                const std::size_t phaseIndex)
+        : profile_(profile), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+    ScopedMassGuardProfileTimer(const ScopedMassGuardProfileTimer&) = delete;
+    ScopedMassGuardProfileTimer& operator=(const ScopedMassGuardProfileTimer&) = delete;
+    ~ScopedMassGuardProfileTimer() {
+        if (phaseIndex_ < profile_.seconds.size()) {
+            profile_.seconds[phaseIndex_] +=
+                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
+        }
+    }
+private:
+    ResamplingMassGuardProfile& profile_;
+    std::size_t phaseIndex_;
+    ResamplingProfileClock::time_point t0_;
+};
+
+#define MPCD_POP_GUARD_PROFILE(profile, phaseName) \
+    ScopedPopulationGuardProfileTimer mpcdPopGuardProfileTimer_##phaseName((profile), PopulationGuardProfilePhaseIndex::phaseName)
+
+#define MPCD_MASS_GUARD_PROFILE(profile, phaseName) \
+    ScopedMassGuardProfileTimer mpcdMassGuardProfileTimer_##phaseName((profile), MassGuardProfilePhaseIndex::phaseName)
+
 
 bool cell_center_inside_domain(int ix, int iy, const CellGrid& grid, const FluidDomainBounds& domain) {
     const double x = (static_cast<double>(ix) + 0.5) * grid.dx;
@@ -102,6 +175,29 @@ void deterministic_receiver_position(std::int32_t cell,
 }
 
 } // namespace
+
+const char* resampling_population_guard_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[ResamplingPopulationGuardProfilePhaseCount] = {
+        "init_thresholds",
+        "count_copy",
+        "stats_before",
+        "ensure_cell_particle_index",
+        "overfull_extraction_loop",
+        "underfull_split_loop",
+        "stats_after_finalize"
+    };
+    return phaseIndex < ResamplingPopulationGuardProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
+
+const char* resampling_mass_guard_profile_phase_name(const std::size_t phaseIndex) {
+    static constexpr const char* names[ResamplingMassGuardProfilePhaseCount] = {
+        "init_validate",
+        "build_particles_by_cell",
+        "cell_loop",
+        "finalize"
+    };
+    return phaseIndex < ResamplingMassGuardProfilePhaseCount ? names[phaseIndex] : "unknown";
+}
 
 
 ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
@@ -596,37 +692,9 @@ void attach_resampling_insertion_apply_diagnostics(
 
 namespace {
 
-bool cell_particle_index_available(const WeightedRealFluidDepositWorkspace& ws,
-                                   int nc) {
-    if (nc <= 0) {
-        return false;
-    }
-    if (ws.cellParticleOffsets.size() != static_cast<std::size_t>(nc) + 1u) {
-        return false;
-    }
-    const std::uint64_t total = ws.cellParticleOffsets.back();
-    if (ws.cellParticleIndices.size() != static_cast<std::size_t>(total)) {
-        return false;
-    }
-    for (int c = 0; c < nc; ++c) {
-        const std::size_t kk = static_cast<std::size_t>(c);
-        if (ws.cellParticleOffsets[kk + 1u] < ws.cellParticleOffsets[kk]) {
-            return false;
-        }
-        if (ws.cellParticleOffsets[kk + 1u] - ws.cellParticleOffsets[kk] !=
-            static_cast<std::uint64_t>(ws.count[kk])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
                                 const ParticleState& state,
                                 int nc) {
-    if (cell_particle_index_available(ws, nc)) {
-        return;
-    }
     ws.cellParticleOffsets.assign(static_cast<std::size_t>(nc) + 1u, 0u);
     for (int c = 0; c < nc; ++c) {
         ws.cellParticleOffsets[static_cast<std::size_t>(c) + 1u] =
@@ -712,71 +780,78 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
 
     ResamplingPopulationGuardDiagnostics d{};
     d.attempted = true;
-    d.freeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
-
     const int nc = depositWorkspace.allocatedCells;
-    if (nc <= 0 || depositWorkspace.count.size() != static_cast<std::size_t>(nc) ||
-        depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc)) {
-        return d;
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, InitThresholds);
+        d.freeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+
+        if (nc <= 0 || depositWorkspace.count.size() != static_cast<std::size_t>(nc) ||
+            depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc)) {
+            return d;
+        }
+
+        const double meanParticleMass = depositDiagnostics.particleMassMean > 0.0
+            ? depositDiagnostics.particleMassMean : 1.0;
+        const int inferredTarget = std::max(1, static_cast<int>(std::llround(
+            (depositDiagnostics.targetCellMass > 0.0 ? depositDiagnostics.targetCellMass : meanParticleMass) /
+            meanParticleMass)));
+        d.nTarget = params.resamplingPopulationNTarget > 0
+            ? params.resamplingPopulationNTarget : inferredTarget;
+        d.nMin = params.resamplingPopulationNMin > 0
+            ? params.resamplingPopulationNMin
+            : std::max(1, static_cast<int>(std::floor(params.resamplingPopulationNMinFraction * static_cast<double>(d.nTarget))));
+        d.nMax = params.resamplingPopulationNMax > 0
+            ? params.resamplingPopulationNMax
+            : std::max(d.nTarget, static_cast<int>(std::ceil(params.resamplingPopulationNMaxFraction * static_cast<double>(d.nTarget))));
+        d.nMin = std::min(d.nMin, d.nTarget);
+        d.nMax = std::max(d.nMax, d.nTarget);
     }
 
-    const double meanParticleMass = depositDiagnostics.particleMassMean > 0.0
-        ? depositDiagnostics.particleMassMean : 1.0;
-    const int inferredTarget = std::max(1, static_cast<int>(std::llround(
-        (depositDiagnostics.targetCellMass > 0.0 ? depositDiagnostics.targetCellMass : meanParticleMass) /
-        meanParticleMass)));
-    d.nTarget = params.resamplingPopulationNTarget > 0
-        ? params.resamplingPopulationNTarget : inferredTarget;
-    d.nMin = params.resamplingPopulationNMin > 0
-        ? params.resamplingPopulationNMin
-        : std::max(1, static_cast<int>(std::floor(params.resamplingPopulationNMinFraction * static_cast<double>(d.nTarget))));
-    d.nMax = params.resamplingPopulationNMax > 0
-        ? params.resamplingPopulationNMax
-        : std::max(d.nTarget, static_cast<int>(std::ceil(params.resamplingPopulationNMaxFraction * static_cast<double>(d.nTarget))));
-    d.nMin = std::min(d.nMin, d.nTarget);
-    d.nMax = std::max(d.nMax, d.nTarget);
-
-    std::vector<std::uint32_t> countAfter = depositWorkspace.count;
-    accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
-                                    d.wetCellsConsidered, d.wetNMinBefore,
-                                    d.wetNMeanBefore, d.wetNStdBefore,
-                                    d.wetLowNFractionBefore);
+    std::vector<std::uint32_t> countAfter;
+    std::vector<int>& overfullCandidateCells = depositWorkspace.populationGuardOverfullCells;
+    std::vector<int>& underfullCandidateCells = depositWorkspace.populationGuardUnderfullCells;
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, CountCopy);
+        countAfter = depositWorkspace.count;
+        overfullCandidateCells.clear();
+        underfullCandidateCells.clear();
+        if (overfullCandidateCells.capacity() < static_cast<std::size_t>(nc)) {
+            overfullCandidateCells.reserve(static_cast<std::size_t>(nc));
+        }
+        if (underfullCandidateCells.capacity() < static_cast<std::size_t>(nc)) {
+            underfullCandidateCells.reserve(static_cast<std::size_t>(nc));
+        }
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!depositWorkspace.wetCell[kk]) {
+                continue;
+            }
+            const int nCell = static_cast<int>(countAfter[kk]);
+            if (nCell > d.nMax) {
+                overfullCandidateCells.push_back(c);
+            } else if (nCell < d.nMin) {
+                underfullCandidateCells.push_back(c);
+            }
+        }
+        d.overfullCandidateCells = static_cast<std::uint64_t>(overfullCandidateCells.size());
+        d.underfullCandidateCells = static_cast<std::uint64_t>(underfullCandidateCells.size());
+    }
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, StatsBefore);
+        accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
+                                        d.wetCellsConsidered, d.wetNMinBefore,
+                                        d.wetNMeanBefore, d.wetNStdBefore,
+                                        d.wetLowNFractionBefore);
+    }
     if (d.wetCellsConsidered == 0u) {
         d.freeSlotsAfter = d.freeSlotsBefore;
         return d;
     }
 
-    // Build compact candidate lists before constructing the cell->particle
-    // index.  In most near-equilibrium steps no cell violates [nMin,nMax]; the
-    // previous code still rebuilt the per-cell particle index and scanned all
-    // cells twice.  This early classification preserves the original cell order
-    // but skips the expensive index build when no population edit is possible.
-    std::vector<int> overfullCells;
-    std::vector<int> underfullCells;
-    overfullCells.reserve(static_cast<std::size_t>(nc / 16 + 1));
-    underfullCells.reserve(static_cast<std::size_t>(nc / 16 + 1));
-    for (int c = 0; c < nc; ++c) {
-        const std::size_t kk = static_cast<std::size_t>(c);
-        if (!depositWorkspace.wetCell[kk]) {
-            continue;
-        }
-        const int nCell = static_cast<int>(countAfter[kk]);
-        if (nCell > d.nMax) {
-            overfullCells.push_back(c);
-        } else if (nCell < d.nMin) {
-            underfullCells.push_back(c);
-        }
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, EnsureCellParticleIndex);
+        ensure_cell_particle_index(depositWorkspace, state, nc);
     }
-    if (overfullCells.empty() && underfullCells.empty()) {
-        d.wetNMinAfter = d.wetNMinBefore;
-        d.wetNMeanAfter = d.wetNMeanBefore;
-        d.wetNStdAfter = d.wetNStdBefore;
-        d.wetLowNFractionAfter = d.wetLowNFractionBefore;
-        d.freeSlotsAfter = d.freeSlotsBefore;
-        return d;
-    }
-
-    ensure_cell_particle_index(depositWorkspace, state, nc);
 
     std::uint64_t extractionBudget = params.resamplingPopulationMaxExtractionsPerStep > 0
         ? static_cast<std::uint64_t>(params.resamplingPopulationMaxExtractionsPerStep)
@@ -784,8 +859,10 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     const int maxExtractPerCell = params.resamplingPopulationMaxExtractionsPerCell > 0
         ? params.resamplingPopulationMaxExtractionsPerCell : std::numeric_limits<int>::max();
 
-    for (std::size_t ic = 0; ic < overfullCells.size() && extractionBudget > 0u; ++ic) {
-        const int c = overfullCells[ic];
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, OverfullExtractionLoop);
+    for (std::size_t cc = 0; cc < overfullCandidateCells.size() && extractionBudget > 0u; ++cc) {
+        const int c = overfullCandidateCells[cc];
         const std::size_t kk = static_cast<std::size_t>(c);
         if (static_cast<int>(countAfter[kk]) <= d.nMax) {
             continue;
@@ -847,10 +924,13 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         }
         if (doneCell > 0) {
             d.cellsExtracted += 1u;
+            d.overfullEditedCells += 1u;
         }
         if (need > doneCell) {
             d.skippedExtractionLimit += static_cast<std::uint64_t>(need - doneCell);
         }
+    }
+
     }
 
     std::uint64_t splitBudget = params.resamplingPopulationMaxSplitsPerStep > 0
@@ -859,8 +939,10 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     const int maxSplitPerCell = params.resamplingPopulationMaxSplitsPerCell > 0
         ? params.resamplingPopulationMaxSplitsPerCell : std::numeric_limits<int>::max();
 
-    for (std::size_t ic = 0; ic < underfullCells.size() && splitBudget > 0u; ++ic) {
-        const int c = underfullCells[ic];
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, UnderfullSplitLoop);
+    for (std::size_t cc = 0; cc < underfullCandidateCells.size() && splitBudget > 0u; ++cc) {
+        const int c = underfullCandidateCells[cc];
         const std::size_t kk = static_cast<std::size_t>(c);
         if (static_cast<int>(countAfter[kk]) >= d.nMin) {
             continue;
@@ -928,13 +1010,18 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         }
         if (doneCell > 0) {
             d.cellsSplit += 1u;
+            d.underfullEditedCells += 1u;
         }
         if (need > doneCell) {
             d.skippedSplitLimit += static_cast<std::uint64_t>(need - doneCell);
         }
     }
 
+    }
+
     std::uint64_t wetAfter = 0u;
+    {
+        MPCD_POP_GUARD_PROFILE(d.profile, StatsAfterFinalize);
     accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
                                     wetAfter, d.wetNMinAfter, d.wetNMeanAfter,
                                     d.wetNStdAfter, d.wetLowNFractionAfter);
@@ -942,6 +1029,7 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     d.activeParticleDelta = static_cast<std::int64_t>(d.splitParticlesCreated) -
                             static_cast<std::int64_t>(d.extractedParticles);
     d.applied = d.splitParticlesCreated > 0u || d.extractedParticles > 0u;
+    }
     return d;
 }
 
@@ -959,6 +1047,10 @@ void attach_resampling_population_guard_diagnostics(
     diagnostics.populationGuardOverfullCells = pop.overfullCells;
     diagnostics.populationGuardCellsSplit = pop.cellsSplit;
     diagnostics.populationGuardCellsExtracted = pop.cellsExtracted;
+    diagnostics.populationGuardOverfullCandidateCells = pop.overfullCandidateCells;
+    diagnostics.populationGuardUnderfullCandidateCells = pop.underfullCandidateCells;
+    diagnostics.populationGuardOverfullEditedCells = pop.overfullEditedCells;
+    diagnostics.populationGuardUnderfullEditedCells = pop.underfullEditedCells;
     diagnostics.populationGuardSplitParticlesCreated = pop.splitParticlesCreated;
     diagnostics.populationGuardExtractedParticles = pop.extractedParticles;
     diagnostics.populationGuardSkippedNoFreeSlots = pop.skippedNoFreeSlots;
@@ -978,6 +1070,7 @@ void attach_resampling_population_guard_diagnostics(
     diagnostics.populationGuardWetNMinAfter = pop.wetNMinAfter;
     diagnostics.populationGuardWetLowNFractionBefore = pop.wetLowNFractionBefore;
     diagnostics.populationGuardWetLowNFractionAfter = pop.wetLowNFractionAfter;
+    diagnostics.populationGuardProfileSeconds = pop.profile.seconds;
 }
 
 
@@ -1507,42 +1600,42 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
 
     ResamplingMassGuardDiagnostics d{};
     d.attempted = true;
-    d.massMinBound = params.resamplingParticleMassMin;
-    d.massMaxBound = params.resamplingParticleMassMax;
-    d.targetCellMass = (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride))
-        ? targetCellMassOverride
-        : depositDiagnostics.targetCellMass;
+    int nc = 0;
+    {
+        MPCD_MASS_GUARD_PROFILE(d.profile, InitValidate);
+        d.massMinBound = params.resamplingParticleMassMin;
+        d.massMaxBound = params.resamplingParticleMassMax;
+        d.targetCellMass = (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride))
+            ? targetCellMassOverride
+            : depositDiagnostics.targetCellMass;
 
-    const int nc = depositWorkspace.allocatedCells;
-    if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||
-        depositWorkspace.cellId.size() < static_cast<std::size_t>(state.Np)) {
-        throw std::runtime_error("apply_resampling_particle_mass_guards: invalid deposit workspace");
-    }
-    if (!(d.massMinBound >= 0.0) || !(d.massMaxBound > d.massMinBound) ||
-        !(d.targetCellMass > 0.0) || !std::isfinite(d.targetCellMass)) {
-        d.skippedInvalidMassCells = static_cast<std::uint64_t>(nc);
-        d.allGuardedCellsFeasible = false;
-        return d;
-    }
-
-    const bool useCellParticleIndex = cell_particle_index_available(depositWorkspace, nc);
-    std::vector<std::vector<std::size_t>> particlesByCell;
-    if (!useCellParticleIndex) {
-        particlesByCell.resize(static_cast<std::size_t>(nc));
-        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-            if (!is_fluid_particle(state, i)) {
-                continue;
-            }
-            const int c = depositWorkspace.cellId[i];
-            if (c < 0 || c >= nc) {
-                continue;
-            }
-            particlesByCell[static_cast<std::size_t>(c)].push_back(i);
+        nc = depositWorkspace.allocatedCells;
+        if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||
+            depositWorkspace.cellId.size() < static_cast<std::size_t>(state.Np)) {
+            throw std::runtime_error("apply_resampling_particle_mass_guards: invalid deposit workspace");
+        }
+        if (!(d.massMinBound >= 0.0) || !(d.massMaxBound > d.massMinBound) ||
+            !(d.targetCellMass > 0.0) || !std::isfinite(d.targetCellMass)) {
+            d.skippedInvalidMassCells = static_cast<std::uint64_t>(nc);
+            d.allGuardedCellsFeasible = false;
+            return d;
         }
     }
-    std::vector<std::size_t> idsScratch;
-    std::vector<double> oldMass;
-    std::vector<double> newMass;
+
+    std::vector<std::vector<std::size_t>> particlesByCell(static_cast<std::size_t>(nc));
+    {
+        MPCD_MASS_GUARD_PROFILE(d.profile, BuildParticlesByCell);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        const int c = depositWorkspace.cellId[i];
+        if (c < 0 || c >= nc) {
+            continue;
+        }
+        particlesByCell[static_cast<std::size_t>(c)].push_back(i);
+    }
+    }
 
     constexpr double eps = 1.0e-12;
     constexpr double energyEps = 1.0e-30;
@@ -1557,34 +1650,15 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
     d.velocityScaleMin = std::numeric_limits<double>::infinity();
     d.velocityScaleMax = 0.0;
 
+    {
+        MPCD_MASS_GUARD_PROFILE(d.profile, CellLoop);
     for (int c = 0; c < nc; ++c) {
         const std::size_t kk = static_cast<std::size_t>(c);
         if (!depositWorkspace.wetCell[kk]) {
             d.skippedDryCells += 1u;
             continue;
         }
-        const std::vector<std::size_t>* idsPtr = nullptr;
-        if (useCellParticleIndex) {
-            idsScratch.clear();
-            const std::uint64_t begin = depositWorkspace.cellParticleOffsets[kk];
-            const std::uint64_t end = depositWorkspace.cellParticleOffsets[kk + 1u];
-            idsScratch.reserve(static_cast<std::size_t>(end - begin));
-            for (std::uint64_t pp = begin; pp < end; ++pp) {
-                const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
-                if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
-                    continue;
-                }
-                const std::size_t pi = static_cast<std::size_t>(pi64);
-                if (!is_fluid_particle(state, pi)) {
-                    continue;
-                }
-                idsScratch.push_back(pi);
-            }
-            idsPtr = &idsScratch;
-        } else {
-            idsPtr = &particlesByCell[kk];
-        }
-        const std::vector<std::size_t>& ids = *idsPtr;
+        auto& ids = particlesByCell[kk];
         if (ids.empty()) {
             d.skippedEmptyCells += 1u;
             continue;
@@ -1606,7 +1680,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
         double minOld = std::numeric_limits<double>::infinity();
         double maxOld = -std::numeric_limits<double>::infinity();
         bool invalid = false;
-        oldMass.assign(ids.size(), 0.0);
+        std::vector<double> oldMass(ids.size(), 0.0);
         for (std::size_t j = 0; j < ids.size(); ++j) {
             const std::size_t i = ids[j];
             const double m = state.mass[i];
@@ -1658,7 +1732,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
             }
         }
         const double lambda = 0.5 * (lo + hi);
-        newMass.assign(ids.size(), 0.0);
+        std::vector<double> newMass(ids.size(), 0.0);
         double massAfter = 0.0;
         double pxMassOnly = 0.0;
         double pyMassOnly = 0.0;
@@ -1755,6 +1829,10 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
         }
     }
 
+    }
+
+    {
+        MPCD_MASS_GUARD_PROFILE(d.profile, Finalize);
     if (!std::isfinite(d.particleMassMinBefore)) {
         d.particleMassMinBefore = 0.0;
     }
@@ -1774,6 +1852,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
         d.momentumResidualRms = std::sqrt(momentumResidual2 * inv);
     }
     d.applied = d.cellsGuarded > 0u || d.particlesAdjusted > 0u;
+    }
     return d;
 }
 
@@ -1820,6 +1899,7 @@ void attach_resampling_mass_guard_diagnostics(
     diagnostics.firstMassGuardedCell = massGuardDiagnostics.firstGuardedCell;
     diagnostics.lastMassGuardedCell = massGuardDiagnostics.lastGuardedCell;
     diagnostics.massGuardAllCellsFeasible = massGuardDiagnostics.allGuardedCellsFeasible;
+    diagnostics.massGuardProfileSeconds = massGuardDiagnostics.profile.seconds;
 }
 
 void resize_weighted_real_fluid_deposit(WeightedRealFluidDepositWorkspace& ws,
