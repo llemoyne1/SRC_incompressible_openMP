@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
@@ -81,6 +82,18 @@ private:
     ScopedStepProfileTimer mpcdProfileTimer_##phaseName((profile), StepProfilePhaseIndex::phaseName)
 
 
+bool internal_profiles_enabled_0176() {
+    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+
+
 struct PostGuardDepositProfileAccumulator {
     std::string outputDir;
     std::uint64_t calls = 0u;
@@ -100,6 +113,9 @@ struct PostGuardDepositProfileAccumulator {
     void add(const std::string& out,
              const ResamplingPopulationGuardDiagnostics& populationGuard,
              const WeightedResamplingDiagnostics& postGuardDeposit) {
+        if (!internal_profiles_enabled_0176()) {
+            return;
+        }
         if (!out.empty()) {
             outputDir = out;
         }

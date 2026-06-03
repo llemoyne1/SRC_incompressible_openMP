@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <cmath>
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -35,6 +37,18 @@ int thread_id() {
     return 0;
 #endif
 }
+
+
+bool internal_profiles_enabled_0176() {
+    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
 
 
 inline void set_particle_role_preconditioned(ParticleState& state,
@@ -212,6 +226,9 @@ struct DepositProfileAccumulator {
     }
 
     ~DepositProfileAccumulator() {
+        if (!internal_profiles_enabled_0176()) {
+            return;
+        }
         if (outputDir.empty()) {
             return;
         }

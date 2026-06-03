@@ -10,6 +10,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +45,18 @@ int openmp_max_threads() {
     return 1;
 #endif
 }
+
+
+bool internal_profiles_enabled_0176() {
+    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
 
 
 void write_phase_profile_0163(const std::string& outputDir,
@@ -425,28 +438,33 @@ int main(int argc, char** argv) {
             }
         }
 
-        write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
-        write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
-        write_resampling_guard_profile_0169(params.outputDir,
-                                            populationGuardProfileSeconds, populationGuardProfileSteps,
-                                            populationGuardOverfullCandidateCells,
-                                            populationGuardUnderfullCandidateCells,
-                                            populationGuardOverfullEditedCells,
-                                            populationGuardUnderfullEditedCells,
-                                            populationGuardOverfullCandidateParticleRefs,
-                                            populationGuardUnderfullCandidateParticleRefs,
-                                            populationGuardOverfullScanPasses,
-                                            populationGuardUnderfullScanPasses,
-                                            populationGuardOverfullParticleRefsScanned,
-                                            populationGuardUnderfullParticleRefsScanned,
-                                            populationGuardOverfullEligibleParticleRefs,
-                                            populationGuardUnderfullEligibleParticleRefs,
-                                            populationGuardOverfullCandidatePopulationMax,
-                                            populationGuardUnderfullCandidatePopulationMax,
-                                            massGuardProfileSeconds, massGuardProfileSteps);
-        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/phase_profile_0163.csv";
-        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/q6_cg_profile_0163.csv";
-        std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/resampling_guard_profile_0169.csv";
+        if (internal_profiles_enabled_0176()) {
+            write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
+            write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
+            write_resampling_guard_profile_0169(params.outputDir,
+                                                populationGuardProfileSeconds, populationGuardProfileSteps,
+                                                populationGuardOverfullCandidateCells,
+                                                populationGuardUnderfullCandidateCells,
+                                                populationGuardOverfullEditedCells,
+                                                populationGuardUnderfullEditedCells,
+                                                populationGuardOverfullCandidateParticleRefs,
+                                                populationGuardUnderfullCandidateParticleRefs,
+                                                populationGuardOverfullScanPasses,
+                                                populationGuardUnderfullScanPasses,
+                                                populationGuardOverfullParticleRefsScanned,
+                                                populationGuardUnderfullParticleRefsScanned,
+                                                populationGuardOverfullEligibleParticleRefs,
+                                                populationGuardUnderfullEligibleParticleRefs,
+                                                populationGuardOverfullCandidatePopulationMax,
+                                                populationGuardUnderfullCandidatePopulationMax,
+                                                massGuardProfileSeconds, massGuardProfileSteps);
+            std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/phase_profile_0163.csv";
+            std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/q6_cg_profile_0163.csv";
+            std::cout << "\n[src_mpcd_base] wrote " << params.outputDir << "/resampling_guard_profile_0169.csv";
+        } else {
+            std::cout << "\n[src_mpcd_base] internal profile CSV disabled"
+                      << " (set MPCD_INTERNAL_PROFILES=1 to enable)";
+        }
         std::cout << "\n[src_mpcd_base] done\n";
         return 0;
     } catch (const std::exception& e) {
