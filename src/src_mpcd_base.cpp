@@ -6,6 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <string>
 #include <vector>
 
 
@@ -74,6 +79,101 @@ private:
 
 #define MPCD_PROFILE_PHASE(profile, phaseName) \
     ScopedStepProfileTimer mpcdProfileTimer_##phaseName((profile), StepProfilePhaseIndex::phaseName)
+
+
+struct PostGuardDepositProfileAccumulator {
+    std::string outputDir;
+    std::uint64_t calls = 0u;
+    std::uint64_t buildMutationPlanCalls = 0u;
+    std::uint64_t editedCells = 0u;
+    std::uint64_t candidateCells = 0u;
+    std::uint64_t candidateParticleRefs = 0u;
+    std::uint64_t scannedParticleRefs = 0u;
+    std::uint64_t eligibleParticleRefs = 0u;
+    std::uint64_t splitParticles = 0u;
+    std::uint64_t extractedParticles = 0u;
+    std::uint64_t fullDepositParticlesVisited = 0u;
+    std::uint64_t fullDepositFluidParticles = 0u;
+    std::uint64_t fullDepositCells = 0u;
+    std::array<double, ResamplingDepositProfilePhaseCount> depositSeconds{};
+
+    void add(const std::string& out,
+             const ResamplingPopulationGuardDiagnostics& populationGuard,
+             const WeightedResamplingDiagnostics& postGuardDeposit) {
+        if (!out.empty()) {
+            outputDir = out;
+        }
+        calls += 1u;
+        buildMutationPlanCalls += postGuardDeposit.depositProfileBuildMutationPlan ? 1u : 0u;
+        editedCells += populationGuard.overfullEditedCells + populationGuard.underfullEditedCells;
+        candidateCells += populationGuard.overfullCandidateCells + populationGuard.underfullCandidateCells;
+        candidateParticleRefs += populationGuard.overfullCandidateParticleRefs +
+                                 populationGuard.underfullCandidateParticleRefs;
+        scannedParticleRefs += populationGuard.overfullParticleRefsScanned +
+                               populationGuard.underfullParticleRefsScanned;
+        eligibleParticleRefs += populationGuard.overfullEligibleParticleRefs +
+                                populationGuard.underfullEligibleParticleRefs;
+        splitParticles += populationGuard.splitParticlesCreated;
+        extractedParticles += populationGuard.extractedParticles;
+        fullDepositParticlesVisited += postGuardDeposit.depositProfileParticlesVisited;
+        fullDepositFluidParticles += postGuardDeposit.depositProfileFluidParticles;
+        fullDepositCells += postGuardDeposit.depositProfileCells;
+        for (std::size_t i = 0; i < ResamplingDepositProfilePhaseCount; ++i) {
+            depositSeconds[i] += postGuardDeposit.depositProfileSeconds[i];
+        }
+    }
+
+    ~PostGuardDepositProfileAccumulator() {
+        if (outputDir.empty() || calls == 0u) {
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir) / "post_guard_profile_0173.csv";
+        std::ofstream out(path);
+        if (!out) {
+            return;
+        }
+        out << "group,phase,total_s,ms_per_call,percent_group_total,calls,value_total,value_per_call\n";
+        out << std::setprecision(17);
+        double total = 0.0;
+        for (double v : depositSeconds) {
+            total += v;
+        }
+        const double denom = static_cast<double>(calls);
+        for (std::size_t i = 0; i < ResamplingDepositProfilePhaseCount; ++i) {
+            const double value = depositSeconds[i];
+            const double percent = total > std::numeric_limits<double>::min() ? 100.0 * value / total : 0.0;
+            out << "post_guard_deposit," << resampling_deposit_profile_phase_name(i) << ','
+                << value << ',' << (1000.0 * value / denom) << ',' << percent << ','
+                << calls << ",0,0\n";
+        }
+        out << "post_guard_deposit,total_post_guard_deposit," << total << ','
+            << (1000.0 * total / denom) << ",100," << calls << ",0,0\n";
+
+        auto emit_meta = [&](const char* name, const std::uint64_t value) {
+            out << "metadata," << name << ",0,0,0," << calls << ',' << value << ','
+                << (static_cast<double>(value) / denom) << "\n";
+        };
+        emit_meta("post_guard_calls", calls);
+        emit_meta("post_guard_build_mutation_plan_calls", buildMutationPlanCalls);
+        emit_meta("post_guard_edited_cells_total", editedCells);
+        emit_meta("post_guard_candidate_cells_total", candidateCells);
+        emit_meta("post_guard_candidate_particle_refs_total", candidateParticleRefs);
+        emit_meta("post_guard_scanned_particle_refs_total", scannedParticleRefs);
+        emit_meta("post_guard_eligible_particle_refs_total", eligibleParticleRefs);
+        emit_meta("post_guard_split_particles_total", splitParticles);
+        emit_meta("post_guard_extracted_particles_total", extractedParticles);
+        emit_meta("post_guard_full_deposit_particles_visited_total", fullDepositParticlesVisited);
+        emit_meta("post_guard_full_deposit_fluid_particles_total", fullDepositFluidParticles);
+        emit_meta("post_guard_full_deposit_cells_total", fullDepositCells);
+    }
+};
+
+PostGuardDepositProfileAccumulator& post_guard_deposit_profile_accumulator() {
+    static PostGuardDepositProfileAccumulator acc;
+    return acc;
+}
 
 bool is_mass_renormalization_step(const SimulationParams& params, std::uint64_t step) {
     return params.resamplingMassRenormalizationPeriod > 0 &&
@@ -367,7 +467,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
                 params.resamplingExtractionEnable,
-                ResamplingDepositProfileContext::PostGuard);
+                ResamplingDepositProfileContext::PostGuard,
+                true);
+            post_guard_deposit_profile_accumulator().add(
+                params.outputDir, populationGuard, result.resampling);
         }
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingAttachFinalDiagnostics);

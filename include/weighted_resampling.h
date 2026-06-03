@@ -973,7 +973,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws,
                                                           bool buildMutationPlan = true,
-                                                          ResamplingDepositProfileContext profileContext = ResamplingDepositProfileContext::Generic);
+                                                          ResamplingDepositProfileContext profileContext = ResamplingDepositProfileContext::Generic,
+                                                          bool reuseExistingCellIds = false);
 
 // 0172 post-thermal refresh: after thermal renormalization, positions, roles,
 // masses, cellId, and classification masks are unchanged.  This routine updates
