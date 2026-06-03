@@ -40,13 +40,16 @@ int thread_id() {
 
 
 bool internal_profiles_enabled_0176() {
-    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-    if (v == nullptr || *v == '\0') {
-        return false;
-    }
-    const std::string s(v);
-    return !(s == "0" || s == "false" || s == "FALSE" ||
-             s == "off" || s == "OFF" || s == "no" || s == "NO");
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+        if (v == nullptr || *v == '\0') {
+            return false;
+        }
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
 }
 
 
@@ -132,11 +135,15 @@ class ScopedPopulationGuardProfileTimer {
 public:
     ScopedPopulationGuardProfileTimer(ResamplingPopulationGuardProfile& profile,
                                       const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
+        if (enabled_) {
+            t0_ = ResamplingProfileClock::now();
+        }
+    }
     ScopedPopulationGuardProfileTimer(const ScopedPopulationGuardProfileTimer&) = delete;
     ScopedPopulationGuardProfileTimer& operator=(const ScopedPopulationGuardProfileTimer&) = delete;
     ~ScopedPopulationGuardProfileTimer() {
-        if (phaseIndex_ < profile_.seconds.size()) {
+        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
             profile_.seconds[phaseIndex_] +=
                 std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
         }
@@ -144,18 +151,23 @@ public:
 private:
     ResamplingPopulationGuardProfile& profile_;
     std::size_t phaseIndex_;
-    ResamplingProfileClock::time_point t0_;
+    bool enabled_ = false;
+    ResamplingProfileClock::time_point t0_{};
 };
 
 class ScopedMassGuardProfileTimer {
 public:
     ScopedMassGuardProfileTimer(ResamplingMassGuardProfile& profile,
                                 const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
+        if (enabled_) {
+            t0_ = ResamplingProfileClock::now();
+        }
+    }
     ScopedMassGuardProfileTimer(const ScopedMassGuardProfileTimer&) = delete;
     ScopedMassGuardProfileTimer& operator=(const ScopedMassGuardProfileTimer&) = delete;
     ~ScopedMassGuardProfileTimer() {
-        if (phaseIndex_ < profile_.seconds.size()) {
+        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
             profile_.seconds[phaseIndex_] +=
                 std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
         }
@@ -163,7 +175,8 @@ public:
 private:
     ResamplingMassGuardProfile& profile_;
     std::size_t phaseIndex_;
-    ResamplingProfileClock::time_point t0_;
+    bool enabled_ = false;
+    ResamplingProfileClock::time_point t0_{};
 };
 
 #define MPCD_POP_GUARD_PROFILE(profile, phaseName) \
@@ -173,11 +186,15 @@ class ScopedDepositProfileTimer {
 public:
     ScopedDepositProfileTimer(std::array<double, ResamplingDepositProfilePhaseCount>& seconds,
                               const std::size_t phaseIndex)
-        : seconds_(seconds), phaseIndex_(phaseIndex), t0_(ResamplingProfileClock::now()) {}
+        : seconds_(seconds), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
+        if (enabled_) {
+            t0_ = ResamplingProfileClock::now();
+        }
+    }
     ScopedDepositProfileTimer(const ScopedDepositProfileTimer&) = delete;
     ScopedDepositProfileTimer& operator=(const ScopedDepositProfileTimer&) = delete;
     ~ScopedDepositProfileTimer() {
-        if (phaseIndex_ < seconds_.size()) {
+        if (enabled_ && phaseIndex_ < seconds_.size()) {
             seconds_[phaseIndex_] +=
                 std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
         }
@@ -185,7 +202,8 @@ public:
 private:
     std::array<double, ResamplingDepositProfilePhaseCount>& seconds_;
     std::size_t phaseIndex_;
-    ResamplingProfileClock::time_point t0_;
+    bool enabled_ = false;
+    ResamplingProfileClock::time_point t0_{};
 };
 
 #define MPCD_MASS_GUARD_PROFILE(profile, phaseName) \
@@ -209,6 +227,9 @@ struct DepositProfileAccumulator {
              std::uint64_t nParticles,
              std::uint64_t nFluid,
              std::uint64_t nCells) {
+        if (!internal_profiles_enabled_0176()) {
+            return;
+        }
         const std::size_t idx = static_cast<std::size_t>(context);
         if (idx >= calls.size()) {
             return;

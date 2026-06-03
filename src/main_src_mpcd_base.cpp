@@ -48,13 +48,16 @@ int openmp_max_threads() {
 
 
 bool internal_profiles_enabled_0176() {
-    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-    if (v == nullptr || *v == '\0') {
-        return false;
-    }
-    const std::string s(v);
-    return !(s == "0" || s == "false" || s == "FALSE" ||
-             s == "off" || s == "OFF" || s == "no" || s == "NO");
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+        if (v == nullptr || *v == '\0') {
+            return false;
+        }
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
 }
 
 
@@ -281,6 +284,7 @@ int main(int argc, char** argv) {
 
         const int ompMaxThreads = openmp_max_threads();
         const int ompActiveThreads = openmp_active_threads();
+        const bool collectInternalProfiles = internal_profiles_enabled_0176();
 
         std::filesystem::create_directories(params.outputDir);
         const std::filesystem::path paramsCopy = std::filesystem::path(params.outputDir) / "params_used.kv";
@@ -365,48 +369,50 @@ int main(int argc, char** argv) {
             const mpcd::StepResult stepResult = mpcd::run_src_mpcd_base_step(
                 state, params, grid, static_cast<std::uint64_t>(step), workspace,
                 collectResamplingDiagnostics);
-            for (std::size_t phase = 0; phase < mpcd::StepProfilePhaseCount; ++phase) {
-                phaseProfileSeconds[phase] += stepResult.profile.seconds[phase];
-            }
-            ++phaseProfileSteps;
-            if (stepResult.q6.applied) {
-                for (std::size_t phase = 0; phase < mpcd::Q6ProjectionProfilePhaseCount; ++phase) {
-                    q6ProfileSeconds[phase] += stepResult.q6.profile.seconds[phase];
+            if (collectInternalProfiles) {
+                for (std::size_t phase = 0; phase < mpcd::StepProfilePhaseCount; ++phase) {
+                    phaseProfileSeconds[phase] += stepResult.profile.seconds[phase];
                 }
-                for (std::size_t phase = 0; phase < mpcd::EllipticProjectionProfilePhaseCount; ++phase) {
-                    ellipticProfileSeconds[phase] += stepResult.q6.ellipticProfile.seconds[phase];
+                ++phaseProfileSteps;
+                if (stepResult.q6.applied) {
+                    for (std::size_t phase = 0; phase < mpcd::Q6ProjectionProfilePhaseCount; ++phase) {
+                        q6ProfileSeconds[phase] += stepResult.q6.profile.seconds[phase];
+                    }
+                    for (std::size_t phase = 0; phase < mpcd::EllipticProjectionProfilePhaseCount; ++phase) {
+                        ellipticProfileSeconds[phase] += stepResult.q6.ellipticProfile.seconds[phase];
+                    }
+                    ++q6ProfileSteps;
                 }
-                ++q6ProfileSteps;
-            }
-            if (stepResult.resampling.populationGuardAttempted) {
-                for (std::size_t phase = 0; phase < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++phase) {
-                    populationGuardProfileSeconds[phase] += stepResult.resampling.populationGuardProfileSeconds[phase];
+                if (stepResult.resampling.populationGuardAttempted) {
+                    for (std::size_t phase = 0; phase < mpcd::ResamplingPopulationGuardProfilePhaseCount; ++phase) {
+                        populationGuardProfileSeconds[phase] += stepResult.resampling.populationGuardProfileSeconds[phase];
+                    }
+                    populationGuardOverfullCandidateCells += stepResult.resampling.populationGuardOverfullCandidateCells;
+                    populationGuardUnderfullCandidateCells += stepResult.resampling.populationGuardUnderfullCandidateCells;
+                    populationGuardOverfullEditedCells += stepResult.resampling.populationGuardOverfullEditedCells;
+                    populationGuardUnderfullEditedCells += stepResult.resampling.populationGuardUnderfullEditedCells;
+                    populationGuardOverfullCandidateParticleRefs += stepResult.resampling.populationGuardOverfullCandidateParticleRefs;
+                    populationGuardUnderfullCandidateParticleRefs += stepResult.resampling.populationGuardUnderfullCandidateParticleRefs;
+                    populationGuardOverfullScanPasses += stepResult.resampling.populationGuardOverfullScanPasses;
+                    populationGuardUnderfullScanPasses += stepResult.resampling.populationGuardUnderfullScanPasses;
+                    populationGuardOverfullParticleRefsScanned += stepResult.resampling.populationGuardOverfullParticleRefsScanned;
+                    populationGuardUnderfullParticleRefsScanned += stepResult.resampling.populationGuardUnderfullParticleRefsScanned;
+                    populationGuardOverfullEligibleParticleRefs += stepResult.resampling.populationGuardOverfullEligibleParticleRefs;
+                    populationGuardUnderfullEligibleParticleRefs += stepResult.resampling.populationGuardUnderfullEligibleParticleRefs;
+                    populationGuardOverfullCandidatePopulationMax = std::max(
+                        populationGuardOverfullCandidatePopulationMax,
+                        stepResult.resampling.populationGuardOverfullCandidatePopulationMax);
+                    populationGuardUnderfullCandidatePopulationMax = std::max(
+                        populationGuardUnderfullCandidatePopulationMax,
+                        stepResult.resampling.populationGuardUnderfullCandidatePopulationMax);
+                    ++populationGuardProfileSteps;
                 }
-                populationGuardOverfullCandidateCells += stepResult.resampling.populationGuardOverfullCandidateCells;
-                populationGuardUnderfullCandidateCells += stepResult.resampling.populationGuardUnderfullCandidateCells;
-                populationGuardOverfullEditedCells += stepResult.resampling.populationGuardOverfullEditedCells;
-                populationGuardUnderfullEditedCells += stepResult.resampling.populationGuardUnderfullEditedCells;
-                populationGuardOverfullCandidateParticleRefs += stepResult.resampling.populationGuardOverfullCandidateParticleRefs;
-                populationGuardUnderfullCandidateParticleRefs += stepResult.resampling.populationGuardUnderfullCandidateParticleRefs;
-                populationGuardOverfullScanPasses += stepResult.resampling.populationGuardOverfullScanPasses;
-                populationGuardUnderfullScanPasses += stepResult.resampling.populationGuardUnderfullScanPasses;
-                populationGuardOverfullParticleRefsScanned += stepResult.resampling.populationGuardOverfullParticleRefsScanned;
-                populationGuardUnderfullParticleRefsScanned += stepResult.resampling.populationGuardUnderfullParticleRefsScanned;
-                populationGuardOverfullEligibleParticleRefs += stepResult.resampling.populationGuardOverfullEligibleParticleRefs;
-                populationGuardUnderfullEligibleParticleRefs += stepResult.resampling.populationGuardUnderfullEligibleParticleRefs;
-                populationGuardOverfullCandidatePopulationMax = std::max(
-                    populationGuardOverfullCandidatePopulationMax,
-                    stepResult.resampling.populationGuardOverfullCandidatePopulationMax);
-                populationGuardUnderfullCandidatePopulationMax = std::max(
-                    populationGuardUnderfullCandidatePopulationMax,
-                    stepResult.resampling.populationGuardUnderfullCandidatePopulationMax);
-                ++populationGuardProfileSteps;
-            }
-            if (stepResult.resampling.massGuardAttempted) {
-                for (std::size_t phase = 0; phase < mpcd::ResamplingMassGuardProfilePhaseCount; ++phase) {
-                    massGuardProfileSeconds[phase] += stepResult.resampling.massGuardProfileSeconds[phase];
+                if (stepResult.resampling.massGuardAttempted) {
+                    for (std::size_t phase = 0; phase < mpcd::ResamplingMassGuardProfilePhaseCount; ++phase) {
+                        massGuardProfileSeconds[phase] += stepResult.resampling.massGuardProfileSeconds[phase];
+                    }
+                    ++massGuardProfileSteps;
                 }
-                ++massGuardProfileSteps;
             }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
@@ -438,7 +444,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (internal_profiles_enabled_0176()) {
+        if (collectInternalProfiles) {
             write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
             write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);
             write_resampling_guard_profile_0169(params.outputDir,

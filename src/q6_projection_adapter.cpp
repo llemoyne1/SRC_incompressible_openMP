@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <numeric>
@@ -21,6 +22,19 @@ namespace {
 
 
 using Q6ProfileClock = std::chrono::steady_clock;
+
+bool internal_profiles_enabled_0176() {
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+        if (v == nullptr || *v == '\0') {
+            return false;
+        }
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
+}
 
 struct Q6ProfilePhaseIndex {
     enum : std::size_t {
@@ -51,13 +65,17 @@ static_assert(Q6ProjectionProfilePhaseCount == 18u,
 class ScopedQ6ProfileTimer {
 public:
     ScopedQ6ProfileTimer(Q6ProjectionProfile& profile, const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), t0_(Q6ProfileClock::now()) {}
+        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
+        if (enabled_) {
+            t0_ = Q6ProfileClock::now();
+        }
+    }
 
     ScopedQ6ProfileTimer(const ScopedQ6ProfileTimer&) = delete;
     ScopedQ6ProfileTimer& operator=(const ScopedQ6ProfileTimer&) = delete;
 
     ~ScopedQ6ProfileTimer() {
-        if (phaseIndex_ < profile_.seconds.size()) {
+        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
             profile_.seconds[phaseIndex_] +=
                 std::chrono::duration<double>(Q6ProfileClock::now() - t0_).count();
         }
@@ -66,7 +84,8 @@ public:
 private:
     Q6ProjectionProfile& profile_;
     std::size_t phaseIndex_ = 0u;
-    Q6ProfileClock::time_point t0_;
+    bool enabled_ = false;
+    Q6ProfileClock::time_point t0_{};
 };
 
 #define MPCD_Q6_PROFILE(profile, phaseName) \

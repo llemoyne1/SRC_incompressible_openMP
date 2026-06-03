@@ -58,16 +58,22 @@ struct StepProfilePhaseIndex {
 
 static_assert(StepProfilePhaseCount == 31u, "StepProfile phase count mismatch");
 
+bool internal_profiles_enabled_0176();
+
 class ScopedStepProfileTimer {
 public:
     ScopedStepProfileTimer(StepProfile& profile, const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), t0_(ProfileClock::now()) {}
+        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
+        if (enabled_) {
+            t0_ = ProfileClock::now();
+        }
+    }
 
     ScopedStepProfileTimer(const ScopedStepProfileTimer&) = delete;
     ScopedStepProfileTimer& operator=(const ScopedStepProfileTimer&) = delete;
 
     ~ScopedStepProfileTimer() {
-        if (phaseIndex_ < profile_.seconds.size()) {
+        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
             profile_.seconds[phaseIndex_] += std::chrono::duration<double>(ProfileClock::now() - t0_).count();
         }
     }
@@ -75,7 +81,8 @@ public:
 private:
     StepProfile& profile_;
     std::size_t phaseIndex_;
-    ProfileClock::time_point t0_;
+    bool enabled_ = false;
+    ProfileClock::time_point t0_{};
 };
 
 #define MPCD_PROFILE_PHASE(profile, phaseName) \
@@ -83,13 +90,16 @@ private:
 
 
 bool internal_profiles_enabled_0176() {
-    const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-    if (v == nullptr || *v == '\0') {
-        return false;
-    }
-    const std::string s(v);
-    return !(s == "0" || s == "false" || s == "FALSE" ||
-             s == "off" || s == "OFF" || s == "no" || s == "NO");
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
+        if (v == nullptr || *v == '\0') {
+            return false;
+        }
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
 }
 
 
