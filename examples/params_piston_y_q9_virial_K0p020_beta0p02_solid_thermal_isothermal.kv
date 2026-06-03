@@ -1,0 +1,80 @@
+# Piston Q9 virial sweep case: Kvirial=0.02, virialBeta=0.02.
+# Moving active-domain piston with Q6 + filtered Q9 + optional virial EOS kick.
+# The virial block follows the validated MATLAB structure:
+#   Pvir = Kvirial * (rho - rhoEOSRef)
+#   Pdrive = Pkin + Kvirial * (rho - rhoDriveRef)
+#   du = - virialBeta * dt/rhoKick * grad(Pdrive)
+# followed by exact global momentum correction and the usual final thermostat.
+inputState = initial_state_active_y095.smpcd
+outputDir = runs/piston_y_q9_virial_K0p020_beta0p02_solid_thermal_isothermal
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+fluidYTop0 = 0.95
+fluidYTopVelocity = -0.001
+
+dt = 0.001
+nSteps = 50000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+method = q9_virial
+projectionOperator = channel_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+
+q9MassFluxProjectionEnable = true
+q9MassFluxProjectionStrength = 1.0
+q9DensityRelaxationBeta = 0.0005
+q9TargetFilter = elliptic_lowpass
+q9LowKMaxIndex = 2
+q9EllipticLowPassPasses = 1
+q9MomentumCorrectionEnable = true
+
+virialDiagnosticsEnable = true
+virialKickEnable = true
+Kvirial = 0.02
+virialBeta = 0.02
+virialRhoEOSRefMode = initial_physical_density
+virialRhoUniformMode = reference_gamma_current_volume
+virialDriveTargetMode = current_uniform
+virialRhoKickMode = uniform_now
+virialRhoKickMinFraction = 0.1
+virialMomentumCorrectionEnable = true
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 500
+dumpStateEvery = 5000
+numThreads = 4

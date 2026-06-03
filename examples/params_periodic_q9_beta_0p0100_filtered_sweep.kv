@@ -1,0 +1,40 @@
+outputDir = runs/periodic_q9_beta_0p0100_filtered_sweep
+inputState = initial_state_q9_sweep_32x32_g20.smpcd
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 5000
+summaryEvery = 50
+dumpStateEvery = 0
+numThreads = 4
+
+bcX = periodic
+bcY = periodic
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+method = q9
+projectionOperator = periodic_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+
+q9MassFluxProjectionEnable = true
+q9MassFluxProjectionStrength = 1.0
+q9DensityRelaxationBeta = 0.0100
+q9TargetFilter = elliptic_lowpass
+q9LowKMaxIndex = 2
+q9EllipticLowPassPasses = 1
+q9MomentumCorrectionEnable = true
+
+kBT = 0.01
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3

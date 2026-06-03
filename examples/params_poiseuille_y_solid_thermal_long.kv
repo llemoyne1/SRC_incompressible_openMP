@@ -1,0 +1,47 @@
+# Long Poiseuille validation: periodic-x channel, generic solid thermal y-walls.
+# Use this run to validate the solid_thermal wall model and calibrate viscosity.
+inputState = initial_state.smpcd
+outputDir = runs/poiseuille_y_solid_thermal_long
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 50000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.005
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4

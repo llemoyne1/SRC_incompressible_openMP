@@ -1,0 +1,66 @@
+# 0061b CUDA-like driven open-channel diagnostic.
+# This is not a physical inlet validation by itself: keepMeanFlow applies a
+# spatially uniform velocity correction so the open boundary is exercised on a
+# short run, as in the legacy CUDA VK path.
+
+inputState = initial_state_open_channel_64x32_g20_kbt0p01.smpcd
+outputDir = runs/open_channel_classic_inlet_outlet_keepmean_64x32
+
+Lx = 2.0
+Ly = 1.0
+Nx = 64
+Ny = 32
+
+dt = 0.001
+nSteps = 10000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+keepMeanFlowEnable = true
+targetMeanUx = 0.05
+targetMeanUy = 0.0
+
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+inletUxLeft = 0.05
+inletUyLeft = 0.0
+inletKBT = -1.0
+inletThermalNoise = 0.0
+inletInjectionMode = cuda_recycle
+inletSlabCells = 1.0
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+projectionEnable = false
+q9MassFluxProjectionEnable = false
+virialDiagnosticsEnable = false
+virialKickEnable = false
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4

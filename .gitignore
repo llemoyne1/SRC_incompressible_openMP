@@ -46,3 +46,14 @@ Thumbs.db
 
 # Fichiers/répertoires locaux non versionnés
 CMakeLists.txt
+
+# Archives / local backups
+*.zip
+
+# Windows metadata files sometimes created under WSL/Linux
+*:Zone.Identifier
+*Zone.Identifier
+
+# Generated SRC/MPCD particle state files
+*.smpcd
+*.patch

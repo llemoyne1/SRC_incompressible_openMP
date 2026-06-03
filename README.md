@@ -1,797 +1,652 @@
-SRC/MPCD incompressible — version OpenMP de référence
-
-Ce dépôt contient une version de référence d’un code SRC/MPCD pour l’étude d’écoulements liquides quasi incompressibles, actuellement centré sur un écoulement de Poiseuille périodique en direction longitudinale, avec forçage volumique, murs thermalisants en direction transverse, redistribution incompressible de particules, fermeture liquide de type pression effective, et parallélisation OpenMP de la redistribution par tuiles.
-
-L’objectif principal du dépôt est de conserver une base de développement reproductible :
-
-préparation MATLAB des cas tests et des états initiaux ;
-
-sérialisation stricte des paramètres et états particulaires vers le C++ ;
-
-exécution C++/OpenMP du schéma SRC/MPCD ;
-
-validation progressive par tranches ;
-
-diagnostics de conservation, homogénéité d’occupation, débit, énergie, fermeture liquide et performance OpenMP ;
-
-conservation des scripts historiques ayant servi aux étapes intermédiaires de validation.
-
-La branche main doit être considérée comme une branche de référence complète, incluant les scripts de validation intermédiaires. Les développements futurs plus spécialisés, par exemple l’adaptation à un cylindre et à une allée de von Kármán, devraient partir d’une branche séparée afin de préserver cet historique.
+# SRC/MPCD C++ OpenMP — resampling baseline
 
-1. Organisation du dépôt
+This branch is a deliberately reduced OpenMP baseline for porting the weighted
+resampling core validated in the MATLAB prototype.  The active solver keeps the
+smallest useful hydrodynamic core:
 
-SRC_incompressible_openMP/
-├── include/
-│   ├── boundary_conditions.h
-│   ├── common_grid.h
-│   ├── dump_io.h
-│   ├── liquid_closure.h
-│   ├── params_io.h
-│   ├── srd_collision.h
-│   ├── state_io.h
-│   ├── types.h
-│   ├── zone_pass.h
-│   └── zone_pass_openmp.h
-│
-├── src/
-│   ├── boundary_conditions.cpp
-│   ├── common_grid.cpp
-│   ├── dump_io.cpp
-│   ├── liquid_closure.cpp
-│   ├── params_io.cpp
-│   ├── srd_collision.cpp
-│   ├── state_io.cpp
-│   ├── zone_pass.cpp
-│   ├── zone_pass_openmp.cpp
-│   ├── main_benchmark_poiseuille.cpp
-│   ├── main_benchmark_poiseuille_openmp.cpp
-│   ├── main_benchmark_poiseuille_openmp_profiled.cpp
-│   ├── main_benchmark_poiseuille_openmp_profiled_closure_omp.cpp
-│   ├── main_benchmark_poiseuille_openmp_profiled_refbuild_omp.cpp
-│   ├── main_benchmark_poiseuille_openmp_profiled_shifted_profiled.cpp
-│   ├── main_step01_stream_bc_collision.cpp
-│   ├── main_step02_zone_pass.cpp
-│   ├── main_step03_double_zone_pass.cpp
-│   ├── main_step04_liquid_closure.cpp
-│   ├── main_step05_full_step.cpp
-│   ├── main_step06_openmp_base_validate.cpp
-│   ├── main_step07_openmp_double_validate.cpp
-│   ├── main_step08_openmp_full_validate.cpp
-│   ├── main_step08_openmp_full_validate_sharedref.cpp
-│   └── main_step09_openmp_full_validate_syncserial.cpp
-│
-├── matlab/
-│   ├── prepare_benchmark_poiseuille_equal_openmp_profiled_shifted.m
-│   ├── prepare_benchmark_poiseuille_equal_openmp_profiled_shifted_run_simple.m
-│   ├── build_benchmark_poiseuille_params_equal.m
-│   ├── build_tranche1_params.m
-│   ├── build_tranche2_params.m
-│   ├── build_tranche4_params.m
-│   ├── build_tranche5_params.m
-│   ├── build_ad_hoc_state_uniform.m
-│   ├── write_params_kv.m
-│   ├── write_state_bin.m
-│   ├── read_params_kv.m
-│   ├── read_state_bin.m
-│   ├── read_cellfields_bin.m
-│   ├── compare_*.m
-│   ├── process_*.m
-│   └── prepare_*.m
-│
-├── .gitignore
-└── README.txt
+- classical compressible SRC/MPCD: `method = classic`;
+- Q6 velocity projection: `method = q6` or `projectionEnable = true`;
+- periodic, solid-wall and inlet/outlet particle boundary conditions;
+- wall virtual particles for no-slip/thermal wall coupling;
+- analytic immersed solids, including circle and rectangle/backward-step masks;
+- mass-aware cell thermostat;
+- runtime summaries and `.smpcd` state dumps.
 
-Le dépôt contient volontairement plusieurs exécutables main_* et plusieurs scripts MATLAB historiques. Ils correspondent aux différentes étapes de construction et de validation de la méthode : streaming + conditions limites + collision, redistribution par zone, double passe tuilée, fermeture liquide, validation OpenMP, puis benchmark Poiseuille profilé.
+Q9 mass-flux projection and the optional virial/EOS pressure kick are not active
+on this branch.  The executable now rejects `method = q9`, `method = q9_virial`
+and Q9/virial parameter keys.  Their source files should be removed from the
+branch with the cleanup commands documented in `doc/README_0110_OPENMP_RESAMPLING_MINIMAL_SRC_Q6_CORE.md`.
 
-2. Dépendances
+## Build
 
-2.1. C++ / OpenMP
+```bash
+./scripts/build_src_mpcd_base.sh
+```
 
-Le code C++ utilise :
+The build creates:
 
-un compilateur C++ moderne, typiquement g++ ou clang++ ;
+```text
+build/src_mpcd_base
+build/validate_elliptic_projection
+```
 
-le standard C++17 ou compatible ;
+Run the elliptic-core validation with:
 
-OpenMP pour les versions parallèles ;
+```bash
+./build/validate_elliptic_projection
+```
 
-un environnement Linux ou WSL recommandé.
+## Minimal smoke validation
 
-Exemple typique :
+A self-contained smoke script generates a small `.smpcd` state with Python,
+runs a short periodic classical SRC case, then runs the same case with Q6:
 
-g++ --version
+```bash
+./scripts/run_resampling_minimal_src_q6_smoke_0110.sh
+```
 
-et, pour OpenMP :
+Expected checks:
 
-g++ -fopenmp --version
+```text
+classic run completes
+q6 run completes
+summary_runtime.csv contains no q9* or virial* columns
+q6DivAfterProjectedFluxRms is finite and small in the q6 summary
+```
 
-2.2. MATLAB
+## Supported method keys
 
-MATLAB est utilisé pour :
+```text
+```
 
-construire les structures de paramètres ;
+For Q6:
 
-générer les états initiaux particulaires ;
+```text
+projectionOperator = periodic_fv_cg | channel_fv_cg | auto_fv_cg | elliptic_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+q6ProjectionStrength = 1.0
+projectionMomentumCorrectionEnable = true
+```
 
-écrire les fichiers binaires lus par le C++ ;
+For immersed solids with Q6, keep the validated mask path:
 
-générer des scripts bash de lancement ;
+```text
+immersedSolidEnable = true
+projectionImmersedSolidMaskEnable = true
+projectionImmersedSolidCloseCutFaces = true
+```
 
-comparer les sorties C++ avec les références MATLAB ;
+Moving immersed solids are intentionally rejected when the Q6 mask is active.
 
-post-traiter les métriques de benchmark et de scaling OpenMP.
+## Why this reduction exists
 
-Aucune toolbox spécialisée n’est supposée indispensable pour le cœur de préparation des cas simples ; les scripts de post-traitement peuvent toutefois utiliser des fonctions de tracé, tableaux, lecture/écriture de fichiers et manipulation de structures.
+The weighted-resampling port should first target a clean core:
 
-2.3. Organisation locale
+```text
+streaming
+particle boundary conditions
+immersed-solid reflection
+weighted SRC collision
+Q6 projection
+thermostat
+diagnostics
+```
 
-Les builds, fichiers binaires d’entrée/sortie, dumps et résultats lourds ne doivent pas être versionnés. Le .gitignore ignore notamment :
+This avoids mixing the new resampling logic with the older Q9/virial liquid
+closure.  The next patches can add particle roles, real-fluid weighted deposit,
+free-pool infrastructure, local extraction/insertion and mass/momentum remap on
+top of this reduced baseline.
 
-build/
-build_*/
-cmake-build-*/
-*.o
-*.a
-*.so
-*.exe
-*.out
-*.bin
-runs/
-results/
-outputs/
-dump/
-dumps/
-slurm-*.out
-*.log
+## Resampling branch milestone 0111: particle roles
 
-Dans l’état actuel, CMakeLists.txt est traité comme local/non versionné. Si une configuration CMake stable est ajoutée plus tard, cette règle devra être revue.
+The `openMP-resampling` branch now distinguishes particle `type` from particle
+`role`. `type` remains the physical/material species identifier; `role` is the
+algorithmic state used by the future weighted-resampling core:
 
-3. Modèle physique et numérique
+```text
+Inactive = 0, Fluid = 1, Latent = 2
+```
 
-3.1. Méthode SRC/MPCD
+Legacy `.smpcd` V1 states are still readable and are normalized as all `Fluid`.
+New dumps are emitted as `.smpcd` V2 with an explicit role array. Current fluid
+operators act only on `Fluid` particles; `Latent` and `Inactive` slots are stored
+but dormant. See `doc/README_0111_PARTICLE_ROLES_MASKS.md`.
 
-Le code implémente une dynamique particulaire de type SRC/MPCD. L’état particulaire contient au minimum :
+Validation:
 
-les positions x, stockées sous forme intercalée [x1,y1,x2,y2,...] côté C++ ;
+```bash
+./scripts/run_particle_roles_smoke_0111.sh
+```
 
-les vitesses v, stockées de façon analogue ;
+### 0112 — weighted real-fluid deposit diagnostics
 
-un type particulaire type, utilisé pour préserver une interface commune avec des cas plus généraux ;
+The branch now includes a first non-mutating resampling deposit:
 
-une position initiale ou de référence r0, utile pour certains diagnostics ou extensions.
+```text
+WeightedRealFluidDepositWorkspace
+```
 
-Un pas de temps complet combine les opérations suivantes :
+It accumulates per cell, using only particles with `role=Fluid`:
 
-application des forces volumiques ;
+```text
+N_c, M_c, P_x,c, P_y,c, U_x,c, U_y,c
+```
 
-streaming particulaire ;
+It deliberately excludes wall virtual particles and immersed-solid virtual
+particles, unlike the SRC collision effective deposit.  The runtime summary now
+contains `resamp*` diagnostics, including `resampMRelRms` and
+`resampParticleMassRelStd`.  Validate with:
 
-conditions limites ;
+```bash
+./scripts/run_weighted_resampling_deposit_smoke_0112.sh
+```
 
-collision SRC/SRD avec décalage aléatoire de la grille de collision ;
+See `doc/README_0112_WEIGHTED_REAL_FLUID_DEPOSIT.md`.
 
-redistribution incompressible des particules ;
+### Patch 0113 — resampling inactive pool/free-list
 
-fermeture liquide et correction de vitesse ;
+The resampling branch now rebuilds a passive particle pool from particle roles:
+`Fluid`, `Latent`, and `Inactive`.  `Inactive` slots form the future free-list for
+particle insertion, while `Latent` slots are tracked separately and are not treated
+as free.  This patch remains diagnostic/passive: it does not activate, deactivate,
+insert, extract, or remap particles.  See
+`doc/README_0113_RESAMPLING_INACTIVE_POOL.md`.
 
-diagnostics et dumps éventuels.
+### Patch 0114 — wet/dry and poor/rich cell classification
 
-3.2. Cas Poiseuille actuel
+Patch 0114 adds passive cell masks for the future resampling core:
 
-Le cas benchmark actuel correspond à un écoulement de Poiseuille dans un domaine rectangulaire, avec :
+```text
+activeCell, wetCell, dryCell, poorCell, richCell, targetBandCell
+```
 
-caseType        = poiseuille
-Lx              = 10
-Ly              = 10
-Nx              = 50
-Ny              = 50
-gamma           = 20
-n               = gamma * Nx * Ny = 50000
-dt              = 5e-3
-alphaDeg        = 170
-kBT             = 1
-bodyForceX      = 0.1
-g               = 0
-boundary_left   = periodic
-boundary_right  = periodic
-boundary_bottom = thermalize
-boundary_top    = thermalize
+The default wet-mask mode is `active_domain`, so a void pocket inside the
+active fluid domain is classified as a poor wet cell rather than ignored as dry.
+The optional `occupied` mode is reserved for later injection/free-surface tests.
 
-Les valeurs ci-dessus correspondent au benchmark build_benchmark_poiseuille_params_equal.m, aligné sur une référence MATLAB exportée historiquement.
+Smoke test:
 
-Le forçage bodyForceX entraîne l’écoulement longitudinal. Les murs inférieur et supérieur sont thermalisants. Les directions gauche/droite sont périodiques.
+```bash
+./scripts/run_resampling_cell_classification_smoke_0114.sh
+```
 
-4. Redistribution incompressible
+Expected diagnostic core:
 
-4.1. Objectif
+```text
+wet=32 dry=0 poor=2 rich=1 emptyWet=1 targetBand=29
+```
 
-La redistribution vise à imposer une quasi-incompressibilité en contrôlant localement le nombre de particules par cellule. Le paramètre central est :
+See `doc/README_0114_RESAMPLING_CELL_CLASSIFICATION.md`.
 
-gamma = nombre cible moyen de particules par cellule
+### Patch 0115 — passive donor/receiver candidate lists
 
-Une cellule est considérée hors bande si son occupation devient trop faible ou trop élevée par rapport à gamma. Les seuils sont pilotés par :
+Patch 0115 turns the 0114 masks into deterministic passive lists for the future
+resampling operator:
 
-coef
-highMode
-lowMode
-lowThrBulkOverride
-maxRedistribPasses
-enableMomentumCorrectionPostRedistribution
+```text
+receiverPoorCells      = wet cells below the poor threshold
+donorRichCells         = wet cells above the rich threshold
+emptyWetReceiverCells  = poor wet cells with N_c = 0
+```
 
-L’idée générale est de déplacer localement des particules entre cellules trop remplies et cellules déficitaires tout en limitant les artefacts de densité et en corrigeant autant que possible l’effet sur la quantité de mouvement.
+The patch also reports deficit/excess diagnostics relative to
+`resamplingTargetCellMass`, plus a lower-bound pool sufficiency flag
+`resampPoolCanSeedReceivers`.  No particle is moved and the free-list is not
+consumed.
 
-4.2. Restrictions actuelles
+Smoke test:
 
-La version tuilée/OpenMP est conçue pour les cas liquides à volume fixe, sans surface libre active :
+```bash
+./scripts/run_resampling_candidate_lists_smoke_0115.sh
+```
 
-noSurfaceCase = true
-redistributionEnableSurfaceTopology = false
-redistributionWallWettingEnabled = false
-useInterfaceVelocityReorientation = false
+Expected diagnostic core:
 
-Cela signifie que les cas avec surface libre, mouillage, piston ou géométrie mobile ne sont pas l’objectif de cette version de référence. Ils doivent être traités plus tard avec une extension explicite de la logique de redistribution et de frontière.
+```text
+receivers=2 donors=1 emptyReceivers=1 deficit=7 excess=4 potential=4 poolCanSeed=1
+```
 
-5. Redistribution par tuiles et double passe décalée
+See `doc/README_0115_RESAMPLING_CANDIDATE_LISTS.md`.
 
-5.1. Motivation
+### Patch 0116 — passive local donor/receiver transfer plan
 
-Une redistribution globale sur tout le domaine est difficile à paralléliser efficacement. La stratégie utilisée ici consiste à découper le domaine en zones rectangulaires indépendantes. Chaque zone traite localement les particules dont elle est responsable.
+Patch 0116 keeps the candidate lists passive but converts them into a
+non-mutating local transfer plan.  All donor/receiver cell pairs are sorted by
+periodic-aware grid distance; the planner greedily assigns the minimum of donor
+excess and receiver deficit.
 
-Cette approche prépare le passage à une parallélisation plus large :
+The plan records only cell-level intentions:
 
-OpenMP intra-nœud ;
+```text
+resampTransferPairs
+resampPlannedTransferMass
+resampRemainingReceiverDeficitAfterPlan
+resampRemainingDonorExcessAfterPlan
+resampTransferMeanCellDistance
+resampTransferMaxCellDistance
+```
 
-puis éventuellement CUDA ou MPI ;
+No particle is moved, no mass is changed, no role is changed and the inactive
+pool is not consumed.
 
-tout en gardant une méthode proche de la référence MATLAB.
+Smoke test:
 
-5.2. Paramètres de tuilage
+```bash
+./scripts/run_resampling_transfer_plan_smoke_0116.sh
+```
 
-Les paramètres principaux sont :
+Expected diagnostic core:
 
-useZoneRedistribution = true
-zoneTileNx            = 25
-zoneTileNy            = 25
-zoneUseShiftedSecondPass = true
-zonePassthroughMode   = false
-zoneSingleFullDomainMode = false
+```text
+transferPairs=2 planned=4 remainingReceiver=3 remainingDonor=0 coverage=0.5714285714285714
+```
 
-Dans le benchmark actuel, avec Nx = Ny = 50 et zoneTileNx = zoneTileNy = 25, le domaine est découpé en tuiles de 25 cellules par 25 cellules pour la passe de base.
+See `doc/README_0116_RESAMPLING_TRANSFER_PLAN.md`.
 
-5.3. Double passe : base puis shifted
+### Patch 0117 — passive donor particle selection
 
-Pour réduire les artefacts de couture entre tuiles, la redistribution est appliquée en deux temps :
+Patch 0117 keeps the 0116 transfer plan passive but selects deterministic
+candidate particle indices from rich donor cells.  The selection follows the
+ordered donor→receiver transfer entries and scans true `Fluid` particle indices
+in increasing order, skipping particles already selected by earlier plan
+entries.
 
-passe base : tuiles alignées sur la grille naturelle ;
+The selected set is diagnostic only:
 
-passe shifted : tuiles décalées, afin de recouper les interfaces de la première passe.
+```text
+no particle is moved
+no mass is changed
+no role is changed
+no inactive pool slot is consumed
+no remap is applied
+```
 
-L’idée est que les défauts d’occupation qui resteraient bloqués aux frontières de tuiles dans la première passe puissent être corrigés lors de la passe décalée.
+The diagnostic block records the selected donor mass and any overshoot produced
+by particle indivisibility:
 
-5.4. Implémentation OpenMP
+```text
+resampDonorParticleSelectionBuilt
+resampSelectedDonorParticles
+resampDonorCellsWithSelectedParticles
+resampSelectedDonorParticleMass
+resampSelectedDonorMassOvershoot
+resampSelectedDonorMassCoverageFraction
+```
 
-La fonction centrale est :
+Smoke test:
 
-run_zone_pass_openmp(...)
+```bash
+./scripts/run_resampling_donor_particle_selection_smoke_0117.sh
+```
 
-Elle effectue une passe de redistribution tuilée selon un mode de layout (base ou shifted). Dans la version OpenMP, les zones sont traitées en parallèle avec une boucle :
+Expected diagnostic core:
 
-#pragma omp parallel for schedule(static)
+```text
+selected=4 selectedMass=4 overshoot=0 coverage=1 firstParticle=1 lastParticle=4
+```
 
-La logique générale d’une passe est :
+See `doc/README_0117_RESAMPLING_DONOR_PARTICLE_SELECTION.md`.
 
-construction du layout de zones ;
+### Patch 0118 — passive extraction operation plan
 
-extraction des particules appartenant à chaque zone ;
+Patch 0118 converts the passive donor-particle selection from 0117 into an
+explicit extraction-operation list.  Each operation records which true `Fluid`
+particle would later be extracted from a donor cell, the receiver cell attached
+to that transfer entry, and the carried mass, momentum and kinetic energy.
 
-snapshot local de l’état d’entrée ;
+This is still diagnostic only:
 
-application locale du noyau de redistribution ;
+```text
+no particle role is changed
+no particle is moved
+no particle mass is changed
+no inactive pool slot is consumed
+no remap is applied
+```
 
-empaquetage des positions/vitesses modifiées ;
+The new diagnostic block records:
 
-fusion dans l’état de sortie global.
+```text
+resampExtractionPlanBuilt
+resampExtractionOps
+resampExtractionParticles
+resampExtractionMass
+resampExtractionMomentumX
+resampExtractionMomentumY
+resampExtractionKineticEnergy
+resampHypotheticalPoolFreeSlotsAfterExtraction
+resampExtractionAllSelectedAreFluid
+resampExtractionNoDuplicateParticles
+```
 
-Les métriques de profilage distinguent notamment :
+Smoke test:
 
-timeLayout
-timeZoneExtract
-timeSnapshot
-timeAlloc
-timeKernel
-timePack
-timeMerge
+```bash
+./scripts/run_resampling_passive_extraction_smoke_0118.sh
+```
 
-Ces métriques permettent d’identifier le coût relatif de la construction des zones, du snapshot, du noyau de redistribution proprement dit et de la fusion globale.
+Expected diagnostic core:
 
-6. Fermeture liquide incompressible
+```text
+ops=4 particles=4 mass=4 coverage=1 poolAfter=11 allFluid=1 noDup=1
+```
 
-6.1. Rôle de la fermeture
+See `doc/README_0118_RESAMPLING_PASSIVE_EXTRACTION.md`.
 
-La redistribution impose une contrainte forte sur l’occupation locale, mais elle peut perturber la dynamique, la quantité de mouvement ou la pression effective. La fermeture liquide vise à reconstruire une pression effective cohérente et à appliquer une correction de vitesse contrôlée.
+### Patch 0119 — mutating extraction Fluid -> Inactive
 
-La fermeture utilise notamment :
+Patch 0119 is the first deliberately mutating resampling step.  It adds the
+parameter:
 
-useLiquidClosure = true
-useOptimalBetaRepair = true
-betaRepair
-betaEOS
-Kvirial
-smoothPdriveAtInterzone
-smoothPdriveInterzoneWidthCells
-smoothPdriveInterzoneBlend
-smoothPdriveIncludeShiftedLayouts
+```text
+resamplingExtractionEnable = false
+```
 
-6.2. Pression effective
+The default is `false`, so all classic SRC/Q6 runs and all passive resampling
+smokes remain unchanged.  When enabled, the code applies the passive extraction
+operations prepared in 0118 by converting selected donor particles:
 
-Le modèle distingue une contribution cinétique et une contribution de type viriel ou pénalisation de densité :
+```text
+Fluid -> Inactive
+```
 
-Ptot = Pkin + Pvir
+No insertion, mass remap, momentum remap, or renormalisation is performed yet.
+After the role mutation, the inactive pool is rebuilt and the real-fluid deposit
+is recomputed, so the runtime summary reports the post-extraction transported
+fluid plus a separate `resampExtractionApply*` diagnostic block.
 
-La contribution de fermeture est pilotée par une raideur effective Kvirial, un coefficient betaEOS, et une densité cible liée à l’occupation moyenne attendue gamma.
+Smoke test:
 
-Dans les développements antérieurs, cette fermeture a été pensée comme une manière de conserver un comportement liquide : densité proche de la cible, pression effective capable de porter les gradients imposés, et correction dynamique évitant que la redistribution ne devienne purement géométrique.
+```bash
+./scripts/run_resampling_mutating_extraction_smoke_0119.sh
+```
 
-6.3. Correction optimale
+Expected diagnostic core:
 
-Lorsque useOptimalBetaRepair = true, le coefficient effectif de correction est choisi de manière à minimiser l’erreur RMS entre l’état de référence post-SRC et l’état après redistribution/correction. Les métriques produites incluent notamment :
+```text
+applied=4 mass=4 fluid=121 inactive=11 poolFree=11 richAfter=0
+```
 
-betaRepairOpt
-betaRepairApplied
-betaRepairNum
-betaRepairDen
-rmsRepairDU
-maxRepairDU
-meanAbsRepairDU
-momentumDeltaX
-momentumDeltaY
+See `doc/README_0119_RESAMPLING_MUTATING_EXTRACTION.md`.
 
-6.4. Lissage interzone
+### Patch 0120 — controlled insertion Inactive -> Fluid
 
-Le tuilage introduit potentiellement des discontinuités faibles aux interfaces entre zones. L’option :
+Patch 0120 adds the first controlled mutating insertion step.  It introduces:
 
-smoothPdriveAtInterzone = true
+```text
+resamplingInsertionEnable = false
+```
 
-active un lissage de la pression motrice ou du champ de correction au voisinage des interfaces interzones. Les paramètres associés définissent l’épaisseur et l’intensité du mélange.
+The option is disabled by default and currently requires
+`resamplingExtractionEnable = true`.  When both switches are enabled, the code
+first applies the 0119 extraction plan (`Fluid -> Inactive`), then immediately
+reactivates the extracted free-list slots into receiver cells:
 
-7. Workflow de préparation et lancement
+```text
+Inactive -> Fluid
+```
 
-Le workflow de référence est en deux temps :
+The inserted particles preserve the mass, momentum and `type` carried by the
+corresponding extraction operation.  Positions are assigned deterministically in
+the receiver cell using a small interior stencil.  This is intentionally still a
+minimal recycling step: no local mass/momentum remap, no thermal correction and
+no renormalisation are applied yet.
 
-MATLAB prépare un dossier d’exécution ;
+Smoke test:
 
-le binaire C++/OpenMP lit ces fichiers et exécute le benchmark.
+```bash
+./scripts/run_resampling_mutating_insertion_smoke_0120.sh
+```
 
-7.1. Préparation MATLAB
+Expected diagnostic core:
 
-Depuis MATLAB, se placer dans la racine du dépôt ou ajouter matlab/ au path :
+```text
+inserted=4 mass=4 fluid=125 inactive=7 poolFree=7 poorAfter=1
+```
 
-cd('/home/llemoyne/gasdyn/mpcd/incompressible')
-addpath('matlab')
+See `doc/README_0120_RESAMPLING_MUTATING_INSERTION.md`.
 
-Lancer la préparation du benchmark de référence :
+### Patch 0121 — local mass/momentum remap after insertion
 
-prep = prepare_benchmark_poiseuille_equal_openmp_profiled_shifted_run_simple();
+Patch 0121 adds the first local remap stage after controlled extraction and
+insertion.  It introduces:
 
-ou, selon le script utilisé :
+```text
+resamplingRemapEnable = false
+```
 
-prep = prepare_benchmark_poiseuille_equal_openmp_profiled_shifted();
+The option is disabled by default and currently requires both
+`resamplingExtractionEnable = true` and `resamplingInsertionEnable = true`.
+When enabled, the code applies the 0119/0120 extraction-insertion cycle, builds
+the post-edit real-fluid deposit, then remaps each non-empty wet cell by a
+uniform mass scale:
 
-Le script construit :
+```text
+m_p <- s_c m_p,      s_c = M_target / M_c
+```
 
-workdir/params.kv
-workdir/in_x.bin
-workdir/in_v.bin
-workdir/in_type.bin
-workdir/in_r0.bin
-workdir/run_benchmark_poiseuille_equal_openmp_profiled_shifted.sh
+Particle velocities are not changed in this first remap patch.  Therefore each
+remapped cell satisfies `M_c -> M_target` while preserving its cell velocity
+`U_c`; the target cell momentum is consequently `M_target U_c`.  Full thermal
+renormalisation / preservation of `E_th,c` remains a later patch.
 
-Par défaut, le dossier de travail est :
+Smoke test:
 
-rbps8/
+```bash
+./scripts/run_resampling_local_remap_smoke_0121.sh
+```
 
-et l’exécutable attendu est :
+Expected diagnostic core:
 
-/home/llemoyne/gasdyn/mpcd/incompressible/build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled
+```text
+remappedCells=2 particles=125 MRelRms~2e-17 scaleMin<1 scaleMax>1
+```
 
-Ces chemins peuvent être remplacés par des overrides MATLAB :
+See `doc/README_0121_RESAMPLING_LOCAL_REMAP.md`.
 
-prep = prepare_benchmark_poiseuille_equal_openmp_profiled_shifted_run_simple(struct( ...
-    'workdir', '/home/llemoyne/gasdyn/mpcd/incompressible/rbps8_test', ...
-    'nThreads', 8, ...
-    'seed', 1));
+### Patch 0122 — local thermal renormalization
 
-Les champs passés en override qui correspondent à des paramètres physiques ou numériques sont transmis à build_benchmark_poiseuille_params_equal. Les champs de runtime (workdir, exePath, prefixIn, prefixOut, seed, nThreads, x, v, type, r0) sont consommés par le script de préparation et ne sont pas écrits comme paramètres physiques.
+Patch 0122 adds the optional switch
+`resamplingThermalRenormalizationEnable`.  When extraction, insertion and local
+mass remap are enabled, this final local stage rescales velocities relative to
+cell velocity so the pre-remap relative thermal energy `E_th,c` is restored while
+preserving `M_c` and `U_c`.  Validate with:
 
-7.2. Exécution bash générée
+```bash
+./scripts/run_resampling_thermal_renormalization_smoke_0122.sh
+```
 
-Le script MATLAB affiche une commande du type :
+### Patch 0123 — bounded particle-mass guard and local renormalization
 
-bash /home/llemoyne/gasdyn/mpcd/incompressible/rbps8/run_benchmark_poiseuille_equal_openmp_profiled_shifted.sh
+Patch 0123 adds an optional mass-safety stage after extraction, insertion,
+local mass remap and optional thermal renormalization:
 
-Le script bash :
+```text
+resamplingMassGuardEnable = false
+resamplingParticleMassMin = 0.25
+resamplingParticleMassMax = 4.0
+```
 
-exporte OMP_NUM_THREADS ;
+When enabled, each non-empty wet cell solves a bounded local mass projection:
 
-rend l’exécutable appelable par chmod +x ;
+```text
+m_min <= m_p <= m_max,
+Σ_p m_p = M_target
+```
 
-lance le binaire C++ avec les chemins vers params.kv et les états binaires.
+when the constraint is feasible.  The projected masses are the closest bounded
+masses to the current values under an additive Lagrange multiplier.  The stage
+then recenters and rescales velocities so the local cell velocity `U_c` and the
+relative thermal energy `E_th,c` measured before mass projection are restored.
+Thus the guard is not a simple clamp: it is a bounded local `M,U,E_th`
+renormalization stage.
 
-La signature attendue du binaire principal est :
+Smoke test:
 
-./main_benchmark_poiseuille_openmp_profiled_shifted_profiled \
-  params.kv \
-  state_x.bin \
-  state_v.bin \
-  state_type.bin \
-  state_r0.bin \
-  out_prefix \
-  has_type \
-  has_r0 \
-  nthreads
+```bash
+./scripts/run_resampling_mass_guard_smoke_0123.sh
+```
 
-Dans le cas généré par MATLAB, has_type = 1, has_r0 = 1, et nthreads correspond à l’override nThreads.
+Expected diagnostic core:
 
-8. Compilation
+```text
+belowBefore>0 aboveBefore>0 belowAfter=0 aboveAfter=0 MRelRms~1e-16
+```
 
-Le dépôt ne doit pas stocker les fichiers de build. Dans l’organisation locale actuelle, l’exécutable attendu est placé dans :
+See `doc/README_0123_RESAMPLING_MASS_GUARD.md`.
 
-build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled
+### Patch 0124 — controlled wet/latent activation
 
-Si un CMakeLists.txt local est disponible, une procédure typique est :
+Patch 0124 adds an optional latent-particle activation stage:
 
-cd /home/llemoyne/gasdyn/mpcd/incompressible
-mkdir -p build
-cd build
-cmake ..
-make -j
+```text
+resamplingLatentActivationEnable = false
+resamplingLatentActivationMaxPerCell = 1
+resamplingLatentActivationParticleMass = 0.0   # <=0: M_target / maxPerCell
+```
 
-Si l’on compile directement avec g++, une commande indicative pour le benchmark principal est :
+When enabled, the stage converts preallocated `Latent` slots into `Fluid`
+particles inside poor wet receiver cells, with empty wet cells treated first.
+It does not consume `Inactive` free-list slots, so conservative donor/receiver
+recycling remains separate from explicit wet/dry filling.  Newly activated
+particles inherit their `type`/species from the latent slot, are positioned by a
+deterministic in-cell stencil, and use the receiver cell velocity if available
+or zero velocity in empty wet cells.  The stage is disabled by default.
 
-cd /home/llemoyne/gasdyn/mpcd/incompressible
-mkdir -p build
+Smoke test:
 
-g++ -std=c++17 -O3 -fopenmp -Iinclude \
-  src/boundary_conditions.cpp \
-  src/common_grid.cpp \
-  src/dump_io.cpp \
-  src/liquid_closure.cpp \
-  src/params_io.cpp \
-  src/srd_collision.cpp \
-  src/state_io.cpp \
-  src/zone_pass.cpp \
-  src/zone_pass_openmp.cpp \
-  src/main_benchmark_poiseuille_openmp_profiled_shifted_profiled.cpp \
-  -o build/main_benchmark_poiseuille_openmp_profiled_shifted_profiled
+```bash
+./scripts/run_resampling_latent_activation_smoke_0124.sh
+```
 
-Les autres fichiers main_* correspondent à des exécutables de validation ou de benchmark antérieurs. Pour les compiler, remplacer simplement le dernier fichier main_*.cpp dans la commande ci-dessus.
+Expected diagnostic core:
 
-9. Sorties produites
+```text
+activated=4 cells=1 fluid=128 latent=1 inactive=3 MRelRms=0
+```
 
-Le benchmark profilé écrit notamment :
+See `doc/README_0124_RESAMPLING_LATENT_ACTIVATION.md`.
 
-out_metrics.csv
-out_runout.kv
-out_stepXXXX_x.bin
-out_stepXXXX_v.bin
-out_stepXXXX_type.bin
-out_stepXXXX_r0.bin
-out_stepXXXX_cellfields.bin
 
-selon le préfixe de sortie demandé.
+## 0125 integrated resampling validator
 
-9.1. Fichier métriques CSV
+- `scripts/run_resampling_integrated_void_rich_latent_smoke_0125.sh`: integrated void/rich/latent validator for activation, recycle, remap, thermal renormalisation and mass guard. See `doc/README_0125_RESAMPLING_INTEGRATED_VOID_RICH_LATENT.md`.
 
-Le fichier *_metrics.csv contient les diagnostics pas à pas :
+## 0126 periodic Taylor--Green resampling validation
 
-step
-occStd
-outBand
-meanKinetic
-meanUx
-meanUy
-Qx
-baseOccStd
-baseOutBand
-shiftedOccStd
-shiftedOutBand
-meanPdrive
-meanPdriveRaw
-meanVelocityX
-meanVelocityY
-particlesMovedDense
-particlesMovedSparse
-betaRepairOpt
-betaRepairApplied
-rmsRepairDU
-maxRepairDU
-meanAbsRepairDU
-momentumDeltaX
-momentumDeltaY
-nThreadsUsedBase
-nThreadsUsedShifted
-timeStepTotal
-timeRefBuild
-timeBase
-timeShifted
-timeClosure
-timeDiagnostics
-timeDump
+Patch 0126 adds the first dynamic, fully periodic validation for the OpenMP
+resampling branch.  It provides a MATLAB V2 `.smpcd` Taylor--Green initial-state
+generator, MATLAB V1/V2 state readers/writers, fluid-only field binning for
+role-aware dumps, a bash runner for `classic`, `q6` and `q6_resampling`, and a
+MATLAB analyzer with visible figures and CSV summaries.
 
-9.2. Fichier runout KV
+Main command:
 
-Le fichier *_runout.kv résume l’état final et le profilage global :
+```bash
+./scripts/run_taylor_green_resampling_validation_0126.sh
+```
 
-finalOccStd
-finalOutBand
-finalMeanKinetic
-finalMeanVelocityX
-finalMeanVelocityY
-finalQx
-totalParticlesMovedDense
-totalParticlesMovedSparse
-finalBetaRepairOpt
-finalBetaRepairApplied
-finalRmsRepairDU
-finalMomentumDeltaX
-finalMomentumDeltaY
-nThreadsUsedBase
-nThreadsUsedShifted
-timeTotalWall
-timeLoopTotal
-timeRefBuild
-timeBase
-timeShifted
-timeClosure
-timeDiagnostics
-timeDumps
-fracRefBuild
-fracBase
-fracShifted
-fracClosure
-fracDiagnostics
-fracDumps
-timeBaseLayout
-timeBaseExtract
-timeBaseSnapshot
-timeBaseAlloc
-timeBaseKernel
-timeBasePack
-timeBaseMerge
-timeShiftedLayout
-timeShiftedExtract
-timeShiftedSnapshot
-timeShiftedAlloc
-timeShiftedKernel
-timeShiftedPack
-timeShiftedMerge
-fracBaseLayout
-fracBaseExtract
-fracBaseSnapshot
-fracBaseAlloc
-fracBaseKernel
-fracBasePack
-fracBaseMerge
-fracShiftedLayout
-fracShiftedExtract
-fracShiftedSnapshot
-fracShiftedAlloc
-fracShiftedKernel
-fracShiftedPack
-fracShiftedMerge
+Useful larger run:
 
-Ces champs sont importants pour diagnostiquer si le coût est dominé par le noyau de redistribution, la copie/snapshot, le packing, la fusion, la fermeture liquide ou les dumps.
+```bash
+TG_NX=64 TG_NY=64 TG_GAMMA=20 TG_STEPS=3000 TG_DUMP_EVERY=100 TG_THREADS=8 \
+./scripts/run_taylor_green_resampling_validation_0126.sh
+```
 
-10. Scripts MATLAB principaux
+The main post-processing output is:
 
-10.1. Préparation de benchmarks
+```text
+runs/taylor_green_resampling_0126/analysis/tg_summary.csv
+```
 
-Fichiers importants :
+See `doc/README_0126_TAYLOR_GREEN_RESAMPLING_VALIDATION.md`.
 
-prepare_benchmark_poiseuille_equal_openmp_profiled_shifted.m
-prepare_benchmark_poiseuille_equal_openmp_profiled_shifted_run_simple.m
-build_benchmark_poiseuille_params_equal.m
-build_ad_hoc_state_uniform.m
-write_params_kv.m
-write_state_bin.m
+## 0129 resampling cadence and global switch
 
-Le script de préparation :
+Patch 0129 separates the three operational levels explicitly:
 
-vérifie que les fonctions MATLAB nécessaires sont sur le path ;
+```text
+resamplingEnable = true/false                 # gates role-changing resampling
+resamplingMassRenormalizationPeriod = K        # K=1 old behaviour, K>1 periodic, K=0 disabled
+resamplingThermalRenormalizationEnable = true  # thermal renormalisation is attempted every step
+```
 
-construit les paramètres physiques et numériques ;
+When `resamplingEnable=false`, the mutating resampling path is bypassed even if
+individual sub-switches remain present in `params.kv`.  When enabled, extraction,
+insertion and latent activation can operate every step, while mass remap and mass
+guard are only applied on steps satisfying `step % K == 0`.  The thermal
+renormalisation remains per-step so discrete role changes do not create an
+uncontrolled thermal drift between mass-remap events.
 
-génère ou reçoit un état initial (x,v,type,r0) ;
+Smoke test:
 
-écrit params.kv ;
+```bash
+./scripts/run_resampling_cadence_smoke_0129.sh
+```
 
-écrit les fichiers binaires d’entrée ;
+See `doc/README_0129_RESAMPLING_CADENCE_AND_SWITCH.md`.
 
-génère un script bash prêt à lancer le binaire C++.
+## Resampling branch milestone 0130: Taylor--Green forcing
 
-10.2. Lecture et post-traitement
+The C++ runtime now supports an optional periodic Taylor--Green body acceleration:
 
-Fichiers utiles :
+```text
+taylorGreenForcingEnable = true
+taylorGreenForcingAmplitude = 0.02
+taylorGreenForcingModeX = 1
+taylorGreenForcingModeY = 1
+```
 
-read_params_kv.m
-read_state_bin.m
-read_cellfields_bin.m
-read_f64_grid_bin.m
-read_i32_grid_bin.m
-analyze_openmp_scaling_results.m
-process_*.m
-compare_*.m
+The forcing is divergence-free and only available for fully periodic Taylor--Green
+validation runs. MATLAB remains responsible for preparing initial `.smpcd` files;
+bash launchers only write `params.kv` and run the OpenMP executable. See
+`doc/README_0130_TAYLOR_GREEN_FORCING.md`.
 
-Ces scripts servent à relire les sorties C++, vérifier les écarts avec les références MATLAB, tracer les indicateurs et analyser la scalabilité OpenMP.
+### 0132 — Resampling performance triage
 
-10.3. Scripts historiques par tranches
+Patch 0132 removes the first major performance bottleneck in the weighted-resampling path. The full donor/receiver mutation plan is now built only once per step, before role-changing operations. Post-edit deposits are lightweight diagnostics. The planner also avoids the previous donor×receiver Cartesian sort and uses a cell→particle index for donor particle selection. See `doc/README_0132_RESAMPLING_PERFORMANCE_TRIAGE.md`.
 
-Les familles :
+### 0133 thermal renormalization performance fix
 
-prepare_tranche*.m
-process_tranche*.m
-compare_step*.m
-main_step*.cpp
+Patch 0133 removes an accidental `O(Ncells*Nparticles)` diagnostic loop from
+resampling thermal renormalization.  The operation remains physically unchanged,
+but the post-renormalization momentum residual is accumulated in the particle
+loop and reduced over cells.  This is essential for Poiseuille/channel cases
+where thermal renormalization runs every step.
 
-correspondent aux étapes progressives de validation :
+### Patch 0140 — MATLAB-compatible population-support guard
 
-Tranche 1 : streaming + conditions limites + collision SRC/SRD
-Tranche 2 : redistribution simple par zones
-Tranche 3 : double passe base + shifted
-Tranche 4 : fermeture liquide
-Tranche 5 : pas complet
-Étapes 6-9 : validations OpenMP et comparaisons avec versions synchrones/sérielles
+Patch 0140 restores the MATLAB `Nmin/Ntarget/Nmax` support-control mechanism in the OpenMP resampling branch.  Since patch 0144, this stage is no longer controlled by a separate `resamplingPopulationGuardEnable` key: `resamplingEnable=true` activates the population-driven support guard, while `resamplingPopulationNMin/NTarget/NMax` set the support band.  Under-populated wet cells are locally split up to `Ntarget`, over-populated wet cells are merge-extracted down to `Ntarget`, and mass/momentum are preserved locally by construction.  This separates support control (`N_c`) from weighted-mass remap (`M_c`) and avoids the previous failure mode where `M_c` was correct but the active particle support became too sparse.
 
-Ces fichiers ne sont pas tous nécessaires au lancement du benchmark final, mais ils sont essentiels pour reconstruire l’historique méthodologique et refaire des validations intermédiaires lors de la publication des résultats.
 
-11. Stratégie de validation
+### Patch 0144 — explicit projection/resampling switches
 
-La validation du code s’est construite par tranches, afin d’éviter de mélanger trop tôt les difficultés :
+Patch 0144 removes the historical `method=classic/q6` selector from the active
+OpenMP resampling branch.  Q6 is now controlled only by:
 
-Tranche 1 : valider streaming, conditions limites et collision ;
+```text
+projectionEnable = true|false
+```
 
-Tranche 2 : valider une passe de redistribution par zones ;
+and the population-driven weighted resampling chain is controlled only by:
 
-Tranche 3 : valider la double passe base + shifted ;
+```text
+resamplingEnable = true|false
+```
 
-Tranche 4 : valider la fermeture liquide ;
+This gives the four intended ablation modes:
 
-Tranche 5 : valider le pas complet ;
+```text
+projectionEnable=false, resamplingEnable=false  # classic SRC/MPCD
+projectionEnable=false, resamplingEnable=true   # classic SRC + population support guard
+projectionEnable=true,  resamplingEnable=false  # Q6 projection only
+projectionEnable=true,  resamplingEnable=true   # Q6 + weighted resampling
+```
 
-Étapes OpenMP : comparer versions sérialisées, synchrones et parallèles ;
-
-Benchmark Poiseuille : vérifier le débit, la stabilité énergétique, l’occupation, les corrections de fermeture et les temps par phase.
-
-Les métriques principales sont :
-
-occStd                écart-type relatif d’occupation cellulaire
-outBand               fraction de cellules hors bande d’occupation
-Qx                    débit longitudinal moyen
-meanKinetic           énergie cinétique moyenne
-betaRepairApplied     correction optimale appliquée par fermeture liquide
-rmsRepairDU           intensité RMS de correction de vitesse
-momentumDeltaX/Y      variation globale de quantité de mouvement
-nThreadsUsedBase      nombre de threads réellement utilisés en passe base
-nThreadsUsedShifted   nombre de threads réellement utilisés en passe shifted
-
-Pour les campagnes de scaling OpenMP, le script analyze_openmp_scaling_results.m agrège les résultats de sous-dossiers threads_* et calcule notamment :
-
-elapsed_seconds
-speedup_vs_1
-efficiency_vs_1
-deltaQx_vs_1
-deltaOccStd_vs_1
-deltaMeanKinetic_vs_1
-
-12. Limites actuelles
-
-Cette version de référence est volontairement spécialisée :
-
-cas liquide à volume fixe ;
-
-pas de surface libre active ;
-
-pas de mouillage ;
-
-pas de réorientation de vitesse d’interface ;
-
-pas de piston ou de frontière mobile complexe dans la version tuilée actuelle ;
-
-géométrie principale : domaine rectangulaire Poiseuille ;
-
-obstacle solide interne non encore intégré dans cette branche de référence.
-
-Ces limitations sont importantes pour les développements futurs. Un cas d’allée de von Kármán autour d’un cylindre nécessitera au minimum :
-
-une représentation d’obstacle solide circulaire ;
-
-une condition limite particulaire sur cylindre ;
-
-une stratégie de redistribution compatible avec cellules solides/fluides partielles ;
-
-des diagnostics de force, traînée, portance et fréquence de shedding ;
-
-une réflexion sur la manière d’appliquer ou de masquer la fermeture liquide au voisinage du solide.
-
-Ces développements doivent être faits sur une branche dédiée, par exemple :
-
-git checkout -b feature/von-karman-cylinder
-
-ou sur une branche nettoyée issue de main, par exemple :
-
-git checkout -b clean/von-karman-base
-
-13. Utilisation Git recommandée
-
-La branche main conserve l’état complet et l’historique de validation. Avant toute modification importante :
-
-cd /home/llemoyne/gasdyn/mpcd/incompressible
-git status
-git pull --rebase origin main
-
-Pour créer une branche de développement :
-
-git checkout -b feature/nom-de-la-branche
-git push -u origin feature/nom-de-la-branche
-
-Pour archiver l’état complet avant nettoyage :
-
-TAG=archive/pre-cleanup-main-$(date +%Y%m%d)
-git tag -a "$TAG" -m "Archive full project before cleanup branch"
-git push origin "$TAG"
-
-Pour identifier précisément la version de départ d’une analyse :
-
-git rev-parse --short HEAD
-
-Les demandes de modification devraient idéalement préciser :
-
-Dépôt : https://github.com/llemoyne1/SRC_incompressible_openMP
-Branche : <branche>
-Commit de départ : <hash>
-Fichiers concernés : <liste>
-Objectif : <objectif physique/numérique>
-Contraintes : <fichiers ou mécanismes à ne pas modifier>
-Tests attendus : <script ou métrique de validation>
-
-14. Notes pour publications et reproductibilité
-
-Ce dépôt doit permettre de reconstruire l’évolution de la méthode depuis les tests élémentaires jusqu’au benchmark OpenMP profilé. Pour une publication, il sera probablement utile de conserver :
-
-la branche main comme archive complète ;
-
-une branche nettoyée contenant uniquement la version finale reproductible ;
-
-un tag correspondant à chaque figure ou série de résultats ;
-
-les paramètres params.kv de chaque campagne ;
-
-les scripts MATLAB ayant généré les états initiaux ;
-
-les sorties *_runout.kv et *_metrics.csv utilisées pour les figures ;
-
-les informations de compilation : compilateur, options, nombre de threads, machine, environnement WSL ou cluster.
-
-Une bonne pratique est d’associer à chaque campagne un dossier externe de résultats, non versionné dans Git, contenant :
-
-params.kv
-run_benchmark_*.sh
-*_metrics.csv
-*_runout.kv
-figures/
-logs/
-
-et de noter dans un fichier texte le commit exact :
-
-git rev-parse HEAD > commit_used.txt
-
-15. État actuel du README
-
-Le README historique était volontairement très court et centré sur le benchmark Poiseuille OpenMP profilé. Cette version étendue décrit le projet dans son état actuel : méthode, scripts MATLAB, structure C++, tuilage, fermeture liquide, workflow de lancement, diagnostics et stratégie de branches.
-
-À terme, il serait préférable de renommer ce fichier en :
-
-README.md
-
-afin de bénéficier d’un affichage Markdown complet sur GitHub.
-
+The former `resamplingPopulationGuardEnable` key is also removed.  When
+`resamplingEnable=true`, the population guard is active and is configured by
+`resamplingPopulationNMin`, `resamplingPopulationNTarget`, and
+`resamplingPopulationNMax`; set all three to positive increasing values for an
+explicit band, or set all three to `0` to infer defaults from the target cell
+mass.  See `doc/README_0144_EXPLICIT_PROJECTION_RESAMPLING_SWITCHES.md`.

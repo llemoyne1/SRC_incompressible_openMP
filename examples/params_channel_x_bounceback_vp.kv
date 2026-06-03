@@ -1,0 +1,42 @@
+# Periodic-y channel with bounceback x-walls and stochastic aggregate wall virtual particles.
+inputState = initial_state.smpcd
+outputDir = runs/channel_x_bounceback_vp
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 1000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = bounceback
+bcRight = bounceback
+bcBottom = periodic
+bcTop = periodic
+
+wallVpEnable = true
+wallVpMode = stochastic_fraction
+wallVpGamma = 0.0      # 0 => infer mean real occupancy Np/(Nx*Ny)
+wallVpMass = 1.0
+wallVpKBT = -1.0       # negative => inherit kBT
+wallVpUxLeft = 0.0
+wallVpUyLeft = 0.0
+wallVpUxRight = 0.0
+wallVpUyRight = 0.0
+
+thermostatEnable = false
+kBT = 0.01
+
+summaryEvery = 10
+dumpStateEvery = 1000
+numThreads = 0

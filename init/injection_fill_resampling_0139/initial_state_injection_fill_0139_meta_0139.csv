@@ -1,0 +1,2 @@
+output,Lx,Ly,Nx,Ny,gamma,capacityMultiplier,nSlots,nFluidInitial,nInactiveInitial,inletYCenter,inletHeightCells,inletYMin,inletYMax,seed
+../init/injection_fill_resampling_0139/initial_state_injection_fill_0139.smpcd,4,1,192,48,20,1,184320,0,184320,0.5,1,0.489583333333333,0.510416666666667,1390139

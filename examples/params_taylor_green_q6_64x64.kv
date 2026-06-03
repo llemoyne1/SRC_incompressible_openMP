@@ -1,0 +1,42 @@
+# Periodic Taylor--Green validation run using the generic elliptic core through Q6.
+# Validation scope: fully periodic fixed box.
+
+inputState = initial_state_tg_64x64_g20_u0p05_kbt0p01.smpcd
+outputDir = runs/taylor_green_q6_64x64
+
+Lx = 1.0
+Ly = 1.0
+Nx = 64
+Ny = 64
+
+dt = 0.001
+nSteps = 15000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcX = periodic
+bcY = periodic
+
+projectionEnable = true
+projectionOperator = periodic_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.001
+
+summaryEvery = 10
+dumpStateEvery = 20
+numThreads = 4

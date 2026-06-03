@@ -1,0 +1,59 @@
+# Periodic Taylor--Green Q6 + weighted-resampling validation template.
+# The run script scripts/run_taylor_green_resampling_validation_0126.sh writes
+# concrete params into runs/taylor_green_resampling_0126.  This file documents
+# the intended parameter set for manual runs.
+
+inputState = runs/taylor_green_resampling_0126/initial_state_tg_0126.smpcd
+outputDir = runs/taylor_green_resampling_0126/q6_resampling
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 1000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 1260126
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcX = periodic
+bcY = periodic
+
+projectionEnable = true
+projectionOperator = periodic_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+q6ProjectionStrength = 1.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.001
+
+resamplingEnable = true
+resamplingTargetCellMass = 20
+resamplingWetMaskMode = active_domain
+resamplingPoorCellMassFraction = 0.75
+resamplingRichCellMassFraction = 1.25
+resamplingExtractionEnable = true
+resamplingInsertionEnable = true
+resamplingRemapEnable = true
+resamplingMassRenormalizationPeriod = 10
+resamplingThermalRenormalizationEnable = true
+resamplingMassGuardEnable = true
+resamplingParticleMassMin = 0.25
+resamplingParticleMassMax = 4.0
+resamplingLatentActivationEnable = false
+
+summaryEvery = 10
+dumpStateEvery = 100
+numThreads = 4

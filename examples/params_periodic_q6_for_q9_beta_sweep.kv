@@ -1,0 +1,32 @@
+outputDir = runs/periodic_q6_for_q9_beta_sweep
+inputState = initial_state_q9_sweep_32x32_g20.smpcd
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 5000
+summaryEvery = 50
+dumpStateEvery = 0
+numThreads = 4
+
+bcX = periodic
+bcY = periodic
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+projectionEnable = true
+projectionOperator = periodic_fv_cg
+projectionMaxIterations = 300
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+
+kBT = 0.01
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
