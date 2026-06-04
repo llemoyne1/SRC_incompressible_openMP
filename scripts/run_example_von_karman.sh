@@ -265,22 +265,12 @@ run_case() {
   echo "[run] binary : $BIN"
   echo "[run] params : $PARAMS_FILE"
   echo "[run] output : $OUT_DIR"
-  set +e
   if [[ "${LIVE_PROGRESS}" == "1" || "${LIVE_PROGRESS}" == "true" || "${LIVE_PROGRESS}" == "TRUE" || "${LIVE_PROGRESS}" == "on" || "${LIVE_PROGRESS}" == "ON" ]]; then
     /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" 2> "$TIME_FILE" | tee "$LOG_FILE"
-    status=${PIPESTATUS[0]}
   else
     /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" > "$LOG_FILE" 2> "$TIME_FILE"
-    status=$?
   fi
-  set -e
-  if [[ -s "$TIME_FILE" ]]; then cat "$TIME_FILE"; fi
-  if [[ "$status" != "0" ]]; then
-    echo "[run] ERROR: solver exited with status $status" >&2
-    echo "[run] see log: $LOG_FILE" >&2
-    echo "[run] see time/stderr: $TIME_FILE" >&2
-    exit "$status"
-  fi
+  cat "$TIME_FILE"
   echo "[run] summary: $OUT_DIR/summary_runtime.csv"
 }
 
@@ -289,8 +279,8 @@ NX="${NX:-64}"
 NY="${NY:-64}"
 GAMMA="${GAMMA:-20}"
 STEPS="${STEPS:-10000}"
-SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
-DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-250}"
+SUMMARY_EVERY="${SUMMARY_EVERY:-250}"
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 DT="${DT:-0.001}"
 KBT="${KBT:-0.001}"
 SEED="${SEED:-1620162}"
@@ -314,13 +304,13 @@ LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 RESTART_STATE="${RESTART_STATE:-}"
 
 CASE_NAME="von_karman"
-Lx="${Lx:-4.0}"
-Ly="${Ly:-1.0}"
-NX="${NX:-192}"
-NY="${NY:-48}"
-UIN="${UIN:-0.05}"
-CYLINDER_CX="${CYLINDER_CX:-0.80}"
-CYLINDER_R="${CYLINDER_R:-0.08}"
+Lx="${Lx:-2.0}"
+Ly="${Ly:-1.5}"
+NX="${NX:-64}"
+NY="${NY:-64}"
+UIN="${UIN:-0.075}"
+CYLINDER_CX="${CYLINDER_CX:-0.40}"
+CYLINDER_R="${CYLINDER_R:-0.16}"
 CYLINDER_Y_OFFSET="${CYLINDER_Y_OFFSET:-0.02}"
 CYLINDER_CY="${CYLINDER_CY:-$(python3 - <<PY
 Ly = float('${Ly}')
