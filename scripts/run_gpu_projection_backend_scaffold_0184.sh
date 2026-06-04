@@ -5,14 +5,14 @@ set -euo pipefail
 # This does not validate a real GPU kernel yet. It verifies that:
 #   1) projectionBackend=cpu preserves the validated path;
 #   2) projectionBackend=auto falls back explicitly to the CPU path and compares cleanly;
-#   3) projectionBackend=openmp_target fails loudly instead of pretending to run on GPU.
+#   3) projectionBackend=cuda fails loudly until the full Q6 CUDA path is wired.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 : "${RUN_ROOT_CPU:=runs/gpu_projection_backend_scaffold_0184_cpu}"
 : "${RUN_ROOT_AUTO:=runs/gpu_projection_backend_scaffold_0184_auto}"
-: "${RUN_ROOT_FAIL:=runs/gpu_projection_backend_scaffold_0184_openmp_target_requested}"
+: "${RUN_ROOT_FAIL:=runs/gpu_projection_backend_scaffold_0184_cuda_requested}"
 : "${COMPARE_OUT:=validation_compare_gpu_backend_scaffold_0184.csv}"
 : "${COMPARE_SUMMARY_OUT:=validation_compare_gpu_backend_scaffold_summary_0184.csv}"
 : "${BUILD:=1}"
@@ -63,27 +63,27 @@ python3 scripts/compare_validation_mono_config_0162.py \
 
 if [[ "$EXPECT_UNIMPLEMENTED_GPU_FAILURE" == "1" ]]; then
   set +e
-  PROJECTION_BACKEND=openmp_target \
-  RUN_TAG=gpu_scaffold_openmp_target_expected_fail_0184 \
+  PROJECTION_BACKEND=cuda \
+  RUN_TAG=gpu_scaffold_cuda_expected_fail_0186 \
   RUN_ROOT="$RUN_ROOT_FAIL" \
   THREADS="$THREADS" STEPS=1 SUMMARY_EVERY=1 \
   NX="$NX" NY="$NY" GAMMA="$GAMMA" CASE_LIST=tg_periodic_full \
-  bash scripts/run_validation_mono_config_0162.sh >/tmp/gpu_scaffold_0184_openmp_target.stdout 2>/tmp/gpu_scaffold_0184_openmp_target.stderr
+  bash scripts/run_validation_mono_config_0162.sh >/tmp/gpu_scaffold_0184_cuda.stdout 2>/tmp/gpu_scaffold_0184_cuda.stderr
   status=$?
   set -e
   if [[ "$status" == "0" ]]; then
-    echo '[0184-gpu-scaffold] ERROR: projectionBackend=openmp_target unexpectedly succeeded, but no real GPU kernel is implemented in 0184.' >&2
+    echo '[0184-gpu-scaffold] ERROR: projectionBackend=cuda unexpectedly succeeded, but the full Q6 CUDA path is not wired yet.' >&2
     exit 1
   fi
-  if ! grep -R "projectionBackend=openmp_target" "$RUN_ROOT_FAIL" /tmp/gpu_scaffold_0184_openmp_target.stderr >/dev/null 2>&1; then
-    echo '[0184-gpu-scaffold] ERROR: openmp_target failure did not contain the expected explicit backend message.' >&2
+  if ! grep -R "projectionBackend=cuda" "$RUN_ROOT_FAIL" /tmp/gpu_scaffold_0184_cuda.stderr >/dev/null 2>&1; then
+    echo '[0184-gpu-scaffold] ERROR: cuda failure did not contain the expected explicit backend message.' >&2
     echo '[0184-gpu-scaffold] stdout:' >&2
-    cat /tmp/gpu_scaffold_0184_openmp_target.stdout >&2 || true
+    cat /tmp/gpu_scaffold_0184_cuda.stdout >&2 || true
     echo '[0184-gpu-scaffold] stderr:' >&2
-    cat /tmp/gpu_scaffold_0184_openmp_target.stderr >&2 || true
+    cat /tmp/gpu_scaffold_0184_cuda.stderr >&2 || true
     exit 1
   fi
-  echo '[0184-gpu-scaffold] PASS: openmp_target request fails explicitly until a real backend is implemented.'
+  echo '[0184-gpu-scaffold] PASS: cuda request fails explicitly until the full Q6 CUDA path is implemented.'
 fi
 
 echo "[0184-gpu-scaffold] wrote $COMPARE_OUT"

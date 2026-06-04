@@ -246,16 +246,13 @@ struct SimulationParams {
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
 
-    // Prototype backend selector for the Q6/elliptic projection path.  The
-    // default CPU backend preserves the validated OpenMP-light behaviour.
-    // Supported values in this scaffold are:
-    //   cpu           : always use the existing OpenMP CPU implementation;
-    //   auto          : select a compiled GPU backend when one exists, otherwise
-    //                   fall back explicitly to CPU with a one-time warning;
-    //   openmp_target : request a future OpenMP-target backend; currently errors
-    //                   clearly unless such a backend is compiled in;
-    //   cuda          : reserved for a future CUDA backend; currently errors
-    //                   clearly unless such a backend is compiled in.
+    // Prototype backend selector for the Q6/elliptic projection path on the
+    // SRC_GPU branch.  The default CPU backend preserves the validated
+    // OpenMP-light behaviour.  Patch 0186 records the CUDA-only strategy:
+    //   cpu  : always use the existing OpenMP CPU implementation;
+    //   auto : explicit CPU fallback for full simulations;
+    //   cuda : reserved for the future full CUDA Q6/CG path and currently
+    //          errors clearly in full simulations until that path is complete.
     std::string projectionBackend = "cpu";
 
     int projectionMaxIterations = 300;

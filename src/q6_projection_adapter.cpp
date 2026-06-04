@@ -52,32 +52,21 @@ void resolve_q6_projection_backend_or_throw(const SimulationParams& params) {
     }
     if (backend == "auto") {
         warn_q6_projection_backend_once(
-            "projectionBackend=auto: no compiled GPU projection backend is present in patch 0184; using CPU OpenMP path.");
+            "projectionBackend=auto on SRC_GPU/CUDA-only branch: using the validated CPU OpenMP path. "
+            "Request projectionBackend=cuda only after the full CUDA CG path is wired into Q6.");
         return;
     }
-    if (backend == "openmp_target") {
-#if defined(MPCD_ENABLE_OPENMP_TARGET_Q6)
-        throw std::runtime_error(
-            "projectionBackend=openmp_target was requested, but patch 0184 only provides the backend scaffold; "
-            "the OpenMP-target Q6/elliptic kernel is not implemented yet.");
-#else
-        throw std::runtime_error(
-            "projectionBackend=openmp_target was requested, but this binary was not compiled with "
-            "MPCD_ENABLE_OPENMP_TARGET_Q6 and patch 0184 does not yet provide GPU kernels. "
-            "Use projectionBackend=cpu or projectionBackend=auto for the validated CPU fallback.");
-#endif
-    }
     if (backend == "cuda") {
-#if defined(MPCD_ENABLE_CUDA_Q6)
         throw std::runtime_error(
-            "projectionBackend=cuda was requested, but patch 0184 only provides the backend scaffold; "
-            "the CUDA Q6/elliptic kernel is not implemented yet.");
-#else
+            "projectionBackend=cuda was requested, but patch 0186 only validates the first CUDA elliptic primitive "
+            "(operator application plus pAp dot product). The full Q6/CG projection path is intentionally not wired "
+            "yet, to avoid silently running a partial CUDA backend. Use projectionBackend=cpu/auto for full simulations "
+            "and run scripts/run_cuda_q6_backend_smoke_0186.sh for the CUDA primitive smoke test.");
+    }
+    if (backend == "openmp_target") {
         throw std::runtime_error(
-            "projectionBackend=cuda was requested, but this binary was not compiled with MPCD_ENABLE_CUDA_Q6 "
-            "and patch 0184 does not yet provide CUDA kernels. Use projectionBackend=cpu or projectionBackend=auto "
-            "for the validated CPU fallback.");
-#endif
+            "projectionBackend=openmp_target is not supported on the SRC_GPU CUDA-only branch from patch 0186 onward. "
+            "Use projectionBackend=cpu/auto for full simulations, or the dedicated CUDA smoke test for GPU work.");
     }
     throw std::runtime_error("Unsupported projectionBackend in Q6 projection path: " + backend);
 }

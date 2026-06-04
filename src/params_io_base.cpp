@@ -921,9 +921,8 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (p.projectionBackend != "cpu" &&
             p.projectionBackend != "auto" &&
-            p.projectionBackend != "openmp_target" &&
             p.projectionBackend != "cuda") {
-            throw std::runtime_error("projectionBackend supports: cpu, auto, openmp_target, cuda");
+            throw std::runtime_error("projectionBackend supports on SRC_GPU/CUDA-only branch: cpu, auto, cuda");
         }
         if (p.projectionMaxIterations < 0) {
             throw std::runtime_error("projectionMaxIterations must be non-negative");
