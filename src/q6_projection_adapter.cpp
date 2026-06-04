@@ -53,15 +53,14 @@ void resolve_q6_projection_backend_or_throw(const SimulationParams& params) {
     if (backend == "auto") {
         warn_q6_projection_backend_once(
             "projectionBackend=auto on SRC_GPU/CUDA-only branch: using the validated CPU OpenMP path. "
-            "Request projectionBackend=cuda only after the full CUDA CG path is wired into Q6.");
+            "Patch 0188 enables projectionBackend=cuda only for the validated fully periodic, unmasked Q6 subset.");
         return;
     }
     if (backend == "cuda") {
-        throw std::runtime_error(
-            "projectionBackend=cuda was requested, but patch 0186 only validates the first CUDA elliptic primitive "
-            "(operator application plus pAp dot product). The full Q6/CG projection path is intentionally not wired "
-            "yet, to avoid silently running a partial CUDA backend. Use projectionBackend=cpu/auto for full simulations "
-            "and run scripts/run_cuda_q6_backend_smoke_0186.sh for the CUDA primitive smoke test.");
+        // Patch 0188 wires CUDA only for the fully periodic, unmasked Q6 subset
+        // inside project_face_field().  Unsupported geometries and non-CUDA
+        // builds fail there with an explicit message rather than falling back.
+        return;
     }
     if (backend == "openmp_target") {
         throw std::runtime_error(
@@ -1439,6 +1438,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     eparams.tolerance = params.projectionTolerance;
     eparams.removeRhsMean = true;
     eparams.removePhiMean = true;
+    eparams.backend = params.projectionBackend;
 
     EllipticProjectionBC bc{};
     {

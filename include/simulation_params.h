@@ -248,11 +248,12 @@ struct SimulationParams {
 
     // Prototype backend selector for the Q6/elliptic projection path on the
     // SRC_GPU branch.  The default CPU backend preserves the validated
-    // OpenMP-light behaviour.  Patch 0186 records the CUDA-only strategy:
+    // OpenMP-light behaviour.  CUDA support is intentionally incremental:
     //   cpu  : always use the existing OpenMP CPU implementation;
     //   auto : explicit CPU fallback for full simulations;
-    //   cuda : reserved for the future full CUDA Q6/CG path and currently
-    //          errors clearly in full simulations until that path is complete.
+    //   cuda : patch 0188 wires only the fully periodic, unmasked Q6 subset
+    //          in a CUDA-enabled executable. Unsupported geometries fail
+    //          explicitly rather than falling back silently.
     std::string projectionBackend = "cpu";
 
     int projectionMaxIterations = 300;

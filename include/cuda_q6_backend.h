@@ -28,6 +28,11 @@ struct CudaQ6CgParams {
     int maxIterations = 500;
     double tolerance = 1.0e-12;
     bool removePhiMeanFinal = true;
+
+    // Keep the integrated CUDA CG close to the CPU CG: the CPU path removes
+    // the active-cell mean from phi and r every 25 iterations, then again from
+    // phi at the end.  A non-positive value disables periodic removal.
+    int meanRemovalPeriod = 25;
 };
 
 struct CudaQ6CgDiagnostics {

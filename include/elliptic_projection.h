@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace mpcd {
@@ -102,6 +103,12 @@ struct EllipticProjectionParams {
     double tolerance = 1.0e-12;
     bool removeRhsMean = true;
     bool removePhiMean = true;
+
+    // SRC_GPU/CUDA-only integration hook.  The default preserves the validated
+    // CPU/OpenMP path.  Patch 0188 wires projectionBackend=cuda only for the
+    // first safe subset: fully periodic, unmasked Q6 projections in a CUDA
+    // build.  auto remains an explicit CPU fallback.
+    std::string backend = "cpu";
 };
 
 struct EllipticProjectionDiagnostics {

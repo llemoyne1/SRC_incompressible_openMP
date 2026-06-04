@@ -1,0 +1,10 @@
+path,role
+include/cuda_q6_backend.h,"Adds meanRemovalPeriod to keep CUDA CG closer to the CPU CG mean-gauge schedule."
+include/elliptic_projection.h,"Adds backend selector to EllipticProjectionParams."
+include/simulation_params.h,"Updates projectionBackend documentation for the 0188 CUDA subset."
+src/cuda_q6_backend.cu,"Adds periodic active-mean removal during CUDA CG iterations, matching the CPU path."
+src/elliptic_projection.cpp,"Routes solve_cg to CUDA for the fully periodic unmasked subset when compiled with MPCD_ENABLE_CUDA_Q6."
+src/q6_projection_adapter.cpp,"Passes SimulationParams::projectionBackend into EllipticProjectionParams and allows cuda to reach the guarded elliptic path."
+scripts/build_src_mpcd_cuda_0188.sh,"Builds the CUDA-enabled full SRC/MPCD executable."
+scripts/run_cuda_q6_tg_integration_0188.sh,"Runs CPU-vs-CUDA Taylor--Green integration validation and unsupported-case guard."
+doc/README_0188_CUDA_Q6_TG_INTEGRATION.md,"Documents scope, build, validation and next steps."

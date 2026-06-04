@@ -592,7 +592,23 @@ bool cuda_q6_solve_cg_operator_plan(
             nActive, dActive.data(), alpha, dP.data(), dAp.data(), dPhi.data(), dR.data(), dBlockSums.data());
         cuda_check(cudaGetLastError(), "q6_axpy_residual_kernel launch");
         cuda_check(cudaDeviceSynchronize(), "q6_axpy_residual_kernel synchronize");
-        const double rrNew = host_sum_blocks(dBlockSums);
+        double rrNew = host_sum_blocks(dBlockSums);
+
+        const bool removeMeanThisIteration =
+            params.removePhiMeanFinal &&
+            params.meanRemovalPeriod > 0 &&
+            ((it + 1) % params.meanRemovalPeriod == 0);
+        if (removeMeanThisIteration) {
+            subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dPhi, dBlockSums);
+            subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dR, dBlockSums);
+            cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
+                       "cudaMemset rrNew after mean removal block sums");
+            q6_sum_active_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+                nActive, dActive.data(), dR.data(), dBlockSums.data());
+            cuda_check(cudaGetLastError(), "q6_sum_active_kernel residual after mean removal launch");
+            cuda_check(cudaDeviceSynchronize(), "q6_sum_active_kernel residual after mean removal synchronize");
+            rrNew = host_sum_blocks(dBlockSums);
+        }
 
         localDiag.iterations = it + 1;
         localDiag.residualAbs = std::sqrt(std::max(0.0, rrNew));

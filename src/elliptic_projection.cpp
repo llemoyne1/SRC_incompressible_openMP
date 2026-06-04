@@ -1,7 +1,12 @@
 #include "elliptic_projection.h"
 
+#ifdef MPCD_ENABLE_CUDA_Q6
+#include "cuda_q6_backend.h"
+#endif
+
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -245,6 +250,44 @@ ScalarStats face_stats(const PeriodicFaceField& f) {
     return s;
 }
 
+std::string normalize_projection_backend_name(std::string backend) {
+    std::transform(backend.begin(), backend.end(), backend.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    std::replace(backend.begin(), backend.end(), '-', '_');
+    return backend;
+}
+
+bool cuda_backend_subset_supported_0188(const EllipticProjectionBC& bc,
+                                        const EllipticProjectionMask* mask,
+                                        const EllipticOperatorPlan& plan) {
+    if (bc.x != EllipticBoundaryType::Periodic || bc.y != EllipticBoundaryType::Periodic) {
+        return false;
+    }
+    if (mask != nullptr) {
+        return false;
+    }
+    return static_cast<int>(plan.activeCells.size()) == plan.numCells && plan.inactiveCells.empty();
+}
+
+void throw_cuda_backend_subset_unsupported_0188(const EllipticProjectionBC& bc,
+                                                const EllipticProjectionMask* mask,
+                                                const EllipticOperatorPlan& plan) {
+    std::string reason;
+    if (bc.x != EllipticBoundaryType::Periodic || bc.y != EllipticBoundaryType::Periodic) {
+        reason = "non-periodic boundary condition";
+    } else if (mask != nullptr) {
+        reason = "projection mask / immersed-solid active subset";
+    } else if (static_cast<int>(plan.activeCells.size()) != plan.numCells || !plan.inactiveCells.empty()) {
+        reason = "operator plan contains inactive cells";
+    } else {
+        reason = "unknown guard condition";
+    }
+    throw std::runtime_error(
+        "projectionBackend=cuda is wired in patch 0188 only for fully periodic, unmasked Q6 projections; "
+        "unsupported case: " + reason + ". Use projectionBackend=cpu/auto for this case until the CUDA backend "
+        "is extended and validated.");
+}
+
 
 void prepare_operator_plan_storage(EllipticOperatorPlan& plan, const int nc) {
     const std::size_t n = static_cast<std::size_t>(nc);
@@ -433,6 +476,39 @@ void solve_cg(const EllipticProjectionGrid& grid,
     {
         MPCD_ELLIPTIC_PROFILE(profile, CgOperatorPlanBuild);
         build_elliptic_operator_plan(grid, alpha, bc, mask, workspace.operatorPlan);
+    }
+
+    const std::string backend = normalize_projection_backend_name(params.backend);
+    if (backend == "cuda") {
+        if (!cuda_backend_subset_supported_0188(bc, mask, workspace.operatorPlan)) {
+            throw_cuda_backend_subset_unsupported_0188(bc, mask, workspace.operatorPlan);
+        }
+#ifdef MPCD_ENABLE_CUDA_Q6
+        CudaQ6CgParams cudaParams{};
+        cudaParams.maxIterations = maxIt;
+        cudaParams.tolerance = params.tolerance;
+        cudaParams.removePhiMeanFinal = params.removePhiMean;
+        cudaParams.meanRemovalPeriod = params.removePhiMean ? 25 : 0;
+        CudaQ6CgDiagnostics cudaDiag{};
+        {
+            MPCD_ELLIPTIC_PROFILE(profile, CgApplyOperator);
+            cuda_q6_solve_cg_operator_plan(
+                workspace.operatorPlan, workspace.rhs, phi, cudaParams, &cudaDiag);
+        }
+        diag.converged = cudaDiag.converged;
+        diag.iterations = cudaDiag.iterations;
+        diag.residualAbs = cudaDiag.residualAbs;
+        diag.residualRel = cudaDiag.residualRel;
+        return;
+#else
+        throw std::runtime_error(
+            "projectionBackend=cuda requested, but this executable was not built with MPCD_ENABLE_CUDA_Q6. "
+            "Build the CUDA integration binary with scripts/build_src_mpcd_cuda_0188.sh, "
+            "or use projectionBackend=cpu/auto.");
+#endif
+    }
+    if (!(backend.empty() || backend == "cpu" || backend == "auto")) {
+        throw std::runtime_error("Unsupported EllipticProjectionParams.backend: " + params.backend);
     }
 
     for (int it = 0; it < maxIt; ++it) {
