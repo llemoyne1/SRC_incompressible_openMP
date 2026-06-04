@@ -321,7 +321,7 @@ nSteps = ${STEPS}
 
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
-keepMeanFlowEnable = true
+keepMeanFlowEnable = false
 targetMeanUx = ${UIN}
 targetMeanUy = 0.0
 
