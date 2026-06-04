@@ -49,6 +49,25 @@ struct CudaQ6CgDiagnostics {
     double residualAbs = 0.0;
     double residualRel = 0.0;
     double lastPAp = 0.0;
+
+    // Patch 0192: optional CUDA-Q6 timing counters.  They are populated by the
+    // CUDA backend and are also accumulated process-wide when
+    // MPCD_CUDA_Q6_TIMING=1.  The timings are wall-clock host timings; without
+    // MPCD_CUDA_Q6_DEBUG_SYNC=1, kernel-launch phases are enqueue timings while
+    // reduction/download phases include the mandatory host-device synchronization.
+    double totalSeconds = 0.0;
+    double uploadRhsSeconds = 0.0;
+    double initializeSeconds = 0.0;
+    double zeroInactiveSeconds = 0.0;
+    double applyOperatorSeconds = 0.0;
+    double hostReductionSeconds = 0.0;
+    double axpyResidualSeconds = 0.0;
+    double meanRemovalSeconds = 0.0;
+    double updateDirectionSeconds = 0.0;
+    double downloadPhiSeconds = 0.0;
+    double finalMeanRemovalSeconds = 0.0;
+    int reductionDownloads = 0;
+    int operatorApplications = 0;
 };
 
 bool cuda_q6_backend_runtime_available();

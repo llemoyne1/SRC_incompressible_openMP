@@ -1,0 +1,8 @@
+file,kind,description
+include/cuda_q6_backend.h,modified,adds optional CUDA Q6 CG timing counters to diagnostics
+src/cuda_q6_backend.cu,modified,adds process-wide CUDA Q6 timing aggregation controlled by MPCD_CUDA_Q6_TIMING
+scripts/build_src_mpcd_cuda_0192.sh,added,builds CUDA-enabled src_mpcd_base binary for patch 0192
+scripts/run_cuda_q6_tg_timing_0192.sh,added,runs Taylor-Green CPU/CUDA timing and optional grid-scaling comparisons
+doc/README_0192_CUDA_Q6_TIMING_AND_SCALING.md,added,documents the timing instrumentation and interpretation
+dev_history/artifacts/gpu_cuda_integration_0192/cuda_q6_timing_scaling_manifest_0192.csv,added,manifest for patch 0192
+dev_history/artifacts/gpu_cuda_integration_0192/cuda_q6_timing_scaling_scope_0192.csv,added,scope and guardrails for patch 0192

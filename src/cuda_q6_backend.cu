@@ -3,12 +3,15 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <chrono>
+#include <iostream>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -40,6 +43,117 @@ void cuda_q6_optional_synchronize(const char* what) {
     if (cuda_q6_debug_sync_enabled()) {
         cuda_check(cudaDeviceSynchronize(), what);
     }
+}
+
+using CudaQ6Clock = std::chrono::steady_clock;
+
+bool cuda_q6_timing_enabled_0192() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("MPCD_CUDA_Q6_TIMING");
+        if (value == nullptr) {
+            return false;
+        }
+        const std::string text(value);
+        return !(text.empty() || text == "0" || text == "false" || text == "FALSE" ||
+                 text == "off" || text == "OFF" || text == "no" || text == "NO");
+    }();
+    return enabled;
+}
+
+double seconds_since_0192(const CudaQ6Clock::time_point& t0) {
+    return std::chrono::duration<double>(CudaQ6Clock::now() - t0).count();
+}
+
+struct CudaQ6TimingAccum0192 {
+    long long solves = 0;
+    long long iterations = 0;
+    long long reductionDownloads = 0;
+    long long operatorApplications = 0;
+    double totalSeconds = 0.0;
+    double uploadRhsSeconds = 0.0;
+    double initializeSeconds = 0.0;
+    double zeroInactiveSeconds = 0.0;
+    double applyOperatorSeconds = 0.0;
+    double hostReductionSeconds = 0.0;
+    double axpyResidualSeconds = 0.0;
+    double meanRemovalSeconds = 0.0;
+    double updateDirectionSeconds = 0.0;
+    double downloadPhiSeconds = 0.0;
+    double finalMeanRemovalSeconds = 0.0;
+};
+
+std::mutex& cuda_q6_timing_mutex_0192() {
+    // Intentionally leaked to remain valid during std::atexit timing printout.
+    static std::mutex* m = new std::mutex();
+    return *m;
+}
+
+CudaQ6TimingAccum0192& cuda_q6_timing_accum_0192() {
+    // Intentionally leaked to remain valid during std::atexit timing printout.
+    static CudaQ6TimingAccum0192* accum = new CudaQ6TimingAccum0192();
+    return *accum;
+}
+
+void cuda_q6_print_timing_summary_0192() {
+    if (!cuda_q6_timing_enabled_0192()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(cuda_q6_timing_mutex_0192());
+    const CudaQ6TimingAccum0192& a = cuda_q6_timing_accum_0192();
+    if (a.solves <= 0) {
+        return;
+    }
+    const double avgSolve = a.totalSeconds / static_cast<double>(a.solves);
+    const double avgIter = a.iterations > 0 ? a.totalSeconds / static_cast<double>(a.iterations) : 0.0;
+    std::cerr
+        << "[cuda_q6_timing_0192]"
+        << " solves=" << a.solves
+        << " iterations=" << a.iterations
+        << " reductions=" << a.reductionDownloads
+        << " operatorApplications=" << a.operatorApplications
+        << " totalSeconds=" << a.totalSeconds
+        << " avgSolveSeconds=" << avgSolve
+        << " avgIterationSeconds=" << avgIter
+        << " uploadRhsSeconds=" << a.uploadRhsSeconds
+        << " initializeSeconds=" << a.initializeSeconds
+        << " zeroInactiveSeconds=" << a.zeroInactiveSeconds
+        << " applyOperatorSeconds=" << a.applyOperatorSeconds
+        << " hostReductionSeconds=" << a.hostReductionSeconds
+        << " axpyResidualSeconds=" << a.axpyResidualSeconds
+        << " meanRemovalSeconds=" << a.meanRemovalSeconds
+        << " updateDirectionSeconds=" << a.updateDirectionSeconds
+        << " finalMeanRemovalSeconds=" << a.finalMeanRemovalSeconds
+        << " downloadPhiSeconds=" << a.downloadPhiSeconds
+        << "\n";
+}
+
+void cuda_q6_register_timing_atexit_0192() {
+    static std::once_flag once;
+    std::call_once(once, []() { std::atexit(cuda_q6_print_timing_summary_0192); });
+}
+
+void cuda_q6_accumulate_timing_0192(const CudaQ6CgDiagnostics& d) {
+    if (!cuda_q6_timing_enabled_0192()) {
+        return;
+    }
+    cuda_q6_register_timing_atexit_0192();
+    std::lock_guard<std::mutex> lock(cuda_q6_timing_mutex_0192());
+    CudaQ6TimingAccum0192& a = cuda_q6_timing_accum_0192();
+    a.solves += 1;
+    a.iterations += d.iterations;
+    a.reductionDownloads += d.reductionDownloads;
+    a.operatorApplications += d.operatorApplications;
+    a.totalSeconds += d.totalSeconds;
+    a.uploadRhsSeconds += d.uploadRhsSeconds;
+    a.initializeSeconds += d.initializeSeconds;
+    a.zeroInactiveSeconds += d.zeroInactiveSeconds;
+    a.applyOperatorSeconds += d.applyOperatorSeconds;
+    a.hostReductionSeconds += d.hostReductionSeconds;
+    a.axpyResidualSeconds += d.axpyResidualSeconds;
+    a.meanRemovalSeconds += d.meanRemovalSeconds;
+    a.updateDirectionSeconds += d.updateDirectionSeconds;
+    a.downloadPhiSeconds += d.downloadPhiSeconds;
+    a.finalMeanRemovalSeconds += d.finalMeanRemovalSeconds;
 }
 
 template <typename T>
@@ -169,12 +283,21 @@ int choose_blocks(const int nActive, const int threadsPerBlock) {
     return std::max(1, std::min(1024, natural));
 }
 
-double host_sum_blocks(const DeviceBuffer<double>& dBlockSums) {
+double host_sum_blocks(const DeviceBuffer<double>& dBlockSums,
+                       double* elapsedSeconds = nullptr,
+                       int* downloadCount = nullptr) {
+    const auto t0 = CudaQ6Clock::now();
     std::vector<double> blockSums;
     dBlockSums.download(blockSums, "copy block sums back");
     double sum = 0.0;
     for (const double v : blockSums) {
         sum += v;
+    }
+    if (elapsedSeconds != nullptr) {
+        *elapsedSeconds += seconds_since_0192(t0);
+    }
+    if (downloadCount != nullptr) {
+        *downloadCount += 1;
     }
     return sum;
 }
@@ -560,7 +683,9 @@ void subtract_active_mean(const int nActive,
                           const int threadsPerBlock,
                           const DeviceBuffer<int>& dActive,
                           DeviceBuffer<double>& dValues,
-                          DeviceBuffer<double>& dBlockSums) {
+                          DeviceBuffer<double>& dBlockSums,
+                          double* reductionSeconds = nullptr,
+                          int* reductionDownloads = nullptr) {
     if (nActive <= 0) {
         return;
     }
@@ -568,7 +693,7 @@ void subtract_active_mean(const int nActive,
         nActive, dActive.data(), dValues.data(), dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_sum_active_kernel launch");
     cuda_q6_optional_synchronize("q6_sum_active_kernel debug synchronize");
-    const double mean = host_sum_blocks(dBlockSums) / static_cast<double>(nActive);
+    const double mean = host_sum_blocks(dBlockSums, reductionSeconds, reductionDownloads) / static_cast<double>(nActive);
     q6_subtract_mean_active_kernel<<<blocks, threadsPerBlock>>>(
         nActive, dActive.data(), mean, dValues.data());
     cuda_check(cudaGetLastError(), "q6_subtract_mean_active_kernel launch");
@@ -687,6 +812,11 @@ bool cuda_q6_solve_cg_operator_plan(
     const int nActive = static_cast<int>(plan.activeCells.size());
     const int nInactive = static_cast<int>(plan.inactiveCells.size());
     CudaQ6CgDiagnostics localDiag{};
+    const bool timingEnabled0192 = cuda_q6_timing_enabled_0192();
+    const auto totalT0 = CudaQ6Clock::now();
+    if (timingEnabled0192) {
+        cuda_q6_register_timing_atexit_0192();
+    }
     localDiag.usedCuda = true;
     localDiag.device = device;
     localDiag.numCells = nc;
@@ -694,6 +824,8 @@ bool cuda_q6_solve_cg_operator_plan(
     localDiag.inactiveCells = nInactive;
 
     if (nActive == 0 || nc == 0) {
+        localDiag.totalSeconds = seconds_since_0192(totalT0);
+        cuda_q6_accumulate_timing_0192(localDiag);
         localDiag.converged = true;
         if (diagnostics != nullptr) {
             *diagnostics = localDiag;
@@ -710,24 +842,42 @@ bool cuda_q6_solve_cg_operator_plan(
         ? uncachedWorkspace
         : cuda_q6_thread_local_cg_workspace();
     cgWorkspace.prepare_for_plan(plan, device, blocks, inactiveBlocks, disablePlanCache);
-    cgWorkspace.dRhs.upload(rhs, "copy rhs cached");
+    {
+        const auto t0 = CudaQ6Clock::now();
+        cgWorkspace.dRhs.upload(rhs, "copy rhs cached");
+        if (timingEnabled0192) {
+            localDiag.uploadRhsSeconds += seconds_since_0192(t0);
+        }
+    }
 
     localDiag.blocks = blocks;
     localDiag.threadsPerBlock = threadsPerBlock;
 
-    q6_initialize_cg_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-        nActive, cgWorkspace.dActive.data(), cgWorkspace.dRhs.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
-    cuda_check(cudaGetLastError(), "q6_initialize_cg_kernel launch");
-    cuda_q6_optional_synchronize("q6_initialize_cg_kernel debug synchronize");
+    {
+        const auto t0 = CudaQ6Clock::now();
+        q6_initialize_cg_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+            nActive, cgWorkspace.dActive.data(), cgWorkspace.dRhs.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
+        cuda_check(cudaGetLastError(), "q6_initialize_cg_kernel launch");
+        cuda_q6_optional_synchronize("q6_initialize_cg_kernel debug synchronize");
+        if (timingEnabled0192) {
+            localDiag.initializeSeconds += seconds_since_0192(t0);
+        }
+    }
 
     if (nInactive > 0) {
+        const auto t0 = CudaQ6Clock::now();
         q6_zero_inactive_kernel<<<inactiveBlocks, threadsPerBlock>>>(
             nInactive, cgWorkspace.dInactive.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dP.data(), cgWorkspace.dAp.data());
         cuda_check(cudaGetLastError(), "q6_zero_inactive_kernel launch");
         cuda_q6_optional_synchronize("q6_zero_inactive_kernel debug synchronize");
+        if (timingEnabled0192) {
+            localDiag.zeroInactiveSeconds += seconds_since_0192(t0);
+        }
     }
 
-    double rr = host_sum_blocks(cgWorkspace.dBlockSums);
+    double rr = host_sum_blocks(cgWorkspace.dBlockSums,
+                                timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
     const double rhsNorm = std::sqrt(std::max(0.0, rr));
     localDiag.rhsNorm = rhsNorm;
     if (rhsNorm <= std::numeric_limits<double>::epsilon()) {
@@ -735,7 +885,15 @@ bool cuda_q6_solve_cg_operator_plan(
         localDiag.iterations = 0;
         localDiag.residualAbs = 0.0;
         localDiag.residualRel = 0.0;
-        cgWorkspace.dPhi.download(phi, "copy phi back");
+        {
+            const auto t0 = CudaQ6Clock::now();
+            cgWorkspace.dPhi.download(phi, "copy phi back");
+            if (timingEnabled0192) {
+                localDiag.downloadPhiSeconds += seconds_since_0192(t0);
+            }
+        }
+        localDiag.totalSeconds = seconds_since_0192(totalT0);
+        cuda_q6_accumulate_timing_0192(localDiag);
         if (diagnostics != nullptr) {
             *diagnostics = localDiag;
         }
@@ -747,39 +905,66 @@ bool cuda_q6_solve_cg_operator_plan(
     bool converged = false;
 
     for (int it = 0; it < maxIt; ++it) {
-        q6_apply_operator_plan_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-            nActive,
-            cgWorkspace.dActive.data(),
-            cgWorkspace.dEast.data(), cgWorkspace.dWest.data(), cgWorkspace.dNorth.data(), cgWorkspace.dSouth.data(),
-            cgWorkspace.dCoeffEast.data(), cgWorkspace.dCoeffWest.data(), cgWorkspace.dCoeffNorth.data(), cgWorkspace.dCoeffSouth.data(),
-            cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
-        cuda_check(cudaGetLastError(), "q6_apply_operator_plan_kernel cg launch");
-        cuda_q6_optional_synchronize("q6_apply_operator_plan_kernel cg debug synchronize");
-        const double pAp = host_sum_blocks(cgWorkspace.dBlockSums);
+        {
+            const auto t0 = CudaQ6Clock::now();
+            q6_apply_operator_plan_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+                nActive,
+                cgWorkspace.dActive.data(),
+                cgWorkspace.dEast.data(), cgWorkspace.dWest.data(), cgWorkspace.dNorth.data(), cgWorkspace.dSouth.data(),
+                cgWorkspace.dCoeffEast.data(), cgWorkspace.dCoeffWest.data(), cgWorkspace.dCoeffNorth.data(), cgWorkspace.dCoeffSouth.data(),
+                cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
+            cuda_check(cudaGetLastError(), "q6_apply_operator_plan_kernel cg launch");
+            cuda_q6_optional_synchronize("q6_apply_operator_plan_kernel cg debug synchronize");
+            if (timingEnabled0192) {
+                localDiag.applyOperatorSeconds += seconds_since_0192(t0);
+                localDiag.operatorApplications += 1;
+            }
+        }
+        const double pAp = host_sum_blocks(cgWorkspace.dBlockSums,
+                                           timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                           timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
         localDiag.lastPAp = pAp;
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
             break;
         }
 
         const double alpha = rr / pAp;
-        q6_axpy_residual_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-            nActive, cgWorkspace.dActive.data(), alpha, cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
-        cuda_check(cudaGetLastError(), "q6_axpy_residual_kernel launch");
-        cuda_q6_optional_synchronize("q6_axpy_residual_kernel debug synchronize");
-        double rrNew = host_sum_blocks(cgWorkspace.dBlockSums);
+        {
+            const auto t0 = CudaQ6Clock::now();
+            q6_axpy_residual_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+                nActive, cgWorkspace.dActive.data(), alpha, cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
+            cuda_check(cudaGetLastError(), "q6_axpy_residual_kernel launch");
+            cuda_q6_optional_synchronize("q6_axpy_residual_kernel debug synchronize");
+            if (timingEnabled0192) {
+                localDiag.axpyResidualSeconds += seconds_since_0192(t0);
+            }
+        }
+        double rrNew = host_sum_blocks(cgWorkspace.dBlockSums,
+                                       timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                       timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
 
         const bool removeMeanThisIteration =
             params.removePhiMeanFinal &&
             params.meanRemovalPeriod > 0 &&
             ((it + 1) % params.meanRemovalPeriod == 0);
         if (removeMeanThisIteration) {
-            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums);
-            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dR, cgWorkspace.dBlockSums);
+            const auto t0 = CudaQ6Clock::now();
+            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums,
+                                 timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                 timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dR, cgWorkspace.dBlockSums,
+                                 timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                 timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
             q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
                 nActive, cgWorkspace.dActive.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
             cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
             cuda_q6_optional_synchronize("q6_sum_active_squares_kernel residual after mean removal debug synchronize");
-            rrNew = host_sum_blocks(cgWorkspace.dBlockSums);
+            rrNew = host_sum_blocks(cgWorkspace.dBlockSums,
+                                    timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                    timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+            if (timingEnabled0192) {
+                localDiag.meanRemovalSeconds += seconds_since_0192(t0);
+            }
         }
 
         localDiag.iterations = it + 1;
@@ -792,18 +977,38 @@ bool cuda_q6_solve_cg_operator_plan(
         }
 
         const double beta = rrNew / rr;
-        q6_update_direction_kernel<<<blocks, threadsPerBlock>>>(
-            nActive, cgWorkspace.dActive.data(), beta, cgWorkspace.dR.data(), cgWorkspace.dP.data());
-        cuda_check(cudaGetLastError(), "q6_update_direction_kernel launch");
-        cuda_q6_optional_synchronize("q6_update_direction_kernel debug synchronize");
+        {
+            const auto t0 = CudaQ6Clock::now();
+            q6_update_direction_kernel<<<blocks, threadsPerBlock>>>(
+                nActive, cgWorkspace.dActive.data(), beta, cgWorkspace.dR.data(), cgWorkspace.dP.data());
+            cuda_check(cudaGetLastError(), "q6_update_direction_kernel launch");
+            cuda_q6_optional_synchronize("q6_update_direction_kernel debug synchronize");
+            if (timingEnabled0192) {
+                localDiag.updateDirectionSeconds += seconds_since_0192(t0);
+            }
+        }
         rr = rrNew;
     }
 
     if (params.removePhiMeanFinal) {
-        subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums);
+        const auto t0 = CudaQ6Clock::now();
+        subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums,
+                             timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                             timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+        if (timingEnabled0192) {
+            localDiag.finalMeanRemovalSeconds += seconds_since_0192(t0);
+        }
     }
 
-    cgWorkspace.dPhi.download(phi, "copy phi back");
+    {
+        const auto t0 = CudaQ6Clock::now();
+        cgWorkspace.dPhi.download(phi, "copy phi back");
+        if (timingEnabled0192) {
+            localDiag.downloadPhiSeconds += seconds_since_0192(t0);
+        }
+    }
+    localDiag.totalSeconds = seconds_since_0192(totalT0);
+    cuda_q6_accumulate_timing_0192(localDiag);
     localDiag.converged = converged;
     if (!converged && localDiag.iterations == 0) {
         localDiag.residualAbs = rhsNorm;
