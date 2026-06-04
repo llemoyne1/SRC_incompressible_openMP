@@ -639,15 +639,17 @@ void validate_simulation_params(const SimulationParams& p) {
         if (q6OpenBoundary && p.immersedSolidEnable) {
             std::string solidShapeForOpen = p.immersedSolidShape;
             std::replace(solidShapeForOpen.begin(), solidShapeForOpen.end(), '-', '_');
-            const bool staticRectangle =
-                (solidShapeForOpen == "rectangle" || solidShapeForOpen == "rect" ||
-                 solidShapeForOpen == "box" || solidShapeForOpen == "step") &&
+            const bool staticSupportedSolid =
+                (solidShapeForOpen == "circle" || solidShapeForOpen == "disk" ||
+                 solidShapeForOpen == "disc" || solidShapeForOpen == "rectangle" ||
+                 solidShapeForOpen == "rect" || solidShapeForOpen == "box" ||
+                 solidShapeForOpen == "step") &&
                 std::abs(p.immersedSolidVx) == 0.0 &&
                 std::abs(p.immersedSolidVy) == 0.0 &&
                 std::abs(p.immersedSolidOmega) == 0.0;
-            if (!hardInletReservoir || !staticRectangle || !p.projectionImmersedSolidMaskEnable ||
+            if (!hardInletReservoir || !staticSupportedSolid || !p.projectionImmersedSolidMaskEnable ||
                 p.projectionAllowUnmaskedImmersedSolid) {
-                throw std::runtime_error("0067 Q6 inlet/outlet with immersed solids requires hard_cell_density inlet, fixed rectangle, projectionImmersedSolidMaskEnable=true and projectionAllowUnmaskedImmersedSolid=false");
+                throw std::runtime_error("0067 Q6 inlet/outlet with immersed solids requires hard_cell_density inlet, fixed static circle/rectangle, projectionImmersedSolidMaskEnable=true and projectionAllowUnmaskedImmersedSolid=false");
             }
         }
         std::string inletInjectionMode = p.inletInjectionMode;
