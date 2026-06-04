@@ -1,0 +1,5 @@
+path,role
+scripts/detect_gpu_toolchain_0185.sh,Read-only local GPU/compiler/toolchain inventory with optional smoke compile probes
+doc/README_0185_GPU_BACKEND_DECISION.md,Backend decision note for SRC_GPU branch after scaffold 0184
+dev_history/artifacts/gpu_backend_decision_0185/gpu_backend_options_0185.csv,Static backend tradeoff matrix
+dev_history/artifacts/gpu_backend_decision_0185/gpu_backend_decision_manifest_0185.csv,Manifest for patch 0185
