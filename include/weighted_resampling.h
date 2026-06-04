@@ -25,7 +25,7 @@ const char* resampling_mass_guard_profile_phase_name(std::size_t phaseIndex);
 const char* resampling_deposit_profile_phase_name(std::size_t phaseIndex);
 
 // Profiling-only context labels for deposit_weighted_real_fluid.  They do not
-// alter the deposit semantics; they only classify calls in deposit_profile_0171.csv.
+// alter the deposit semantics; they only classify resampling deposit calls.
 enum class ResamplingDepositProfileContext : std::uint8_t {
     Generic = 0,
     Initial = 1,

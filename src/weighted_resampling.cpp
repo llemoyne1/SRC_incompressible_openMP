@@ -39,18 +39,6 @@ int thread_id() {
 }
 
 
-bool internal_profiles_enabled_0176() {
-    static const bool enabled = []() {
-        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-        if (v == nullptr || *v == '\0') {
-            return false;
-        }
-        const std::string s(v);
-        return !(s == "0" || s == "false" || s == "FALSE" ||
-                 s == "off" || s == "OFF" || s == "no" || s == "NO");
-    }();
-    return enabled;
-}
 
 
 
@@ -69,236 +57,22 @@ inline void set_particle_role_preconditioned(ParticleState& state,
 }
 
 
-using ResamplingProfileClock = std::chrono::steady_clock;
-
-struct PopulationGuardProfilePhaseIndex {
-    enum : std::size_t {
-        InitThresholds = 0,
-        CountCopy = 1,
-        StatsBefore = 2,
-        EnsureCellParticleIndex = 3,
-        OverfullExtractionLoop = 4,
-        UnderfullSplitLoop = 5,
-        StatsAfterFinalize = 6,
-        OverfullCandidateSetup = 7,
-        OverfullParticleScan = 8,
-        OverfullApplyMutation = 9,
-        OverfullDiagnostics = 10,
-        UnderfullCandidateSetup = 11,
-        UnderfullParticleScan = 12,
-        UnderfullApplyMutation = 13,
-        UnderfullDiagnostics = 14,
-        OverfullMutationMomentumMerge = 15,
-        OverfullMutationStateWrite = 16,
-        OverfullMutationRoleInactivate = 17,
-        OverfullMutationPoolPush = 18,
-        OverfullMutationCountUpdate = 19,
-        UnderfullMutationPoolPop = 20,
-        UnderfullMutationParticleClone = 21,
-        UnderfullMutationRoleActivate = 22,
-        UnderfullMutationPoolFluidPush = 23,
-        UnderfullMutationCountersUpdate = 24
-    };
-};
-
-struct MassGuardProfilePhaseIndex {
-    enum : std::size_t {
-        InitValidate = 0,
-        BuildParticlesByCell = 1,
-        CellLoop = 2,
-        Finalize = 3
-    };
-};
-
-struct DepositProfilePhaseIndex {
-    enum : std::size_t {
-        ValidateResize = 0,
-        ClearArrays = 1,
-        RoleCounts = 2,
-        ParticleLoopCellAccum = 3,
-        ReduceCellsFinalize = 4,
-        ActiveWetClassification = 5,
-        PoorRichClassification = 6,
-        CandidateLists = 7,
-        MutationPlanCellIndex = 8,
-        TransferPlanBuild = 9,
-        DonorParticleSelection = 10,
-        PassiveExtractionPlan = 11
-    };
-};
-
-static_assert(ResamplingPopulationGuardProfilePhaseCount == 25u, "population-guard profile phase count mismatch");
-static_assert(ResamplingMassGuardProfilePhaseCount == 4u, "mass-guard profile phase count mismatch");
-static_assert(ResamplingDepositProfilePhaseCount == 12u, "deposit profile phase count mismatch");
-
-class ScopedPopulationGuardProfileTimer {
-public:
-    ScopedPopulationGuardProfileTimer(ResamplingPopulationGuardProfile& profile,
-                                      const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
-        if (enabled_) {
-            t0_ = ResamplingProfileClock::now();
-        }
-    }
-    ScopedPopulationGuardProfileTimer(const ScopedPopulationGuardProfileTimer&) = delete;
-    ScopedPopulationGuardProfileTimer& operator=(const ScopedPopulationGuardProfileTimer&) = delete;
-    ~ScopedPopulationGuardProfileTimer() {
-        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
-            profile_.seconds[phaseIndex_] +=
-                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
-        }
-    }
-private:
-    ResamplingPopulationGuardProfile& profile_;
-    std::size_t phaseIndex_;
-    bool enabled_ = false;
-    ResamplingProfileClock::time_point t0_{};
-};
-
-class ScopedMassGuardProfileTimer {
-public:
-    ScopedMassGuardProfileTimer(ResamplingMassGuardProfile& profile,
-                                const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
-        if (enabled_) {
-            t0_ = ResamplingProfileClock::now();
-        }
-    }
-    ScopedMassGuardProfileTimer(const ScopedMassGuardProfileTimer&) = delete;
-    ScopedMassGuardProfileTimer& operator=(const ScopedMassGuardProfileTimer&) = delete;
-    ~ScopedMassGuardProfileTimer() {
-        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
-            profile_.seconds[phaseIndex_] +=
-                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
-        }
-    }
-private:
-    ResamplingMassGuardProfile& profile_;
-    std::size_t phaseIndex_;
-    bool enabled_ = false;
-    ResamplingProfileClock::time_point t0_{};
-};
-
-#define MPCD_POP_GUARD_PROFILE(profile, phaseName) \
-    ScopedPopulationGuardProfileTimer mpcdPopGuardProfileTimer_##phaseName((profile), PopulationGuardProfilePhaseIndex::phaseName)
-
-class ScopedDepositProfileTimer {
-public:
-    ScopedDepositProfileTimer(std::array<double, ResamplingDepositProfilePhaseCount>& seconds,
-                              const std::size_t phaseIndex)
-        : seconds_(seconds), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
-        if (enabled_) {
-            t0_ = ResamplingProfileClock::now();
-        }
-    }
-    ScopedDepositProfileTimer(const ScopedDepositProfileTimer&) = delete;
-    ScopedDepositProfileTimer& operator=(const ScopedDepositProfileTimer&) = delete;
-    ~ScopedDepositProfileTimer() {
-        if (enabled_ && phaseIndex_ < seconds_.size()) {
-            seconds_[phaseIndex_] +=
-                std::chrono::duration<double>(ResamplingProfileClock::now() - t0_).count();
-        }
-    }
-private:
-    std::array<double, ResamplingDepositProfilePhaseCount>& seconds_;
-    std::size_t phaseIndex_;
-    bool enabled_ = false;
-    ResamplingProfileClock::time_point t0_{};
-};
-
-#define MPCD_MASS_GUARD_PROFILE(profile, phaseName) \
-    ScopedMassGuardProfileTimer mpcdMassGuardProfileTimer_##phaseName((profile), MassGuardProfilePhaseIndex::phaseName)
-
-#define MPCD_DEPOSIT_PROFILE(seconds, phaseName) \
-    ScopedDepositProfileTimer mpcdDepositProfileTimer_##phaseName((seconds), DepositProfilePhaseIndex::phaseName)
+#define MPCD_POP_GUARD_PROFILE(profile, phaseName) ((void)0)
+#define MPCD_MASS_GUARD_PROFILE(profile, phaseName) ((void)0)
+#define MPCD_DEPOSIT_PROFILE(seconds, phaseName) ((void)0)
 
 struct DepositProfileAccumulator {
-    std::array<std::array<double, ResamplingDepositProfilePhaseCount>,
-               static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> seconds{};
-    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> calls{};
-    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> particlesVisited{};
-    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> fluidParticles{};
-    std::array<std::uint64_t, static_cast<std::size_t>(ResamplingDepositProfileContext::Count)> cells{};
-    std::string outputDir;
-
-    void add(const std::string& out,
-             ResamplingDepositProfileContext context,
-             const std::array<double, ResamplingDepositProfilePhaseCount>& localSeconds,
-             std::uint64_t nParticles,
-             std::uint64_t nFluid,
-             std::uint64_t nCells) {
-        if (!internal_profiles_enabled_0176()) {
-            return;
-        }
-        const std::size_t idx = static_cast<std::size_t>(context);
-        if (idx >= calls.size()) {
-            return;
-        }
-        if (!out.empty()) {
-            outputDir = out;
-        }
-        calls[idx] += 1u;
-        particlesVisited[idx] += nParticles;
-        fluidParticles[idx] += nFluid;
-        cells[idx] += nCells;
-        for (std::size_t i = 0; i < ResamplingDepositProfilePhaseCount; ++i) {
-            seconds[idx][i] += localSeconds[i];
-        }
-    }
-
-    ~DepositProfileAccumulator() {
-        if (!internal_profiles_enabled_0176()) {
-            return;
-        }
-        if (outputDir.empty()) {
-            return;
-        }
-        std::error_code ec;
-        std::filesystem::create_directories(outputDir, ec);
-        const std::filesystem::path path = std::filesystem::path(outputDir) / "deposit_profile_0172.csv";
-        std::ofstream out(path);
-        if (!out) {
-            return;
-        }
-        out << "context,phase,total_s,ms_per_call,percent_context_total,calls,particles_visited,fluid_particles,cells\n";
-        out.setf(std::ios::fmtflags(0), std::ios::floatfield);
-        out.precision(17);
-        for (std::size_t c = 0; c < calls.size(); ++c) {
-            if (calls[c] == 0u) {
-                continue;
-            }
-            const auto context = static_cast<ResamplingDepositProfileContext>(c);
-            double total = 0.0;
-            for (double v : seconds[c]) {
-                total += v;
-            }
-            const double denom = static_cast<double>(calls[c]);
-            for (std::size_t p = 0; p < ResamplingDepositProfilePhaseCount; ++p) {
-                const double value = seconds[c][p];
-                const double percent = total > std::numeric_limits<double>::min()
-                    ? 100.0 * value / total : 0.0;
-                out << resampling_deposit_profile_context_name(context) << ','
-                    << resampling_deposit_profile_phase_name(p) << ','
-                    << value << ','
-                    << (1000.0 * value / denom) << ','
-                    << percent << ','
-                    << calls[c] << ','
-                    << particlesVisited[c] << ','
-                    << fluidParticles[c] << ','
-                    << cells[c] << '\n';
-            }
-            out << resampling_deposit_profile_context_name(context) << ",total_deposit,"
-                << total << ',' << (1000.0 * total / denom) << ",100,"
-                << calls[c] << ',' << particlesVisited[c] << ','
-                << fluidParticles[c] << ',' << cells[c] << '\n';
-        }
-    }
+    void add(const std::string&,
+             ResamplingDepositProfileContext,
+             const std::array<double, ResamplingDepositProfilePhaseCount>&,
+             std::uint64_t, std::uint64_t, std::uint64_t) {}
 };
 
 DepositProfileAccumulator& deposit_profile_accumulator() {
     static DepositProfileAccumulator acc;
     return acc;
 }
+
 
 
 bool cell_center_inside_domain(int ix, int iy, const CellGrid& grid, const FluidDomainBounds& domain) {

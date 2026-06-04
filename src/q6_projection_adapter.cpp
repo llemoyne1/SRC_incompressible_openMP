@@ -21,75 +21,8 @@ namespace mpcd {
 namespace {
 
 
-using Q6ProfileClock = std::chrono::steady_clock;
+#define MPCD_Q6_PROFILE(profile, phaseName) ((void)0)
 
-bool internal_profiles_enabled_0176() {
-    static const bool enabled = []() {
-        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-        if (v == nullptr || *v == '\0') {
-            return false;
-        }
-        const std::string s(v);
-        return !(s == "0" || s == "false" || s == "FALSE" ||
-                 s == "off" || s == "OFF" || s == "no" || s == "NO");
-    }();
-    return enabled;
-}
-
-struct Q6ProfilePhaseIndex {
-    enum : std::size_t {
-        ResizeWorkspace = 0,
-        DepositCellVelocity = 1,
-        BuildBaseFlux = 2,
-        FillAlpha = 3,
-        PrepareImmersedMask = 4,
-        ApplyImmersedAlpha = 5,
-        TargetDivergence = 6,
-        SetupBoundaryConditions = 7,
-        ProjectFaceField = 8,
-        CapacityStrength = 9,
-        BuildScaledFluxes = 10,
-        EnforceImmersedFlux = 11,
-        DivProjectedAfter = 12,
-        SolidLeakStats = 13,
-        FaceCorrectionToCell = 14,
-        BuildCorrectedCellVelocity = 15,
-        DivCellAfter = 16,
-        ApplyParticleVelocityCorrection = 17
-    };
-};
-
-static_assert(Q6ProjectionProfilePhaseCount == 18u,
-              "Q6 projection profile phase count mismatch");
-
-class ScopedQ6ProfileTimer {
-public:
-    ScopedQ6ProfileTimer(Q6ProjectionProfile& profile, const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
-        if (enabled_) {
-            t0_ = Q6ProfileClock::now();
-        }
-    }
-
-    ScopedQ6ProfileTimer(const ScopedQ6ProfileTimer&) = delete;
-    ScopedQ6ProfileTimer& operator=(const ScopedQ6ProfileTimer&) = delete;
-
-    ~ScopedQ6ProfileTimer() {
-        if (enabled_ && phaseIndex_ < profile_.seconds.size()) {
-            profile_.seconds[phaseIndex_] +=
-                std::chrono::duration<double>(Q6ProfileClock::now() - t0_).count();
-        }
-    }
-
-private:
-    Q6ProjectionProfile& profile_;
-    std::size_t phaseIndex_ = 0u;
-    bool enabled_ = false;
-    Q6ProfileClock::time_point t0_{};
-};
-
-#define MPCD_Q6_PROFILE(profile, phaseName) \
-    ScopedQ6ProfileTimer mpcdQ6ProfileTimer_##phaseName((profile), Q6ProfilePhaseIndex::phaseName)
 
 int thread_count() {
 #ifdef _OPENMP

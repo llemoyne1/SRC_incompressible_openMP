@@ -14,82 +14,8 @@ namespace mpcd {
 namespace {
 
 
-using EllipticProfileClock = std::chrono::steady_clock;
+#define MPCD_ELLIPTIC_PROFILE(profilePtr, phaseName) ((void)0)
 
-bool internal_profiles_enabled_0176() {
-    static const bool enabled = []() {
-        const char* v = std::getenv("MPCD_INTERNAL_PROFILES");
-        if (v == nullptr || *v == '\0') {
-            return false;
-        }
-        const std::string s(v);
-        return !(s == "0" || s == "false" || s == "FALSE" ||
-                 s == "off" || s == "OFF" || s == "no" || s == "NO");
-    }();
-    return enabled;
-}
-
-struct EllipticProfilePhaseIndex {
-    enum : std::size_t {
-        ComputeDivBefore = 0,
-        BuildSolveBaseFlux = 1,
-        ZeroAlphaFaces = 2,
-        ComputeDivForSolve = 3,
-        BuildRhs = 4,
-        RhsGauge = 5,
-        CgInitialize = 6,
-        CgRhsNormAndStats = 7,
-        CgApplyOperator = 8,
-        CgDotPAp = 9,
-        CgAxpyPhiResidual = 10,
-        CgPeriodicMeanRemoval = 11,
-        CgDotResidual = 12,
-        CgUpdateDirection = 13,
-        CgOperatorPlanBuild = 14,
-        CgFinalMeanRemoval = 15,
-        CgFinalResidual = 16,
-        BuildCorrectionFlux = 17,
-        ComputeDivAfter = 18,
-        FinalStatsDivBefore = 19,
-        FinalStatsTarget = 20,
-        FinalStatsDivAfter = 21,
-        FinalStatsCorrection = 22,
-        FinalStatsProjected = 23,
-        Other = 24
-    };
-};
-
-static_assert(EllipticProjectionProfilePhaseCount == 25u,
-              "Elliptic projection profile phase count mismatch");
-
-class ScopedEllipticProfileTimer {
-public:
-    ScopedEllipticProfileTimer(EllipticProjectionProfile* profile, const std::size_t phaseIndex)
-        : profile_(profile), phaseIndex_(phaseIndex), enabled_(internal_profiles_enabled_0176()) {
-        if (enabled_) {
-            t0_ = EllipticProfileClock::now();
-        }
-    }
-
-    ScopedEllipticProfileTimer(const ScopedEllipticProfileTimer&) = delete;
-    ScopedEllipticProfileTimer& operator=(const ScopedEllipticProfileTimer&) = delete;
-
-    ~ScopedEllipticProfileTimer() {
-        if (enabled_ && profile_ && phaseIndex_ < profile_->seconds.size()) {
-            profile_->seconds[phaseIndex_] +=
-                std::chrono::duration<double>(EllipticProfileClock::now() - t0_).count();
-        }
-    }
-
-private:
-    EllipticProjectionProfile* profile_ = nullptr;
-    std::size_t phaseIndex_ = 0u;
-    bool enabled_ = false;
-    EllipticProfileClock::time_point t0_{};
-};
-
-#define MPCD_ELLIPTIC_PROFILE(profilePtr, phaseName) \
-    ScopedEllipticProfileTimer mpcdEllipticProfileTimer_##phaseName((profilePtr), EllipticProfilePhaseIndex::phaseName)
 
 int cell_index(int i, int j, int Nx) {
     return i + Nx * j;
@@ -390,6 +316,7 @@ void solve_cg(const EllipticProjectionGrid& grid,
               EllipticProjectionWorkspace& workspace,
               EllipticProjectionDiagnostics& diag,
               EllipticProjectionProfile* profile) {
+    (void)profile;
     const int nc = grid.numCells;
     require_scalar_size(workspace.r, nc, "workspace.r");
     require_scalar_size(workspace.p, nc, "workspace.p");
