@@ -1,0 +1,9 @@
+path,kind,action
+include/cuda_q6_backend.h,header,extend CUDA Q6 backend API with standalone CG params and diagnostics
+src/cuda_q6_backend.cu,cuda_source,add device-resident standalone CG kernels and solver function
+src/main_validate_cuda_q6_cg_0187.cpp,validator,add manufactured periodic CPU-vs-CUDA CG comparison
+scripts/build_cuda_q6_cg_0187.sh,script,build standalone CUDA CG validator
+scripts/run_cuda_q6_cg_smoke_0187.sh,script,run CUDA CG smoke and preserve explicit full-path failure check
+doc/README_0187_CUDA_Q6_STANDALONE_CG.md,documentation,document scope build smoke and next integration step
+dev_history/artifacts/gpu_cuda_cg_0187/cuda_q6_cg_scope_0187.csv,artifact,record numerical and architectural scope
+dev_history/artifacts/gpu_cuda_cg_0187/cuda_q6_cg_manifest_0187.csv,artifact,record files included in patch 0187

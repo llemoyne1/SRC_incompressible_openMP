@@ -1,0 +1,8 @@
+item,status,comment
+backend_policy,cuda_only,"The SRC_GPU branch now focuses on CUDA as the only experimental GPU backend."
+full_simulation_wiring,not_yet,"projectionBackend=cuda remains an explicit failure in full SRC/MPCD runs."
+standalone_cg,added,"CUDA CG on an existing EllipticOperatorPlan is added and validated against CPU reference CG."
+operator_plan_transfer,host_to_device_once,"Plan topology and coefficients are uploaded once per standalone solve."
+vector_residency,device_resident,"phi,r,p,Ap remain on device during the CG loop."
+scalar_reductions,host_finalized,"Block reductions are finalized on host for pAp and residual norms; acceptable for validation, not final performance design."
+first_integration_target,next_patch,"Wire CUDA CG into project_face_field for a restricted Q6 path after standalone validation."
