@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -30,14 +29,6 @@ namespace mpcd {
 // velocity face field, Q9 can pass a mass-flux face field, and future surface
 // tension modules can reuse the same discrete div/grad/operator machinery.
 
-
-constexpr std::size_t EllipticProjectionProfilePhaseCount = 25u;
-
-const char* elliptic_projection_profile_phase_name(std::size_t phaseIndex);
-
-struct EllipticProjectionProfile {
-    std::array<double, EllipticProjectionProfilePhaseCount> seconds{};
-};
 
 struct EllipticProjectionGrid {
     int Nx = 0;
@@ -131,7 +122,6 @@ struct EllipticProjectionResult {
     std::vector<double> divBefore;
     std::vector<double> divAfter;
     EllipticProjectionDiagnostics diagnostics;
-    EllipticProjectionProfile profile;
 };
 
 

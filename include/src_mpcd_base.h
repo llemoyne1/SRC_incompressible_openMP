@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include "boundary_base.h"
@@ -18,14 +17,6 @@
 namespace mpcd {
 
 
-constexpr std::size_t StepProfilePhaseCount = 31u;
-
-const char* step_profile_phase_name(std::size_t phaseIndex);
-
-struct StepProfile {
-    std::array<double, StepProfilePhaseCount> seconds{};
-};
-
 struct StepResult {
     FluidDomainBounds domain;
     BoundaryDiagnostics boundary;
@@ -36,7 +27,6 @@ struct StepResult {
     ClosedCapacityResponseDiagnostics capacity;
     WeightedResamplingDiagnostics resampling;
     ResamplingParticlePoolDiagnostics resamplingPool;
-    StepProfile profile;
 };
 
 struct SrcMpcdBaseWorkspace {
