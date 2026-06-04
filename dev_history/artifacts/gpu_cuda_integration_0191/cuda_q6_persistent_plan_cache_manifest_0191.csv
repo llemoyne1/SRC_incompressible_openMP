@@ -1,0 +1,7 @@
+path,action,description
+src/cuda_q6_backend.cu,modified,Adds a thread-local CUDA CG workspace/cache for elliptic operator plan and scratch buffers; uploads RHS per projection and reloads plan only on signature change.
+scripts/build_src_mpcd_cuda_0191.sh,added,Builds CUDA-enabled SRC/MPCD executable for patch 0191.
+scripts/run_cuda_q6_tg_regression_0191.sh,added,Runs CPU vs CUDA Taylor-Green regression with persistent cache enabled and optional cached-vs-uncached ablation.
+doc/README_0191_CUDA_Q6_PERSISTENT_PLAN_CACHE.md,added,Documents the 0191 persistent plan-cache strategy, controls and validation.
+dev_history/artifacts/gpu_cuda_integration_0191/cuda_q6_persistent_plan_cache_manifest_0191.csv,added,Patch manifest.
+dev_history/artifacts/gpu_cuda_integration_0191/cuda_q6_persistent_plan_cache_scope_0191.csv,added,Scope and risk register for patch 0191.

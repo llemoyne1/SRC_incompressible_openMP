@@ -1,0 +1,11 @@
+item,status,notes
+backend policy,CUDA-only,No OpenCL/OpenGL/OpenMP-target decision logic added.
+default simulation backend,CPU,projectionBackend remains CPU unless explicitly set to cuda.
+CUDA supported subset,periodic-unmasked-Q6,Taylor-Green remains the primary integration target.
+plan cache,enabled by default,Thread-local cache keeps operator-plan and scratch buffers across projection calls.
+cache invalidation,signature-based,Signature includes dimensions/boundaries/topology/coefficients.
+runtime escape hatch,available,Set MPCD_CUDA_Q6_DISABLE_PLAN_CACHE=1 to force old uncached behavior.
+unsupported cases,guarded,Non-periodic/masked cases must still fail explicitly for projectionBackend=cuda.
+expected performance effect,moderate,Reduces allocation/upload overhead but does not yet remove per-iteration host reductions.
+main numerical risk,stale plan,Mitigated by exact signature check and cache-disable option.
+next optimization,device-side reductions,CG still downloads block sums to host at every dot product.

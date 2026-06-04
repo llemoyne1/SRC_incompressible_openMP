@@ -5,11 +5,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace mpcd {
@@ -72,6 +75,12 @@ public:
         count_ = count;
         if (count_ > 0u) {
             cuda_check(cudaMalloc(reinterpret_cast<void**>(&ptr_), count_ * sizeof(T)), "cudaMalloc");
+        }
+    }
+
+    void allocate_if_needed(const std::size_t count) {
+        if (count_ != count) {
+            allocate(count);
         }
     }
 
@@ -168,6 +177,164 @@ double host_sum_blocks(const DeviceBuffer<double>& dBlockSums) {
         sum += v;
     }
     return sum;
+}
+
+
+bool cuda_q6_plan_cache_disabled() {
+    const char* value = std::getenv("MPCD_CUDA_Q6_DISABLE_PLAN_CACHE");
+    if (value == nullptr) {
+        return false;
+    }
+    const std::string text(value);
+    return !(text.empty() || text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
+}
+
+uint64_t fnv1a_mix_u64(uint64_t h, const uint64_t v) {
+    constexpr uint64_t prime = 1099511628211ull;
+    h ^= v;
+    h *= prime;
+    return h;
+}
+
+uint64_t fnv1a_mix_i32(uint64_t h, const int v) {
+    return fnv1a_mix_u64(h, static_cast<uint64_t>(static_cast<int64_t>(v)));
+}
+
+uint64_t fnv1a_mix_double(uint64_t h, const double v) {
+    uint64_t bits = 0u;
+    static_assert(sizeof(bits) == sizeof(v), "unexpected double size");
+    std::memcpy(&bits, &v, sizeof(bits));
+    return fnv1a_mix_u64(h, bits);
+}
+
+template <typename T>
+uint64_t fnv1a_mix_vector(uint64_t h, const std::vector<T>& v) {
+    h = fnv1a_mix_u64(h, static_cast<uint64_t>(v.size()));
+    for (const T& x : v) {
+        if constexpr (std::is_same<T, double>::value) {
+            h = fnv1a_mix_double(h, x);
+        } else {
+            h = fnv1a_mix_i32(h, static_cast<int>(x));
+        }
+    }
+    return h;
+}
+
+uint64_t elliptic_plan_signature_0191(const EllipticOperatorPlan& plan) {
+    uint64_t h = 1469598103934665603ull;
+    h = fnv1a_mix_i32(h, plan.Nx);
+    h = fnv1a_mix_i32(h, plan.Ny);
+    h = fnv1a_mix_i32(h, plan.numCells);
+    h = fnv1a_mix_double(h, plan.dx);
+    h = fnv1a_mix_double(h, plan.dy);
+    h = fnv1a_mix_i32(h, static_cast<int>(plan.bcX));
+    h = fnv1a_mix_i32(h, static_cast<int>(plan.bcY));
+    h = fnv1a_mix_vector(h, plan.activeCells);
+    h = fnv1a_mix_vector(h, plan.inactiveCells);
+    h = fnv1a_mix_vector(h, plan.east);
+    h = fnv1a_mix_vector(h, plan.west);
+    h = fnv1a_mix_vector(h, plan.north);
+    h = fnv1a_mix_vector(h, plan.south);
+    h = fnv1a_mix_vector(h, plan.coeffEast);
+    h = fnv1a_mix_vector(h, plan.coeffWest);
+    h = fnv1a_mix_vector(h, plan.coeffNorth);
+    h = fnv1a_mix_vector(h, plan.coeffSouth);
+    return h;
+}
+
+class CudaQ6CgDeviceWorkspace {
+public:
+    void prepare_for_plan(const EllipticOperatorPlan& plan,
+                          const int device,
+                          const int blocks,
+                          const int inactiveBlocks,
+                          const bool forcePlanReload) {
+        const int nc = plan.numCells;
+        const int nActive = static_cast<int>(plan.activeCells.size());
+        const int nInactive = static_cast<int>(plan.inactiveCells.size());
+        const uint64_t sig = elliptic_plan_signature_0191(plan);
+        const bool reloadPlan = forcePlanReload ||
+                                !planValid_ ||
+                                device_ != device ||
+                                numCells_ != nc ||
+                                activeCells_ != nActive ||
+                                inactiveCells_ != nInactive ||
+                                planSignature_ != sig;
+
+        if (reloadPlan) {
+            dActive.allocate_if_needed(static_cast<std::size_t>(nActive));
+            dInactive.allocate_if_needed(static_cast<std::size_t>(std::max(1, nInactive)));
+            dEast.allocate_if_needed(static_cast<std::size_t>(nc));
+            dWest.allocate_if_needed(static_cast<std::size_t>(nc));
+            dNorth.allocate_if_needed(static_cast<std::size_t>(nc));
+            dSouth.allocate_if_needed(static_cast<std::size_t>(nc));
+            dCoeffEast.allocate_if_needed(static_cast<std::size_t>(nc));
+            dCoeffWest.allocate_if_needed(static_cast<std::size_t>(nc));
+            dCoeffNorth.allocate_if_needed(static_cast<std::size_t>(nc));
+            dCoeffSouth.allocate_if_needed(static_cast<std::size_t>(nc));
+
+            dActive.upload(plan.activeCells, "copy activeCells cached");
+            if (nInactive > 0) {
+                dInactive.upload(plan.inactiveCells, "copy inactiveCells cached");
+            }
+            dEast.upload(plan.east, "copy east cached");
+            dWest.upload(plan.west, "copy west cached");
+            dNorth.upload(plan.north, "copy north cached");
+            dSouth.upload(plan.south, "copy south cached");
+            dCoeffEast.upload(plan.coeffEast, "copy coeffEast cached");
+            dCoeffWest.upload(plan.coeffWest, "copy coeffWest cached");
+            dCoeffNorth.upload(plan.coeffNorth, "copy coeffNorth cached");
+            dCoeffSouth.upload(plan.coeffSouth, "copy coeffSouth cached");
+
+            device_ = device;
+            numCells_ = nc;
+            activeCells_ = nActive;
+            inactiveCells_ = nInactive;
+            planSignature_ = sig;
+            planValid_ = true;
+        }
+
+        dRhs.allocate_if_needed(static_cast<std::size_t>(nc));
+        dPhi.allocate_if_needed(static_cast<std::size_t>(nc));
+        dR.allocate_if_needed(static_cast<std::size_t>(nc));
+        dP.allocate_if_needed(static_cast<std::size_t>(nc));
+        dAp.allocate_if_needed(static_cast<std::size_t>(nc));
+        dBlockSums.allocate_if_needed(static_cast<std::size_t>(std::max(1, blocks)));
+        if (inactiveBlocks > 0) {
+            dInactiveScratchBlocks.allocate_if_needed(static_cast<std::size_t>(inactiveBlocks));
+        }
+    }
+
+    DeviceBuffer<int> dActive;
+    DeviceBuffer<int> dInactive;
+    DeviceBuffer<int> dEast;
+    DeviceBuffer<int> dWest;
+    DeviceBuffer<int> dNorth;
+    DeviceBuffer<int> dSouth;
+    DeviceBuffer<double> dCoeffEast;
+    DeviceBuffer<double> dCoeffWest;
+    DeviceBuffer<double> dCoeffNorth;
+    DeviceBuffer<double> dCoeffSouth;
+    DeviceBuffer<double> dRhs;
+    DeviceBuffer<double> dPhi;
+    DeviceBuffer<double> dR;
+    DeviceBuffer<double> dP;
+    DeviceBuffer<double> dAp;
+    DeviceBuffer<double> dBlockSums;
+    DeviceBuffer<double> dInactiveScratchBlocks;
+
+private:
+    bool planValid_ = false;
+    int device_ = -1;
+    int numCells_ = -1;
+    int activeCells_ = -1;
+    int inactiveCells_ = -1;
+    uint64_t planSignature_ = 0u;
+};
+
+CudaQ6CgDeviceWorkspace& cuda_q6_thread_local_cg_workspace() {
+    thread_local CudaQ6CgDeviceWorkspace workspace;
+    return workspace;
 }
 
 __global__ void q6_apply_operator_plan_kernel(const int nActive,
@@ -534,61 +701,33 @@ bool cuda_q6_solve_cg_operator_plan(
         return true;
     }
 
-    DeviceBuffer<int> dActive(static_cast<std::size_t>(nActive));
-    DeviceBuffer<int> dInactive(static_cast<std::size_t>(std::max(1, nInactive)));
-    DeviceBuffer<int> dEast(static_cast<std::size_t>(nc));
-    DeviceBuffer<int> dWest(static_cast<std::size_t>(nc));
-    DeviceBuffer<int> dNorth(static_cast<std::size_t>(nc));
-    DeviceBuffer<int> dSouth(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dCoeffEast(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dCoeffWest(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dCoeffNorth(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dCoeffSouth(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dRhs(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dPhi(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dR(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dP(static_cast<std::size_t>(nc));
-    DeviceBuffer<double> dAp(static_cast<std::size_t>(nc));
-
-    dActive.upload(plan.activeCells, "copy activeCells");
-    if (nInactive > 0) {
-        dInactive.upload(plan.inactiveCells, "copy inactiveCells");
-    }
-    dEast.upload(plan.east, "copy east");
-    dWest.upload(plan.west, "copy west");
-    dNorth.upload(plan.north, "copy north");
-    dSouth.upload(plan.south, "copy south");
-    dCoeffEast.upload(plan.coeffEast, "copy coeffEast");
-    dCoeffWest.upload(plan.coeffWest, "copy coeffWest");
-    dCoeffNorth.upload(plan.coeffNorth, "copy coeffNorth");
-    dCoeffSouth.upload(plan.coeffSouth, "copy coeffSouth");
-    dRhs.upload(rhs, "copy rhs");
-
-    cuda_check(cudaMemset(dPhi.data(), 0, static_cast<std::size_t>(nc) * sizeof(double)), "cudaMemset phi");
-    cuda_check(cudaMemset(dR.data(), 0, static_cast<std::size_t>(nc) * sizeof(double)), "cudaMemset r");
-    cuda_check(cudaMemset(dP.data(), 0, static_cast<std::size_t>(nc) * sizeof(double)), "cudaMemset p");
-    cuda_check(cudaMemset(dAp.data(), 0, static_cast<std::size_t>(nc) * sizeof(double)), "cudaMemset Ap");
-
     constexpr int threadsPerBlock = 256;
     const int blocks = choose_blocks(nActive, threadsPerBlock);
     const int inactiveBlocks = choose_blocks(nInactive, threadsPerBlock);
-    DeviceBuffer<double> dBlockSums(static_cast<std::size_t>(blocks));
+    const bool disablePlanCache = cuda_q6_plan_cache_disabled();
+    CudaQ6CgDeviceWorkspace uncachedWorkspace;
+    CudaQ6CgDeviceWorkspace& cgWorkspace = disablePlanCache
+        ? uncachedWorkspace
+        : cuda_q6_thread_local_cg_workspace();
+    cgWorkspace.prepare_for_plan(plan, device, blocks, inactiveBlocks, disablePlanCache);
+    cgWorkspace.dRhs.upload(rhs, "copy rhs cached");
+
     localDiag.blocks = blocks;
     localDiag.threadsPerBlock = threadsPerBlock;
 
     q6_initialize_cg_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-        nActive, dActive.data(), dRhs.data(), dPhi.data(), dR.data(), dP.data(), dAp.data(), dBlockSums.data());
+        nActive, cgWorkspace.dActive.data(), cgWorkspace.dRhs.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_initialize_cg_kernel launch");
     cuda_q6_optional_synchronize("q6_initialize_cg_kernel debug synchronize");
 
     if (nInactive > 0) {
         q6_zero_inactive_kernel<<<inactiveBlocks, threadsPerBlock>>>(
-            nInactive, dInactive.data(), dPhi.data(), dR.data(), dP.data(), dAp.data());
+            nInactive, cgWorkspace.dInactive.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dP.data(), cgWorkspace.dAp.data());
         cuda_check(cudaGetLastError(), "q6_zero_inactive_kernel launch");
         cuda_q6_optional_synchronize("q6_zero_inactive_kernel debug synchronize");
     }
 
-    double rr = host_sum_blocks(dBlockSums);
+    double rr = host_sum_blocks(cgWorkspace.dBlockSums);
     const double rhsNorm = std::sqrt(std::max(0.0, rr));
     localDiag.rhsNorm = rhsNorm;
     if (rhsNorm <= std::numeric_limits<double>::epsilon()) {
@@ -596,7 +735,7 @@ bool cuda_q6_solve_cg_operator_plan(
         localDiag.iterations = 0;
         localDiag.residualAbs = 0.0;
         localDiag.residualRel = 0.0;
-        dPhi.download(phi, "copy phi back");
+        cgWorkspace.dPhi.download(phi, "copy phi back");
         if (diagnostics != nullptr) {
             *diagnostics = localDiag;
         }
@@ -610,13 +749,13 @@ bool cuda_q6_solve_cg_operator_plan(
     for (int it = 0; it < maxIt; ++it) {
         q6_apply_operator_plan_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
             nActive,
-            dActive.data(),
-            dEast.data(), dWest.data(), dNorth.data(), dSouth.data(),
-            dCoeffEast.data(), dCoeffWest.data(), dCoeffNorth.data(), dCoeffSouth.data(),
-            dP.data(), dAp.data(), dBlockSums.data());
+            cgWorkspace.dActive.data(),
+            cgWorkspace.dEast.data(), cgWorkspace.dWest.data(), cgWorkspace.dNorth.data(), cgWorkspace.dSouth.data(),
+            cgWorkspace.dCoeffEast.data(), cgWorkspace.dCoeffWest.data(), cgWorkspace.dCoeffNorth.data(), cgWorkspace.dCoeffSouth.data(),
+            cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dBlockSums.data());
         cuda_check(cudaGetLastError(), "q6_apply_operator_plan_kernel cg launch");
         cuda_q6_optional_synchronize("q6_apply_operator_plan_kernel cg debug synchronize");
-        const double pAp = host_sum_blocks(dBlockSums);
+        const double pAp = host_sum_blocks(cgWorkspace.dBlockSums);
         localDiag.lastPAp = pAp;
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
             break;
@@ -624,23 +763,23 @@ bool cuda_q6_solve_cg_operator_plan(
 
         const double alpha = rr / pAp;
         q6_axpy_residual_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-            nActive, dActive.data(), alpha, dP.data(), dAp.data(), dPhi.data(), dR.data(), dBlockSums.data());
+            nActive, cgWorkspace.dActive.data(), alpha, cgWorkspace.dP.data(), cgWorkspace.dAp.data(), cgWorkspace.dPhi.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
         cuda_check(cudaGetLastError(), "q6_axpy_residual_kernel launch");
         cuda_q6_optional_synchronize("q6_axpy_residual_kernel debug synchronize");
-        double rrNew = host_sum_blocks(dBlockSums);
+        double rrNew = host_sum_blocks(cgWorkspace.dBlockSums);
 
         const bool removeMeanThisIteration =
             params.removePhiMeanFinal &&
             params.meanRemovalPeriod > 0 &&
             ((it + 1) % params.meanRemovalPeriod == 0);
         if (removeMeanThisIteration) {
-            subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dPhi, dBlockSums);
-            subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dR, dBlockSums);
+            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums);
+            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dR, cgWorkspace.dBlockSums);
             q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-                nActive, dActive.data(), dR.data(), dBlockSums.data());
+                nActive, cgWorkspace.dActive.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
             cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
             cuda_q6_optional_synchronize("q6_sum_active_squares_kernel residual after mean removal debug synchronize");
-            rrNew = host_sum_blocks(dBlockSums);
+            rrNew = host_sum_blocks(cgWorkspace.dBlockSums);
         }
 
         localDiag.iterations = it + 1;
@@ -654,17 +793,17 @@ bool cuda_q6_solve_cg_operator_plan(
 
         const double beta = rrNew / rr;
         q6_update_direction_kernel<<<blocks, threadsPerBlock>>>(
-            nActive, dActive.data(), beta, dR.data(), dP.data());
+            nActive, cgWorkspace.dActive.data(), beta, cgWorkspace.dR.data(), cgWorkspace.dP.data());
         cuda_check(cudaGetLastError(), "q6_update_direction_kernel launch");
         cuda_q6_optional_synchronize("q6_update_direction_kernel debug synchronize");
         rr = rrNew;
     }
 
     if (params.removePhiMeanFinal) {
-        subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dPhi, dBlockSums);
+        subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums);
     }
 
-    dPhi.download(phi, "copy phi back");
+    cgWorkspace.dPhi.download(phi, "copy phi back");
     localDiag.converged = converged;
     if (!converged && localDiag.iterations == 0) {
         localDiag.residualAbs = rhsNorm;
