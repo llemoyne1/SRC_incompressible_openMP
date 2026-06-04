@@ -1,0 +1,92 @@
+# 0064 Q9+virial minimal open-channel Poiseuille-style smoke test.
+# Geometry: x-open channel, y-solid walls. Particle inlet/outlet remains the
+# 0061b CUDA-like recycling path. Q6 and Q9 use the generic elliptic operator.
+# The virial EOS/kick is active only in the interior bulk: the inlet/outlet
+# reservoir slabs are excluded from virial pressure diagnostics and kicks.
+
+inputState = initial_state_open_channel_64x32_g20_kbt0p01.smpcd
+outputDir = runs/open_channel_q9_virial_inlet_outlet_keepmean_64x32
+
+Lx = 2.0
+Ly = 1.0
+Nx = 64
+Ny = 32
+
+dt = 0.001
+nSteps = 300
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+keepMeanFlowEnable = true
+targetMeanUx = 0.05
+targetMeanUy = 0.0
+
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+inletUxLeft = 0.05
+inletUyLeft = 0.0
+inletKBT = -1.0
+inletThermalNoise = 0.0
+inletInjectionMode = cuda_recycle
+inletSlabCells = 1.0
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+method = q9_virial
+projectionEnable = true
+projectionOperator = elliptic_fv_cg
+projectionMaxIterations = 500
+projectionTolerance = 1.0e-10
+projectionMomentumCorrectionEnable = true
+q6ProjectionStrength = 0.50
+projectionImmersedSolidMaskEnable = false
+projectionAllowUnmaskedImmersedSolid = false
+
+q9MassFluxProjectionEnable = true
+q9MassFluxProjectionStrength = 1.00
+q9DensityRelaxationBeta = 0.001
+q9TargetFilter = elliptic_lowpass
+q9LowKMaxIndex = 4
+q9EllipticLowPassPasses = 1
+q9MomentumCorrectionEnable = true
+
+virialDiagnosticsEnable = true
+virialKickEnable = true
+virialK = 0.50
+virialBeta = 0.05
+virialRhoEOSRefMode = current_uniform
+virialRhoUniformMode = particle_mean
+virialDriveTargetMode = current_uniform
+virialRhoKickMode = uniform_now
+virialRhoKickMinFraction = 0.10
+virialMomentumCorrectionEnable = true
+virialOpenBoundaryExclusionCells = 3
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 300
+numThreads = 4

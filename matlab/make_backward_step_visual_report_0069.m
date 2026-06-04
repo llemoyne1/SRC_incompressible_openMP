@@ -1,0 +1,196 @@
+function V = make_backward_step_visual_report_0069(varargin)
+%MAKE_BACKWARD_STEP_VISUAL_REPORT_0069 Systematic PNG visual diagnostics from .smpcd dumps.
+%
+% Creates per-case, per-frame panels for N, Ux, Uy, omega, q9 masks and low-mass ramp.
+
+p = inputParser;
+p.FunctionName = 'make_backward_step_visual_report_0069';
+addParameter(p, 'root', '..', @(s) ischar(s) || isstring(s));
+addParameter(p, 'runRoot', 'runs/backward_step_mass_budget_viz_0069', @(s) ischar(s) || isstring(s));
+addParameter(p, 'caseGlob', 'backstep_*', @(s) ischar(s) || isstring(s));
+addParameter(p, 'maxFramesPerCase', 6, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+addParameter(p, 'fields', {'N','Ux','Uy','omega','q9Active','q9ImmersedHalo','q9LowMassRamp'}, @(x) iscell(x) || isstring(x));
+addParameter(p, 'climN', [], @(x) isempty(x) || (isnumeric(x) && numel(x)==2));
+parse(p, varargin{:});
+opts = p.Results;
+
+root = char(opts.root);
+runRoot = fullfile(root, char(opts.runRoot));
+if ~exist(runRoot, 'dir')
+    error('Cannot find runRoot: %s', runRoot);
+end
+
+caseDirs = dir(fullfile(runRoot, char(opts.caseGlob)));
+caseDirs = caseDirs([caseDirs.isdir]);
+caseDirs = caseDirs(~startsWith({caseDirs.name}, '.'));
+if isempty(caseDirs)
+    error('No case directories matching %s in %s', char(opts.caseGlob), runRoot);
+end
+
+figRoot = fullfile(runRoot, 'visual_report_0069');
+if ~exist(figRoot, 'dir'); mkdir(figRoot); end
+
+created = strings(0,1);
+for c = 1:numel(caseDirs)
+    caseLabel = caseDirs(c).name;
+    caseDir = fullfile(caseDirs(c).folder, caseDirs(c).name);
+    paramsPath = fullfile(caseDir, 'params_used.kv');
+    if ~exist(paramsPath, 'file')
+        warning('Skipping %s: missing params_used.kv', caseLabel);
+        continue;
+    end
+    params = parse_smpcd_kv(paramsPath);
+    frames = list_smpcd_dumps(caseDir);
+    if isempty(frames)
+        warning('Skipping %s: no .smpcd dumps', caseLabel);
+        continue;
+    end
+    n = height(frames);
+    if n <= opts.maxFramesPerCase
+        idxList = 1:n;
+    else
+        idxList = unique(round(linspace(1, n, opts.maxFramesPerCase)));
+    end
+
+    geom = local_geometry(params);
+    caseFigDir = fullfile(figRoot, caseLabel);
+    if ~exist(caseFigDir, 'dir'); mkdir(caseFigDir); end
+
+    for kk = 1:numel(idxList)
+        idx = idxList(kk);
+        state = read_smpcd_state(frames.fullPath{idx});
+        fields = bin_smpcd_state(state, 'Lx', geom.Lx, 'Ly', geom.Ly, 'Nx', geom.Nx, 'Ny', geom.Ny);
+        masks = local_masks(fields, geom, params);
+        outPng = fullfile(caseFigDir, sprintf('frame_%04d_t_%0.4g_panel.png', idx, frames.time(idx)));
+        local_panel_figure(caseLabel, idx, frames.time(idx), geom, fields, masks, opts, outPng);
+        created(end+1,1) = string(outPng); %#ok<AGROW>
+    end
+end
+
+V = struct();
+V.runRoot = runRoot;
+V.outputDir = figRoot;
+V.files = created;
+end
+
+function local_panel_figure(caseLabel, frameIndex, t, geom, fields, masks, opts, outPng)
+fieldList = opts.fields;
+if isstring(fieldList); fieldList = cellstr(fieldList); end
+nF = numel(fieldList);
+nCol = 3;
+nRow = ceil(nF / nCol);
+fig = figure('Visible','off','Color','w','Position',[50 50 420*nCol 360*nRow]);
+for k = 1:nF
+    fld = char(fieldList{k});
+    subplot(nRow, nCol, k);
+    A = local_extract(fld, fields, masks, geom);
+    imagesc(geom.x, geom.y, A);
+    axis image; set(gca,'YDir','normal');
+    hold on;
+    rectangle('Position',[geom.sx0 geom.sy0 geom.sx1-geom.sx0 geom.sy1-geom.sy0], 'EdgeColor','k', 'LineWidth',1.0);
+    hold off;
+    title(fld, 'Interpreter','none'); xlabel('x'); ylabel('y'); colorbar;
+    if strcmpi(fld,'N') && ~isempty(opts.climN)
+        caxis(opts.climN);
+    elseif any(strcmpi(fld, {'q9Active','q9ImmersedHalo','q9OpenExcluded','q9LowMassRamp','solidAny'}))
+        caxis([0 1]);
+    end
+end
+sgtitle(sprintf('%s | frame %d | t=%.4g', caseLabel, frameIndex, t), 'Interpreter','none');
+saveas(fig, outPng);
+close(fig);
+end
+
+function A = local_extract(fld, fields, masks, geom)
+switch lower(fld)
+    case 'n'
+        A = local_field_or_zeros(fields, 'N', geom.Ny, geom.Nx);
+    case 'ux'
+        A = local_field_or_zeros(fields, 'Ux', geom.Ny, geom.Nx);
+    case 'uy'
+        A = local_field_or_zeros(fields, 'Uy', geom.Ny, geom.Nx);
+    case 'speed'
+        Ux = local_field_or_zeros(fields, 'Ux', geom.Ny, geom.Nx);
+        Uy = local_field_or_zeros(fields, 'Uy', geom.Ny, geom.Nx);
+        A = hypot(Ux, Uy);
+    case 'omega'
+        A = local_field_or_zeros(fields, 'omega', geom.Ny, geom.Nx);
+    case 'rho'
+        if isfield(fields,'rho'); A = fields.rho; else; A = local_field_or_zeros(fields,'N',geom.Ny,geom.Nx); end
+    case 'solidany'
+        A = double(masks.solid);
+    case 'q9active'
+        A = double(masks.q9GeoActive);
+    case 'q9openexcluded'
+        A = double(masks.q9OpenExcluded);
+    case 'q9immersedhalo'
+        A = double(masks.q9Halo);
+    case 'q9lowmassramp'
+        A = masks.q9LowMassRamp;
+    otherwise
+        error('Unknown field %s', fld);
+end
+end
+
+function geom = local_geometry(params)
+geom.Nx = local_get_num(params, 'Nx', NaN);
+geom.Ny = local_get_num(params, 'Ny', NaN);
+geom.Lx = local_get_num(params, 'Lx', NaN);
+geom.Ly = local_get_num(params, 'Ly', NaN);
+geom.dx = geom.Lx / geom.Nx;
+geom.dy = geom.Ly / geom.Ny;
+geom.x = ((0:geom.Nx-1) + 0.5) * geom.dx;
+geom.y = ((0:geom.Ny-1) + 0.5) * geom.dy;
+[geom.X, geom.Y] = meshgrid(geom.x, geom.y);
+geom.sx0 = local_get_num(params, 'immersedSolidXMin', 0.25);
+geom.sx1 = local_get_num(params, 'immersedSolidXMax', 0.65);
+geom.sy0 = local_get_num(params, 'immersedSolidYMin', 0.0);
+geom.sy1 = local_get_num(params, 'immersedSolidYMax', 0.50);
+geom.q9OpenCells = max(0, round(local_get_num(params, 'q9OpenBoundaryExclusionCells', 0)));
+geom.q9HaloCells = max(0, round(local_get_num(params, 'q9ImmersedSolidHaloCells', 0)));
+end
+
+function masks = local_masks(fields, geom, params)
+N = local_field_or_zeros(fields, 'N', geom.Ny, geom.Nx);
+solid = geom.X >= geom.sx0 & geom.X <= geom.sx1 & geom.Y >= geom.sy0 & geom.Y <= geom.sy1;
+q9OpenExcluded = false(size(solid));
+if geom.q9OpenCells > 0
+    q9OpenExcluded(:, 1:min(geom.q9OpenCells, geom.Nx)) = true;
+    q9OpenExcluded(:, max(1, geom.Nx-geom.q9OpenCells+1):geom.Nx) = true;
+end
+q9Halo = false(size(solid));
+if geom.q9HaloCells > 0
+    K = ones(2*geom.q9HaloCells + 1, 2*geom.q9HaloCells + 1);
+    q9Halo = conv2(double(solid), K, 'same') > 0 & ~solid;
+end
+r0 = local_get_num(params, 'q9LowMassRampStart', 1.0);
+r1 = local_get_num(params, 'q9LowMassRampEnd', local_get_num(params, 'q9MinCellMassForCorrection', 8.0));
+if r1 <= r0
+    ramp = double(N >= r1);
+else
+    ramp = min(1, max(0, (N-r0)./(r1-r0)));
+end
+masks.solid = solid;
+masks.q9OpenExcluded = q9OpenExcluded & ~solid;
+masks.q9Halo = q9Halo;
+masks.q9GeoActive = ~solid & ~q9OpenExcluded & ~q9Halo;
+masks.q9LowMassRamp = ramp;
+end
+
+function A = local_field_or_zeros(fields, name, ny, nx)
+if isfield(fields, name)
+    A = fields.(name);
+elseif strcmp(name,'N') && isfield(fields,'mass')
+    A = fields.mass;
+else
+    A = zeros(ny,nx);
+end
+end
+
+function v = local_get_num(params, key, defaultVal)
+v = defaultVal;
+if isfield(params, key)
+    tmp = str2double(string(params.(key)));
+    if ~isnan(tmp); v = tmp; end
+end
+end

@@ -1,0 +1,508 @@
+path,line,text
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,89,phase_profile_0157.csv
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,90,phase_profile_top_0157.csv
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,97,phase_profile_0157.csv
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,103,`phase_profile_0157.csv` contient toutes les phases instrumentées :
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,109,"`phase_profile_top_0157.csv` extrait les douze phases dominantes pour chaque couple `(case, threads)`."
+doc/README_0157_FINE_PERFORMANCE_PROFILING.md,116,"column -s, -t < runs/performance_profile_0157/phase_profile_top_0157.csv | less -S"
+doc/README_0158_HOTSPOT_OPTIMIZATION.md,69,phase_profile_0158.csv
+doc/README_0158_HOTSPOT_OPTIMIZATION.md,70,phase_profile_top_0158.csv
+doc/README_0158_HOTSPOT_OPTIMIZATION.md,77,phase_profile_0157.csv
+doc/README_0158_HOTSPOT_OPTIMIZATION.md,78,phase_profile_top_0157.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,3,"Ce patch ajoute une instrumentation temporelle interne au chemin Q6 sans modifier les opérations numériques de projection, de collision, de resampling ou de thermostat. Il part de l'état 0158 et complète le profilage global `phase_profile_0159.csv` par un fichier dédié au verrou Q6/CG."
+doc/README_0159_Q6_CG_FINE_PROFILING.md,18,RUN_ROOT/phase_profile_0159.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,19,RUN_ROOT/phase_profile_top_0159.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,20,RUN_ROOT/q6_cg_profile_0159.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,21,RUN_ROOT/q6_cg_profile_top_0159.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,27,q6_cg_profile_top_0159.csv
+doc/README_0159_Q6_CG_FINE_PROFILING.md,133,"column -s, -t < runs/performance_profile_0159/q6_cg_profile_top_0159.csv | less -S"
+doc/README_0160_Q6_CG_FUSED_AXPY.md,86,runs/performance_profile_0160/phase_profile_0160.csv
+doc/README_0160_Q6_CG_FUSED_AXPY.md,87,runs/performance_profile_0160/phase_profile_top_0160.csv
+doc/README_0160_Q6_CG_FUSED_AXPY.md,88,runs/performance_profile_0160/q6_cg_profile_0160.csv
+doc/README_0160_Q6_CG_FUSED_AXPY.md,89,runs/performance_profile_0160/q6_cg_profile_top_0160.csv
+doc/README_0160_Q6_CG_FUSED_AXPY.md,108,phase_profile_0159.csv
+doc/README_0160_Q6_CG_FUSED_AXPY.md,109,q6_cg_profile_0159.csv
+doc/README_0161_ELLIPTIC_OPERATOR_PLAN.md,73,runs/performance_profile_0161/phase_profile_0161.csv
+doc/README_0161_ELLIPTIC_OPERATOR_PLAN.md,74,runs/performance_profile_0161/phase_profile_top_0161.csv
+doc/README_0161_ELLIPTIC_OPERATOR_PLAN.md,75,runs/performance_profile_0161/q6_cg_profile_0161.csv
+doc/README_0161_ELLIPTIC_OPERATOR_PLAN.md,76,runs/performance_profile_0161/q6_cg_profile_top_0161.csv
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,9,- `phase_profile_0163.csv`
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,10,- `q6_cg_profile_0163.csv`
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,14,- `phase_profile_0161.csv`
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,15,- `q6_cg_profile_0161.csv`
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,21,- `phase_profile_0164.csv`
+doc/README_0164B_PROFILE_SUFFIX_FIX.md,22,- `q6_cg_profile_0164.csv`
+doc/README_0165_RESAMPLING_GUARD_FINE_PROFILING.md,26,resampling_guard_profile_0165.csv
+doc/README_0165_RESAMPLING_GUARD_FINE_PROFILING.md,32,RUN_ROOT/resampling_guard_profile_0165.csv
+doc/README_0165_RESAMPLING_GUARD_FINE_PROFILING.md,33,RUN_ROOT/resampling_guard_profile_top_0165.csv
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,18,6. Add aggregate metadata rows to `resampling_guard_profile_0166.csv` reporting total and mean candidate/edited cells per population-guard call.
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,55,- `phase_profile_0166.csv`
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,56,- `phase_profile_top_0166.csv`
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,57,- `q6_cg_profile_0166.csv`
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,58,- `q6_cg_profile_top_0166.csv`
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,59,- `resampling_guard_profile_0166.csv`
+doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,60,- `resampling_guard_profile_top_0166.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,84,- `phase_profile_0168.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,85,- `phase_profile_top_0168.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,86,- `q6_cg_profile_0168.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,87,- `q6_cg_profile_top_0168.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,88,- `resampling_guard_profile_0168.csv`
+doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,89,- `resampling_guard_profile_top_0168.csv`
+doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,10,`resampling_guard_profile_0169.csv`. These rows are nested inside the existing
+doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,40,- `phase_profile_0169.csv`
+doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,41,- `q6_cg_profile_0169.csv`
+doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,42,- `resampling_guard_profile_0169.csv`
+doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,43,- `resampling_guard_profile_top_0169.csv`
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,24,- `deposit_profile_0171.csv`
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,28,- `RUN_ROOT/deposit_profile_0171.csv`
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,29,- `RUN_ROOT/deposit_profile_top_0171.csv`
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,85,phase_profile_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,86,phase_profile_top_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,87,q6_cg_profile_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,88,q6_cg_profile_top_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,89,resampling_guard_profile_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,90,resampling_guard_profile_top_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,91,deposit_profile_0171.csv
+doc/README_0171_DEPOSIT_FINE_PROFILING.md,92,deposit_profile_top_0171.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,75,phase_profile_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,76,phase_profile_top_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,77,q6_cg_profile_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,78,q6_cg_profile_top_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,79,resampling_guard_profile_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,80,resampling_guard_profile_top_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,81,deposit_profile_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,82,deposit_profile_top_0172.csv
+doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,88,- The `post_thermal` context in `deposit_profile_0172.csv` should be dominated
+doc/README_0173_POST_GUARD_DEPOSIT_PROFILING.md,14,post_guard_profile_0173.csv
+doc/README_0173_POST_GUARD_DEPOSIT_PROFILING.md,20,RUN_ROOT/post_guard_profile_0173.csv
+doc/README_0173_POST_GUARD_DEPOSIT_PROFILING.md,21,RUN_ROOT/post_guard_profile_top_0173.csv
+doc/README_0174B_EQUIVALENCE_DIAGNOSTIC_FIX.md,10,- `post_guard_profile_0174b.csv`
+doc/README_0174B_EQUIVALENCE_DIAGNOSTIC_FIX.md,11,- `post_guard_equivalence_profile_0174b.csv`
+doc/README_0174B_EQUIVALENCE_DIAGNOSTIC_FIX.md,22,- `post_guard_profile_0174b.csv`
+doc/README_0174B_EQUIVALENCE_DIAGNOSTIC_FIX.md,23,- `post_guard_equivalence_profile_0174b.csv`
+doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,12,post_guard_equivalence_profile_0174b.csv
+doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,44,phase_profile_0174b.csv
+doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,45,post_guard_profile_0174b.csv
+doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,46,post_guard_equivalence_profile_0174b.csv
+doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,47,resampling_guard_profile_0174b.csv
+doc/README_0174C_POST_GUARD_EQUIVALENCE_SIMPLE_DIAGNOSTIC.md,17,- `post_guard_profile_0174c.csv`
+doc/README_0174C_POST_GUARD_EQUIVALENCE_SIMPLE_DIAGNOSTIC.md,18,- `post_guard_equivalence_profile_0174c.csv`
+doc/README_0174D_POST_GUARD_EQUIVALENCE_TRACE.md,7,- `post_guard_equivalence_trace_0174d.csv`
+doc/README_0175_POST_GUARD_STRICT_REUSE_CELLID.md,19,"- `deposit_profile`, context `post_guard`, phase `particle_loop_cell_accum`"
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,10,- `phase_profile_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,11,- `q6_cg_profile_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,12,- `deposit_profile_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,13,- `resampling_guard_profile_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,14,- `post_guard_profile_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,15,- `post_guard_equivalence_*.csv`
+doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,16,- `post_guard_equivalence_trace_*.csv`
+doc/README_0176D_LIGHT_SMOKE_PROFILE_ENV_FIX.md,28,"Expected result: at least one internal profile CSV such as `phase_profile_*.csv`, `q6_cg_profile_*.csv`, `deposit_profile_*.csv`, or `resampling_guard_profile_*.csv`."
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,13,- `phase_profile_*.csv`
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,14,- `q6_cg_profile_*.csv`
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,15,- `deposit_profile_*.csv`
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,16,- `resampling_guard_profile_*.csv`
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,17,- `post_guard_profile_*.csv`
+doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,18,- `post_guard_equivalence_*.csv`
+doc/README_0177_DISABLE_PROFILE_RUNTIME_OVERHEAD.md,29,- no `phase_profile_*.csv`
+doc/README_0177_DISABLE_PROFILE_RUNTIME_OVERHEAD.md,30,- no `q6_cg_profile_*.csv`
+doc/README_0177_DISABLE_PROFILE_RUNTIME_OVERHEAD.md,31,- no `deposit_profile_*.csv`
+doc/README_0177_DISABLE_PROFILE_RUNTIME_OVERHEAD.md,32,- no `resampling_guard_profile_*.csv`
+include/weighted_resampling.h,25,const char* resampling_deposit_profile_phase_name(std::size_t phaseIndex);
+include/weighted_resampling.h,28,// alter the deposit semantics; they only classify calls in deposit_profile_0171.csv.
+include/weighted_resampling.h,40,const char* resampling_deposit_profile_context_name(ResamplingDepositProfileContext context);
+scripts/apply_openmp_light_diagnostics_0176.py,102,"old = '''        write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);"
+scripts/apply_openmp_light_diagnostics_0176.py,103,"write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);"
+scripts/apply_openmp_light_diagnostics_0176.py,104,"write_resampling_guard_profile_0169(params.outputDir,"
+scripts/apply_openmp_light_diagnostics_0176.py,121,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/phase_profile_0163.csv"";"
+scripts/apply_openmp_light_diagnostics_0176.py,122,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/q6_cg_profile_0163.csv"";"
+scripts/apply_openmp_light_diagnostics_0176.py,123,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/resampling_guard_profile_0169.csv"";"
+scripts/apply_openmp_light_diagnostics_0176.py,127,"write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);"
+scripts/apply_openmp_light_diagnostics_0176.py,128,"write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);"
+scripts/apply_openmp_light_diagnostics_0176.py,129,"write_resampling_guard_profile_0169(params.outputDir,"
+scripts/apply_openmp_light_diagnostics_0176.py,146,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/phase_profile_0163.csv"";"
+scripts/apply_openmp_light_diagnostics_0176.py,147,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/q6_cg_profile_0163.csv"";"
+scripts/apply_openmp_light_diagnostics_0176.py,148,"std::cout << ""\\n[src_mpcd_base] wrote "" << params.outputDir << ""/resampling_guard_profile_0169.csv"";"
+scripts/audit_openmp_light_cleanup_0178.py,17,"r""phase_profile"", r""q6_cg_profile"", r""deposit_profile"","
+scripts/audit_openmp_light_cleanup_0178.py,18,"r""resampling_guard_profile"", r""post_guard_profile"","
+scripts/audit_openmp_light_cleanup_0178.py,19,"r""post_guard_equivalence"", r""post_guard_equivalence_trace"","
+scripts/run_openmp_light_smoke_0176.sh,38,"\( -name ""phase_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,39,"-o -name ""q6_cg_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,40,"-o -name ""deposit_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,41,"-o -name ""resampling_guard_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,42,"-o -name ""post_guard_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,43,"-o -name ""post_guard_equivalence*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,44,"-o -name ""post_guard_equivalence_trace_*.csv"" \) \"
+scripts/run_openmp_light_smoke_0176.sh,51,"\( -name ""phase_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,52,"-o -name ""q6_cg_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,53,"-o -name ""deposit_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,54,"-o -name ""resampling_guard_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,55,"-o -name ""post_guard_profile_*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,56,"-o -name ""post_guard_equivalence*.csv"" \"
+scripts/run_openmp_light_smoke_0176.sh,57,"-o -name ""post_guard_equivalence_trace_*.csv"" \) -type f -print >&2"
+scripts/run_performance_profile_0157.sh,8,#   RUN_ROOT/phase_profile_0157.csv
+scripts/run_performance_profile_0157.sh,9,#   RUN_ROOT/phase_profile_top_0157.csv
+scripts/run_performance_profile_0157.sh,36,"PHASE_CSV=""$RUN_ROOT/phase_profile_0157.csv"""
+scripts/run_performance_profile_0157.sh,37,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0157.csv"""
+scripts/run_performance_profile_0157.sh,198,"if [[ -f ""$out_dir/phase_profile_0157.csv"" ]]; then"
+scripts/run_performance_profile_0157.sh,200,"""$out_dir/phase_profile_0157.csv"" >> ""$PHASE_CSV"""
+scripts/run_performance_profile_0157.sh,202,"echo ""Missing phase profile: $out_dir/phase_profile_0157.csv"" >&2"
+scripts/run_performance_profile_0158.sh,8,#   RUN_ROOT/phase_profile_0158.csv
+scripts/run_performance_profile_0158.sh,9,#   RUN_ROOT/phase_profile_top_0158.csv
+scripts/run_performance_profile_0158.sh,36,"PHASE_CSV=""$RUN_ROOT/phase_profile_0158.csv"""
+scripts/run_performance_profile_0158.sh,37,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0158.csv"""
+scripts/run_performance_profile_0158.sh,198,"if [[ -f ""$out_dir/phase_profile_0158.csv"" ]]; then"
+scripts/run_performance_profile_0158.sh,200,"""$out_dir/phase_profile_0158.csv"" >> ""$PHASE_CSV"""
+scripts/run_performance_profile_0158.sh,202,"echo ""Missing phase profile: $out_dir/phase_profile_0158.csv"" >&2"
+scripts/run_performance_profile_0159.sh,8,#   RUN_ROOT/phase_profile_0159.csv
+scripts/run_performance_profile_0159.sh,9,#   RUN_ROOT/phase_profile_top_0159.csv
+scripts/run_performance_profile_0159.sh,10,#   RUN_ROOT/q6_cg_profile_0159.csv
+scripts/run_performance_profile_0159.sh,11,#   RUN_ROOT/q6_cg_profile_top_0159.csv
+scripts/run_performance_profile_0159.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0159.csv"""
+scripts/run_performance_profile_0159.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0159.csv"""
+scripts/run_performance_profile_0159.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0159.csv"""
+scripts/run_performance_profile_0159.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0159.csv"""
+scripts/run_performance_profile_0159.sh,203,"if [[ -f ""$out_dir/phase_profile_0159.csv"" ]]; then"
+scripts/run_performance_profile_0159.sh,205,"""$out_dir/phase_profile_0159.csv"" >> ""$PHASE_CSV"""
+scripts/run_performance_profile_0159.sh,207,"echo ""Missing phase profile: $out_dir/phase_profile_0159.csv"" >&2"
+scripts/run_performance_profile_0159.sh,211,"if [[ -f ""$out_dir/q6_cg_profile_0159.csv"" ]]; then"
+scripts/run_performance_profile_0159.sh,213,"""$out_dir/q6_cg_profile_0159.csv"" >> ""$Q6_CG_CSV"""
+scripts/run_performance_profile_0159.sh,215,"echo ""Missing Q6/CG profile: $out_dir/q6_cg_profile_0159.csv"" >&2"
+scripts/run_performance_profile_0160.sh,8,#   RUN_ROOT/phase_profile_0160.csv
+scripts/run_performance_profile_0160.sh,9,#   RUN_ROOT/phase_profile_top_0160.csv
+scripts/run_performance_profile_0160.sh,10,#   RUN_ROOT/q6_cg_profile_0160.csv
+scripts/run_performance_profile_0160.sh,11,#   RUN_ROOT/q6_cg_profile_top_0160.csv
+scripts/run_performance_profile_0160.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0160.csv"""
+scripts/run_performance_profile_0160.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0160.csv"""
+scripts/run_performance_profile_0160.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0160.csv"""
+scripts/run_performance_profile_0160.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0160.csv"""
+scripts/run_performance_profile_0160.sh,203,"if [[ -f ""$out_dir/phase_profile_0160.csv"" ]]; then"
+scripts/run_performance_profile_0160.sh,205,"""$out_dir/phase_profile_0160.csv"" >> ""$PHASE_CSV"""
+scripts/run_performance_profile_0160.sh,207,"echo ""Missing phase profile: $out_dir/phase_profile_0160.csv"" >&2"
+scripts/run_performance_profile_0160.sh,211,"if [[ -f ""$out_dir/q6_cg_profile_0160.csv"" ]]; then"
+scripts/run_performance_profile_0160.sh,213,"""$out_dir/q6_cg_profile_0160.csv"" >> ""$Q6_CG_CSV"""
+scripts/run_performance_profile_0160.sh,215,"echo ""Missing Q6/CG profile: $out_dir/q6_cg_profile_0160.csv"" >&2"
+scripts/run_performance_profile_0161.sh,8,#   RUN_ROOT/phase_profile_0161.csv
+scripts/run_performance_profile_0161.sh,9,#   RUN_ROOT/phase_profile_top_0161.csv
+scripts/run_performance_profile_0161.sh,10,#   RUN_ROOT/q6_cg_profile_0161.csv
+scripts/run_performance_profile_0161.sh,11,#   RUN_ROOT/q6_cg_profile_top_0161.csv
+scripts/run_performance_profile_0161.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0161.csv"""
+scripts/run_performance_profile_0161.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0161.csv"""
+scripts/run_performance_profile_0161.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0161.csv"""
+scripts/run_performance_profile_0161.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0161.csv"""
+scripts/run_performance_profile_0161.sh,203,"if [[ -f ""$out_dir/phase_profile_0161.csv"" ]]; then"
+scripts/run_performance_profile_0161.sh,205,"""$out_dir/phase_profile_0161.csv"" >> ""$PHASE_CSV"""
+scripts/run_performance_profile_0161.sh,207,"echo ""Missing phase profile: $out_dir/phase_profile_0161.csv"" >&2"
+scripts/run_performance_profile_0161.sh,211,"if [[ -f ""$out_dir/q6_cg_profile_0161.csv"" ]]; then"
+scripts/run_performance_profile_0161.sh,213,"""$out_dir/q6_cg_profile_0161.csv"" >> ""$Q6_CG_CSV"""
+scripts/run_performance_profile_0161.sh,215,"echo ""Missing Q6/CG profile: $out_dir/q6_cg_profile_0161.csv"" >&2"
+scripts/run_performance_profile_0164.sh,8,#   RUN_ROOT/phase_profile_0164.csv
+scripts/run_performance_profile_0164.sh,9,#   RUN_ROOT/phase_profile_top_0164.csv
+scripts/run_performance_profile_0164.sh,10,#   RUN_ROOT/q6_cg_profile_0164.csv
+scripts/run_performance_profile_0164.sh,11,#   RUN_ROOT/q6_cg_profile_top_0164.csv
+scripts/run_performance_profile_0164.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0164.csv"""
+scripts/run_performance_profile_0164.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0164.csv"""
+scripts/run_performance_profile_0164.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0164.csv"""
+scripts/run_performance_profile_0164.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0164.csv"""
+scripts/run_performance_profile_0164.sh,225,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0164.sh,226,"cp ""$phase_src"" ""$out_dir/phase_profile_0164.csv"""
+scripts/run_performance_profile_0164.sh,234,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0164.sh,235,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0164.csv"""
+scripts/run_performance_profile_0165.sh,8,#   RUN_ROOT/phase_profile_0165.csv
+scripts/run_performance_profile_0165.sh,9,#   RUN_ROOT/phase_profile_top_0165.csv
+scripts/run_performance_profile_0165.sh,10,#   RUN_ROOT/q6_cg_profile_0165.csv
+scripts/run_performance_profile_0165.sh,11,#   RUN_ROOT/q6_cg_profile_top_0165.csv
+scripts/run_performance_profile_0165.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0165.csv"""
+scripts/run_performance_profile_0165.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0165.csv"""
+scripts/run_performance_profile_0165.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0165.csv"""
+scripts/run_performance_profile_0165.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0165.csv"""
+scripts/run_performance_profile_0165.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0165.csv"""
+scripts/run_performance_profile_0165.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0165.csv"""
+scripts/run_performance_profile_0165.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0165.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0165.csv"""
+scripts/run_performance_profile_0165.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0165.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0165.csv"""
+scripts/run_performance_profile_0165.sh,245,"resamp_guard_src=""$out_dir/resampling_guard_profile_0165.csv"""
+scripts/run_performance_profile_0166.sh,8,#   RUN_ROOT/phase_profile_0166.csv
+scripts/run_performance_profile_0166.sh,9,#   RUN_ROOT/phase_profile_top_0166.csv
+scripts/run_performance_profile_0166.sh,10,#   RUN_ROOT/q6_cg_profile_0166.csv
+scripts/run_performance_profile_0166.sh,11,#   RUN_ROOT/q6_cg_profile_top_0166.csv
+scripts/run_performance_profile_0166.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0166.csv"""
+scripts/run_performance_profile_0166.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0166.csv"""
+scripts/run_performance_profile_0166.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0166.csv"""
+scripts/run_performance_profile_0166.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0166.csv"""
+scripts/run_performance_profile_0166.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0166.csv"""
+scripts/run_performance_profile_0166.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0166.csv"""
+scripts/run_performance_profile_0166.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0166.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0166.csv"""
+scripts/run_performance_profile_0166.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0166.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0166.csv"""
+scripts/run_performance_profile_0166.sh,245,"resamp_guard_src=""$out_dir/resampling_guard_profile_0166.csv"""
+scripts/run_performance_profile_0167b.sh,8,#   RUN_ROOT/phase_profile_0167b.csv
+scripts/run_performance_profile_0167b.sh,9,#   RUN_ROOT/phase_profile_top_0167b.csv
+scripts/run_performance_profile_0167b.sh,10,#   RUN_ROOT/q6_cg_profile_0167b.csv
+scripts/run_performance_profile_0167b.sh,11,#   RUN_ROOT/q6_cg_profile_top_0167b.csv
+scripts/run_performance_profile_0167b.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0167b.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0167b.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0167b.csv"""
+scripts/run_performance_profile_0167b.sh,245,"resamp_guard_src=""$out_dir/resampling_guard_profile_0167b.csv"""
+scripts/run_performance_profile_0168.sh,8,#   RUN_ROOT/phase_profile_0168.csv
+scripts/run_performance_profile_0168.sh,9,#   RUN_ROOT/phase_profile_top_0168.csv
+scripts/run_performance_profile_0168.sh,10,#   RUN_ROOT/q6_cg_profile_0168.csv
+scripts/run_performance_profile_0168.sh,11,#   RUN_ROOT/q6_cg_profile_top_0168.csv
+scripts/run_performance_profile_0168.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0168.csv"""
+scripts/run_performance_profile_0168.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0168.csv"""
+scripts/run_performance_profile_0168.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0168.csv"""
+scripts/run_performance_profile_0168.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0168.csv"""
+scripts/run_performance_profile_0168.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0168.csv"""
+scripts/run_performance_profile_0168.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0168.csv"""
+scripts/run_performance_profile_0168.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0168.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0168.csv"""
+scripts/run_performance_profile_0168.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0168.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0168.csv"""
+scripts/run_performance_profile_0168.sh,245,"resamp_guard_src=""$out_dir/resampling_guard_profile_0168.csv"""
+scripts/run_performance_profile_0169.sh,8,#   RUN_ROOT/phase_profile_0169.csv
+scripts/run_performance_profile_0169.sh,9,#   RUN_ROOT/phase_profile_top_0169.csv
+scripts/run_performance_profile_0169.sh,10,#   RUN_ROOT/q6_cg_profile_0169.csv
+scripts/run_performance_profile_0169.sh,11,#   RUN_ROOT/q6_cg_profile_top_0169.csv
+scripts/run_performance_profile_0169.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0169.csv"""
+scripts/run_performance_profile_0169.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0169.csv"""
+scripts/run_performance_profile_0169.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0169.csv"""
+scripts/run_performance_profile_0169.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0169.csv"""
+scripts/run_performance_profile_0169.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0169.csv"""
+scripts/run_performance_profile_0169.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0169.csv"""
+scripts/run_performance_profile_0169.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0169.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0169.csv"""
+scripts/run_performance_profile_0169.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0169.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0169.csv"""
+scripts/run_performance_profile_0169.sh,245,"resamp_guard_src=""$out_dir/resampling_guard_profile_0169.csv"""
+scripts/run_performance_profile_0170.sh,8,#   RUN_ROOT/phase_profile_0170.csv
+scripts/run_performance_profile_0170.sh,9,#   RUN_ROOT/phase_profile_top_0170.csv
+scripts/run_performance_profile_0170.sh,10,#   RUN_ROOT/q6_cg_profile_0170.csv
+scripts/run_performance_profile_0170.sh,11,#   RUN_ROOT/q6_cg_profile_top_0170.csv
+scripts/run_performance_profile_0170.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0170.csv"""
+scripts/run_performance_profile_0170.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0170.csv"""
+scripts/run_performance_profile_0170.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0170.csv"""
+scripts/run_performance_profile_0170.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0170.csv"""
+scripts/run_performance_profile_0170.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0170.csv"""
+scripts/run_performance_profile_0170.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0170.csv"""
+scripts/run_performance_profile_0170.sh,228,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0170.sh,229,"cp ""$phase_src"" ""$out_dir/phase_profile_0170.csv"""
+scripts/run_performance_profile_0170.sh,237,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0170.sh,238,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0170.csv"""
+scripts/run_performance_profile_0170.sh,246,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0170.sh,247,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0170.csv"""
+scripts/run_performance_profile_0171.sh,8,#   RUN_ROOT/phase_profile_0171.csv
+scripts/run_performance_profile_0171.sh,9,#   RUN_ROOT/phase_profile_top_0171.csv
+scripts/run_performance_profile_0171.sh,10,#   RUN_ROOT/q6_cg_profile_0171.csv
+scripts/run_performance_profile_0171.sh,11,#   RUN_ROOT/q6_cg_profile_top_0171.csv
+scripts/run_performance_profile_0171.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0171.csv"""
+scripts/run_performance_profile_0171.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0171.csv"""
+scripts/run_performance_profile_0171.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0171.csv"""
+scripts/run_performance_profile_0171.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0171.csv"""
+scripts/run_performance_profile_0171.sh,231,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0171.sh,232,"cp ""$phase_src"" ""$out_dir/phase_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,240,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0171.sh,241,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,249,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0171.sh,250,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0171.csv"""
+scripts/run_performance_profile_0171.sh,257,"deposit_src=""$out_dir/deposit_profile_0171.csv"""
+scripts/run_performance_profile_0172.sh,8,#   RUN_ROOT/phase_profile_0172.csv
+scripts/run_performance_profile_0172.sh,9,#   RUN_ROOT/phase_profile_top_0172.csv
+scripts/run_performance_profile_0172.sh,10,#   RUN_ROOT/q6_cg_profile_0172.csv
+scripts/run_performance_profile_0172.sh,11,#   RUN_ROOT/q6_cg_profile_top_0172.csv
+scripts/run_performance_profile_0172.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0172.csv"""
+scripts/run_performance_profile_0172.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0172.csv"""
+scripts/run_performance_profile_0172.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0172.csv"""
+scripts/run_performance_profile_0172.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0172.csv"""
+scripts/run_performance_profile_0172.sh,231,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0172.sh,232,"cp ""$phase_src"" ""$out_dir/phase_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,240,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0172.sh,241,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,249,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0172.sh,250,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0172.csv"""
+scripts/run_performance_profile_0172.sh,258,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0172.sh,259,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0172.csv"""
+scripts/run_performance_profile_0173.sh,8,#   RUN_ROOT/phase_profile_0173.csv
+scripts/run_performance_profile_0173.sh,9,#   RUN_ROOT/phase_profile_top_0173.csv
+scripts/run_performance_profile_0173.sh,10,#   RUN_ROOT/q6_cg_profile_0173.csv
+scripts/run_performance_profile_0173.sh,11,#   RUN_ROOT/q6_cg_profile_top_0173.csv
+scripts/run_performance_profile_0173.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0173.csv"""
+scripts/run_performance_profile_0173.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0173.csv"""
+scripts/run_performance_profile_0173.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0173.csv"""
+scripts/run_performance_profile_0173.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0173.csv"""
+scripts/run_performance_profile_0173.sh,46,"POST_GUARD_CSV=""$RUN_ROOT/post_guard_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,47,"POST_GUARD_TOP_CSV=""$RUN_ROOT/post_guard_profile_top_0173.csv"""
+scripts/run_performance_profile_0173.sh,234,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0173.sh,235,"cp ""$phase_src"" ""$out_dir/phase_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,243,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0173.sh,244,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,252,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0173.sh,253,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,261,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0173.sh,262,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0173.csv"""
+scripts/run_performance_profile_0173.sh,270,"if post_guard_src=$(find_profile_file ""$out_dir"" ""post_guard_profile""); then"
+scripts/run_performance_profile_0173.sh,271,"cp ""$post_guard_src"" ""$out_dir/post_guard_profile_0173.csv"""
+scripts/run_performance_profile_0174b.sh,8,#   RUN_ROOT/phase_profile_0174b.csv
+scripts/run_performance_profile_0174b.sh,9,#   RUN_ROOT/phase_profile_top_0174b.csv
+scripts/run_performance_profile_0174b.sh,10,#   RUN_ROOT/q6_cg_profile_0174b.csv
+scripts/run_performance_profile_0174b.sh,11,#   RUN_ROOT/q6_cg_profile_top_0174b.csv
+scripts/run_performance_profile_0174b.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,46,"POST_GUARD_CSV=""$RUN_ROOT/post_guard_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,47,"POST_GUARD_TOP_CSV=""$RUN_ROOT/post_guard_profile_top_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,48,"POST_GUARD_EQUIV_CSV=""$RUN_ROOT/post_guard_equivalence_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,236,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0174b.sh,237,"cp ""$phase_src"" ""$out_dir/phase_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,245,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0174b.sh,246,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,254,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0174b.sh,255,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,263,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0174b.sh,264,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,272,"if post_guard_src=$(find_profile_file ""$out_dir"" ""post_guard_profile""); then"
+scripts/run_performance_profile_0174b.sh,273,"cp ""$post_guard_src"" ""$out_dir/post_guard_profile_0174b.csv"""
+scripts/run_performance_profile_0174b.sh,281,"if post_guard_equiv_src=$(find_profile_file ""$out_dir"" ""post_guard_equivalence_profile""); then"
+scripts/run_performance_profile_0174b.sh,282,"cp ""$post_guard_equiv_src"" ""$out_dir/post_guard_equivalence_profile_0174b.csv"""
+scripts/run_performance_profile_0174c.sh,8,#   RUN_ROOT/phase_profile_0174c.csv
+scripts/run_performance_profile_0174c.sh,9,#   RUN_ROOT/phase_profile_top_0174c.csv
+scripts/run_performance_profile_0174c.sh,10,#   RUN_ROOT/q6_cg_profile_0174c.csv
+scripts/run_performance_profile_0174c.sh,11,#   RUN_ROOT/q6_cg_profile_top_0174c.csv
+scripts/run_performance_profile_0174c.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,46,"POST_GUARD_CSV=""$RUN_ROOT/post_guard_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,47,"POST_GUARD_TOP_CSV=""$RUN_ROOT/post_guard_profile_top_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,48,"POST_GUARD_EQUIV_CSV=""$RUN_ROOT/post_guard_equivalence_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,236,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0174c.sh,237,"cp ""$phase_src"" ""$out_dir/phase_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,245,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0174c.sh,246,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,254,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0174c.sh,255,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,263,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0174c.sh,264,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,272,"if post_guard_src=$(find_profile_file ""$out_dir"" ""post_guard_profile""); then"
+scripts/run_performance_profile_0174c.sh,273,"cp ""$post_guard_src"" ""$out_dir/post_guard_profile_0174c.csv"""
+scripts/run_performance_profile_0174c.sh,281,"if post_guard_equiv_src=$(find_profile_file ""$out_dir"" ""post_guard_equivalence_profile""); then"
+scripts/run_performance_profile_0174c.sh,282,"cp ""$post_guard_equiv_src"" ""$out_dir/post_guard_equivalence_profile_0174c.csv"""
+scripts/run_performance_profile_0174d.sh,8,#   RUN_ROOT/phase_profile_0174d.csv
+scripts/run_performance_profile_0174d.sh,9,#   RUN_ROOT/phase_profile_top_0174d.csv
+scripts/run_performance_profile_0174d.sh,10,#   RUN_ROOT/q6_cg_profile_0174d.csv
+scripts/run_performance_profile_0174d.sh,11,#   RUN_ROOT/q6_cg_profile_top_0174d.csv
+scripts/run_performance_profile_0174d.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,46,"POST_GUARD_CSV=""$RUN_ROOT/post_guard_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,47,"POST_GUARD_TOP_CSV=""$RUN_ROOT/post_guard_profile_top_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,48,"POST_GUARD_EQUIV_CSV=""$RUN_ROOT/post_guard_equivalence_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,49,"POST_GUARD_TRACE_CSV=""$RUN_ROOT/post_guard_equivalence_trace_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,238,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0174d.sh,239,"cp ""$phase_src"" ""$out_dir/phase_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,247,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0174d.sh,248,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,256,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0174d.sh,257,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,265,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0174d.sh,266,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,274,"if post_guard_src=$(find_profile_file ""$out_dir"" ""post_guard_profile""); then"
+scripts/run_performance_profile_0174d.sh,275,"cp ""$post_guard_src"" ""$out_dir/post_guard_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,283,"if post_guard_equiv_src=$(find_profile_file ""$out_dir"" ""post_guard_equivalence_profile""); then"
+scripts/run_performance_profile_0174d.sh,284,"cp ""$post_guard_equiv_src"" ""$out_dir/post_guard_equivalence_profile_0174d.csv"""
+scripts/run_performance_profile_0174d.sh,292,"if post_guard_trace_src=$(find_profile_file ""$out_dir"" ""post_guard_equivalence_trace""); then"
+scripts/run_performance_profile_0174d.sh,293,"cp ""$post_guard_trace_src"" ""$out_dir/post_guard_equivalence_trace_0174d.csv"""
+scripts/run_performance_profile_0175.sh,8,#   RUN_ROOT/phase_profile_0175.csv
+scripts/run_performance_profile_0175.sh,9,#   RUN_ROOT/phase_profile_top_0175.csv
+scripts/run_performance_profile_0175.sh,10,#   RUN_ROOT/q6_cg_profile_0175.csv
+scripts/run_performance_profile_0175.sh,11,#   RUN_ROOT/q6_cg_profile_top_0175.csv
+scripts/run_performance_profile_0175.sh,38,"PHASE_CSV=""$RUN_ROOT/phase_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,39,"TOP_CSV=""$RUN_ROOT/phase_profile_top_0175.csv"""
+scripts/run_performance_profile_0175.sh,40,"Q6_CG_CSV=""$RUN_ROOT/q6_cg_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,41,"Q6_CG_TOP_CSV=""$RUN_ROOT/q6_cg_profile_top_0175.csv"""
+scripts/run_performance_profile_0175.sh,42,"RESAMP_GUARD_CSV=""$RUN_ROOT/resampling_guard_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,43,"RESAMP_GUARD_TOP_CSV=""$RUN_ROOT/resampling_guard_profile_top_0175.csv"""
+scripts/run_performance_profile_0175.sh,44,"DEPOSIT_CSV=""$RUN_ROOT/deposit_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,45,"DEPOSIT_TOP_CSV=""$RUN_ROOT/deposit_profile_top_0175.csv"""
+scripts/run_performance_profile_0175.sh,231,"if phase_src=$(find_profile_file ""$out_dir"" ""phase_profile""); then"
+scripts/run_performance_profile_0175.sh,232,"cp ""$phase_src"" ""$out_dir/phase_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,240,"if q6cg_src=$(find_profile_file ""$out_dir"" ""q6_cg_profile""); then"
+scripts/run_performance_profile_0175.sh,241,"cp ""$q6cg_src"" ""$out_dir/q6_cg_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,249,"if resamp_guard_src=$(find_profile_file ""$out_dir"" ""resampling_guard_profile""); then"
+scripts/run_performance_profile_0175.sh,250,"cp ""$resamp_guard_src"" ""$out_dir/resampling_guard_profile_0175.csv"""
+scripts/run_performance_profile_0175.sh,258,"if deposit_src=$(find_profile_file ""$out_dir"" ""deposit_profile""); then"
+scripts/run_performance_profile_0175.sh,259,"cp ""$deposit_src"" ""$out_dir/deposit_profile_0175.csv"""
+src/main_src_mpcd_base.cpp,65,"void write_phase_profile_0163(const std::string& outputDir,"
+src/main_src_mpcd_base.cpp,68,"const std::filesystem::path path = std::filesystem::path(outputDir) / ""phase_profile_0163.csv"";"
+src/main_src_mpcd_base.cpp,90,"void write_q6_cg_profile_0163(const std::string& outputDir,"
+src/main_src_mpcd_base.cpp,94,"const std::filesystem::path path = std::filesystem::path(outputDir) / ""q6_cg_profile_0163.csv"";"
+src/main_src_mpcd_base.cpp,123,void write_resampling_guard_profile_0169(
+src/main_src_mpcd_base.cpp,143,"const std::filesystem::path path = std::filesystem::path(outputDir) / ""resampling_guard_profile_0169.csv"";"
+src/main_src_mpcd_base.cpp,448,"write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);"
+src/main_src_mpcd_base.cpp,449,"write_q6_cg_profile_0163(params.outputDir, q6ProfileSeconds, ellipticProfileSeconds, q6ProfileSteps);"
+src/main_src_mpcd_base.cpp,450,"write_resampling_guard_profile_0169(params.outputDir,"
+src/main_src_mpcd_base.cpp,467,"std::cout << ""\n[src_mpcd_base] wrote "" << params.outputDir << ""/phase_profile_0163.csv"";"
+src/main_src_mpcd_base.cpp,468,"std::cout << ""\n[src_mpcd_base] wrote "" << params.outputDir << ""/q6_cg_profile_0163.csv"";"
+src/main_src_mpcd_base.cpp,469,"std::cout << ""\n[src_mpcd_base] wrote "" << params.outputDir << ""/resampling_guard_profile_0169.csv"";"
+src/src_mpcd_base.cpp,158,"const std::filesystem::path path = std::filesystem::path(outputDir) / ""post_guard_profile_0173.csv"";"
+src/src_mpcd_base.cpp,173,"out << ""post_guard_deposit,"" << resampling_deposit_profile_phase_name(i) << ','"
+src/src_mpcd_base.cpp,199,PostGuardDepositProfileAccumulator& post_guard_deposit_profile_accumulator() {
+src/src_mpcd_base.cpp,498,post_guard_deposit_profile_accumulator().add(
+src/weighted_resampling.cpp,212,"#define MPCD_DEPOSIT_PROFILE(seconds, phaseName) \"
+src/weighted_resampling.cpp,258,"const std::filesystem::path path = std::filesystem::path(outputDir) / ""deposit_profile_0172.csv"";"
+src/weighted_resampling.cpp,280,"out << resampling_deposit_profile_context_name(context) << ','"
+src/weighted_resampling.cpp,281,"<< resampling_deposit_profile_phase_name(p) << ','"
+src/weighted_resampling.cpp,290,"out << resampling_deposit_profile_context_name(context) << "",total_deposit,"""
+src/weighted_resampling.cpp,298,DepositProfileAccumulator& deposit_profile_accumulator() {
+src/weighted_resampling.cpp,416,const char* resampling_deposit_profile_phase_name(const std::size_t phaseIndex) {
+src/weighted_resampling.cpp,434,const char* resampling_deposit_profile_context_name(const ResamplingDepositProfileContext context) {
+src/weighted_resampling.cpp,2322,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ValidateResize);"
+src/weighted_resampling.cpp,2339,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ClearArrays);"
+src/weighted_resampling.cpp,2378,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, RoleCounts);"
+src/weighted_resampling.cpp,2388,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ParticleLoopCellAccum);"
+src/weighted_resampling.cpp,2443,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ReduceCellsFinalize);"
+src/weighted_resampling.cpp,2520,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ActiveWetClassification);"
+src/weighted_resampling.cpp,2563,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, PoorRichClassification);"
+src/weighted_resampling.cpp,2605,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, CandidateLists);"
+src/weighted_resampling.cpp,2658,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, MutationPlanCellIndex);"
+src/weighted_resampling.cpp,2691,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, TransferPlanBuild);"
+src/weighted_resampling.cpp,2898,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, PassiveExtractionPlan);"
+src/weighted_resampling.cpp,3034,deposit_profile_accumulator().add(
+src/weighted_resampling.cpp,3064,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ValidateResize);"
+src/weighted_resampling.cpp,3088,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ClearArrays);"
+src/weighted_resampling.cpp,3099,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ParticleLoopCellAccum);"
+src/weighted_resampling.cpp,3132,"MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ReduceCellsFinalize);"
+src/weighted_resampling.cpp,3184,deposit_profile_accumulator().add(

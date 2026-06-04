@@ -1,0 +1,64 @@
+# Minimal isothermal piston validation for the active-fluid-domain geometry.
+# This is intended to prepare later EOS/liquid-closure tests, not to provide
+# a final liquid EOS by itself.
+#
+# Geometry:
+#   fixed numerical box: 0 <= x <= 1, 0 <= y <= 1
+#   active fluid domain: 0 <= y <= yTop(t)
+#   yTop(t) = 0.95 - 0.001*t
+#
+# With dt=0.001 and nSteps=50000, t_end=50 and yTop_end=0.90,
+# so the active area decreases by 5.263% and the mean physical density
+# increases by 5.556% at conserved mass.
+#
+# Requires initial_state_active_y095.smpcd generated inside 0 <= y <= 0.95.
+inputState = initial_state_active_y095.smpcd
+outputDir = runs/piston_y_solid_thermal_isothermal
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+fluidYTop0 = 0.95
+fluidYTopVelocity = -0.001
+
+dt = 0.001
+nSteps = 50000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+# The normal top-wall velocity is inherited from fluidYTopVelocity.
+# wallUyTop remains a tangential/extra velocity offset and should stay zero here.
+wallUyTop = 0.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 5000
+numThreads = 4

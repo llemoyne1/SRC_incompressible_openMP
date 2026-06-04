@@ -1,0 +1,33 @@
+# First Poiseuille-style validation: periodic-x channel, specular y-walls.
+# This is a slip-wall reference; it is not expected to enforce no-slip.
+inputState = initial_state.smpcd
+outputDir = runs/poiseuille_y_specular
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+dt = 0.001
+nSteps = 10000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.005
+bodyAccelerationY = 0.0
+
+bcX = periodic
+bcY = specular
+
+wallVpEnable = false
+
+thermostatEnable = false
+kBT = 0.01
+
+summaryEvery = 50
+dumpStateEvery = 250
+numThreads = 0

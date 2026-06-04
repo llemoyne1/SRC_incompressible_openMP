@@ -1,0 +1,55 @@
+# Active-domain smoke test: fixed numerical box Ly=1, active fluid top yTop=0.95.
+# This verifies that solid reflection, solid_thermal wall coupling and runtime
+# geometry diagnostics use fluidYTop0 rather than the fixed box Ly.
+# Generate the matching initial state with MATLAB, e.g.:
+# generate_smpcd_state_uniform('output','initial_state_active_y095.smpcd', ...
+#   'Lx',1.0,'Ly',0.95,'Nx',32,'Ny',32,'gamma',80,'kBT',0.01,'mass',1.0,'seed',12345);
+inputState = initial_state_active_y095.smpcd
+outputDir = runs/active_domain_y_top_static
+
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 32
+
+# Active fluid domain inside the fixed box.
+fluidYTop0 = 0.95
+fluidYTopVelocity = 0.0
+
+dt = 0.001
+nSteps = 5000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+
+gridShiftEnable = true
+rngSeed = 12345
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4

@@ -1,0 +1,64 @@
+# Rotating fixed immersed circular solid with generic solid_thermal coupling.
+# Purpose: validate tangential wall motion on a curved immersed boundary.
+#
+# Generate the initial state with MATLAB:
+#   generate_smpcd_state_uniform('output','initial_state_circle_64x64_g20.smpcd', ...
+#     'Lx',1,'Ly',1,'Nx',64,'Ny',64,'gamma',20,'kBT',0.01, ...
+#     'mass',1.0,'type',0,'seed',12345, ...
+#     'excludeCircle',true,'circleCx',0.5,'circleCy',0.5,'circleR',0.12)
+
+inputState = initial_state_circle_64x64_g20.smpcd
+outputDir = runs/immersed_circle_rotating_64x64
+
+Lx = 1.0
+Ly = 1.0
+Nx = 64
+Ny = 64
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = 0.001
+nSteps = 50000
+
+rotationAngle = 2.0943951023931953
+randomRotationSign = true
+gridShiftEnable = true
+rngSeed = 12345
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = periodic
+bcTop = periodic
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+immersedCircleEnable = true
+immersedCircleCx = 0.5
+immersedCircleCy = 0.5
+immersedCircleR = 0.12
+immersedCircleFractionSamples = 4
+immersedCircleWallUx = 0.0
+immersedCircleWallUy = 0.0
+# Positive is counter-clockwise. Surface speed is omega*R = 0.024.
+immersedCircleOmega = 0.2
+
+wallAccommodation = 1.0
+wallVpGamma = 0.0
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+
+thermostatEnable = true
+thermostatMode = cell_relative_rescale
+thermostatEvery = 1
+thermostatTargetKBT = -1.0
+thermostatMinParticles = 3
+kBT = 0.01
+
+summaryEvery = 100
+dumpStateEvery = 1000
+numThreads = 4
