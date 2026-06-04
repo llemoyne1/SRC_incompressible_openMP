@@ -366,6 +366,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "kBT") p.kBT = parse_double(value, key);
         else if (key == "projectionEnable") p.projectionEnable = parse_bool(value, key);
         else if (key == "projectionOperator") p.projectionOperator = get_lower(kv, key);
+        else if (key == "projectionBackend" || key == "q6ProjectionBackend" || key == "gpuProjectionBackend") {
+            p.projectionBackend = get_lower(kv, key);
+            std::replace(p.projectionBackend.begin(), p.projectionBackend.end(), '-', '_');
+        }
         else if (key == "projectionMaxIterations") p.projectionMaxIterations = parse_int(value, key);
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
@@ -914,6 +918,12 @@ void validate_simulation_params(const SimulationParams& p) {
             p.projectionOperator != "auto_fv_cg" &&
             p.projectionOperator != "elliptic_fv_cg") {
             throw std::runtime_error("projectionOperator supports: periodic_fv_cg, channel_fv_cg, auto_fv_cg, elliptic_fv_cg");
+        }
+        if (p.projectionBackend != "cpu" &&
+            p.projectionBackend != "auto" &&
+            p.projectionBackend != "openmp_target" &&
+            p.projectionBackend != "cuda") {
+            throw std::runtime_error("projectionBackend supports: cpu, auto, openmp_target, cuda");
         }
         if (p.projectionMaxIterations < 0) {
             throw std::runtime_error("projectionMaxIterations must be non-negative");

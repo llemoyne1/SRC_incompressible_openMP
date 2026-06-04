@@ -20,6 +20,7 @@ SUMMARY_EVERY=${SUMMARY_EVERY:-100}
 THREADS=${THREADS:-8}
 DT=${DT:-0.001}
 KBT=${KBT:-0.001}
+PROJECTION_BACKEND=${PROJECTION_BACKEND:-cpu}
 SEED=${SEED:-1620162}
 CASE_LIST=${CASE_LIST:-tg_periodic_full poiseuille_wall_full open_rect_obstacle_full piston_virial_full}
 DUMP_STATE_EVERY=${DUMP_STATE_EVERY:-0}
@@ -131,6 +132,7 @@ gridShiftEnable = true
 rngSeed = $SEED
 
 projectionEnable = true
+projectionBackend = $PROJECTION_BACKEND
 projectionMaxIterations = 800
 projectionTolerance = 1.0e-10
 projectionMomentumCorrectionEnable = true
@@ -421,6 +423,7 @@ cat <<INFO
 [0162-validation] grid/gamma : ${NX}x${NY} / $GAMMA
 [0162-validation] steps      : $STEPS
 [0162-validation] threads    : $THREADS
+[0162-validation] projection backend : $PROJECTION_BACKEND
 [0162-validation] cases      : $CASE_LIST
 INFO
 

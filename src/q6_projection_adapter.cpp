@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <numeric>
@@ -34,6 +35,51 @@ bool internal_profiles_enabled_0176() {
                  s == "off" || s == "OFF" || s == "no" || s == "NO");
     }();
     return enabled;
+}
+
+void warn_q6_projection_backend_once(const std::string& message) {
+    static bool warned = false;
+    if (!warned) {
+        std::cerr << "[q6_projection_backend] " << message << '\n';
+        warned = true;
+    }
+}
+
+void resolve_q6_projection_backend_or_throw(const SimulationParams& params) {
+    const std::string& backend = params.projectionBackend;
+    if (backend == "cpu") {
+        return;
+    }
+    if (backend == "auto") {
+        warn_q6_projection_backend_once(
+            "projectionBackend=auto: no compiled GPU projection backend is present in patch 0184; using CPU OpenMP path.");
+        return;
+    }
+    if (backend == "openmp_target") {
+#if defined(MPCD_ENABLE_OPENMP_TARGET_Q6)
+        throw std::runtime_error(
+            "projectionBackend=openmp_target was requested, but patch 0184 only provides the backend scaffold; "
+            "the OpenMP-target Q6/elliptic kernel is not implemented yet.");
+#else
+        throw std::runtime_error(
+            "projectionBackend=openmp_target was requested, but this binary was not compiled with "
+            "MPCD_ENABLE_OPENMP_TARGET_Q6 and patch 0184 does not yet provide GPU kernels. "
+            "Use projectionBackend=cpu or projectionBackend=auto for the validated CPU fallback.");
+#endif
+    }
+    if (backend == "cuda") {
+#if defined(MPCD_ENABLE_CUDA_Q6)
+        throw std::runtime_error(
+            "projectionBackend=cuda was requested, but patch 0184 only provides the backend scaffold; "
+            "the CUDA Q6/elliptic kernel is not implemented yet.");
+#else
+        throw std::runtime_error(
+            "projectionBackend=cuda was requested, but this binary was not compiled with MPCD_ENABLE_CUDA_Q6 "
+            "and patch 0184 does not yet provide CUDA kernels. Use projectionBackend=cpu or projectionBackend=auto "
+            "for the validated CPU fallback.");
+#endif
+    }
+    throw std::runtime_error("Unsupported projectionBackend in Q6 projection path: " + backend);
 }
 
 struct Q6ProfilePhaseIndex {
@@ -1359,6 +1405,8 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     if (!q6_projection_requested(params)) {
         return diag;
     }
+
+    resolve_q6_projection_backend_or_throw(params);
 
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());

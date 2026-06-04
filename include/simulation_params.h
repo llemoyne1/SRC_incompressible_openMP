@@ -245,6 +245,19 @@ struct SimulationParams {
     // 0144 to avoid redundant or contradictory configurations.
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
+
+    // Prototype backend selector for the Q6/elliptic projection path.  The
+    // default CPU backend preserves the validated OpenMP-light behaviour.
+    // Supported values in this scaffold are:
+    //   cpu           : always use the existing OpenMP CPU implementation;
+    //   auto          : select a compiled GPU backend when one exists, otherwise
+    //                   fall back explicitly to CPU with a one-time warning;
+    //   openmp_target : request a future OpenMP-target backend; currently errors
+    //                   clearly unless such a backend is compiled in;
+    //   cuda          : reserved for a future CUDA backend; currently errors
+    //                   clearly unless such a backend is compiled in.
+    std::string projectionBackend = "cpu";
+
     int projectionMaxIterations = 300;
     double projectionTolerance = 1.0e-10;
     bool projectionMomentumCorrectionEnable = true;

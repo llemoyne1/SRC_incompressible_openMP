@@ -1,0 +1,7 @@
+path,kind,purpose
+include/simulation_params.h,modified,Add projectionBackend runtime selector with CPU default
+src/params_io_base.cpp,modified,Parse and validate projectionBackend/q6ProjectionBackend/gpuProjectionBackend aliases
+src/q6_projection_adapter.cpp,modified,Resolve Q6 projection backend before entering the validated CPU projection path
+scripts/run_validation_mono_config_0162.sh,modified,Allow PROJECTION_BACKEND environment variable in generated validation parameter files
+scripts/run_gpu_projection_backend_scaffold_0184.sh,added,Smoke/validation helper for cpu vs auto fallback and explicit unimplemented GPU failure
+doc/README_0184_GPU_PROJECTION_BACKEND_SCAFFOLD.md,added,Document the backend scaffold and next GPU implementation step
