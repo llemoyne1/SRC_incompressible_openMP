@@ -312,14 +312,29 @@ bool cuda_q6_plan_cache_disabled() {
     return !(text.empty() || text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
 }
 
-bool cuda_q6_legacy_host_block_sum_enabled_0193() {
-    const char* value = std::getenv("MPCD_CUDA_Q6_HOST_BLOCK_SUM");
+bool cuda_q6_env_truthy_0194(const char* name) {
+    const char* value = std::getenv(name);
     if (value == nullptr) {
         return false;
     }
     const std::string text(value);
     return !(text.empty() || text == "0" || text == "false" || text == "FALSE" ||
              text == "off" || text == "OFF" || text == "no" || text == "NO");
+}
+
+bool cuda_q6_device_scalar_reduction_enabled_0194() {
+    // 0193 showed that the extra device-side scalar reduction kernel is slower
+    // than downloading the small blockSums array for the current CG granularity
+    // (64^2 and 128^2 TG).  Keep it as an explicit ablation mode only.
+    return cuda_q6_env_truthy_0194("MPCD_CUDA_Q6_DEVICE_SCALAR_REDUCTION");
+}
+
+bool cuda_q6_legacy_host_block_sum_enabled_0193() {
+    // Backward-compatible override.  In 0194 this is again the default path.
+    if (cuda_q6_env_truthy_0194("MPCD_CUDA_Q6_HOST_BLOCK_SUM")) {
+        return true;
+    }
+    return !cuda_q6_device_scalar_reduction_enabled_0194();
 }
 
 uint64_t fnv1a_mix_u64(uint64_t h, const uint64_t v) {
@@ -731,7 +746,7 @@ double host_sum_blocks_reduced_0193(const DeviceBuffer<double>& dBlockSums,
     constexpr int reductionThreads = 256;
     q6_reduce_block_sums_to_scalar_kernel<<<1, reductionThreads, reductionThreads * sizeof(double)>>>(
         blocks, dBlockSums.data(), dScalarSum.data());
-    cuda_check(cudaGetLastError(), "q6_reduce_block_sums_to_scalar_kernel launch");
+    cuda_check(cudaGetLastError(), "q6_reduce_block_sums_to_scalar_kernel launch (explicit device scalar reduction mode)");
     cuda_q6_optional_synchronize("q6_reduce_block_sums_to_scalar_kernel debug synchronize");
 
     double sum = 0.0;
