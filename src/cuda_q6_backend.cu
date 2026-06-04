@@ -69,6 +69,7 @@ struct CudaQ6TimingAccum0192 {
     long long iterations = 0;
     long long reductionDownloads = 0;
     long long operatorApplications = 0;
+    long long residualNormShortcuts = 0;
     double totalSeconds = 0.0;
     double uploadRhsSeconds = 0.0;
     double initializeSeconds = 0.0;
@@ -111,6 +112,7 @@ void cuda_q6_print_timing_summary_0192() {
         << " iterations=" << a.iterations
         << " reductions=" << a.reductionDownloads
         << " operatorApplications=" << a.operatorApplications
+        << " residualNormShortcuts=" << a.residualNormShortcuts
         << " totalSeconds=" << a.totalSeconds
         << " avgSolveSeconds=" << avgSolve
         << " avgIterationSeconds=" << avgIter
@@ -143,6 +145,7 @@ void cuda_q6_accumulate_timing_0192(const CudaQ6CgDiagnostics& d) {
     a.iterations += d.iterations;
     a.reductionDownloads += d.reductionDownloads;
     a.operatorApplications += d.operatorApplications;
+    a.residualNormShortcuts += d.residualNormFromMeanRemovalShortcuts;
     a.totalSeconds += d.totalSeconds;
     a.uploadRhsSeconds += d.uploadRhsSeconds;
     a.initializeSeconds += d.initializeSeconds;
@@ -335,6 +338,25 @@ bool cuda_q6_legacy_host_block_sum_enabled_0193() {
         return true;
     }
     return !cuda_q6_device_scalar_reduction_enabled_0194();
+}
+
+
+bool cuda_q6_residual_norm_shortcut_enabled_0195() {
+    // Default path for 0195.  During periodic mean removal, q6_axpy_residual_kernel
+    // has already produced rrNew = sum(r^2) before gauge-fixing r.  If s=sum(r),
+    // then after r <- r - s/n, the exact corrected norm is rrNew - s^2/n.  This
+    // avoids a full post-subtraction sum(r^2) reduction/download.  Keep legacy
+    // explicit recomputation available for ablation and numerical regression.
+    if (cuda_q6_env_truthy_0194("MPCD_CUDA_Q6_LEGACY_MEAN_REMOVAL_RESIDUAL_NORM")) {
+        return false;
+    }
+    const char* value = std::getenv("MPCD_CUDA_Q6_RESIDUAL_NORM_SHORTCUT");
+    if (value == nullptr) {
+        return true;
+    }
+    const std::string text(value);
+    return !(text.empty() || text == "0" || text == "false" || text == "FALSE" ||
+             text == "off" || text == "OFF" || text == "no" || text == "NO");
 }
 
 uint64_t fnv1a_mix_u64(uint64_t h, const uint64_t v) {
@@ -761,27 +783,29 @@ double host_sum_blocks_reduced_0193(const DeviceBuffer<double>& dBlockSums,
     return sum;
 }
 
-void subtract_active_mean(const int nActive,
-                          const int blocks,
-                          const int threadsPerBlock,
-                          const DeviceBuffer<int>& dActive,
-                          DeviceBuffer<double>& dValues,
-                          DeviceBuffer<double>& dBlockSums,
-                          DeviceBuffer<double>& dScalarSum,
-                          double* reductionSeconds = nullptr,
-                          int* reductionDownloads = nullptr) {
+double subtract_active_mean(const int nActive,
+                            const int blocks,
+                            const int threadsPerBlock,
+                            const DeviceBuffer<int>& dActive,
+                            DeviceBuffer<double>& dValues,
+                            DeviceBuffer<double>& dBlockSums,
+                            DeviceBuffer<double>& dScalarSum,
+                            double* reductionSeconds = nullptr,
+                            int* reductionDownloads = nullptr) {
     if (nActive <= 0) {
-        return;
+        return 0.0;
     }
     q6_sum_active_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
         nActive, dActive.data(), dValues.data(), dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_sum_active_kernel launch");
     cuda_q6_optional_synchronize("q6_sum_active_kernel debug synchronize");
-    const double mean = host_sum_blocks_reduced_0193(dBlockSums, blocks, dScalarSum, reductionSeconds, reductionDownloads) / static_cast<double>(nActive);
+    const double sum = host_sum_blocks_reduced_0193(dBlockSums, blocks, dScalarSum, reductionSeconds, reductionDownloads);
+    const double mean = sum / static_cast<double>(nActive);
     q6_subtract_mean_active_kernel<<<blocks, threadsPerBlock>>>(
         nActive, dActive.data(), mean, dValues.data());
     cuda_check(cudaGetLastError(), "q6_subtract_mean_active_kernel launch");
     cuda_q6_optional_synchronize("q6_subtract_mean_active_kernel debug synchronize");
+    return sum;
 }
 
 } // namespace
@@ -1037,16 +1061,23 @@ bool cuda_q6_solve_cg_operator_plan(
             subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dPhi, cgWorkspace.dBlockSums, cgWorkspace.dScalarSum,
                                  timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
                                  timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
-            subtract_active_mean(nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dR, cgWorkspace.dBlockSums, cgWorkspace.dScalarSum,
-                                 timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
-                                 timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
-            q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
-                nActive, cgWorkspace.dActive.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
-            cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
-            cuda_q6_optional_synchronize("q6_sum_active_squares_kernel residual after mean removal debug synchronize");
-            rrNew = host_sum_blocks_reduced_0193(cgWorkspace.dBlockSums, blocks, cgWorkspace.dScalarSum,
-                                                 timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
-                                                 timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+            const double residualSumBeforeMean = subtract_active_mean(
+                nActive, blocks, threadsPerBlock, cgWorkspace.dActive, cgWorkspace.dR, cgWorkspace.dBlockSums, cgWorkspace.dScalarSum,
+                timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+            if (cuda_q6_residual_norm_shortcut_enabled_0195()) {
+                const double correction = (residualSumBeforeMean * residualSumBeforeMean) / static_cast<double>(nActive);
+                rrNew = std::max(0.0, rrNew - correction);
+                localDiag.residualNormFromMeanRemovalShortcuts += 1;
+            } else {
+                q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+                    nActive, cgWorkspace.dActive.data(), cgWorkspace.dR.data(), cgWorkspace.dBlockSums.data());
+                cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
+                cuda_q6_optional_synchronize("q6_sum_active_squares_kernel residual after mean removal debug synchronize");
+                rrNew = host_sum_blocks_reduced_0193(cgWorkspace.dBlockSums, blocks, cgWorkspace.dScalarSum,
+                                                     timingEnabled0192 ? &localDiag.hostReductionSeconds : nullptr,
+                                                     timingEnabled0192 ? &localDiag.reductionDownloads : nullptr);
+            }
             if (timingEnabled0192) {
                 localDiag.meanRemovalSeconds += seconds_since_0192(t0);
             }
