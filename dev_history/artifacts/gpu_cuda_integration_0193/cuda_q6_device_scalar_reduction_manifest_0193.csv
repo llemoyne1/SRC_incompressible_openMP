@@ -1,0 +1,7 @@
+file,kind,description
+src/cuda_q6_backend.cu,modified,"adds device-side second-stage reduction of CUDA CG block sums to one scalar before host copy"
+scripts/build_src_mpcd_cuda_0193.sh,added,"builds CUDA-enabled src_mpcd_base binary for patch 0193"
+scripts/run_cuda_q6_tg_reduction_0193.sh,added,"runs Taylor-Green CPU/CUDA comparison and reduction-cleanup timing/scaling checks"
+doc/README_0193_CUDA_Q6_DEVICE_SCALAR_REDUCTION.md,added,"documents the device scalar reduction and validation protocol"
+dev_history/artifacts/gpu_cuda_integration_0193/cuda_q6_device_scalar_reduction_manifest_0193.csv,added,"lists files in patch 0193"
+dev_history/artifacts/gpu_cuda_integration_0193/cuda_q6_device_scalar_reduction_scope_0193.csv,added,"records scope and guardrails for patch 0193"
