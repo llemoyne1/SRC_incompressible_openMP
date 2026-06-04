@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -19,6 +20,22 @@ void cuda_check(cudaError_t status, const char* what) {
         std::ostringstream oss;
         oss << what << ": " << cudaGetErrorString(status);
         throw std::runtime_error(oss.str());
+    }
+}
+
+
+bool cuda_q6_debug_sync_enabled() {
+    const char* value = std::getenv("MPCD_CUDA_Q6_DEBUG_SYNC");
+    if (value == nullptr) {
+        return false;
+    }
+    const std::string text(value);
+    return !(text.empty() || text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
+}
+
+void cuda_q6_optional_synchronize(const char* what) {
+    if (cuda_q6_debug_sync_enabled()) {
+        cuda_check(cudaDeviceSynchronize(), what);
     }
 }
 
@@ -380,17 +397,15 @@ void subtract_active_mean(const int nActive,
     if (nActive <= 0) {
         return;
     }
-    cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
-               "cudaMemset mean block sums");
     q6_sum_active_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
         nActive, dActive.data(), dValues.data(), dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_sum_active_kernel launch");
-    cuda_check(cudaDeviceSynchronize(), "q6_sum_active_kernel synchronize");
+    cuda_q6_optional_synchronize("q6_sum_active_kernel debug synchronize");
     const double mean = host_sum_blocks(dBlockSums) / static_cast<double>(nActive);
     q6_subtract_mean_active_kernel<<<blocks, threadsPerBlock>>>(
         nActive, dActive.data(), mean, dValues.data());
     cuda_check(cudaGetLastError(), "q6_subtract_mean_active_kernel launch");
-    cuda_check(cudaDeviceSynchronize(), "q6_subtract_mean_active_kernel synchronize");
+    cuda_q6_optional_synchronize("q6_subtract_mean_active_kernel debug synchronize");
 }
 
 } // namespace
@@ -462,9 +477,6 @@ double cuda_q6_apply_elliptic_operator_plan_and_dot(
     constexpr int threadsPerBlock = 256;
     const int blocks = choose_blocks(nActive, threadsPerBlock);
     DeviceBuffer<double> dBlockSums(static_cast<std::size_t>(blocks));
-    cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
-               "cudaMemset block sums");
-
     q6_apply_operator_plan_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
         nActive,
         dActive.data(),
@@ -472,7 +484,7 @@ double cuda_q6_apply_elliptic_operator_plan_and_dot(
         dCoeffEast.data(), dCoeffWest.data(), dCoeffNorth.data(), dCoeffSouth.data(),
         dPhi.data(), dAphi.data(), dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_apply_operator_plan_kernel launch");
-    cuda_check(cudaDeviceSynchronize(), "q6_apply_operator_plan_kernel synchronize");
+    cuda_q6_optional_synchronize("q6_apply_operator_plan_kernel debug synchronize");
 
     dAphi.download(Aphi, "copy Aphi back");
     const double pAp = host_sum_blocks(dBlockSums);
@@ -567,13 +579,13 @@ bool cuda_q6_solve_cg_operator_plan(
     q6_initialize_cg_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
         nActive, dActive.data(), dRhs.data(), dPhi.data(), dR.data(), dP.data(), dAp.data(), dBlockSums.data());
     cuda_check(cudaGetLastError(), "q6_initialize_cg_kernel launch");
-    cuda_check(cudaDeviceSynchronize(), "q6_initialize_cg_kernel synchronize");
+    cuda_q6_optional_synchronize("q6_initialize_cg_kernel debug synchronize");
 
     if (nInactive > 0) {
         q6_zero_inactive_kernel<<<inactiveBlocks, threadsPerBlock>>>(
             nInactive, dInactive.data(), dPhi.data(), dR.data(), dP.data(), dAp.data());
         cuda_check(cudaGetLastError(), "q6_zero_inactive_kernel launch");
-        cuda_check(cudaDeviceSynchronize(), "q6_zero_inactive_kernel synchronize");
+        cuda_q6_optional_synchronize("q6_zero_inactive_kernel debug synchronize");
     }
 
     double rr = host_sum_blocks(dBlockSums);
@@ -596,8 +608,6 @@ bool cuda_q6_solve_cg_operator_plan(
     bool converged = false;
 
     for (int it = 0; it < maxIt; ++it) {
-        cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
-                   "cudaMemset pAp block sums");
         q6_apply_operator_plan_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
             nActive,
             dActive.data(),
@@ -605,7 +615,7 @@ bool cuda_q6_solve_cg_operator_plan(
             dCoeffEast.data(), dCoeffWest.data(), dCoeffNorth.data(), dCoeffSouth.data(),
             dP.data(), dAp.data(), dBlockSums.data());
         cuda_check(cudaGetLastError(), "q6_apply_operator_plan_kernel cg launch");
-        cuda_check(cudaDeviceSynchronize(), "q6_apply_operator_plan_kernel cg synchronize");
+        cuda_q6_optional_synchronize("q6_apply_operator_plan_kernel cg debug synchronize");
         const double pAp = host_sum_blocks(dBlockSums);
         localDiag.lastPAp = pAp;
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
@@ -613,12 +623,10 @@ bool cuda_q6_solve_cg_operator_plan(
         }
 
         const double alpha = rr / pAp;
-        cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
-                   "cudaMemset rrNew block sums");
         q6_axpy_residual_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
             nActive, dActive.data(), alpha, dP.data(), dAp.data(), dPhi.data(), dR.data(), dBlockSums.data());
         cuda_check(cudaGetLastError(), "q6_axpy_residual_kernel launch");
-        cuda_check(cudaDeviceSynchronize(), "q6_axpy_residual_kernel synchronize");
+        cuda_q6_optional_synchronize("q6_axpy_residual_kernel debug synchronize");
         double rrNew = host_sum_blocks(dBlockSums);
 
         const bool removeMeanThisIteration =
@@ -628,12 +636,10 @@ bool cuda_q6_solve_cg_operator_plan(
         if (removeMeanThisIteration) {
             subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dPhi, dBlockSums);
             subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dR, dBlockSums);
-            cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
-                       "cudaMemset rrNew after mean removal block sums");
             q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
                 nActive, dActive.data(), dR.data(), dBlockSums.data());
             cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
-            cuda_check(cudaDeviceSynchronize(), "q6_sum_active_squares_kernel residual after mean removal synchronize");
+            cuda_q6_optional_synchronize("q6_sum_active_squares_kernel residual after mean removal debug synchronize");
             rrNew = host_sum_blocks(dBlockSums);
         }
 
@@ -650,7 +656,7 @@ bool cuda_q6_solve_cg_operator_plan(
         q6_update_direction_kernel<<<blocks, threadsPerBlock>>>(
             nActive, dActive.data(), beta, dR.data(), dP.data());
         cuda_check(cudaGetLastError(), "q6_update_direction_kernel launch");
-        cuda_check(cudaDeviceSynchronize(), "q6_update_direction_kernel synchronize");
+        cuda_q6_optional_synchronize("q6_update_direction_kernel debug synchronize");
         rr = rrNew;
     }
 

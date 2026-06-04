@@ -1,0 +1,6 @@
+area,status,notes,next_step
+CUDA Q6 TG correctness,preserved,0189 already passed 76 compared metrics with zero failures,rerun 0190 regression and compare Q6 diagnostics
+Explicit kernel synchronization,disabled by default,avoids redundant host/device stalls; enable with MPCD_CUDA_Q6_DEBUG_SYNC=1 when debugging,profile default vs debug-sync only if needed
+Reduction-buffer cudaMemset,removed when overwritten by reduction kernels,reduction kernels write one value per launched block so pre-zeroing is unnecessary,confirm no change in pAp rr residual diagnostics
+Performance,limited cleanup only,64x64 TG may remain slower because allocations copies scalar reductions and kernel launches dominate,consider persistent CUDA Q6 context after 0190
+CUDA scope,unchanged,only fully periodic unmasked Taylor-Green Q6 path is enabled,extend to larger periodic tests before bounded Poiseuille
