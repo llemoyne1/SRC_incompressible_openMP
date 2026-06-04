@@ -178,16 +178,81 @@ resamplingLatentActivationEnable = false
 PARAMS
 }
 
+
+restart_slug_from_state() {
+  local base_name
+  base_name="$(basename "$1")"
+  base_name="${base_name%.smpcd}"
+  printf '%s' "$base_name" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+default_run_root_for_case() {
+  local case_dir="$1"
+  if [[ -n "${RESTART_STATE:-}" ]]; then
+    printf 'runs/%s_restart/%s' "$case_dir" "$(restart_slug_from_state "$RESTART_STATE")"
+  else
+    printf 'runs/%s' "$case_dir"
+  fi
+}
+
+absolute_path_for_guard() {
+  local path_value="$1"
+  if [[ "$path_value" == /* ]]; then
+    printf '%s
+' "$path_value"
+  else
+    printf '%s/%s
+' "$ROOT_DIR" "$path_value"
+  fi
+}
+
 prepare_run_root() {
-  if [[ "${CLEAN_RUN_ROOT}" == "1" ]]; then rm -rf "$RUN_ROOT"; fi
+  if [[ "${CLEAN_RUN_ROOT}" == "1" ]]; then
+    if [[ -n "${RESTART_STATE:-}" ]]; then
+      local restart_abs run_abs
+      restart_abs="$(absolute_path_for_guard "$RESTART_STATE")"
+      run_abs="$(absolute_path_for_guard "$RUN_ROOT")"
+      case "$restart_abs" in
+        "$run_abs"|"$run_abs"/*)
+          echo "ERROR: RESTART_STATE is inside RUN_ROOT while CLEAN_RUN_ROOT=1." >&2
+          echo "       RESTART_STATE=$RESTART_STATE" >&2
+          echo "       RUN_ROOT=$RUN_ROOT" >&2
+          echo "       Use a different RUN_ROOT or set CLEAN_RUN_ROOT=0." >&2
+          exit 2
+          ;;
+      esac
+    fi
+    rm -rf "$RUN_ROOT"
+  fi
   mkdir -p "$RUN_ROOT/init" "$RUN_ROOT/params" "$RUN_ROOT/logs"
+}
+
+prepare_initial_state_or_restart() {
+  local generated_state="$1"
+  shift
+  if [[ -n "${RESTART_STATE:-}" ]]; then
+    if [[ ! -f "$RESTART_STATE" ]]; then
+      echo "ERROR: RESTART_STATE does not exist: $RESTART_STATE" >&2
+      exit 2
+    fi
+    STATE_FILE="$RESTART_STATE"
+    echo "[restart] using dump as inputState: $STATE_FILE"
+    echo "[restart] writing new run to: $RUN_ROOT"
+  else
+    STATE_FILE="$generated_state"
+    generate_state "$STATE_FILE" "$@"
+  fi
 }
 
 run_case() {
   echo "[run] binary : $BIN"
   echo "[run] params : $PARAMS_FILE"
   echo "[run] output : $OUT_DIR"
-  /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" > "$LOG_FILE" 2> "$TIME_FILE"
+  if [[ "${LIVE_PROGRESS}" == "1" || "${LIVE_PROGRESS}" == "true" || "${LIVE_PROGRESS}" == "TRUE" || "${LIVE_PROGRESS}" == "on" || "${LIVE_PROGRESS}" == "ON" ]]; then
+    /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" 2> "$TIME_FILE" | tee "$LOG_FILE"
+  else
+    /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" > "$LOG_FILE" 2> "$TIME_FILE"
+  fi
   cat "$TIME_FILE"
   echo "[run] summary: $OUT_DIR/summary_runtime.csv"
 }
@@ -218,6 +283,8 @@ RESAMP_MASS_RENORM_PERIOD="${RESAMP_MASS_RENORM_PERIOD:-10}"
 RESAMP_MASS_MIN="${RESAMP_MASS_MIN:-0.5}"
 RESAMP_MASS_MAX="${RESAMP_MASS_MAX:-2.0}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+RESTART_STATE="${RESTART_STATE:-}"
 
 CASE_NAME="piston"
 Lx="${Lx:-1.0}"
@@ -233,15 +300,16 @@ CAP_VIRIAL_GAIN="${CAP_VIRIAL_GAIN:-20.0}"
 CAP_VIRIAL_ETA="${CAP_VIRIAL_ETA:-0.005}"
 CAP_VIRIAL_POWER="${CAP_VIRIAL_POWER:-2.0}"
 CAP_VIRIAL_KICK_STRENGTH="${CAP_VIRIAL_KICK_STRENGTH:-0.2}"
-RUN_ROOT="${RUN_ROOT:-runs/example_piston}"
+RUN_ROOT="${RUN_ROOT:-$(default_run_root_for_case example_piston)}"
 prepare_run_root
-STATE_FILE="$RUN_ROOT/init/piston_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
+GENERATED_STATE_FILE="$RUN_ROOT/init/piston_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
+STATE_FILE="$GENERATED_STATE_FILE"
 PARAMS_FILE="$RUN_ROOT/params/piston.kv"
 OUT_DIR="$RUN_ROOT/output"
 LOG_FILE="$RUN_ROOT/logs/piston.log"
 TIME_FILE="$RUN_ROOT/logs/piston.time"
 
-generate_state "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" $((SEED+33)) zero 0.0 0.0 0.0 "$PISTON_YTOP0" none
+prepare_initial_state_or_restart "$GENERATED_STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" $((SEED+33)) zero 0.0 0.0 0.0 "$PISTON_YTOP0" none
 mkdir -p "$OUT_DIR"
 cat > "$PARAMS_FILE" <<PARAMS
 inputState = ${STATE_FILE}

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BIN="${BIN:-build/src_mpcd_base}"
-AUTO_BUILD="${AUTO_BUILD:-1}"
+AUTO_BUILD="${AUTO_BUILD:-0}"
 BUILD_PROFILE="${BUILD_PROFILE:-native}"
 CXX="${CXX:-g++}"
 THREADS="${THREADS:-8}"
@@ -178,16 +178,81 @@ resamplingLatentActivationEnable = false
 PARAMS
 }
 
+
+restart_slug_from_state() {
+  local base_name
+  base_name="$(basename "$1")"
+  base_name="${base_name%.smpcd}"
+  printf '%s' "$base_name" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+default_run_root_for_case() {
+  local case_dir="$1"
+  if [[ -n "${RESTART_STATE:-}" ]]; then
+    printf 'runs/%s_restart/%s' "$case_dir" "$(restart_slug_from_state "$RESTART_STATE")"
+  else
+    printf 'runs/%s' "$case_dir"
+  fi
+}
+
+absolute_path_for_guard() {
+  local path_value="$1"
+  if [[ "$path_value" == /* ]]; then
+    printf '%s
+' "$path_value"
+  else
+    printf '%s/%s
+' "$ROOT_DIR" "$path_value"
+  fi
+}
+
 prepare_run_root() {
-  if [[ "${CLEAN_RUN_ROOT}" == "1" ]]; then rm -rf "$RUN_ROOT"; fi
+  if [[ "${CLEAN_RUN_ROOT}" == "1" ]]; then
+    if [[ -n "${RESTART_STATE:-}" ]]; then
+      local restart_abs run_abs
+      restart_abs="$(absolute_path_for_guard "$RESTART_STATE")"
+      run_abs="$(absolute_path_for_guard "$RUN_ROOT")"
+      case "$restart_abs" in
+        "$run_abs"|"$run_abs"/*)
+          echo "ERROR: RESTART_STATE is inside RUN_ROOT while CLEAN_RUN_ROOT=1." >&2
+          echo "       RESTART_STATE=$RESTART_STATE" >&2
+          echo "       RUN_ROOT=$RUN_ROOT" >&2
+          echo "       Use a different RUN_ROOT or set CLEAN_RUN_ROOT=0." >&2
+          exit 2
+          ;;
+      esac
+    fi
+    rm -rf "$RUN_ROOT"
+  fi
   mkdir -p "$RUN_ROOT/init" "$RUN_ROOT/params" "$RUN_ROOT/logs"
+}
+
+prepare_initial_state_or_restart() {
+  local generated_state="$1"
+  shift
+  if [[ -n "${RESTART_STATE:-}" ]]; then
+    if [[ ! -f "$RESTART_STATE" ]]; then
+      echo "ERROR: RESTART_STATE does not exist: $RESTART_STATE" >&2
+      exit 2
+    fi
+    STATE_FILE="$RESTART_STATE"
+    echo "[restart] using dump as inputState: $STATE_FILE"
+    echo "[restart] writing new run to: $RUN_ROOT"
+  else
+    STATE_FILE="$generated_state"
+    generate_state "$STATE_FILE" "$@"
+  fi
 }
 
 run_case() {
   echo "[run] binary : $BIN"
   echo "[run] params : $PARAMS_FILE"
   echo "[run] output : $OUT_DIR"
-  /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" > "$LOG_FILE" 2> "$TIME_FILE"
+  if [[ "${LIVE_PROGRESS}" == "1" || "${LIVE_PROGRESS}" == "true" || "${LIVE_PROGRESS}" == "TRUE" || "${LIVE_PROGRESS}" == "on" || "${LIVE_PROGRESS}" == "ON" ]]; then
+    /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" 2> "$TIME_FILE" | tee "$LOG_FILE"
+  else
+    /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS_FILE" > "$LOG_FILE" 2> "$TIME_FILE"
+  fi
   cat "$TIME_FILE"
   echo "[run] summary: $OUT_DIR/summary_runtime.csv"
 }
@@ -196,7 +261,7 @@ run_case() {
 NX="${NX:-64}"
 NY="${NY:-64}"
 GAMMA="${GAMMA:-20}"
-STEPS="${STEPS:-1000}"
+STEPS="${STEPS:-10000}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-250}"
 DT="${DT:-0.001}"
@@ -214,10 +279,12 @@ RESAMP_POP_MAX_EXTRACT_PER_CELL="${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}"
 RESAMP_POP_MAX_EXTRACT_PER_STEP="${RESAMP_POP_MAX_EXTRACT_PER_STEP:-200000}"
 RESAMP_POOR_FRACTION="${RESAMP_POOR_FRACTION:-0.90}"
 RESAMP_RICH_FRACTION="${RESAMP_RICH_FRACTION:-1.10}"
-RESAMP_MASS_RENORM_PERIOD="${RESAMP_MASS_RENORM_PERIOD:-10}"
+RESAMP_MASS_RENORM_PERIOD="${RESAMP_MASS_RENORM_PERIOD:-1000}"
 RESAMP_MASS_MIN="${RESAMP_MASS_MIN:-0.5}"
 RESAMP_MASS_MAX="${RESAMP_MASS_MAX:-2.0}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+RESTART_STATE="${RESTART_STATE:-}"
 
 CASE_NAME="taylor_green"
 Lx="${Lx:-1.0}"
@@ -225,19 +292,20 @@ Ly="${Ly:-1.0}"
 TG_U0="${TG_U0:-0.08}"
 TG_BODY_ACCEL_X="${TG_BODY_ACCEL_X:-0.0}"
 TG_BODY_ACCEL_Y="${TG_BODY_ACCEL_Y:-0.0}"
-TG_FORCING_ENABLE="${TG_FORCING_ENABLE:-false}"
-TG_FORCING_AMPLITUDE="${TG_FORCING_AMPLITUDE:-0.0}"
+TG_FORCING_ENABLE="${TG_FORCING_ENABLE:-true}"
+TG_FORCING_AMPLITUDE="${TG_FORCING_AMPLITUDE:-0.05}"
 TG_FORCING_MODE_X="${TG_FORCING_MODE_X:-1}"
 TG_FORCING_MODE_Y="${TG_FORCING_MODE_Y:-1}"
-RUN_ROOT="${RUN_ROOT:-runs/example_taylor_green}"
+RUN_ROOT="${RUN_ROOT:-$(default_run_root_for_case example_taylor_green)}"
 prepare_run_root
-STATE_FILE="$RUN_ROOT/init/taylor_green_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
+GENERATED_STATE_FILE="$RUN_ROOT/init/taylor_green_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
+STATE_FILE="$GENERATED_STATE_FILE"
 PARAMS_FILE="$RUN_ROOT/params/taylor_green.kv"
 OUT_DIR="$RUN_ROOT/output"
 LOG_FILE="$RUN_ROOT/logs/taylor_green.log"
 TIME_FILE="$RUN_ROOT/logs/taylor_green.time"
 
-generate_state "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" taylor_green 0.0 0.0 "$TG_U0" -1.0 none
+prepare_initial_state_or_restart "$GENERATED_STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" taylor_green 0.0 0.0 "$TG_U0" -1.0 none
 mkdir -p "$OUT_DIR"
 cat > "$PARAMS_FILE" <<PARAMS
 inputState = ${STATE_FILE}
