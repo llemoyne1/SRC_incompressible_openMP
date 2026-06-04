@@ -1,5 +1,0 @@
-case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
-open_rect_obstacle_full,42.51722408,32.293445227,1.3165899079870262,42.56,32.34,1.3160173160173159,37,76,FAIL
-piston_virial_full,18.469476327,12.434419036,1.4853509660183852,18.52,12.48,1.4839743589743588,28,76,FAIL
-poiseuille_wall_full,16.860610501,11.930670591,1.4132156589520577,16.9,11.98,1.4106844741235391,0,76,PASS
-tg_periodic_full,22.336891541,15.564493934,1.4351183941937216,22.41,15.62,1.4346991037131882,28,76,FAIL

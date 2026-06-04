@@ -1,0 +1,462 @@
+path,action,group,reason
+dev_history/artifacts/cleanup_audit_0178/openmp_light_cleanup_inventory_0178.csv,remove,autre,sélection production
+dev_history/artifacts/cleanup_audit_0178/openmp_light_cleanup_summary_0178.csv,remove,autre,sélection production
+dev_history/artifacts/cleanup_audit_0178/openmp_light_profile_references_0178.csv,remove,autre,sélection production
+dev_history/artifacts/cleanup_audit_0179/openmp_light_cleanup_manifest_0179.csv,remove,autre,sélection production
+dev_history/artifacts/docs/README_0068d_fix_q9_low_mass_parser.md,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/closed_capacity_uniform_overfill_suite_0152.csv,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1_meta_0152.csv,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1_preview_0152.png,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p02_meta_0152.csv,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p02_preview_0152.png,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p05_meta_0152.csv,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p05_preview_0152.png,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p1_meta_0152.csv,remove,autre,sélection production
+dev_history/artifacts/init/closed_capacity_wall_load_0152/static_mf1p1_preview_0152.png,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_fluid_uniform_0145/initial_state_fluid_uniform_0145_small_meta_0145.csv,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_fluid_uniform_0145/initial_state_fluid_uniform_0145_small_preview_0145.png,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_resampling_0145/initial_state_fluid_uniform_0145_meta_0145.csv,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_resampling_0145/initial_state_fluid_uniform_0145_preview_0145.png,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_resampling_0145/initial_state_fluid_uniform_0145_small_meta_0145.csv,remove,autre,sélection production
+dev_history/artifacts/init/injection_fill_resampling_0145/initial_state_fluid_uniform_0145_small_preview_0145.png,remove,autre,sélection production
+dev_history/artifacts/matlab/analyze_closed_capacity_inlet_only_0147.m,remove,autre,sélection production
+dev_history/artifacts/matlab/analyze_closed_capacity_wall_load_validation_0152.m,remove,autre,sélection production
+dev_history/artifacts/matlab/prepare_closed_capacity_uniform_overfill_0152.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+dev_history/artifacts/matlab/prepare_closed_capacity_uniform_overfill_suite_0152.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+dev_history/artifacts/matlab/prepare_injection_fill_fluid_uniform_0145.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+dev_history/doc/doc/NEXT_CHAT_PROMPT_0090.md,remove,autre,sélection production
+dev_history/doc/doc/NEXT_CHAT_PROMPT_0091_SEGMENTED_INLET_OUTLET.md,remove,autre,sélection production
+dev_history/doc/doc/README_0071_OPEN_CHANNEL_HARD_INLET_BUDGET.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0072_BACKWARD_STEP_HARD_INLET_BUDGET.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0073_BACKWARD_STEP_VALIDATED_Q9_PARAMS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0074_BACKWARD_STEP_RECEDED_THIN_VALIDATED_Q9.md,remove,autre,sélection production
+dev_history/doc/doc/README_0075_BACKWARD_STEP_RECEDED_THIN_VALIDATED_Q9_UIN025.md,remove,autre,sélection production
+dev_history/doc/doc/README_0076_INLET_OUTLET_STATUS_AND_IMMERSED_SOLID_NOTES.md,remove,autre,sélection production
+dev_history/doc/doc/README_0077_POISEUILLE_HARD_INLET_FREE_OUTLET.md,remove,autre,sélection production
+dev_history/doc/doc/README_0078_GAMMA_RELATIVE_Q9_LOW_MASS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0079_POISEUILLE_RAMPED_HARD_INLET.md,remove,autre,sélection production
+dev_history/doc/doc/README_0080_Q9_THERMAL_SOFT_LIMITER.md,remove,autre,sélection production
+dev_history/doc/doc/README_0081_VISUAL_IMMERSED_SOLID_FLAG_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0082_POISEUILLE_OUTLET_CORNER_BANDS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0083_SEGMENTED_INLET_OUTLET_APERTURES.md,remove,autre,sélection production
+dev_history/doc/doc/README_0084_OPEN_CHANNEL_FULL_IO_SLIP.md,remove,autre,sélection production
+dev_history/doc/doc/README_0085_OPEN_BOUNDARY_EXCLUSION_SWEEP.md,remove,campagne/sweep,préparation de campagnes de développement retirée
+dev_history/doc/doc/README_0086_OPEN_CHANNEL_FULL_IO_Q9_BOUNDARY_MODES.md,remove,autre,sélection production
+dev_history/doc/doc/README_0087_Q9_VIRIAL_ZERO_OPEN_EXCLUSION.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0088_FULL_IO_VP_POISEUILLE_PROFILE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0089_VP_TAPERED_FLAT_INLET_WALL_BANDS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0090_INLET_OUTLET_VALIDATION_STATUS.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0091_INLET_OUTLET_ROOT_CLEANUP.md,remove,autre,sélection production
+dev_history/doc/doc/README_0092_OUTLET_NEUMANN_MODE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0093_Q9_LIMITER_SPATIAL_DIAGNOSTICS.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0094_Q9_DIAGNOSTIC_BINARY_FORMAT.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0097_HYBRID_OUTLET_BOUNDARY.md,remove,autre,sélection production
+dev_history/doc/doc/README_0098_IMMERSED_SOLID_FACE_CELL_Q9.md,remove,autre,sélection production
+dev_history/doc/doc/README_0099_VIRIAL_IMMERSED_SOLID_NORMAL_CLIP.md,remove,autre,sélection production
+dev_history/doc/doc/README_0100_IMMERSED_CIRCLE_FACE_CELL_SMOKE.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0101_Q9_IMMERSED_SOLID_CLOSED_FACE_FLUX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0102_PERIODIC_CYLINDER_FACE_CELL_SMOKE.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0103_Q6_IMMERSED_SOLID_DIAGNOSTIC_CLEANUP.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0104B_PERIODIC_CYLINDER_STARTUP_VISUAL_MATLAB_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0104_PERIODIC_CYLINDER_STARTUP_VISUAL.md,remove,autre,sélection production
+dev_history/doc/doc/README_0105_PERIODIC_CYLINDER_DYNAMIC_VISUAL.md,remove,autre,sélection production
+dev_history/doc/doc/README_0110_OPENMP_RESAMPLING_MINIMAL_SRC_Q6_CORE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0111_PARTICLE_ROLES_MASKS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0112_WEIGHTED_REAL_FLUID_DEPOSIT.md,remove,autre,sélection production
+dev_history/doc/doc/README_0113_RESAMPLING_INACTIVE_POOL.md,remove,autre,sélection production
+dev_history/doc/doc/README_0114_RESAMPLING_CELL_CLASSIFICATION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0115_RESAMPLING_CANDIDATE_LISTS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0116_RESAMPLING_TRANSFER_PLAN.md,remove,autre,sélection production
+dev_history/doc/doc/README_0117_RESAMPLING_DONOR_PARTICLE_SELECTION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0118_RESAMPLING_PASSIVE_EXTRACTION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0119_RESAMPLING_MUTATING_EXTRACTION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0120_RESAMPLING_MUTATING_INSERTION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0121_RESAMPLING_LOCAL_REMAP.md,remove,autre,sélection production
+dev_history/doc/doc/README_0122_RESAMPLING_THERMAL_RENORMALIZATION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0123_RESAMPLING_MASS_GUARD.md,remove,autre,sélection production
+dev_history/doc/doc/README_0124_RESAMPLING_LATENT_ACTIVATION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0125_RESAMPLING_INTEGRATED_VOID_RICH_LATENT.md,remove,autre,sélection production
+dev_history/doc/doc/README_0126B_TAYLOR_GREEN_WSL_PYTHON_GENERATOR.md,remove,autre,sélection production
+dev_history/doc/doc/README_0126_TAYLOR_GREEN_RESAMPLING_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0127_TAYLOR_GREEN_VOID_RICH_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0128_TAYLOR_GREEN_RANDOM_POPULATION_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0129_RESAMPLING_CADENCE_AND_SWITCH.md,remove,autre,sélection production
+dev_history/doc/doc/README_0130_TAYLOR_GREEN_FORCING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0131B_POISEUILLE_PROJECTION_OPERATOR_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0131_POISEUILLE_WALLVP_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0132_RESAMPLING_PERFORMANCE_TRIAGE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0133_RESAMPLING_THERMAL_RENORM_FASTPATH.md,remove,autre,sélection production
+dev_history/doc/doc/README_0134_PERIODIC_CYLINDER_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0135_CHANNEL_CYLINDER_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0136B_BACKWARD_STEP_ANALYSIS_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0136_BACKWARD_STEP_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0137B_REVERT_Q6_WARMSTART.md,remove,autre,sélection production
+dev_history/doc/doc/README_0138B_OPEN_CHANNEL_RECT_OBSTACLE_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0138_OPEN_CHANNEL_CYLINDER_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0139B_INJECTION_FILL_INLET_PROFILE_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0139_INJECTION_FILL_RESAMPLING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0140_POPULATION_SUPPORT_GUARD.md,remove,autre,sélection production
+dev_history/doc/doc/README_0141_RESAMPLING_0140_VALIDATION_SCRIPTS.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0142_STANDALONE_OPEN_BOUNDARIES.md,remove,autre,sélection production
+dev_history/doc/doc/README_0143_RELATIVE_OPEN_BOUNDARY_SEGMENTS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0144_EXPLICIT_PROJECTION_RESAMPLING_SWITCHES.md,remove,autre,sélection production
+dev_history/doc/doc/README_0145_FLUID_UNIFORM_INITIAL_STATE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0146_ACTIVE_DOMAIN_SMALL_SCRIPT_CLEANUP.md,remove,autre,sélection production
+dev_history/doc/doc/README_0147_CLOSED_CAPACITY_VIRIAL_RESPONSE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0148_CLOSED_CAPACITY_MATLAB_POSTPROCESS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0149_CLOSED_CAPACITY_REMAP_TARGET.md,remove,autre,sélection production
+dev_history/doc/doc/README_0150_CLOSED_CAPACITY_MOMENTUM_POSTPROCESS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0151_CLOSED_CAPACITY_WALL_LOAD.md,remove,autre,sélection production
+dev_history/doc/doc/README_0152_CLOSED_CAPACITY_WALL_LOAD_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0154_STATIC_MASS_FACTOR_TAGS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0156_PERFORMANCE_OPENMP_GPU_PLAN.md,remove,autre,sélection production
+dev_history/doc/doc/README_0157_FINE_PERFORMANCE_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0158_HOTSPOT_OPTIMIZATION.md,remove,autre,sélection production
+dev_history/doc/doc/README_0159_Q6_CG_FINE_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0160_Q6_CG_FUSED_AXPY.md,remove,autre,sélection production
+dev_history/doc/doc/README_0161_ELLIPTIC_OPERATOR_PLAN.md,remove,autre,sélection production
+dev_history/doc/doc/README_0162_MONO_CONFIG_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0164B_PROFILE_SUFFIX_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0165B_RESAMPLING_GUARD_PROFILE_LINK_FIX.md,remove,autre,sélection production
+dev_history/doc/doc/README_0165_RESAMPLING_GUARD_FINE_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0166_POPULATION_GUARD_CANDIDATE_LISTS.md,remove,autre,sélection production
+dev_history/doc/doc/README_0167B_MASS_GUARD_BUFFER_ONLY.md,remove,autre,sélection production
+dev_history/doc/doc/README_0168_POPULATION_GUARD_DEEP_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0169_POPULATION_GUARD_MUTATION_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0170_POPULATION_GUARD_LOCAL_ROLE_WRITE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0171_DEPOSIT_FINE_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0172_POST_THERMAL_DEPOSIT_REFRESH.md,remove,autre,sélection production
+dev_history/doc/doc/README_0173_POST_GUARD_DEPOSIT_PROFILING.md,remove,autre,sélection production
+dev_history/doc/doc/README_0174B_EQUIVALENCE_DIAGNOSTIC_FIX.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0174B_POST_GUARD_EQUIVALENCE_DIAGNOSTIC.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0174C_POST_GUARD_EQUIVALENCE_SIMPLE_DIAGNOSTIC.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0174D_POST_GUARD_EQUIVALENCE_TRACE.md,remove,autre,sélection production
+dev_history/doc/doc/README_0175_POST_GUARD_STRICT_REUSE_CELLID.md,remove,autre,sélection production
+dev_history/doc/doc/README_0176B_LIGHT_SMOKE_SCRIPT_FIX.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0176C_LIGHT_SMOKE_VALIDATION_WRAPPER.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0176D_LIGHT_SMOKE_PROFILE_ENV_FIX.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+dev_history/doc/doc/README_0176_OPENMP_LIGHT_DIAGNOSTICS.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0177_DISABLE_PROFILE_RUNTIME_OVERHEAD.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/doc/doc/README_0178_OPENMP_LIGHT_CLEANUP_AUDIT.md,remove,autre,sélection production
+dev_history/doc/doc/README_0179_OPENMP_LIGHT_CLEANUP.md,remove,autre,sélection production
+dev_history/doc/light_cleanup/README_0180_OPENMP_LIGHT_REMAINING_AUDIT.md,remove,autre,sélection production
+dev_history/doc/light_cleanup/README_0181_OPENMP_LIGHT_SAFE_ARCHIVE.md,remove,autre,sélection production
+dev_history/scripts/light_cleanup/apply_openmp_light_archive_0181.py,remove,autre,sélection production
+dev_history/scripts/light_cleanup/audit_openmp_light_remaining_0180.py,remove,autre,sélection production
+dev_history/scripts/light_diagnostics/apply_openmp_light_diagnostics_0176.py,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+dev_history/scripts/performance_profiles/run_performance_profile_0157.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0158.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0159.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0160.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0161.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0164.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0165.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0166.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0167b.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0168.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0169.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0170.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0171.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0172.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0173.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0174b.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0174c.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0174d.sh,remove,autre,sélection production
+dev_history/scripts/performance_profiles/run_performance_profile_0175.sh,remove,autre,sélection production
+dev_history/scripts/scripts/apply_openmp_light_cleanup_0179.py,remove,autre,sélection production
+dev_history/scripts/scripts/audit_openmp_light_cleanup_0178.py,remove,autre,sélection production
+dev_history/scripts/scripts/run_closed_capacity_inlet_only_0147.sh,remove,autre,sélection production
+dev_history/scripts/scripts/run_closed_capacity_wall_load_validation_0152.sh,remove,autre,sélection production
+dev_history/scripts/scripts/run_injection_fill_closed_0146_small.sh,remove,autre,sélection production
+dev_history/scripts/scripts/run_performance_probe_0156.sh,remove,autre,sélection production
+dev_history/scripts/scripts/run_resampling_0140_validation_suite.sh,remove,autre,sélection production
+dev_history/scripts/scripts/run_same_face_segmented_io_validation_0143.sh,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_0162.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_0171.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_0172.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_0174.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_0175.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_summary_0162.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_summary_0171.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_summary_0172.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_summary_0174.csv,remove,autre,sélection production
+dev_history/validation_comparisons/validation_compare_summary_0175.csv+,remove,autre,sélection production
+doc/README_0182_OPENMP_LIGHT_FINAL_AUDIT_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+doc/README_0184_OPENMP_PRODUCTION_STRIPPED_STAGE1.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+doc/README_0185_OPENMP_PRODUCTION_STRIPPED_STAGE2.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+doc/README_0186F_VON_KARMAN_STATIC_CIRCLE_IO.md,keep,documentation,note de production récente directement utile
+doc/README_0188_PRODUCTION_ANNEXES.md,keep,documentation,nouvelle synthèse de nettoyage et manifeste de sélection
+doc/README_APPLY_0070_Q9_RAMP_FLOOR.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+doc/production_annexes_selection_0188.csv,keep,documentation,nouvelle synthèse de nettoyage et manifeste de sélection
+doc/src_mpcd_params_catalogue_0187.csv,keep,documentation,catalogue des paramètres de production conservé pour prise en main
+doc/src_mpcd_params_cles_acceptees_0187.csv,keep,documentation,catalogue des paramètres de production conservé pour prise en main
+docs/ACTIVE_FLUID_DOMAIN.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/ACTIVE_FLUID_DOMAIN_SMOKE_TESTS.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/BACKWARD_STEP_CLASSIC_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/BACKWARD_STEP_COHERENCE_DIAGNOSTICS.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/BACKWARD_STEP_FINAL_LIQUID_CLOSURE_DEFAULT.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/BACKWARD_STEP_FINAL_Q9_VIRIAL_CONFIGURATION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/BACKWARD_STEP_HARDWALL_CALIBRATION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/BACKWARD_STEP_MASKED_Q6_Q9_STRUCTURE_SUITE.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/BACKWARD_STEP_MASS_BUDGET_VISUAL_0069.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/BACKWARD_STEP_PARAMETRIC_Q6_Q9.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/BACKWARD_STEP_POPULATION_RELIABILITY_DIAGNOSTICS.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/BACKWARD_STEP_Q6_Q9_PARAMETRIC_RESULTS_AND_LIQUID_COMPARISON.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/BACKWARD_STEP_STRUCTURE_VISUALIZATION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/ELLIPTIC_PROJECTION_CORE.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/HARD_INLET_LONG_RUN_0067E.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/HARD_INLET_Q9_RUNTIME_DIAGNOSTICS_0067D.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/HARD_INLET_Q9_SOFT_RUNS_0067C.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/HARD_INLET_RESERVOIR_0067.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/IMMERSED_ANALYTIC_CIRCLE.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/IMMERSED_CIRCLE_COMBINED_MOTION_DEMO.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/IMMERSED_CIRCLE_ROTATION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/IMMERSED_CIRCLE_TIME_AVERAGING.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/IMMERSED_CIRCLE_TRANSLATION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/IMMERSED_SOLID_CURVED_HARDWALL_MASK.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/IMMERSED_SOLID_Q6_Q9_MASK.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/IMMERSED_SOLID_RECTANGLE_BACKWARD_STEP.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/INCOMPRESSIBLE_Q6_Q9_STATUS.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/INLET_OUTLET_BACKWARD_STEP_VALIDATION_0066.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/INLET_OUTLET_CLASSIC_0061.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/INLET_OUTLET_OPEN_CHANNEL_BULK_DIAGNOSTICS_0065B.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/INLET_OUTLET_OPEN_CHANNEL_VALIDATION_0065.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/INLET_OUTLET_Q6_0062.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/INLET_OUTLET_Q9_0063.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/INLET_OUTLET_Q9_0063B_FAST_SWEEP.md,remove,campagne/sweep,préparation de campagnes de développement retirée
+docs/INLET_OUTLET_VIRIAL_0064.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/INLET_OUTLET_VIRIAL_0064B_FAST_SWEEP.md,remove,campagne/sweep,préparation de campagnes de développement retirée
+docs/LIQUID_CLOSURE_DYNAMIC_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/LIQUID_CLOSURE_Q6_Q9_VIRIAL_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/MASS_AWARE_THERMOSTAT.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/MATLAB_POSTPROCESSING.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/MINIMAL_PISTON_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/MOVING_WALL_NUMERICAL_SAFETY.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/PISTON_ACTIVE_DOMAIN_Q6_Q9.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/POISEUILLE_CALIBRATION.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/POISEUILLE_Q6_CHANNEL_LONG_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/POISEUILLE_Q9_FILTERED_CHANNEL_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/POISEUILLE_VALIDATION.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/Q6_CHANNEL_POISEUILLE_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/Q6_PERIODIC_ADAPTER.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/Q9_BETA_SWEEP_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/Q9_IMMERSED_OPEN_BOUNDARY_SAFETY_0066.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/Q9_IMMERSED_OPEN_BOUNDARY_SAFETY_0066B_TUNED_SWEEP.md,remove,campagne/sweep,préparation de campagnes de développement retirée
+docs/Q9_IMMERSED_OPEN_BOUNDARY_SAFETY_0066C_CONSERVATIVE_TUNING.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/Q9_LOWK_FILTERING_INCIDENT.md,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+docs/Q9_PERIODIC_ADAPTER.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/README_APPLY_0069.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/RUNTIME_WALL_REFLECTION_DIAGNOSTICS.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/SOLID_THERMAL_BOUNDARIES.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/SOLID_THERMAL_COUETTE_SLIDING.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/SOLID_THERMAL_POISEUILLE_SYMMETRY.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/SRCMPCD_STATE_BIN_V1.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/SRC_MPCD_BASE.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+docs/TAYLOR_GREEN_Q6_HIGH_SNR_SHORT_RUN.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/TAYLOR_GREEN_Q6_VALIDATION.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/TAYLOR_GREEN_Q9_FILTERED_VALIDATION.md,remove,validation,script ou document de validation intermédiaire retiré de la version production
+docs/VIRIAL_DENSITY_WAVE_CHANNEL.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/VIRIAL_EOS_PISTON.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/VIRIAL_EOS_STRESS_COMPRESSION.md,remove,documentation historique,note de jalon ou détail de validation intermédiaire retiré
+docs/VIRIAL_EOS_SWEEP.md,remove,campagne/sweep,préparation de campagnes de développement retirée
+docs/VON_KARMAN_LONG_COMPARISON.md,keep,documentation cas,documentation utile pour un des cinq cas de production
+docs/WALL_VIRTUAL_PARTICLES.md,keep,documentation générale,référence générale utile hors validation intermédiaire
+examples/params_active_domain_y_top_slow_motion.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_active_domain_y_top_static.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_backward_step_classic_long_96x48.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_backward_step_classic_smoke_96x48.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_backward_step_classic_structure_96x48.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_backward_step_q6_mask_smoke_96x48.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_backward_step_q6_mask_structure_96x48.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_backward_step_q9_mask_smoke_96x48.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_backward_step_q9_mask_structure_96x48.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_backward_step_q9_virial_mask_smoke_96x48.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_channel_x_bounceback.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_channel_x_bounceback_vp.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_channel_x_solid_thermal.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_channel_y_bounceback.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_channel_y_bounceback_vp.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_channel_y_solid_thermal.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_channel_y_specular.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_couette_x_solid_thermal_long.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_couette_y_solid_thermal_long.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_density_wave_channel_q9_filtered.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_density_wave_channel_q9_virial_K0p500_beta0p20.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_density_wave_channel_q9_virial_K1p000_beta0p50.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_classic_mask_smoke_48x48_0100.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_immersed_circle_combined_motion_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_equilibrium_long_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_forced_long_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_forced_medium_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_forced_periodic_solid_thermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_forced_strong_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_periodic_solid_thermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_q6_mask_smoke_48x48_0100.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_immersed_circle_q9_mask_smoke_48x48_0100.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_immersed_circle_q9_virial_mask_smoke_48x48_0100.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_immersed_circle_rotating_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_immersed_circle_translating_64x64.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_open_channel_classic_inlet_outlet_keepmean_64x32.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_open_channel_classic_inlet_outlet_smoke_64x32.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_open_channel_q6_inlet_outlet_keepmean_64x32.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_open_channel_q9_inlet_outlet_keepmean_64x32.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_open_channel_q9_virial_inlet_outlet_keepmean_64x32.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_periodic_base.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_periodic_cylinder_classic_smoke_96x48_0102.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_periodic_cylinder_q6_smoke_96x48_0102.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_periodic_cylinder_q6_startup_visual_96x48_0104.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_periodic_cylinder_q9_dynamic_visual_96x48_0105.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_periodic_cylinder_q9_smoke_96x48_0102.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_periodic_cylinder_q9_startup_visual_96x48_0104.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_periodic_cylinder_q9_virial_dynamic_visual_96x48_0105.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_periodic_cylinder_q9_virial_smoke_96x48_0102.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_periodic_cylinder_q9_virial_startup_visual_96x48_0104.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_periodic_q6_for_q9_beta_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q6_for_q9_smoke.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_periodic_q6_smoke.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_periodic_q9_beta_0p0005_filtered_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p0010_filtered_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p0020_filtered_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p002_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p0050_filtered_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p005_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p0100_filtered_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p010_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p020_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_beta_0p050_sweep.kv,remove,campagne/sweep,préparation de campagnes de développement retirée
+examples/params_periodic_q9_smoke.kv,remove,validation,script ou document de validation intermédiaire retiré de la version production
+examples/params_piston_y_q6_solid_thermal_isothermal.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_piston_y_q9_filtered_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_filtered_stress_y080_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p005_beta0p02_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p010_beta0p02_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p020_beta0p02_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p050_beta0p02_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p100_beta0p02_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_K0p100_beta0p05_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_solid_thermal_isothermal.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_piston_y_q9_virial_stress_y080_K0p250_beta0p10_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_q9_virial_stress_y080_K0p500_beta0p20_solid_thermal_isothermal.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_piston_y_solid_thermal_isothermal.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_piston_y_solid_thermal_unthermostatted.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_x_solid_thermal_long.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_poiseuille_y_bounceback.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_bounceback_thermostat.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_bounceback_vp.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_bounceback_vp_thermostat.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_classic_solid_thermal_long.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_classic_solid_thermal_short.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_q6_solid_thermal_long.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_poiseuille_y_q6_solid_thermal_short.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_poiseuille_y_q9_filtered_solid_thermal_debug.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_q9_filtered_solid_thermal_long.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_q9_virial_K0p500_beta0p20_solid_thermal_long.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_solid_thermal_long.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_poiseuille_y_solid_thermal_thermostat.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_poiseuille_y_specular.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_taylor_green_classic_64x64.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_taylor_green_high_snr_classic_64x64_g80_short.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_taylor_green_high_snr_q6_64x64_g80_short.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_taylor_green_high_snr_q9_filtered_64x64_g80_short.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_taylor_green_high_snr_q9_virial_K0p500_beta0p20_64x64_g80_short.kv,remove,exemple historique,ancien gabarit de validation ou variante redondante retiré
+examples/params_taylor_green_q6_64x64.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+examples/params_taylor_green_q6_resampling_0126.kv,keep,exemple kv,exemple paramétrique conservé comme gabarit minimal ou cas de production
+matlab/analyze_backward_step_hard_inlet_budget_0072.m,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+matlab/analyze_backward_step_hard_inlet_validation_0067.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_backward_step_mass_budget_0069.m,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+matlab/analyze_backward_step_open_channel_validation_0066.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_backward_step_q9_safety_smoke_0066.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/analyze_backward_step_resampling_0136.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_channel_cylinder_resampling_0135.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_immersed_circle_face_cell_smoke_0100.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/analyze_immersed_circle_time_average.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/analyze_injection_fill_resampling_0139.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_open_channel_cylinder_resampling_0138.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_open_channel_full_io_exclusion_sweep_0085.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/analyze_open_channel_full_io_q9_boundary_modes_0086.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_open_channel_hard_inlet_budget_0071.m,remove,diagnostic développement,diagnostic interne ou analyse de mise au point retiré
+matlab/analyze_open_channel_poiseuille_validation_0065.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_open_channel_q9_inlet_outlet_fast_sweep.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/analyze_open_channel_q9_virial_inlet_outlet_fast_sweep.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/analyze_open_channel_q9_virial_inlet_outlet_smoke.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/analyze_open_channel_rect_obstacle_resampling_0138b.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_open_channel_wall_bands_0089.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_periodic_cylinder_resampling_0134.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_poiseuille_hard_inlet_free_outlet_0077.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_poiseuille_outlet_corner_bands_0082.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_poiseuille_profile.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/analyze_poiseuille_wallvp_resampling_0131.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_taylor_green_random_population_resampling_0128.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_taylor_green_resampling_0126.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/analyze_taylor_green_void_rich_resampling_0127.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/bin_smpcd_state.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/compare_poiseuille_runs.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/demo_immersed_circle_combined_motion.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/generate_backward_step_exact_fluid_state_0072.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_backward_step_state.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_density_wave_channel_state.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/generate_open_channel_classic_state.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_piston_active_y095_state.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_poiseuille_q6_channel_short_state.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_q9_beta_sweep_state.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/generate_q9_periodic_smoke_state.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/generate_smpcd_state_taylor_green.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_smpcd_state_uniform.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/generate_taylor_green_high_snr_short_state.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/generate_taylor_green_resampling_state_0126.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/generate_von_karman_cylinder_state.m,keep,matlab génération,générateur de condition initiale utile aux cas de production
+matlab/inspect_smpcd_state.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/list_smpcd_dumps.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/make_backward_step_hard_inlet_visual_report_0072.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/make_backward_step_visual_report_0069.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/make_open_channel_hard_inlet_visual_report_0071.m,remove,matlab historique,analyse spécialisée de validation/développement retirée
+matlab/make_periodic_cylinder_dynamic_visual_report_0105.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/make_periodic_cylinder_startup_visual_report_0104.m,keep,matlab analyse cas,analyse/rapport conservé pour TG/Poiseuille/step/piston/VK ou solide générique
+matlab/parse_smpcd_kv.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/play_smpcd_dumps.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/play_smpcd_filtered_animation.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/plot_q6_projection_summary.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/plot_smpcd_frame.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/plot_smpcd_summary.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/postprocess_smpcd_run.m,keep,matlab post-traitement,visualisation ou post-traitement générique
+matlab/prepare_backward_step_resampling_0136.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_channel_cylinder_resampling_0135.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_injection_fill_resampling_0139.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_open_channel_cylinder_resampling_0138.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_open_channel_rect_obstacle_resampling_0138b.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_periodic_cylinder_resampling_0134.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_poiseuille_wallvp_resampling_0131.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_taylor_green_random_population_resampling_0128.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/prepare_taylor_green_void_rich_resampling_0127.m,remove,campagne/sweep,préparation de campagnes de développement retirée
+matlab/read_smpcd_state.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/smpcd_fields_to_table.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd
+matlab/validate_active_fluid_domain_refactor.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_classic_long.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_final_liquid_config.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_hardwall_calibration_suite.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_liquid_closure_comparison.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_masked_structure_suite.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_parametric_suite.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_backward_step_smoke.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_density_wave_virial_channel.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_immersed_circle_rotation.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_immersed_circle_smoke.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_immersed_circle_translation.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_liquid_closure_dynamic_suite.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_minimal_piston.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_piston_q6_q9_active_domain.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_piston_q9_virial_active_domain.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_piston_q9_virial_stress_compression.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_piston_q9_virial_sweep.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_poiseuille_q6_channel_long.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_poiseuille_q6_channel_short.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_poiseuille_q9_channel_long.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_q9_beta_sweep.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_q9_periodic_smoke.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_solid_thermal_couette_sliding.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_solid_thermal_poiseuille_symmetry.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_taylor_green_q6_high_snr_short.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_taylor_green_q6_periodic.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_taylor_green_q9_filtered_short.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/validate_von_karman_long_comparison.m,remove,validation,script ou document de validation intermédiaire retiré de la version production
+matlab/write_smpcd_state.m,keep,matlab I/O,utilitaire générique de lecture/écriture/inspection smpcd

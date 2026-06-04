@@ -1,2 +1,0 @@
-output,Lx,Ly,Nx,Ny,gamma,capacityMultiplier,nCells,nSlots,nFluidInitial,nInactiveInitial,populationMinInitial,populationMaxInitial,populationMeanInitial,mass,type,kBT,velocityMode,Ux,Uy,removeMeanMomentum,inletYCenter,inletHeightCells,inletYMin,inletYMax,seed
-../init/injection_fill_resampling_0145/initial_state_fluid_uniform_0145_small.smpcd,1,1,48,48,20,1.25,2304,57600,46080,11520,20,20,20,1,0,0.001,maxwell,0,0,1,0.5,1,0.489583333333333,0.510416666666667,1390145
