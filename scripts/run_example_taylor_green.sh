@@ -223,6 +223,12 @@ CASE_NAME="taylor_green"
 Lx="${Lx:-1.0}"
 Ly="${Ly:-1.0}"
 TG_U0="${TG_U0:-0.08}"
+TG_BODY_ACCEL_X="${TG_BODY_ACCEL_X:-0.0}"
+TG_BODY_ACCEL_Y="${TG_BODY_ACCEL_Y:-0.0}"
+TG_FORCING_ENABLE="${TG_FORCING_ENABLE:-false}"
+TG_FORCING_AMPLITUDE="${TG_FORCING_AMPLITUDE:-0.0}"
+TG_FORCING_MODE_X="${TG_FORCING_MODE_X:-1}"
+TG_FORCING_MODE_Y="${TG_FORCING_MODE_Y:-1}"
 RUN_ROOT="${RUN_ROOT:-runs/example_taylor_green}"
 prepare_run_root
 STATE_FILE="$RUN_ROOT/init/taylor_green_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
@@ -245,9 +251,12 @@ Ny = ${NY}
 dt = ${DT}
 nSteps = ${STEPS}
 
-bodyAccelerationX = 0.0
-bodyAccelerationY = 0.0
-taylorGreenForcingEnable = false
+bodyAccelerationX = ${TG_BODY_ACCEL_X}
+bodyAccelerationY = ${TG_BODY_ACCEL_Y}
+taylorGreenForcingEnable = ${TG_FORCING_ENABLE}
+taylorGreenForcingAmplitude = ${TG_FORCING_AMPLITUDE}
+taylorGreenForcingModeX = ${TG_FORCING_MODE_X}
+taylorGreenForcingModeY = ${TG_FORCING_MODE_Y}
 
 bcX = periodic
 bcY = periodic

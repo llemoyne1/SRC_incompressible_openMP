@@ -222,7 +222,8 @@ CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
 CASE_NAME="poiseuille"
 Lx="${Lx:-2.0}"
 Ly="${Ly:-1.0}"
-POIS_BODY_ACCEL="${POIS_BODY_ACCEL:-0.01}"
+POIS_BODY_ACCEL_X="${POIS_BODY_ACCEL_X:-${POIS_BODY_ACCEL:-0.01}}"
+POIS_BODY_ACCEL_Y="${POIS_BODY_ACCEL_Y:-0.0}"
 RUN_ROOT="${RUN_ROOT:-runs/example_poiseuille}"
 prepare_run_root
 STATE_FILE="$RUN_ROOT/init/poiseuille_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
@@ -245,8 +246,8 @@ Ny = ${NY}
 dt = ${DT}
 nSteps = ${STEPS}
 
-bodyAccelerationX = ${POIS_BODY_ACCEL}
-bodyAccelerationY = 0.0
+bodyAccelerationX = ${POIS_BODY_ACCEL_X}
+bodyAccelerationY = ${POIS_BODY_ACCEL_Y}
 
 bcX = periodic
 bcY = solid
