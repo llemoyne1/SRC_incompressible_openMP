@@ -66,9 +66,11 @@ struct CudaQ6CgDiagnostics {
     double updateDirectionSeconds = 0.0;
     double downloadPhiSeconds = 0.0;
     double finalMeanRemovalSeconds = 0.0;
+    double deviceScalarReductionSeconds = 0.0;
     int reductionDownloads = 0;
     int operatorApplications = 0;
     int residualNormFromMeanRemovalShortcuts = 0;
+    int deviceScalarCgIterations = 0;
 };
 
 bool cuda_q6_backend_runtime_available();

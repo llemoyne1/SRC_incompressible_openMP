@@ -1,0 +1,16 @@
+item,value
+patch,0196
+branch,SRC_GPU
+base_assumption,0195 applied after 0194 rollback/default host-block reduction
+main_change,device_scalar_cg_loop
+cuda_scope,periodic_unmasked_q6_taylor_green_only
+default_projection_backend,cpu
+default_cuda_cg_mode,device_scalar_cg
+legacy_cg_mode,MPCD_CUDA_Q6_LEGACY_HOST_SCALAR_CG=1 or MPCD_CUDA_Q6_DEVICE_SCALAR_CG=0
+residual_mean_shortcut_default,disabled
+negative_0193_device_scalar_reduction_default,disabled
+expected_sync_change,main CG loop pAp host download removed; rrNew scalar still downloaded once per iteration
+validation_cases,tg_periodic_full CPU vs CUDA device_scalar and legacy_host_scalar
+unsupported_guard,poiseuille_wall_full with projectionBackend=cuda must fail explicitly
+next_if_success,consider extending same scalar strategy to bounded-y Poiseuille or fusing convergence cadence
+next_if_failure,keep legacy host-scalar path and profile kernel launch overhead/fused update kernels
