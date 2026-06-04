@@ -332,6 +332,33 @@ __global__ void q6_sum_active_kernel(const int nActive,
     }
 }
 
+__global__ void q6_sum_active_squares_kernel(const int nActive,
+                                             const int* __restrict__ activeCells,
+                                             const double* __restrict__ values,
+                                             double* __restrict__ blockSums) {
+    extern __shared__ double shared[];
+    const int tid = threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    int idx = blockIdx.x * blockDim.x + tid;
+    double local = 0.0;
+    while (idx < nActive) {
+        const double v = values[activeCells[idx]];
+        local += v * v;
+        idx += stride;
+    }
+    shared[tid] = local;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shared[tid] += shared[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        blockSums[blockIdx.x] = shared[0];
+    }
+}
+
 __global__ void q6_subtract_mean_active_kernel(const int nActive,
                                                const int* __restrict__ activeCells,
                                                const double mean,
@@ -603,10 +630,10 @@ bool cuda_q6_solve_cg_operator_plan(
             subtract_active_mean(nActive, blocks, threadsPerBlock, dActive, dR, dBlockSums);
             cuda_check(cudaMemset(dBlockSums.data(), 0, static_cast<std::size_t>(blocks) * sizeof(double)),
                        "cudaMemset rrNew after mean removal block sums");
-            q6_sum_active_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
+            q6_sum_active_squares_kernel<<<blocks, threadsPerBlock, threadsPerBlock * sizeof(double)>>>(
                 nActive, dActive.data(), dR.data(), dBlockSums.data());
-            cuda_check(cudaGetLastError(), "q6_sum_active_kernel residual after mean removal launch");
-            cuda_check(cudaDeviceSynchronize(), "q6_sum_active_kernel residual after mean removal synchronize");
+            cuda_check(cudaGetLastError(), "q6_sum_active_squares_kernel residual after mean removal launch");
+            cuda_check(cudaDeviceSynchronize(), "q6_sum_active_squares_kernel residual after mean removal synchronize");
             rrNew = host_sum_blocks(dBlockSums);
         }
 

@@ -1,0 +1,7 @@
+patch,file,kind,purpose
+0189,src/cuda_q6_backend.cu,modified,Fix CUDA CG residual norm after periodic mean removal by summing squares instead of the signed residual sum
+0189,scripts/build_src_mpcd_cuda_0189.sh,added,Build CUDA-enabled SRC/MPCD executable with a distinct 0189 binary name
+0189,scripts/run_cuda_q6_tg_regression_0189.sh,added,Run integrated TG CPU/CUDA regression focused on Q6 convergence and projected divergence
+0189,doc/README_0189_CUDA_Q6_MEAN_REMOVAL_RESIDUAL_FIX.md,added,Document the premature-convergence bug and the 0189 fix
+0189,dev_history/artifacts/gpu_cuda_integration_0189/cuda_q6_mean_removal_fix_manifest_0189.csv,added,Manifest for the 0189 differential archive
+0189,dev_history/artifacts/gpu_cuda_integration_0189/cuda_q6_regression_scope_0189.csv,added,Scope and non-goals for the CUDA Q6 regression patch
