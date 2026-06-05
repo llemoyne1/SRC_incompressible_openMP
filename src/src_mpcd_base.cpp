@@ -1,6 +1,7 @@
 #include "src_mpcd_base.h"
 #include "closed_capacity_response.h"
 #include "cuda_resampling_persistent_active_path_0240.h"
+#include "cuda_streaming_periodic_0245.h"
 
 #include <algorithm>
 #include <chrono>
@@ -410,23 +411,32 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
-    // pre-stream particle position and is therefore independent of boundary
-    // wrapping done later in the step.
+    // pre-stream particle position. 0245 can offload this force+stream phase to
+    // CUDA, but only for the strictly periodic subset; all wall/open/solid cases
+    // deliberately keep the validated CPU path.
     {
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
+        bool handledByCudaStreaming0245 = false;
+        if (cuda_periodic_streaming_0245_requested()) {
+            const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
+                try_apply_cuda_periodic_streaming_0245(state, params, step);
+            handledByCudaStreaming0245 = cudaStreaming0245.handled;
+        }
+        if (!handledByCudaStreaming0245) {
 #pragma omp parallel for if(n > 10000)
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
-                continue;
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                double tgAx = 0.0;
+                double tgAy = 0.0;
+                taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
+                state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
+                state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
+                state.x[i] += state.vx[i] * params.dt;
+                state.y[i] += state.vy[i] * params.dt;
             }
-            double tgAx = 0.0;
-            double tgAy = 0.0;
-            taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
-            state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
-            state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
-            state.x[i] += state.vx[i] * params.dt;
-            state.y[i] += state.vy[i] * params.dt;
         }
     }
 
