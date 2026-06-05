@@ -600,7 +600,6 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.cycles = cycles;
 
     DeviceBuffers b;
-    const std::size_t nBytesD = n * sizeof(double);
     const std::size_t nBytesI = n * sizeof(int);
     const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
     const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
