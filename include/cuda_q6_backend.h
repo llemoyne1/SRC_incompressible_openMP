@@ -33,6 +33,12 @@ struct CudaQ6CgParams {
     // the active-cell mean from phi and r every 25 iterations, then again from
     // phi at the end.  A non-positive value disables periodic removal.
     int meanRemovalPeriod = 25;
+
+    // Patch 0197: experimental batched device-side CG loop.  Batch size 1 is
+    // equivalent to the 0196 device-scalar path.  Larger values reduce host
+    // scalar synchronization by checking convergence only between batches,
+    // while a device flag preserves exact early stop within the batch.
+    int deviceIterationBatchSize = 1;
 };
 
 struct CudaQ6CgDiagnostics {
@@ -71,6 +77,9 @@ struct CudaQ6CgDiagnostics {
     int operatorApplications = 0;
     int residualNormFromMeanRemovalShortcuts = 0;
     int deviceScalarCgIterations = 0;
+    int deviceScalarCgBatchSize = 1;
+    int deviceScalarCgBatches = 0;
+    int deviceScalarCgConvergenceDownloads = 0;
 };
 
 bool cuda_q6_backend_runtime_available();

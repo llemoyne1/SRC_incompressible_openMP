@@ -1,0 +1,7 @@
+component,status,notes
+CUDA Q6 CG,batch mode added,batchSize=1 is 0196-equivalent; batchSize>1 reduces host convergence downloads
+CPU/OpenMP,unchanged,reference path remains projectionBackend=cpu
+projectionBackend=cuda,unchanged scope,still periodic unmasked TG-only subset
+mean removal,guarded,batches stop at meanRemovalPeriod boundaries
+convergence,device flag,exact iteration recorded within batch and downloaded at batch boundary
+unsupported Poiseuille,expected fail,guard remains required

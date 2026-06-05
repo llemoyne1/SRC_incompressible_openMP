@@ -1,0 +1,2 @@
+status,nx,ny,numCells,device,blocks,threadsPerBlock,cpuConverged,cudaConverged,cpuIterations,cudaIterations,cpuResidualRel,cudaResidualRel,exactCpuMaxAbs,exactCudaMaxAbs,cpuCudaMaxAbs,cpuCudaRms,cpuCudaRelRms,tolerance,phiTolerance
+PASS,128,96,12288,0,48,256,1,1,199,199,9.5272582295470148e-12,9.5272581896226805e-12,7.0776717819853729e-13,7.081557562571561e-13,2.6645352591003757e-15,4.8691139325364961e-16,6.6491523504534041e-16,9.9999999999999994e-12,1e-08
