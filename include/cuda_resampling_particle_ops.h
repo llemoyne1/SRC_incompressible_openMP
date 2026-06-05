@@ -215,4 +215,54 @@ bool cuda_resampling_apply_insertion_operations_0236(
     const CudaResamplingInsertionApplyParams& params,
     CudaResamplingInsertionApplyDiagnostics* diagnostics = nullptr);
 
+// 0239: persistent-state extraction/insertion variants.  These apply the same
+// prevalidated resampling mutations as the 0236/0237 host-vector wrappers, but
+// mutate an existing CudaParticleState in place.  Only operation vectors are
+// copied to the GPU; x/y/vx/vy/mass/type/role remain resident.
+struct CudaResamplingPersistentOpsDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+    std::uint64_t particles = 0;
+    std::uint64_t extractionOperations = 0;
+    std::uint64_t insertionOperations = 0;
+    std::uint64_t operationsApplied = 0;
+    std::uint64_t invalidOperations = 0;
+    double extractedMass = 0.0;
+    double insertedMass = 0.0;
+    double extractedMomentumX = 0.0;
+    double extractedMomentumY = 0.0;
+    double insertedMomentumX = 0.0;
+    double insertedMomentumY = 0.0;
+    double operationUploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+class CudaParticleState;
+
+bool cuda_resampling_apply_extraction_operations_on_state_0239(
+    CudaParticleState& gpuState,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const CudaResamplingExtractionApplyParams& params,
+    CudaResamplingPersistentOpsDiagnostics* diagnostics = nullptr);
+
+bool cuda_resampling_apply_insertion_operations_on_state_0239(
+    CudaParticleState& gpuState,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<std::uint32_t>& particleType,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const std::vector<std::uint32_t>& insertionOrdinal,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    const CudaResamplingInsertionApplyParams& params,
+    CudaResamplingPersistentOpsDiagnostics* diagnostics = nullptr);
+
 } // namespace mpcd

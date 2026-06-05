@@ -1,0 +1,7 @@
+item,value
+patch_id,0238
+scope,harness_only
+q6_projection,disabled
+cpu_default,unchanged
+combined_mode,shared_particle_cell_workspace_plus_cuda_resampling_extract_insert
+expected_next_step,move_resampling_mutations_directly_onto_CudaParticleState

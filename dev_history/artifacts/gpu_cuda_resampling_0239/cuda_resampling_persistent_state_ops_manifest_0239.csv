@@ -1,0 +1,7 @@
+artifact,kind,description
+include/cuda_resampling_particle_ops.h,header,Adds persistent-state extraction/insertion prototypes and diagnostics
+src/cuda_resampling_particle_ops.cu,cuda,Adds kernels mutating CudaParticleState directly
+src/main_validate_cuda_resampling_persistent_state_ops_0239.cpp,validator,Standalone persistent-state mutation validation
+scripts/build_cuda_resampling_persistent_state_ops_0239.sh,script,Build validator
+scripts/run_cuda_resampling_persistent_state_ops_smoke_0239.sh,script,Run smoke validation
+README_0239_CUDA_RESAMPLING_PERSISTENT_STATE_OPS.md,doc,Patch documentation

@@ -1,4 +1,5 @@
 #include "cuda_resampling_particle_ops.h"
+#include "cuda_particle_state.h"
 
 #include <cuda_runtime.h>
 
@@ -778,6 +779,284 @@ bool cuda_resampling_apply_extraction_operations_0237(
 
     cudaFree(d_role);
     cudaFree(d_index);
+    cudaFree(d_applied);
+    return true;
+}
+
+namespace {
+
+__global__ void apply_extraction_on_particle_state_kernel_0239(
+    unsigned char* __restrict__ role,
+    const std::uint32_t* __restrict__ particleIndex,
+    int nOps,
+    int nParticles,
+    std::uint8_t fluidRole,
+    std::uint8_t inactiveRole,
+    std::uint32_t invalidParticle,
+    std::uint32_t* __restrict__ applied)
+{
+    const int op = blockIdx.x * blockDim.x + threadIdx.x;
+    if (op >= nOps) return;
+    const std::uint32_t p = particleIndex[op];
+    std::uint32_t ok = 0u;
+    if (p != invalidParticle && p < static_cast<std::uint32_t>(nParticles) && role[p] == fluidRole) {
+        role[p] = inactiveRole;
+        ok = 1u;
+    }
+    applied[op] = ok;
+}
+
+__device__ __host__ inline double resampling_hash01_0239(std::uint32_t a) {
+    a ^= a >> 16;
+    a *= 0x7feb352du;
+    a ^= a >> 15;
+    a *= 0x846ca68bu;
+    a ^= a >> 16;
+    return (static_cast<double>(a & 0x00ffffffu) + 0.5) / 16777216.0;
+}
+
+__global__ void apply_insertion_on_particle_state_kernel_0239(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    const std::uint32_t* __restrict__ particleIndex,
+    const std::uint32_t* __restrict__ receiverCell,
+    const std::uint32_t* __restrict__ particleType,
+    const double* __restrict__ particleMass,
+    const double* __restrict__ momentumX,
+    const double* __restrict__ momentumY,
+    const std::uint32_t* __restrict__ insertionOrdinal,
+    int nOps,
+    int nParticles,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    std::uint8_t inactiveRole,
+    std::uint8_t fluidRole,
+    std::uint32_t invalidParticle,
+    std::uint32_t* __restrict__ applied)
+{
+    const int op = blockIdx.x * blockDim.x + threadIdx.x;
+    if (op >= nOps) return;
+    const std::uint32_t p = particleIndex[op];
+    std::uint32_t ok = 0u;
+    if (p != invalidParticle && p < static_cast<std::uint32_t>(nParticles) && role[p] == inactiveRole) {
+        const std::uint32_t c = receiverCell[op];
+        const std::uint32_t nCells = Nx * Ny;
+        const double m = particleMass[op];
+        if (c < nCells && m > 0.0) {
+            const std::uint32_t ix = c % Nx;
+            const std::uint32_t iy = c / Nx;
+            const std::uint32_t ord = insertionOrdinal[op];
+            const double fx = resampling_hash01_0239(ord ^ (c * 747796405u));
+            const double fy = resampling_hash01_0239((ord + 0x9e3779b9u) ^ (c * 2891336453u));
+            x[p] = (static_cast<double>(ix) + fx) * dx;
+            y[p] = (static_cast<double>(iy) + fy) * dy;
+            mass[p] = m;
+            type[p] = particleType[op];
+            vx[p] = momentumX[op] / m;
+            vy[p] = momentumY[op] / m;
+            role[p] = fluidRole;
+            ok = 1u;
+        }
+    }
+    applied[op] = ok;
+}
+
+} // namespace
+
+bool cuda_resampling_apply_extraction_operations_on_state_0239(
+    CudaParticleState& gpuState,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const CudaResamplingExtractionApplyParams& params,
+    CudaResamplingPersistentOpsDiagnostics* diagnostics)
+{
+    const auto t0 = Clock::now();
+    auto view = gpuState.device_view();
+    const std::size_t mOps = particleIndex.size();
+    if (particleMass.size() != mOps || momentumX.size() != mOps || momentumY.size() != mOps) {
+        throw std::runtime_error("cuda_resampling_apply_extraction_operations_on_state_0239: operation array size mismatch");
+    }
+    if (diagnostics) {
+        *diagnostics = CudaResamplingPersistentOpsDiagnostics{};
+        diagnostics->attempted = true;
+        diagnostics->particles = view.n;
+        diagnostics->extractionOperations = static_cast<std::uint64_t>(mOps);
+        for (std::size_t k = 0; k < mOps; ++k) {
+            diagnostics->extractedMass += particleMass[k];
+            diagnostics->extractedMomentumX += momentumX[k];
+            diagnostics->extractedMomentumY += momentumY[k];
+        }
+    }
+    if (view.n == 0 || mOps == 0) {
+        if (diagnostics) {
+            diagnostics->applied = true;
+            diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+        }
+        return true;
+    }
+
+    std::uint32_t* d_index = nullptr;
+    std::uint32_t* d_applied = nullptr;
+    const std::size_t opBytes = mOps * sizeof(std::uint32_t);
+    check_cuda(cudaMalloc(&d_index, opBytes), "malloc state extraction index");
+    check_cuda(cudaMalloc(&d_applied, opBytes), "malloc state extraction applied");
+    const auto tu0 = Clock::now();
+    check_cuda(cudaMemcpy(d_index, particleIndex.data(), opBytes, cudaMemcpyHostToDevice), "copy state extraction index");
+    const auto tu1 = Clock::now();
+
+    cudaEvent_t ev0{}, ev1{};
+    check_cuda(cudaEventCreate(&ev0), "event state extraction 0");
+    check_cuda(cudaEventCreate(&ev1), "event state extraction 1");
+    check_cuda(cudaEventRecord(ev0), "record state extraction 0");
+    const int threads = 256;
+    const int blocks = (static_cast<int>(mOps) + threads - 1) / threads;
+    apply_extraction_on_particle_state_kernel_0239<<<blocks, threads>>>(
+        view.role, d_index, static_cast<int>(mOps), static_cast<int>(view.n),
+        params.fluidRole, params.inactiveRole, params.invalidParticle, d_applied);
+    check_cuda(cudaGetLastError(), "launch state extraction");
+    check_cuda(cudaEventRecord(ev1), "record state extraction 1");
+    check_cuda(cudaEventSynchronize(ev1), "sync state extraction 1");
+    float kernelMs = 0.0f;
+    check_cuda(cudaEventElapsedTime(&kernelMs, ev0, ev1), "elapsed state extraction");
+    check_cuda(cudaEventDestroy(ev0), "destroy state extraction 0");
+    check_cuda(cudaEventDestroy(ev1), "destroy state extraction 1");
+
+    std::vector<std::uint32_t> applied(mOps, 0u);
+    check_cuda(cudaMemcpy(applied.data(), d_applied, opBytes, cudaMemcpyDeviceToHost), "download state extraction applied");
+    if (diagnostics) {
+        diagnostics->applied = true;
+        diagnostics->operationUploadSeconds = elapsed_seconds(tu0, tu1);
+        diagnostics->kernelSeconds = static_cast<double>(kernelMs) * 1.0e-3;
+        for (std::uint32_t v : applied) {
+            if (v) ++diagnostics->operationsApplied;
+            else ++diagnostics->invalidOperations;
+        }
+        diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+    }
+    cudaFree(d_index);
+    cudaFree(d_applied);
+    return true;
+}
+
+bool cuda_resampling_apply_insertion_operations_on_state_0239(
+    CudaParticleState& gpuState,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<std::uint32_t>& particleType,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const std::vector<std::uint32_t>& insertionOrdinal,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    const CudaResamplingInsertionApplyParams& params,
+    CudaResamplingPersistentOpsDiagnostics* diagnostics)
+{
+    const auto t0 = Clock::now();
+    auto view = gpuState.device_view();
+    const std::size_t mOps = particleIndex.size();
+    if (receiverCell.size() != mOps || particleType.size() != mOps || particleMass.size() != mOps ||
+        momentumX.size() != mOps || momentumY.size() != mOps || insertionOrdinal.size() != mOps) {
+        throw std::runtime_error("cuda_resampling_apply_insertion_operations_on_state_0239: operation array size mismatch");
+    }
+    if (diagnostics) {
+        *diagnostics = CudaResamplingPersistentOpsDiagnostics{};
+        diagnostics->attempted = true;
+        diagnostics->particles = view.n;
+        diagnostics->insertionOperations = static_cast<std::uint64_t>(mOps);
+        for (std::size_t k = 0; k < mOps; ++k) {
+            diagnostics->insertedMass += particleMass[k];
+            diagnostics->insertedMomentumX += momentumX[k];
+            diagnostics->insertedMomentumY += momentumY[k];
+        }
+    }
+    if (view.n == 0 || mOps == 0) {
+        if (diagnostics) {
+            diagnostics->applied = true;
+            diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+        }
+        return true;
+    }
+
+    std::uint32_t* d_index = nullptr;
+    std::uint32_t* d_receiverCell = nullptr;
+    std::uint32_t* d_particleType = nullptr;
+    double* d_particleMass = nullptr;
+    double* d_momentumX = nullptr;
+    double* d_momentumY = nullptr;
+    std::uint32_t* d_insertionOrdinal = nullptr;
+    std::uint32_t* d_applied = nullptr;
+    const std::size_t u32Bytes = mOps * sizeof(std::uint32_t);
+    const std::size_t dblBytes = mOps * sizeof(double);
+    check_cuda(cudaMalloc(&d_index, u32Bytes), "malloc state insertion index");
+    check_cuda(cudaMalloc(&d_receiverCell, u32Bytes), "malloc state insertion receiverCell");
+    check_cuda(cudaMalloc(&d_particleType, u32Bytes), "malloc state insertion particleType");
+    check_cuda(cudaMalloc(&d_particleMass, dblBytes), "malloc state insertion particleMass");
+    check_cuda(cudaMalloc(&d_momentumX, dblBytes), "malloc state insertion momentumX");
+    check_cuda(cudaMalloc(&d_momentumY, dblBytes), "malloc state insertion momentumY");
+    check_cuda(cudaMalloc(&d_insertionOrdinal, u32Bytes), "malloc state insertion ordinal");
+    check_cuda(cudaMalloc(&d_applied, u32Bytes), "malloc state insertion applied");
+
+    const auto tu0 = Clock::now();
+    check_cuda(cudaMemcpy(d_index, particleIndex.data(), u32Bytes, cudaMemcpyHostToDevice), "copy state insertion index");
+    check_cuda(cudaMemcpy(d_receiverCell, receiverCell.data(), u32Bytes, cudaMemcpyHostToDevice), "copy state insertion receiverCell");
+    check_cuda(cudaMemcpy(d_particleType, particleType.data(), u32Bytes, cudaMemcpyHostToDevice), "copy state insertion particleType");
+    check_cuda(cudaMemcpy(d_particleMass, particleMass.data(), dblBytes, cudaMemcpyHostToDevice), "copy state insertion particleMass");
+    check_cuda(cudaMemcpy(d_momentumX, momentumX.data(), dblBytes, cudaMemcpyHostToDevice), "copy state insertion momentumX");
+    check_cuda(cudaMemcpy(d_momentumY, momentumY.data(), dblBytes, cudaMemcpyHostToDevice), "copy state insertion momentumY");
+    check_cuda(cudaMemcpy(d_insertionOrdinal, insertionOrdinal.data(), u32Bytes, cudaMemcpyHostToDevice), "copy state insertion ordinal");
+    const auto tu1 = Clock::now();
+
+    cudaEvent_t ev0{}, ev1{};
+    check_cuda(cudaEventCreate(&ev0), "event state insertion 0");
+    check_cuda(cudaEventCreate(&ev1), "event state insertion 1");
+    check_cuda(cudaEventRecord(ev0), "record state insertion 0");
+    const int threads = 256;
+    const int blocks = (static_cast<int>(mOps) + threads - 1) / threads;
+    apply_insertion_on_particle_state_kernel_0239<<<blocks, threads>>>(
+        view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+        d_index, d_receiverCell, d_particleType, d_particleMass, d_momentumX, d_momentumY,
+        d_insertionOrdinal, static_cast<int>(mOps), static_cast<int>(view.n), Nx, Ny, dx, dy,
+        params.inactiveRole, params.fluidRole, params.invalidParticle, d_applied);
+    check_cuda(cudaGetLastError(), "launch state insertion");
+    check_cuda(cudaEventRecord(ev1), "record state insertion 1");
+    check_cuda(cudaEventSynchronize(ev1), "sync state insertion 1");
+    float kernelMs = 0.0f;
+    check_cuda(cudaEventElapsedTime(&kernelMs, ev0, ev1), "elapsed state insertion");
+    check_cuda(cudaEventDestroy(ev0), "destroy state insertion 0");
+    check_cuda(cudaEventDestroy(ev1), "destroy state insertion 1");
+
+    std::vector<std::uint32_t> applied(mOps, 0u);
+    check_cuda(cudaMemcpy(applied.data(), d_applied, u32Bytes, cudaMemcpyDeviceToHost), "download state insertion applied");
+    if (diagnostics) {
+        diagnostics->applied = true;
+        diagnostics->operationUploadSeconds = elapsed_seconds(tu0, tu1);
+        diagnostics->kernelSeconds = static_cast<double>(kernelMs) * 1.0e-3;
+        for (std::uint32_t v : applied) {
+            if (v) ++diagnostics->operationsApplied;
+            else ++diagnostics->invalidOperations;
+        }
+        diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+    }
+
+    cudaFree(d_index);
+    cudaFree(d_receiverCell);
+    cudaFree(d_particleType);
+    cudaFree(d_particleMass);
+    cudaFree(d_momentumX);
+    cudaFree(d_momentumY);
+    cudaFree(d_insertionOrdinal);
     cudaFree(d_applied);
     return true;
 }

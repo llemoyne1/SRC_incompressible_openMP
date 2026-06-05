@@ -1,0 +1,4 @@
+artifact,kind,description
+scripts/build_src_mpcd_cuda_0238.sh,script,Build CUDA binary with persistent particle/cell and resampling support
+scripts/run_cuda_noq6_persistent_resampling_0238.sh,script,Run no-Q6 combined persistent CUDA plus resampling validation
+README_0238_CUDA_NOQ6_PERSISTENT_RESAMPLING.md,doc,Documentation for combined no-Q6 harness
