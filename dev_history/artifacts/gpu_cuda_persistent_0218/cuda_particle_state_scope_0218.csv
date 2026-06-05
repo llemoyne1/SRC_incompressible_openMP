@@ -1,0 +1,10 @@
+field,value
+patch_id,0218
+branch,SRC_GPU
+purpose,Introduce reusable persistent CUDA particle state manager
+modifies_main_step,no
+new_runtime_flag,none
+backend,cuda-only
+arrays_resident,x;y;vx;vy;mass;type;role
+validation,standalone smoke upload-once mutate-on-device download-once
+next_step,Wire deposit/SRC collision/thermostat kernels to shared CudaParticleState
