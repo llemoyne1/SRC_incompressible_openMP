@@ -12,6 +12,9 @@
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
 #include "cuda_persistent_mpcd_step.h"
 #include "cuda_particle_state.h"
+#ifdef MPCD_ENABLE_CUDA_CELL_WORKSPACE
+#include "cuda_cell_workspace.h"
+#endif
 #endif
 
 #include <algorithm>
@@ -525,6 +528,11 @@ struct CudaPersistentCollisionActiveRow {
     std::uint64_t particleStateMetadataUploadCalls = 0u;
     std::uint64_t particleStateMetadataCacheHits = 0u;
     std::uint64_t particleStateMetadataBytesSkipped = 0u;
+    int sharedCellWorkspaceEnabled = 0;
+    double cellWorkspaceAllocateSeconds = 0.0;
+    std::uint64_t cellWorkspaceAllocationCalls = 0u;
+    int cellWorkspaceReusedAllocation = 0;
+    std::uint64_t cellWorkspaceAllocatedBytes = 0u;
 };
 
 class CudaPersistentCollisionActiveAccumulator {
@@ -545,7 +553,7 @@ public:
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
-        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,sharedParticleStateEnabled,particleStateAllocateSeconds,particleStateUploadSeconds,particleStateAllocationCalls,particleStateReusedAllocation,particleStateHostToDeviceBytes,particleStateMetadataUploadCalls,particleStateMetadataCacheHits,particleStateMetadataBytesSkipped\n";
+        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,sharedParticleStateEnabled,particleStateAllocateSeconds,particleStateUploadSeconds,particleStateAllocationCalls,particleStateReusedAllocation,particleStateHostToDeviceBytes,particleStateMetadataUploadCalls,particleStateMetadataCacheHits,particleStateMetadataBytesSkipped,sharedCellWorkspaceEnabled,cellWorkspaceAllocateSeconds,cellWorkspaceAllocationCalls,cellWorkspaceReusedAllocation,cellWorkspaceAllocatedBytes\n";
         for (const auto& r : rows_) {
             out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ','
                 << r.particlesRotated << ',' << r.invalidCellParticles << ',' << r.numCells << ','
@@ -559,7 +567,9 @@ public:
                 << r.particleStateUploadSeconds << ',' << r.particleStateAllocationCalls << ','
                 << r.particleStateReusedAllocation << ',' << r.particleStateHostToDeviceBytes << ','
                 << r.particleStateMetadataUploadCalls << ',' << r.particleStateMetadataCacheHits << ','
-                << r.particleStateMetadataBytesSkipped << '\n';
+                << r.particleStateMetadataBytesSkipped << ',' << r.sharedCellWorkspaceEnabled << ','
+                << r.cellWorkspaceAllocateSeconds << ',' << r.cellWorkspaceAllocationCalls << ','
+                << r.cellWorkspaceReusedAllocation << ',' << r.cellWorkspaceAllocatedBytes << '\n';
         }
     }
 
@@ -577,6 +587,13 @@ CudaPersistentCollisionActiveAccumulator& cuda_persistent_collision_active_accum
 CudaParticleState& cuda_persistent_particle_state_tls() {
     static thread_local CudaParticleState state;
     return state;
+}
+#endif
+
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+CudaCellWorkspace& cuda_persistent_cell_workspace_tls() {
+    static thread_local CudaCellWorkspace workspace;
+    return workspace;
 }
 #endif
 
@@ -662,14 +679,27 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         params.thermostatEvery > 0 && ((step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u);
     CudaPersistentMpcdStepDiagnostics raw{};
     CudaParticleStateDiagnostics particleDiag{};
+    CudaCellWorkspaceDiagnostics cellDiag{};
     const bool useSharedParticleState = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE", false);
+    const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
     if (useSharedParticleState) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_STRICT", true);
         if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1 requires MPCD_ENABLE_CUDA_PARTICLE_STATE");
     }
 #endif
+#if !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (useSharedCellWorkspace) {
+        const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT", true);
+        if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1 requires MPCD_ENABLE_CUDA_CELL_WORKSPACE");
+    }
+#endif
+    if (useSharedCellWorkspace && !useSharedParticleState) {
+        const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT", true);
+        if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1 requires MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1");
+    }
     const bool canUseSharedParticleState = useSharedParticleState && applyPersistentThermostat;
+    const bool canUseSharedCellWorkspace = canUseSharedParticleState && useSharedCellWorkspace;
     if (applyPersistentThermostat) {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
         if (canUseSharedParticleState) {
@@ -680,11 +710,22 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             } else {
                 gpuState.upload_all(state, &particleDiag);
             }
-            raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
-                gpuState, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
-            // Account for the explicit particle-state upload done outside the shared-state substep.
-            raw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds;
-            raw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds;
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+            if (canUseSharedCellWorkspace) {
+                auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
+                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+                    gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+            } else
+#endif
+            {
+                raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+                    gpuState, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+            }
+            // Account for the explicit particle-state upload and optional cell-workspace allocation
+            // done outside the shared-state substep.
+            raw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
+            raw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
         } else
 #endif
         {
@@ -729,6 +770,11 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.particleStateMetadataUploadCalls = particleDiag.metadataUploadCalls;
     row.particleStateMetadataCacheHits = particleDiag.metadataCacheHits;
     row.particleStateMetadataBytesSkipped = particleDiag.metadataBytesSkipped;
+    row.sharedCellWorkspaceEnabled = canUseSharedCellWorkspace ? 1 : 0;
+    row.cellWorkspaceAllocateSeconds = cellDiag.allocateSeconds;
+    row.cellWorkspaceAllocationCalls = cellDiag.allocationCalls;
+    row.cellWorkspaceReusedAllocation = cellDiag.reusedAllocation;
+    row.cellWorkspaceAllocatedBytes = cellDiag.allocatedBytes;
     auto& acc = cuda_persistent_collision_active_accumulator();
     acc.set_output_dir(params.outputDir);
     acc.add(row);

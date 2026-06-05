@@ -1,0 +1,5 @@
+artifact,kind,description
+scripts/build_src_mpcd_cuda_0225.sh,script,CUDA build including CudaParticleState and CudaCellWorkspace
+scripts/run_cuda_persistent_cell_workspace_active_0225.sh,script,Validation harness for active shared particle+cell workspace path
+doc/README_0225_CUDA_PERSISTENT_CELL_WORKSPACE_ACTIVE.md,documentation,Patch scope and validation instructions
+src/src_collision.cpp,source,Branches real persistent SRC+thermostat path through shared CudaCellWorkspace
