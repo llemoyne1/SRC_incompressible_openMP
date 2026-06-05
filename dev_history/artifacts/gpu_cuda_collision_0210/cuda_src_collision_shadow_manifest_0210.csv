@@ -1,0 +1,7 @@
+file,action,notes
+src/src_collision.cpp,modify,add CUDA SRC collision shadow validation after CPU collision
+scripts/build_src_mpcd_cuda_0210.sh,add,build CUDA-enabled simulation binary with SRC collision kernel
+scripts/run_cuda_src_collision_shadow_0210.sh,add,TG shadow validation harness for CUDA SRC collision
+doc/README_0210_CUDA_SRC_COLLISION_SHADOW.md,add,scope and validation documentation
+dev_history/artifacts/gpu_cuda_collision_0210/cuda_src_collision_shadow_manifest_0210.csv,add,this manifest
+dev_history/artifacts/gpu_cuda_collision_0210/cuda_src_collision_shadow_scope_0210.csv,add,scope summary

@@ -5,6 +5,10 @@
 #include "cuda_cell_moments.h"
 #endif
 
+#ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
+#include "cuda_src_collision.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -466,6 +470,164 @@ void maybe_validate_cuda_cell_moments_shadow(const ParticleState& state,
                                  " maxAbsPy=" + std::to_string(row.maxAbsPy));
     }
 }
+
+#endif
+
+#ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
+bool cuda_src_collision_env_flag_enabled(const char* name, const bool fallback = false) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+int cuda_src_collision_env_int_value(const char* name, const int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stoi(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+double cuda_src_collision_env_double_value(const char* name, const double fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stod(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+struct CudaSrcCollisionShadowRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t particlesRotated = 0u;
+    std::uint64_t invalidCellParticles = 0u;
+    std::uint64_t velocityMismatches = 0u;
+    int numCells = 0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+    double maxAbsVx = 0.0;
+    double maxAbsVy = 0.0;
+    double rmsV = 0.0;
+    double sumAbsVx = 0.0;
+    double sumAbsVy = 0.0;
+};
+
+class CudaSrcCollisionShadowAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaSrcCollisionShadowRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaSrcCollisionShadowAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_src_collision_shadow_0210.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,velocityMismatches,maxAbsVx,maxAbsVy,rmsV,sumAbsVx,sumAbsVy\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.particlesRotated << ','
+                << r.invalidCellParticles << ',' << r.numCells << ','
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << ','
+                << r.velocityMismatches << ',' << r.maxAbsVx << ',' << r.maxAbsVy << ',' << r.rmsV << ','
+                << r.sumAbsVx << ',' << r.sumAbsVy << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaSrcCollisionShadowRow> rows_;
+};
+
+CudaSrcCollisionShadowAccumulator& cuda_src_collision_shadow_accumulator() {
+    static CudaSrcCollisionShadowAccumulator acc;
+    return acc;
+}
+
+bool should_run_cuda_src_collision_shadow(std::uint64_t step) {
+    if (!cuda_src_collision_env_flag_enabled("MPCD_CUDA_SRC_COLLISION_SHADOW", false)) return false;
+    const int every = std::max(1, cuda_src_collision_env_int_value("MPCD_CUDA_SRC_COLLISION_SHADOW_EVERY", 1));
+    return (step % static_cast<std::uint64_t>(every)) == 0u;
+}
+
+void maybe_validate_cuda_src_collision_shadow(const ParticleState& cpuPostCollisionState,
+                                              const SimulationParams& params,
+                                              std::uint64_t step,
+                                              const CollisionWorkspace& ws,
+                                              ParticleState& cudaShadowState,
+                                              bool enabledForThisStep) {
+    if (!enabledForThisStep) return;
+
+    CudaSrcCollisionShadowAccumulator& acc = cuda_src_collision_shadow_accumulator();
+    acc.set_output_dir(params.outputDir);
+
+    CudaSrcCollisionOptions opts{};
+    opts.threadsPerBlock = std::max(32, cuda_src_collision_env_int_value("MPCD_CUDA_SRC_COLLISION_THREADS_PER_BLOCK", 256));
+
+    CudaSrcCollisionDiagnostics diag = cuda_apply_src_collision_from_cell_moments(
+        cudaShadowState,
+        static_cast<int>(ws.cellUx.size()),
+        ws.cellId,
+        ws.cellUx,
+        ws.cellUy,
+        ws.cosA,
+        ws.sinA,
+        opts);
+
+    const std::size_t n = static_cast<std::size_t>(cpuPostCollisionState.Np);
+    if (cudaShadowState.Np != cpuPostCollisionState.Np || cudaShadowState.vx.size() != n || cudaShadowState.vy.size() != n) {
+        throw std::runtime_error("CUDA SRC collision shadow: inconsistent shadow state size");
+    }
+
+    CudaSrcCollisionShadowRow row{};
+    row.step = step;
+    row.particlesVisited = diag.particlesVisited;
+    row.particlesRotated = diag.particlesRotated;
+    row.invalidCellParticles = diag.invalidCellParticles;
+    row.numCells = diag.numCells;
+    row.uploadSeconds = diag.uploadSeconds;
+    row.kernelSeconds = diag.kernelSeconds;
+    row.downloadSeconds = diag.downloadSeconds;
+    row.totalSeconds = diag.totalSeconds;
+
+    double rms2 = 0.0;
+    const double tol = cuda_src_collision_env_double_value("MPCD_CUDA_SRC_COLLISION_SHADOW_TOL", 1.0e-12);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double dvx = std::abs(cpuPostCollisionState.vx[i] - cudaShadowState.vx[i]);
+        const double dvy = std::abs(cpuPostCollisionState.vy[i] - cudaShadowState.vy[i]);
+        row.maxAbsVx = std::max(row.maxAbsVx, dvx);
+        row.maxAbsVy = std::max(row.maxAbsVy, dvy);
+        row.sumAbsVx += dvx;
+        row.sumAbsVy += dvy;
+        rms2 += dvx * dvx + dvy * dvy;
+        if (dvx > tol || dvy > tol) ++row.velocityMismatches;
+    }
+    row.rmsV = n > 0 ? std::sqrt(rms2 / static_cast<double>(2u * n)) : 0.0;
+    acc.add(row);
+
+    const bool strict = cuda_src_collision_env_flag_enabled("MPCD_CUDA_SRC_COLLISION_SHADOW_STRICT", true);
+    if (strict && (row.velocityMismatches != 0u || row.invalidCellParticles != 0u)) {
+        throw std::runtime_error("CUDA SRC collision shadow mismatch: velocityMismatches=" +
+                                 std::to_string(row.velocityMismatches) +
+                                 " invalidCellParticles=" + std::to_string(row.invalidCellParticles) +
+                                 " maxAbsVx=" + std::to_string(row.maxAbsVx) +
+                                 " maxAbsVy=" + std::to_string(row.maxAbsVy));
+    }
+}
 #endif
 
 } // namespace
@@ -757,6 +919,16 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         ws.sinA[k] = sa;
     }
 
+#ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
+    const bool cudaSrcCollisionShadowEnabled = should_run_cuda_src_collision_shadow(step);
+    ParticleState cudaSrcCollisionShadowState;
+    if (cudaSrcCollisionShadowEnabled) {
+        cudaSrcCollisionShadowState = state;
+    }
+#else
+    const bool cudaSrcCollisionShadowEnabled = false;
+#endif
+
 #pragma omp parallel for if(n > 10000)
     for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
@@ -777,6 +949,14 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         state.vx[i] = ux + ca * dvx - sa * dvy;
         state.vy[i] = uy + sa * dvx + ca * dvy;
     }
+
+#ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
+    maybe_validate_cuda_src_collision_shadow(state, params, step, ws,
+                                             cudaSrcCollisionShadowState,
+                                             cudaSrcCollisionShadowEnabled);
+#else
+    (void)cudaSrcCollisionShadowEnabled;
+#endif
 
     return diag;
 }
