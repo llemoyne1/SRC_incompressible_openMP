@@ -2,6 +2,7 @@
 #include "closed_capacity_response.h"
 #include "cuda_resampling_persistent_active_path_0240.h"
 #include "cuda_streaming_periodic_0245.h"
+#include "cuda_streaming_wall_simple_0246.h"
 
 #include <algorithm>
 #include <chrono>
@@ -416,13 +417,18 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // deliberately keep the validated CPU path.
     {
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
-        bool handledByCudaStreaming0245 = false;
-        if (cuda_periodic_streaming_0245_requested()) {
+        bool handledByCudaStreaming = false;
+        if (cuda_wall_simple_streaming_0246_requested()) {
+            const CudaWallSimpleStreaming0246Diagnostics cudaStreaming0246 =
+                try_apply_cuda_wall_simple_streaming_0246(state, params, step);
+            handledByCudaStreaming = cudaStreaming0246.handled;
+        }
+        if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
                 try_apply_cuda_periodic_streaming_0245(state, params, step);
-            handledByCudaStreaming0245 = cudaStreaming0245.handled;
+            handledByCudaStreaming = cudaStreaming0245.handled;
         }
-        if (!handledByCudaStreaming0245) {
+        if (!handledByCudaStreaming) {
 #pragma omp parallel for if(n > 10000)
             for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
                 const std::size_t i = static_cast<std::size_t>(ii);
