@@ -11,6 +11,7 @@
 
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
 #include "cuda_persistent_mpcd_step.h"
+#include "cuda_particle_state.h"
 #endif
 
 #include <algorithm>
@@ -515,6 +516,11 @@ struct CudaPersistentCollisionActiveRow {
     double thermostatScaleMean = 1.0;
     double thermostatScaleMin = 1.0;
     double thermostatScaleMax = 1.0;
+    int sharedParticleStateEnabled = 0;
+    double particleStateAllocateSeconds = 0.0;
+    double particleStateUploadSeconds = 0.0;
+    std::uint64_t particleStateAllocationCalls = 0u;
+    int particleStateReusedAllocation = 0;
 };
 
 class CudaPersistentCollisionActiveAccumulator {
@@ -535,7 +541,7 @@ public:
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
-        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
+        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,sharedParticleStateEnabled,particleStateAllocateSeconds,particleStateUploadSeconds,particleStateAllocationCalls,particleStateReusedAllocation\n";
         for (const auto& r : rows_) {
             out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ','
                 << r.particlesRotated << ',' << r.invalidCellParticles << ',' << r.numCells << ','
@@ -544,7 +550,10 @@ public:
                 << r.thermostatAppliedOnGpu << ',' << r.thermostatCellsRescaled << ','
                 << r.thermostatParticlesRescaled << ',' << r.thermostatKBTBefore << ','
                 << r.thermostatKBTAfter << ',' << r.thermostatScaleMean << ','
-                << r.thermostatScaleMin << ',' << r.thermostatScaleMax << '\n';
+                << r.thermostatScaleMin << ',' << r.thermostatScaleMax << ','
+                << r.sharedParticleStateEnabled << ',' << r.particleStateAllocateSeconds << ','
+                << r.particleStateUploadSeconds << ',' << r.particleStateAllocationCalls << ','
+                << r.particleStateReusedAllocation << '\n';
         }
     }
 
@@ -557,6 +566,13 @@ CudaPersistentCollisionActiveAccumulator& cuda_persistent_collision_active_accum
     static CudaPersistentCollisionActiveAccumulator acc;
     return acc;
 }
+
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+CudaParticleState& cuda_persistent_particle_state_tls() {
+    static thread_local CudaParticleState state;
+    return state;
+}
+#endif
 
 bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
                                                 const CellGrid& grid,
@@ -639,9 +655,31 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     const bool applyPersistentThermostat = persistentCollisionThermostat && params.thermostatEnable &&
         params.thermostatEvery > 0 && ((step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u);
     CudaPersistentMpcdStepDiagnostics raw{};
+    CudaParticleStateDiagnostics particleDiag{};
+    const bool useSharedParticleState = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE", false);
+#if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+    if (useSharedParticleState) {
+        const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_STRICT", true);
+        if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1 requires MPCD_ENABLE_CUDA_PARTICLE_STATE");
+    }
+#endif
+    const bool canUseSharedParticleState = useSharedParticleState && applyPersistentThermostat;
     if (applyPersistentThermostat) {
-        raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
-            state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+        if (canUseSharedParticleState) {
+            auto& gpuState = cuda_persistent_particle_state_tls();
+            gpuState.upload_all(state, &particleDiag);
+            raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+                gpuState, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+            // Account for the explicit particle-state upload done outside the shared-state substep.
+            raw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds;
+            raw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds;
+        } else
+#endif
+        {
+            raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+                state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+        }
         cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
     } else {
         raw = cuda_apply_persistent_tg_deposit_src_collision(
@@ -671,6 +709,11 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         row.thermostatScaleMin = consumedThermostat.scaleMin;
         row.thermostatScaleMax = consumedThermostat.scaleMax;
     }
+    row.sharedParticleStateEnabled = canUseSharedParticleState ? 1 : 0;
+    row.particleStateAllocateSeconds = particleDiag.allocateSeconds;
+    row.particleStateUploadSeconds = particleDiag.uploadSeconds;
+    row.particleStateAllocationCalls = particleDiag.allocationCalls;
+    row.particleStateReusedAllocation = particleDiag.reusedAllocation;
     auto& acc = cuda_persistent_collision_active_accumulator();
     acc.set_output_dir(params.outputDir);
     acc.add(row);
