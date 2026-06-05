@@ -698,7 +698,9 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT", true);
         if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1 requires MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1");
     }
-    const bool canUseSharedParticleState = useSharedParticleState && applyPersistentThermostat;
+    // 0226: shared particle/cell state is also useful for the collision-only
+    // path, which preserves the physical order collision -> Q6 -> thermostat.
+    const bool canUseSharedParticleState = useSharedParticleState && (applyPersistentThermostat || persistentCollision);
     const bool canUseSharedCellWorkspace = canUseSharedParticleState && useSharedCellWorkspace;
     if (applyPersistentThermostat) {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
@@ -734,8 +736,35 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         }
         cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
     } else {
-        raw = cuda_apply_persistent_tg_deposit_src_collision(
-            state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+        if (canUseSharedParticleState) {
+            auto& gpuState = cuda_persistent_particle_state_tls();
+            const bool metadataCache = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE", true);
+            if (metadataCache) {
+                gpuState.upload_kinematics_with_cached_metadata(state, &particleDiag);
+            } else {
+                gpuState.upload_all(state, &particleDiag);
+            }
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+            if (canUseSharedCellWorkspace) {
+                auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
+                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                raw = cuda_apply_persistent_tg_deposit_src_collision(
+                    gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+            } else
+#endif
+            {
+                raw = cuda_apply_persistent_tg_deposit_src_collision(
+                    gpuState, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+            }
+            raw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
+            raw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
+        } else
+#endif
+        {
+            raw = cuda_apply_persistent_tg_deposit_src_collision(
+                state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+        }
     }
 
     CudaPersistentCollisionActiveRow row{};

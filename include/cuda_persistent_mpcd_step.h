@@ -78,6 +78,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config);
 
+// 0226 shared-state collision-only overload. Particle arrays are already resident
+// in CudaParticleState. This is the algorithmically correct bridge for
+// collision -> Q6 -> CPU thermostat, because it does not apply the thermostat
+// before Q6.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    CudaParticleState& gpuState,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config);
+
+// 0226 shared particle+cell collision-only overload. It reuses both the
+// persistent particle arrays and the persistent cell workspace, while still
+// restoring the CPU workspace so downstream diagnostics/Q6/resampling remain
+// unchanged.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config);
+
 // 0215 active persistent substep: deposit -> SRC collision -> cell-relative
 // thermostat on the GPU, with a single final download of vx/vy and CPU
 // workspace cell moments. This entry point is deliberately for subsets where

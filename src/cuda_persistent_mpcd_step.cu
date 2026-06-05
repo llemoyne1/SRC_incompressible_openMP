@@ -955,4 +955,161 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 #endif
 }
 
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config) {
+#if !defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP) || !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    (void)gpuState; (void)cellWorkspace; (void)downloadTarget; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config;
+    throw std::runtime_error("cuda_apply_persistent_tg_deposit_src_collision(CudaParticleState,CudaCellWorkspace) requires MPCD_ENABLE_CUDA_PERSISTENT_STEP, MPCD_ENABLE_CUDA_PARTICLE_STATE and MPCD_ENABLE_CUDA_CELL_WORKSPACE");
+#else
+    validate_particle_state(downloadTarget, "cuda_apply_persistent_tg_deposit_src_collision(shared particle+cell downloadTarget)");
+    if (config.Nx <= 0 || config.Ny <= 0) throw std::runtime_error("persistent CUDA shared collision step: invalid grid");
+    if (!(config.Lx > 0.0) || !(config.Ly > 0.0)) throw std::runtime_error("persistent CUDA shared collision step: invalid domain");
+
+    const CudaParticleDeviceView pv = gpuState.device_view();
+    if (pv.n == 0u) throw std::runtime_error("persistent CUDA shared collision step: empty CudaParticleState");
+    if (downloadTarget.Np != pv.n) throw std::runtime_error("persistent CUDA shared collision step: host particle count mismatch");
+    if (pv.x == nullptr || pv.y == nullptr || pv.vx == nullptr || pv.vy == nullptr || pv.mass == nullptr || pv.role == nullptr) {
+        throw std::runtime_error("persistent CUDA shared collision step: incomplete CudaParticleState device view");
+    }
+
+    const std::size_t n = static_cast<std::size_t>(pv.n);
+    const int nInt = static_cast<int>(n);
+    if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA shared collision step: too many particles for prototype int kernels");
+    const int nc = config.Nx * config.Ny;
+    const int cycles = std::max(1, config.cycles);
+    const int threads = std::max(32, config.threadsPerBlock);
+    const int particleBlocks = std::max(1, (nInt + threads - 1) / threads);
+    const int cellBlocks = std::max(1, (nc + threads - 1) / threads);
+    const int resetBlocks = std::max(particleBlocks, cellBlocks);
+
+    cellWorkspace.ensure_capacity(pv.n, nc, nullptr);
+    const CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
+    if (cv.cellId == nullptr || cv.count == nullptr || cv.cellMass == nullptr || cv.cellPx == nullptr ||
+        cv.cellPy == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr || cv.cosA == nullptr ||
+        cv.sinA == nullptr || cv.fluidCounter == nullptr || cv.rotatedCounter == nullptr || cv.invalidCounter == nullptr) {
+        throw std::runtime_error("persistent CUDA shared collision step: incomplete CudaCellWorkspace device view");
+    }
+    if (cv.particleCapacity < pv.n || cv.numCells < nc) {
+        throw std::runtime_error("persistent CUDA shared collision step: CudaCellWorkspace capacity mismatch");
+    }
+
+    std::vector<double> cosHost(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
+    std::vector<double> sinHost(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
+    if (config.randomRotationSign) {
+        for (int c = 0; c < nc; ++c) {
+            const std::uint64_t h = splitmix64_host(config.rngSeed ^
+                                                    (config.step * 0x9e3779b97f4a7c15ULL) ^
+                                                    static_cast<std::uint64_t>(c));
+            if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
+        }
+    }
+
+    CudaPersistentMpcdStepDiagnostics diag{};
+    diag.particlesVisited = pv.n;
+    diag.numCells = nc;
+    diag.cycles = cycles;
+
+    const std::size_t nBytesI = n * sizeof(int);
+    const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
+    const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
+
+    const auto tTotal0 = Clock::now();
+    auto t0 = Clock::now();
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemset(cv.fluidCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMemset(cv.rotatedCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMemset(cv.invalidCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.uploadSeconds = seconds_since(t0);
+
+    DeviceConfig cfg{};
+    cfg.Nx = config.Nx;
+    cfg.Ny = config.Ny;
+    cfg.numCells = nc;
+    cfg.Lx = config.Lx;
+    cfg.Ly = config.Ly;
+    cfg.dx = config.Lx / static_cast<double>(config.Nx);
+    cfg.dy = config.Ly / static_cast<double>(config.Ny);
+    cfg.shiftX = config.shiftX;
+    cfg.shiftY = config.shiftY;
+    cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+
+    t0 = Clock::now();
+    for (int cycle = 0; cycle < cycles; ++cycle) {
+        reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, cv.cellId, cv.count, cv.cellMass,
+                                                                cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy,
+                                                                cv.cellKinetic, cv.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        deposit_persistent_kernel<<<particleBlocks, threads>>>(nInt, pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role,
+                                                               cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
+                                                               cv.cellPy, cv.fluidCounter);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
+                                                                     cv.cellUx, cv.cellUy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx, cv.cellUy,
+                                                                  cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
+                                                                  cv.rotatedCounter, cv.invalidCounter);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+    }
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.kernelSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    gpuState.download_velocities(downloadTarget);
+    cellIdOut.assign(n, -1);
+    cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+    cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+    cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+    cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+    MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
+    MPCD_CUDA_CHECK(cudaMemcpy(&fluid, cv.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(&rotated, cv.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(&invalid, cv.invalidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.downloadSeconds = seconds_since(t0);
+
+    diag.fluidParticles = static_cast<std::uint64_t>(fluid) / static_cast<std::uint64_t>(cycles);
+    diag.particlesRotated = static_cast<std::uint64_t>(rotated);
+    diag.invalidCellParticles = static_cast<std::uint64_t>(invalid);
+    diag.totalSeconds = seconds_since(tTotal0);
+    return diag;
+#endif
+}
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    CudaParticleState& gpuState,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config) {
+#if !defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP) || !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    (void)gpuState; (void)downloadTarget; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config;
+    throw std::runtime_error("cuda_apply_persistent_tg_deposit_src_collision(CudaParticleState) requires MPCD_ENABLE_CUDA_PERSISTENT_STEP, MPCD_ENABLE_CUDA_PARTICLE_STATE and MPCD_ENABLE_CUDA_CELL_WORKSPACE");
+#else
+    CudaCellWorkspace transientWorkspace;
+    return cuda_apply_persistent_tg_deposit_src_collision(gpuState, transientWorkspace, downloadTarget,
+                                                          cellIdOut, cellCountOut, cellMassOut, cellUxOut, cellUyOut,
+                                                          config);
+#endif
+}
+
 } // namespace mpcd

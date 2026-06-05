@@ -1,0 +1,7 @@
+artifact,kind,description
+include/cuda_persistent_mpcd_step.h,modified,Add collision-only overloads using CudaParticleState and CudaCellWorkspace
+src/cuda_persistent_mpcd_step.cu,modified,Implement shared particle/cell collision-only CUDA substep without thermostat
+src/src_collision.cpp,modified,Allow shared particle/cell workspace in persistent collision-only path compatible with Q6
+scripts/build_src_mpcd_cuda_0226.sh,added,Build CUDA-enabled executable for 0226 harness
+scripts/run_cuda_persistent_cell_workspace_q6_0226.sh,added,Compare CPU baseline Q6 CUDA shared collision and shared collision plus Q6 CUDA
+doc/README_0226_CUDA_PERSISTENT_CELL_WORKSPACE_Q6.md,added,Documentation for 0226 combined harness
