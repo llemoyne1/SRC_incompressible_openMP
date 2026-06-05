@@ -36,16 +36,19 @@ void cuda_free_ptr(T*& ptr) {
     }
 }
 
-std::vector<std::uint8_t> normalized_roles_for_cuda(const ParticleState& state) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
-    if (state.role.empty()) return std::vector<std::uint8_t>(n, kParticleRoleFluid);
-    return state.role;
+// 0222 upload fast path: avoid rebuilding temporary host vectors on every
+// particle-state upload when role/type arrays are already explicitly stored in
+// ParticleState. The old implementation copied state.role/state.type into
+// temporary std::vectors before cudaMemcpy, which became visible once the
+// CudaParticleState path was called every step. For missing optional arrays we
+// keep the previous semantics using cudaMemset instead of allocating/filling
+// temporary vectors on the host.
+const unsigned char* role_upload_ptr_or_null(const ParticleState& state) {
+    return state.role.empty() ? nullptr : state.role.data();
 }
 
-std::vector<std::uint32_t> normalized_types_for_cuda(const ParticleState& state) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
-    if (state.type.empty()) return std::vector<std::uint32_t>(n, 0u);
-    return state.type;
+const std::uint32_t* type_upload_ptr_or_null(const ParticleState& state) {
+    return state.type.empty() ? nullptr : state.type.data();
 }
 
 __global__ void smoke_increment_fluid_velocities_kernel(int n,
@@ -255,13 +258,21 @@ void CudaParticleState::upload_masses_and_roles(const ParticleState& state, Cuda
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
     const std::size_t bytesR = n * sizeof(unsigned char);
-    std::vector<std::uint8_t> roleHost = normalized_roles_for_cuda(state);
-    std::vector<std::uint32_t> typeHost = normalized_types_for_cuda(state);
+    const unsigned char* roleHost = role_upload_ptr_or_null(state);
+    const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
     const auto t0 = Clock::now();
     if (n > 0u) {
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost.data(), bytesU, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost.data(), bytesR, cudaMemcpyHostToDevice));
+        if (typeHost != nullptr) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost, bytesU, cudaMemcpyHostToDevice));
+        } else {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->type, 0, bytesU));
+        }
+        if (roleHost != nullptr) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
+        } else {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
+        }
     }
     if (diag != nullptr) {
         diag->uploadCalls += 1u;
@@ -285,8 +296,8 @@ void CudaParticleState::upload_all(const ParticleState& state, CudaParticleState
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
     const std::size_t bytesR = n * sizeof(unsigned char);
-    std::vector<std::uint8_t> roleHost = normalized_roles_for_cuda(state);
-    std::vector<std::uint32_t> typeHost = normalized_types_for_cuda(state);
+    const unsigned char* roleHost = role_upload_ptr_or_null(state);
+    const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
     const auto t0 = Clock::now();
     if (n > 0u) {
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
@@ -294,8 +305,16 @@ void CudaParticleState::upload_all(const ParticleState& state, CudaParticleState
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->vy, state.vy.data(), bytesD, cudaMemcpyHostToDevice));
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost.data(), bytesU, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost.data(), bytesR, cudaMemcpyHostToDevice));
+        if (typeHost != nullptr) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost, bytesU, cudaMemcpyHostToDevice));
+        } else {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->type, 0, bytesU));
+        }
+        if (roleHost != nullptr) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
+        } else {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
+        }
     }
     if (diag != nullptr) {
         diag->uploadCalls += 1u;
