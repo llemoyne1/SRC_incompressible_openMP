@@ -1,0 +1,6 @@
+item,path,description
+script,scripts/build_src_mpcd_cuda_0204.sh,"Builds the CUDA-enabled SRC/MPCD binary with Q6 and cell-moments CUDA components."
+script,scripts/run_cuda_tg_combined_gpu_0204.sh,"Runs robust CPU, Q6-only, cell-deposit-only, and combined CUDA TG comparisons."
+doc,doc/README_0204_CUDA_TG_COMBINED_HARNESS_FIX.md,"Documents the 0204 harness fix and validation commands."
+artifact,dev_history/artifacts/gpu_cuda_combined_0204/cuda_tg_combined_harness_fix_manifest_0204.csv,"Manifest for patch 0204."
+artifact,dev_history/artifacts/gpu_cuda_combined_0204/cuda_tg_combined_harness_fix_scope_0204.csv,"Scope and constraints for patch 0204."
