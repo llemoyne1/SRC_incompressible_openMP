@@ -1,0 +1,11 @@
+item,value
+patch,0223
+branch,SRC_GPU
+purpose,reduce CudaParticleState host-to-device metadata transfer in persistent SRC+thermostat path
+physics_change,no
+step_change,shared particle-state upload path only
+runtime_flag,MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE
+runtime_default,enabled
+rollback,MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=0
+main_validation,tg_periodic_full 64x64/128x128 projection disabled
+expected_effect,skip mass/type/role uploads when metadata signature is unchanged

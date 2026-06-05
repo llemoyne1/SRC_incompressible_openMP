@@ -1,0 +1,7 @@
+patch,kind,path,description
+0223,modified,include/cuda_particle_state.h,Add diagnostics and cached metadata upload API
+0223,modified,src/cuda_particle_state.cu,Upload x/y/vx/vy every call but reuse mass/type/role device metadata when a safe signature is unchanged
+0223,modified,src/src_collision.cpp,Use cached metadata upload in shared CudaParticleState persistent SRC+thermostat path and record cache diagnostics
+0223,added,scripts/build_src_mpcd_cuda_0223.sh,CUDA build harness for metadata-cache validation
+0223,added,scripts/run_cuda_persistent_particle_state_metadata_cache_0223.sh,Validation harness comparing legacy upload cache-off and metadata-cache modes
+0223,added,doc/README_0223_CUDA_PERSISTENT_METADATA_CACHE.md,Documentation for patch 0223

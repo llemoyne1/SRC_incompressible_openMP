@@ -33,6 +33,9 @@ struct CudaParticleStateDiagnostics {
     std::uint64_t allocationCalls = 0u;
     std::uint64_t uploadCalls = 0u;
     std::uint64_t downloadCalls = 0u;
+    std::uint64_t metadataUploadCalls = 0u;
+    std::uint64_t metadataCacheHits = 0u;
+    std::uint64_t metadataBytesSkipped = 0u;
     int reusedAllocation = 0;
     double allocateSeconds = 0.0;
     double uploadSeconds = 0.0;
@@ -75,6 +78,13 @@ public:
     void ensure_capacity(std::uint64_t n, CudaParticleStateDiagnostics* diag = nullptr);
 
     void upload_all(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
+    // 0223: upload x/y/vx/vy every call but reuse cached mass/type/role
+    // metadata when a safe host-side signature proves it has not changed.
+    // This is intended for the persistent SRC+thermostat path where CPU
+    // transport still updates positions/velocities every step, while metadata
+    // changes less frequently. It is exact: changed metadata is reuploaded.
+    void upload_kinematics_with_cached_metadata(const ParticleState& state,
+                                                CudaParticleStateDiagnostics* diag = nullptr);
     void upload_positions(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
     void upload_velocities(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
     void upload_masses_and_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);

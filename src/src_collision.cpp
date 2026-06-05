@@ -521,6 +521,10 @@ struct CudaPersistentCollisionActiveRow {
     double particleStateUploadSeconds = 0.0;
     std::uint64_t particleStateAllocationCalls = 0u;
     int particleStateReusedAllocation = 0;
+    std::uint64_t particleStateHostToDeviceBytes = 0u;
+    std::uint64_t particleStateMetadataUploadCalls = 0u;
+    std::uint64_t particleStateMetadataCacheHits = 0u;
+    std::uint64_t particleStateMetadataBytesSkipped = 0u;
 };
 
 class CudaPersistentCollisionActiveAccumulator {
@@ -541,7 +545,7 @@ public:
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
-        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,sharedParticleStateEnabled,particleStateAllocateSeconds,particleStateUploadSeconds,particleStateAllocationCalls,particleStateReusedAllocation\n";
+        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax,sharedParticleStateEnabled,particleStateAllocateSeconds,particleStateUploadSeconds,particleStateAllocationCalls,particleStateReusedAllocation,particleStateHostToDeviceBytes,particleStateMetadataUploadCalls,particleStateMetadataCacheHits,particleStateMetadataBytesSkipped\n";
         for (const auto& r : rows_) {
             out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ','
                 << r.particlesRotated << ',' << r.invalidCellParticles << ',' << r.numCells << ','
@@ -553,7 +557,9 @@ public:
                 << r.thermostatScaleMin << ',' << r.thermostatScaleMax << ','
                 << r.sharedParticleStateEnabled << ',' << r.particleStateAllocateSeconds << ','
                 << r.particleStateUploadSeconds << ',' << r.particleStateAllocationCalls << ','
-                << r.particleStateReusedAllocation << '\n';
+                << r.particleStateReusedAllocation << ',' << r.particleStateHostToDeviceBytes << ','
+                << r.particleStateMetadataUploadCalls << ',' << r.particleStateMetadataCacheHits << ','
+                << r.particleStateMetadataBytesSkipped << '\n';
         }
     }
 
@@ -668,7 +674,12 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
         if (canUseSharedParticleState) {
             auto& gpuState = cuda_persistent_particle_state_tls();
-            gpuState.upload_all(state, &particleDiag);
+            const bool metadataCache = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE", true);
+            if (metadataCache) {
+                gpuState.upload_kinematics_with_cached_metadata(state, &particleDiag);
+            } else {
+                gpuState.upload_all(state, &particleDiag);
+            }
             raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                 gpuState, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
             // Account for the explicit particle-state upload done outside the shared-state substep.
@@ -714,6 +725,10 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.particleStateUploadSeconds = particleDiag.uploadSeconds;
     row.particleStateAllocationCalls = particleDiag.allocationCalls;
     row.particleStateReusedAllocation = particleDiag.reusedAllocation;
+    row.particleStateHostToDeviceBytes = particleDiag.hostToDeviceBytes;
+    row.particleStateMetadataUploadCalls = particleDiag.metadataUploadCalls;
+    row.particleStateMetadataCacheHits = particleDiag.metadataCacheHits;
+    row.particleStateMetadataBytesSkipped = particleDiag.metadataBytesSkipped;
     auto& acc = cuda_persistent_collision_active_accumulator();
     acc.set_output_dir(params.outputDir);
     acc.add(row);

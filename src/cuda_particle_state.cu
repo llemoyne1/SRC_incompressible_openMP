@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -51,6 +52,43 @@ const std::uint32_t* type_upload_ptr_or_null(const ParticleState& state) {
     return state.type.empty() ? nullptr : state.type.data();
 }
 
+// 0223 exact metadata signature. This is deliberately conservative and
+// byte-based: if mass/type/role host contents change, the signature changes and
+// metadata is reuploaded. Collisions are theoretically possible for a 64-bit
+// hash, but in this diagnostic/performance path it is a practical guard; users
+// can disable the cache by calling upload_all() instead.
+std::uint64_t fnv1a_bytes(std::uint64_t h, const void* data, std::size_t nbytes) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    for (std::size_t i = 0; i < nbytes; ++i) {
+        h ^= static_cast<std::uint64_t>(p[i]);
+        h *= prime;
+    }
+    return h;
+}
+
+std::uint64_t cuda_particle_metadata_signature(const ParticleState& state) {
+    constexpr std::uint64_t offset = 1469598103934665603ULL;
+    std::uint64_t h = offset;
+    const std::uint64_t n = state.Np;
+    h = fnv1a_bytes(h, &n, sizeof(n));
+    const std::size_t nn = static_cast<std::size_t>(n);
+    if (n > 0u) {
+        h = fnv1a_bytes(h, state.mass.data(), nn * sizeof(double));
+        const bool hasType = !state.type.empty();
+        const bool hasRole = !state.role.empty();
+        h = fnv1a_bytes(h, &hasType, sizeof(hasType));
+        h = fnv1a_bytes(h, &hasRole, sizeof(hasRole));
+        if (hasType) {
+            h = fnv1a_bytes(h, state.type.data(), nn * sizeof(std::uint32_t));
+        }
+        if (hasRole) {
+            h = fnv1a_bytes(h, state.role.data(), nn * sizeof(unsigned char));
+        }
+    }
+    return h;
+}
+
 __global__ void smoke_increment_fluid_velocities_kernel(int n,
                                                         const unsigned char* role,
                                                         double* vx,
@@ -78,6 +116,9 @@ struct CudaParticleState::Impl {
     std::uint64_t n = 0u;
     std::uint64_t capacity = 0u;
     std::uint64_t allocatedBytes = 0u;
+    std::uint64_t metadataSignature = 0u;
+    std::uint64_t metadataParticles = 0u;
+    bool metadataUploaded = false;
 
     void release() {
         cuda_free_ptr(x);
@@ -90,6 +131,9 @@ struct CudaParticleState::Impl {
         n = 0u;
         capacity = 0u;
         allocatedBytes = 0u;
+        metadataSignature = 0u;
+        metadataParticles = 0u;
+        metadataUploaded = false;
     }
 };
 
@@ -187,6 +231,9 @@ void CudaParticleState::ensure_capacity(std::uint64_t n, CudaParticleStateDiagno
     impl_->n = n;
     impl_->capacity = n;
     impl_->allocatedBytes = 5u * bytesD + bytesU + bytesR;
+    impl_->metadataSignature = 0u;
+    impl_->metadataParticles = 0u;
+    impl_->metadataUploaded = false;
     if (diag != nullptr) {
         diag->allocationCalls += 1u;
         diag->reusedAllocation = 0;
@@ -326,6 +373,74 @@ void CudaParticleState::upload_all(const ParticleState& state, CudaParticleState
     }
 #endif
 }
+
+
+void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleState& state,
+                                                               CudaParticleStateDiagnostics* diag) {
+#ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    (void)state; (void)diag;
+    throw std::runtime_error("CudaParticleState::upload_kinematics_with_cached_metadata called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    validate_particle_state(state, "CudaParticleState::upload_kinematics_with_cached_metadata");
+    ensure_capacity(state.Np, diag);
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t bytesD = n * sizeof(double);
+    const std::size_t bytesU = n * sizeof(std::uint32_t);
+    const std::size_t bytesR = n * sizeof(unsigned char);
+    const unsigned char* roleHost = role_upload_ptr_or_null(state);
+    const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
+    const std::uint64_t sig = cuda_particle_metadata_signature(state);
+    const bool mustUploadMetadata =
+        !impl_->metadataUploaded || impl_->metadataParticles != state.Np || impl_->metadataSignature != sig;
+
+    const auto t0 = Clock::now();
+    if (n > 0u) {
+        // CPU transport still owns positions and velocities before this
+        // substep, so x/y/vx/vy must be refreshed every call.
+        MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
+        MPCD_CUDA_CHECK(cudaMemcpy(impl_->y, state.y.data(), bytesD, cudaMemcpyHostToDevice));
+        MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
+        MPCD_CUDA_CHECK(cudaMemcpy(impl_->vy, state.vy.data(), bytesD, cudaMemcpyHostToDevice));
+
+        if (mustUploadMetadata) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
+            if (typeHost != nullptr) {
+                MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost, bytesU, cudaMemcpyHostToDevice));
+            } else {
+                MPCD_CUDA_CHECK(cudaMemset(impl_->type, 0, bytesU));
+            }
+            if (roleHost != nullptr) {
+                MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
+            } else {
+                MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
+            }
+            impl_->metadataSignature = sig;
+            impl_->metadataParticles = state.Np;
+            impl_->metadataUploaded = true;
+        }
+    } else {
+        impl_->metadataSignature = sig;
+        impl_->metadataParticles = state.Np;
+        impl_->metadataUploaded = true;
+    }
+
+    if (diag != nullptr) {
+        diag->uploadCalls += 1u;
+        diag->hostToDeviceBytes += 4u * bytesD + (mustUploadMetadata ? (bytesD + bytesU + bytesR) : 0u);
+        if (mustUploadMetadata) {
+            diag->metadataUploadCalls += 1u;
+        } else {
+            diag->metadataCacheHits += 1u;
+            diag->metadataBytesSkipped += bytesD + bytesU + bytesR;
+        }
+        diag->uploadSeconds += elapsed_seconds(t0);
+        diag->particles = state.Np;
+        diag->capacity = impl_->capacity;
+        diag->allocatedBytes = impl_->allocatedBytes;
+    }
+#endif
+}
+
 
 void CudaParticleState::download_velocities(ParticleState& state, CudaParticleStateDiagnostics* diag) const {
 #ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
