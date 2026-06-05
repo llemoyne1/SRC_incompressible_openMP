@@ -1,2 +1,2 @@
 case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
-tg_periodic_full,1.800909479,2.370647231,0.7596699565630143,1.86,2.45,0.7591836734693878,0,76,PASS
+tg_periodic_full,1.86447073,2.246692886,0.8298734293495245,1.91,2.32,0.8232758620689655,0,76,PASS
