@@ -1,0 +1,6 @@
+patch,component,kind,path,description
+0208,cuda_combined,new,scripts/build_src_mpcd_cuda_0208.sh,Build CUDA-enabled simulation binary with Q6 cell-moments and thermostat support
+0208,cuda_combined,new,scripts/run_cuda_tg_full_gpu_stack_0208.sh,Run combined TG validation for CPU cell thermostat Q6 and full CUDA stacks
+0208,cuda_combined,new,doc/README_0208_CUDA_TG_FULL_GPU_STACK.md,Document combined CUDA stack validation harness
+0208,cuda_combined,new,dev_history/artifacts/gpu_cuda_combined_0208/cuda_tg_full_gpu_stack_manifest_0208.csv,List files in patch 0208
+0208,cuda_combined,new,dev_history/artifacts/gpu_cuda_combined_0208/cuda_tg_full_gpu_stack_scope_0208.csv,Scope and validation targets for patch 0208
