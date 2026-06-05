@@ -23,6 +23,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/particle_state.cpp \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
+  src/cuda_resampling_persistent_active_path_0240.cpp \
   -o build/src_mpcd_base
 
 

@@ -56,6 +56,7 @@ $CXX $CXXFLAGS -Iinclude \
   src/particle_state.cpp \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
+  src/cuda_resampling_persistent_active_path_0240.cpp \
   -o "$OUT_DIR/src_mpcd_base"
 
 echo "[0156-build] Built $OUT_DIR/src_mpcd_base"

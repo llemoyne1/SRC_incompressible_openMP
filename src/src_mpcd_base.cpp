@@ -1,5 +1,6 @@
 #include "src_mpcd_base.h"
 #include "closed_capacity_response.h"
+#include "cuda_resampling_persistent_active_path_0240.h"
 
 #include <algorithm>
 #include <chrono>
@@ -290,6 +291,34 @@ ResamplingRemapApplyDiagnostics make_thermal_reference_gate(const std::vector<st
     return d;
 }
 
+
+bool cuda_resampling_persistent_active_path_0240_requested(const ParticleState& state) {
+    const char* enabled = std::getenv("MPCD_CUDA_RESAMPLING_PERSISTENT_0240");
+    if (enabled == nullptr) {
+        return false;
+    }
+    std::string value(enabled);
+    for (char& c : value) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (!(value == "1" || value == "true" || value == "yes" || value == "on")) {
+        return false;
+    }
+
+    const char* minParticlesEnv = std::getenv("MPCD_CUDA_RESAMPLING_PERSISTENT_0240_MIN_PARTICLES");
+    if (minParticlesEnv != nullptr && minParticlesEnv[0] != '\0') {
+        try {
+            const std::uint64_t minParticles = static_cast<std::uint64_t>(std::stoull(minParticlesEnv));
+            if (state.Np < minParticles) {
+                return false;
+            }
+        } catch (...) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) {
     if (!params.keepMeanFlowEnable) {
         return;
@@ -517,18 +546,36 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ResamplingInsertionApplyDiagnostics insertionApply{};
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
-        {
-            MPCD_PROFILE_PHASE(result.profile, ResamplingExtraction);
-            extractionApply =
-                apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
+        bool handledByCudaResampling0240 = false;
+        if (cuda_resampling_persistent_active_path_0240_requested(state)) {
+            const CudaResamplingPersistentActivePath0240Diagnostics cudaEdit0240 =
+                try_apply_cuda_resampling_persistent_active_path_0240(
+                    state,
+                    workspace.resamplingPool,
+                    workspace.resampling,
+                    result.resampling,
+                    params,
+                    grid,
+                    extractionApply,
+                    insertionApply);
+            handledByCudaResampling0240 = cudaEdit0240.handled;
+            planOrTransferEdited = planOrTransferEdited || cudaEdit0240.applied;
         }
-        planOrTransferEdited = planOrTransferEdited || extractionApply.applied;
 
-        if (params.resamplingInsertionEnable && extractionApply.applied) {
-            MPCD_PROFILE_PHASE(result.profile, ResamplingInsertion);
-            insertionApply = apply_resampling_insertion_operations(
-                state, workspace.resamplingPool, workspace.resampling, grid);
-            planOrTransferEdited = planOrTransferEdited || insertionApply.applied;
+        if (!handledByCudaResampling0240) {
+            {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingExtraction);
+                extractionApply =
+                    apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
+            }
+            planOrTransferEdited = planOrTransferEdited || extractionApply.applied;
+
+            if (params.resamplingInsertionEnable && extractionApply.applied) {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingInsertion);
+                insertionApply = apply_resampling_insertion_operations(
+                    state, workspace.resamplingPool, workspace.resampling, grid);
+                planOrTransferEdited = planOrTransferEdited || insertionApply.applied;
+            }
         }
     }
 

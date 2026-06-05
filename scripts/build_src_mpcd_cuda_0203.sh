@@ -44,6 +44,7 @@ set -x
   src/particle_state.cpp \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
+  src/cuda_resampling_persistent_active_path_0240.cpp \
   src/cuda_q6_backend.cu \
   src/cuda_cell_moments.cu \
   -o "$OUT"
