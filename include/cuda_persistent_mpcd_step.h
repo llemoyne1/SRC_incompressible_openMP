@@ -1,0 +1,47 @@
+#pragma once
+
+#include "particle_state.h"
+
+#include <cstdint>
+
+namespace mpcd {
+
+struct CudaPersistentMpcdStepConfig {
+    int Nx = 0;
+    int Ny = 0;
+    double Lx = 1.0;
+    double Ly = 1.0;
+    double rotationAngle = 2.0943951023931954923; // 120 degrees
+    int randomRotationSign = 1;
+    std::uint64_t rngSeed = 1u;
+    double targetKBT = 1.0e-3;
+    int thermostatMinParticles = 2;
+    double thermostatEpsilon = 1.0e-30;
+    int cycles = 1;
+    int threadsPerBlock = 256;
+};
+
+struct CudaPersistentMpcdStepDiagnostics {
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    std::uint64_t particlesRotated = 0u;
+    std::uint64_t invalidCellParticles = 0u;
+    int numCells = 0;
+    int cycles = 0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+bool cuda_persistent_mpcd_step_available();
+
+// 0212 persistent-particle prototype for the periodic Taylor--Green subset.
+// The particle arrays are uploaded once, then deposit -> SRC rotation ->
+// cell-relative thermostat are run for config.cycles without intermediate
+// host transfers. Only final vx/vy are downloaded back to state.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
+    ParticleState& state,
+    const CudaPersistentMpcdStepConfig& config);
+
+} // namespace mpcd

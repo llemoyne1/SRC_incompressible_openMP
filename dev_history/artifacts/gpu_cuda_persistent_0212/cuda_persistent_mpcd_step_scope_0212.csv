@@ -1,0 +1,12 @@
+item,value
+patch,0212
+branch,SRC_GPU
+objective,Start persistent GPU particle-state transition
+modifies_main_step,no
+runtime_default_cpu_unchanged,yes
+validated_chain,deposit->SRC collision->cell-relative thermostat
+host_to_device_uploads_per_validation,1
+device_to_host_downloads_per_validation,1
+supported_subset,periodic Taylor-Green-like synthetic states
+unsupported,wallVP immersed solid resampling transport Q6 coupling
+next_step,wire persistent state into real SRC/MPCD step as shadow or active experimental path
