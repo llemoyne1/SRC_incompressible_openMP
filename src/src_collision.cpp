@@ -523,7 +523,7 @@ public:
         if (outputDir_.empty() || rows_.empty()) return;
         std::error_code ec;
         std::filesystem::create_directories(outputDir_, ec);
-        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_persistent_src_collision_active_0213.csv";
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_persistent_src_collision_active_0214.csv";
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
@@ -602,7 +602,8 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.cycles = 1;
     cfg.threadsPerBlock = std::max(32, persistent_env_int_value("MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK", 256));
 
-    CudaPersistentMpcdStepDiagnostics raw = cuda_apply_persistent_tg_deposit_src_collision(state, ws.cellId, cfg);
+    CudaPersistentMpcdStepDiagnostics raw = cuda_apply_persistent_tg_deposit_src_collision(
+        state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
 
     CudaPersistentCollisionActiveRow row{};
     row.step = step;

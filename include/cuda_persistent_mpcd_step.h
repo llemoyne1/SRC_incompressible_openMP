@@ -52,12 +52,16 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
 
 // 0213 active-collision entry point for the real SRC/MPCD step.
 // It uploads particles once, performs deposit -> cell velocity finalization -> SRC rotation
-// on the GPU, downloads vx/vy and the real-particle cellId array, and leaves the
-// CPU thermostat/Q6/resampling stages unchanged. The caller is responsible for
+// on the GPU, downloads vx/vy plus the real-particle cellId/count/mass/mean-velocity
+// arrays, and leaves the CPU thermostat/Q6/resampling stages unchanged. The caller is responsible for
 // restricting this to the currently supported periodic, no-wallVP/no-solid subset.
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
     ParticleState& state,
     std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config);
 
 } // namespace mpcd

@@ -272,10 +272,14 @@ bool cuda_persistent_mpcd_step_available() {
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     ParticleState& state,
     std::vector<int>* cellIdOut,
+    std::vector<std::uint32_t>* cellCountOut,
+    std::vector<double>* cellMassOut,
+    std::vector<double>* cellUxOut,
+    std::vector<double>* cellUyOut,
     const CudaPersistentMpcdStepConfig& config,
     const bool applyThermostat) {
 #ifndef MPCD_ENABLE_CUDA_PERSISTENT_STEP
-    (void)state; (void)cellIdOut; (void)config; (void)applyThermostat;
+    (void)state; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config; (void)applyThermostat;
     throw std::runtime_error("cuda_apply_persistent_tg_impl called without MPCD_ENABLE_CUDA_PERSISTENT_STEP");
 #else
     validate_particle_state(state, "cuda_apply_persistent_tg_deposit_src_thermostat");
@@ -408,6 +412,22 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
         cellIdOut->assign(n, -1);
         MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut->data(), b.cellId, nBytesI, cudaMemcpyDeviceToHost));
     }
+    if (cellCountOut != nullptr) {
+        cellCountOut->assign(static_cast<std::size_t>(nc), 0u);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut->data(), b.count, cBytesU, cudaMemcpyDeviceToHost));
+    }
+    if (cellMassOut != nullptr) {
+        cellMassOut->assign(static_cast<std::size_t>(nc), 0.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut->data(), b.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+    }
+    if (cellUxOut != nullptr) {
+        cellUxOut->assign(static_cast<std::size_t>(nc), 0.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut->data(), b.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+    }
+    if (cellUyOut != nullptr) {
+        cellUyOut->assign(static_cast<std::size_t>(nc), 0.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut->data(), b.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    }
     unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
     MPCD_CUDA_CHECK(cudaMemcpy(&fluid, b.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&rotated, b.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
@@ -427,14 +447,18 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
     ParticleState& state,
     const CudaPersistentMpcdStepConfig& config) {
-    return cuda_apply_persistent_tg_impl(state, nullptr, config, true);
+    return cuda_apply_persistent_tg_impl(state, nullptr, nullptr, nullptr, nullptr, nullptr, config, true);
 }
 
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
     ParticleState& state,
     std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config) {
-    return cuda_apply_persistent_tg_impl(state, &cellIdOut, config, false);
+    return cuda_apply_persistent_tg_impl(state, &cellIdOut, &cellCountOut, &cellMassOut, &cellUxOut, &cellUyOut, config, false);
 }
 
 } // namespace mpcd

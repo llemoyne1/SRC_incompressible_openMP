@@ -1,0 +1,9 @@
+item,value
+patch,0214
+branch,SRC_GPU
+backend,CUDA-only
+runtime_flag,MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+purpose,Fix 0213 active persistent SRC collision workspace cell moments so summaries meanN/stdN/minN/maxN are not zero
+numerical_scope,Taylor-Green periodic full-domain subset only
+expected_change,No velocity/physics change; diagnostics/workspace occupancy restored
+validation,Compare CPU baseline vs persistent SRC collision active at 64x64 and then 128x128
