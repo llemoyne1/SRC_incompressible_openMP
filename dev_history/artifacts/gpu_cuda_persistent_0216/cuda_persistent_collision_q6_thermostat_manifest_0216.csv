@@ -1,0 +1,5 @@
+patch,artifact,description
+0216,scripts/build_src_mpcd_cuda_0216.sh,CUDA build including Q6/cell/thermostat/SRC/persistent backends
+0216,scripts/run_cuda_persistent_collision_q6_thermostat_0216.sh,Harness comparing CPU baseline Q6 CUDA persistent collision and combined persistent collision plus Q6 CUDA
+0216,doc/README_0216_CUDA_PERSISTENT_COLLISION_Q6_THERMOSTAT.md,Documentation for the first persistent collision to Q6 CUDA integration step
+0216,dev_history/artifacts/gpu_cuda_persistent_0216/cuda_persistent_collision_q6_thermostat_scope_0216.csv,Scope and guardrail summary
