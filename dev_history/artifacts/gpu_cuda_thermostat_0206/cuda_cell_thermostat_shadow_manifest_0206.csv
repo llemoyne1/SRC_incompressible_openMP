@@ -1,0 +1,7 @@
+patch,component,kind,path,description
+0206,cuda_cell_thermostat,modified,src/thermostat.cpp,Add CUDA thermostat shadow validation inside real thermostat step
+0206,cuda_cell_thermostat,new,scripts/build_src_mpcd_cuda_0206.sh,Build CUDA-enabled simulation binary with Q6 cell moments and thermostat primitives
+0206,cuda_cell_thermostat,new,scripts/run_cuda_cell_thermostat_shadow_0206.sh,Run CPU baseline versus CUDA thermostat shadow and collect diagnostics
+0206,cuda_cell_thermostat,new,doc/README_0206_CUDA_CELL_THERMOSTAT_SHADOW.md,Document shadow thermostat validation
+0206,cuda_cell_thermostat,new,dev_history/artifacts/gpu_cuda_thermostat_0206/cuda_cell_thermostat_shadow_manifest_0206.csv,List files in patch 0206
+0206,cuda_cell_thermostat,new,dev_history/artifacts/gpu_cuda_thermostat_0206/cuda_cell_thermostat_shadow_scope_0206.csv,Declare scope and guardrails for patch 0206

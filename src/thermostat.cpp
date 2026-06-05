@@ -1,11 +1,20 @@
 #include "thermostat.h"
 
+#ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+#include "cuda_cell_thermostat.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <string>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -29,6 +38,197 @@ int thread_id() {
     return 0;
 #endif
 }
+
+[[maybe_unused]] bool env_flag_enabled(const char* name, const bool fallback = false) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+[[maybe_unused]] int env_int_value(const char* name, const int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stoi(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+[[maybe_unused]] double env_double_value(const char* name, const double fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stod(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+#ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+struct CudaThermostatShadowRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    int numCells = 0;
+    std::uint64_t cellsRescaledCpu = 0u;
+    std::uint64_t cellsRescaledCuda = 0u;
+    std::uint64_t particlesRescaledCpu = 0u;
+    std::uint64_t particlesRescaledCuda = 0u;
+    double cpuKBTBefore = 0.0;
+    double cudaKBTBefore = 0.0;
+    double cpuKBTAfter = 0.0;
+    double cudaKBTAfter = 0.0;
+    double cpuScaleMean = 1.0;
+    double cudaScaleMean = 1.0;
+    double maxAbsVx = 0.0;
+    double maxAbsVy = 0.0;
+    double rmsV = 0.0;
+    std::uint64_t velocityMismatches = 0u;
+    double maxDiagDiff = 0.0;
+    double uploadSeconds = 0.0;
+    double kineticKernelSeconds = 0.0;
+    double scaleKernelSeconds = 0.0;
+    double applyKernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+class CudaThermostatShadowAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaThermostatShadowRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaThermostatShadowAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_thermostat_shadow_0206.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,fluidParticles,numCells,"
+            << "cellsRescaledCpu,cellsRescaledCuda,particlesRescaledCpu,particlesRescaledCuda,"
+            << "cpuKBTBefore,cudaKBTBefore,cpuKBTAfter,cudaKBTAfter,cpuScaleMean,cudaScaleMean,"
+            << "maxAbsVx,maxAbsVy,rmsV,velocityMismatches,maxDiagDiff,"
+            << "uploadSeconds,kineticKernelSeconds,scaleKernelSeconds,applyKernelSeconds,downloadSeconds,totalSeconds\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ',' << r.numCells << ','
+                << r.cellsRescaledCpu << ',' << r.cellsRescaledCuda << ','
+                << r.particlesRescaledCpu << ',' << r.particlesRescaledCuda << ','
+                << r.cpuKBTBefore << ',' << r.cudaKBTBefore << ','
+                << r.cpuKBTAfter << ',' << r.cudaKBTAfter << ','
+                << r.cpuScaleMean << ',' << r.cudaScaleMean << ','
+                << r.maxAbsVx << ',' << r.maxAbsVy << ',' << r.rmsV << ','
+                << r.velocityMismatches << ',' << r.maxDiagDiff << ','
+                << r.uploadSeconds << ',' << r.kineticKernelSeconds << ','
+                << r.scaleKernelSeconds << ',' << r.applyKernelSeconds << ','
+                << r.downloadSeconds << ',' << r.totalSeconds << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaThermostatShadowRow> rows_;
+};
+
+CudaThermostatShadowAccumulator& cuda_thermostat_shadow_accumulator() {
+    static CudaThermostatShadowAccumulator acc;
+    return acc;
+}
+
+double max_diag_diff(const ThermostatDiagnostics& cpu, const ThermostatDiagnostics& cuda) {
+    double d = 0.0;
+    d = std::max(d, std::abs(static_cast<double>(cpu.cellsRescaled) - static_cast<double>(cuda.cellsRescaled)));
+    d = std::max(d, std::abs(static_cast<double>(cpu.particlesRescaled) - static_cast<double>(cuda.particlesRescaled)));
+    d = std::max(d, std::abs(cpu.kBTBefore - cuda.kBTBefore));
+    d = std::max(d, std::abs(cpu.kBTAfter - cuda.kBTAfter));
+    d = std::max(d, std::abs(cpu.scaleMean - cuda.scaleMean));
+    d = std::max(d, std::abs(cpu.scaleMin - cuda.scaleMin));
+    d = std::max(d, std::abs(cpu.scaleMax - cuda.scaleMax));
+    return d;
+}
+
+void maybe_validate_cuda_cell_thermostat_shadow(const ParticleState& preState,
+                                                const ParticleState& postCpuState,
+                                                const SimulationParams& params,
+                                                const CellGrid& grid,
+                                                const std::vector<int>& cellId,
+                                                const ThermostatWorkspace& ws,
+                                                std::uint64_t step,
+                                                const ThermostatDiagnostics& cpuDiag,
+                                                double targetKBT) {
+    if (!env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false)) return;
+    const int every = std::max(1, env_int_value("MPCD_CUDA_THERMOSTAT_SHADOW_EVERY", 1));
+    if ((step % static_cast<std::uint64_t>(every)) != 0u) return;
+
+    ParticleState cudaState = preState;
+    CudaCellThermostatDiagnostics cudaRaw{};
+    CudaCellThermostatOptions opts{};
+    opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_THERMOSTAT_THREADS_PER_BLOCK", 256));
+
+    const ThermostatDiagnostics cudaDiag = cuda_apply_cell_relative_rescale_thermostat_from_moments(
+        cudaState, grid.numCells, cellId, ws.cellCount, ws.cellUx, ws.cellUy,
+        targetKBT, params.thermostatMinParticles, params.thermostatEpsilon, &cudaRaw, opts);
+
+    CudaThermostatShadowRow row{};
+    row.step = step;
+    row.particlesVisited = preState.Np;
+    row.fluidParticles = cudaRaw.fluidParticles;
+    row.numCells = grid.numCells;
+    row.cellsRescaledCpu = cpuDiag.cellsRescaled;
+    row.cellsRescaledCuda = cudaDiag.cellsRescaled;
+    row.particlesRescaledCpu = cpuDiag.particlesRescaled;
+    row.particlesRescaledCuda = cudaDiag.particlesRescaled;
+    row.cpuKBTBefore = cpuDiag.kBTBefore;
+    row.cudaKBTBefore = cudaDiag.kBTBefore;
+    row.cpuKBTAfter = cpuDiag.kBTAfter;
+    row.cudaKBTAfter = cudaDiag.kBTAfter;
+    row.cpuScaleMean = cpuDiag.scaleMean;
+    row.cudaScaleMean = cudaDiag.scaleMean;
+    row.maxDiagDiff = max_diag_diff(cpuDiag, cudaDiag);
+    row.uploadSeconds = cudaRaw.uploadSeconds;
+    row.kineticKernelSeconds = cudaRaw.kineticKernelSeconds;
+    row.scaleKernelSeconds = cudaRaw.scaleKernelSeconds;
+    row.applyKernelSeconds = cudaRaw.applyKernelSeconds;
+    row.downloadSeconds = cudaRaw.downloadSeconds;
+    row.totalSeconds = cudaRaw.totalSeconds;
+
+    const std::size_t n = static_cast<std::size_t>(preState.Np);
+    const double tol = env_double_value("MPCD_CUDA_THERMOSTAT_SHADOW_TOL", 1.0e-10);
+    double sumSq = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double dvx = std::abs(postCpuState.vx[i] - cudaState.vx[i]);
+        const double dvy = std::abs(postCpuState.vy[i] - cudaState.vy[i]);
+        row.maxAbsVx = std::max(row.maxAbsVx, dvx);
+        row.maxAbsVy = std::max(row.maxAbsVy, dvy);
+        sumSq += dvx * dvx + dvy * dvy;
+        if (dvx > tol || dvy > tol) ++row.velocityMismatches;
+    }
+    row.rmsV = n > 0u ? std::sqrt(sumSq / static_cast<double>(2u * n)) : 0.0;
+
+    CudaThermostatShadowAccumulator& acc = cuda_thermostat_shadow_accumulator();
+    acc.set_output_dir(params.outputDir);
+    acc.add(row);
+
+    const bool strict = env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW_STRICT", true);
+    const double diagTol = env_double_value("MPCD_CUDA_THERMOSTAT_SHADOW_DIAG_TOL", 1.0e-10);
+    if (strict && (row.velocityMismatches != 0u || row.maxDiagDiff > diagTol)) {
+        throw std::runtime_error("CUDA thermostat shadow mismatch: velocityMismatches=" +
+                                 std::to_string(row.velocityMismatches) +
+                                 " maxAbsVx=" + std::to_string(row.maxAbsVx) +
+                                 " maxAbsVy=" + std::to_string(row.maxAbsVy) +
+                                 " maxDiagDiff=" + std::to_string(row.maxDiagDiff));
+    }
+}
+#endif
 
 } // namespace
 
@@ -113,6 +313,16 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
     std::fill(ws.localKinetic.begin(), ws.localKinetic.end(), 0.0);
+
+#ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+    const bool cudaThermostatShadowEnabled = env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false);
+    ParticleState cudaThermostatPreState;
+    if (cudaThermostatShadowEnabled) {
+        cudaThermostatPreState = state;
+    }
+#else
+    const bool cudaThermostatShadowEnabled = false;
+#endif
 
 #pragma omp parallel
     {
@@ -252,6 +462,16 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     diag.scaleMean = cellsRescaled > 0u ? scaleSum / static_cast<double>(cellsRescaled) : 1.0;
     diag.scaleMin = cellsRescaled > 0u ? scaleMin : 1.0;
     diag.scaleMax = cellsRescaled > 0u ? scaleMax : 1.0;
+
+#ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+    if (cudaThermostatShadowEnabled) {
+        maybe_validate_cuda_cell_thermostat_shadow(cudaThermostatPreState, state, params, grid,
+                                                   cellId, ws, step, diag, targetKBT);
+    }
+#else
+    (void)cudaThermostatShadowEnabled;
+#endif
+
     return diag;
 }
 

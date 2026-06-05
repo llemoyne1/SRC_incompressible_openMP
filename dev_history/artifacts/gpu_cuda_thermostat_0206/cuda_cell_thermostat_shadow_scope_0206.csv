@@ -1,0 +1,14 @@
+item,value
+patch,0206
+branch,SRC_GPU
+base_assumption,0205 standalone CUDA thermostat already applied
+mode,shadow_validation_only
+runtime_flag,MPCD_CUDA_THERMOSTAT_SHADOW=1
+default_dynamics,CPU/OpenMP thermostat unchanged
+active_cuda_thermostat,not_enabled
+validated_case_target,tg_periodic_full
+recommended_grid_cases,64:200 128:100
+projection_backend_for_validation,cpu
+expected_output,cuda_cell_thermostat_shadow_0206.csv
+strict_default,true
+next_step_if_passes,active CUDA thermostat guarded by runtime flag
