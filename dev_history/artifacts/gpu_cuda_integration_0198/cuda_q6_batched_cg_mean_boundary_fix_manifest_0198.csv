@@ -1,0 +1,10 @@
+item,value
+patch,0198
+branch,SRC_GPU
+base_patch,0197
+scope,fix CUDA Q6 batched CG mean-removal boundary rrOld handling
+default_cpu_path,unchanged
+default_cuda_batch_size,1
+runtime_batch_env,MPCD_CUDA_Q6_DEVICE_SCALAR_BATCH
+validated_target,tg_periodic_full periodic unmasked Q6
+unsupported_cases,non-periodic bounded/open/immersed-solid Q6 remain rejected
