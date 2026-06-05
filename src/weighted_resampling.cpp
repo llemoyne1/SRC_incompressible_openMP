@@ -1,6 +1,9 @@
 #include "weighted_resampling.h"
 
 #include "immersed_solid.h"
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+#include "cuda_resampling_guard.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -14,6 +17,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -37,6 +41,165 @@ int thread_id() {
     return 0;
 #endif
 }
+
+
+
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+bool cuda_resampling_shadow_enabled_0229() {
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_CUDA_RESAMPLING_SHADOW");
+        if (v == nullptr || *v == '\0') return false;
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
+}
+
+std::string cuda_resampling_shadow_csv_path_0229() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_SHADOW_CSV");
+    return (v && *v) ? std::string(v) : std::string();
+}
+
+bool cuda_resampling_shadow_strict_0229() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_SHADOW_STRICT");
+    if (v == nullptr || *v == '\0') return true;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+bool cuda_resampling_shadow_compare_plan_0231() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_SHADOW_COMPARE_PLAN");
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+std::vector<std::uint32_t> to_u32_cells_0229(const std::vector<std::int32_t>& in) {
+    std::vector<std::uint32_t> out;
+    out.reserve(in.size());
+    for (std::int32_t v : in) {
+        if (v >= 0) out.push_back(static_cast<std::uint32_t>(v));
+    }
+    return out;
+}
+
+std::uint64_t mismatch_count_cells_0229(const std::vector<std::uint32_t>& a,
+                                        const std::vector<std::uint32_t>& b) {
+    const std::size_t n = std::min(a.size(), b.size());
+    std::uint64_t m = static_cast<std::uint64_t>(a.size() > b.size() ? a.size() - b.size() : b.size() - a.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        if (a[i] != b[i]) ++m;
+    }
+    return m;
+}
+
+void append_cuda_resampling_shadow_csv_0229(const std::string& path,
+                                            const std::string& outputDir,
+                                            ResamplingDepositProfileContext context,
+                                            const WeightedResamplingDiagnostics& d,
+                                            const CudaResamplingPlanDiagnostics& cd,
+                                            std::uint64_t poorMismatch,
+                                            std::uint64_t richMismatch,
+                                            double deficitDiff,
+                                            double excessDiff,
+                                            double plannedDiff,
+                                            bool pass) {
+    if (path.empty()) return;
+    const bool needHeader = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) return;
+    if (needHeader) {
+        out << "outputDir,context,pass,cpuPoor,cudaPoor,poorMismatch,cpuRich,cudaRich,richMismatch,"
+               "cpuDeficit,cudaDeficit,deficitAbsDiff,cpuExcess,cudaExcess,excessAbsDiff,"
+               "cpuPlanned,cudaPlanned,plannedAbsDiff,targetCellMass,nWetCells,nActiveCells\n";
+    }
+    out << outputDir << ','
+        << static_cast<int>(context) << ','
+        << (pass ? 1 : 0) << ','
+        << d.nReceiverCells << ',' << cd.poorCells << ',' << poorMismatch << ','
+        << d.nDonorCells << ',' << cd.richCells << ',' << richMismatch << ','
+        << d.receiverMassDeficitToTarget << ',' << cd.totalDeficit << ',' << deficitDiff << ','
+        << d.donorMassExcessAboveTarget << ',' << cd.totalExcess << ',' << excessDiff << ','
+        << d.plannedTransferMass << ',' << cd.plannedMass << ',' << plannedDiff << ','
+        << d.targetCellMass << ',' << d.nWetCells << ',' << d.nActiveCells << '\n';
+}
+
+void run_cuda_resampling_shadow_0229(const WeightedRealFluidDepositWorkspace& ws,
+                                     const SimulationParams& params,
+                                     const WeightedResamplingDiagnostics& d,
+                                     ResamplingDepositProfileContext context) {
+    if (!cuda_resampling_shadow_enabled_0229()) return;
+    if (!d.cellClassificationComputed || !(d.targetCellMass > 0.0)) return;
+
+    // The CPU resampling logic classifies poor/rich only on wet cells.  Feed
+    // wetCell as the CUDA active mask so the CUDA guard mirrors the actual CPU
+    // resampling domain for both active_domain and occupied wet-mask modes.
+    CudaResamplingPlanParams cp{};
+    cp.guard.targetCellMass = d.targetCellMass;
+    cp.guard.poorRelativeThreshold = std::max(0.0, 1.0 - params.resamplingPoorCellMassFraction);
+    cp.guard.richRelativeThreshold = std::max(0.0, params.resamplingRichCellMassFraction - 1.0);
+    cp.guard.minFluidCount = 0u;
+    cp.guard.useActiveMask = true;
+    cp.minTransferMass = 0.0;
+    cp.maxTransfers = 0u;
+
+    std::vector<std::uint32_t> cudaPoor;
+    std::vector<std::uint32_t> cudaRich;
+    std::vector<double> cudaDeficit;
+    std::vector<double> cudaExcess;
+    std::vector<std::uint32_t> cudaRecv;
+    std::vector<std::uint32_t> cudaDonor;
+    std::vector<double> cudaMass;
+    CudaResamplingPlanDiagnostics cd{};
+
+    const bool ok = cuda_resampling_compact_and_plan_0228(
+        ws.count, ws.mass, ws.wetCell, cp,
+        cudaPoor, cudaRich, cudaDeficit, cudaExcess,
+        cudaRecv, cudaDonor, cudaMass, &cd);
+    if (!ok || !cd.applied) {
+        throw std::runtime_error("CUDA resampling shadow 0229 failed to execute");
+    }
+
+    const std::vector<std::uint32_t> cpuPoor = to_u32_cells_0229(ws.receiverPoorCells);
+    const std::vector<std::uint32_t> cpuRich = to_u32_cells_0229(ws.donorRichCells);
+    const std::uint64_t poorMismatch = mismatch_count_cells_0229(cpuPoor, cudaPoor);
+    const std::uint64_t richMismatch = mismatch_count_cells_0229(cpuRich, cudaRich);
+    const double deficitDiff = std::abs(d.receiverMassDeficitToTarget - cd.totalDeficit);
+    const double excessDiff = std::abs(d.donorMassExcessAboveTarget - cd.totalExcess);
+    const double plannedDiff = std::abs(d.plannedTransferMass - cd.plannedMass);
+    const double massTol = std::max(1.0e-9, 1.0e-10 * std::max({1.0, std::abs(d.receiverMassDeficitToTarget), std::abs(d.donorMassExcessAboveTarget)}));
+    // In the real resampling path the CPU transfer plan is local/geometric and
+    // order-dependent, while the CUDA 0228 planner is a deterministic global
+    // greedy diagnostic.  They are not expected to match cell-by-cell or in
+    // planned mass on real deposits.  The shadow validation therefore checks
+    // the guard invariants by default: poor/rich sets and aggregate
+    // deficit/excess.  Enable MPCD_CUDA_RESAMPLING_SHADOW_COMPARE_PLAN=1 only
+    // for synthetic tests where the CPU and CUDA planners are intentionally
+    // identical.
+    const bool comparePlan = cuda_resampling_shadow_compare_plan_0231();
+    const bool pass = poorMismatch == 0u && richMismatch == 0u &&
+                      deficitDiff <= massTol && excessDiff <= massTol &&
+                      (!comparePlan || !d.transferPlanBuilt || plannedDiff <= massTol);
+
+    append_cuda_resampling_shadow_csv_0229(
+        cuda_resampling_shadow_csv_path_0229(), params.outputDir, context, d, cd,
+        poorMismatch, richMismatch, deficitDiff, excessDiff, plannedDiff, pass);
+
+    if (!pass) {
+        std::ostringstream oss;
+        oss << "CUDA resampling shadow 0231 mismatch: poorMismatch=" << poorMismatch
+            << " richMismatch=" << richMismatch
+            << " deficitDiff=" << deficitDiff
+            << " excessDiff=" << excessDiff
+            << " plannedDiff=" << plannedDiff
+            << " comparePlan=" << (cuda_resampling_shadow_compare_plan_0231() ? 1 : 0);
+        if (cuda_resampling_shadow_strict_0229()) {
+            throw std::runtime_error(oss.str());
+        }
+    }
+}
+#endif
 
 
 bool internal_profiles_enabled_0176() {
@@ -3025,6 +3188,10 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         d.particleMassMin = std::isfinite(particleMassMin) ? particleMassMin : 0.0;
         d.particleMassMax = particleMassMax;
     }
+
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+    run_cuda_resampling_shadow_0229(ws, params, d, profileContext);
+#endif
 
     d.depositProfileSeconds = depositProfileSeconds;
     d.depositProfileParticlesVisited = static_cast<std::uint64_t>(n);

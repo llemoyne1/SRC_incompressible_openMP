@@ -1,0 +1,5 @@
+patch,kind,path,description
+0231,modified,src/weighted_resampling.cpp,Relax real-deposit CUDA resampling shadow pass criterion to classification and aggregate mass invariants
+0231,added,scripts/build_src_mpcd_cuda_0231.sh,CUDA build script for resampling shadow plan-policy validation
+0231,added,scripts/run_cuda_resampling_shadow_0231.sh,Robust shadow harness with COMPARE_PLAN toggle
+0231,added,doc/README_0231_CUDA_RESAMPLING_SHADOW_PLAN_POLICY.md,Documentation of plan comparison policy

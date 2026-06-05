@@ -1,0 +1,8 @@
+item,value
+scope,CUDA resampling shadow validation on real deposits
+changes_numeric_kernel,no
+particle_mutation,no
+cpu_authoritative_path,yes
+strict_invariants,poor/rich sets and aggregate deficit/excess
+planned_mass_comparison,diagnostic only by default
+rollback_env,MPCD_CUDA_RESAMPLING_SHADOW_COMPARE_PLAN=1

@@ -1,0 +1,6 @@
+item,status,notes
+runtime_step_modified,no,Standalone only; no particle mutation and no simulation path change
+cuda_classification,validated_in_0227,Reused and extended
+cuda_compaction,new,Compacts poor/rich cell lists with atomics then sorts on host for deterministic comparison
+greedy_transfer_plan,new,Host-side deterministic plan from GPU compact lists
+particle_extraction_insertion,not_yet,Deferred to subsequent patch after shadow validation on real deposits

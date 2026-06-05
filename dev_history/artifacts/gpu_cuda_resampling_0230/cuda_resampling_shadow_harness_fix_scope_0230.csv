@@ -1,0 +1,7 @@
+item,status,notes
+kernel_changes,none,no CUDA or CPU numerical kernel changed
+step_changes,none,weighted resampling implementation unchanged
+purpose,harness_fix,ensure CUDA resampling shadow run is actually summarized
+strict_shadow_default,disabled,STRICT_SHADOW=0 records mismatches instead of aborting before summary
+shadow_rows_required,enabled,shadow mode fails if shadowRows==0
+next_step,real_shadow_validation,rerun 64x64 and 128x128 then proceed to donor-selection/extraction-insertion only if shadow passes

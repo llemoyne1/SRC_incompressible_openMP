@@ -1,0 +1,2 @@
+grid,NX,NY,steps,mode,baselineWallTime,modeWallTime,wallDelta_s,wallSpeedup,failed_metrics,compared_metrics,verdict,shadowRows,shadowPassRows,shadowPoorMismatch,shadowRichMismatch,shadowDeficitAbsDiffMax,shadowExcessAbsDiffMax,shadowPlannedAbsDiffMax,shadowCsv,compareCsv,compareSummary
+64x64_s200,64,64,200,cpu_baseline,3.648417641,3.648417641,0.0,1.0,0,0,PASS,0,0,0,0,0.0,0.0,0.0,none,none,none

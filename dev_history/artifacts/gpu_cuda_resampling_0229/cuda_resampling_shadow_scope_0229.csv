@@ -1,0 +1,7 @@
+item,status,details
+runtime default,unchanged,CUDA resampling shadow is disabled unless MPCD_CUDA_RESAMPLING_SHADOW=1
+particle mutation,none,No particle role/mass/position/velocity mutation is introduced
+validated objects,real deposits,Uses the actual WeightedRealFluidDepositWorkspace produced by the run
+strict comparison,enabled by default,Poor/rich cell lists and aggregate mass balances must match
+transfer plan comparison,aggregate only,The CUDA prototype checks planned mass balance; exact donor/receiver pair order remains CPU-specific
+next step,mutating shadow,Move to donor particle selection/extraction-insertion shadow planning

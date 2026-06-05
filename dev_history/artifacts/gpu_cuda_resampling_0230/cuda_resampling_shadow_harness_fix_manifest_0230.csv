@@ -1,0 +1,4 @@
+patch,area,file,change
+0230,resampling-shadow,scripts/build_src_mpcd_cuda_0230.sh,CUDA build script for robust 0230 harness
+0230,resampling-shadow,scripts/run_cuda_resampling_shadow_0230.sh,robust baseline/shadow runner with logs and shadowRows fail guard
+0230,documentation,doc/README_0230_CUDA_RESAMPLING_SHADOW_HARNESS_FIX.md,documents 0229 ambiguity and 0230 validation criteria
