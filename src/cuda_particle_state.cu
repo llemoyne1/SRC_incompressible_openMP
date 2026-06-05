@@ -294,6 +294,38 @@ void CudaParticleState::upload_velocities(const ParticleState& state, CudaPartic
 #endif
 }
 
+void CudaParticleState::upload_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag) {
+#ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    (void)state; (void)diag;
+    throw std::runtime_error("CudaParticleState::upload_roles called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    validate_particle_state(state, "CudaParticleState::upload_roles");
+    ensure_capacity(state.Np, diag);
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t bytesR = n * sizeof(unsigned char);
+    const unsigned char* roleHost = role_upload_ptr_or_null(state);
+    const auto t0 = Clock::now();
+    if (n > 0u) {
+        if (roleHost != nullptr) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
+        } else {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
+        }
+    }
+    // Do not mark the mass/type/role metadata cache as fully valid here: this
+    // fast path intentionally uploads only role[]. A later
+    // upload_kinematics_with_cached_metadata() must still refresh mass/type.
+    if (diag != nullptr) {
+        diag->uploadCalls += 1u;
+        diag->hostToDeviceBytes += bytesR;
+        diag->uploadSeconds += elapsed_seconds(t0);
+        diag->particles = state.Np;
+        diag->capacity = impl_->capacity;
+        diag->allocatedBytes = impl_->allocatedBytes;
+    }
+#endif
+}
+
 void CudaParticleState::upload_masses_and_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag) {
 #ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
     (void)state; (void)diag;

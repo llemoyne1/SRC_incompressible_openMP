@@ -293,7 +293,20 @@ try_apply_cuda_resampling_persistent_active_path_0240(
     CudaParticleStateDiagnostics stateDiag{};
     const std::string uploadMode0242 = env_string_0242(
         "MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_UPLOAD_MODE", "all");
-    if (uploadMode0242 == "cached" || uploadMode0242 == "kinematics_cached") {
+    if (uploadMode0242 == "roles_only" || uploadMode0242 == "role_only") {
+        // 0243 diagnostic/transition mode: the CPU shadow remains authoritative
+        // and no full device->host particle download is performed. The kernels
+        // only need role[] to validate/apply the Fluid->Inactive->Fluid edits;
+        // insertion writes all touched particle fields explicitly. Non-touched
+        // device kinematics may be stale and must not be consumed downstream.
+        if (!env_flag_true_0241("MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_HOST_SHADOW_AUTHORITATIVE", false) ||
+            env_flag_true_0241("MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_DOWNLOAD_ALL", false)) {
+            if (env_flag_true_0241("MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0243_STRICT_ROLES_ONLY", true)) {
+                throw std::runtime_error("roles_only upload mode requires HOST_SHADOW_AUTHORITATIVE=1 and DOWNLOAD_ALL=0");
+            }
+        }
+        gpuState.upload_roles(state, &stateDiag);
+    } else if (uploadMode0242 == "cached" || uploadMode0242 == "kinematics_cached") {
         gpuState.upload_kinematics_with_cached_metadata(state, &stateDiag);
     } else {
         gpuState.upload_all(state, &stateDiag);

@@ -87,6 +87,12 @@ public:
                                                 CudaParticleStateDiagnostics* diag = nullptr);
     void upload_positions(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
     void upload_velocities(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
+    // 0243: role-only upload for the active resampling shadow benchmark.
+    // It allocates the full device particle state but refreshes only role[].
+    // This is safe only for paths that do not subsequently treat the whole
+    // CudaParticleState as authoritative; non-touched x/y/v/m/type entries may
+    // remain stale.
+    void upload_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
     void upload_masses_and_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
 
     void download_velocities(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
