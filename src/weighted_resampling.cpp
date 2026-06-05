@@ -3,6 +3,7 @@
 #include "immersed_solid.h"
 #ifdef MPCD_ENABLE_CUDA_RESAMPLING
 #include "cuda_resampling_guard.h"
+#include "cuda_resampling_particle_ops.h"
 #endif
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <unordered_set>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -199,6 +201,340 @@ void run_cuda_resampling_shadow_0229(const WeightedRealFluidDepositWorkspace& ws
         }
     }
 }
+
+
+bool cuda_resampling_transfer_shadow_enabled_0234() {
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW");
+        if (v == nullptr || *v == '\0') return false;
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
+}
+
+std::string cuda_resampling_transfer_shadow_csv_path_0234() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_CSV");
+    return (v && *v) ? std::string(v) : std::string();
+}
+
+bool cuda_resampling_transfer_shadow_strict_0234() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_STRICT");
+    if (v == nullptr || *v == '\0') return true;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+std::uint64_t cuda_resampling_transfer_shadow_max_transfers_0234() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_MAX_TRANSFERS");
+    if (v == nullptr || *v == '\0') return 4096u;
+    try {
+        const long long x = std::stoll(std::string(v));
+        return x <= 0 ? 0u : static_cast<std::uint64_t>(x);
+    } catch (...) {
+        return 4096u;
+    }
+}
+
+
+bool cuda_resampling_transfer_shadow_unique_receiver_0235() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_UNIQUE_RECEIVER");
+    // 0234 kept at most one synthetic insertion per receiver cell.  That was
+    // safe, but it artificially limited shadow coverage on real deposits.  The
+    // 0235 default is to allow several unique insertion particles in the same
+    // receiver cell while still forbidding duplicate donor particles.  Set this
+    // variable to 1 to recover the 0234 policy exactly.
+    if (v == nullptr || *v == '\0') return false;
+    const std::string sv(v);
+    return !(sv == "0" || sv == "false" || sv == "FALSE" ||
+             sv == "off" || sv == "OFF" || sv == "no" || sv == "NO");
+}
+
+double max_abs_diff_vec_0234(const std::vector<double>& a, const std::vector<double>& b) {
+    if (a.size() != b.size()) return std::numeric_limits<double>::infinity();
+    double m = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i) m = std::max(m, std::abs(a[i] - b[i]));
+    return m;
+}
+
+std::uint64_t mismatch_u32_vec_0234(const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b) {
+    if (a.size() != b.size()) return static_cast<std::uint64_t>(std::max(a.size(), b.size()));
+    std::uint64_t m = 0u;
+    for (std::size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) ++m;
+    return m;
+}
+
+std::uint64_t mismatch_u8_vec_0234(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) {
+    if (a.size() != b.size()) return static_cast<std::uint64_t>(std::max(a.size(), b.size()));
+    std::uint64_t m = 0u;
+    for (std::size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) ++m;
+    return m;
+}
+
+void totals_mass_momentum_0234(const std::vector<double>& mass,
+                               const std::vector<double>& vx,
+                               const std::vector<double>& vy,
+                               double& m, double& px, double& py) {
+    m = px = py = 0.0;
+    for (std::size_t i = 0; i < mass.size(); ++i) {
+        m += mass[i];
+        px += mass[i] * vx[i];
+        py += mass[i] * vy[i];
+    }
+}
+
+void cpu_apply_shadow_transfer_0234(
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<double>& requestedTransferMass,
+    const std::vector<std::uint32_t>& selectedDonorParticle,
+    const std::vector<std::uint32_t>& insertionParticle,
+    const CudaResamplingShadowTransferParams& params,
+    std::vector<std::uint32_t>& cell,
+    std::vector<std::uint8_t>& role,
+    std::vector<double>& mass,
+    std::vector<double>& vx,
+    std::vector<double>& vy,
+    std::vector<double>& actualTransferMass) {
+    actualTransferMass.assign(receiverCell.size(), 0.0);
+    for (std::size_t t = 0; t < receiverCell.size(); ++t) {
+        const std::uint32_t p = selectedDonorParticle[t];
+        const std::uint32_t q = insertionParticle[t];
+        if (p == params.invalidParticle || q == params.invalidParticle) continue;
+        if (p >= cell.size() || q >= cell.size()) continue;
+        if (role[p] != params.fluidRole) continue;
+        if (role[q] != params.insertionRole) continue;
+        const double donorMass = mass[p];
+        double dm = requestedTransferMass[t];
+        if (!(dm > 0.0) || !(donorMass > params.minDonorMassAfterExtract)) continue;
+        if (params.maxExtractFractionOfDonor > 0.0 && params.maxExtractFractionOfDonor < 1.0) {
+            dm = std::min(dm, params.maxExtractFractionOfDonor * donorMass);
+        }
+        dm = std::min(dm, donorMass - params.minDonorMassAfterExtract);
+        if (!(dm > 0.0)) continue;
+        const double vxp = vx[p];
+        const double vyp = vy[p];
+        mass[p] -= dm;
+        mass[q] += dm;
+        cell[q] = receiverCell[t];
+        role[q] = params.fluidRole;
+        vx[q] = vxp;
+        vy[q] = vyp;
+        actualTransferMass[t] = dm;
+    }
+}
+
+void append_cuda_resampling_transfer_shadow_csv_0234(
+    const std::string& path,
+    const std::string& outputDir,
+    ResamplingDepositProfileContext context,
+    const WeightedResamplingDiagnostics& d,
+    std::uint64_t rawSelected,
+    std::uint64_t shadowTransfers,
+    const CudaResamplingShadowTransferDiagnostics& cd,
+    std::uint64_t cellMismatch,
+    std::uint64_t roleMismatch,
+    double massMaxAbs,
+    double vxMaxAbs,
+    double vyMaxAbs,
+    double actualMaxAbs,
+    double massConservationAbs,
+    double pxConservationAbs,
+    double pyConservationAbs,
+    bool pass) {
+    if (path.empty()) return;
+    const bool needHeader = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) return;
+    if (needHeader) {
+        out << "outputDir,context,pass,fluidParticles,rawSelected,shadowTransfers,requestedMass,actualMass,"
+               "appliedTransfers,skippedTransfers,invalidDonorTransfers,invalidInsertionTransfers,"
+               "duplicateDonorParticles,duplicateInsertionParticles,cellMismatch,roleMismatch,"
+               "massMaxAbs,vxMaxAbs,vyMaxAbs,actualMaxAbs,massConservationAbs,pxConservationAbs,pyConservationAbs,"
+               "uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,targetCellMass,nTransferPairs,nSelectedDonorParticles\n";
+    }
+    out << outputDir << ','
+        << static_cast<int>(context) << ','
+        << (pass ? 1 : 0) << ','
+        << d.nFluid << ','
+        << rawSelected << ','
+        << shadowTransfers << ','
+        << cd.requestedTransferMass << ','
+        << cd.actualTransferMass << ','
+        << cd.appliedTransfers << ','
+        << cd.skippedTransfers << ','
+        << cd.invalidDonorTransfers << ','
+        << cd.invalidInsertionTransfers << ','
+        << cd.duplicateDonorParticles << ','
+        << cd.duplicateInsertionParticles << ','
+        << cellMismatch << ','
+        << roleMismatch << ','
+        << massMaxAbs << ','
+        << vxMaxAbs << ','
+        << vyMaxAbs << ','
+        << actualMaxAbs << ','
+        << massConservationAbs << ','
+        << pxConservationAbs << ','
+        << pyConservationAbs << ','
+        << cd.uploadSeconds << ','
+        << cd.kernelSeconds << ','
+        << cd.downloadSeconds << ','
+        << cd.totalSeconds << ','
+        << d.targetCellMass << ','
+        << d.nTransferPairs << ','
+        << d.nSelectedDonorParticles << '\n';
+}
+
+void run_cuda_resampling_transfer_shadow_0234(const ParticleState& state,
+                                              const WeightedRealFluidDepositWorkspace& ws,
+                                              const SimulationParams& params,
+                                              const WeightedResamplingDiagnostics& d,
+                                              ResamplingDepositProfileContext context) {
+    if (!cuda_resampling_transfer_shadow_enabled_0234()) return;
+    if (!d.donorParticleSelectionBuilt || ws.selectedDonorParticles.empty()) return;
+    if (ws.cellId.size() < static_cast<std::size_t>(state.Np)) return;
+
+    const std::uint64_t maxTransfers = cuda_resampling_transfer_shadow_max_transfers_0234();
+    std::vector<std::uint32_t> particleCell;
+    std::vector<std::uint8_t> particleRole;
+    std::vector<double> particleMass;
+    std::vector<double> particleVx;
+    std::vector<double> particleVy;
+    particleCell.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+    particleRole.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+    particleMass.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+    particleVx.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+    particleVy.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+
+    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        int c = ws.cellId[i];
+        if (c < 0) c = 0;
+        particleCell.push_back(static_cast<std::uint32_t>(c));
+        particleRole.push_back(i < state.role.size() ? state.role[i] : static_cast<std::uint8_t>(ParticleRole::Fluid));
+        particleMass.push_back(i < state.mass.size() ? state.mass[i] : 0.0);
+        particleVx.push_back(i < state.vx.size() ? state.vx[i] : 0.0);
+        particleVy.push_back(i < state.vy.size() ? state.vy[i] : 0.0);
+    }
+
+    std::vector<std::uint32_t> receiverCell;
+    std::vector<double> requestedTransferMass;
+    std::vector<std::uint32_t> selectedDonorParticle;
+    std::vector<std::uint32_t> insertionParticle;
+    receiverCell.reserve(ws.selectedDonorParticles.size());
+    requestedTransferMass.reserve(ws.selectedDonorParticles.size());
+    selectedDonorParticle.reserve(ws.selectedDonorParticles.size());
+    insertionParticle.reserve(ws.selectedDonorParticles.size());
+
+    std::unordered_set<std::uint32_t> usedDonor;
+    std::unordered_set<std::uint32_t> usedReceiver;
+    const bool uniqueReceiver = cuda_resampling_transfer_shadow_unique_receiver_0235();
+    std::uint64_t rawSelected = 0u;
+    for (const ResamplingSelectedDonorParticle& s : ws.selectedDonorParticles) {
+        ++rawSelected;
+        if (maxTransfers > 0u && receiverCell.size() >= static_cast<std::size_t>(maxTransfers)) break;
+        if (s.particleIndex == kInvalidParticleIndex || s.particleIndex >= static_cast<std::uint64_t>(state.Np)) continue;
+        if (s.receiverCell < 0) continue;
+        const std::uint32_t p = static_cast<std::uint32_t>(s.particleIndex);
+        const std::uint32_t rc = static_cast<std::uint32_t>(s.receiverCell);
+        if (!usedDonor.insert(p).second) continue;
+        // 0235 expands the 0234 shadow coverage: several transfers may target
+        // the same receiver cell as long as each transfer uses a distinct
+        // synthetic insertion particle.  The old one-receiver policy is kept as
+        // an explicit ablation with
+        // MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_UNIQUE_RECEIVER=1.
+        if (uniqueReceiver && !usedReceiver.insert(rc).second) continue;
+        const double mp = p < particleMass.size() ? particleMass[p] : 0.0;
+        if (!(mp > 0.0)) continue;
+        const double request = std::min(0.45 * mp, std::max(0.0, s.planEntryMass > 0.0 ? s.planEntryMass : s.particleMass));
+        if (!(request > 0.0)) continue;
+        receiverCell.push_back(rc);
+        requestedTransferMass.push_back(request);
+        selectedDonorParticle.push_back(p);
+        const std::uint32_t q = static_cast<std::uint32_t>(particleCell.size());
+        insertionParticle.push_back(q);
+        particleCell.push_back(rc);
+        particleRole.push_back(static_cast<std::uint8_t>(ParticleRole::Latent));
+        particleMass.push_back(0.0);
+        particleVx.push_back(0.0);
+        particleVy.push_back(0.0);
+    }
+
+    if (receiverCell.empty()) return;
+
+    CudaResamplingShadowTransferParams tp{};
+    tp.fluidRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+    tp.insertionRole = static_cast<std::uint8_t>(ParticleRole::Latent);
+    tp.maxExtractFractionOfDonor = 0.50;
+    tp.minDonorMassAfterExtract = 1.0e-12;
+
+    std::vector<std::uint32_t> cpuCell = particleCell;
+    std::vector<std::uint8_t> cpuRole = particleRole;
+    std::vector<double> cpuMass = particleMass;
+    std::vector<double> cpuVx = particleVx;
+    std::vector<double> cpuVy = particleVy;
+    std::vector<double> cpuActual;
+    cpu_apply_shadow_transfer_0234(receiverCell, requestedTransferMass, selectedDonorParticle,
+                                   insertionParticle, tp, cpuCell, cpuRole, cpuMass, cpuVx, cpuVy, cpuActual);
+
+    std::vector<std::uint32_t> gpuCell;
+    std::vector<std::uint8_t> gpuRole;
+    std::vector<double> gpuMass;
+    std::vector<double> gpuVx;
+    std::vector<double> gpuVy;
+    std::vector<double> gpuActual;
+    CudaResamplingShadowTransferDiagnostics cd{};
+    const bool ok = cuda_resampling_apply_shadow_transfers_0233(
+        particleCell, particleRole, particleMass, particleVx, particleVy,
+        receiverCell, requestedTransferMass, selectedDonorParticle, insertionParticle,
+        tp, gpuCell, gpuRole, gpuMass, gpuVx, gpuVy, &gpuActual, &cd);
+    if (!ok || !cd.applied) {
+        throw std::runtime_error("CUDA resampling transfer shadow 0234 failed to execute");
+    }
+
+    double beforeM = 0.0, beforePx = 0.0, beforePy = 0.0;
+    double afterM = 0.0, afterPx = 0.0, afterPy = 0.0;
+    totals_mass_momentum_0234(particleMass, particleVx, particleVy, beforeM, beforePx, beforePy);
+    totals_mass_momentum_0234(gpuMass, gpuVx, gpuVy, afterM, afterPx, afterPy);
+
+    const std::uint64_t cellMismatch = mismatch_u32_vec_0234(cpuCell, gpuCell);
+    const std::uint64_t roleMismatch = mismatch_u8_vec_0234(cpuRole, gpuRole);
+    const double massMaxAbs = max_abs_diff_vec_0234(cpuMass, gpuMass);
+    const double vxMaxAbs = max_abs_diff_vec_0234(cpuVx, gpuVx);
+    const double vyMaxAbs = max_abs_diff_vec_0234(cpuVy, gpuVy);
+    const double actualMaxAbs = max_abs_diff_vec_0234(cpuActual, gpuActual);
+    const double massConservationAbs = std::abs(afterM - beforeM);
+    const double pxConservationAbs = std::abs(afterPx - beforePx);
+    const double pyConservationAbs = std::abs(afterPy - beforePy);
+    const double tol = 1.0e-9;
+    const bool pass = cellMismatch == 0u && roleMismatch == 0u &&
+                      massMaxAbs <= tol && vxMaxAbs <= 1.0e-12 && vyMaxAbs <= 1.0e-12 &&
+                      actualMaxAbs <= tol && massConservationAbs <= 1.0e-8 &&
+                      pxConservationAbs <= 1.0e-8 && pyConservationAbs <= 1.0e-8;
+
+    append_cuda_resampling_transfer_shadow_csv_0234(
+        cuda_resampling_transfer_shadow_csv_path_0234(), params.outputDir, context, d,
+        rawSelected, static_cast<std::uint64_t>(receiverCell.size()), cd,
+        cellMismatch, roleMismatch, massMaxAbs, vxMaxAbs, vyMaxAbs, actualMaxAbs,
+        massConservationAbs, pxConservationAbs, pyConservationAbs, pass);
+
+    if (!pass) {
+        std::ostringstream oss;
+        oss << "CUDA resampling transfer shadow 0234 mismatch: transfers=" << receiverCell.size()
+            << " cellMismatch=" << cellMismatch
+            << " roleMismatch=" << roleMismatch
+            << " massMaxAbs=" << massMaxAbs
+            << " vxMaxAbs=" << vxMaxAbs
+            << " vyMaxAbs=" << vyMaxAbs
+            << " massConservationAbs=" << massConservationAbs
+            << " pxConservationAbs=" << pxConservationAbs
+            << " pyConservationAbs=" << pyConservationAbs;
+        if (cuda_resampling_transfer_shadow_strict_0234()) {
+            throw std::runtime_error(oss.str());
+        }
+    }
+}
+
 #endif
 
 
@@ -3191,6 +3527,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
 
 #ifdef MPCD_ENABLE_CUDA_RESAMPLING
     run_cuda_resampling_shadow_0229(ws, params, d, profileContext);
+    run_cuda_resampling_transfer_shadow_0234(state, ws, params, d, profileContext);
 #endif
 
     d.depositProfileSeconds = depositProfileSeconds;

@@ -1,0 +1,3 @@
+patch,file,change
+0234b,src/weighted_resampling.cpp,Add missing <unordered_set> include for CUDA resampling transfer shadow build
+0234b,doc/README_0234B_CUDA_RESAMPLING_TRANSFER_SHADOW_COMPILE_FIX.md,Document compile-only fix

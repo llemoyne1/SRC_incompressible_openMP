@@ -1,0 +1,6 @@
+item,value
+scope,compile-only fix
+numerical_logic_changed,no
+runtime_behavior_changed,no
+reason,weighted_resampling.cpp uses std::unordered_set in 0234 transfer shadow code
+validation,rebuild and rerun scripts/run_cuda_resampling_transfer_shadow_0234.sh
