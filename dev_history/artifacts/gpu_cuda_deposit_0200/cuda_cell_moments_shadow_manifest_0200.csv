@@ -1,0 +1,7 @@
+file,role,notes
+include/cuda_cell_moments.h,existing,0199 CUDA cell moments interface reused unchanged
+src/cuda_cell_moments.cu,existing,0199 atomic deposit implementation reused unchanged
+src/src_collision.cpp,modified,optional CUDA cell-moments shadow validation after CPU thread-local deposit
+scripts/build_src_mpcd_cuda_0200.sh,added,CUDA-enabled full SRC/MPCD build with Q6 and cell-moments modules
+scripts/run_cuda_cell_moments_shadow_0200.sh,added,runs baseline/shadow TG cases and aggregates in-step shadow diagnostics
+doc/README_0200_CUDA_CELL_MOMENTS_SHADOW.md,added,documents scope runtime switches validation and limitations

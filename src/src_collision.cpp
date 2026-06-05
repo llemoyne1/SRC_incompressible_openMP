@@ -1,12 +1,23 @@
 #include "src_collision.h"
 #include "immersed_solid.h"
 
+#ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
+#include "cuda_cell_moments.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 #include <random>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -179,6 +190,184 @@ void add_virtual_face_to_cell(const VirtualFaceContribution& v,
     vpPyTotal += v.py;
 }
 
+
+#ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
+bool env_flag_enabled(const char* name, const bool fallback = false) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+int env_int_value(const char* name, const int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stoi(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+double env_double_value(const char* name, const double fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try {
+        return std::stod(std::string(v));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+struct CudaCellMomentsShadowRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    int numCells = 0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+    std::uint64_t cellIdMismatches = 0u;
+    std::uint64_t countMismatches = 0u;
+    double maxAbsMass = 0.0;
+    double maxAbsPx = 0.0;
+    double maxAbsPy = 0.0;
+    double maxAbsUx = 0.0;
+    double maxAbsUy = 0.0;
+    double sumAbsMass = 0.0;
+    double sumAbsPx = 0.0;
+    double sumAbsPy = 0.0;
+};
+
+class CudaCellMomentsShadowAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaCellMomentsShadowRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaCellMomentsShadowAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_moments_shadow_0200.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,fluidParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,cellIdMismatches,countMismatches,maxAbsMass,maxAbsPx,maxAbsPy,maxAbsUx,maxAbsUy,sumAbsMass,sumAbsPx,sumAbsPy\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ',' << r.numCells << ','
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << ','
+                << r.cellIdMismatches << ',' << r.countMismatches << ','
+                << r.maxAbsMass << ',' << r.maxAbsPx << ',' << r.maxAbsPy << ','
+                << r.maxAbsUx << ',' << r.maxAbsUy << ','
+                << r.sumAbsMass << ',' << r.sumAbsPx << ',' << r.sumAbsPy << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaCellMomentsShadowRow> rows_;
+};
+
+CudaCellMomentsShadowAccumulator& cuda_cell_moments_shadow_accumulator() {
+    static CudaCellMomentsShadowAccumulator acc;
+    return acc;
+}
+
+void maybe_validate_cuda_cell_moments_shadow(const ParticleState& state,
+                                             const SimulationParams& params,
+                                             const CellGrid& grid,
+                                             const GridShift& shift,
+                                             std::uint64_t step,
+                                             const CollisionWorkspace& ws,
+                                             const int nt) {
+    if (!env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_SHADOW", false)) return;
+    const int every = std::max(1, env_int_value("MPCD_CUDA_CELL_MOMENTS_SHADOW_EVERY", 1));
+    if ((step % static_cast<std::uint64_t>(every)) != 0u) return;
+
+    CudaCellMomentsShadowAccumulator& acc = cuda_cell_moments_shadow_accumulator();
+    acc.set_output_dir(params.outputDir);
+
+    CudaCellMoments cuda{};
+    CudaCellMomentsDiagnostics diag{};
+    CudaCellMomentsOptions opts{};
+    opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_CELL_MOMENTS_THREADS_PER_BLOCK", 256));
+    cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
+
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const int nc = grid.numCells;
+    if (cuda.cellId.size() != n || cuda.cellCount.size() != static_cast<std::size_t>(nc)) {
+        throw std::runtime_error("CUDA cell moments shadow: incompatible CUDA output sizes");
+    }
+
+    CudaCellMomentsShadowRow row{};
+    row.step = step;
+    row.particlesVisited = diag.particlesVisited;
+    row.fluidParticles = diag.fluidParticles;
+    row.numCells = diag.numCells;
+    row.uploadSeconds = diag.uploadSeconds;
+    row.kernelSeconds = diag.kernelSeconds;
+    row.downloadSeconds = diag.downloadSeconds;
+    row.totalSeconds = diag.totalSeconds;
+
+    for (std::size_t i = 0; i < n; ++i) {
+        if (ws.cellId[i] != cuda.cellId[i]) ++row.cellIdMismatches;
+    }
+
+    for (int c = 0; c < nc; ++c) {
+        std::uint32_t count = 0u;
+        double mass = 0.0;
+        double px = 0.0;
+        double py = 0.0;
+        for (int t = 0; t < nt; ++t) {
+            const std::size_t k = static_cast<std::size_t>(t * nc + c);
+            count += ws.localCount[k];
+            mass += ws.localMass[k];
+            px += ws.localPx[k];
+            py += ws.localPy[k];
+        }
+        const std::size_t kk = static_cast<std::size_t>(c);
+        if (count != cuda.cellCount[kk]) ++row.countMismatches;
+        const double ux = mass > 0.0 ? px / mass : 0.0;
+        const double uy = mass > 0.0 ? py / mass : 0.0;
+        const double dm = std::abs(mass - cuda.cellMass[kk]);
+        const double dpx = std::abs(px - cuda.cellPx[kk]);
+        const double dpy = std::abs(py - cuda.cellPy[kk]);
+        const double dux = std::abs(ux - cuda.cellUx[kk]);
+        const double duy = std::abs(uy - cuda.cellUy[kk]);
+        row.maxAbsMass = std::max(row.maxAbsMass, dm);
+        row.maxAbsPx = std::max(row.maxAbsPx, dpx);
+        row.maxAbsPy = std::max(row.maxAbsPy, dpy);
+        row.maxAbsUx = std::max(row.maxAbsUx, dux);
+        row.maxAbsUy = std::max(row.maxAbsUy, duy);
+        row.sumAbsMass += dm;
+        row.sumAbsPx += dpx;
+        row.sumAbsPy += dpy;
+    }
+
+    acc.add(row);
+
+    const bool strict = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_SHADOW_STRICT", true);
+    const double tol = env_double_value("MPCD_CUDA_CELL_MOMENTS_SHADOW_TOL", 1.0e-9);
+    if (strict && (row.cellIdMismatches != 0u || row.countMismatches != 0u ||
+                   row.maxAbsMass > tol || row.maxAbsPx > tol || row.maxAbsPy > tol ||
+                   row.maxAbsUx > tol || row.maxAbsUy > tol)) {
+        throw std::runtime_error("CUDA cell moments shadow mismatch: cellId=" +
+                                 std::to_string(row.cellIdMismatches) +
+                                 " count=" + std::to_string(row.countMismatches) +
+                                 " maxAbsMass=" + std::to_string(row.maxAbsMass) +
+                                 " maxAbsPx=" + std::to_string(row.maxAbsPx) +
+                                 " maxAbsPy=" + std::to_string(row.maxAbsPy));
+    }
+}
+#endif
+
 } // namespace
 
 GridShift sample_grid_shift(const SimulationParams& params, std::uint64_t step) {
@@ -286,6 +475,10 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
             ws.localPy[k] += m * state.vy[i];
         }
     }
+
+#ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
+    maybe_validate_cuda_cell_moments_shadow(state, params, grid, diag.shift, step, ws, nt);
+#endif
 
     const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
     const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
