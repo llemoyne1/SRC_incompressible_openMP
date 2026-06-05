@@ -60,4 +60,66 @@ bool cuda_resampling_select_donor_particles_0232(
     std::vector<std::uint32_t>* eligibleCountByCell = nullptr,
     CudaResamplingParticleSelectDiagnostics* diagnostics = nullptr);
 
+
+struct CudaResamplingShadowTransferParams {
+    std::uint8_t fluidRole = 0u;
+    std::uint8_t insertionRole = 1u;
+    std::uint32_t invalidParticle = 0xffffffffu;
+    double maxExtractFractionOfDonor = 0.50;
+    double minDonorMassAfterExtract = 1.0e-12;
+};
+
+struct CudaResamplingShadowTransferDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+    std::uint64_t particles = 0;
+    std::uint64_t transfers = 0;
+    std::uint64_t appliedTransfers = 0;
+    std::uint64_t skippedTransfers = 0;
+    std::uint64_t invalidDonorTransfers = 0;
+    std::uint64_t invalidInsertionTransfers = 0;
+    std::uint64_t donorRoleMismatchTransfers = 0;
+    std::uint64_t insertionRoleMismatchTransfers = 0;
+    std::uint64_t duplicateDonorParticles = 0;
+    std::uint64_t duplicateInsertionParticles = 0;
+    double requestedTransferMass = 0.0;
+    double actualTransferMass = 0.0;
+    double totalMassBefore = 0.0;
+    double totalMassAfter = 0.0;
+    double totalPxBefore = 0.0;
+    double totalPyBefore = 0.0;
+    double totalPxAfter = 0.0;
+    double totalPyAfter = 0.0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+// First mutating CUDA resampling primitive, deliberately scoped to a shadow/copy
+// operation.  For every planned transfer, a selected donor particle p is split:
+// a bounded mass dm is removed from p, and an already allocated insertion particle
+// q is activated in the receiver cell with velocity copied from p.  This preserves
+// global mass and momentum exactly up to floating-point roundoff when donor and
+// insertion particles are unique.  The function mutates output copies only and is
+// not yet the full production resampling algorithm.
+bool cuda_resampling_apply_shadow_transfers_0233(
+    const std::vector<std::uint32_t>& particleCell,
+    const std::vector<std::uint8_t>& particleRole,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& particleVx,
+    const std::vector<double>& particleVy,
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<double>& requestedTransferMass,
+    const std::vector<std::uint32_t>& selectedDonorParticle,
+    const std::vector<std::uint32_t>& insertionParticle,
+    const CudaResamplingShadowTransferParams& params,
+    std::vector<std::uint32_t>& outParticleCell,
+    std::vector<std::uint8_t>& outParticleRole,
+    std::vector<double>& outParticleMass,
+    std::vector<double>& outParticleVx,
+    std::vector<double>& outParticleVy,
+    std::vector<double>* actualTransferMass = nullptr,
+    CudaResamplingShadowTransferDiagnostics* diagnostics = nullptr);
+
 } // namespace mpcd
