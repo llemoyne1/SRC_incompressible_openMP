@@ -122,4 +122,56 @@ bool cuda_resampling_apply_shadow_transfers_0233(
     std::vector<double>* actualTransferMass = nullptr,
     CudaResamplingShadowTransferDiagnostics* diagnostics = nullptr);
 
+
+struct CudaResamplingInsertionApplyParams {
+    std::uint8_t inactiveRole = 0u;
+    std::uint8_t fluidRole = 1u;
+    std::uint32_t invalidParticle = 0xffffffffu;
+};
+
+struct CudaResamplingInsertionApplyDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+    std::uint64_t particles = 0;
+    std::uint64_t operations = 0;
+    std::uint64_t operationsApplied = 0;
+    std::uint64_t invalidOperations = 0;
+    double insertedMass = 0.0;
+    double insertedMomentumX = 0.0;
+    double insertedMomentumY = 0.0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+// Active CUDA insertion primitive for the resampling chantier.
+//
+// This function applies the same net state update as the CPU extraction+insertion
+// pair after extraction has marked selected particles inactive and pushed them
+// into the free pool: the same storage slot is reactivated in its receiver cell
+// with deterministic in-cell coordinates, prescribed mass/type and prescribed
+// momentum.  Pool bookkeeping and diagnostics remain host-side.
+bool cuda_resampling_apply_insertion_operations_0236(
+    std::vector<double>& x,
+    std::vector<double>& y,
+    std::vector<double>& vx,
+    std::vector<double>& vy,
+    std::vector<double>& mass,
+    std::vector<std::uint32_t>& type,
+    std::vector<std::uint8_t>& role,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<std::uint32_t>& particleType,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const std::vector<std::uint32_t>& insertionOrdinal,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    const CudaResamplingInsertionApplyParams& params,
+    CudaResamplingInsertionApplyDiagnostics* diagnostics = nullptr);
+
 } // namespace mpcd

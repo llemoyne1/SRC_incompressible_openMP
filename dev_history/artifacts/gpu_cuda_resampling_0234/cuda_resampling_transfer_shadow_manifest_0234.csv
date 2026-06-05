@@ -1,0 +1,5 @@
+file,kind,description
+src/weighted_resampling.cpp,modified,Adds real-deposit CUDA resampling transfer shadow using the 0233 conservative mutation primitive on temporary particle arrays.
+scripts/build_src_mpcd_cuda_0234.sh,script,Builds CUDA-enabled SRC/MPCD executable with resampling guard and particle-op kernels.
+scripts/run_cuda_resampling_transfer_shadow_0234.sh,script,Runs CPU baseline and CUDA transfer-shadow validation on TG cases and consolidates guard/transfer diagnostics.
+doc/README_0234_CUDA_RESAMPLING_TRANSFER_SHADOW_REAL.md,doc,Documents the real-deposit CUDA resampling transfer shadow stage.

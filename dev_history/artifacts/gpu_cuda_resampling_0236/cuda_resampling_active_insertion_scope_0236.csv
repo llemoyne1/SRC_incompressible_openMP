@@ -1,0 +1,8 @@
+item,value
+cuda_resampling_stage,active insertion only
+cpu_still_authoritative_for,classification compaction donor_selection extraction pool_bookkeeping remap thermal diagnostics
+runtime_flag,MPCD_CUDA_RESAMPLING_INSERTION_USE
+strict_flag,MPCD_CUDA_RESAMPLING_INSERTION_STRICT
+q6_recommended_for_harness,false
+expected_performance_gain,not_yet_expected
+expected_validation,failed_metrics=0

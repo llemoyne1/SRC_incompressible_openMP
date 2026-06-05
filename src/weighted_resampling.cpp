@@ -252,6 +252,23 @@ bool cuda_resampling_transfer_shadow_unique_receiver_0235() {
              sv == "off" || sv == "OFF" || sv == "no" || sv == "NO");
 }
 
+
+bool cuda_resampling_insertion_use_0236() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_INSERTION_USE");
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+bool cuda_resampling_insertion_strict_0236() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_INSERTION_STRICT");
+    if (v == nullptr || *v == '\0') return true;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
 double max_abs_diff_vec_0234(const std::vector<double>& a, const std::vector<double>& b) {
     if (a.size() != b.size()) return std::numeric_limits<double>::infinity();
     double m = 0.0;
@@ -1329,6 +1346,118 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
     d.attempted = true;
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
     d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+    const bool useCudaInsertion = cuda_resampling_insertion_use_0236();
+#else
+    const bool useCudaInsertion = false;
+#endif
+
+    if (useCudaInsertion) {
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+        std::vector<std::uint32_t> opParticle;
+        std::vector<std::uint32_t> opReceiver;
+        std::vector<std::uint32_t> opType;
+        std::vector<double> opMass;
+        std::vector<double> opPx;
+        std::vector<double> opPy;
+        std::vector<std::uint32_t> opOrdinal;
+        opParticle.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opReceiver.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opType.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opMass.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opPx.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opPy.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opOrdinal.reserve(depositWorkspace.passiveExtractionOperations.size());
+
+        for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
+            if (op.particleMass > 0.0 && std::isfinite(op.particleMass)) {
+                d.plannedInsertionMass += op.particleMass;
+            }
+
+            if (op.particleIndex == kInvalidParticleIndex || op.particleIndex >= state.Np) {
+                d.skippedInvalidSourceParticles += 1u;
+                d.allSourcesWereInactive = false;
+                continue;
+            }
+            const std::size_t sourceIndex = static_cast<std::size_t>(op.particleIndex);
+            if (!is_inactive_particle(state, sourceIndex)) {
+                d.skippedSourceNotInactive += 1u;
+                d.allSourcesWereInactive = false;
+                continue;
+            }
+            if (op.receiverCell < 0 || op.receiverCell >= grid.numCells) {
+                d.skippedInvalidReceiverCells += 1u;
+                d.noInvalidReceiverCells = false;
+                continue;
+            }
+            if (!(op.particleMass > 0.0) || !std::isfinite(op.particleMass)) {
+                d.skippedInvalidMass += 1u;
+                continue;
+            }
+            auto freeIt = std::find(pool.freeInactiveSlots.begin(),
+                                    pool.freeInactiveSlots.end(),
+                                    op.particleIndex);
+            if (freeIt == pool.freeInactiveSlots.end()) {
+                d.skippedNoFreeSlots += 1u;
+                continue;
+            }
+
+            const std::uint64_t slot64 = op.particleIndex;
+            pool.freeInactiveSlots.erase(freeIt);
+            opParticle.push_back(static_cast<std::uint32_t>(slot64));
+            opReceiver.push_back(static_cast<std::uint32_t>(op.receiverCell));
+            opType.push_back(op.particleType);
+            opMass.push_back(op.particleMass);
+            opPx.push_back(op.momentumX);
+            opPy.push_back(op.momentumY);
+            opOrdinal.push_back(static_cast<std::uint32_t>(d.operationsApplied));
+
+            d.operationsApplied += 1u;
+            d.roleChanges += 1u;
+            d.insertedMass += op.particleMass;
+            d.insertedMomentumX += op.momentumX;
+            d.insertedMomentumY += op.momentumY;
+            d.insertedKineticEnergy += op.kineticEnergy;
+            if (d.firstInsertedParticle == kInvalidParticleIndex) {
+                d.firstInsertedParticle = slot64;
+                d.firstInsertionReceiverCell = op.receiverCell;
+            }
+            d.lastInsertedParticle = slot64;
+            d.lastInsertionReceiverCell = op.receiverCell;
+        }
+
+        if (!opParticle.empty()) {
+            CudaResamplingInsertionApplyParams cp{};
+            cp.inactiveRole = static_cast<std::uint8_t>(ParticleRole::Inactive);
+            cp.fluidRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+            cp.invalidParticle = 0xffffffffu;
+            CudaResamplingInsertionApplyDiagnostics cd{};
+            const bool ok = cuda_resampling_apply_insertion_operations_0236(
+                state.x, state.y, state.vx, state.vy, state.mass, state.type, state.role,
+                opParticle, opReceiver, opType, opMass, opPx, opPy, opOrdinal,
+                static_cast<std::uint32_t>(grid.Nx), static_cast<std::uint32_t>(grid.Ny),
+                grid.dx, grid.dy, cp, &cd);
+            if (!ok || cd.operationsApplied != opParticle.size()) {
+                if (cuda_resampling_insertion_strict_0236()) {
+                    throw std::runtime_error("CUDA resampling insertion 0236 failed or applied fewer operations than CPU plan");
+                }
+            }
+        }
+
+        d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+        d.poolFreeSlotDelta = d.poolFreeSlotsBefore >= d.poolFreeSlotsAfter
+            ? d.poolFreeSlotsBefore - d.poolFreeSlotsAfter : 0u;
+        d.massResidualVsPlan = d.insertedMass - d.plannedInsertionMass;
+        d.applied = d.operationsApplied > 0u;
+        d.allSourcesWereInactive = d.allSourcesWereInactive && d.skippedSourceNotInactive == 0u;
+        d.noInvalidReceiverCells = d.noInvalidReceiverCells && d.skippedInvalidReceiverCells == 0u;
+        return d;
+#else
+        (void)pool;
+        (void)grid;
+#endif
+    }
 
     for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
         if (op.particleMass > 0.0 && std::isfinite(op.particleMass)) {

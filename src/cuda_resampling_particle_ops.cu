@@ -462,4 +462,205 @@ bool cuda_resampling_apply_shadow_transfers_0233(
     return true;
 }
 
+
+namespace {
+
+__global__ void apply_insertion_operations_kernel_0236(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    std::uint8_t* __restrict__ role,
+    const std::uint32_t* __restrict__ particleIndex,
+    const std::uint32_t* __restrict__ receiverCell,
+    const std::uint32_t* __restrict__ particleType,
+    const double* __restrict__ particleMass,
+    const double* __restrict__ momentumX,
+    const double* __restrict__ momentumY,
+    const std::uint32_t* __restrict__ insertionOrdinal,
+    int nOperations,
+    int nParticles,
+    int Nx,
+    int Ny,
+    double dx,
+    double dy,
+    std::uint8_t fluidRole,
+    std::uint8_t inactiveRole,
+    std::uint32_t invalidParticle,
+    std::uint32_t* __restrict__ appliedFlags)
+{
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nOperations) return;
+    appliedFlags[t] = 0u;
+
+    const std::uint32_t p = particleIndex[t];
+    if (p == invalidParticle || p >= static_cast<std::uint32_t>(nParticles)) return;
+    if (role[p] != inactiveRole) return;
+    const std::uint32_t cell = receiverCell[t];
+    if (cell >= static_cast<std::uint32_t>(Nx * Ny)) return;
+    const double m = particleMass[t];
+    if (!(m > 0.0)) return;
+
+    const int ix = static_cast<int>(cell % static_cast<std::uint32_t>(Nx));
+    const int iy = static_cast<int>(cell / static_cast<std::uint32_t>(Nx));
+    const std::uint32_t q = insertionOrdinal[t] & 15u;
+    const double fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
+    const double fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
+
+    x[p] = (static_cast<double>(ix) + fx) * dx;
+    y[p] = (static_cast<double>(iy) + fy) * dy;
+    vx[p] = momentumX[t] / m;
+    vy[p] = momentumY[t] / m;
+    mass[p] = m;
+    type[p] = particleType[t];
+    role[p] = fluidRole;
+    appliedFlags[t] = 1u;
+}
+
+} // namespace
+
+bool cuda_resampling_apply_insertion_operations_0236(
+    std::vector<double>& x,
+    std::vector<double>& y,
+    std::vector<double>& vx,
+    std::vector<double>& vy,
+    std::vector<double>& mass,
+    std::vector<std::uint32_t>& type,
+    std::vector<std::uint8_t>& role,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<std::uint32_t>& receiverCell,
+    const std::vector<std::uint32_t>& particleType,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const std::vector<std::uint32_t>& insertionOrdinal,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    const CudaResamplingInsertionApplyParams& params,
+    CudaResamplingInsertionApplyDiagnostics* diagnostics)
+{
+    const auto t0 = Clock::now();
+    const std::size_t n = x.size();
+    const std::size_t mOps = particleIndex.size();
+    if (y.size() != n || vx.size() != n || vy.size() != n || mass.size() != n || type.size() != n || role.size() != n) {
+        throw std::runtime_error("cuda_resampling_apply_insertion_operations_0236: particle array size mismatch");
+    }
+    if (receiverCell.size() != mOps || particleType.size() != mOps || particleMass.size() != mOps ||
+        momentumX.size() != mOps || momentumY.size() != mOps || insertionOrdinal.size() != mOps) {
+        throw std::runtime_error("cuda_resampling_apply_insertion_operations_0236: operation array size mismatch");
+    }
+    if (diagnostics) {
+        *diagnostics = CudaResamplingInsertionApplyDiagnostics{};
+        diagnostics->attempted = true;
+        diagnostics->particles = static_cast<std::uint64_t>(n);
+        diagnostics->operations = static_cast<std::uint64_t>(mOps);
+        for (std::size_t i = 0; i < mOps; ++i) {
+            diagnostics->insertedMass += particleMass[i];
+            diagnostics->insertedMomentumX += momentumX[i];
+            diagnostics->insertedMomentumY += momentumY[i];
+        }
+    }
+    if (n == 0 || mOps == 0) {
+        if (diagnostics) {
+            diagnostics->applied = true;
+            diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+        }
+        return true;
+    }
+
+    double *d_x=nullptr,*d_y=nullptr,*d_vx=nullptr,*d_vy=nullptr,*d_mass=nullptr;
+    std::uint32_t *d_type=nullptr,*d_index=nullptr,*d_receiver=nullptr,*d_particleType=nullptr,*d_ordinal=nullptr,*d_applied=nullptr;
+    std::uint8_t *d_role=nullptr;
+    double *d_opMass=nullptr,*d_mx=nullptr,*d_my=nullptr;
+    const std::size_t bytesD = n * sizeof(double);
+    const std::size_t bytesU32 = n * sizeof(std::uint32_t);
+    const std::size_t bytesU8 = n * sizeof(std::uint8_t);
+    const std::size_t opU32 = mOps * sizeof(std::uint32_t);
+    const std::size_t opD = mOps * sizeof(double);
+    check_cuda(cudaMalloc(&d_x, bytesD), "malloc insertion x");
+    check_cuda(cudaMalloc(&d_y, bytesD), "malloc insertion y");
+    check_cuda(cudaMalloc(&d_vx, bytesD), "malloc insertion vx");
+    check_cuda(cudaMalloc(&d_vy, bytesD), "malloc insertion vy");
+    check_cuda(cudaMalloc(&d_mass, bytesD), "malloc insertion mass");
+    check_cuda(cudaMalloc(&d_type, bytesU32), "malloc insertion type");
+    check_cuda(cudaMalloc(&d_role, bytesU8), "malloc insertion role");
+    check_cuda(cudaMalloc(&d_index, opU32), "malloc insertion index");
+    check_cuda(cudaMalloc(&d_receiver, opU32), "malloc insertion receiver");
+    check_cuda(cudaMalloc(&d_particleType, opU32), "malloc insertion op type");
+    check_cuda(cudaMalloc(&d_opMass, opD), "malloc insertion op mass");
+    check_cuda(cudaMalloc(&d_mx, opD), "malloc insertion mx");
+    check_cuda(cudaMalloc(&d_my, opD), "malloc insertion my");
+    check_cuda(cudaMalloc(&d_ordinal, opU32), "malloc insertion ordinal");
+    check_cuda(cudaMalloc(&d_applied, opU32), "malloc insertion applied");
+
+    const auto tu0 = Clock::now();
+    check_cuda(cudaMemcpy(d_x, x.data(), bytesD, cudaMemcpyHostToDevice), "copy insertion x");
+    check_cuda(cudaMemcpy(d_y, y.data(), bytesD, cudaMemcpyHostToDevice), "copy insertion y");
+    check_cuda(cudaMemcpy(d_vx, vx.data(), bytesD, cudaMemcpyHostToDevice), "copy insertion vx");
+    check_cuda(cudaMemcpy(d_vy, vy.data(), bytesD, cudaMemcpyHostToDevice), "copy insertion vy");
+    check_cuda(cudaMemcpy(d_mass, mass.data(), bytesD, cudaMemcpyHostToDevice), "copy insertion mass");
+    check_cuda(cudaMemcpy(d_type, type.data(), bytesU32, cudaMemcpyHostToDevice), "copy insertion type");
+    check_cuda(cudaMemcpy(d_role, role.data(), bytesU8, cudaMemcpyHostToDevice), "copy insertion role");
+    check_cuda(cudaMemcpy(d_index, particleIndex.data(), opU32, cudaMemcpyHostToDevice), "copy insertion index");
+    check_cuda(cudaMemcpy(d_receiver, receiverCell.data(), opU32, cudaMemcpyHostToDevice), "copy insertion receiver");
+    check_cuda(cudaMemcpy(d_particleType, particleType.data(), opU32, cudaMemcpyHostToDevice), "copy insertion particle type");
+    check_cuda(cudaMemcpy(d_opMass, particleMass.data(), opD, cudaMemcpyHostToDevice), "copy insertion mass ops");
+    check_cuda(cudaMemcpy(d_mx, momentumX.data(), opD, cudaMemcpyHostToDevice), "copy insertion mx");
+    check_cuda(cudaMemcpy(d_my, momentumY.data(), opD, cudaMemcpyHostToDevice), "copy insertion my");
+    check_cuda(cudaMemcpy(d_ordinal, insertionOrdinal.data(), opU32, cudaMemcpyHostToDevice), "copy insertion ordinal");
+    const auto tu1 = Clock::now();
+
+    cudaEvent_t ev0{}, ev1{};
+    check_cuda(cudaEventCreate(&ev0), "event insertion 0");
+    check_cuda(cudaEventCreate(&ev1), "event insertion 1");
+    check_cuda(cudaEventRecord(ev0), "record insertion 0");
+    const int threads = 256;
+    const int blocks = (static_cast<int>(mOps) + threads - 1) / threads;
+    apply_insertion_operations_kernel_0236<<<blocks, threads>>>(
+        d_x, d_y, d_vx, d_vy, d_mass, d_type, d_role,
+        d_index, d_receiver, d_particleType, d_opMass, d_mx, d_my, d_ordinal,
+        static_cast<int>(mOps), static_cast<int>(n), static_cast<int>(Nx), static_cast<int>(Ny), dx, dy,
+        params.fluidRole, params.inactiveRole, params.invalidParticle, d_applied);
+    check_cuda(cudaGetLastError(), "launch insertion operations");
+    check_cuda(cudaEventRecord(ev1), "record insertion 1");
+    check_cuda(cudaEventSynchronize(ev1), "sync insertion 1");
+    float kernelMs = 0.0f;
+    check_cuda(cudaEventElapsedTime(&kernelMs, ev0, ev1), "elapsed insertion");
+    check_cuda(cudaEventDestroy(ev0), "destroy insertion 0");
+    check_cuda(cudaEventDestroy(ev1), "destroy insertion 1");
+
+    std::vector<std::uint32_t> applied(mOps, 0u);
+    const auto td0 = Clock::now();
+    check_cuda(cudaMemcpy(x.data(), d_x, bytesD, cudaMemcpyDeviceToHost), "download insertion x");
+    check_cuda(cudaMemcpy(y.data(), d_y, bytesD, cudaMemcpyDeviceToHost), "download insertion y");
+    check_cuda(cudaMemcpy(vx.data(), d_vx, bytesD, cudaMemcpyDeviceToHost), "download insertion vx");
+    check_cuda(cudaMemcpy(vy.data(), d_vy, bytesD, cudaMemcpyDeviceToHost), "download insertion vy");
+    check_cuda(cudaMemcpy(mass.data(), d_mass, bytesD, cudaMemcpyDeviceToHost), "download insertion mass");
+    check_cuda(cudaMemcpy(type.data(), d_type, bytesU32, cudaMemcpyDeviceToHost), "download insertion type");
+    check_cuda(cudaMemcpy(role.data(), d_role, bytesU8, cudaMemcpyDeviceToHost), "download insertion role");
+    check_cuda(cudaMemcpy(applied.data(), d_applied, opU32, cudaMemcpyDeviceToHost), "download insertion applied");
+    const auto td1 = Clock::now();
+
+    if (diagnostics) {
+        diagnostics->applied = true;
+        diagnostics->kernelSeconds = static_cast<double>(kernelMs) * 1e-3;
+        diagnostics->uploadSeconds = elapsed_seconds(tu0, tu1);
+        diagnostics->downloadSeconds = elapsed_seconds(td0, td1);
+        for (std::uint32_t v : applied) {
+            if (v) ++diagnostics->operationsApplied;
+            else ++diagnostics->invalidOperations;
+        }
+        diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+    }
+
+    cudaFree(d_x); cudaFree(d_y); cudaFree(d_vx); cudaFree(d_vy); cudaFree(d_mass);
+    cudaFree(d_type); cudaFree(d_role); cudaFree(d_index); cudaFree(d_receiver); cudaFree(d_particleType);
+    cudaFree(d_opMass); cudaFree(d_mx); cudaFree(d_my); cudaFree(d_ordinal); cudaFree(d_applied);
+    return true;
+}
+
 } // namespace mpcd
