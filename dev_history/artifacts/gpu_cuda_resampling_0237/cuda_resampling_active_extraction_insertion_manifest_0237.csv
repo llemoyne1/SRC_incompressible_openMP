@@ -1,0 +1,7 @@
+item,path,description
+source,include/cuda_resampling_particle_ops.h,Adds CUDA extraction apply API and diagnostics
+source,src/cuda_resampling_particle_ops.cu,Adds extraction role-transition kernel
+source,src/weighted_resampling.cpp,Adds active CUDA extraction switch and host-side prevalidation
+script,scripts/build_src_mpcd_cuda_0237.sh,Builds CUDA-enabled src_mpcd binary for 0237
+script,scripts/run_cuda_resampling_extraction_insertion_active_0237.sh,Compares CPU extraction/insertion with CUDA extraction/insertion modes
+doc,doc/README_0237_CUDA_RESAMPLING_ACTIVE_EXTRACTION_INSERTION.md,Documents 0237 scope and validation

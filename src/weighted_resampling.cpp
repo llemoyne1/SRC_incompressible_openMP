@@ -253,6 +253,23 @@ bool cuda_resampling_transfer_shadow_unique_receiver_0235() {
 }
 
 
+
+bool cuda_resampling_extraction_use_0237() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_EXTRACTION_USE");
+    if (v == nullptr || *v == '\0') return false;
+    const std::string sv(v);
+    return !(sv == "0" || sv == "false" || sv == "FALSE" ||
+             sv == "off" || sv == "OFF" || sv == "no" || sv == "NO");
+}
+
+bool cuda_resampling_extraction_strict_0237() {
+    const char* v = std::getenv("MPCD_CUDA_RESAMPLING_EXTRACTION_STRICT");
+    if (v == nullptr || *v == '\0') return true;
+    const std::string sv(v);
+    return !(sv == "0" || sv == "false" || sv == "FALSE" ||
+             sv == "off" || sv == "OFF" || sv == "no" || sv == "NO");
+}
+
 bool cuda_resampling_insertion_use_0236() {
     const char* v = std::getenv("MPCD_CUDA_RESAMPLING_INSERTION_USE");
     if (v == nullptr || *v == '\0') return false;
@@ -1254,6 +1271,94 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
     std::vector<std::uint8_t> seen(n, 0u);
+
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+    const bool useCudaExtraction = cuda_resampling_extraction_use_0237();
+#else
+    const bool useCudaExtraction = false;
+#endif
+
+    if (useCudaExtraction) {
+#ifdef MPCD_ENABLE_CUDA_RESAMPLING
+        std::vector<std::uint32_t> opParticle;
+        std::vector<double> opMass;
+        std::vector<double> opPx;
+        std::vector<double> opPy;
+        opParticle.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opMass.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opPx.reserve(depositWorkspace.passiveExtractionOperations.size());
+        opPy.reserve(depositWorkspace.passiveExtractionOperations.size());
+
+        for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
+            d.plannedExtractionMass += op.particleMass;
+            const std::uint64_t pi64 = op.particleIndex;
+            if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) {
+                d.skippedInvalidParticles += 1u;
+                d.noDuplicateParticles = false;
+                continue;
+            }
+            const std::size_t pi = static_cast<std::size_t>(pi64);
+            if (seen[pi]) {
+                d.skippedDuplicateParticles += 1u;
+                d.noDuplicateParticles = false;
+                continue;
+            }
+            seen[pi] = 1u;
+            if (!is_fluid_particle(state, pi)) {
+                d.skippedNonFluidParticles += 1u;
+                d.allAppliedWereFluid = false;
+                continue;
+            }
+
+            const double mp = state.mass[pi];
+            const double vx = state.vx[pi];
+            const double vy = state.vy[pi];
+            const double px = mp * vx;
+            const double py = mp * vy;
+            const double ke = 0.5 * mp * (vx * vx + vy * vy);
+
+            resampling_pool_push_free_slot(pool, pi64);
+            opParticle.push_back(static_cast<std::uint32_t>(pi64));
+            opMass.push_back(mp);
+            opPx.push_back(px);
+            opPy.push_back(py);
+
+            d.operationsApplied += 1u;
+            d.roleChanges += 1u;
+            d.appliedMass += mp;
+            d.appliedMomentumX += px;
+            d.appliedMomentumY += py;
+            d.appliedKineticEnergy += ke;
+            if (d.firstAppliedParticle == kInvalidParticleIndex) d.firstAppliedParticle = pi64;
+            d.lastAppliedParticle = pi64;
+        }
+
+        if (!opParticle.empty()) {
+            CudaResamplingExtractionApplyParams cp{};
+            cp.fluidRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+            cp.inactiveRole = static_cast<std::uint8_t>(ParticleRole::Inactive);
+            cp.invalidParticle = 0xffffffffu;
+            CudaResamplingExtractionApplyDiagnostics cd{};
+            const bool ok = cuda_resampling_apply_extraction_operations_0237(
+                state.role, opParticle, opMass, opPx, opPy, cp, &cd);
+            if (!ok || cd.operationsApplied != opParticle.size()) {
+                if (cuda_resampling_extraction_strict_0237()) {
+                    throw std::runtime_error("CUDA resampling extraction 0237 failed or applied fewer operations than CPU plan");
+                }
+            }
+        }
+
+        d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+        d.poolFreeSlotDelta = d.poolFreeSlotsAfter >= d.poolFreeSlotsBefore
+            ? d.poolFreeSlotsAfter - d.poolFreeSlotsBefore : 0u;
+        d.massResidualVsPlan = d.appliedMass - d.plannedExtractionMass;
+        d.applied = d.operationsApplied > 0u;
+        d.allAppliedWereFluid = d.allAppliedWereFluid && d.skippedNonFluidParticles == 0u;
+        return d;
+#else
+        (void)pool;
+#endif
+    }
 
     for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
         d.plannedExtractionMass += op.particleMass;

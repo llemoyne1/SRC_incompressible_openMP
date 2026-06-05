@@ -123,6 +123,47 @@ bool cuda_resampling_apply_shadow_transfers_0233(
     CudaResamplingShadowTransferDiagnostics* diagnostics = nullptr);
 
 
+
+
+struct CudaResamplingExtractionApplyParams {
+    std::uint8_t fluidRole = 1u;
+    std::uint8_t inactiveRole = 0u;
+    std::uint32_t invalidParticle = 0xffffffffu;
+};
+
+struct CudaResamplingExtractionApplyDiagnostics {
+    bool attempted = false;
+    bool applied = false;
+    std::uint64_t particles = 0;
+    std::uint64_t operations = 0;
+    std::uint64_t operationsApplied = 0;
+    std::uint64_t invalidOperations = 0;
+    double extractedMass = 0.0;
+    double extractedMomentumX = 0.0;
+    double extractedMomentumY = 0.0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+// Active CUDA extraction primitive for the resampling chantier.
+//
+// The host still builds and validates the extraction operation list, including
+// duplicate filtering and particle-pool bookkeeping.  This primitive applies the
+// device-side role transition Fluid -> Inactive for those prevalidated particle
+// indices, then downloads the updated role array so the current CPU-authoritative
+// ParticleState remains coherent.  This is an intermediate step before the same
+// mutation is performed directly on CudaParticleState.
+bool cuda_resampling_apply_extraction_operations_0237(
+    std::vector<std::uint8_t>& role,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const CudaResamplingExtractionApplyParams& params,
+    CudaResamplingExtractionApplyDiagnostics* diagnostics = nullptr);
+
 struct CudaResamplingInsertionApplyParams {
     std::uint8_t inactiveRole = 0u;
     std::uint8_t fluidRole = 1u;

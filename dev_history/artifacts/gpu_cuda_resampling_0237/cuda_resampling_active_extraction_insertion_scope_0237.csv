@@ -1,0 +1,13 @@
+key,value
+patch,0237
+focus,resampling active extraction plus insertion
+mutates_real_state,yes_under_flags
+cpu_default,yes
+projection_tested,false
+q6_scope,not involved
+resampling_classification,cpu
+resampling_plan,cpu
+resampling_extraction,cuda_optional
+resampling_insertion,cuda_optional
+persistent_particle_state,not yet
+next_step,connect extraction/insertion to CudaParticleState

@@ -663,4 +663,123 @@ bool cuda_resampling_apply_insertion_operations_0236(
     return true;
 }
 
+
+namespace {
+
+__global__ void apply_extraction_operations_kernel_0237(
+    std::uint8_t* __restrict__ role,
+    const std::uint32_t* __restrict__ particleIndex,
+    int nOps,
+    int nParticles,
+    std::uint8_t fluidRole,
+    std::uint8_t inactiveRole,
+    std::uint32_t invalidParticle,
+    std::uint32_t* __restrict__ appliedFlags)
+{
+    const int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nOps) return;
+    const std::uint32_t p = particleIndex[t];
+    if (p == invalidParticle || p >= static_cast<std::uint32_t>(nParticles)) {
+        appliedFlags[t] = 0u;
+        return;
+    }
+    if (role[p] != fluidRole) {
+        appliedFlags[t] = 0u;
+        return;
+    }
+    role[p] = inactiveRole;
+    appliedFlags[t] = 1u;
+}
+
+} // namespace
+
+bool cuda_resampling_apply_extraction_operations_0237(
+    std::vector<std::uint8_t>& role,
+    const std::vector<std::uint32_t>& particleIndex,
+    const std::vector<double>& particleMass,
+    const std::vector<double>& momentumX,
+    const std::vector<double>& momentumY,
+    const CudaResamplingExtractionApplyParams& params,
+    CudaResamplingExtractionApplyDiagnostics* diagnostics)
+{
+    const auto t0 = Clock::now();
+    const std::size_t n = role.size();
+    const std::size_t mOps = particleIndex.size();
+    if (particleMass.size() != mOps || momentumX.size() != mOps || momentumY.size() != mOps) {
+        throw std::runtime_error("cuda_resampling_apply_extraction_operations_0237: operation array size mismatch");
+    }
+    if (diagnostics) {
+        *diagnostics = CudaResamplingExtractionApplyDiagnostics{};
+        diagnostics->attempted = true;
+        diagnostics->particles = static_cast<std::uint64_t>(n);
+        diagnostics->operations = static_cast<std::uint64_t>(mOps);
+        for (std::size_t i = 0; i < mOps; ++i) {
+            diagnostics->extractedMass += particleMass[i];
+            diagnostics->extractedMomentumX += momentumX[i];
+            diagnostics->extractedMomentumY += momentumY[i];
+        }
+    }
+    if (n == 0 || mOps == 0) {
+        if (diagnostics) {
+            diagnostics->applied = true;
+            diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+        }
+        return true;
+    }
+
+    std::uint8_t* d_role = nullptr;
+    std::uint32_t* d_index = nullptr;
+    std::uint32_t* d_applied = nullptr;
+    const std::size_t bytesRole = n * sizeof(std::uint8_t);
+    const std::size_t opU32 = mOps * sizeof(std::uint32_t);
+    check_cuda(cudaMalloc(&d_role, bytesRole), "malloc extraction role");
+    check_cuda(cudaMalloc(&d_index, opU32), "malloc extraction index");
+    check_cuda(cudaMalloc(&d_applied, opU32), "malloc extraction applied");
+
+    const auto tu0 = Clock::now();
+    check_cuda(cudaMemcpy(d_role, role.data(), bytesRole, cudaMemcpyHostToDevice), "copy extraction role");
+    check_cuda(cudaMemcpy(d_index, particleIndex.data(), opU32, cudaMemcpyHostToDevice), "copy extraction index");
+    const auto tu1 = Clock::now();
+
+    cudaEvent_t ev0{}, ev1{};
+    check_cuda(cudaEventCreate(&ev0), "event extraction 0");
+    check_cuda(cudaEventCreate(&ev1), "event extraction 1");
+    check_cuda(cudaEventRecord(ev0), "record extraction 0");
+    const int threads = 256;
+    const int blocks = (static_cast<int>(mOps) + threads - 1) / threads;
+    apply_extraction_operations_kernel_0237<<<blocks, threads>>>(
+        d_role, d_index, static_cast<int>(mOps), static_cast<int>(n),
+        params.fluidRole, params.inactiveRole, params.invalidParticle, d_applied);
+    check_cuda(cudaGetLastError(), "launch extraction operations");
+    check_cuda(cudaEventRecord(ev1), "record extraction 1");
+    check_cuda(cudaEventSynchronize(ev1), "sync extraction 1");
+    float kernelMs = 0.0f;
+    check_cuda(cudaEventElapsedTime(&kernelMs, ev0, ev1), "elapsed extraction");
+    check_cuda(cudaEventDestroy(ev0), "destroy extraction 0");
+    check_cuda(cudaEventDestroy(ev1), "destroy extraction 1");
+
+    std::vector<std::uint32_t> applied(mOps, 0u);
+    const auto td0 = Clock::now();
+    check_cuda(cudaMemcpy(role.data(), d_role, bytesRole, cudaMemcpyDeviceToHost), "download extraction role");
+    check_cuda(cudaMemcpy(applied.data(), d_applied, opU32, cudaMemcpyDeviceToHost), "download extraction applied");
+    const auto td1 = Clock::now();
+
+    if (diagnostics) {
+        diagnostics->applied = true;
+        diagnostics->kernelSeconds = static_cast<double>(kernelMs) * 1e-3;
+        diagnostics->uploadSeconds = elapsed_seconds(tu0, tu1);
+        diagnostics->downloadSeconds = elapsed_seconds(td0, td1);
+        for (std::uint32_t v : applied) {
+            if (v) ++diagnostics->operationsApplied;
+            else ++diagnostics->invalidOperations;
+        }
+        diagnostics->totalSeconds = elapsed_seconds(t0, Clock::now());
+    }
+
+    cudaFree(d_role);
+    cudaFree(d_index);
+    cudaFree(d_applied);
+    return true;
+}
+
 } // namespace mpcd
