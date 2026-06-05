@@ -27,6 +27,14 @@ bool env_flag_true_0241(const char* name, bool defaultValue) {
     return defaultValue;
 }
 
+std::string env_string_0242(const char* name, const char* defaultValue) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return std::string(defaultValue ? defaultValue : "");
+    std::string s(v);
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
 void deterministic_receiver_position_0241(std::int32_t cell,
                                            std::uint64_t ordinal,
                                            const CellGrid& grid,
@@ -45,6 +53,20 @@ void deterministic_receiver_position_0241(std::int32_t cell,
 }
 
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_RESAMPLING)
+
+void accumulate_particle_state_diag_0242(CudaResamplingPersistentActivePath0240Diagnostics& out,
+                                         const CudaParticleStateDiagnostics& in) {
+    out.allocationCalls += in.allocationCalls;
+    out.uploadCalls += in.uploadCalls;
+    out.downloadCalls += in.downloadCalls;
+    out.metadataUploadCalls += in.metadataUploadCalls;
+    out.metadataCacheHits += in.metadataCacheHits;
+    out.hostToDeviceBytes += in.hostToDeviceBytes;
+    out.deviceToHostBytes += in.deviceToHostBytes;
+    out.metadataBytesSkipped += in.metadataBytesSkipped;
+    out.uploadSeconds += in.uploadSeconds;
+    out.downloadSeconds += in.downloadSeconds;
+}
 
 struct ActivePathPreparedOps0241 {
     std::vector<std::uint32_t> extractionParticle;
@@ -269,7 +291,14 @@ try_apply_cuda_resampling_persistent_active_path_0240(
 
     thread_local CudaParticleState gpuState;
     CudaParticleStateDiagnostics stateDiag{};
-    gpuState.upload_all(state, &stateDiag);
+    const std::string uploadMode0242 = env_string_0242(
+        "MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_UPLOAD_MODE", "all");
+    if (uploadMode0242 == "cached" || uploadMode0242 == "kinematics_cached") {
+        gpuState.upload_kinematics_with_cached_metadata(state, &stateDiag);
+    } else {
+        gpuState.upload_all(state, &stateDiag);
+    }
+    accumulate_particle_state_diag_0242(d, stateDiag);
 
     ActivePathPreparedOps0241 ops{};
     prepare_extraction_ops_0241(state, poolWorkspace, depositWorkspace, extractionDiagnostics, ops);
@@ -324,14 +353,29 @@ try_apply_cuda_resampling_persistent_active_path_0240(
         insertionDiagnostics = ResamplingInsertionApplyDiagnostics{};
     }
 
-    CudaParticleStateDiagnostics downloadDiag{};
-    gpuState.download_all(state, &downloadDiag);
+    const bool hostShadowAuthoritative0242 = env_flag_true_0241(
+        "MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_HOST_SHADOW_AUTHORITATIVE", false);
+    const bool downloadAll0242 = env_flag_true_0241(
+        "MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_DOWNLOAD_ALL", !hostShadowAuthoritative0242);
+
+    d.hostShadowAuthoritative = hostShadowAuthoritative0242;
+    if (downloadAll0242) {
+        CudaParticleStateDiagnostics downloadDiag{};
+        gpuState.download_all(state, &downloadDiag);
+        accumulate_particle_state_diag_0242(d, downloadDiag);
+    } else {
+        // 0242 performance mode: the host shadow was already edited using the
+        // exact same validated plan as the GPU kernels.  Skipping the full
+        // device->host particle copy exposes the transfer overhead while keeping
+        // the surrounding CPU-owned pipeline deterministic.  Strict operation
+        // count checks above remain active by default.
+        d.downloadSkipped = true;
+    }
 
     d.handled = true;
     d.applied = extractionDiagnostics.applied || insertionDiagnostics.applied;
     d.extractionApplied = extractionDiagnostics.operationsApplied;
     d.insertionApplied = insertionDiagnostics.operationsApplied;
-    d.allocationCalls = stateDiag.allocationCalls;
     return d;
 #else
     (void)state;

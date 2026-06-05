@@ -26,6 +26,21 @@ struct CudaResamplingPersistentActivePath0240Diagnostics {
     std::uint64_t extractionApplied = 0;
     std::uint64_t insertionApplied = 0;
     std::uint64_t allocationCalls = 0;
+
+    // 0242 transfer accounting for the active-path bridge.  These counters are
+    // deliberately diagnostic-only: the CPU fallback and validation comparisons
+    // still determine correctness.
+    std::uint64_t uploadCalls = 0;
+    std::uint64_t downloadCalls = 0;
+    std::uint64_t metadataUploadCalls = 0;
+    std::uint64_t metadataCacheHits = 0;
+    std::uint64_t hostToDeviceBytes = 0;
+    std::uint64_t deviceToHostBytes = 0;
+    std::uint64_t metadataBytesSkipped = 0;
+    bool hostShadowAuthoritative = false;
+    bool downloadSkipped = false;
+    double uploadSeconds = 0.0;
+    double downloadSeconds = 0.0;
 };
 
 CudaResamplingPersistentActivePath0240Diagnostics
