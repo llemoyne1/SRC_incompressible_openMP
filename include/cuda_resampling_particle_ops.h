@@ -168,6 +168,13 @@ struct CudaResamplingInsertionApplyParams {
     std::uint8_t inactiveRole = 0u;
     std::uint8_t fluidRole = 1u;
     std::uint32_t invalidParticle = 0xffffffffu;
+
+    // 0241: persistent-state insertion is now used by the active resampling
+    // path.  The historical 0239 smoke validator used a hash placement rule,
+    // so keep it as the default to preserve that validator.  The production
+    // active path sets this flag to 0 to reproduce the CPU 4x4 deterministic
+    // receiver-cell stencil used by apply_resampling_insertion_operations().
+    std::uint8_t useHashPlacement = 1u;
 };
 
 struct CudaResamplingInsertionApplyDiagnostics {

@@ -839,6 +839,7 @@ __global__ void apply_insertion_on_particle_state_kernel_0239(
     std::uint8_t inactiveRole,
     std::uint8_t fluidRole,
     std::uint32_t invalidParticle,
+    std::uint8_t useHashPlacement,
     std::uint32_t* __restrict__ applied)
 {
     const int op = blockIdx.x * blockDim.x + threadIdx.x;
@@ -853,8 +854,16 @@ __global__ void apply_insertion_on_particle_state_kernel_0239(
             const std::uint32_t ix = c % Nx;
             const std::uint32_t iy = c / Nx;
             const std::uint32_t ord = insertionOrdinal[op];
-            const double fx = resampling_hash01_0239(ord ^ (c * 747796405u));
-            const double fy = resampling_hash01_0239((ord + 0x9e3779b9u) ^ (c * 2891336453u));
+            double fx = 0.0;
+            double fy = 0.0;
+            if (useHashPlacement) {
+                fx = resampling_hash01_0239(ord ^ (c * 747796405u));
+                fy = resampling_hash01_0239((ord + 0x9e3779b9u) ^ (c * 2891336453u));
+            } else {
+                const std::uint32_t q = ord & 15u;
+                fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
+                fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
+            }
             x[p] = (static_cast<double>(ix) + fx) * dx;
             y[p] = (static_cast<double>(iy) + fy) * dy;
             mass[p] = m;
@@ -1028,7 +1037,7 @@ bool cuda_resampling_apply_insertion_operations_on_state_0239(
         view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
         d_index, d_receiverCell, d_particleType, d_particleMass, d_momentumX, d_momentumY,
         d_insertionOrdinal, static_cast<int>(mOps), static_cast<int>(view.n), Nx, Ny, dx, dy,
-        params.inactiveRole, params.fluidRole, params.invalidParticle, d_applied);
+        params.inactiveRole, params.fluidRole, params.invalidParticle, params.useHashPlacement, d_applied);
     check_cuda(cudaGetLastError(), "launch state insertion");
     check_cuda(cudaEventRecord(ev1), "record state insertion 1");
     check_cuda(cudaEventSynchronize(ev1), "sync state insertion 1");

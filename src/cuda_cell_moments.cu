@@ -26,6 +26,28 @@ void cuda_check(cudaError_t err, const char* context) {
     }
 }
 
+// 0241 compile fix: native atomicAdd(double*, double) is only available for
+// device architectures >= sm_60.  Some CUDA build scripts intentionally leave
+// CUDA_ARCH_FLAGS empty, in which case nvcc may target an older default virtual
+// architecture and reject the overload at compile time.  Keep this file
+// architecture-tolerant by using a CAS fallback below sm_60.
+__device__ inline double atomic_add_double_compat(double* address, double value) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+    return atomicAdd(address, value);
+#else
+    auto* addressAsUll = reinterpret_cast<unsigned long long int*>(address);
+    unsigned long long int old = *addressAsUll;
+    unsigned long long int assumed;
+    do {
+        assumed = old;
+        old = atomicCAS(addressAsUll,
+                        assumed,
+                        __double_as_longlong(value + __longlong_as_double(assumed)));
+    } while (assumed != old);
+    return __longlong_as_double(old);
+#endif
+}
+
 template <typename T>
 void cuda_alloc(T** ptr, std::size_t count, const char* context) {
     cuda_check(cudaMalloc(reinterpret_cast<void**>(ptr), count * sizeof(T)), context);
@@ -203,9 +225,9 @@ __global__ void deposit_cell_moments_atomic_kernel(const int nParticles,
     cellId[i] = c;
     const double m = uniformMass ? uniformMassValue : mass[i];
     atomicAdd(&cellCount[c], 1u);
-    atomicAdd(&cellMass[c], m);
-    atomicAdd(&cellPx[c], m * vx[i]);
-    atomicAdd(&cellPy[c], m * vy[i]);
+    atomic_add_double_compat(&cellMass[c], m);
+    atomic_add_double_compat(&cellPx[c], m * vx[i]);
+    atomic_add_double_compat(&cellPy[c], m * vy[i]);
 }
 
 __global__ void finalize_cell_velocities_kernel(const int numCells,
