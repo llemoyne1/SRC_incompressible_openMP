@@ -1,0 +1,10 @@
+field,value
+patch,0235
+area,cuda_resampling
+mode,shadow_only
+mutates_real_particle_state,0
+allows_duplicate_receiver_cells,1
+duplicate_receiver_rollback,MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW_UNIQUE_RECEIVER=1
+duplicate_donor_particles_allowed,0
+default_max_shadow_transfers,8192
+next_step,active_resampling_cuda_guarded_or_real_transfer_shadow_with_pool_allocator

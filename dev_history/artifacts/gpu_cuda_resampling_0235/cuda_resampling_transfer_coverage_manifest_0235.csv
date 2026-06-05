@@ -1,0 +1,5 @@
+item,path,description
+modified,src/weighted_resampling.cpp,Allow repeated receiver cells in CUDA resampling transfer shadow by default while keeping donor uniqueness.
+added,scripts/build_src_mpcd_cuda_0235.sh,CUDA build helper for 0235 shadow-transfer coverage validation.
+added,scripts/run_cuda_resampling_transfer_shadow_0235.sh,Harness comparing CPU baseline with expanded CUDA transfer shadow on real deposits.
+added,doc/README_0235_CUDA_RESAMPLING_TRANSFER_COVERAGE.md,Documentation for the 0235 transfer-shadow coverage expansion.
