@@ -3,6 +3,7 @@
 #include "particle_state.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace mpcd {
 
@@ -11,6 +12,11 @@ struct CudaPersistentMpcdStepConfig {
     int Ny = 0;
     double Lx = 1.0;
     double Ly = 1.0;
+    // Optional collision-grid shift, matching GridShift in the CPU collision path.
+    double shiftX = 0.0;
+    double shiftY = 0.0;
+    // Absolute SRC/MPCD step used for random rotation signs.
+    std::uint64_t step = 0u;
     double rotationAngle = 2.0943951023931954923; // 120 degrees
     int randomRotationSign = 1;
     std::uint64_t rngSeed = 1u;
@@ -42,6 +48,16 @@ bool cuda_persistent_mpcd_step_available();
 // host transfers. Only final vx/vy are downloaded back to state.
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
     ParticleState& state,
+    const CudaPersistentMpcdStepConfig& config);
+
+// 0213 active-collision entry point for the real SRC/MPCD step.
+// It uploads particles once, performs deposit -> cell velocity finalization -> SRC rotation
+// on the GPU, downloads vx/vy and the real-particle cellId array, and leaves the
+// CPU thermostat/Q6/resampling stages unchanged. The caller is responsible for
+// restricting this to the currently supported periodic, no-wallVP/no-solid subset.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    ParticleState& state,
+    std::vector<int>& cellIdOut,
     const CudaPersistentMpcdStepConfig& config);
 
 } // namespace mpcd

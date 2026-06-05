@@ -1,0 +1,7 @@
+artifact,description
+include/cuda_persistent_mpcd_step.h,Adds shifted/step-aware persistent CUDA config and collision-only entry point returning cellId
+src/cuda_persistent_mpcd_step.cu,Generalizes persistent deposit/SRC/thermostat prototype and adds collision-only persistent substep
+src/src_collision.cpp,Adds runtime-gated active persistent CUDA deposit+SRC collision path for periodic no-wall subset
+scripts/build_src_mpcd_cuda_0213.sh,Builds CUDA-enabled SRC/MPCD executable with persistent-step backend
+scripts/run_cuda_persistent_src_collision_active_0213.sh,Compares CPU collision baseline to active persistent CUDA collision path
+doc/README_0213_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE.md,Documents scope flags constraints and validation

@@ -9,6 +9,10 @@
 #include "cuda_src_collision.h"
 #endif
 
+#ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+#include "cuda_persistent_mpcd_step.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -473,6 +477,159 @@ void maybe_validate_cuda_cell_moments_shadow(const ParticleState& state,
 
 #endif
 
+
+#ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+bool persistent_env_flag_enabled(const char* name, const bool fallback = false) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    const std::string t(v);
+    return !(t == "0" || t == "false" || t == "FALSE" ||
+             t == "off" || t == "OFF" || t == "no" || t == "NO");
+}
+
+int persistent_env_int_value(const char* name, const int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try { return std::stoi(std::string(v)); }
+    catch (...) { return fallback; }
+}
+
+struct CudaPersistentCollisionActiveRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    std::uint64_t particlesRotated = 0u;
+    std::uint64_t invalidCellParticles = 0u;
+    int numCells = 0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+    double shiftX = 0.0;
+    double shiftY = 0.0;
+};
+
+class CudaPersistentCollisionActiveAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaPersistentCollisionActiveRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaPersistentCollisionActiveAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_persistent_src_collision_active_0213.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ','
+                << r.particlesRotated << ',' << r.invalidCellParticles << ',' << r.numCells << ','
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ','
+                << r.totalSeconds << ',' << r.shiftX << ',' << r.shiftY << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaPersistentCollisionActiveRow> rows_;
+};
+
+CudaPersistentCollisionActiveAccumulator& cuda_persistent_collision_active_accumulator() {
+    static CudaPersistentCollisionActiveAccumulator acc;
+    return acc;
+}
+
+bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
+                                                const CellGrid& grid,
+                                                const FluidDomainBounds& domain,
+                                                std::string* reason = nullptr) {
+    auto fail = [&](const std::string& why) {
+        if (reason != nullptr) *reason = why;
+        return false;
+    };
+    if (!is_x_periodic(params) || !is_y_periodic(params)) return fail("requires periodic x and periodic y");
+    if (immersed_solid_enabled(params)) return fail("immersed solid is not supported");
+    if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params) ||
+        face_has_wall_coupling(params.bcBottom, params) || face_has_wall_coupling(params.bcTop, params)) {
+        return fail("wall/virtual-particle coupling is not supported");
+    }
+    const double eps = 1.0e-12;
+    if (std::abs(domain.xMin) > eps || std::abs(domain.yMin) > eps ||
+        std::abs(domain.xMax - grid.Lx) > eps || std::abs(domain.yMax - grid.Ly) > eps) {
+        return fail("moving/sub-domain fluid bounds are not supported");
+    }
+    if (!cuda_persistent_mpcd_step_available()) return fail("CUDA persistent step backend is not available");
+    if (reason != nullptr) *reason = "supported";
+    return true;
+}
+
+bool try_cuda_persistent_src_collision_active(ParticleState& state,
+                                              const SimulationParams& params,
+                                              const CellGrid& grid,
+                                              const FluidDomainBounds& domain,
+                                              const GridShift& shift,
+                                              std::uint64_t step,
+                                              CollisionWorkspace& ws) {
+    if (!persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE", false)) return false;
+
+    std::string reason;
+    if (!cuda_persistent_collision_subset_supported(params, grid, domain, &reason)) {
+        const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT", true);
+        if (strict) {
+            throw std::runtime_error("CUDA persistent SRC collision active unsupported: " + reason);
+        }
+        return false;
+    }
+
+    CudaPersistentMpcdStepConfig cfg{};
+    cfg.Nx = grid.Nx;
+    cfg.Ny = grid.Ny;
+    cfg.Lx = grid.Lx;
+    cfg.Ly = grid.Ly;
+    cfg.shiftX = shift.sx;
+    cfg.shiftY = shift.sy;
+    cfg.step = step;
+    cfg.rotationAngle = params.rotationAngle;
+    cfg.randomRotationSign = params.randomRotationSign ? 1 : 0;
+    cfg.rngSeed = params.rngSeed;
+    cfg.cycles = 1;
+    cfg.threadsPerBlock = std::max(32, persistent_env_int_value("MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK", 256));
+
+    CudaPersistentMpcdStepDiagnostics raw = cuda_apply_persistent_tg_deposit_src_collision(state, ws.cellId, cfg);
+
+    CudaPersistentCollisionActiveRow row{};
+    row.step = step;
+    row.particlesVisited = raw.particlesVisited;
+    row.fluidParticles = raw.fluidParticles;
+    row.particlesRotated = raw.particlesRotated;
+    row.invalidCellParticles = raw.invalidCellParticles;
+    row.numCells = raw.numCells;
+    row.uploadSeconds = raw.uploadSeconds;
+    row.kernelSeconds = raw.kernelSeconds;
+    row.downloadSeconds = raw.downloadSeconds;
+    row.totalSeconds = raw.totalSeconds;
+    row.shiftX = shift.sx;
+    row.shiftY = shift.sy;
+    auto& acc = cuda_persistent_collision_active_accumulator();
+    acc.set_output_dir(params.outputDir);
+    acc.add(row);
+
+    const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT", true);
+    if (strict && raw.invalidCellParticles != 0u) {
+        throw std::runtime_error("CUDA persistent SRC collision active invalidCellParticles=" +
+                                 std::to_string(raw.invalidCellParticles));
+    }
+    return true;
+}
+#endif
+
 #ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
 bool cuda_src_collision_env_flag_enabled(const char* name, const bool fallback = false) {
     const char* v = std::getenv(name);
@@ -796,6 +953,12 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
+
+#ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+    if (try_cuda_persistent_src_collision_active(state, params, grid, domain, diag.shift, step, ws)) {
+        return diag;
+    }
+#endif
 
 #ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
     CudaCellMoments cudaCellMomentsActive{};

@@ -1,0 +1,12 @@
+item,value
+patch,0213
+branch,SRC_GPU
+backend,CUDA-only
+runtime_flag,MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+scope,active persistent CUDA deposit+SRC collision in real step
+cpu_default,unchanged
+supported_case,periodic full-domain TG-like cases without wallVP or immersed solids
+unsupported_cases,open boundaries walls wallVP immersed solids moving/subdomain fluid bounds
+q6,unchanged downstream CPU/CUDA selected by projectionBackend
+thermostat,unchanged downstream CPU/CUDA selected independently
+resampling,unchanged CPU path

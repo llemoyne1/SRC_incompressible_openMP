@@ -69,6 +69,7 @@ struct DeviceBuffers {
 struct DeviceConfig {
     int Nx, Ny, numCells;
     double Lx, Ly, dx, dy;
+    double shiftX, shiftY;
     unsigned char fluidRole;
 };
 
@@ -80,8 +81,8 @@ __device__ double wrap_periodic(double x, double L) {
 }
 
 __device__ int cell_index_device(double x, double y, DeviceConfig cfg) {
-    const double xs = wrap_periodic(x, cfg.Lx);
-    const double ys = wrap_periodic(y, cfg.Ly);
+    const double xs = wrap_periodic(x + cfg.shiftX, cfg.Lx);
+    const double ys = wrap_periodic(y + cfg.shiftY, cfg.Ly);
     int ix = static_cast<int>(floor(xs / cfg.dx));
     int iy = static_cast<int>(floor(ys / cfg.dy));
     if (ix < 0) ix = 0; if (ix >= cfg.Nx) ix = cfg.Nx - 1;
@@ -268,12 +269,14 @@ bool cuda_persistent_mpcd_step_available() {
 #endif
 }
 
-CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     ParticleState& state,
-    const CudaPersistentMpcdStepConfig& config) {
+    std::vector<int>* cellIdOut,
+    const CudaPersistentMpcdStepConfig& config,
+    const bool applyThermostat) {
 #ifndef MPCD_ENABLE_CUDA_PERSISTENT_STEP
-    (void)state; (void)config;
-    throw std::runtime_error("cuda_apply_persistent_tg_deposit_src_thermostat called without MPCD_ENABLE_CUDA_PERSISTENT_STEP");
+    (void)state; (void)cellIdOut; (void)config; (void)applyThermostat;
+    throw std::runtime_error("cuda_apply_persistent_tg_impl called without MPCD_ENABLE_CUDA_PERSISTENT_STEP");
 #else
     validate_particle_state(state, "cuda_apply_persistent_tg_deposit_src_thermostat");
     if (config.Nx <= 0 || config.Ny <= 0) throw std::runtime_error("persistent CUDA step: invalid grid");
@@ -295,7 +298,9 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
     std::vector<double> sinHost(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
     if (config.randomRotationSign) {
         for (int c = 0; c < nc; ++c) {
-            const std::uint64_t h = splitmix64_host(config.rngSeed ^ static_cast<std::uint64_t>(c));
+            const std::uint64_t h = splitmix64_host(config.rngSeed ^
+                                                    (config.step * 0x9e3779b97f4a7c15ULL) ^
+                                                    static_cast<std::uint64_t>(c));
             if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
         }
     }
@@ -358,6 +363,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
     cfg.Ly = config.Ly;
     cfg.dx = config.Lx / static_cast<double>(config.Nx);
     cfg.dy = config.Ly / static_cast<double>(config.Ny);
+    cfg.shiftX = config.shiftX;
+    cfg.shiftY = config.shiftY;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -377,17 +384,19 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
                                                                   b.cosA, b.sinA, cfg, b.vx, b.vy,
                                                                   b.rotatedCounter, b.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        MPCD_CUDA_CHECK(cudaMemset(b.cellKinetic, 0, cBytesD));
-        kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.mass, b.vx, b.vy,
-                                                               b.cellUx, b.cellUy, cfg, b.cellKinetic);
-        MPCD_CUDA_CHECK(cudaGetLastError());
-        scale_persistent_kernel<<<cellBlocks, threads>>>(nc, b.count, b.cellKinetic, config.targetKBT,
-                                                         std::max(1, config.thermostatMinParticles),
-                                                         config.thermostatEpsilon, b.cellScale);
-        MPCD_CUDA_CHECK(cudaGetLastError());
-        apply_thermostat_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.cellUx,
-                                                                       b.cellUy, b.cellScale, cfg, b.vx, b.vy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        if (applyThermostat) {
+            MPCD_CUDA_CHECK(cudaMemset(b.cellKinetic, 0, cBytesD));
+            kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.mass, b.vx, b.vy,
+                                                                   b.cellUx, b.cellUy, cfg, b.cellKinetic);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+            scale_persistent_kernel<<<cellBlocks, threads>>>(nc, b.count, b.cellKinetic, config.targetKBT,
+                                                             std::max(1, config.thermostatMinParticles),
+                                                             config.thermostatEpsilon, b.cellScale);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+            apply_thermostat_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.cellUx,
+                                                                           b.cellUy, b.cellScale, cfg, b.vx, b.vy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
     diag.kernelSeconds = seconds_since(t0);
@@ -395,6 +404,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
     t0 = Clock::now();
     MPCD_CUDA_CHECK(cudaMemcpy(state.vx.data(), b.vx, nBytesD, cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(state.vy.data(), b.vy, nBytesD, cudaMemcpyDeviceToHost));
+    if (cellIdOut != nullptr) {
+        cellIdOut->assign(n, -1);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut->data(), b.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    }
     unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
     MPCD_CUDA_CHECK(cudaMemcpy(&fluid, b.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&rotated, b.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
@@ -408,6 +421,20 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermosta
     diag.totalSeconds = seconds_since(tTotal0);
     return diag;
 #endif
+}
+
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
+    ParticleState& state,
+    const CudaPersistentMpcdStepConfig& config) {
+    return cuda_apply_persistent_tg_impl(state, nullptr, config, true);
+}
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
+    ParticleState& state,
+    std::vector<int>& cellIdOut,
+    const CudaPersistentMpcdStepConfig& config) {
+    return cuda_apply_persistent_tg_impl(state, &cellIdOut, config, false);
 }
 
 } // namespace mpcd
