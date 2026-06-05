@@ -1,0 +1,6 @@
+artifact,description
+include/cuda_cell_moments.h,Reuses 0199 CUDA deposit API; no header change required in 0201
+src/cuda_cell_moments.cu,Reuses 0199 atomic deposit implementation; no kernel change required in 0201
+src/src_collision.cpp,Adds optional active CUDA deposit path controlled by MPCD_CUDA_CELL_MOMENTS_USE
+scripts/build_src_mpcd_cuda_0201.sh,Builds CUDA-enabled SRC/MPCD executable with active deposit support
+scripts/run_cuda_cell_moments_active_0201.sh,Runs CPU baseline versus active CUDA-deposit validation and timing

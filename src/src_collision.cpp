@@ -280,6 +280,91 @@ CudaCellMomentsShadowAccumulator& cuda_cell_moments_shadow_accumulator() {
     return acc;
 }
 
+struct CudaCellMomentsActiveRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    int numCells = 0;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+class CudaCellMomentsActiveAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaCellMomentsActiveRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaCellMomentsActiveAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_moments_active_0201.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,fluidParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ',' << r.numCells << ','
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaCellMomentsActiveRow> rows_;
+};
+
+CudaCellMomentsActiveAccumulator& cuda_cell_moments_active_accumulator() {
+    static CudaCellMomentsActiveAccumulator acc;
+    return acc;
+}
+
+bool try_cuda_cell_moments_active(const ParticleState& state,
+                                  const SimulationParams& params,
+                                  const CellGrid& grid,
+                                  const GridShift& shift,
+                                  std::uint64_t step,
+                                  CollisionWorkspace& ws,
+                                  CudaCellMoments& cuda) {
+    if (!env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_USE", false)) return false;
+
+    CudaCellMomentsDiagnostics diag{};
+    CudaCellMomentsOptions opts{};
+    opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_CELL_MOMENTS_THREADS_PER_BLOCK", 256));
+    cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
+
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const int nc = grid.numCells;
+    if (cuda.cellId.size() != n || cuda.cellCount.size() != static_cast<std::size_t>(nc) ||
+        cuda.cellMass.size() != static_cast<std::size_t>(nc) || cuda.cellPx.size() != static_cast<std::size_t>(nc) ||
+        cuda.cellPy.size() != static_cast<std::size_t>(nc)) {
+        throw std::runtime_error("CUDA cell moments active: incompatible CUDA output sizes");
+    }
+
+    ws.cellId = cuda.cellId;
+
+    CudaCellMomentsActiveRow row{};
+    row.step = step;
+    row.particlesVisited = diag.particlesVisited;
+    row.fluidParticles = diag.fluidParticles;
+    row.numCells = diag.numCells;
+    row.uploadSeconds = diag.uploadSeconds;
+    row.kernelSeconds = diag.kernelSeconds;
+    row.downloadSeconds = diag.downloadSeconds;
+    row.totalSeconds = diag.totalSeconds;
+    CudaCellMomentsActiveAccumulator& acc = cuda_cell_moments_active_accumulator();
+    acc.set_output_dir(params.outputDir);
+    acc.add(row);
+    return true;
+}
+
 void maybe_validate_cuda_cell_moments_shadow(const ParticleState& state,
                                              const SimulationParams& params,
                                              const CellGrid& grid,
@@ -454,30 +539,42 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
 
+#ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
+    CudaCellMoments cudaCellMomentsActive{};
+    const bool usingCudaCellMomentsActive = try_cuda_cell_moments_active(
+        state, params, grid, diag.shift, step, ws, cudaCellMomentsActive);
+#else
+    const bool usingCudaCellMomentsActive = false;
+#endif
+
+    if (!usingCudaCellMomentsActive) {
 #pragma omp parallel
-    {
-        const int tid = thread_id();
-        const std::size_t offset = static_cast<std::size_t>(tid * nc);
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
-                continue;
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i)) {
+                    continue;
+                }
+                const int c = cell_index_from_position(state.x[i], state.y[i], grid, diag.shift, params);
+                ws.cellId[i] = c;
+                const std::size_t k = offset + static_cast<std::size_t>(c);
+                const double m = state.mass[i];
+                ws.localCount[k] += 1u;
+                ws.localMass[k] += m;
+                ws.localPx[k] += m * state.vx[i];
+                ws.localPy[k] += m * state.vy[i];
             }
-            const int c = cell_index_from_position(state.x[i], state.y[i], grid, diag.shift, params);
-            ws.cellId[i] = c;
-            const std::size_t k = offset + static_cast<std::size_t>(c);
-            const double m = state.mass[i];
-            ws.localCount[k] += 1u;
-            ws.localMass[k] += m;
-            ws.localPx[k] += m * state.vx[i];
-            ws.localPy[k] += m * state.vy[i];
         }
     }
 
 #ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
-    maybe_validate_cuda_cell_moments_shadow(state, params, grid, diag.shift, step, ws, nt);
+    if (!usingCudaCellMomentsActive) {
+        maybe_validate_cuda_cell_moments_shadow(state, params, grid, diag.shift, step, ws, nt);
+    }
 #endif
 
     const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
@@ -502,12 +599,23 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         double mass = 0.0;
         double px = 0.0;
         double py = 0.0;
-        for (int t = 0; t < nt; ++t) {
-            const std::size_t k = static_cast<std::size_t>(t * nc + c);
-            count += ws.localCount[k];
-            mass += ws.localMass[k];
-            px += ws.localPx[k];
-            py += ws.localPy[k];
+#ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
+        if (usingCudaCellMomentsActive) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            count = cudaCellMomentsActive.cellCount[kk];
+            mass = cudaCellMomentsActive.cellMass[kk];
+            px = cudaCellMomentsActive.cellPx[kk];
+            py = cudaCellMomentsActive.cellPy[kk];
+        } else
+#endif
+        {
+            for (int t = 0; t < nt; ++t) {
+                const std::size_t k = static_cast<std::size_t>(t * nc + c);
+                count += ws.localCount[k];
+                mass += ws.localMass[k];
+                px += ws.localPx[k];
+                py += ws.localPy[k];
+            }
         }
 
         const int ix = c % grid.Nx;
