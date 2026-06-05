@@ -1,0 +1,11 @@
+field,value
+patch,0203
+branch,SRC_GPU
+baseline,0202 active CUDA cell-moments deposit plus 0198/0196 CUDA Q6 backend
+cuda_default,disabled unless runtime flags are set by the script
+physical_scope,Taylor-Green periodic full-fluid validation only
+new_numerical_kernel,no
+purpose,Measure composition of validated CUDA Q6 and CUDA particle-to-cell deposit paths
+q6_mode,batch device-scalar CG with configurable BATCH_SIZE; default 20
+deposit_mode,active CUDA cell moments with persistent buffers and fast paths
+next_decision,If combined path remains near neutral, move a cell-moment consumer such as thermostat/collision to CUDA.
