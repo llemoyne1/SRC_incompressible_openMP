@@ -289,6 +289,10 @@ struct CudaCellMomentsActiveRow {
     double kernelSeconds = 0.0;
     double downloadSeconds = 0.0;
     double totalSeconds = 0.0;
+    int reusedDeviceBuffers = 0;
+    int allFluidFastPath = 0;
+    int uniformMassFastPath = 0;
+    int downloadedCellVelocities = 1;
 };
 
 class CudaCellMomentsActiveAccumulator {
@@ -305,14 +309,16 @@ public:
         if (outputDir_.empty() || rows_.empty()) return;
         std::error_code ec;
         std::filesystem::create_directories(outputDir_, ec);
-        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_moments_active_0201.csv";
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_moments_active_0202.csv";
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
-        out << "step,particlesVisited,fluidParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds\n";
+        out << "step,particlesVisited,fluidParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,reusedDeviceBuffers,allFluidFastPath,uniformMassFastPath,downloadedCellVelocities\n";
         for (const auto& r : rows_) {
             out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ',' << r.numCells << ','
-                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << '\n';
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << ','
+                << r.reusedDeviceBuffers << ',' << r.allFluidFastPath << ',' << r.uniformMassFastPath << ','
+                << r.downloadedCellVelocities << '\n';
         }
     }
 
@@ -338,6 +344,11 @@ bool try_cuda_cell_moments_active(const ParticleState& state,
     CudaCellMomentsDiagnostics diag{};
     CudaCellMomentsOptions opts{};
     opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_CELL_MOMENTS_THREADS_PER_BLOCK", 256));
+    opts.reuseDeviceBuffers = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_REUSE_BUFFERS", true);
+    opts.computeCellVelocities = false;
+    opts.downloadCellVelocities = false;
+    opts.enableAllFluidFastPath = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_ALL_FLUID_FASTPATH", true);
+    opts.enableUniformMassFastPath = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_UNIFORM_MASS_FASTPATH", true);
     cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -359,6 +370,10 @@ bool try_cuda_cell_moments_active(const ParticleState& state,
     row.kernelSeconds = diag.kernelSeconds;
     row.downloadSeconds = diag.downloadSeconds;
     row.totalSeconds = diag.totalSeconds;
+    row.reusedDeviceBuffers = diag.reusedDeviceBuffers;
+    row.allFluidFastPath = diag.allFluidFastPath;
+    row.uniformMassFastPath = diag.uniformMassFastPath;
+    row.downloadedCellVelocities = diag.downloadedCellVelocities;
     CudaCellMomentsActiveAccumulator& acc = cuda_cell_moments_active_accumulator();
     acc.set_output_dir(params.outputDir);
     acc.add(row);

@@ -39,6 +39,66 @@ void cuda_free(T*& ptr) {
     }
 }
 
+struct DeviceDepositBuffers {
+    std::size_t nCapacity = 0u;
+    std::size_t cellCapacity = 0u;
+    double* d_x = nullptr;
+    double* d_y = nullptr;
+    double* d_vx = nullptr;
+    double* d_vy = nullptr;
+    double* d_mass = nullptr;
+    unsigned char* d_role = nullptr;
+    int* d_cellId = nullptr;
+    unsigned int* d_count = nullptr;
+    double* d_cellMass = nullptr;
+    double* d_cellPx = nullptr;
+    double* d_cellPy = nullptr;
+    double* d_cellUx = nullptr;
+    double* d_cellUy = nullptr;
+
+    ~DeviceDepositBuffers() { release(); }
+
+    void release() {
+        cuda_free(d_x);
+        cuda_free(d_y);
+        cuda_free(d_vx);
+        cuda_free(d_vy);
+        cuda_free(d_mass);
+        cuda_free(d_role);
+        cuda_free(d_cellId);
+        cuda_free(d_count);
+        cuda_free(d_cellMass);
+        cuda_free(d_cellPx);
+        cuda_free(d_cellPy);
+        cuda_free(d_cellUx);
+        cuda_free(d_cellUy);
+        nCapacity = 0u;
+        cellCapacity = 0u;
+    }
+
+    void ensure(std::size_t n, std::size_t nc) {
+        if (n <= nCapacity && nc <= cellCapacity) return;
+        release();
+        nCapacity = n;
+        cellCapacity = nc;
+        cuda_alloc(&d_x, nCapacity, "cudaMalloc d_x");
+        cuda_alloc(&d_y, nCapacity, "cudaMalloc d_y");
+        cuda_alloc(&d_vx, nCapacity, "cudaMalloc d_vx");
+        cuda_alloc(&d_vy, nCapacity, "cudaMalloc d_vy");
+        cuda_alloc(&d_mass, nCapacity, "cudaMalloc d_mass");
+        cuda_alloc(&d_role, nCapacity, "cudaMalloc d_role");
+        cuda_alloc(&d_cellId, nCapacity, "cudaMalloc d_cellId");
+        cuda_alloc(&d_count, cellCapacity, "cudaMalloc d_count");
+        cuda_alloc(&d_cellMass, cellCapacity, "cudaMalloc d_cellMass");
+        cuda_alloc(&d_cellPx, cellCapacity, "cudaMalloc d_cellPx");
+        cuda_alloc(&d_cellPy, cellCapacity, "cudaMalloc d_cellPy");
+        cuda_alloc(&d_cellUx, cellCapacity, "cudaMalloc d_cellUx");
+        cuda_alloc(&d_cellUy, cellCapacity, "cudaMalloc d_cellUy");
+    }
+};
+
+thread_local DeviceDepositBuffers g_reusableDepositBuffers;
+
 struct DeviceDepositConfig {
     int nx;
     int ny;
@@ -98,7 +158,8 @@ __global__ void reset_cell_moments_kernel(const int nParticles,
                                           double* cellPx,
                                           double* cellPy,
                                           double* cellUx,
-                                          double* cellUy) {
+                                          double* cellUy,
+                                          const int resetVelocities) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int i = tid; i < nParticles; i += stride) {
@@ -109,8 +170,10 @@ __global__ void reset_cell_moments_kernel(const int nParticles,
         cellMass[c] = 0.0;
         cellPx[c] = 0.0;
         cellPy[c] = 0.0;
-        cellUx[c] = 0.0;
-        cellUy[c] = 0.0;
+        if (resetVelocities) {
+            cellUx[c] = 0.0;
+            cellUy[c] = 0.0;
+        }
     }
 }
 
@@ -122,6 +185,9 @@ __global__ void deposit_cell_moments_atomic_kernel(const int nParticles,
                                                    const double* mass,
                                                    const unsigned char* role,
                                                    const DeviceDepositConfig cfg,
+                                                   const int allFluid,
+                                                   const int uniformMass,
+                                                   const double uniformMassValue,
                                                    int* cellId,
                                                    unsigned int* cellCount,
                                                    double* cellMass,
@@ -129,13 +195,13 @@ __global__ void deposit_cell_moments_atomic_kernel(const int nParticles,
                                                    double* cellPy) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nParticles) return;
-    if (role[i] != static_cast<unsigned char>(kParticleRoleFluid)) {
+    if (!allFluid && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) {
         cellId[i] = -1;
         return;
     }
     const int c = cell_index_from_position_device(x[i], y[i], cfg);
     cellId[i] = c;
-    const double m = mass[i];
+    const double m = uniformMass ? uniformMassValue : mass[i];
     atomicAdd(&cellCount[c], 1u);
     atomicAdd(&cellMass[c], m);
     atomicAdd(&cellPx[c], m * vx[i]);
@@ -216,8 +282,24 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
     }
 
     std::uint64_t fluidParticles = 0u;
+    bool allFluid = options.enableAllFluidFastPath;
     for (std::size_t i = 0; i < n; ++i) {
-        if (h_role[i] == kParticleRoleFluid) ++fluidParticles;
+        if (h_role[i] == kParticleRoleFluid) {
+            ++fluidParticles;
+        } else {
+            allFluid = false;
+        }
+    }
+
+    bool uniformMass = options.enableUniformMassFastPath && n > 0u;
+    const double uniformMassValue = n > 0u ? state.mass[0] : 0.0;
+    if (uniformMass) {
+        for (std::size_t i = 1; i < n; ++i) {
+            if (state.mass[i] != uniformMassValue) {
+                uniformMass = false;
+                break;
+            }
+        }
     }
 
     out.cellId.assign(n, -1);
@@ -225,44 +307,30 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
     out.cellMass.assign(static_cast<std::size_t>(nc), 0.0);
     out.cellPx.assign(static_cast<std::size_t>(nc), 0.0);
     out.cellPy.assign(static_cast<std::size_t>(nc), 0.0);
-    out.cellUx.assign(static_cast<std::size_t>(nc), 0.0);
-    out.cellUy.assign(static_cast<std::size_t>(nc), 0.0);
+    if (options.downloadCellVelocities) {
+        out.cellUx.assign(static_cast<std::size_t>(nc), 0.0);
+        out.cellUy.assign(static_cast<std::size_t>(nc), 0.0);
+    } else {
+        out.cellUx.clear();
+        out.cellUy.clear();
+    }
 
-    double* d_x = nullptr;
-    double* d_y = nullptr;
-    double* d_vx = nullptr;
-    double* d_vy = nullptr;
-    double* d_mass = nullptr;
-    unsigned char* d_role = nullptr;
-    int* d_cellId = nullptr;
-    unsigned int* d_count = nullptr;
-    double* d_cellMass = nullptr;
-    double* d_cellPx = nullptr;
-    double* d_cellPy = nullptr;
-    double* d_cellUx = nullptr;
-    double* d_cellUy = nullptr;
+    DeviceDepositBuffers localBuffers;
+    DeviceDepositBuffers& buffers = options.reuseDeviceBuffers ? g_reusableDepositBuffers : localBuffers;
 
     const Clock::time_point tu0 = Clock::now();
-    cuda_alloc(&d_x, n, "cudaMalloc d_x");
-    cuda_alloc(&d_y, n, "cudaMalloc d_y");
-    cuda_alloc(&d_vx, n, "cudaMalloc d_vx");
-    cuda_alloc(&d_vy, n, "cudaMalloc d_vy");
-    cuda_alloc(&d_mass, n, "cudaMalloc d_mass");
-    cuda_alloc(&d_role, n, "cudaMalloc d_role");
-    cuda_alloc(&d_cellId, n, "cudaMalloc d_cellId");
-    cuda_alloc(&d_count, static_cast<std::size_t>(nc), "cudaMalloc d_count");
-    cuda_alloc(&d_cellMass, static_cast<std::size_t>(nc), "cudaMalloc d_cellMass");
-    cuda_alloc(&d_cellPx, static_cast<std::size_t>(nc), "cudaMalloc d_cellPx");
-    cuda_alloc(&d_cellPy, static_cast<std::size_t>(nc), "cudaMalloc d_cellPy");
-    cuda_alloc(&d_cellUx, static_cast<std::size_t>(nc), "cudaMalloc d_cellUx");
-    cuda_alloc(&d_cellUy, static_cast<std::size_t>(nc), "cudaMalloc d_cellUy");
+    buffers.ensure(n, static_cast<std::size_t>(nc));
 
-    cuda_check(cudaMemcpy(d_x, state.x.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy x H2D");
-    cuda_check(cudaMemcpy(d_y, state.y.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy y H2D");
-    cuda_check(cudaMemcpy(d_vx, state.vx.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy vx H2D");
-    cuda_check(cudaMemcpy(d_vy, state.vy.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy vy H2D");
-    cuda_check(cudaMemcpy(d_mass, state.mass.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy mass H2D");
-    cuda_check(cudaMemcpy(d_role, h_role, n * sizeof(unsigned char), cudaMemcpyHostToDevice), "copy role H2D");
+    cuda_check(cudaMemcpy(buffers.d_x, state.x.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy x H2D");
+    cuda_check(cudaMemcpy(buffers.d_y, state.y.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy y H2D");
+    cuda_check(cudaMemcpy(buffers.d_vx, state.vx.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy vx H2D");
+    cuda_check(cudaMemcpy(buffers.d_vy, state.vy.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy vy H2D");
+    if (!uniformMass) {
+        cuda_check(cudaMemcpy(buffers.d_mass, state.mass.data(), n * sizeof(double), cudaMemcpyHostToDevice), "copy mass H2D");
+    }
+    if (!allFluid) {
+        cuda_check(cudaMemcpy(buffers.d_role, h_role, n * sizeof(unsigned char), cudaMemcpyHostToDevice), "copy role H2D");
+    }
     const Clock::time_point tu1 = Clock::now();
 
     DeviceDepositConfig cfg{};
@@ -284,41 +352,40 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
     const int resetGrid = std::max(particleGrid, cellGrid);
 
     const Clock::time_point tk0 = Clock::now();
-    reset_cell_moments_kernel<<<resetGrid, block>>>(nInt, nc, d_cellId, d_count, d_cellMass,
-                                                    d_cellPx, d_cellPy, d_cellUx, d_cellUy);
+    reset_cell_moments_kernel<<<resetGrid, block>>>(nInt, nc, buffers.d_cellId, buffers.d_count,
+                                                    buffers.d_cellMass, buffers.d_cellPx, buffers.d_cellPy,
+                                                    buffers.d_cellUx, buffers.d_cellUy,
+                                                    options.computeCellVelocities ? 1 : 0);
     cuda_check(cudaGetLastError(), "launch reset_cell_moments_kernel");
-    deposit_cell_moments_atomic_kernel<<<particleGrid, block>>>(nInt, d_x, d_y, d_vx, d_vy, d_mass,
-                                                                d_role, cfg, d_cellId, d_count,
-                                                                d_cellMass, d_cellPx, d_cellPy);
+    deposit_cell_moments_atomic_kernel<<<particleGrid, block>>>(nInt, buffers.d_x, buffers.d_y,
+                                                                buffers.d_vx, buffers.d_vy,
+                                                                buffers.d_mass, buffers.d_role, cfg,
+                                                                allFluid ? 1 : 0,
+                                                                uniformMass ? 1 : 0,
+                                                                uniformMassValue,
+                                                                buffers.d_cellId, buffers.d_count,
+                                                                buffers.d_cellMass, buffers.d_cellPx,
+                                                                buffers.d_cellPy);
     cuda_check(cudaGetLastError(), "launch deposit_cell_moments_atomic_kernel");
-    finalize_cell_velocities_kernel<<<cellGrid, block>>>(nc, d_cellMass, d_cellPx, d_cellPy, d_cellUx, d_cellUy);
-    cuda_check(cudaGetLastError(), "launch finalize_cell_velocities_kernel");
+    if (options.computeCellVelocities) {
+        finalize_cell_velocities_kernel<<<cellGrid, block>>>(nc, buffers.d_cellMass, buffers.d_cellPx,
+                                                            buffers.d_cellPy, buffers.d_cellUx, buffers.d_cellUy);
+        cuda_check(cudaGetLastError(), "launch finalize_cell_velocities_kernel");
+    }
     cuda_check(cudaDeviceSynchronize(), "cuda_deposit_cell_moments_atomic synchronize");
     const Clock::time_point tk1 = Clock::now();
 
     const Clock::time_point td0 = Clock::now();
-    cuda_check(cudaMemcpy(out.cellId.data(), d_cellId, n * sizeof(int), cudaMemcpyDeviceToHost), "copy cellId D2H");
-    cuda_check(cudaMemcpy(out.cellCount.data(), d_count, static_cast<std::size_t>(nc) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost), "copy count D2H");
-    cuda_check(cudaMemcpy(out.cellMass.data(), d_cellMass, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellMass D2H");
-    cuda_check(cudaMemcpy(out.cellPx.data(), d_cellPx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellPx D2H");
-    cuda_check(cudaMemcpy(out.cellPy.data(), d_cellPy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellPy D2H");
-    cuda_check(cudaMemcpy(out.cellUx.data(), d_cellUx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellUx D2H");
-    cuda_check(cudaMemcpy(out.cellUy.data(), d_cellUy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellUy D2H");
+    cuda_check(cudaMemcpy(out.cellId.data(), buffers.d_cellId, n * sizeof(int), cudaMemcpyDeviceToHost), "copy cellId D2H");
+    cuda_check(cudaMemcpy(out.cellCount.data(), buffers.d_count, static_cast<std::size_t>(nc) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost), "copy count D2H");
+    cuda_check(cudaMemcpy(out.cellMass.data(), buffers.d_cellMass, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellMass D2H");
+    cuda_check(cudaMemcpy(out.cellPx.data(), buffers.d_cellPx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellPx D2H");
+    cuda_check(cudaMemcpy(out.cellPy.data(), buffers.d_cellPy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellPy D2H");
+    if (options.downloadCellVelocities) {
+        cuda_check(cudaMemcpy(out.cellUx.data(), buffers.d_cellUx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellUx D2H");
+        cuda_check(cudaMemcpy(out.cellUy.data(), buffers.d_cellUy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy cellUy D2H");
+    }
     const Clock::time_point td1 = Clock::now();
-
-    cuda_free(d_x);
-    cuda_free(d_y);
-    cuda_free(d_vx);
-    cuda_free(d_vy);
-    cuda_free(d_mass);
-    cuda_free(d_role);
-    cuda_free(d_cellId);
-    cuda_free(d_count);
-    cuda_free(d_cellMass);
-    cuda_free(d_cellPx);
-    cuda_free(d_cellPy);
-    cuda_free(d_cellUx);
-    cuda_free(d_cellUy);
 
     const Clock::time_point t1 = Clock::now();
     if (diagnostics != nullptr) {
@@ -329,6 +396,10 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
         diagnostics->kernelSeconds = seconds_between(tk0, tk1);
         diagnostics->downloadSeconds = seconds_between(td0, td1);
         diagnostics->totalSeconds = seconds_between(t0, t1);
+        diagnostics->reusedDeviceBuffers = options.reuseDeviceBuffers ? 1 : 0;
+        diagnostics->allFluidFastPath = allFluid ? 1 : 0;
+        diagnostics->uniformMassFastPath = uniformMass ? 1 : 0;
+        diagnostics->downloadedCellVelocities = options.downloadCellVelocities ? 1 : 0;
     }
 }
 

@@ -11,6 +11,21 @@ namespace mpcd {
 
 struct CudaCellMomentsOptions {
     int threadsPerBlock = 256;
+
+    // 0202: keep device allocations across calls. This is intended for the
+    // active in-step path where particle counts and grid sizes remain stable
+    // for many consecutive collision steps.
+    bool reuseDeviceBuffers = false;
+
+    // Active collision deposit only needs cellId/count/mass/px/py. Shadow
+    // validation may keep velocities enabled for direct CPU/CUDA comparison.
+    bool computeCellVelocities = true;
+    bool downloadCellVelocities = true;
+
+    // Conservative automatic fast paths. They are enabled by default because
+    // they are guarded by exact host-side checks performed in the deposit call.
+    bool enableAllFluidFastPath = true;
+    bool enableUniformMassFastPath = true;
 };
 
 struct CudaCellMomentsDiagnostics {
@@ -21,6 +36,10 @@ struct CudaCellMomentsDiagnostics {
     double kernelSeconds = 0.0;
     double downloadSeconds = 0.0;
     double totalSeconds = 0.0;
+    int reusedDeviceBuffers = 0;
+    int allFluidFastPath = 0;
+    int uniformMassFastPath = 0;
+    int downloadedCellVelocities = 1;
 };
 
 struct CudaCellMoments {
