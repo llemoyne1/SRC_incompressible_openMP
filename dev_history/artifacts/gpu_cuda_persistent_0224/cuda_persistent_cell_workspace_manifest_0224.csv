@@ -1,0 +1,8 @@
+item,path,description
+header,include/cuda_cell_workspace.h,Persistent CUDA cell workspace public API
+source,src/cuda_cell_workspace.cu,Persistent CUDA cell workspace allocation/reuse implementation
+header_update,include/cuda_persistent_mpcd_step.h,Adds shared particle+cell workspace overload
+source_update,src/cuda_persistent_mpcd_step.cu,Implements shared CudaParticleState + CudaCellWorkspace persistent substep
+validator,src/main_validate_cuda_persistent_cell_workspace_bridge_0224.cpp,Standalone CPU/legacy/shared-cell-workspace validator
+build_script,scripts/build_cuda_persistent_cell_workspace_bridge_0224.sh,Builds validator with nvcc
+run_script,scripts/run_cuda_persistent_cell_workspace_bridge_smoke_0224.sh,Runs 64/128 smoke and writes CSV

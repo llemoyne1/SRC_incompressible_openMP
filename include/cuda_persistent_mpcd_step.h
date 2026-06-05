@@ -3,6 +3,7 @@
 #include "particle_state.h"
 #include "thermostat.h"
 #include "cuda_particle_state.h"
+#include "cuda_cell_workspace.h"
 
 #include <cstdint>
 #include <vector>
@@ -99,6 +100,22 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 // workspace cell moments so the current host-side step can continue unchanged.
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
     CudaParticleState& gpuState,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config,
+    ThermostatDiagnostics* thermostatDiagOut = nullptr);
+
+// 0224 shared particle+cell workspace overload. Particle arrays are resident in
+// CudaParticleState and cell/moment scratch arrays are resident in
+// CudaCellWorkspace. This removes the remaining per-call cell-buffer
+// allocations from the persistent deposit -> SRC collision -> thermostat path.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
     ParticleState& downloadTarget,
     std::vector<int>& cellIdOut,
     std::vector<std::uint32_t>& cellCountOut,

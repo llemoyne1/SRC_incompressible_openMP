@@ -1,0 +1,8 @@
+key,value
+patch,0224
+scope,standalone bridge validation for persistent CUDA cell workspace
+modifies_main_step,no
+requires_cuda_macros,MPCD_ENABLE_CUDA_PERSISTENT_STEP;MPCD_ENABLE_CUDA_PARTICLE_STATE;MPCD_ENABLE_CUDA_CELL_WORKSPACE
+physics_scope,Taylor-Green periodic prototype;deposit;SRC collision;cell-relative thermostat
+expected_next_patch,thread-local CudaCellWorkspace active integration in src_collision_step
+rollback,do not use new overload; existing 0223 shared-particle path remains available
