@@ -1,0 +1,10 @@
+key,value
+patch,0215
+branch,SRC_GPU
+feature,persistent CUDA deposit->SRC collision->thermostat substep
+runtime_flag,MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+default_behavior,CPU/OpenMP unchanged
+supported_geometry,periodic_x_periodic_y_full_domain_no_wallVP_no_solid
+projection_support,projectionEnable=false only for this patch
+reason_projection_disabled,Q6 currently modifies CPU velocities between collision and thermostat
+expected_next_step,shared resident GPU particle state across Q6/capacity/thermostat or device-side Q6 consumer

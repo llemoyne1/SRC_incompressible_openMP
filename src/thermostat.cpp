@@ -4,6 +4,10 @@
 #include "cuda_cell_thermostat.h"
 #endif
 
+#ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+#include "cuda_persistent_mpcd_step.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -388,6 +392,19 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     if (!(targetKBT > 0.0)) {
         throw std::runtime_error("Thermostat requires positive thermostatTargetKBT or kBT");
     }
+
+#ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+    if (env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE", false)) {
+        ThermostatDiagnostics consumed{};
+        if (cuda_persistent_take_consumed_thermostat(step, consumed)) {
+            return consumed;
+        }
+        const bool strictConsumed = env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT", true);
+        if (strictConsumed) {
+            throw std::runtime_error("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1 but no consumed thermostat diagnostics were recorded for this step");
+        }
+    }
+#endif
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const int nc = grid.numCells;

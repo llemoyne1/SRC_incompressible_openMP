@@ -1,0 +1,9 @@
+item,path,description
+header,include/cuda_persistent_mpcd_step.h,Adds persistent SRC+thermostat entry point and consumed thermostat diagnostics handoff.
+implementation,src/cuda_persistent_mpcd_step.cu,Adds GPU thermostat diagnostics and wrapper for deposit->SRC->thermostat.
+collision,src/src_collision.cpp,Adds runtime switch and workspace/diagnostic restoration for persistent SRC+thermostat path.
+thermostat,src/thermostat.cpp,Consumes diagnostics when thermostat was already applied by persistent CUDA substep.
+validation_script,scripts/run_cuda_persistent_src_thermostat_active_0215.sh,Compares CPU baseline with persistent CUDA SRC+thermostat active path.
+build_script,scripts/build_src_mpcd_cuda_0215.sh,Builds CUDA-enabled executable with persistent step support.
+validation_helper,scripts/run_validation_mono_config_0162.sh,Adds PROJECTION_ENABLE env override while preserving default projectionEnable=true.
+documentation,doc/README_0215_CUDA_PERSISTENT_SRC_THERMOSTAT.md,Documents scope and validation criteria.

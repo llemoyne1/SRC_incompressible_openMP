@@ -1,6 +1,7 @@
 #pragma once
 
 #include "particle_state.h"
+#include "thermostat.h"
 
 #include <cstdint>
 #include <vector>
@@ -38,6 +39,17 @@ struct CudaPersistentMpcdStepDiagnostics {
     double kernelSeconds = 0.0;
     double downloadSeconds = 0.0;
     double totalSeconds = 0.0;
+
+    // 0215: optional persistent collision+thermostat substep diagnostics.
+    // These are populated only when the persistent path applies the
+    // cell-relative thermostat on GPU after SRC rotation.
+    std::uint64_t thermostatCellsRescaled = 0u;
+    std::uint64_t thermostatParticlesRescaled = 0u;
+    double thermostatKBTBefore = 0.0;
+    double thermostatKBTAfter = 0.0;
+    double thermostatScaleMean = 1.0;
+    double thermostatScaleMin = 1.0;
+    double thermostatScaleMax = 1.0;
 };
 
 bool cuda_persistent_mpcd_step_available();
@@ -63,5 +75,26 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     std::vector<double>& cellUxOut,
     std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config);
+
+// 0215 active persistent substep: deposit -> SRC collision -> cell-relative
+// thermostat on the GPU, with a single final download of vx/vy and CPU
+// workspace cell moments. This entry point is deliberately for subsets where
+// no CPU velocity operator is interposed between collision and thermostat
+// (for example projectionEnable=false).
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+    ParticleState& state,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config,
+    ThermostatDiagnostics* thermostatDiagOut = nullptr);
+
+// When the 0215 persistent collision+thermostat path has already applied the
+// thermostat inside src_collision_step(), the later thermostat phase consumes
+// the stored diagnostics and returns without applying a second thermostat.
+void cuda_persistent_record_consumed_thermostat(std::uint64_t step, const ThermostatDiagnostics& diag);
+bool cuda_persistent_take_consumed_thermostat(std::uint64_t step, ThermostatDiagnostics& diag);
 
 } // namespace mpcd

@@ -269,6 +269,26 @@ bool cuda_persistent_mpcd_step_available() {
 #endif
 }
 
+
+namespace {
+std::uint64_t g_consumedThermostatStep = 0u;
+bool g_consumedThermostatValid = false;
+ThermostatDiagnostics g_consumedThermostatDiag{};
+}
+
+void cuda_persistent_record_consumed_thermostat(std::uint64_t step, const ThermostatDiagnostics& diag) {
+    g_consumedThermostatStep = step;
+    g_consumedThermostatDiag = diag;
+    g_consumedThermostatValid = true;
+}
+
+bool cuda_persistent_take_consumed_thermostat(std::uint64_t step, ThermostatDiagnostics& diag) {
+    if (!g_consumedThermostatValid || g_consumedThermostatStep != step) return false;
+    diag = g_consumedThermostatDiag;
+    g_consumedThermostatValid = false;
+    return true;
+}
+
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     ParticleState& state,
     std::vector<int>* cellIdOut,
@@ -277,9 +297,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     std::vector<double>* cellUxOut,
     std::vector<double>* cellUyOut,
     const CudaPersistentMpcdStepConfig& config,
-    const bool applyThermostat) {
+    const bool applyThermostat,
+    ThermostatDiagnostics* thermostatDiagOut) {
 #ifndef MPCD_ENABLE_CUDA_PERSISTENT_STEP
-    (void)state; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config; (void)applyThermostat;
+    (void)state; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config; (void)applyThermostat; (void)thermostatDiagOut;
     throw std::runtime_error("cuda_apply_persistent_tg_impl called without MPCD_ENABLE_CUDA_PERSISTENT_STEP");
 #else
     validate_particle_state(state, "cuda_apply_persistent_tg_deposit_src_thermostat");
@@ -428,6 +449,14 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
         cellUyOut->assign(static_cast<std::size_t>(nc), 0.0);
         MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut->data(), b.cellUy, cBytesD, cudaMemcpyDeviceToHost));
     }
+    std::vector<double> kineticHost;
+    std::vector<double> scaleHost;
+    if (applyThermostat && thermostatDiagOut != nullptr) {
+        kineticHost.assign(static_cast<std::size_t>(nc), 0.0);
+        scaleHost.assign(static_cast<std::size_t>(nc), 1.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(kineticHost.data(), b.cellKinetic, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(scaleHost.data(), b.cellScale, cBytesD, cudaMemcpyDeviceToHost));
+    }
     unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
     MPCD_CUDA_CHECK(cudaMemcpy(&fluid, b.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&rotated, b.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
@@ -438,6 +467,49 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     diag.fluidParticles = static_cast<std::uint64_t>(fluid) / static_cast<std::uint64_t>(cycles);
     diag.particlesRotated = static_cast<std::uint64_t>(rotated);
     diag.invalidCellParticles = static_cast<std::uint64_t>(invalid);
+
+    if (applyThermostat && thermostatDiagOut != nullptr && cellCountOut != nullptr && !kineticHost.empty()) {
+        ThermostatDiagnostics td{};
+        double totalKBefore = 0.0;
+        double targetKTotal = 0.0;
+        double scaleSum = 0.0;
+        double scaleMin = 1.0e300;
+        double scaleMax = 0.0;
+        std::uint64_t dofTotal = 0u;
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            const std::uint32_t count = (*cellCountOut)[kk];
+            const double K = kineticHost[kk];
+            if (count < static_cast<std::uint32_t>(std::max(1, config.thermostatMinParticles))) continue;
+            if (!(K > config.thermostatEpsilon)) continue;
+            const double dof = 2.0 * static_cast<double>(count - 1u);
+            const double targetK = 0.5 * dof * config.targetKBT;
+            const double scale = scaleHost[kk];
+            totalKBefore += K;
+            targetKTotal += targetK;
+            dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
+            td.cellsRescaled += 1u;
+            td.particlesRescaled += static_cast<std::uint64_t>(count);
+            scaleSum += scale;
+            if (scale < scaleMin) scaleMin = scale;
+            if (scale > scaleMax) scaleMax = scale;
+        }
+        td.applied = td.cellsRescaled > 0u;
+        td.kBTBefore = dofTotal > 0u ? (2.0 * totalKBefore / static_cast<double>(dofTotal)) : 0.0;
+        td.kBTAfter = dofTotal > 0u ? (2.0 * targetKTotal / static_cast<double>(dofTotal)) : 0.0;
+        td.scaleMean = td.cellsRescaled > 0u ? scaleSum / static_cast<double>(td.cellsRescaled) : 1.0;
+        td.scaleMin = td.cellsRescaled > 0u ? scaleMin : 1.0;
+        td.scaleMax = td.cellsRescaled > 0u ? scaleMax : 1.0;
+        *thermostatDiagOut = td;
+        diag.thermostatCellsRescaled = td.cellsRescaled;
+        diag.thermostatParticlesRescaled = td.particlesRescaled;
+        diag.thermostatKBTBefore = td.kBTBefore;
+        diag.thermostatKBTAfter = td.kBTAfter;
+        diag.thermostatScaleMean = td.scaleMean;
+        diag.thermostatScaleMin = td.scaleMin;
+        diag.thermostatScaleMax = td.scaleMax;
+    }
+
     diag.totalSeconds = seconds_since(tTotal0);
     return diag;
 #endif
@@ -447,7 +519,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_thermostat(
     ParticleState& state,
     const CudaPersistentMpcdStepConfig& config) {
-    return cuda_apply_persistent_tg_impl(state, nullptr, nullptr, nullptr, nullptr, nullptr, config, true);
+    return cuda_apply_persistent_tg_impl(state, nullptr, nullptr, nullptr, nullptr, nullptr, config, true, nullptr);
 }
 
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision(
@@ -458,7 +530,19 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     std::vector<double>& cellUxOut,
     std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config) {
-    return cuda_apply_persistent_tg_impl(state, &cellIdOut, &cellCountOut, &cellMassOut, &cellUxOut, &cellUyOut, config, false);
+    return cuda_apply_persistent_tg_impl(state, &cellIdOut, &cellCountOut, &cellMassOut, &cellUxOut, &cellUyOut, config, false, nullptr);
+}
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+    ParticleState& state,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config,
+    ThermostatDiagnostics* thermostatDiagOut) {
+    return cuda_apply_persistent_tg_impl(state, &cellIdOut, &cellCountOut, &cellMassOut, &cellUxOut, &cellUyOut, config, true, thermostatDiagOut);
 }
 
 } // namespace mpcd

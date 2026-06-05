@@ -507,6 +507,14 @@ struct CudaPersistentCollisionActiveRow {
     double totalSeconds = 0.0;
     double shiftX = 0.0;
     double shiftY = 0.0;
+    int thermostatAppliedOnGpu = 0;
+    std::uint64_t thermostatCellsRescaled = 0u;
+    std::uint64_t thermostatParticlesRescaled = 0u;
+    double thermostatKBTBefore = 0.0;
+    double thermostatKBTAfter = 0.0;
+    double thermostatScaleMean = 1.0;
+    double thermostatScaleMin = 1.0;
+    double thermostatScaleMax = 1.0;
 };
 
 class CudaPersistentCollisionActiveAccumulator {
@@ -523,16 +531,20 @@ public:
         if (outputDir_.empty() || rows_.empty()) return;
         std::error_code ec;
         std::filesystem::create_directories(outputDir_, ec);
-        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_persistent_src_collision_active_0214.csv";
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_persistent_src_collision_thermostat_0215.csv";
         std::ofstream out(path);
         if (!out) return;
         out << std::setprecision(17);
-        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY\n";
+        out << "step,particlesVisited,fluidParticles,particlesRotated,invalidCellParticles,numCells,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,shiftX,shiftY,thermostatAppliedOnGpu,thermostatCellsRescaled,thermostatParticlesRescaled,thermostatKBTBefore,thermostatKBTAfter,thermostatScaleMean,thermostatScaleMin,thermostatScaleMax\n";
         for (const auto& r : rows_) {
             out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ','
                 << r.particlesRotated << ',' << r.invalidCellParticles << ',' << r.numCells << ','
                 << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ','
-                << r.totalSeconds << ',' << r.shiftX << ',' << r.shiftY << '\n';
+                << r.totalSeconds << ',' << r.shiftX << ',' << r.shiftY << ','
+                << r.thermostatAppliedOnGpu << ',' << r.thermostatCellsRescaled << ','
+                << r.thermostatParticlesRescaled << ',' << r.thermostatKBTBefore << ','
+                << r.thermostatKBTAfter << ',' << r.thermostatScaleMean << ','
+                << r.thermostatScaleMin << ',' << r.thermostatScaleMax << '\n';
         }
     }
 
@@ -577,7 +589,9 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                                               const GridShift& shift,
                                               std::uint64_t step,
                                               CollisionWorkspace& ws) {
-    if (!persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE", false)) return false;
+    const bool persistentCollision = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE", false);
+    const bool persistentCollisionThermostat = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE", false);
+    if (!persistentCollision && !persistentCollisionThermostat) return false;
 
     std::string reason;
     if (!cuda_persistent_collision_subset_supported(params, grid, domain, &reason)) {
@@ -586,6 +600,22 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             throw std::runtime_error("CUDA persistent SRC collision active unsupported: " + reason);
         }
         return false;
+    }
+    if (persistentCollisionThermostat) {
+        const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_STRICT", true);
+        auto failThermostat = [&](const std::string& why) {
+            if (strict) throw std::runtime_error("CUDA persistent SRC+thermostat unsupported: " + why);
+            return false;
+        };
+        if (!params.thermostatEnable) return failThermostat("thermostatEnable=false");
+        if (params.thermostatEvery <= 0) return failThermostat("thermostatEvery must be positive");
+        if ((step % static_cast<std::uint64_t>(params.thermostatEvery)) != 0u) {
+            // No thermostat on this step; keep using the collision-only persistent path if requested.
+        } else {
+            if (params.thermostatMode != "cell_relative_rescale") return failThermostat("only cell_relative_rescale is supported");
+            if (params.projectionEnable) return failThermostat("projectionEnable must be false because Q6 currently modifies velocities on CPU between collision and thermostat");
+            if (params.closedCapacityResponseEnable) return failThermostat("capacity/virial velocity kicks between collision and thermostat are not supported");
+        }
     }
 
     CudaPersistentMpcdStepConfig cfg{};
@@ -599,11 +629,24 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.rotationAngle = params.rotationAngle;
     cfg.randomRotationSign = params.randomRotationSign ? 1 : 0;
     cfg.rngSeed = params.rngSeed;
+    cfg.targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+    cfg.thermostatMinParticles = params.thermostatMinParticles;
+    cfg.thermostatEpsilon = params.thermostatEpsilon;
     cfg.cycles = 1;
     cfg.threadsPerBlock = std::max(32, persistent_env_int_value("MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK", 256));
 
-    CudaPersistentMpcdStepDiagnostics raw = cuda_apply_persistent_tg_deposit_src_collision(
-        state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+    ThermostatDiagnostics consumedThermostat{};
+    const bool applyPersistentThermostat = persistentCollisionThermostat && params.thermostatEnable &&
+        params.thermostatEvery > 0 && ((step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u);
+    CudaPersistentMpcdStepDiagnostics raw{};
+    if (applyPersistentThermostat) {
+        raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+            state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+        cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
+    } else {
+        raw = cuda_apply_persistent_tg_deposit_src_collision(
+            state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+    }
 
     CudaPersistentCollisionActiveRow row{};
     row.step = step;
@@ -618,6 +661,16 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.totalSeconds = raw.totalSeconds;
     row.shiftX = shift.sx;
     row.shiftY = shift.sy;
+    row.thermostatAppliedOnGpu = applyPersistentThermostat ? 1 : 0;
+    if (applyPersistentThermostat) {
+        row.thermostatCellsRescaled = consumedThermostat.cellsRescaled;
+        row.thermostatParticlesRescaled = consumedThermostat.particlesRescaled;
+        row.thermostatKBTBefore = consumedThermostat.kBTBefore;
+        row.thermostatKBTAfter = consumedThermostat.kBTAfter;
+        row.thermostatScaleMean = consumedThermostat.scaleMean;
+        row.thermostatScaleMin = consumedThermostat.scaleMin;
+        row.thermostatScaleMax = consumedThermostat.scaleMax;
+    }
     auto& acc = cuda_persistent_collision_active_accumulator();
     acc.set_output_dir(params.outputDir);
     acc.add(row);

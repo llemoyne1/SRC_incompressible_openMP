@@ -131,7 +131,7 @@ randomRotationSign = true
 gridShiftEnable = true
 rngSeed = $SEED
 
-projectionEnable = true
+projectionEnable = ${PROJECTION_ENABLE:-true}
 projectionBackend = $PROJECTION_BACKEND
 projectionMaxIterations = 800
 projectionTolerance = 1.0e-10
