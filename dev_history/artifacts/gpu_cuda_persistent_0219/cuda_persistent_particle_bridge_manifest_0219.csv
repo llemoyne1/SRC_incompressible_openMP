@@ -1,0 +1,7 @@
+artifact,kind,description
+include/cuda_persistent_mpcd_step.h,modified_header,Adds shared CudaParticleState overload for persistent deposit/SRC/thermostat
+src/cuda_persistent_mpcd_step.cu,modified_source,Implements persistent substep using resident particle device buffers
+src/main_validate_cuda_persistent_particle_bridge_0219.cpp,new_validator,Compares shared-state path against CPU and legacy CUDA references
+scripts/build_cuda_persistent_particle_bridge_0219.sh,new_script,Builds the 0219 validator
+scripts/run_cuda_persistent_particle_bridge_smoke_0219.sh,new_script,Runs 64x64 and 128x128 bridge smokes and writes CSV/log
+doc/README_0219_CUDA_PERSISTENT_PARTICLE_BRIDGE.md,new_doc,Documents scope and validation

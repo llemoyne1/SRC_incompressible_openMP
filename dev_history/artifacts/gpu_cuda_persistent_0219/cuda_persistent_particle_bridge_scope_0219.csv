@@ -1,0 +1,11 @@
+item,value
+patch_id,0219
+branch_context,SRC_GPU
+base_assumption,0218 particle state manager already applied
+numerical_scope,standalone TG periodic deposit SRC collision thermostat
+step_modified,no
+uses_cuda_particle_state,yes
+particle_uploads_inside_substep,no
+cell_workspace_persistent,no
+q6_included,no
+expected_next_step,guarded real-step mode using one CudaParticleState across steps

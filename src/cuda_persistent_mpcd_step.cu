@@ -1,4 +1,5 @@
 #include "cuda_persistent_mpcd_step.h"
+#include "cuda_particle_state.h"
 
 #include <cuda_runtime.h>
 
@@ -544,5 +545,214 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     ThermostatDiagnostics* thermostatDiagOut) {
     return cuda_apply_persistent_tg_impl(state, &cellIdOut, &cellCountOut, &cellMassOut, &cellUxOut, &cellUyOut, config, true, thermostatDiagOut);
 }
+
+
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+    CudaParticleState& gpuState,
+    ParticleState& downloadTarget,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config,
+    ThermostatDiagnostics* thermostatDiagOut) {
+#if !defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP) || !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+    (void)gpuState; (void)downloadTarget; (void)cellIdOut; (void)cellCountOut; (void)cellMassOut; (void)cellUxOut; (void)cellUyOut; (void)config; (void)thermostatDiagOut;
+    throw std::runtime_error("cuda_apply_persistent_tg_deposit_src_collision_thermostat(CudaParticleState) requires MPCD_ENABLE_CUDA_PERSISTENT_STEP and MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    validate_particle_state(downloadTarget, "cuda_apply_persistent_tg_deposit_src_collision_thermostat(shared downloadTarget)");
+    if (config.Nx <= 0 || config.Ny <= 0) throw std::runtime_error("persistent CUDA shared-state step: invalid grid");
+    if (!(config.Lx > 0.0) || !(config.Ly > 0.0)) throw std::runtime_error("persistent CUDA shared-state step: invalid domain");
+    if (!(config.targetKBT > 0.0)) throw std::runtime_error("persistent CUDA shared-state step: targetKBT must be positive");
+
+    const CudaParticleDeviceView pv = gpuState.device_view();
+    if (pv.n == 0u) throw std::runtime_error("persistent CUDA shared-state step: empty CudaParticleState");
+    if (downloadTarget.Np != pv.n) throw std::runtime_error("persistent CUDA shared-state step: host particle count mismatch");
+    if (pv.x == nullptr || pv.y == nullptr || pv.vx == nullptr || pv.vy == nullptr || pv.mass == nullptr || pv.role == nullptr) {
+        throw std::runtime_error("persistent CUDA shared-state step: incomplete CudaParticleState device view");
+    }
+
+    const std::size_t n = static_cast<std::size_t>(pv.n);
+    const int nInt = static_cast<int>(n);
+    if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA shared-state step: too many particles for prototype int kernels");
+    const int nc = config.Nx * config.Ny;
+    const int cycles = std::max(1, config.cycles);
+    const int threads = std::max(32, config.threadsPerBlock);
+    const int particleBlocks = std::max(1, (nInt + threads - 1) / threads);
+    const int cellBlocks = std::max(1, (nc + threads - 1) / threads);
+    const int resetBlocks = std::max(particleBlocks, cellBlocks);
+
+    std::vector<double> cosHost(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
+    std::vector<double> sinHost(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
+    if (config.randomRotationSign) {
+        for (int c = 0; c < nc; ++c) {
+            const std::uint64_t h = splitmix64_host(config.rngSeed ^
+                                                    (config.step * 0x9e3779b97f4a7c15ULL) ^
+                                                    static_cast<std::uint64_t>(c));
+            if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
+        }
+    }
+
+    CudaPersistentMpcdStepDiagnostics diag{};
+    diag.particlesVisited = pv.n;
+    diag.numCells = nc;
+    diag.cycles = cycles;
+
+    DeviceBuffers b;
+    const std::size_t nBytesD = n * sizeof(double);
+    const std::size_t nBytesI = n * sizeof(int);
+    const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
+    const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
+
+    const auto tTotal0 = Clock::now();
+    auto t0 = Clock::now();
+
+    // 0219: particle arrays are owned by CudaParticleState. Allocate only the
+    // transient cell/workspace arrays needed by the persistent substep.
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellId, nBytesI));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.count, cBytesU));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellMass, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellPx, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellPy, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellUx, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellUy, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cosA, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.sinA, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellKinetic, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.cellScale, cBytesD));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.fluidCounter, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.rotatedCounter, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMalloc(&b.invalidCounter, sizeof(unsigned long long)));
+
+    MPCD_CUDA_CHECK(cudaMemcpy(b.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemcpy(b.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemset(b.fluidCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMemset(b.rotatedCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaMemset(b.invalidCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.uploadSeconds = seconds_since(t0);
+
+    DeviceConfig cfg{};
+    cfg.Nx = config.Nx;
+    cfg.Ny = config.Ny;
+    cfg.numCells = nc;
+    cfg.Lx = config.Lx;
+    cfg.Ly = config.Ly;
+    cfg.dx = config.Lx / static_cast<double>(config.Nx);
+    cfg.dy = config.Ly / static_cast<double>(config.Ny);
+    cfg.shiftX = config.shiftX;
+    cfg.shiftY = config.shiftY;
+    cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+
+    t0 = Clock::now();
+    for (int cycle = 0; cycle < cycles; ++cycle) {
+        reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, b.cellId, b.count, b.cellMass,
+                                                                b.cellPx, b.cellPy, b.cellUx, b.cellUy,
+                                                                b.cellKinetic, b.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        deposit_persistent_kernel<<<particleBlocks, threads>>>(nInt, pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role,
+                                                               cfg, b.cellId, b.count, b.cellMass, b.cellPx,
+                                                               b.cellPy, b.fluidCounter);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
+                                                                     b.cellUx, b.cellUy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, b.cellUx, b.cellUy,
+                                                                  b.cosA, b.sinA, cfg, pv.vx, pv.vy,
+                                                                  b.rotatedCounter, b.invalidCounter);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_CUDA_CHECK(cudaMemset(b.cellKinetic, 0, cBytesD));
+        kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, pv.mass, pv.vx, pv.vy,
+                                                               b.cellUx, b.cellUy, cfg, b.cellKinetic);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        scale_persistent_kernel<<<cellBlocks, threads>>>(nc, b.count, b.cellKinetic, config.targetKBT,
+                                                         std::max(1, config.thermostatMinParticles),
+                                                         config.thermostatEpsilon, b.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        apply_thermostat_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, b.cellUx,
+                                                                       b.cellUy, b.cellScale, cfg, pv.vx, pv.vy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+    }
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.kernelSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    gpuState.download_velocities(downloadTarget);
+    cellIdOut.assign(n, -1);
+    cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+    cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+    cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+    cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+    MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), b.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), b.count, cBytesU, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), b.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), b.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), b.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+
+    std::vector<double> kineticHost(static_cast<std::size_t>(nc), 0.0);
+    std::vector<double> scaleHost(static_cast<std::size_t>(nc), 1.0);
+    if (thermostatDiagOut != nullptr) {
+        MPCD_CUDA_CHECK(cudaMemcpy(kineticHost.data(), b.cellKinetic, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(scaleHost.data(), b.cellScale, cBytesD, cudaMemcpyDeviceToHost));
+    }
+    unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
+    MPCD_CUDA_CHECK(cudaMemcpy(&fluid, b.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(&rotated, b.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(&invalid, b.invalidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    diag.downloadSeconds = seconds_since(t0);
+
+    diag.fluidParticles = static_cast<std::uint64_t>(fluid) / static_cast<std::uint64_t>(cycles);
+    diag.particlesRotated = static_cast<std::uint64_t>(rotated);
+    diag.invalidCellParticles = static_cast<std::uint64_t>(invalid);
+
+    if (thermostatDiagOut != nullptr) {
+        ThermostatDiagnostics td{};
+        double totalKBefore = 0.0;
+        double targetKTotal = 0.0;
+        double scaleSum = 0.0;
+        double scaleMin = 1.0e300;
+        double scaleMax = 0.0;
+        std::uint64_t dofTotal = 0u;
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            const std::uint32_t count = cellCountOut[kk];
+            const double K = kineticHost[kk];
+            if (count < static_cast<std::uint32_t>(std::max(1, config.thermostatMinParticles))) continue;
+            if (!(K > config.thermostatEpsilon)) continue;
+            const double dof = 2.0 * static_cast<double>(count - 1u);
+            const double targetK = 0.5 * dof * config.targetKBT;
+            const double scale = scaleHost[kk];
+            totalKBefore += K;
+            targetKTotal += targetK;
+            dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
+            td.cellsRescaled += 1u;
+            td.particlesRescaled += static_cast<std::uint64_t>(count);
+            scaleSum += scale;
+            if (scale < scaleMin) scaleMin = scale;
+            if (scale > scaleMax) scaleMax = scale;
+        }
+        td.applied = td.cellsRescaled > 0u;
+        td.kBTBefore = dofTotal > 0u ? (2.0 * totalKBefore / static_cast<double>(dofTotal)) : 0.0;
+        td.kBTAfter = dofTotal > 0u ? (2.0 * targetKTotal / static_cast<double>(dofTotal)) : 0.0;
+        td.scaleMean = td.cellsRescaled > 0u ? scaleSum / static_cast<double>(td.cellsRescaled) : 1.0;
+        td.scaleMin = td.cellsRescaled > 0u ? scaleMin : 1.0;
+        td.scaleMax = td.cellsRescaled > 0u ? scaleMax : 1.0;
+        *thermostatDiagOut = td;
+        diag.thermostatCellsRescaled = td.cellsRescaled;
+        diag.thermostatParticlesRescaled = td.particlesRescaled;
+        diag.thermostatKBTBefore = td.kBTBefore;
+        diag.thermostatKBTAfter = td.kBTAfter;
+        diag.thermostatScaleMean = td.scaleMean;
+        diag.thermostatScaleMin = td.scaleMin;
+        diag.thermostatScaleMax = td.scaleMax;
+    }
+
+    diag.totalSeconds = seconds_since(tTotal0);
+    return diag;
+#endif
+}
+
 
 } // namespace mpcd

@@ -2,6 +2,7 @@
 
 #include "particle_state.h"
 #include "thermostat.h"
+#include "cuda_particle_state.h"
 
 #include <cstdint>
 #include <vector>
@@ -83,6 +84,22 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 // (for example projectionEnable=false).
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
     ParticleState& state,
+    std::vector<int>& cellIdOut,
+    std::vector<std::uint32_t>& cellCountOut,
+    std::vector<double>& cellMassOut,
+    std::vector<double>& cellUxOut,
+    std::vector<double>& cellUyOut,
+    const CudaPersistentMpcdStepConfig& config,
+    ThermostatDiagnostics* thermostatDiagOut = nullptr);
+
+
+// 0219 shared-state overload: the particle arrays are already resident in a
+// CudaParticleState. This avoids re-uploading x/y/vx/vy/mass/role for each
+// persistent CUDA substep. The function still downloads final vx/vy and CPU
+// workspace cell moments so the current host-side step can continue unchanged.
+CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+    CudaParticleState& gpuState,
+    ParticleState& downloadTarget,
     std::vector<int>& cellIdOut,
     std::vector<std::uint32_t>& cellCountOut,
     std::vector<double>& cellMassOut,
