@@ -1,0 +1,14 @@
+item,value
+patch,0207
+branch,SRC_GPU
+base_assumption,0206 shadow CUDA thermostat already applied
+mode,active_runtime_path
+runtime_flag,MPCD_CUDA_THERMOSTAT_USE=1
+default,CPU thermostat remains default
+active_priority,active mode disables shadow validation in the same step
+validated_cases,tg_periodic_full 64x64/128x128 via harness
+projection_backend_default,cpu
+cell_moments_backend,CPU moments by default; CUDA cell moments can be composed later via MPCD_CUDA_CELL_MOMENTS_USE=1
+physics_guard,compare_validation_mono_config_0162 failed_metrics must remain 0
+diagnostic_output,cuda_cell_thermostat_active_0207.csv
+next_step,compose active cell moments + active thermostat + Q6 CUDA

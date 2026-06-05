@@ -1,0 +1,7 @@
+patch,component,kind,path,description
+0207,cuda_cell_thermostat,modified,src/thermostat.cpp,Add active CUDA thermostat runtime path and per-step timing CSV
+0207,cuda_cell_thermostat,new,scripts/build_src_mpcd_cuda_0207.sh,Build CUDA-enabled simulation binary with active thermostat support
+0207,cuda_cell_thermostat,new,scripts/run_cuda_cell_thermostat_active_0207.sh,Run CPU baseline versus active CUDA thermostat and collect diagnostics
+0207,cuda_cell_thermostat,new,doc/README_0207_CUDA_CELL_THERMOSTAT_ACTIVE.md,Document active CUDA thermostat validation
+0207,cuda_cell_thermostat,new,dev_history/artifacts/gpu_cuda_thermostat_0207/cuda_cell_thermostat_active_manifest_0207.csv,List files in patch 0207
+0207,cuda_cell_thermostat,new,dev_history/artifacts/gpu_cuda_thermostat_0207/cuda_cell_thermostat_active_scope_0207.csv,Record scope and guardrails for active thermostat path

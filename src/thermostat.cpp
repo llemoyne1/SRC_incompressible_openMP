@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <string>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -142,6 +143,97 @@ private:
 CudaThermostatShadowAccumulator& cuda_thermostat_shadow_accumulator() {
     static CudaThermostatShadowAccumulator acc;
     return acc;
+}
+
+
+struct CudaThermostatActiveRow {
+    std::uint64_t step = 0u;
+    std::uint64_t particlesVisited = 0u;
+    std::uint64_t fluidParticles = 0u;
+    int numCells = 0;
+    std::uint64_t cellsRescaled = 0u;
+    std::uint64_t particlesRescaled = 0u;
+    double kBTBefore = 0.0;
+    double kBTAfter = 0.0;
+    double scaleMean = 1.0;
+    double scaleMin = 1.0;
+    double scaleMax = 1.0;
+    double uploadSeconds = 0.0;
+    double kineticKernelSeconds = 0.0;
+    double scaleKernelSeconds = 0.0;
+    double applyKernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+class CudaThermostatActiveAccumulator {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaThermostatActiveRow& row) {
+        rows_.push_back(row);
+    }
+
+    ~CudaThermostatActiveAccumulator() {
+        if (outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_cell_thermostat_active_0207.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,particlesVisited,fluidParticles,numCells,"
+            << "cellsRescaled,particlesRescaled,kBTBefore,kBTAfter,"
+            << "scaleMean,scaleMin,scaleMax,"
+            << "uploadSeconds,kineticKernelSeconds,scaleKernelSeconds,applyKernelSeconds,downloadSeconds,totalSeconds\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.particlesVisited << ',' << r.fluidParticles << ',' << r.numCells << ','
+                << r.cellsRescaled << ',' << r.particlesRescaled << ','
+                << r.kBTBefore << ',' << r.kBTAfter << ','
+                << r.scaleMean << ',' << r.scaleMin << ',' << r.scaleMax << ','
+                << r.uploadSeconds << ',' << r.kineticKernelSeconds << ','
+                << r.scaleKernelSeconds << ',' << r.applyKernelSeconds << ','
+                << r.downloadSeconds << ',' << r.totalSeconds << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaThermostatActiveRow> rows_;
+};
+
+CudaThermostatActiveAccumulator& cuda_thermostat_active_accumulator() {
+    static CudaThermostatActiveAccumulator acc;
+    return acc;
+}
+
+void record_cuda_cell_thermostat_active(const SimulationParams& params,
+                                        std::uint64_t step,
+                                        const ThermostatDiagnostics& diag,
+                                        const CudaCellThermostatDiagnostics& raw) {
+    CudaThermostatActiveRow row{};
+    row.step = step;
+    row.particlesVisited = raw.particlesVisited;
+    row.fluidParticles = raw.fluidParticles;
+    row.numCells = raw.numCells;
+    row.cellsRescaled = diag.cellsRescaled;
+    row.particlesRescaled = diag.particlesRescaled;
+    row.kBTBefore = diag.kBTBefore;
+    row.kBTAfter = diag.kBTAfter;
+    row.scaleMean = diag.scaleMean;
+    row.scaleMin = diag.scaleMin;
+    row.scaleMax = diag.scaleMax;
+    row.uploadSeconds = raw.uploadSeconds;
+    row.kineticKernelSeconds = raw.kineticKernelSeconds;
+    row.scaleKernelSeconds = raw.scaleKernelSeconds;
+    row.applyKernelSeconds = raw.applyKernelSeconds;
+    row.downloadSeconds = raw.downloadSeconds;
+    row.totalSeconds = raw.totalSeconds;
+    CudaThermostatActiveAccumulator& acc = cuda_thermostat_active_accumulator();
+    acc.set_output_dir(params.outputDir);
+    acc.add(row);
 }
 
 double max_diag_diff(const ThermostatDiagnostics& cpu, const ThermostatDiagnostics& cuda) {
@@ -315,12 +407,17 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     std::fill(ws.localKinetic.begin(), ws.localKinetic.end(), 0.0);
 
 #ifdef MPCD_ENABLE_CUDA_THERMOSTAT
-    const bool cudaThermostatShadowEnabled = env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false);
+    const bool cudaThermostatActiveEnabled = env_flag_enabled("MPCD_CUDA_THERMOSTAT_USE", false);
+    // Active mode has priority. Shadow mode intentionally remains validation-only
+    // and is disabled when the active CUDA thermostat drives the dynamics.
+    const bool cudaThermostatShadowEnabled =
+        (!cudaThermostatActiveEnabled) && env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false);
     ParticleState cudaThermostatPreState;
     if (cudaThermostatShadowEnabled) {
         cudaThermostatPreState = state;
     }
 #else
+    const bool cudaThermostatActiveEnabled = false;
     const bool cudaThermostatShadowEnabled = false;
 #endif
 
@@ -369,6 +466,21 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
             ws.cellUy[kk] = py / mass;
         }
     }
+
+#ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+    if (cudaThermostatActiveEnabled) {
+        CudaCellThermostatDiagnostics cudaRaw{};
+        CudaCellThermostatOptions opts{};
+        opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_THERMOSTAT_THREADS_PER_BLOCK", 256));
+        diag = cuda_apply_cell_relative_rescale_thermostat_from_moments(
+            state, nc, cellId, ws.cellCount, ws.cellUx, ws.cellUy,
+            targetKBT, params.thermostatMinParticles, params.thermostatEpsilon, &cudaRaw, opts);
+        record_cuda_cell_thermostat_active(params, step, diag, cudaRaw);
+        return diag;
+    }
+#else
+    (void)cudaThermostatActiveEnabled;
+#endif
 
 #pragma omp parallel
     {
