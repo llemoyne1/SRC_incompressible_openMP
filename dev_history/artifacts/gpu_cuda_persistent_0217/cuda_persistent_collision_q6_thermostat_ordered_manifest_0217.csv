@@ -1,0 +1,6 @@
+artifact,kind,description
+scripts/build_src_mpcd_cuda_0217.sh,build_script,Build CUDA-enabled SRC/MPCD binary with Q6 cell moments thermostat SRC collision and persistent-step CUDA units.
+scripts/run_cuda_persistent_collision_q6_thermostat_ordered_0217.sh,validation_script,Compare CPU baseline Q6 CUDA persistent collision CUDA thermostat CUDA and ordered full CUDA modes on TG.
+doc/README_0217_CUDA_PERSISTENT_COLLISION_Q6_THERMOSTAT_ORDERED.md,documentation,Documents scope validation and interpretation for the ordered CUDA stack harness.
+dev_history/artifacts/gpu_cuda_persistent_0217/cuda_persistent_collision_q6_thermostat_ordered_manifest_0217.csv,manifest,Lists files introduced by patch 0217.
+dev_history/artifacts/gpu_cuda_persistent_0217/cuda_persistent_collision_q6_thermostat_ordered_scope_0217.csv,scope,Defines patch scope constraints defaults and next expected step.
