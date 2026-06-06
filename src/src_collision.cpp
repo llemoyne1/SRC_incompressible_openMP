@@ -16,6 +16,9 @@
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
 #include "cuda_persistent_mpcd_step.h"
 #include "cuda_particle_state.h"
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+#include "cuda_shared_particle_state_0251.h"
+#endif
 #ifdef MPCD_ENABLE_CUDA_CELL_WORKSPACE
 #include "cuda_cell_workspace.h"
 #endif
@@ -711,16 +714,18 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     CudaCellWorkspaceDiagnostics cellDiag{};
     const bool useSharedParticleState = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE", false);
     const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
+    const bool useSharedParticleState0251 =
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251", false);
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
-    if (useSharedParticleState) {
+    if (useSharedParticleState || useSharedParticleState0251) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_STRICT", true);
-        if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1 requires MPCD_ENABLE_CUDA_PARTICLE_STATE");
+        if (strict) throw std::runtime_error("CUDA persistent SRC collision shared particle state requires MPCD_ENABLE_CUDA_PARTICLE_STATE");
     }
 #endif
 #if !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-    if (useSharedCellWorkspace) {
+    if (useSharedCellWorkspace || useSharedParticleState0251) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT", true);
-        if (strict) throw std::runtime_error("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1 requires MPCD_ENABLE_CUDA_CELL_WORKSPACE");
+        if (strict) throw std::runtime_error("CUDA persistent SRC collision shared cell workspace requires MPCD_ENABLE_CUDA_CELL_WORKSPACE");
     }
 #endif
     if (useSharedCellWorkspace && !useSharedParticleState) {
@@ -765,6 +770,29 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         }
         cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
     } else {
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        bool consumedSharedParticleState0251 = false;
+        if (useSharedParticleState0251) {
+            const bool sharedFresh = cuda_shared_particle_state_0251_is_fresh();
+            const bool strict0251 = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT", true);
+            if (!sharedFresh && strict0251) {
+                throw std::runtime_error(std::string("CUDA persistent SRC collision 0252 requested shared 0251 state, but it is stale; lastWriter=") +
+                                         cuda_shared_particle_state_0251_last_writer() +
+                                         " lastInvalidator=" + cuda_shared_particle_state_0251_last_invalidator());
+            }
+            if (sharedFresh) {
+                auto& gpuState = cuda_shared_particle_state_0251();
+                auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
+                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                raw = cuda_apply_persistent_tg_deposit_src_collision(
+                    gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+                raw.uploadSeconds += cellDiag.allocateSeconds;
+                raw.totalSeconds += cellDiag.allocateSeconds;
+                consumedSharedParticleState0251 = true;
+            }
+        }
+        if (!consumedSharedParticleState0251) {
+#endif
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
         if (canUseSharedParticleState) {
             auto& gpuState = cuda_persistent_particle_state_tls();
@@ -788,12 +816,23 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             }
             raw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
             raw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + cellDiag.allocateSeconds;
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+            cuda_shared_particle_state_0251_invalidate("persistent_src_collision_private_state_0252");
+#endif
         } else
 #endif
         {
             raw = cuda_apply_persistent_tg_deposit_src_collision(
                 state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+            cuda_shared_particle_state_0251_invalidate("persistent_src_collision_transient_state_0252");
+#endif
         }
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        } else {
+            cuda_shared_particle_state_0251_mark_fresh("persistent_src_collision_0252");
+        }
+#endif
     }
 
     CudaPersistentCollisionActiveRow row{};
@@ -819,7 +858,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         row.thermostatScaleMin = consumedThermostat.scaleMin;
         row.thermostatScaleMax = consumedThermostat.scaleMax;
     }
-    row.sharedParticleStateEnabled = canUseSharedParticleState ? 1 : 0;
+    row.sharedParticleStateEnabled = (canUseSharedParticleState || useSharedParticleState0251) ? 1 : 0;
     row.particleStateAllocateSeconds = particleDiag.allocateSeconds;
     row.particleStateUploadSeconds = particleDiag.uploadSeconds;
     row.particleStateAllocationCalls = particleDiag.allocationCalls;
@@ -828,7 +867,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.particleStateMetadataUploadCalls = particleDiag.metadataUploadCalls;
     row.particleStateMetadataCacheHits = particleDiag.metadataCacheHits;
     row.particleStateMetadataBytesSkipped = particleDiag.metadataBytesSkipped;
-    row.sharedCellWorkspaceEnabled = canUseSharedCellWorkspace ? 1 : 0;
+    row.sharedCellWorkspaceEnabled = (canUseSharedCellWorkspace || useSharedParticleState0251) ? 1 : 0;
     row.cellWorkspaceAllocateSeconds = cellDiag.allocateSeconds;
     row.cellWorkspaceAllocationCalls = cellDiag.allocationCalls;
     row.cellWorkspaceReusedAllocation = cellDiag.reusedAllocation;

@@ -514,19 +514,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, Q6Projection);
         result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+        cuda_shared_particle_state_0251_invalidate("cpu_q6_projection_after_collision");
     }
     {
         MPCD_PROFILE_PHASE(result.profile, ClosedCapacity);
         result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
+        cuda_shared_particle_state_0251_invalidate("cpu_closed_capacity_after_collision");
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Thermostat);
         result.thermostat = apply_cell_relative_rescale_thermostat(
             state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
+        cuda_shared_particle_state_0251_invalidate("cpu_thermostat_after_collision");
     }
     {
         MPCD_PROFILE_PHASE(result.profile, KeepMeanFlow);
         apply_keep_mean_flow(state, params);
+        cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
     }
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
     // needed on steps for which the caller will write a runtime summary.  The
