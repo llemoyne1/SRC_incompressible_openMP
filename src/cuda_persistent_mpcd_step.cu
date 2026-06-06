@@ -1363,7 +1363,12 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    gpuState.download_velocities(downloadTarget);
+    const bool residentClassic0260or0261 =
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false);
+    if (!residentClassic0260or0261) {
+        gpuState.download_velocities(downloadTarget);
+    }
     cellIdOut.assign(n, -1);
     const bool minimalDownload0257 = env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257", false);
     if (minimalDownload0257) {

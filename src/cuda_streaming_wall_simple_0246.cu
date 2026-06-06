@@ -174,6 +174,19 @@ bool cuda_wall_simple_streaming_0246_requested() {
     return env_truthy_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246");
 }
 
+bool cuda_wall_simple_streaming_0246_resident_0261_requested() {
+    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261");
+}
+
+bool cuda_wall_simple_streaming_0246_download_all_requested_0261() {
+    const char* v = std::getenv("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL");
+    if (v == nullptr || *v == '\0') {
+        return !cuda_wall_simple_streaming_0246_resident_0261_requested();
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
 bool cuda_wall_simple_streaming_0246_supported(const SimulationParams& params) {
     if (!is_periodic_pair_0246(params.bcLeft, params.bcRight)) return false;
     if (params.bcBottom == "periodic" || params.bcTop == "periodic") return false;
@@ -211,7 +224,11 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     const auto t0 = Clock::now();
     CudaParticleStateDiagnostics particleDiag{};
     CudaParticleState& gpuState = persistent_streaming_state_0246();
-    gpuState.upload_all(state, &particleDiag);
+    const bool resident0261 = cuda_wall_simple_streaming_0246_resident_0261_requested();
+    const bool canReuseResident = resident0261 && cuda_shared_particle_state_0251_is_fresh();
+    if (!canReuseResident) {
+        gpuState.upload_all(state, &particleDiag);
+    }
     const auto tAfterUpload = Clock::now();
 
     unsigned long long* dBottomHits = nullptr;
@@ -274,15 +291,22 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
         throw std::runtime_error("cuda_streaming_wall_simple_0246: too many y-wall reflections in one step");
     }
 
-    gpuState.download_all(state, &particleDiag);
+    const bool downloadAll = cuda_wall_simple_streaming_0246_download_all_requested_0261();
+    if (downloadAll) {
+        gpuState.download_all(state, &particleDiag);
+    }
     cuda_shared_particle_state_0251_mark_fresh("streaming_wall_simple_0246");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;
     diag.applied = true;
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
+    if (downloadAll || !resident0261) {
+        diag.fluidParticles = 0u;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+            if (is_fluid_particle(state, i)) ++diag.fluidParticles;
+        }
+    } else {
+        diag.fluidParticles = state.Np;
     }
     diag.hitsBottom = static_cast<std::uint64_t>(hBottomHits);
     diag.hitsTop = static_cast<std::uint64_t>(hTopHits);

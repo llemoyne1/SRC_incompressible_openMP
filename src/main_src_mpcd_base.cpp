@@ -37,7 +37,8 @@ bool env_truthy_0260(const char* name) {
 }
 
 void sync_cuda_resident_state_for_host_0260(mpcd::ParticleState& state) {
-    if (env_truthy_0260("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260")) {
+    if (env_truthy_0260("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260") ||
+        env_truthy_0260("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261")) {
         (void)mpcd::cuda_shared_particle_state_0251_download_if_fresh(state);
     }
 }
