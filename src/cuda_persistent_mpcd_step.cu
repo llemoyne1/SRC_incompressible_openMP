@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -34,6 +35,15 @@ void cuda_free(T*& ptr) {
         cudaFree(ptr);
         ptr = nullptr;
     }
+}
+
+
+bool env_flag_enabled_0257(const char* name, const bool fallback = false) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
 std::uint64_t splitmix64_host(std::uint64_t x) {
@@ -1336,15 +1346,29 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     t0 = Clock::now();
     gpuState.download_velocities(downloadTarget);
     cellIdOut.assign(n, -1);
-    cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
-    cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+    const bool minimalDownload0257 = env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257", false);
+    if (minimalDownload0257) {
+        // 0257 conservative minimal-download mode: keep cellCount on the host
+        // because runtime summaries/validation still consume population
+        // diagnostics, but skip the heavier post-collision cellMass/cellUx/cellUy
+        // arrays which are not needed by the current CPU continuation.
+        cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+        cellMassOut.clear();
+        cellUxOut.clear();
+        cellUyOut.clear();
+    } else {
+        cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+        cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+    }
     MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    if (!minimalDownload0257) {
+        MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    }
     unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
     MPCD_CUDA_CHECK(cudaMemcpy(&fluid, cv.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&rotated, cv.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
