@@ -203,7 +203,7 @@ wallAccommodation = 1.0
 wallVpGamma = $GAMMA
 wallVpMass = 1.0
 wallKBT = $KBT
-wallThermalNoise = 1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-1.0}
 wallUxBottom = 0.0
 wallUyBottom = 0.0
 wallUxTop = 0.0
@@ -290,7 +290,7 @@ wallAccommodation = 1.0
 wallVpGamma = $GAMMA
 wallVpMass = 1.0
 wallKBT = -1.0
-wallThermalNoise = 1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-1.0}
 
 $(write_common_runtime_block)
 $(write_resampling_block)
@@ -360,7 +360,7 @@ wallAccommodation = 1.0
 wallVpGamma = $GAMMA
 wallVpMass = 1.0
 wallKBT = -1.0
-wallThermalNoise = 1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-1.0}
 wallUxLeft = 0.0
 wallUyLeft = 0.0
 wallUxRight = 0.0
@@ -404,7 +404,7 @@ wallAccommodation = 1.0
 wallVpGamma = $GAMMA
 wallVpMass = 1.0
 wallKBT = -1.0
-wallThermalNoise = 1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-1.0}
 wallUxBottom = 0.0
 wallUyBottom = 0.0
 wallUxTop = 0.0

@@ -629,6 +629,30 @@ CudaCellWorkspace& cuda_persistent_cell_workspace_tls() {
 }
 #endif
 
+bool cuda_wall_simple_collision_0253_enabled() {
+    return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253", false);
+}
+
+bool cuda_immersed_rect_collision_0254_enabled() {
+    return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254", false);
+}
+
+bool cuda_piston_collision_0255_enabled() {
+    return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_PISTON_0255", false);
+}
+
+bool is_full_domain_bounds(const CellGrid& grid,
+                           const FluidDomainBounds& domain,
+                           std::string* reason = nullptr) {
+    const double eps = 1.0e-12;
+    if (std::abs(domain.xMin) > eps || std::abs(domain.yMin) > eps ||
+        std::abs(domain.xMax - grid.Lx) > eps || std::abs(domain.yMax - grid.Ly) > eps) {
+        if (reason != nullptr) *reason = "moving/sub-domain fluid bounds are not supported";
+        return false;
+    }
+    return true;
+}
+
 bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
                                                 const CellGrid& grid,
                                                 const FluidDomainBounds& domain,
@@ -637,27 +661,216 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
         if (reason != nullptr) *reason = why;
         return false;
     };
-    if (!is_x_periodic(params) || !is_y_periodic(params)) return fail("requires periodic x and periodic y");
-    if (immersed_solid_enabled(params)) return fail("immersed solid is not supported");
-    if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params) ||
-        face_has_wall_coupling(params.bcBottom, params) || face_has_wall_coupling(params.bcTop, params)) {
-        return fail("wall/virtual-particle coupling is not supported");
+    if (immersed_solid_enabled(params) && !cuda_immersed_rect_collision_0254_enabled()) {
+        return fail("immersed solid requires MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=1");
     }
-    const double eps = 1.0e-12;
-    if (std::abs(domain.xMin) > eps || std::abs(domain.yMin) > eps ||
-        std::abs(domain.xMax - grid.Lx) > eps || std::abs(domain.yMax - grid.Ly) > eps) {
-        return fail("moving/sub-domain fluid bounds are not supported");
+    const bool fullDomainBounds = is_full_domain_bounds(grid, domain, nullptr);
+    if (!fullDomainBounds && !cuda_piston_collision_0255_enabled()) {
+        return fail("moving/sub-domain fluid bounds require MPCD_CUDA_PERSISTENT_SRC_COLLISION_PISTON_0255=1");
     }
     if (!cuda_persistent_mpcd_step_available()) return fail("CUDA persistent step backend is not available");
-    if (reason != nullptr) *reason = "supported";
-    return true;
+
+    if (is_x_periodic(params) && is_y_periodic(params)) {
+        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params) ||
+            face_has_wall_coupling(params.bcBottom, params) || face_has_wall_coupling(params.bcTop, params)) {
+            return fail("periodic collision subset cannot include wall/virtual-particle coupling");
+        }
+        if (reason != nullptr) *reason = "supported_periodic_0252";
+        return true;
+    }
+
+    if (cuda_piston_collision_0255_enabled()) {
+        if (!params.closedCapacityResponseEnable) {
+            return fail("piston 0255 expects closedCapacityResponseEnable=true");
+        }
+        if (!is_x_periodic(params) || is_y_periodic(params)) {
+            return fail("piston 0255 requires periodic x and bounded y");
+        }
+        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params)) {
+            return fail("piston 0255 does not support left/right wall coupling");
+        }
+        if (!face_has_wall_coupling(params.bcBottom, params) || !face_has_wall_coupling(params.bcTop, params)) {
+            return fail("piston 0255 requires bottom/top wall coupling");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("piston 0255 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("piston 0255 invalid wall accommodation/mass");
+        }
+        if (std::abs(domain.xMin) > 1.0e-12 || std::abs(domain.xMax - grid.Lx) > 1.0e-12) {
+            return fail("piston 0255 requires full x domain bounds");
+        }
+        if (domain.yMax <= domain.yMin || domain.yMin < -1.0e-12 || domain.yMax > grid.Ly + 1.0e-12) {
+            return fail("piston 0255 invalid y-domain bounds");
+        }
+        if (immersed_solid_enabled(params)) {
+            return fail("piston 0255 does not combine with immersed solids");
+        }
+        if (reason != nullptr) *reason = "supported_piston_0255";
+        return true;
+    }
+
+    if (cuda_immersed_rect_collision_0254_enabled()) {
+        if (!immersed_solid_enabled(params)) return fail("immersed-rectangle 0254 requires immersedSolidEnable=true");
+        if (immersed_solid_shape(params) != ImmersedSolidShape::Rectangle) {
+            return fail("immersed-rectangle 0254 supports rectangle only");
+        }
+        if (std::abs(params.immersedSolidVx) > 1.0e-15 ||
+            std::abs(params.immersedSolidVy) > 1.0e-15 ||
+            std::abs(params.immersedSolidOmega) > 1.0e-15) {
+            return fail("immersed-rectangle 0254 supports static rectangles only");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("immersed-rectangle 0254 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("immersed-rectangle 0254 invalid wall accommodation/mass");
+        }
+        if (params.immersedSolidFractionSamples <= 0) {
+            return fail("immersed-rectangle 0254 requires positive fraction samples");
+        }
+        if (reason != nullptr) *reason = "supported_immersed_rectangle_0254";
+        return true;
+    }
+
+    if (cuda_wall_simple_collision_0253_enabled()) {
+        if (!is_x_periodic(params) || is_y_periodic(params)) return fail("wall-simple 0253 requires periodic x and bounded y");
+        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params)) {
+            return fail("wall-simple 0253 does not support left/right wall coupling");
+        }
+        if (!face_has_wall_coupling(params.bcBottom, params) || !face_has_wall_coupling(params.bcTop, params)) {
+            return fail("wall-simple 0253 requires bottom/top wall coupling");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("wall-simple 0253 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("wall-simple 0253 invalid wall accommodation/mass");
+        }
+        if (reason != nullptr) *reason = "supported_wall_simple_0253";
+        return true;
+    }
+
+    return fail("requires periodic x/y, or wall-simple 0253 explicitly enabled");
 }
+
+void populate_cuda_persistent_wall_virtual_diagnostics_0253(CollisionDiagnostics& diag,
+                                                            const ParticleState& state,
+                                                            const SimulationParams& params,
+                                                            const CellGrid& grid,
+                                                            const FluidDomainBounds& domain,
+                                                            std::uint64_t step) {
+    if (is_x_periodic(params) && is_y_periodic(params)) return;
+    const int nc = grid.numCells;
+    if (nc <= 0) return;
+    const ParticleRoleCounts roleCounts = count_particle_roles(state);
+    const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
+    const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
+    const double wallKBT = params.wallKBT > 0.0 ? params.wallKBT :
+                           (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
+    const double fullCellArea = grid.dx * grid.dy;
+
+    double vpEquivalentSum = 0.0;
+    double vpMassSum = 0.0;
+    double vpMassLeftSum = 0.0;
+    double vpMassRightSum = 0.0;
+    double vpMassBottomSum = 0.0;
+    double vpMassTopSum = 0.0;
+    double vpPxSum = 0.0;
+    double vpPySum = 0.0;
+
+    for (int c = 0; c < nc; ++c) {
+        const int ix = c % grid.Nx;
+        const int iy = c / grid.Nx;
+        double cellVpEquivalent = 0.0;
+        double cellVpMass = 0.0;
+        double cellVpPx = 0.0;
+        double cellVpPy = 0.0;
+        double massDummy = 0.0;
+        double pxDummy = 0.0;
+        double pyDummy = 0.0;
+
+        if (face_has_wall_coupling(params.bcLeft, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "left", wallUx, wallUy);
+            const auto v = make_virtual_face_contribution(
+                face_area_left(ix, iy, grid, diag.shift, params, domain),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                wallUx, wallUy,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x4c454654ULL));
+            add_virtual_face_to_cell(v, massDummy, pxDummy, pyDummy, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassLeftSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcRight, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "right", wallUx, wallUy);
+            const auto v = make_virtual_face_contribution(
+                face_area_right(ix, iy, grid, diag.shift, params, domain),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                wallUx, wallUy,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x5249474854ULL));
+            add_virtual_face_to_cell(v, massDummy, pxDummy, pyDummy, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassRightSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcBottom, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "bottom", wallUx, wallUy);
+            const auto v = make_virtual_face_contribution(
+                face_area_bottom(ix, iy, grid, diag.shift, params, domain),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                wallUx, wallUy,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x424f54544f4dULL));
+            add_virtual_face_to_cell(v, massDummy, pxDummy, pyDummy, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassBottomSum += v.mass;
+        }
+        if (face_has_wall_coupling(params.bcTop, params)) {
+            double wallUx = 0.0, wallUy = 0.0;
+            wall_velocity_for_face(params, domain, "top", wallUx, wallUy);
+            const auto v = make_virtual_face_contribution(
+                face_area_top(ix, iy, grid, diag.shift, params, domain),
+                fullCellArea, wallVpGamma, params.wallAccommodation,
+                params.wallVpMass, wallKBT, params.wallThermalNoise,
+                wallUx, wallUy,
+                splitmix64(params.rngSeed ^ (step * 0x9e3779b97f4a7c15ULL) ^
+                           (static_cast<std::uint64_t>(c) * 0xbf58476d1ce4e5b9ULL) ^
+                           0x544f50ULL));
+            add_virtual_face_to_cell(v, massDummy, pxDummy, pyDummy, cellVpEquivalent, cellVpMass, cellVpPx, cellVpPy);
+            vpMassTopSum += v.mass;
+        }
+        vpEquivalentSum += cellVpEquivalent;
+        vpMassSum += cellVpMass;
+        vpPxSum += cellVpPx;
+        vpPySum += cellVpPy;
+    }
+
+    diag.virtualParticleEquivalent = vpEquivalentSum;
+    diag.virtualParticleCount = static_cast<std::uint64_t>(std::llround(vpEquivalentSum));
+    diag.virtualMass = vpMassSum;
+    diag.virtualMassLeft = vpMassLeftSum;
+    diag.virtualMassRight = vpMassRightSum;
+    diag.virtualMassBottom = vpMassBottomSum;
+    diag.virtualMassTop = vpMassTopSum;
+    diag.virtualMassImmersed = 0.0;
+    diag.virtualMomentumX = vpPxSum;
+    diag.virtualMomentumY = vpPySum;
+}
+
 
 bool try_cuda_persistent_src_collision_active(ParticleState& state,
                                               const SimulationParams& params,
                                               const CellGrid& grid,
                                               const FluidDomainBounds& domain,
-                                              const GridShift& shift,
+                                              CollisionDiagnostics& diagOut,
                                               std::uint64_t step,
                                               CollisionWorkspace& ws) {
     const bool persistentCollision = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE", false);
@@ -694,12 +907,40 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.Ny = grid.Ny;
     cfg.Lx = grid.Lx;
     cfg.Ly = grid.Ly;
-    cfg.shiftX = shift.sx;
-    cfg.shiftY = shift.sy;
+    cfg.shiftX = diagOut.shift.sx;
+    cfg.shiftY = diagOut.shift.sy;
     cfg.step = step;
     cfg.rotationAngle = params.rotationAngle;
     cfg.randomRotationSign = params.randomRotationSign ? 1 : 0;
     cfg.rngSeed = params.rngSeed;
+    cfg.periodicX = is_x_periodic(params) ? 1 : 0;
+    cfg.periodicY = is_y_periodic(params) ? 1 : 0;
+    cfg.domainXMin = domain.xMin;
+    cfg.domainXMax = domain.xMax;
+    cfg.domainYMin = domain.yMin;
+    cfg.domainYMax = domain.yMax;
+    cfg.wallLeftEnabled = face_has_wall_coupling(params.bcLeft, params) ? 1 : 0;
+    cfg.wallRightEnabled = face_has_wall_coupling(params.bcRight, params) ? 1 : 0;
+    cfg.wallBottomEnabled = face_has_wall_coupling(params.bcBottom, params) ? 1 : 0;
+    cfg.wallTopEnabled = face_has_wall_coupling(params.bcTop, params) ? 1 : 0;
+    const ParticleRoleCounts roleCountsForCudaWall = count_particle_roles(state);
+    const double inferredGammaForCudaWall = static_cast<double>(roleCountsForCudaWall.fluid) / static_cast<double>(std::max(1, grid.numCells));
+    cfg.wallAccommodation = params.wallAccommodation;
+    cfg.wallGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGammaForCudaWall;
+    cfg.wallVpMass = params.wallVpMass;
+    wall_velocity_for_face(params, domain, "left", cfg.wallUxLeft, cfg.wallUyLeft);
+    wall_velocity_for_face(params, domain, "right", cfg.wallUxRight, cfg.wallUyRight);
+    wall_velocity_for_face(params, domain, "bottom", cfg.wallUxBottom, cfg.wallUyBottom);
+    wall_velocity_for_face(params, domain, "top", cfg.wallUxTop, cfg.wallUyTop);
+    if (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Rectangle) {
+        cfg.immersedRectangleEnabled = 1;
+        cfg.immersedFractionSamples = std::max(1, params.immersedSolidFractionSamples);
+        const double immersedTime = static_cast<double>(step) * params.dt;
+        immersed_solid_rectangle_bounds(params, immersedTime, cfg.immersedXMin, cfg.immersedXMax, cfg.immersedYMin, cfg.immersedYMax);
+        const double cx = 0.5 * (cfg.immersedXMin + cfg.immersedXMax);
+        const double cy = 0.5 * (cfg.immersedYMin + cfg.immersedYMax);
+        immersed_solid_wall_velocity(params, cx, cy, immersedTime, cfg.immersedWallUx, cfg.immersedWallUy);
+    }
     cfg.targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
     cfg.thermostatMinParticles = params.thermostatMinParticles;
     cfg.thermostatEpsilon = params.thermostatEpsilon;
@@ -846,8 +1087,8 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.kernelSeconds = raw.kernelSeconds;
     row.downloadSeconds = raw.downloadSeconds;
     row.totalSeconds = raw.totalSeconds;
-    row.shiftX = shift.sx;
-    row.shiftY = shift.sy;
+    row.shiftX = diagOut.shift.sx;
+    row.shiftY = diagOut.shift.sy;
     row.thermostatAppliedOnGpu = applyPersistentThermostat ? 1 : 0;
     if (applyPersistentThermostat) {
         row.thermostatCellsRescaled = consumedThermostat.cellsRescaled;
@@ -881,6 +1122,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         throw std::runtime_error("CUDA persistent SRC collision active invalidCellParticles=" +
                                  std::to_string(raw.invalidCellParticles));
     }
+    populate_cuda_persistent_wall_virtual_diagnostics_0253(diagOut, state, params, grid, domain, step);
     return true;
 }
 #endif
@@ -1210,7 +1452,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
 
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
-    if (try_cuda_persistent_src_collision_active(state, params, grid, domain, diag.shift, step, ws)) {
+    if (try_cuda_persistent_src_collision_active(state, params, grid, domain, diag, step, ws)) {
         return diag;
     }
 #endif

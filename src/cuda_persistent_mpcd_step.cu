@@ -71,6 +71,16 @@ struct DeviceConfig {
     int Nx, Ny, numCells;
     double Lx, Ly, dx, dy;
     double shiftX, shiftY;
+    int periodicX, periodicY;
+    double domainXMin, domainXMax, domainYMin, domainYMax;
+    int wallLeftEnabled, wallRightEnabled, wallBottomEnabled, wallTopEnabled;
+    double wallAccommodation, wallGamma, wallVpMass;
+    double wallUxLeft, wallUyLeft, wallUxRight, wallUyRight;
+    double wallUxBottom, wallUyBottom, wallUxTop, wallUyTop;
+    int immersedRectangleEnabled;
+    int immersedFractionSamples;
+    double immersedXMin, immersedXMax, immersedYMin, immersedYMax;
+    double immersedWallUx, immersedWallUy;
     unsigned char fluidRole;
 };
 
@@ -81,14 +91,140 @@ __device__ double wrap_periodic(double x, double L) {
     return x;
 }
 
+__device__ int bounded_cell_index_device(double xs, double L, double dx, int N) {
+    (void)L;
+    int i = static_cast<int>(floor(xs / dx));
+    if (i < 0) i = 0;
+    if (i >= N) i = N - 1;
+    return i;
+}
+
+__device__ int periodic_cell_index_device(double xs, double L, double dx, int N) {
+    xs = wrap_periodic(xs, L);
+    int i = static_cast<int>(floor(xs / dx));
+    if (i < 0) i = 0;
+    if (i >= N) i = N - 1;
+    return i;
+}
+
 __device__ int cell_index_device(double x, double y, DeviceConfig cfg) {
-    const double xs = wrap_periodic(x + cfg.shiftX, cfg.Lx);
-    const double ys = wrap_periodic(y + cfg.shiftY, cfg.Ly);
-    int ix = static_cast<int>(floor(xs / cfg.dx));
-    int iy = static_cast<int>(floor(ys / cfg.dy));
-    if (ix < 0) ix = 0; if (ix >= cfg.Nx) ix = cfg.Nx - 1;
-    if (iy < 0) iy = 0; if (iy >= cfg.Ny) iy = cfg.Ny - 1;
+    const double xs = x + cfg.shiftX;
+    const double ys = y + cfg.shiftY;
+    const int ix = cfg.periodicX
+        ? periodic_cell_index_device(xs, cfg.Lx, cfg.dx, cfg.Nx)
+        : bounded_cell_index_device(xs, cfg.Lx, cfg.dx, cfg.Nx);
+    const int iy = cfg.periodicY
+        ? periodic_cell_index_device(ys, cfg.Ly, cfg.dy, cfg.Ny)
+        : bounded_cell_index_device(ys, cfg.Ly, cfg.dy, cfg.Ny);
     return ix + cfg.Nx * iy;
+}
+
+__device__ double overlap_length_device(double a0, double a1, double b0, double b1) {
+    const double lo = fmax(a0, b0);
+    const double hi = fmin(a1, b1);
+    return hi > lo ? hi - lo : 0.0;
+}
+
+__device__ void add_virtual_wall_mass_momentum_device(double faceArea,
+                                                       double fullCellArea,
+                                                       double wallUx,
+                                                       double wallUy,
+                                                       DeviceConfig cfg,
+                                                       double& mass,
+                                                       double& px,
+                                                       double& py) {
+    if (!(faceArea > 0.0) || !(fullCellArea > 0.0)) return;
+    const double equivalentCount = cfg.wallAccommodation * cfg.wallGamma * faceArea / fullCellArea;
+    if (!(equivalentCount > 0.0)) return;
+    const double vmass = equivalentCount * cfg.wallVpMass;
+    mass += vmass;
+    px += vmass * wallUx;
+    py += vmass * wallUy;
+}
+
+__device__ bool point_inside_domain_device(double x, double y, DeviceConfig cfg) {
+    return x >= cfg.domainXMin && x <= cfg.domainXMax &&
+           y >= cfg.domainYMin && y <= cfg.domainYMax;
+}
+
+__device__ bool point_inside_immersed_rectangle_device(double x, double y, DeviceConfig cfg) {
+    return x >= cfg.immersedXMin && x <= cfg.immersedXMax &&
+           y >= cfg.immersedYMin && y <= cfg.immersedYMax;
+}
+
+__device__ double immersed_rectangle_fraction_device(int ix, int iy, DeviceConfig cfg) {
+    if (!cfg.immersedRectangleEnabled) return 0.0;
+    const int ns = cfg.immersedFractionSamples > 0 ? cfg.immersedFractionSamples : 1;
+    const double x0 = static_cast<double>(ix) * cfg.dx - cfg.shiftX;
+    const double y0 = static_cast<double>(iy) * cfg.dy - cfg.shiftY;
+    int inside = 0;
+    int fluidSamples = 0;
+    const int total = ns * ns;
+    for (int sy = 0; sy < ns; ++sy) {
+        double y = y0 + (static_cast<double>(sy) + 0.5) * cfg.dy / static_cast<double>(ns);
+        if (cfg.periodicY) y = wrap_periodic(y, cfg.Ly);
+        for (int sx = 0; sx < ns; ++sx) {
+            double x = x0 + (static_cast<double>(sx) + 0.5) * cfg.dx / static_cast<double>(ns);
+            if (cfg.periodicX) x = wrap_periodic(x, cfg.Lx);
+            if (!point_inside_domain_device(x, y, cfg)) continue;
+            ++fluidSamples;
+            if (point_inside_immersed_rectangle_device(x, y, cfg)) ++inside;
+        }
+    }
+    const int denom = fluidSamples > 0 ? fluidSamples : total;
+    return static_cast<double>(inside) / static_cast<double>(denom);
+}
+
+__global__ void add_wall_virtual_faces_persistent_kernel(int nc,
+                                                         DeviceConfig cfg,
+                                                         double* cellMass,
+                                                         double* cellPx,
+                                                         double* cellPy) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    if (cfg.wallAccommodation <= 0.0 || cfg.wallGamma <= 0.0 || cfg.wallVpMass <= 0.0) return;
+
+    const int ix = c % cfg.Nx;
+    const int iy = c / cfg.Nx;
+    const double x0 = static_cast<double>(ix) * cfg.dx - cfg.shiftX;
+    const double x1 = x0 + cfg.dx;
+    const double y0 = static_cast<double>(iy) * cfg.dy - cfg.shiftY;
+    const double y1 = y0 + cfg.dy;
+    const double fullCellArea = cfg.dx * cfg.dy;
+
+    double mass = cellMass[c];
+    double px = cellPx[c];
+    double py = cellPy[c];
+
+    if (cfg.wallLeftEnabled) {
+        const double outsideX = overlap_length_device(x0, x1, cfg.domainXMin - cfg.dx, cfg.domainXMin);
+        const double insideY = cfg.periodicY ? cfg.dy : overlap_length_device(y0, y1, cfg.domainYMin, cfg.domainYMax);
+        add_virtual_wall_mass_momentum_device(outsideX * insideY, fullCellArea, cfg.wallUxLeft, cfg.wallUyLeft, cfg, mass, px, py);
+    }
+    if (cfg.wallRightEnabled) {
+        const double outsideX = overlap_length_device(x0, x1, cfg.domainXMax, cfg.domainXMax + cfg.dx);
+        const double insideY = cfg.periodicY ? cfg.dy : overlap_length_device(y0, y1, cfg.domainYMin, cfg.domainYMax);
+        add_virtual_wall_mass_momentum_device(outsideX * insideY, fullCellArea, cfg.wallUxRight, cfg.wallUyRight, cfg, mass, px, py);
+    }
+    if (cfg.wallBottomEnabled) {
+        const double insideX = cfg.periodicX ? cfg.dx : overlap_length_device(x0, x1, cfg.domainXMin, cfg.domainXMax);
+        const double outsideY = overlap_length_device(y0, y1, cfg.domainYMin - cfg.dy, cfg.domainYMin);
+        add_virtual_wall_mass_momentum_device(insideX * outsideY, fullCellArea, cfg.wallUxBottom, cfg.wallUyBottom, cfg, mass, px, py);
+    }
+    if (cfg.wallTopEnabled) {
+        const double insideX = cfg.periodicX ? cfg.dx : overlap_length_device(x0, x1, cfg.domainXMin, cfg.domainXMax);
+        const double outsideY = overlap_length_device(y0, y1, cfg.domainYMax, cfg.domainYMax + cfg.dy);
+        add_virtual_wall_mass_momentum_device(insideX * outsideY, fullCellArea, cfg.wallUxTop, cfg.wallUyTop, cfg, mass, px, py);
+    }
+    if (cfg.immersedRectangleEnabled) {
+        const double solidFraction = immersed_rectangle_fraction_device(ix, iy, cfg);
+        add_virtual_wall_mass_momentum_device(solidFraction * fullCellArea, fullCellArea,
+                                              cfg.immersedWallUx, cfg.immersedWallUy, cfg, mass, px, py);
+    }
+
+    cellMass[c] = mass;
+    cellPx[c] = px;
+    cellPy[c] = py;
 }
 
 __global__ void reset_persistent_cells_kernel(int n, int nc,
@@ -391,6 +527,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.dy = config.Ly / static_cast<double>(config.Ny);
     cfg.shiftX = config.shiftX;
     cfg.shiftY = config.shiftY;
+    cfg.periodicX = config.periodicX ? 1 : 0;
+    cfg.periodicY = config.periodicY ? 1 : 0;
+    cfg.domainXMin = config.domainXMin;
+    cfg.domainXMax = config.domainXMax;
+    cfg.domainYMin = config.domainYMin;
+    cfg.domainYMax = config.domainYMax;
+    cfg.wallLeftEnabled = config.wallLeftEnabled;
+    cfg.wallRightEnabled = config.wallRightEnabled;
+    cfg.wallBottomEnabled = config.wallBottomEnabled;
+    cfg.wallTopEnabled = config.wallTopEnabled;
+    cfg.wallAccommodation = config.wallAccommodation;
+    cfg.wallGamma = config.wallGamma;
+    cfg.wallVpMass = config.wallVpMass;
+    cfg.wallUxLeft = config.wallUxLeft;
+    cfg.wallUyLeft = config.wallUyLeft;
+    cfg.wallUxRight = config.wallUxRight;
+    cfg.wallUyRight = config.wallUyRight;
+    cfg.wallUxBottom = config.wallUxBottom;
+    cfg.wallUyBottom = config.wallUyBottom;
+    cfg.wallUxTop = config.wallUxTop;
+    cfg.wallUyTop = config.wallUyTop;
+    cfg.immersedRectangleEnabled = config.immersedRectangleEnabled;
+    cfg.immersedFractionSamples = config.immersedFractionSamples;
+    cfg.immersedXMin = config.immersedXMin;
+    cfg.immersedXMax = config.immersedXMax;
+    cfg.immersedYMin = config.immersedYMin;
+    cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedWallUx = config.immersedWallUx;
+    cfg.immersedWallUy = config.immersedWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -403,6 +568,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+            add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
                                                                      b.cellUx, b.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -642,6 +811,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.dy = config.Ly / static_cast<double>(config.Ny);
     cfg.shiftX = config.shiftX;
     cfg.shiftY = config.shiftY;
+    cfg.periodicX = config.periodicX ? 1 : 0;
+    cfg.periodicY = config.periodicY ? 1 : 0;
+    cfg.domainXMin = config.domainXMin;
+    cfg.domainXMax = config.domainXMax;
+    cfg.domainYMin = config.domainYMin;
+    cfg.domainYMax = config.domainYMax;
+    cfg.wallLeftEnabled = config.wallLeftEnabled;
+    cfg.wallRightEnabled = config.wallRightEnabled;
+    cfg.wallBottomEnabled = config.wallBottomEnabled;
+    cfg.wallTopEnabled = config.wallTopEnabled;
+    cfg.wallAccommodation = config.wallAccommodation;
+    cfg.wallGamma = config.wallGamma;
+    cfg.wallVpMass = config.wallVpMass;
+    cfg.wallUxLeft = config.wallUxLeft;
+    cfg.wallUyLeft = config.wallUyLeft;
+    cfg.wallUxRight = config.wallUxRight;
+    cfg.wallUyRight = config.wallUyRight;
+    cfg.wallUxBottom = config.wallUxBottom;
+    cfg.wallUyBottom = config.wallUyBottom;
+    cfg.wallUxTop = config.wallUxTop;
+    cfg.wallUyTop = config.wallUyTop;
+    cfg.immersedRectangleEnabled = config.immersedRectangleEnabled;
+    cfg.immersedFractionSamples = config.immersedFractionSamples;
+    cfg.immersedXMin = config.immersedXMin;
+    cfg.immersedXMax = config.immersedXMax;
+    cfg.immersedYMin = config.immersedYMin;
+    cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedWallUx = config.immersedWallUx;
+    cfg.immersedWallUy = config.immersedWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -654,6 +852,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+            add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
                                                                      b.cellUx, b.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -844,6 +1046,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.dy = config.Ly / static_cast<double>(config.Ny);
     cfg.shiftX = config.shiftX;
     cfg.shiftY = config.shiftY;
+    cfg.periodicX = config.periodicX ? 1 : 0;
+    cfg.periodicY = config.periodicY ? 1 : 0;
+    cfg.domainXMin = config.domainXMin;
+    cfg.domainXMax = config.domainXMax;
+    cfg.domainYMin = config.domainYMin;
+    cfg.domainYMax = config.domainYMax;
+    cfg.wallLeftEnabled = config.wallLeftEnabled;
+    cfg.wallRightEnabled = config.wallRightEnabled;
+    cfg.wallBottomEnabled = config.wallBottomEnabled;
+    cfg.wallTopEnabled = config.wallTopEnabled;
+    cfg.wallAccommodation = config.wallAccommodation;
+    cfg.wallGamma = config.wallGamma;
+    cfg.wallVpMass = config.wallVpMass;
+    cfg.wallUxLeft = config.wallUxLeft;
+    cfg.wallUyLeft = config.wallUyLeft;
+    cfg.wallUxRight = config.wallUxRight;
+    cfg.wallUyRight = config.wallUyRight;
+    cfg.wallUxBottom = config.wallUxBottom;
+    cfg.wallUyBottom = config.wallUyBottom;
+    cfg.wallUxTop = config.wallUxTop;
+    cfg.wallUyTop = config.wallUyTop;
+    cfg.immersedRectangleEnabled = config.immersedRectangleEnabled;
+    cfg.immersedFractionSamples = config.immersedFractionSamples;
+    cfg.immersedXMin = config.immersedXMin;
+    cfg.immersedXMax = config.immersedXMax;
+    cfg.immersedYMin = config.immersedYMin;
+    cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedWallUx = config.immersedWallUx;
+    cfg.immersedWallUy = config.immersedWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -856,6 +1087,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+            add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -1042,6 +1277,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.dy = config.Ly / static_cast<double>(config.Ny);
     cfg.shiftX = config.shiftX;
     cfg.shiftY = config.shiftY;
+    cfg.periodicX = config.periodicX ? 1 : 0;
+    cfg.periodicY = config.periodicY ? 1 : 0;
+    cfg.domainXMin = config.domainXMin;
+    cfg.domainXMax = config.domainXMax;
+    cfg.domainYMin = config.domainYMin;
+    cfg.domainYMax = config.domainYMax;
+    cfg.wallLeftEnabled = config.wallLeftEnabled;
+    cfg.wallRightEnabled = config.wallRightEnabled;
+    cfg.wallBottomEnabled = config.wallBottomEnabled;
+    cfg.wallTopEnabled = config.wallTopEnabled;
+    cfg.wallAccommodation = config.wallAccommodation;
+    cfg.wallGamma = config.wallGamma;
+    cfg.wallVpMass = config.wallVpMass;
+    cfg.wallUxLeft = config.wallUxLeft;
+    cfg.wallUyLeft = config.wallUyLeft;
+    cfg.wallUxRight = config.wallUxRight;
+    cfg.wallUyRight = config.wallUyRight;
+    cfg.wallUxBottom = config.wallUxBottom;
+    cfg.wallUyBottom = config.wallUyBottom;
+    cfg.wallUxTop = config.wallUxTop;
+    cfg.wallUyTop = config.wallUyTop;
+    cfg.immersedRectangleEnabled = config.immersedRectangleEnabled;
+    cfg.immersedFractionSamples = config.immersedFractionSamples;
+    cfg.immersedXMin = config.immersedXMin;
+    cfg.immersedXMax = config.immersedXMax;
+    cfg.immersedYMin = config.immersedYMin;
+    cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedWallUx = config.immersedWallUx;
+    cfg.immersedWallUy = config.immersedWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1054,6 +1318,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+            add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());

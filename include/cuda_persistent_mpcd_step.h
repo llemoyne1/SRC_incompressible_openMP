@@ -18,6 +18,47 @@ struct CudaPersistentMpcdStepConfig {
     // Optional collision-grid shift, matching GridShift in the CPU collision path.
     double shiftX = 0.0;
     double shiftY = 0.0;
+    // 0253: bounded wall-simple collision support.  The historical
+    // persistent collision path assumed periodic indexing in both
+    // directions.  These flags let the same backend reproduce the CPU
+    // bounded cell-indexing and deterministic virtual-wall momentum
+    // contribution for the Poiseuille wall-simple subset.
+    int periodicX = 1;
+    int periodicY = 1;
+    double domainXMin = 0.0;
+    double domainXMax = 1.0;
+    double domainYMin = 0.0;
+    double domainYMax = 1.0;
+    int wallLeftEnabled = 0;
+    int wallRightEnabled = 0;
+    int wallBottomEnabled = 0;
+    int wallTopEnabled = 0;
+    double wallAccommodation = 0.0;
+    double wallGamma = 0.0;
+    double wallVpMass = 1.0;
+    double wallUxLeft = 0.0;
+    double wallUyLeft = 0.0;
+    double wallUxRight = 0.0;
+    double wallUyRight = 0.0;
+    double wallUxBottom = 0.0;
+    double wallUyBottom = 0.0;
+    double wallUxTop = 0.0;
+    double wallUyTop = 0.0;
+
+    // 0254: deterministic immersed-rectangle virtual-wall contribution for
+    // the SRC collision. This mirrors the CPU collision's
+    // immersed_solid_fraction_in_cell() term for the static rectangle subset
+    // used by open_rect_obstacle_full. Thermal noise, moving solids and
+    // circular/rotating solids remain CPU-only until dedicated validation.
+    int immersedRectangleEnabled = 0;
+    int immersedFractionSamples = 4;
+    double immersedXMin = 0.0;
+    double immersedXMax = 0.0;
+    double immersedYMin = 0.0;
+    double immersedYMax = 0.0;
+    double immersedWallUx = 0.0;
+    double immersedWallUy = 0.0;
+
     // Absolute SRC/MPCD step used for random rotation signs.
     std::uint64_t step = 0u;
     double rotationAngle = 2.0943951023931954923; // 120 degrees
