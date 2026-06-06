@@ -3,6 +3,10 @@
 
 #ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
 #include "cuda_cell_moments.h"
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+#include "cuda_shared_particle_state_0251.h"
+#include "cuda_cell_workspace.h"
+#endif
 #endif
 
 #ifdef MPCD_ENABLE_CUDA_SRC_COLLISION
@@ -344,6 +348,13 @@ CudaCellMomentsActiveAccumulator& cuda_cell_moments_active_accumulator() {
     return acc;
 }
 
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+CudaCellWorkspace& cuda_cell_moments_persistent_workspace_0251() {
+    static CudaCellWorkspace workspace;
+    return workspace;
+}
+#endif
+
 bool try_cuda_cell_moments_active(const ParticleState& state,
                                   const SimulationParams& params,
                                   const CellGrid& grid,
@@ -361,7 +372,25 @@ bool try_cuda_cell_moments_active(const ParticleState& state,
     opts.downloadCellVelocities = false;
     opts.enableAllFluidFastPath = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_ALL_FLUID_FASTPATH", true);
     opts.enableUniformMassFastPath = env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_UNIFORM_MASS_FASTPATH", true);
-    cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
+    const bool preferPersistentParticleState0251 =
+        env_flag_enabled("MPCD_CUDA_CELL_MOMENTS_PERSISTENT_STATE_0251", false);
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (preferPersistentParticleState0251 && cuda_shared_particle_state_0251_is_fresh()) {
+        cuda_deposit_cell_moments_atomic_from_persistent_state(
+            state,
+            cuda_shared_particle_state_0251(),
+            cuda_cell_moments_persistent_workspace_0251(),
+            grid,
+            shift,
+            params,
+            cuda,
+            &diag,
+            opts);
+    } else
+#endif
+    {
+        cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
+    }
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const int nc = grid.numCells;

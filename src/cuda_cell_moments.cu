@@ -1,4 +1,6 @@
 #include "cuda_cell_moments.h"
+#include "cuda_cell_workspace.h"
+#include "cuda_particle_state.h"
 
 #include <cuda_runtime.h>
 
@@ -419,6 +421,167 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
         diagnostics->downloadSeconds = seconds_between(td0, td1);
         diagnostics->totalSeconds = seconds_between(t0, t1);
         diagnostics->reusedDeviceBuffers = options.reuseDeviceBuffers ? 1 : 0;
+        diagnostics->allFluidFastPath = allFluid ? 1 : 0;
+        diagnostics->uniformMassFastPath = uniformMass ? 1 : 0;
+        diagnostics->downloadedCellVelocities = options.downloadCellVelocities ? 1 : 0;
+    }
+}
+
+
+void cuda_deposit_cell_moments_atomic_from_persistent_state(
+    const ParticleState& hostMirror,
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    const CellGrid& grid,
+    const GridShift& shift,
+    const SimulationParams& params,
+    CudaCellMoments& out,
+    CudaCellMomentsDiagnostics* diagnostics,
+    CudaCellMomentsOptions options) {
+    validate_particle_state(hostMirror, "cuda_deposit_cell_moments_atomic_from_persistent_state");
+    if (grid.Nx <= 0 || grid.Ny <= 0 || grid.numCells != grid.Nx * grid.Ny) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: invalid grid");
+    }
+    if (!(grid.dx > 0.0) || !(grid.dy > 0.0) || !(grid.Lx > 0.0) || !(grid.Ly > 0.0)) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: invalid grid spacing/domain");
+    }
+    if (options.threadsPerBlock <= 0) {
+        options.threadsPerBlock = 256;
+    }
+
+    const Clock::time_point t0 = Clock::now();
+    const std::size_t n = static_cast<std::size_t>(hostMirror.Np);
+    const int nInt = static_cast<int>(n);
+    if (static_cast<std::size_t>(nInt) != n) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: particle count exceeds int range for prototype kernel");
+    }
+    if (gpuState.size() != hostMirror.Np) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: GPU particle state size mismatch");
+    }
+    const int nc = grid.numCells;
+
+    std::vector<std::uint8_t> roleFallback;
+    const std::uint8_t* h_role = nullptr;
+    if (hostMirror.role.empty()) {
+        roleFallback.assign(n, kParticleRoleFluid);
+        h_role = roleFallback.data();
+    } else {
+        h_role = hostMirror.role.data();
+    }
+
+    std::uint64_t fluidParticles = 0u;
+    bool allFluid = options.enableAllFluidFastPath;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (h_role[i] == kParticleRoleFluid) {
+            ++fluidParticles;
+        } else {
+            allFluid = false;
+        }
+    }
+
+    bool uniformMass = options.enableUniformMassFastPath && n > 0u;
+    const double uniformMassValue = n > 0u ? hostMirror.mass[0] : 0.0;
+    if (uniformMass) {
+        for (std::size_t i = 1; i < n; ++i) {
+            if (hostMirror.mass[i] != uniformMassValue) {
+                uniformMass = false;
+                break;
+            }
+        }
+    }
+
+    out.cellId.assign(n, -1);
+    out.cellCount.assign(static_cast<std::size_t>(nc), 0u);
+    out.cellMass.assign(static_cast<std::size_t>(nc), 0.0);
+    out.cellPx.assign(static_cast<std::size_t>(nc), 0.0);
+    out.cellPy.assign(static_cast<std::size_t>(nc), 0.0);
+    if (options.downloadCellVelocities) {
+        out.cellUx.assign(static_cast<std::size_t>(nc), 0.0);
+        out.cellUy.assign(static_cast<std::size_t>(nc), 0.0);
+    } else {
+        out.cellUx.clear();
+        out.cellUy.clear();
+    }
+
+    CudaCellWorkspaceDiagnostics workspaceDiag{};
+    cellWorkspace.ensure_capacity(hostMirror.Np, nc, &workspaceDiag);
+    CudaCellWorkspaceDeviceView cell = cellWorkspace.device_view();
+    CudaParticleDeviceView particles = gpuState.device_view();
+    if (cell.particleCapacity < hostMirror.Np || cell.numCells < nc ||
+        cell.cellId == nullptr || cell.count == nullptr || cell.cellMass == nullptr ||
+        cell.cellPx == nullptr || cell.cellPy == nullptr) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: invalid persistent cell workspace");
+    }
+    if (particles.n != hostMirror.Np || particles.x == nullptr || particles.y == nullptr ||
+        particles.vx == nullptr || particles.vy == nullptr || particles.mass == nullptr ||
+        particles.role == nullptr) {
+        throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: invalid persistent particle view");
+    }
+
+    DeviceDepositConfig cfg{};
+    cfg.nx = grid.Nx;
+    cfg.ny = grid.Ny;
+    cfg.numCells = grid.numCells;
+    cfg.lx = grid.Lx;
+    cfg.ly = grid.Ly;
+    cfg.dx = grid.dx;
+    cfg.dy = grid.dy;
+    cfg.shiftX = shift.sx;
+    cfg.shiftY = shift.sy;
+    cfg.periodicX = periodic_x(params) ? 1 : 0;
+    cfg.periodicY = periodic_y(params) ? 1 : 0;
+
+    const int block = options.threadsPerBlock;
+    const int particleGrid = std::max(1, (nInt + block - 1) / block);
+    const int cellGridN = std::max(1, (nc + block - 1) / block);
+    const int resetGrid = std::max(particleGrid, cellGridN);
+
+    const Clock::time_point tk0 = Clock::now();
+    reset_cell_moments_kernel<<<resetGrid, block>>>(nInt, nc, cell.cellId, cell.count,
+                                                    cell.cellMass, cell.cellPx, cell.cellPy,
+                                                    cell.cellUx, cell.cellUy,
+                                                    options.computeCellVelocities ? 1 : 0);
+    cuda_check(cudaGetLastError(), "launch reset_cell_moments_kernel persistent");
+    deposit_cell_moments_atomic_kernel<<<particleGrid, block>>>(nInt, particles.x, particles.y,
+                                                                particles.vx, particles.vy,
+                                                                particles.mass, particles.role, cfg,
+                                                                allFluid ? 1 : 0,
+                                                                uniformMass ? 1 : 0,
+                                                                uniformMassValue,
+                                                                cell.cellId, cell.count,
+                                                                cell.cellMass, cell.cellPx,
+                                                                cell.cellPy);
+    cuda_check(cudaGetLastError(), "launch deposit_cell_moments_atomic_kernel persistent");
+    if (options.computeCellVelocities) {
+        finalize_cell_velocities_kernel<<<cellGridN, block>>>(nc, cell.cellMass, cell.cellPx,
+                                                              cell.cellPy, cell.cellUx, cell.cellUy);
+        cuda_check(cudaGetLastError(), "launch finalize_cell_velocities_kernel persistent");
+    }
+    cuda_check(cudaDeviceSynchronize(), "cuda_deposit_cell_moments_atomic_from_persistent_state synchronize");
+    const Clock::time_point tk1 = Clock::now();
+
+    const Clock::time_point td0 = Clock::now();
+    cuda_check(cudaMemcpy(out.cellId.data(), cell.cellId, n * sizeof(int), cudaMemcpyDeviceToHost), "copy persistent cellId D2H");
+    cuda_check(cudaMemcpy(out.cellCount.data(), cell.count, static_cast<std::size_t>(nc) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost), "copy persistent count D2H");
+    cuda_check(cudaMemcpy(out.cellMass.data(), cell.cellMass, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy persistent cellMass D2H");
+    cuda_check(cudaMemcpy(out.cellPx.data(), cell.cellPx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy persistent cellPx D2H");
+    cuda_check(cudaMemcpy(out.cellPy.data(), cell.cellPy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy persistent cellPy D2H");
+    if (options.downloadCellVelocities) {
+        cuda_check(cudaMemcpy(out.cellUx.data(), cell.cellUx, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy persistent cellUx D2H");
+        cuda_check(cudaMemcpy(out.cellUy.data(), cell.cellUy, static_cast<std::size_t>(nc) * sizeof(double), cudaMemcpyDeviceToHost), "copy persistent cellUy D2H");
+    }
+    const Clock::time_point td1 = Clock::now();
+
+    const Clock::time_point t1 = Clock::now();
+    if (diagnostics != nullptr) {
+        diagnostics->particlesVisited = static_cast<std::uint64_t>(n);
+        diagnostics->fluidParticles = fluidParticles;
+        diagnostics->numCells = nc;
+        diagnostics->uploadSeconds = 0.0;
+        diagnostics->kernelSeconds = seconds_between(tk0, tk1);
+        diagnostics->downloadSeconds = seconds_between(td0, td1);
+        diagnostics->totalSeconds = seconds_between(t0, t1);
+        diagnostics->reusedDeviceBuffers = workspaceDiag.reusedAllocation;
         diagnostics->allFluidFastPath = allFluid ? 1 : 0;
         diagnostics->uniformMassFastPath = uniformMass ? 1 : 0;
         diagnostics->downloadedCellVelocities = options.downloadCellVelocities ? 1 : 0;

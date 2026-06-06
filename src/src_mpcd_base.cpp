@@ -7,6 +7,7 @@
 #include "cuda_immersed_rectangle_0247.h"
 #include "cuda_inlet_outlet_fullface_0249a.h"
 #include "cuda_inlet_outlet_segmented_0249b.h"
+#include "cuda_shared_particle_state_0251.h"
 
 #include <algorithm>
 #include <chrono>
@@ -363,6 +364,14 @@ void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) 
     }
 }
 
+
+bool boundary_cpu_may_have_edited_particles_0251(const BoundaryDiagnostics& b) {
+    return b.hitsLeft != 0u || b.hitsRight != 0u || b.hitsBottom != 0u || b.hitsTop != 0u ||
+           b.inletReservoirDeleted != 0u || b.inletBackflowDeleted != 0u ||
+           b.outletParticlesDeleted != 0u || b.inletParticlesInserted != 0u ||
+           b.inletNetParticleDelta != 0;
+}
+
 } // namespace
 
 const char* step_profile_phase_name(const std::size_t phaseIndex) {
@@ -412,6 +421,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     validate_particle_state(state, "run_src_mpcd_base_step");
     ensure_particle_roles(state, ParticleRole::Fluid);
+    cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     const std::size_t n = static_cast<std::size_t>(state.Np);
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
@@ -475,6 +485,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
         merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
         merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
+        if (boundary_cpu_may_have_edited_particles_0251(result.boundary)) {
+            cuda_shared_particle_state_0251_invalidate("cpu_boundary_conditions_edited_particles");
+        }
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Immersed);
@@ -489,6 +502,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (!handledByCudaImmersed) {
             result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
+            if (result.immersed.hits != 0u) {
+                cuda_shared_particle_state_0251_invalidate("cpu_immersed_solid_edited_particles");
+            }
         }
     }
     {

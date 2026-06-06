@@ -1,0 +1,6 @@
+case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
+open_rect_obstacle_full,10.565285711,13.236749548,0.7981782591479458,10.61,13.34,0.795352323838081,0,76,PASS
+piston_virial_full,4.25871759,5.171476348,0.8235013182738432,4.32,5.26,0.8212927756653994,0,76,PASS
+poiseuille_wall_full,3.625776505,4.545391583,0.7976818803820098,3.67,4.63,0.7926565874730022,0,76,PASS
+segmented_u_turn_full,7.509588786,8.594390821,0.8737779026351309,7.56,8.71,0.8679678530424798,0,76,PASS
+tg_periodic_full,6.117491661,7.247344642,0.8441011105705879,6.16,7.34,0.8392370572207085,0,76,PASS

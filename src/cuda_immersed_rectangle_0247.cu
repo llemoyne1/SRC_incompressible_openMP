@@ -1,6 +1,7 @@
 #include "cuda_immersed_rectangle_0247.h"
 
 #include "cuda_particle_state.h"
+#include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 
@@ -229,8 +230,7 @@ __global__ void immersed_rectangle_reflection_kernel_0247(
 }
 
 CudaParticleState& persistent_immersed_rectangle_state_0247() {
-    static CudaParticleState gpuState;
-    return gpuState;
+    return cuda_shared_particle_state_0251();
 }
 
 } // namespace
@@ -316,6 +316,7 @@ CudaImmersedRectangle0247Diagnostics try_apply_cuda_immersed_rectangle_0247(
     check_cuda_0247(cudaFree(dHits), "free hit counter");
 
     gpuState.download_all(state, &particleDiag);
+    cuda_shared_particle_state_0251_mark_fresh("immersed_rectangle_0247");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;

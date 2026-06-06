@@ -1,6 +1,7 @@
 #include "cuda_streaming_periodic_0245.h"
 
 #include "cuda_particle_state.h"
+#include "cuda_shared_particle_state_0251.h"
 
 #include <cuda_runtime.h>
 
@@ -106,8 +107,7 @@ __global__ void periodic_force_stream_kernel_0245(
 }
 
 CudaParticleState& persistent_streaming_state_0245() {
-    static CudaParticleState gpuState;
-    return gpuState;
+    return cuda_shared_particle_state_0251();
 }
 
 } // namespace
@@ -169,6 +169,7 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     const auto tAfterKernel = Clock::now();
 
     gpuState.download_all(state, &particleDiag);
+    cuda_shared_particle_state_0251_mark_fresh("streaming_periodic_0245");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;

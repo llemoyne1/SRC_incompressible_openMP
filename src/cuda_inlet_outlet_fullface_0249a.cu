@@ -1,6 +1,7 @@
 #include "cuda_inlet_outlet_fullface_0249a.h"
 
 #include "cuda_particle_state.h"
+#include "cuda_shared_particle_state_0251.h"
 
 #include <cuda_runtime.h>
 
@@ -150,8 +151,7 @@ __global__ void inlet_outlet_fullface_mark_exits_kernel_0249a(
 }
 
 CudaParticleState& persistent_inlet_outlet_state_0249a() {
-    static CudaParticleState gpuState;
-    return gpuState;
+    return cuda_shared_particle_state_0251();
 }
 
 } // namespace
@@ -273,6 +273,7 @@ CudaInletOutletFullface0249aDiagnostics try_apply_cuda_inlet_outlet_fullface_024
     check_cuda_0249a(cudaFree(dRoleChanges), "free roleChanges");
 
     gpuState.download_all(state, &particleDiag);
+    cuda_shared_particle_state_0251_mark_fresh("inlet_outlet_fullface_0249a");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;

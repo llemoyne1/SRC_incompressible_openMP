@@ -1,6 +1,7 @@
 #include "cuda_streaming_piston_0247b.h"
 
 #include "cuda_particle_state.h"
+#include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
 
 #include <cuda_runtime.h>
@@ -139,8 +140,7 @@ __global__ void piston_force_stream_kernel_0247b(
 }
 
 CudaParticleState& persistent_piston_streaming_state_0247b() {
-    static CudaParticleState gpuState;
-    return gpuState;
+    return cuda_shared_particle_state_0251();
 }
 
 } // namespace
@@ -249,6 +249,7 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
     }
 
     gpuState.download_all(state, &particleDiag);
+    cuda_shared_particle_state_0251_mark_fresh("streaming_piston_0247b");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;

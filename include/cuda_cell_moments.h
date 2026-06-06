@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "cell_grid.h"
+#include "cuda_particle_state.h"
+#include "cuda_cell_workspace.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 
@@ -61,5 +63,21 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
                                       CudaCellMoments& out,
                                       CudaCellMomentsDiagnostics* diagnostics = nullptr,
                                       CudaCellMomentsOptions options = CudaCellMomentsOptions{});
+
+// 0251: deposit directly from an already-current persistent CudaParticleState
+// into a persistent CudaCellWorkspace. This skips the particle H2D upload in
+// cuda_deposit_cell_moments_atomic(); only the cell arrays required by the
+// still-CPU collision/Q6 stages are downloaded. The caller is responsible for
+// proving that gpuState matches the current host ParticleState.
+void cuda_deposit_cell_moments_atomic_from_persistent_state(
+    const ParticleState& hostMirror,
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    const CellGrid& grid,
+    const GridShift& shift,
+    const SimulationParams& params,
+    CudaCellMoments& out,
+    CudaCellMomentsDiagnostics* diagnostics = nullptr,
+    CudaCellMomentsOptions options = CudaCellMomentsOptions{});
 
 } // namespace mpcd

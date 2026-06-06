@@ -1,6 +1,7 @@
 #include "cuda_streaming_wall_simple_0246.h"
 
 #include "cuda_particle_state.h"
+#include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
 
 #include <cuda_runtime.h>
@@ -164,8 +165,7 @@ __global__ void wall_simple_force_stream_kernel_0246(
 }
 
 CudaParticleState& persistent_streaming_state_0246() {
-    static CudaParticleState gpuState;
-    return gpuState;
+    return cuda_shared_particle_state_0251();
 }
 
 } // namespace
@@ -275,6 +275,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     }
 
     gpuState.download_all(state, &particleDiag);
+    cuda_shared_particle_state_0251_mark_fresh("streaming_wall_simple_0246");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;
