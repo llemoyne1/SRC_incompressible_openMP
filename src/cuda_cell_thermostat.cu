@@ -1,4 +1,6 @@
 #include "cuda_cell_thermostat.h"
+#include "cuda_particle_state.h"
+#include "cuda_cell_workspace.h"
 
 #include <cuda_runtime.h>
 
@@ -291,6 +293,133 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_moments(
     localDiag.scaleMin = diag.scaleMin;
     localDiag.scaleMax = diag.scaleMax;
     localDiag.totalSeconds = seconds_since(tTotal0);
+    if (cudaDiag) *cudaDiag = localDiag;
+    return diag;
+#endif
+}
+
+
+ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    ParticleState& downloadTarget,
+    int numCells,
+    const std::vector<int>& cellId,
+    const std::vector<std::uint32_t>& cellCount,
+    const std::vector<double>& cellUx,
+    const std::vector<double>& cellUy,
+    double targetKBT,
+    int minParticles,
+    double epsilon,
+    CudaCellThermostatDiagnostics* cudaDiag,
+    CudaCellThermostatOptions options) {
+#if !defined(MPCD_ENABLE_CUDA_THERMOSTAT) || !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    (void)gpuState; (void)cellWorkspace; (void)downloadTarget; (void)numCells; (void)cellId;
+    (void)cellCount; (void)cellUx; (void)cellUy; (void)targetKBT; (void)minParticles;
+    (void)epsilon; (void)cudaDiag; (void)options;
+    throw std::runtime_error("cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258 requires CUDA thermostat, particle state and cell workspace");
+#else
+    validate_particle_state(downloadTarget, "cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258");
+    if (numCells <= 0) throw std::runtime_error("cuda thermostat 0258: invalid numCells");
+    const std::size_t n = static_cast<std::size_t>(downloadTarget.Np);
+    if (gpuState.size() != downloadTarget.Np) throw std::runtime_error("cuda thermostat 0258: particle-state size mismatch");
+    if (cellWorkspace.particle_capacity() < downloadTarget.Np || cellWorkspace.cell_capacity() < numCells) {
+        throw std::runtime_error("cuda thermostat 0258: cell workspace capacity too small");
+    }
+    if (cellId.size() != n) throw std::runtime_error("cuda thermostat 0258: cellId size mismatch");
+    if (cellCount.size() != static_cast<std::size_t>(numCells) ||
+        cellUx.size() != static_cast<std::size_t>(numCells) ||
+        cellUy.size() != static_cast<std::size_t>(numCells)) {
+        throw std::runtime_error("cuda thermostat 0258: cell moment array size mismatch");
+    }
+    if (!(targetKBT > 0.0)) throw std::runtime_error("cuda thermostat 0258: targetKBT must be positive");
+    if (minParticles < 1) minParticles = 1;
+    if (!(epsilon >= 0.0)) epsilon = 0.0;
+
+    const int threads = std::max(32, options.threadsPerBlock);
+    const int particleBlocks = static_cast<int>((n + static_cast<std::size_t>(threads) - 1u) / static_cast<std::size_t>(threads));
+    const int cellBlocks = (numCells + threads - 1) / threads;
+
+    CudaCellThermostatDiagnostics localDiag{};
+    localDiag.particlesVisited = downloadTarget.Np;
+    localDiag.numCells = numCells;
+
+    const auto tTotal0 = Clock::now();
+    auto t0 = Clock::now();
+
+    CudaParticleDeviceView pv = gpuState.device_view();
+    CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
+    if (pv.vx == nullptr || pv.vy == nullptr || pv.mass == nullptr || pv.role == nullptr ||
+        cv.cellId == nullptr || cv.count == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr ||
+        cv.cellKinetic == nullptr || cv.cellScale == nullptr || cv.fluidCounter == nullptr) {
+        throw std::runtime_error("cuda thermostat 0258: null device view");
+    }
+
+    const std::size_t nBytesI = n * sizeof(int);
+    const std::size_t cBytesD = static_cast<std::size_t>(numCells) * sizeof(double);
+    const std::size_t cBytesC = static_cast<std::size_t>(numCells) * sizeof(std::uint32_t);
+
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.cellId, cellId.data(), nBytesI, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.count, cellCount.data(), cBytesC, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.cellUx, cellUx.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemcpy(cv.cellUy, cellUy.data(), cBytesD, cudaMemcpyHostToDevice));
+    MPCD_CUDA_CHECK(cudaMemset(cv.cellKinetic, 0, cBytesD));
+    MPCD_CUDA_CHECK(cudaMemset(cv.fluidCounter, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    localDiag.uploadSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    kinetic_relative_kernel<<<particleBlocks, threads>>>(downloadTarget.Np, cv.cellId,
+                                                         reinterpret_cast<const std::uint8_t*>(pv.role),
+                                                         pv.mass, pv.vx, pv.vy,
+                                                         cv.cellUx, cv.cellUy, numCells,
+                                                         kParticleRoleFluid, cv.cellKinetic, cv.fluidCounter);
+    MPCD_CUDA_CHECK(cudaGetLastError());
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    localDiag.kineticKernelSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    scale_kernel<<<cellBlocks, threads>>>(numCells, cv.count, cv.cellKinetic,
+                                          targetKBT, minParticles, epsilon, cv.cellScale);
+    MPCD_CUDA_CHECK(cudaGetLastError());
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    localDiag.scaleKernelSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    apply_rescale_kernel<<<particleBlocks, threads>>>(downloadTarget.Np, cv.cellId,
+                                                      reinterpret_cast<const std::uint8_t*>(pv.role),
+                                                      cv.cellUx, cv.cellUy, cv.cellScale,
+                                                      numCells, kParticleRoleFluid,
+                                                      pv.vx, pv.vy);
+    MPCD_CUDA_CHECK(cudaGetLastError());
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    localDiag.applyKernelSeconds = seconds_since(t0);
+
+    t0 = Clock::now();
+    CudaParticleStateDiagnostics downloadDiag{};
+    gpuState.download_velocities(downloadTarget, &downloadDiag);
+    std::vector<double> cellKinetic(static_cast<std::size_t>(numCells), 0.0);
+    std::vector<double> cellScale(static_cast<std::size_t>(numCells), 1.0);
+    unsigned long long fluidCounter = 0ull;
+    MPCD_CUDA_CHECK(cudaMemcpy(cellKinetic.data(), cv.cellKinetic, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(cellScale.data(), cv.cellScale, cBytesD, cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(&fluidCounter, cv.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    localDiag.downloadSeconds = seconds_since(t0);
+    localDiag.fluidParticles = static_cast<std::uint64_t>(fluidCounter);
+
+    ThermostatDiagnostics diag = diagnostics_from_cells(cellCount, cellKinetic, cellScale,
+                                                        targetKBT, minParticles, epsilon);
+    localDiag.applied = diag.applied;
+    localDiag.cellsRescaled = diag.cellsRescaled;
+    localDiag.particlesRescaled = diag.particlesRescaled;
+    localDiag.kBTBefore = diag.kBTBefore;
+    localDiag.kBTAfter = diag.kBTAfter;
+    localDiag.scaleMean = diag.scaleMean;
+    localDiag.scaleMin = diag.scaleMin;
+    localDiag.scaleMax = diag.scaleMax;
+    localDiag.totalSeconds = seconds_since(tTotal0);
+    localDiag.particleStateUploadSeconds = 0.0;
     if (cudaDiag) *cudaDiag = localDiag;
     return diag;
 #endif

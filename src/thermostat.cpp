@@ -2,6 +2,13 @@
 
 #ifdef MPCD_ENABLE_CUDA_THERMOSTAT
 #include "cuda_cell_thermostat.h"
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+#include "cuda_shared_particle_state_0251.h"
+#include "cuda_particle_state.h"
+#endif
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+#include "cuda_cell_workspace.h"
+#endif
 #endif
 
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
@@ -73,6 +80,13 @@ int thread_id() {
 }
 
 #ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+CudaCellWorkspace& cuda_thermostat_cell_workspace_0258_tls() {
+    static thread_local CudaCellWorkspace workspace;
+    return workspace;
+}
+#endif
+
 struct CudaThermostatShadowRow {
     std::uint64_t step = 0u;
     std::uint64_t particlesVisited = 0u;
@@ -424,16 +438,20 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     std::fill(ws.localKinetic.begin(), ws.localKinetic.end(), 0.0);
 
 #ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+    const bool cudaThermostatPersistent0258Enabled =
+        env_flag_enabled("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258", false);
     const bool cudaThermostatActiveEnabled = env_flag_enabled("MPCD_CUDA_THERMOSTAT_USE", false);
-    // Active mode has priority. Shadow mode intentionally remains validation-only
-    // and is disabled when the active CUDA thermostat drives the dynamics.
+    // Active modes have priority. Shadow mode intentionally remains validation-only
+    // and is disabled when a CUDA thermostat drives the dynamics.
     const bool cudaThermostatShadowEnabled =
-        (!cudaThermostatActiveEnabled) && env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false);
+        (!cudaThermostatPersistent0258Enabled) && (!cudaThermostatActiveEnabled) &&
+        env_flag_enabled("MPCD_CUDA_THERMOSTAT_SHADOW", false);
     ParticleState cudaThermostatPreState;
     if (cudaThermostatShadowEnabled) {
         cudaThermostatPreState = state;
     }
 #else
+    const bool cudaThermostatPersistent0258Enabled = false;
     const bool cudaThermostatActiveEnabled = false;
     const bool cudaThermostatShadowEnabled = false;
 #endif
@@ -485,6 +503,41 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     }
 
 #ifdef MPCD_ENABLE_CUDA_THERMOSTAT
+    if (cudaThermostatPersistent0258Enabled) {
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        CudaCellThermostatDiagnostics cudaRaw{};
+        CudaCellThermostatOptions opts{};
+        opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_THERMOSTAT_THREADS_PER_BLOCK", 256));
+
+        CudaParticleStateDiagnostics particleDiag{};
+        CudaCellWorkspaceDiagnostics workspaceDiag{};
+        auto& gpuState = cuda_shared_particle_state_0251();
+        const bool metadataCache = env_flag_enabled("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_METADATA_CACHE", true);
+        if (metadataCache) {
+            gpuState.upload_kinematics_with_cached_metadata(state, &particleDiag);
+        } else {
+            gpuState.upload_all(state, &particleDiag);
+        }
+        auto& cellWorkspace = cuda_thermostat_cell_workspace_0258_tls();
+        cellWorkspace.ensure_capacity(state.Np, grid.numCells, &workspaceDiag);
+
+        diag = cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258(
+            gpuState, cellWorkspace, state, nc, cellId, ws.cellCount, ws.cellUx, ws.cellUy,
+            targetKBT, params.thermostatMinParticles, params.thermostatEpsilon, &cudaRaw, opts);
+        cudaRaw.uploadSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + workspaceDiag.allocateSeconds;
+        cudaRaw.totalSeconds += particleDiag.allocateSeconds + particleDiag.uploadSeconds + workspaceDiag.allocateSeconds;
+        cudaRaw.particleStateUploadSeconds = particleDiag.uploadSeconds;
+        cudaRaw.cellWorkspaceAllocateSeconds = workspaceDiag.allocateSeconds;
+        record_cuda_cell_thermostat_active(params, step, diag, cudaRaw);
+        cuda_shared_particle_state_0251_mark_fresh("cuda_thermostat_persistent_0258");
+        return diag;
+#else
+        const bool strict = env_flag_enabled("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_STRICT", true);
+        if (strict) {
+            throw std::runtime_error("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258 requires CUDA particle state and cell workspace");
+        }
+#endif
+    }
     if (cudaThermostatActiveEnabled) {
         CudaCellThermostatDiagnostics cudaRaw{};
         CudaCellThermostatOptions opts{};
@@ -496,6 +549,7 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
         return diag;
     }
 #else
+    (void)cudaThermostatPersistent0258Enabled;
     (void)cudaThermostatActiveEnabled;
 #endif
 
