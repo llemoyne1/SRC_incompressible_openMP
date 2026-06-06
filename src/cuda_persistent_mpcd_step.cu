@@ -1124,21 +1124,40 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    gpuState.download_velocities(downloadTarget);
+    const bool residentPeriodic0260 = env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false);
+    if (!residentPeriodic0260) {
+        gpuState.download_velocities(downloadTarget);
+    }
+    // The later thermostat phase checks that cellId has the particle count even
+    // when it only consumes diagnostics recorded here. In resident 0260 mode the
+    // values themselves are not needed on the host, so only size the vector.
     cellIdOut.assign(n, -1);
     cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
-    cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
-    MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    if (!residentPeriodic0260) {
+        cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    } else {
+        cellMassOut.clear();
+        cellUxOut.clear();
+        cellUyOut.clear();
+    }
+    // Keep population diagnostics available for runtime summaries; this is much
+    // cheaper than downloading full velocities and cell moments every step.
     MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    if (!residentPeriodic0260) {
+        MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    }
 
     std::vector<double> kineticHost(static_cast<std::size_t>(nc), 0.0);
     std::vector<double> scaleHost(static_cast<std::size_t>(nc), 1.0);
     if (thermostatDiagOut != nullptr) {
+        // Keep deterministic thermostat diagnostics bit-compatible with the CPU
+        // validation path. This is still much cheaper than downloading full
+        // particle velocities and all cell moments every step.
         MPCD_CUDA_CHECK(cudaMemcpy(kineticHost.data(), cv.cellKinetic, cBytesD, cudaMemcpyDeviceToHost));
         MPCD_CUDA_CHECK(cudaMemcpy(scaleHost.data(), cv.cellScale, cBytesD, cudaMemcpyDeviceToHost));
     }

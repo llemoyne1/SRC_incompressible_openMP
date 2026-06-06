@@ -2,6 +2,7 @@
 #include "cell_grid.h"
 #include "params_io_base.h"
 #include "runtime_summary.h"
+#include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 #include "src_mpcd_base.h"
@@ -26,6 +27,21 @@
 #endif
 
 namespace {
+
+bool env_truthy_0260(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+void sync_cuda_resident_state_for_host_0260(mpcd::ParticleState& state) {
+    if (env_truthy_0260("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260")) {
+        (void)mpcd::cuda_shared_particle_state_0251_download_if_fresh(state);
+    }
+}
+
 
 std::string state_dump_name(const std::string& outputDir, int step) {
     std::ostringstream oss;
@@ -416,6 +432,7 @@ int main(int argc, char** argv) {
             }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
+                sync_cuda_resident_state_for_host_0260(state);
                 const double wallTime = elapsed_seconds(t0);
                 const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
                                                            &workspace.collision.cellCount,
@@ -440,6 +457,7 @@ int main(int argc, char** argv) {
             }
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
+                sync_cuda_resident_state_for_host_0260(state);
                 mpcd::write_smpcd_state(state_dump_name(params.outputDir, step), state);
             }
         }

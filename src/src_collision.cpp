@@ -957,14 +957,16 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
     const bool useSharedParticleState0251 =
         persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251", false);
+    const bool useSharedThermostatState0260 =
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260", false);
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
-    if (useSharedParticleState || useSharedParticleState0251) {
+    if (useSharedParticleState || useSharedParticleState0251 || useSharedThermostatState0260) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_STRICT", true);
         if (strict) throw std::runtime_error("CUDA persistent SRC collision shared particle state requires MPCD_ENABLE_CUDA_PARTICLE_STATE");
     }
 #endif
 #if !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-    if (useSharedCellWorkspace || useSharedParticleState0251) {
+    if (useSharedCellWorkspace || useSharedParticleState0251 || useSharedThermostatState0260) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT", true);
         if (strict) throw std::runtime_error("CUDA persistent SRC collision shared cell workspace requires MPCD_ENABLE_CUDA_CELL_WORKSPACE");
     }
@@ -978,6 +980,30 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     const bool canUseSharedParticleState = useSharedParticleState && (applyPersistentThermostat || persistentCollision);
     const bool canUseSharedCellWorkspace = canUseSharedParticleState && useSharedCellWorkspace;
     if (applyPersistentThermostat) {
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        bool consumedSharedThermostatState0260 = false;
+        if (useSharedThermostatState0260) {
+            const bool sharedFresh = cuda_shared_particle_state_0251_is_fresh();
+            const bool strict0260 = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT", true);
+            if (!sharedFresh && strict0260) {
+                throw std::runtime_error(std::string("CUDA persistent SRC+thermostat 0260 requested shared 0251 state, but it is stale; lastWriter=") +
+                                         cuda_shared_particle_state_0251_last_writer() +
+                                         " lastInvalidator=" + cuda_shared_particle_state_0251_last_invalidator());
+            }
+            if (sharedFresh) {
+                auto& gpuState = cuda_shared_particle_state_0251();
+                auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
+                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
+                    gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+                raw.uploadSeconds += cellDiag.allocateSeconds;
+                raw.totalSeconds += cellDiag.allocateSeconds;
+                consumedSharedThermostatState0260 = true;
+                cuda_shared_particle_state_0251_mark_fresh("persistent_src_collision_thermostat_0260");
+            }
+        }
+        if (!consumedSharedThermostatState0260) {
+#endif
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
         if (canUseSharedParticleState) {
             auto& gpuState = cuda_persistent_particle_state_tls();
@@ -1009,6 +1035,9 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                 state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
         }
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        }
+#endif
         cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
     } else {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
@@ -1099,7 +1128,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         row.thermostatScaleMin = consumedThermostat.scaleMin;
         row.thermostatScaleMax = consumedThermostat.scaleMax;
     }
-    row.sharedParticleStateEnabled = (canUseSharedParticleState || useSharedParticleState0251) ? 1 : 0;
+    row.sharedParticleStateEnabled = (canUseSharedParticleState || useSharedParticleState0251 || useSharedThermostatState0260) ? 1 : 0;
     row.particleStateAllocateSeconds = particleDiag.allocateSeconds;
     row.particleStateUploadSeconds = particleDiag.uploadSeconds;
     row.particleStateAllocationCalls = particleDiag.allocationCalls;
@@ -1108,7 +1137,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.particleStateMetadataUploadCalls = particleDiag.metadataUploadCalls;
     row.particleStateMetadataCacheHits = particleDiag.metadataCacheHits;
     row.particleStateMetadataBytesSkipped = particleDiag.metadataBytesSkipped;
-    row.sharedCellWorkspaceEnabled = (canUseSharedCellWorkspace || useSharedParticleState0251) ? 1 : 0;
+    row.sharedCellWorkspaceEnabled = (canUseSharedCellWorkspace || useSharedParticleState0251 || useSharedThermostatState0260) ? 1 : 0;
     row.cellWorkspaceAllocateSeconds = cellDiag.allocateSeconds;
     row.cellWorkspaceAllocationCalls = cellDiag.allocationCalls;
     row.cellWorkspaceReusedAllocation = cellDiag.reusedAllocation;

@@ -46,6 +46,15 @@ const char* cuda_shared_particle_state_0251_last_writer() {
 const char* cuda_shared_particle_state_0251_last_invalidator() {
     return registry_0251().lastInvalidator;
 }
+
+bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState& state) {
+    auto& r = registry_0251();
+    if (!r.fresh) {
+        return false;
+    }
+    r.state.download_all(state, nullptr);
+    return true;
+}
 #endif
 
 } // namespace mpcd

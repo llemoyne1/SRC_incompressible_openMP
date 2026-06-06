@@ -98,7 +98,7 @@ make_state() {
 
 write_resampling_block() {
   cat <<PARAMS
-resamplingEnable = true
+resamplingEnable = ${RESAMPLING_ENABLE:-true}
 resamplingPopulationNMin = ${RESAMP_N_MIN:-14}
 resamplingPopulationNTarget = ${RESAMP_N_TARGET:-20}
 resamplingPopulationNMax = ${RESAMP_N_MAX:-26}
@@ -131,6 +131,7 @@ randomRotationSign = true
 gridShiftEnable = true
 rngSeed = $SEED
 
+srcClassicCudaModeEnable = ${SRC_CLASSIC_CUDA_MODE_ENABLE:-false}
 projectionEnable = ${PROJECTION_ENABLE:-true}
 projectionBackend = $PROJECTION_BACKEND
 projectionMaxIterations = 800
@@ -138,7 +139,7 @@ projectionTolerance = 1.0e-10
 projectionMomentumCorrectionEnable = true
 q6ProjectionStrength = 1.0
 
-thermostatEnable = true
+thermostatEnable = ${THERMOSTAT_ENABLE:-true}
 thermostatMode = cell_relative_rescale
 thermostatEvery = 1
 thermostatTargetKBT = -1.0

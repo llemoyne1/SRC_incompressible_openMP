@@ -111,6 +111,32 @@ bool internal_profiles_enabled_0176() {
 }
 
 
+bool cuda_classic_src_periodic_resident_0260_requested() {
+    const char* v = std::getenv("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260");
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+bool cuda_classic_src_periodic_resident_0260_supported(const SimulationParams& params) {
+    return params.srcClassicCudaModeEnable &&
+           params.bcLeft == "periodic" && params.bcRight == "periodic" &&
+           params.bcBottom == "periodic" && params.bcTop == "periodic" &&
+           !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
+           !params.immersedSolidEnable &&
+           !params.projectionEnable &&
+           !params.closedCapacityResponseEnable &&
+           !params.resamplingEnable;
+}
+
+bool cuda_classic_src_periodic_resident_0260_active(const SimulationParams& params) {
+    return cuda_classic_src_periodic_resident_0260_requested() &&
+           cuda_classic_src_periodic_resident_0260_supported(params);
+}
+
 
 struct PostGuardDepositProfileAccumulator {
     std::string outputDir;
@@ -421,7 +447,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     validate_particle_state(state, "run_src_mpcd_base_step");
     ensure_particle_roles(state, ParticleRole::Fluid);
-    cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
+    const bool residentClassicPeriodic0260 = cuda_classic_src_periodic_resident_0260_active(params);
+    if (!residentClassicPeriodic0260 || !cuda_shared_particle_state_0251_is_fresh()) {
+        cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
+    }
     const std::size_t n = static_cast<std::size_t>(state.Np);
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
@@ -513,24 +542,36 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Q6Projection);
-        result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
-        cuda_shared_particle_state_0251_invalidate("cpu_q6_projection_after_collision");
+        if (!params.srcClassicCudaModeEnable) {
+            result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+            if (params.projectionEnable) {
+                cuda_shared_particle_state_0251_invalidate("cpu_q6_projection_after_collision");
+            }
+        }
     }
     {
         MPCD_PROFILE_PHASE(result.profile, ClosedCapacity);
-        result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
-        cuda_shared_particle_state_0251_invalidate("cpu_closed_capacity_after_collision");
+        if (!params.srcClassicCudaModeEnable) {
+            result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
+            if (params.closedCapacityVirialKickEnable) {
+                cuda_shared_particle_state_0251_invalidate("cpu_closed_capacity_after_collision");
+            }
+        }
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Thermostat);
         result.thermostat = apply_cell_relative_rescale_thermostat(
             state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
-        cuda_shared_particle_state_0251_invalidate("cpu_thermostat_after_collision");
+        if (!residentClassicPeriodic0260) {
+            cuda_shared_particle_state_0251_invalidate("cpu_thermostat_after_collision");
+        }
     }
     {
         MPCD_PROFILE_PHASE(result.profile, KeepMeanFlow);
         apply_keep_mean_flow(state, params);
-        cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
+        if (params.keepMeanFlowEnable || !residentClassicPeriodic0260) {
+            cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
+        }
     }
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
     // needed on steps for which the caller will write a runtime summary.  The
@@ -538,6 +579,15 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // production loop passes false on non-summary steps.
     if (!params.resamplingEnable && !collectResamplingDiagnosticsWhenDisabled) {
         return result;
+    }
+
+    // 0260 resident classic CUDA keeps the host ParticleState stale between summaries.
+    // The disabled-resampling diagnostics below still read the host state to report
+    // resampStdN/resampMRel* in runtime_summary.csv.  Synchronize only on summary/final
+    // steps, i.e. exactly when collectResamplingDiagnosticsWhenDisabled is true, so the
+    // resident performance path is preserved between summaries.
+    if (residentClassicPeriodic0260) {
+        (void)cuda_shared_particle_state_0251_download_if_fresh(state);
     }
 
     {

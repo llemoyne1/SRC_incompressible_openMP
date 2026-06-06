@@ -240,9 +240,18 @@ struct SimulationParams {
     double thermostatEpsilon = 1.0e-30;
     double kBT = 0.0;
 
+    // Optional explicit classic-SRC mode.  When true, the time-step driver
+    // keeps the particle SRC/MPCD dynamics but short-circuits the
+    // incompressible closure stages (Q6/Q9 projection and closed-capacity
+    // virial kick), even if their historical parameter blocks are present in
+    // a validation file.  This is intended as a durable, runtime-selectable
+    // classic CUDA SRC mode inside the incompressible codebase.
+    bool srcClassicCudaModeEnable = false;
+
     // Optional incompressible/projection module.  Q6 is controlled only by
-    // projectionEnable.  The former method=classic/q6 switch was removed in
-    // 0144 to avoid redundant or contradictory configurations.
+    // projectionEnable, unless srcClassicCudaModeEnable=true short-circuits
+    // it at the step-driver level.  The former method=classic/q6 switch was
+    // removed in 0144 to avoid redundant or contradictory configurations.
     bool projectionEnable = false;
     std::string projectionOperator = "periodic_fv_cg"; // aliases accepted: channel_fv_cg, auto_fv_cg, elliptic_fv_cg
 

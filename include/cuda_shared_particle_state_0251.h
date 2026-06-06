@@ -18,11 +18,13 @@ void cuda_shared_particle_state_0251_invalidate(const char* reason);
 bool cuda_shared_particle_state_0251_is_fresh();
 const char* cuda_shared_particle_state_0251_last_writer();
 const char* cuda_shared_particle_state_0251_last_invalidator();
+bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState& state);
 #else
 inline void cuda_shared_particle_state_0251_invalidate(const char*) {}
 inline bool cuda_shared_particle_state_0251_is_fresh() { return false; }
 inline const char* cuda_shared_particle_state_0251_last_writer() { return "disabled"; }
 inline const char* cuda_shared_particle_state_0251_last_invalidator() { return "disabled"; }
+inline bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState&) { return false; }
 #endif
 
 } // namespace mpcd

@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 0259 — classic SRC CUDA mode validation/performance runner.
+# It activates the durable srcClassicCudaModeEnable parameter, so Q6/Q9 and
+# closed-capacity virial are short-circuited even if their historical parameter
+# blocks are present. The CUDA mode uses the fused persistent collision+
+# deterministic cell-relative thermostat path, which is physically equivalent
+# to the CPU classic ordering because no Q6/virial operator sits between them.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+BIN=${BIN:-build/src_mpcd_base_cuda_0259}
+ART_DIR=${ART_DIR:-dev_history/artifacts/gpu_cuda_classic_src_0259}
+GRID_CASES=${GRID_CASES:-"64:64:300 128:128:300"}
+CASES=${CASES:-"tg_periodic_full poiseuille_wall_full open_rect_obstacle_full piston_virial_full"}
+GAMMA=${GAMMA:-20}
+THREADS=${THREADS:-8}
+SUMMARY_EVERY_DEFAULT=${SUMMARY_EVERY:-50}
+SEED_BASE=${SEED_BASE:-162058}
+PROJECTION_BACKEND=${PROJECTION_BACKEND:-cpu}
+PROJECTION_ENABLE=${PROJECTION_ENABLE:-false}
+STOP_ON_FAIL=${STOP_ON_FAIL:-1}
+FORCE_REBUILD=${FORCE_REBUILD:-1}
+
+BASELINE_MODE_NAME=${BASELINE_MODE_NAME:-cpu_classic}
+COLL0257_MODE_NAME=${COLL0257_MODE_NAME:-0257_classic_cuda_collision_cpu_thermostat}
+THERM0258_MODE_NAME=${THERM0258_MODE_NAME:-0259_classic_cuda_fused_thermostat}
+RUN_FUSED_THERMOSTAT_PERIODIC=${RUN_FUSED_THERMOSTAT_PERIODIC:-1}
+RUN_FUSED_THERMOSTAT_ALL=${RUN_FUSED_THERMOSTAT_ALL:-0}
+
+mkdir -p "$ART_DIR"
+
+if [[ "$FORCE_REBUILD" != "0" && "$FORCE_REBUILD" != "false" && "$FORCE_REBUILD" != "FALSE" ]]; then
+  echo "[0259-classic-src-cuda] rebuilding $BIN (FORCE_REBUILD=$FORCE_REBUILD)"
+  OUT="$BIN" CUDA_ARCH_FLAGS=${CUDA_ARCH_FLAGS:-} bash scripts/build_src_mpcd_cuda_0259.sh
+elif [[ ! -x "$BIN" ]]; then
+  OUT="$BIN" CUDA_ARCH_FLAGS=${CUDA_ARCH_FLAGS:-} bash scripts/build_src_mpcd_cuda_0259.sh
+fi
+if [[ ! -x "$BIN" ]]; then
+  echo "[0259-classic-src-cuda] ERROR: missing binary $BIN" >&2
+  exit 127
+fi
+
+OUT_CSV=${OUT_CSV:-$ART_DIR/cuda_classic_src_mode_0259.csv}
+printf 'caseName,grid,NX,NY,steps,mode,classicSrcCudaMode,resamplingEnable,boundaryStackCuda,persistentSrcCollision,minimalCollisionDownload0257,fusedCollisionThermostat0259,collisionWallSimple0253,collisionImmersedRect0254,collisionPiston0255,wallThermalNoise,projectionEnable,projectionBackend,runExitCode,baselineTotalWallTime,modeTotalWallTime,totalWallDelta_s,totalWallSpeedup,baselineMaxCaseWallTime,modeMaxCaseWallTime,maxCaseWallDelta_s,maxCaseWallSpeedup,collisionActiveCalls,collisionTotalSeconds,collisionUploadSeconds,collisionKernelSeconds,collisionDownloadSeconds,collisionSharedParticleStateFraction,collisionSharedCellWorkspaceFraction,thermostatActiveCalls,thermostatTotalSeconds,thermostatUploadSeconds,thermostatKineticKernelSeconds,thermostatScaleKernelSeconds,thermostatApplyKernelSeconds,thermostatDownloadSeconds,thermostatParticlesVisitedPerCall,thermostatCellsRescaledPerCall,thermostatParticlesRescaledPerCall,failed_metrics,compared_metrics,verdict,stdoutLog,stderrLog,compareCsv,compareSummary\n' > "$OUT_CSV"
+
+summary_times() {
+  local summary=$1
+  python3 - "$summary" <<'PY'
+import csv, math, sys
+p=sys.argv[1]
+try:
+    with open(p, newline='') as f:
+        rows=list(csv.DictReader(f))
+    vals=[]
+    for r in rows:
+        v=None
+        for k in ('elapsed_s','wallTime','wallTime_s','elapsedSeconds'):
+            if k in r and r[k] not in ('', 'nan'):
+                v=float(r[k]); break
+        if v is not None:
+            vals.append(v)
+    print(f"{sum(vals) if vals else float('nan')},{max(vals) if vals else float('nan')}")
+except Exception:
+    print('nan,nan')
+PY
+}
+
+read_compare_summary() {
+  local f=$1
+  python3 - "$f" <<'PY'
+import csv, sys
+failed=999999; compared=0; verdict='FAIL'
+try:
+    with open(sys.argv[1], newline='') as fh:
+        rows=list(csv.DictReader(fh))
+    if rows:
+        failed=sum(int(float(r.get('failed_metrics', r.get('failed', r.get('nFailed', 999999))) or 0)) for r in rows)
+        compared=sum(int(float(r.get('compared_metrics', r.get('compared', r.get('nCompared', 0))) or 0)) for r in rows)
+        verdict='PASS' if failed == 0 and compared > 0 else 'FAIL'
+except Exception:
+    pass
+print(f'{failed},{compared},{verdict}')
+PY
+}
+
+collision_stats() {
+  local root=$1
+  python3 - "$root" <<'PY'
+import csv, glob, math, os, sys
+rows=[]
+for p in glob.glob(os.path.join(sys.argv[1], '*', 'cuda_persistent_src_collision_thermostat_0215.csv')):
+    try:
+        with open(p, newline='') as f: rows.extend(list(csv.DictReader(f)))
+    except FileNotFoundError: pass
+if not rows:
+    print('0,0,0,0,0,nan,nan')
+    raise SystemExit(0)
+def vals(k):
+    out=[]
+    for r in rows:
+        try: out.append(float(r.get(k,'nan')))
+        except Exception: out.append(float('nan'))
+    return [x for x in out if math.isfinite(x)]
+def s(k): return sum(vals(k))
+def a(k):
+    xs=vals(k); return sum(xs)/len(xs) if xs else float('nan')
+print(','.join(str(x) for x in [len(rows), s('totalSeconds'), s('uploadSeconds'), s('kernelSeconds'), s('downloadSeconds'), a('sharedParticleStateEnabled'), a('sharedCellWorkspaceEnabled')]))
+PY
+}
+
+thermostat_stats() {
+  local root=$1
+  python3 - "$root" <<'PY'
+import csv, glob, math, os, sys
+rows=[]
+for p in glob.glob(os.path.join(sys.argv[1], '*', 'cuda_cell_thermostat_active_0207.csv')):
+    try:
+        with open(p, newline='') as f: rows.extend(list(csv.DictReader(f)))
+    except FileNotFoundError: pass
+if not rows:
+    print('0,0,0,0,0,0,0,nan,nan,nan')
+    raise SystemExit(0)
+def vals(k):
+    out=[]
+    for r in rows:
+        try: out.append(float(r.get(k,'nan')))
+        except Exception: out.append(float('nan'))
+    return [x for x in out if math.isfinite(x)]
+def s(k): return sum(vals(k))
+def a(k):
+    xs=vals(k); return sum(xs)/len(xs) if xs else float('nan')
+print(','.join(str(x) for x in [len(rows), s('totalSeconds'), s('uploadSeconds'), s('kineticKernelSeconds'), s('scaleKernelSeconds'), s('applyKernelSeconds'), s('downloadSeconds'), a('particlesVisited'), a('cellsRescaled'), a('particlesRescaled')]))
+PY
+}
+
+collision_feature_flags_for_case() {
+  local case_name=$1
+  local wall=0 immersed=0 piston=0
+  case "$case_name" in
+    tg_periodic_full) ;;
+    poiseuille_wall_full) wall=1 ;;
+    open_rect_obstacle_full) immersed=1 ;;
+    piston_virial_full) piston=1 ;;
+    *) echo "[0259-classic-src-cuda] ERROR: unsupported case $case_name" >&2; return 2 ;;
+  esac
+  echo "$wall,$immersed,$piston"
+}
+
+run_validation_logged() {
+  local case_name=$1 nx=$2 ny=$3 steps=$4 root=$5 tag=$6 mode=$7 stdout_log=$8 stderr_log=$9
+  local summary_every=${SUMMARY_EVERY_OVERRIDE:-$SUMMARY_EVERY_DEFAULT}
+  local seed=$((SEED_BASE + nx + ny + steps))
+
+  local classic_mode=1 resampling_enable=false
+  local resampling_cuda=0 resampling_download_all=1 resampling_host_shadow=0 resampling_upload_mode=all
+  local boundary_cuda=0 persistent_collision=0 collision_shared_0251=0 minimal_download_0257=0 persistent_thermostat_0258=0 fused_collision_thermostat_0259=0
+  local coll_wall=0 coll_immersed=0 coll_piston=0
+
+  case "$mode" in
+    "$BASELINE_MODE_NAME") ;;
+    "$COLL0257_MODE_NAME")
+      resampling_cuda=1; resampling_download_all=0; resampling_host_shadow=1; resampling_upload_mode=roles_only
+      boundary_cuda=1; persistent_collision=1; collision_shared_0251=1; minimal_download_0257=1
+      IFS=, read -r coll_wall coll_immersed coll_piston <<<"$(collision_feature_flags_for_case "$case_name")" ;;
+    "$THERM0258_MODE_NAME")
+      resampling_cuda=1; resampling_download_all=0; resampling_host_shadow=1; resampling_upload_mode=roles_only
+      boundary_cuda=1; persistent_collision=1; collision_shared_0251=1; minimal_download_0257=1; fused_collision_thermostat_0259=1
+      IFS=, read -r coll_wall coll_immersed coll_piston <<<"$(collision_feature_flags_for_case "$case_name")" ;;
+    *) echo "[0259-classic-src-cuda] ERROR: unknown mode $mode" >&2; return 2 ;;
+  esac
+
+  rm -rf "$root"
+  set +e
+  env BIN="$BIN" BUILD_IF_MISSING=0 CASE_LIST="$case_name" WALL_THERMAL_NOISE="${WALL_THERMAL_NOISE:-0}" \
+      NX="$nx" NY="$ny" GAMMA="$GAMMA" STEPS="$steps" SUMMARY_EVERY="$summary_every" \
+      THREADS="$THREADS" SEED="$seed" DUMP_STATE_EVERY=0 \
+      RUN_ROOT="$root" RUN_TAG="$tag" PROJECTION_BACKEND="$PROJECTION_BACKEND" PROJECTION_ENABLE="$PROJECTION_ENABLE" \
+      SRC_CLASSIC_CUDA_MODE_ENABLE="$classic_mode" RESAMPLING_ENABLE="$resampling_enable" THERMOSTAT_ENABLE=true \
+      MPCD_CUDA_CELL_MOMENTS_USE=0 \
+      MPCD_CUDA_CELL_MOMENTS_SHADOW=0 \
+      MPCD_CUDA_CELL_MOMENTS_PERSISTENT_STATE_0251=0 \
+      MPCD_CUDA_THERMOSTAT_USE=0 \
+      MPCD_CUDA_THERMOSTAT_PERSISTENT_0258="$persistent_thermostat_0258" \
+      MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_STRICT=1 \
+      MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_METADATA_CACHE=1 \
+      MPCD_CUDA_SRC_COLLISION_USE=0 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE="$persistent_collision" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257="$minimal_download_0257" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251="$collision_shared_0251" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253="$coll_wall" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254="$coll_immersed" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_PISTON_0255="$coll_piston" \
+      MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK=${MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK:-256} \
+      MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE="$fused_collision_thermostat_0259" \
+      MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=0 \
+      MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=0 \
+      MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=0 \
+      MPCD_CUDA_RESAMPLING_EXTRACTION_USE=0 \
+      MPCD_CUDA_RESAMPLING_INSERTION_USE=0 \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_0240="$resampling_cuda" \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_0240_MIN_PARTICLES=0 \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0241_STRICT=1 \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_UPLOAD_MODE="$resampling_upload_mode" \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_DOWNLOAD_ALL="$resampling_download_all" \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_ACTIVE_PATH_0242_HOST_SHADOW_AUTHORITATIVE="$resampling_host_shadow" \
+      MPCD_CUDA_STREAMING_PERIODIC_0245="$boundary_cuda" \
+      MPCD_CUDA_STREAMING_PERIODIC_0245_THREADS="${MPCD_CUDA_STREAMING_PERIODIC_0245_THREADS:-256}" \
+      MPCD_CUDA_STREAMING_WALL_SIMPLE_0246="$boundary_cuda" \
+      MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS="${MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS:-256}" \
+      MPCD_CUDA_IMMERSED_RECTANGLE_0247="$boundary_cuda" \
+      MPCD_CUDA_IMMERSED_RECTANGLE_0247_THREADS="${MPCD_CUDA_IMMERSED_RECTANGLE_0247_THREADS:-256}" \
+      MPCD_CUDA_STREAMING_PISTON_0247B="$boundary_cuda" \
+      MPCD_CUDA_STREAMING_PISTON_0247B_THREADS="${MPCD_CUDA_STREAMING_PISTON_0247B_THREADS:-256}" \
+      MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A="$boundary_cuda" \
+      MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B="$boundary_cuda" \
+      MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A_THREADS="${MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A_THREADS:-256}" \
+      MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B_THREADS="${MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B_THREADS:-256}" \
+      bash scripts/run_validation_mono_config_0162.sh >"$stdout_log" 2>"$stderr_log"
+  local rc=$?
+  set -e
+  return $rc
+}
+
+compare_runs() {
+  local base_root=$1 run_root=$2 compare_csv=$3 compare_summary=$4 stdout_log=$5 stderr_log=$6
+  if [[ -f "$base_root/validation_summary_0162.csv" && -f "$run_root/validation_summary_0162.csv" ]]; then
+    set +e
+    python3 scripts/compare_validation_mono_config_0162.py \
+      --origin "$base_root" --optimized "$run_root" \
+      --out "$compare_csv" --summary-out "$compare_summary" >>"$stdout_log" 2>>"$stderr_log"
+    local rc=$?
+    set -e
+    return $rc
+  fi
+  return 99
+}
+
+for spec in $GRID_CASES; do
+  IFS=':' read -r nx ny steps extra <<<"$spec"
+  if [[ -n "${extra:-}" || -z "${nx:-}" || -z "${ny:-}" ]]; then
+    echo "[0259-classic-src-cuda] ERROR: GRID_CASES entries must be NX:NY:STEPS, got '$spec'" >&2
+    exit 2
+  fi
+  if [[ -z "${steps:-}" ]]; then steps=300; fi
+  label="${nx}x${ny}_s${steps}"
+
+  for case_name in $CASES; do
+    echo "[0259-classic-src-cuda] running baseline case=$case_name grid=$label"
+    base_root="runs/cuda_classic_src_0259_${case_name}_baseline_${label}"
+    base_stdout="$ART_DIR/baseline_${case_name}_${label}.stdout.log"
+    base_stderr="$ART_DIR/baseline_${case_name}_${label}.stderr.log"
+    base_rc=0
+    run_validation_logged "$case_name" "$nx" "$ny" "$steps" "$base_root" "baseline_${case_name}_${label}" "$BASELINE_MODE_NAME" "$base_stdout" "$base_stderr" || base_rc=$?
+    IFS=, read -r base_total base_max <<<"$(summary_times "$base_root/validation_summary_0162.csv")"
+
+    modes_to_run=("$COLL0257_MODE_NAME")
+    if [[ "$RUN_FUSED_THERMOSTAT_ALL" == "1" || "$RUN_FUSED_THERMOSTAT_ALL" == "true" || "$RUN_FUSED_THERMOSTAT_ALL" == "TRUE" ]]; then
+      modes_to_run+=("$THERM0258_MODE_NAME")
+    elif [[ "$case_name" == "tg_periodic_full" && ( "$RUN_FUSED_THERMOSTAT_PERIODIC" == "1" || "$RUN_FUSED_THERMOSTAT_PERIODIC" == "true" || "$RUN_FUSED_THERMOSTAT_PERIODIC" == "TRUE" ) ]]; then
+      modes_to_run+=("$THERM0258_MODE_NAME")
+    else
+      echo "[0259-classic-src-cuda] skipping fused thermostat for case=$case_name grid=$label (periodic-only guard; set RUN_FUSED_THERMOSTAT_ALL=1 to test experimentally)"
+    fi
+
+    for mode in "${modes_to_run[@]}"; do
+      echo "[0259-classic-src-cuda] running case=$case_name mode=$mode grid=$label"
+      run_root="runs/cuda_classic_src_0259_${case_name}_${mode}_${label}"
+      stdout_log="$ART_DIR/${case_name}_${mode}_${label}.stdout.log"
+      stderr_log="$ART_DIR/${case_name}_${mode}_${label}.stderr.log"
+      rc=0
+      run_validation_logged "$case_name" "$nx" "$ny" "$steps" "$run_root" "${case_name}_${mode}_${label}" "$mode" "$stdout_log" "$stderr_log" || rc=$?
+      IFS=, read -r mode_total mode_max <<<"$(summary_times "$run_root/validation_summary_0162.csv")"
+      compare_csv="$ART_DIR/compare_${case_name}_${mode}_${label}.csv"
+      compare_summary="$ART_DIR/compare_summary_${case_name}_${mode}_${label}.csv"
+      cmp_rc=0
+      compare_runs "$base_root" "$run_root" "$compare_csv" "$compare_summary" "$stdout_log" "$stderr_log" || cmp_rc=$?
+      IFS=, read -r failed compared verdict <<<"$(read_compare_summary "$compare_summary")"
+      if [[ $rc -ne 0 || $base_rc -ne 0 || $cmp_rc -ne 0 ]]; then verdict="FAIL"; fi
+      IFS=, read -r coll_calls coll_total coll_upload coll_kernel coll_download coll_shared_p coll_shared_c <<<"$(collision_stats "$run_root")"
+      IFS=, read -r th_calls th_total th_upload th_kin th_scale th_apply th_download th_particles th_cells th_part_rescaled <<<"$(thermostat_stats "$run_root")"
+
+      IFS=, read -r row_wall row_immersed row_piston <<<"$(collision_feature_flags_for_case "$case_name")"
+      row_minimal_download=0
+      row_thermostat=0
+      case "$mode" in
+        "$COLL0257_MODE_NAME") row_minimal_download=1 ;;
+        "$THERM0258_MODE_NAME") row_minimal_download=1; row_thermostat=1 ;;
+      esac
+
+      python3 - "$OUT_CSV" "$case_name" "$label" "$nx" "$ny" "$steps" "$mode" \
+        1 false 1 1 "$row_minimal_download" "$row_thermostat" "$row_wall" "$row_immersed" "$row_piston" "${WALL_THERMAL_NOISE:-0}" \
+        "$PROJECTION_ENABLE" "$PROJECTION_BACKEND" "$rc" "$base_total" "$mode_total" "$base_max" "$mode_max" \
+        "$coll_calls" "$coll_total" "$coll_upload" "$coll_kernel" "$coll_download" "$coll_shared_p" "$coll_shared_c" \
+        "$th_calls" "$th_total" "$th_upload" "$th_kin" "$th_scale" "$th_apply" "$th_download" "$th_particles" "$th_cells" "$th_part_rescaled" \
+        "$failed" "$compared" "$verdict" "$stdout_log" "$stderr_log" "$compare_csv" "$compare_summary" <<'PY'
+import csv, math, sys
+(out, caseName, label, nx, ny, steps, mode,
+ classicSrcCudaMode, resamplingEnable, boundaryCuda, persistentCollision, minimalDownload0257, fusedThermostat0259,
+ collWall, collImmersed, collPiston, wallThermalNoise,
+ projectionEnable, projectionBackend, rc, baseTotal, modeTotal, baseMax, modeMax,
+ collCalls, collTotal, collUpload, collKernel, collDownload, collSharedP, collSharedC,
+ thCalls, thTotal, thUpload, thKin, thScale, thApply, thDownload, thParticles, thCells, thParticlesRescaled,
+ failed, compared, verdict, stdoutLog, stderrLog, compareCsv, compareSummary) = sys.argv[1:]
+def f(x):
+    try: return float(x)
+    except Exception: return float('nan')
+bt, mt, bm, mm = map(f, (baseTotal, modeTotal, baseMax, modeMax))
+row=[caseName,label,nx,ny,steps,mode,classicSrcCudaMode,resamplingEnable,boundaryCuda,persistentCollision,minimalDownload0257,fusedThermostat0259,
+     collWall,collImmersed,collPiston,wallThermalNoise,projectionEnable,projectionBackend,rc,baseTotal,modeTotal,
+     mt-bt if math.isfinite(mt) and math.isfinite(bt) else float('nan'),
+     bt/mt if math.isfinite(mt) and mt>0 and math.isfinite(bt) else float('nan'),
+     baseMax,modeMax,
+     mm-bm if math.isfinite(mm) and math.isfinite(bm) else float('nan'),
+     bm/mm if math.isfinite(mm) and mm>0 and math.isfinite(bm) else float('nan'),
+     collCalls,collTotal,collUpload,collKernel,collDownload,collSharedP,collSharedC,
+     thCalls,thTotal,thUpload,thKin,thScale,thApply,thDownload,thParticles,thCells,thParticlesRescaled,
+     failed,compared,verdict,stdoutLog,stderrLog,compareCsv,compareSummary]
+with open(out,'a',newline='') as fh:
+    csv.writer(fh).writerow(row)
+PY
+      echo "[0259-classic-src-cuda] $verdict case=$case_name grid=$label mode=$mode failed=$failed/$compared wall=$mode_total baseline=$base_total"
+      if [[ "$STOP_ON_FAIL" == "1" && "$verdict" != "PASS" ]]; then
+        echo "[0259-classic-src-cuda] stopping after failure; see $stderr_log" >&2
+        exit 1
+      fi
+    done
+  done
+done
+
+echo "[0259-classic-src-cuda] wrote $OUT_CSV"
+echo "[0259-classic-src-cuda] classicSrcCudaModeEnable=1: Q6/Q9 and closed-capacity virial are short-circuited."
+echo "[0259-classic-src-cuda] fused deterministic thermostat is restricted to tg_periodic_full by default; wall/solid/piston cases use CUDA collision + CPU thermostat."

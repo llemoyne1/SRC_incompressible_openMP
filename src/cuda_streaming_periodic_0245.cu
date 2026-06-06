@@ -116,6 +116,19 @@ bool cuda_periodic_streaming_0245_requested() {
     return env_truthy_0245("MPCD_CUDA_STREAMING_PERIODIC_0245");
 }
 
+bool cuda_periodic_streaming_0245_resident_0260_requested() {
+    return env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260");
+}
+
+bool cuda_periodic_streaming_0245_download_all_requested_0260() {
+    const char* v = std::getenv("MPCD_CUDA_STREAMING_PERIODIC_0245_DOWNLOAD_ALL");
+    if (v == nullptr || *v == '\0') {
+        return !cuda_periodic_streaming_0245_resident_0260_requested();
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
 bool cuda_periodic_streaming_0245_supported(const SimulationParams& params) {
     if (!is_periodic_pair_0245(params.bcLeft, params.bcRight)) return false;
     if (!is_periodic_pair_0245(params.bcBottom, params.bcTop)) return false;
@@ -145,7 +158,11 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     const auto t0 = Clock::now();
     CudaParticleStateDiagnostics particleDiag{};
     CudaParticleState& gpuState = persistent_streaming_state_0245();
-    gpuState.upload_all(state, &particleDiag);
+    const bool resident0260 = cuda_periodic_streaming_0245_resident_0260_requested();
+    const bool canReuseResident = resident0260 && cuda_shared_particle_state_0251_is_fresh();
+    if (!canReuseResident) {
+        gpuState.upload_all(state, &particleDiag);
+    }
     const auto tAfterUpload = Clock::now();
 
     CudaParticleDeviceView view = gpuState.device_view();
@@ -168,15 +185,22 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     check_cuda_0245(cudaDeviceSynchronize(), "periodic_force_stream_kernel_0245 synchronize");
     const auto tAfterKernel = Clock::now();
 
-    gpuState.download_all(state, &particleDiag);
+    const bool downloadAll = cuda_periodic_streaming_0245_download_all_requested_0260();
+    if (downloadAll) {
+        gpuState.download_all(state, &particleDiag);
+    }
     cuda_shared_particle_state_0251_mark_fresh("streaming_periodic_0245");
     const auto tAfterDownload = Clock::now();
 
     diag.handled = true;
     diag.applied = true;
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
+    if (downloadAll || !resident0260) {
+        diag.fluidParticles = 0u;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+            if (is_fluid_particle(state, i)) ++diag.fluidParticles;
+        }
+    } else {
+        diag.fluidParticles = state.Np;
     }
     diag.allocationCalls = particleDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls;

@@ -364,6 +364,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "thermostatMinParticles") p.thermostatMinParticles = parse_int(value, key);
         else if (key == "thermostatEpsilon") p.thermostatEpsilon = parse_double(value, key);
         else if (key == "kBT") p.kBT = parse_double(value, key);
+        else if (key == "srcClassicCudaModeEnable" || key == "classicSrcCudaModeEnable" ||
+                 key == "classicSrcModeEnable" || key == "classicSrcCudaMode") {
+            p.srcClassicCudaModeEnable = parse_bool(value, key);
+        }
         else if (key == "projectionEnable") p.projectionEnable = parse_bool(value, key);
         else if (key == "projectionOperator") p.projectionOperator = get_lower(kv, key);
         else if (key == "projectionBackend" || key == "q6ProjectionBackend" || key == "gpuProjectionBackend") {
@@ -911,7 +915,12 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
         }
     }
-    const bool q6OrProjectionRequested = p.projectionEnable;
+    // 0259: classic SRC CUDA mode is a durable operator-level short-circuit
+    // for the incompressible closure. Keep accepting legacy Q6/virial
+    // parameter blocks in validation files, but do not validate those blocks as
+    // active physics when the classic mode is selected.
+    const bool classicSrcCudaMode = p.srcClassicCudaModeEnable;
+    const bool q6OrProjectionRequested = p.projectionEnable && !classicSrcCudaMode;
     if (q6OrProjectionRequested) {
         if (p.projectionOperator != "periodic_fv_cg" &&
             p.projectionOperator != "channel_fv_cg" &&
@@ -938,7 +947,7 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("projectionImmersedSolidFluidFractionThreshold must lie in [0,1]");
         }
     }
-    if (p.closedCapacityResponseEnable) {
+    if (p.closedCapacityResponseEnable && !classicSrcCudaMode) {
         if (!(p.closedCapacityReferenceCellMass >= 0.0) || !std::isfinite(p.closedCapacityReferenceCellMass)) {
             throw std::runtime_error("closedCapacityReferenceCellMass must be finite and non-negative; use 0 to infer it");
         }
