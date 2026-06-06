@@ -3,6 +3,8 @@
 #include "cuda_resampling_persistent_active_path_0240.h"
 #include "cuda_streaming_periodic_0245.h"
 #include "cuda_streaming_wall_simple_0246.h"
+#include "cuda_streaming_piston_0247b.h"
+#include "cuda_immersed_rectangle_0247.h"
 
 #include <algorithm>
 #include <chrono>
@@ -412,13 +414,18 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
-    // pre-stream particle position. 0245 can offload this force+stream phase to
-    // CUDA, but only for the strictly periodic subset; all wall/open/solid cases
-    // deliberately keep the validated CPU path.
+    // pre-stream particle position. CUDA offloads are enabled only for explicitly
+    // validated boundary subsets: 0245 periodic, 0246 static y-walls, 0247b
+    // moving-y-wall piston. All unsupported cases fall back to the CPU path.
     {
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
         bool handledByCudaStreaming = false;
-        if (cuda_wall_simple_streaming_0246_requested()) {
+        if (cuda_piston_streaming_0247b_requested()) {
+            const CudaPistonStreaming0247bDiagnostics cudaStreaming0247b =
+                try_apply_cuda_piston_streaming_0247b(state, params, step);
+            handledByCudaStreaming = cudaStreaming0247b.handled;
+        }
+        if (!handledByCudaStreaming && cuda_wall_simple_streaming_0246_requested()) {
             const CudaWallSimpleStreaming0246Diagnostics cudaStreaming0246 =
                 try_apply_cuda_wall_simple_streaming_0246(state, params, step);
             handledByCudaStreaming = cudaStreaming0246.handled;
@@ -457,7 +464,18 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Immersed);
-        result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
+        bool handledByCudaImmersed = false;
+        if (cuda_immersed_rectangle_0247_requested()) {
+            const CudaImmersedRectangle0247Diagnostics cudaImmersed0247 =
+                try_apply_cuda_immersed_rectangle_0247(state, params, result.domain, time);
+            if (cudaImmersed0247.handled) {
+                result.immersed.hits = cudaImmersed0247.hits;
+                handledByCudaImmersed = true;
+            }
+        }
+        if (!handledByCudaImmersed) {
+            result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
+        }
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Collision);
