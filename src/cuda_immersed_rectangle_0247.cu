@@ -239,6 +239,21 @@ bool cuda_immersed_rectangle_0247_requested() {
     return env_truthy_0247("MPCD_CUDA_IMMERSED_RECTANGLE_0247");
 }
 
+
+bool cuda_immersed_rectangle_0247_resident_0262_requested() {
+    return env_truthy_0247("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262");
+}
+
+bool cuda_immersed_rectangle_0247_download_all_requested_0262() {
+    const char* v = std::getenv("MPCD_CUDA_IMMERSED_RECTANGLE_0247_DOWNLOAD_ALL");
+    if (v == nullptr || *v == '\0') {
+        return !cuda_immersed_rectangle_0247_resident_0262_requested();
+    }
+    const std::string flag(v);
+    return !(flag == "0" || flag == "false" || flag == "FALSE" ||
+             flag == "off" || flag == "OFF" || flag == "no" || flag == "NO");
+}
+
 bool cuda_immersed_rectangle_0247_supported(const SimulationParams& params) {
     if (!immersed_solid_enabled(params)) return false;
     if (immersed_solid_shape(params) != ImmersedSolidShape::Rectangle) return false;
@@ -282,7 +297,11 @@ CudaImmersedRectangle0247Diagnostics try_apply_cuda_immersed_rectangle_0247(
     const auto t0 = Clock::now();
     CudaParticleStateDiagnostics particleDiag{};
     CudaParticleState& gpuState = persistent_immersed_rectangle_state_0247();
-    gpuState.upload_all(state, &particleDiag);
+    const bool resident0262 = cuda_immersed_rectangle_0247_resident_0262_requested();
+    const bool canReuseResident = resident0262 && cuda_shared_particle_state_0251_is_fresh();
+    if (!canReuseResident) {
+        gpuState.upload_all(state, &particleDiag);
+    }
     const auto tAfterUpload = Clock::now();
 
     unsigned long long* dHits = nullptr;
@@ -315,7 +334,10 @@ CudaImmersedRectangle0247Diagnostics try_apply_cuda_immersed_rectangle_0247(
     check_cuda_0247(cudaMemcpy(&hHits, dHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy hit counter");
     check_cuda_0247(cudaFree(dHits), "free hit counter");
 
-    gpuState.download_all(state, &particleDiag);
+    const bool downloadAll = cuda_immersed_rectangle_0247_download_all_requested_0262();
+    if (downloadAll || !resident0262) {
+        gpuState.download_all(state, &particleDiag);
+    }
     cuda_shared_particle_state_0251_mark_fresh("immersed_rectangle_0247");
     const auto tAfterDownload = Clock::now();
 

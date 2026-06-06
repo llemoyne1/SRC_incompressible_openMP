@@ -171,6 +171,37 @@ bool cuda_classic_src_wall_resident_0261_active(const SimulationParams& params) 
 }
 
 
+bool cuda_classic_src_solid_resident_0262_requested() {
+    const char* v = std::getenv("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262");
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+bool cuda_classic_src_solid_resident_0262_supported(const SimulationParams& params) {
+    return params.srcClassicCudaModeEnable &&
+           params.bcLeft == "periodic" && params.bcRight == "periodic" &&
+           params.bcBottom == "periodic" && params.bcTop == "periodic" &&
+           !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
+           params.immersedSolidEnable &&
+           immersed_solid_shape(params) == ImmersedSolidShape::Rectangle &&
+           params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 && params.immersedSolidOmega == 0.0 &&
+           !params.projectionEnable &&
+           !params.closedCapacityResponseEnable &&
+           !params.resamplingEnable &&
+           params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
+           params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
+}
+
+bool cuda_classic_src_solid_resident_0262_active(const SimulationParams& params) {
+    return cuda_classic_src_solid_resident_0262_requested() &&
+           cuda_classic_src_solid_resident_0262_supported(params);
+}
+
+
 struct PostGuardDepositProfileAccumulator {
     std::string outputDir;
     std::uint64_t calls = 0u;
@@ -482,7 +513,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ensure_particle_roles(state, ParticleRole::Fluid);
     const bool residentClassicPeriodic0260 = cuda_classic_src_periodic_resident_0260_active(params);
     const bool residentClassicWall0261 = cuda_classic_src_wall_resident_0261_active(params);
-    const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261;
+    const bool residentClassicSolid0262 = cuda_classic_src_solid_resident_0262_active(params);
+    const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261 || residentClassicSolid0262;
     if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
         cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     }
@@ -616,7 +648,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         return result;
     }
 
-    // 0260/0261 resident classic CUDA keeps the host ParticleState stale between summaries.
+    // 0260/0261/0262 resident classic CUDA keeps the host ParticleState stale between summaries.
     // The disabled-resampling diagnostics below still read the host state to report
     // resampStdN/resampMRel* in runtime_summary.csv.  Synchronize only on summary/final
     // steps, i.e. exactly when collectResamplingDiagnosticsWhenDisabled is true, so the

@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 0262 — static rectangle immersed-solid classic SRC CUDA resident validation/performance runner.
+# Scope: periodic box with static rectangular immersed solid only. Q6/Q9/resampling/virial and thermostat are disabled for this first resident solid step.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+BIN=${BIN:-build/src_mpcd_base_cuda_0262}
+ART_DIR=${ART_DIR:-dev_history/artifacts/gpu_cuda_classic_src_0262}
+GRID_CASES=${GRID_CASES:-"64:64:300 128:128:300"}
+CASES=${CASES:-"periodic_rect_obstacle_classic"}
+GAMMA=${GAMMA:-20}
+THREADS=${THREADS:-8}
+SEED_BASE=${SEED_BASE:-162061}
+STOP_ON_FAIL=${STOP_ON_FAIL:-1}
+FORCE_REBUILD=${FORCE_REBUILD:-1}
+SUMMARY_EVERY_MODE=${SUMMARY_EVERY_MODE:-final}
+
+BASELINE_MODE_NAME=${BASELINE_MODE_NAME:-cpu_classic_solid_no_thermostat}
+HYBRID_MODE_NAME=${HYBRID_MODE_NAME:-0257_solid_cuda_download_each_step_no_thermostat}
+RESIDENT_MODE_NAME=${RESIDENT_MODE_NAME:-0262_solid_resident_classic_cuda_no_thermostat}
+
+mkdir -p "$ART_DIR"
+
+if [[ "$FORCE_REBUILD" != "0" && "$FORCE_REBUILD" != "false" && "$FORCE_REBUILD" != "FALSE" ]]; then
+  echo "[0262-classic-src-solid-resident] rebuilding $BIN (FORCE_REBUILD=$FORCE_REBUILD)"
+  OUT="$BIN" CUDA_ARCH_FLAGS=${CUDA_ARCH_FLAGS:-} bash scripts/build_src_mpcd_cuda_0262.sh
+elif [[ ! -x "$BIN" ]]; then
+  OUT="$BIN" CUDA_ARCH_FLAGS=${CUDA_ARCH_FLAGS:-} bash scripts/build_src_mpcd_cuda_0262.sh
+fi
+if [[ ! -x "$BIN" ]]; then
+  echo "[0262-classic-src-solid-resident] ERROR: missing binary $BIN" >&2
+  exit 127
+fi
+
+OUT_CSV=${OUT_CSV:-$ART_DIR/cuda_classic_src_solid_resident_0262.csv}
+printf 'caseName,grid,NX,NY,steps,mode,classicSrcCudaMode,residentSolid0262,summaryEvery,thermostatEnable,runExitCode,baselineTotalWallTime,modeTotalWallTime,totalWallDelta_s,totalWallSpeedup,baselineMaxCaseWallTime,modeMaxCaseWallTime,maxCaseWallDelta_s,maxCaseWallSpeedup,collisionActiveCalls,collisionTotalSeconds,collisionUploadSeconds,collisionKernelSeconds,collisionDownloadSeconds,collisionSharedParticleStateFraction,collisionSharedCellWorkspaceFraction,thermostatGpuAppliedFraction,failed_metrics,compared_metrics,verdict,stdoutLog,stderrLog,compareCsv,compareSummary\n' > "$OUT_CSV"
+
+summary_times() {
+  local summary=$1
+  python3 - "$summary" <<'PY'
+import csv, math, sys
+p=sys.argv[1]
+try:
+    with open(p, newline='') as f:
+        rows=list(csv.DictReader(f))
+    vals=[]
+    for r in rows:
+        v=None
+        for k in ('elapsed_s','wallTime','wallTime_s','elapsedSeconds'):
+            if k in r and r[k] not in ('', 'nan'):
+                v=float(r[k]); break
+        if v is not None:
+            vals.append(v)
+    print(f"{sum(vals) if vals else float('nan')},{max(vals) if vals else float('nan')}")
+except Exception:
+    print('nan,nan')
+PY
+}
+
+read_compare_summary() {
+  local f=$1
+  python3 - "$f" <<'PY'
+import csv, sys
+failed=999999; compared=0; verdict='FAIL'
+try:
+    with open(sys.argv[1], newline='') as fh:
+        rows=list(csv.DictReader(fh))
+    if rows:
+        failed=sum(int(float(r.get('failed_metrics', r.get('failed', r.get('nFailed', 999999))) or 0)) for r in rows)
+        compared=sum(int(float(r.get('compared_metrics', r.get('compared', r.get('nCompared', 0))) or 0)) for r in rows)
+        verdict='PASS' if failed == 0 and compared > 0 else 'FAIL'
+except Exception:
+    pass
+print(f'{failed},{compared},{verdict}')
+PY
+}
+
+collision_stats() {
+  local root=$1
+  python3 - "$root" <<'PY'
+import csv, glob, math, os, sys
+rows=[]
+for p in glob.glob(os.path.join(sys.argv[1], '*', 'cuda_persistent_src_collision_thermostat_0215.csv')):
+    try:
+        with open(p, newline='') as f: rows.extend(list(csv.DictReader(f)))
+    except FileNotFoundError: pass
+if not rows:
+    print('0,0,0,0,0,nan,nan,nan')
+    raise SystemExit(0)
+def vals(k):
+    out=[]
+    for r in rows:
+        try: out.append(float(r.get(k,'nan')))
+        except Exception: out.append(float('nan'))
+    return [x for x in out if math.isfinite(x)]
+def s(k): return sum(vals(k))
+def a(k):
+    xs=vals(k); return sum(xs)/len(xs) if xs else float('nan')
+print(','.join(str(x) for x in [len(rows), s('totalSeconds'), s('uploadSeconds'), s('kernelSeconds'), s('downloadSeconds'), a('sharedParticleStateEnabled'), a('sharedCellWorkspaceEnabled'), a('thermostatAppliedOnGpu')]))
+PY
+}
+
+summary_every_for_steps() {
+  local steps=$1
+  if [[ "${SUMMARY_EVERY_MODE:-final}" == "final" ]]; then
+    echo "$steps"
+  else
+    echo "${SUMMARY_EVERY:-50}"
+  fi
+}
+
+run_validation_logged() {
+  local case_name=$1 nx=$2 ny=$3 steps=$4 root=$5 tag=$6 mode=$7 stdout_log=$8 stderr_log=$9
+  local summary_every
+  summary_every=$(summary_every_for_steps "$steps")
+  local seed=$((SEED_BASE + nx + ny + steps))
+
+  local periodic_stream=0 periodic_download=1 resident=0 persistent_collision=0 collision_shared=0 minimal_download=0
+  case "$mode" in
+    "$BASELINE_MODE_NAME") ;;
+    "$HYBRID_MODE_NAME")
+      periodic_stream=1; periodic_download=1; persistent_collision=1; collision_shared=1; minimal_download=1 ;;
+    "$RESIDENT_MODE_NAME")
+      periodic_stream=1; periodic_download=0; resident=1; persistent_collision=1; collision_shared=1; minimal_download=1 ;;
+    *) echo "[0262-classic-src-solid-resident] ERROR: unknown mode $mode" >&2; return 2 ;;
+  esac
+
+  rm -rf "$root"
+  set +e
+  env BIN="$BIN" BUILD_IF_MISSING=0 CASE_LIST="$case_name" WALL_THERMAL_NOISE=0 \
+      NX="$nx" NY="$ny" GAMMA="$GAMMA" STEPS="$steps" SUMMARY_EVERY="$summary_every" \
+      THREADS="$THREADS" SEED="$seed" DUMP_STATE_EVERY=0 \
+      RUN_ROOT="$root" RUN_TAG="$tag" PROJECTION_BACKEND=cpu PROJECTION_ENABLE=false \
+      SRC_CLASSIC_CUDA_MODE_ENABLE=true RESAMPLING_ENABLE=false THERMOSTAT_ENABLE=false \
+      MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260=0 \
+      MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262="$resident" \
+      MPCD_CUDA_STREAMING_PERIODIC_0245="$periodic_stream" \
+      MPCD_CUDA_STREAMING_PERIODIC_0245_DOWNLOAD_ALL="$periodic_download" \
+      MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=0 \
+      MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=1 \
+      MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS=${MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS:-256} \
+      MPCD_CUDA_IMMERSED_RECTANGLE_0247="$periodic_stream" \
+      MPCD_CUDA_IMMERSED_RECTANGLE_0247_DOWNLOAD_ALL="$periodic_download" \
+      MPCD_CUDA_IMMERSED_RECTANGLE_0247_THREADS="${MPCD_CUDA_IMMERSED_RECTANGLE_0247_THREADS:-256}" \
+      MPCD_CUDA_STREAMING_PISTON_0247B=0 \
+      MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A=0 \
+      MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=0 \
+      MPCD_CUDA_CELL_MOMENTS_USE=0 \
+      MPCD_CUDA_THERMOSTAT_USE=0 \
+      MPCD_CUDA_THERMOSTAT_PERSISTENT_0258=0 \
+      MPCD_CUDA_SRC_COLLISION_USE=0 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE="$persistent_collision" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257="$minimal_download" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251="$collision_shared" \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT=1 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=0 \
+      MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254="$persistent_collision" \
+      MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=0 \
+      MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=0 \
+      MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=0 \
+      MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=0 \
+      MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=0 \
+      MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK=${MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK:-256} \
+      MPCD_CUDA_RESAMPLING_PERSISTENT_0240=0 \
+      bash scripts/run_validation_mono_config_0162.sh >"$stdout_log" 2>"$stderr_log"
+  local rc=$?
+  set -e
+  return $rc
+}
+
+compare_runs() {
+  local base_root=$1 run_root=$2 compare_csv=$3 compare_summary=$4 stdout_log=$5 stderr_log=$6
+  if [[ -f "$base_root/validation_summary_0162.csv" && -f "$run_root/validation_summary_0162.csv" ]]; then
+    set +e
+    python3 scripts/compare_validation_mono_config_0162.py \
+      --origin "$base_root" --optimized "$run_root" \
+      --out "$compare_csv" --summary-out "$compare_summary" >>"$stdout_log" 2>>"$stderr_log"
+    local rc=$?
+    set -e
+    return $rc
+  fi
+  return 3
+}
+
+for grid_spec in $GRID_CASES; do
+  IFS=: read -r nx ny steps <<<"$grid_spec"
+  if [[ -z "${steps:-}" ]]; then
+    echo "[0262-classic-src-solid-resident] ERROR: GRID_CASES entries must be NX:NY:STEPS, got $grid_spec" >&2
+    exit 2
+  fi
+  grid_tag="${nx}x${ny}_s${steps}"
+  for case_name in $CASES; do
+    if [[ "$case_name" != "periodic_rect_obstacle_classic" ]]; then
+      echo "[0262-classic-src-solid-resident] ERROR: 0262 is limited to periodic_rect_obstacle_classic / periodic static-rectangle immersed solid, got $case_name" >&2
+      exit 2
+    fi
+    summary_every_current=$(summary_every_for_steps "$steps")
+    base_root="$ART_DIR/${case_name}_${BASELINE_MODE_NAME}_${grid_tag}"
+    base_stdout="$ART_DIR/${case_name}_${BASELINE_MODE_NAME}_${grid_tag}.stdout.log"
+    base_stderr="$ART_DIR/${case_name}_${BASELINE_MODE_NAME}_${grid_tag}.stderr.log"
+    echo "[0262-classic-src-solid-resident] running baseline case=$case_name grid=$grid_tag"
+    run_validation_logged "$case_name" "$nx" "$ny" "$steps" "$base_root" "cuda_classic_src_0262_${case_name}_baseline_${grid_tag}" "$BASELINE_MODE_NAME" "$base_stdout" "$base_stderr"
+    base_rc=$?
+    IFS=, read -r base_total base_max <<<"$(summary_times "$base_root/validation_summary_0162.csv")"
+
+    for mode in "$HYBRID_MODE_NAME" "$RESIDENT_MODE_NAME"; do
+      run_root="$ART_DIR/${case_name}_${mode}_${grid_tag}"
+      stdout_log="$ART_DIR/${case_name}_${mode}_${grid_tag}.stdout.log"
+      stderr_log="$ART_DIR/${case_name}_${mode}_${grid_tag}.stderr.log"
+      compare_csv="$ART_DIR/${case_name}_${mode}_${grid_tag}_compare.csv"
+      compare_summary="$ART_DIR/${case_name}_${mode}_${grid_tag}_compare_summary.csv"
+      echo "[0262-classic-src-solid-resident] running case=$case_name mode=$mode grid=$grid_tag"
+      run_validation_logged "$case_name" "$nx" "$ny" "$steps" "$run_root" "cuda_classic_src_0262_${case_name}_${mode}_${grid_tag}" "$mode" "$stdout_log" "$stderr_log"
+      rc=$?
+      cmp_rc=0
+      compare_runs "$base_root" "$run_root" "$compare_csv" "$compare_summary" "$stdout_log" "$stderr_log" || cmp_rc=$?
+      IFS=, read -r failed compared verdict <<<"$(read_compare_summary "$compare_summary")"
+      IFS=, read -r mode_total mode_max <<<"$(summary_times "$run_root/validation_summary_0162.csv")"
+      IFS=, read -r coll_calls coll_total coll_upload coll_kernel coll_download coll_shared_p coll_shared_c coll_thermo_gpu <<<"$(collision_stats "$run_root")"
+      speedup=$(python3 - <<PY
+b=float('$base_total'); m=float('$mode_total')
+print(b/m if m>0 else float('nan'))
+PY
+)
+      max_speedup=$(python3 - <<PY
+b=float('$base_max'); m=float('$mode_max')
+print(b/m if m>0 else float('nan'))
+PY
+)
+      delta=$(python3 - <<PY
+b=float('$base_total'); m=float('$mode_total')
+print(m-b)
+PY
+)
+      max_delta=$(python3 - <<PY
+b=float('$base_max'); m=float('$mode_max')
+print(m-b)
+PY
+)
+      resident_flag=0
+      if [[ "$mode" == "$RESIDENT_MODE_NAME" ]]; then resident_flag=1; fi
+      printf '%s,%s,%s,%s,%s,%s,1,%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$case_name" "$grid_tag" "$nx" "$ny" "$steps" "$mode" "$resident_flag" "$summary_every_current" "$rc" \
+        "$base_total" "$mode_total" "$delta" "$speedup" "$base_max" "$mode_max" "$max_delta" "$max_speedup" \
+        "$coll_calls" "$coll_total" "$coll_upload" "$coll_kernel" "$coll_download" "$coll_shared_p" "$coll_shared_c" "$coll_thermo_gpu" \
+        "$failed" "$compared" "$verdict" "$stdout_log" "$stderr_log" "$compare_csv" "$compare_summary" >> "$OUT_CSV"
+      echo "[0262-classic-src-solid-resident] $verdict case=$case_name grid=$grid_tag mode=$mode failed=$failed/$compared wall=$mode_total baseline=$base_total"
+      if [[ "$STOP_ON_FAIL" == "1" && ( "$rc" != "0" || "$verdict" != "PASS" ) ]]; then
+        echo "[0262-classic-src-solid-resident] stopping after failure; see $stderr_log" >&2
+        exit 1
+      fi
+    done
+  done
+done
+
+echo "[0262-classic-src-solid-resident] wrote $OUT_CSV"
+echo "[0262-classic-src-solid-resident] scope: static rectangle immersed solid only; Q6/Q9/resampling/virial and thermostat disabled; host downloads deferred to summaries in resident mode."

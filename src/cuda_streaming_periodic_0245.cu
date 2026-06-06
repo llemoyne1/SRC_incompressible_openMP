@@ -117,7 +117,13 @@ bool cuda_periodic_streaming_0245_requested() {
 }
 
 bool cuda_periodic_streaming_0245_resident_0260_requested() {
-    return env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260");
+    // 0260 introduced the periodic resident path.  0262 reuses the same
+    // periodic force/stream kernel before applying the immersed-rectangle
+    // reflection kernel on the same shared CudaParticleState.  Treat both
+    // modes as resident here; otherwise a periodic+solid run falls back to
+    // CPU streaming on a stale host ParticleState between summaries.
+    return env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260") ||
+           env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262");
 }
 
 bool cuda_periodic_streaming_0245_download_all_requested_0260() {
@@ -133,7 +139,12 @@ bool cuda_periodic_streaming_0245_supported(const SimulationParams& params) {
     if (!is_periodic_pair_0245(params.bcLeft, params.bcRight)) return false;
     if (!is_periodic_pair_0245(params.bcBottom, params.bcTop)) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
-    if (params.immersedSolidEnable) return false;
+    // The original 0245 validation excluded immersed solids.  For 0262, the
+    // external boundaries remain strictly periodic and the solid reflection is
+    // handled immediately afterwards by cuda_immersed_rectangle_0247 on the
+    // same shared state.  Allow that exact resident mode, while keeping all
+    // other immersed-solid combinations on the conservative CPU path.
+    if (params.immersedSolidEnable && !env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262")) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
     return true;
 }
