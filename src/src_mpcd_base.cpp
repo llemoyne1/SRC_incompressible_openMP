@@ -5,6 +5,7 @@
 #include "cuda_streaming_wall_simple_0246.h"
 #include "cuda_streaming_piston_0247b.h"
 #include "cuda_immersed_rectangle_0247.h"
+#include "cuda_inlet_outlet_fullface_0249a.h"
 
 #include <algorithm>
 #include <chrono>
@@ -460,7 +461,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Boundary);
+        CudaInletOutletFullface0249aDiagnostics cudaIo0249a{};
+        if (cuda_inlet_outlet_fullface_0249a_requested()) {
+            cudaIo0249a = try_apply_cuda_inlet_outlet_fullface_0249a(
+                state, params, result.domain, step, time);
+        }
         result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
+        merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Immersed);
