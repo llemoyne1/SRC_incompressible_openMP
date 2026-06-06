@@ -297,6 +297,84 @@ $(write_resampling_block)
 PARAMS
 }
 
+write_params_segmented_u_turn() {
+  local label=$1 out_dir=$2 params=$3 state=$4
+  cat > "$params" <<PARAMS
+inputState = $state
+outputDir = $out_dir
+
+Lx = 1.0
+Ly = 1.0
+Nx = $NX
+Ny = $NY
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = $DT
+nSteps = $STEPS
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = solid
+bcRight = solid
+bcBottom = solid
+bcTop = solid
+
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 2
+openBoundarySegment0 = left inlet ${UIN_SMIN:-0.10} ${UIN_SMAX:-0.35} ${UTURN_INLET_UX:-0.08} 0.0 0 1.0
+openBoundarySegment1 = left outlet ${UOUT_SMIN:-0.65} ${UOUT_SMAX:-0.90} ${UTURN_OUTLET_UX:--0.08} 0.0 0 1.0
+
+inletVelocityRampEnable = true
+inletVelocityRampStartTime = 0.0
+inletVelocityRampEndTime = ${UTURN_RAMP_END_TIME:-0.25}
+inletVelocityRampInitialFactor = 0.2
+inletVelocityRampFinalFactor = 1.0
+inletVelocityRampProfile = smoothstep
+inletVelocitySpatialProfile = uniform
+inletKBT = -1.0
+inletThermalNoise = 1.0
+inletInjectionMode = hard_cell_density
+inletReservoirMode = hard_cell_density
+inletReservoirCells = 3
+inletTargetOccupancy = $GAMMA
+inletHardCellVelocityMean = true
+inletHardCellThermalRescale = true
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+openBoundaryOutletMode = hybrid
+openBoundaryOutletHybridBlend = 0.0
+openBoundaryOutletFeedbackGain = 0.0
+
+projectionOperator = elliptic_fv_cg
+projectionImmersedSolidMaskEnable = false
+projectionImmersedSolidCloseCutFaces = false
+projectionAllowUnmaskedImmersedSolid = true
+
+wallAccommodation = 1.0
+wallVpGamma = $GAMMA
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = 1.0
+wallUxLeft = 0.0
+wallUyLeft = 0.0
+wallUxRight = 0.0
+wallUyRight = 0.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
+
+$(write_common_runtime_block)
+$(write_resampling_block)
+PARAMS
+}
+
 write_params_piston_virial() {
   local label=$1 out_dir=$2 params=$3 state=$4
   cat > "$params" <<PARAMS
@@ -380,6 +458,11 @@ prepare_case() {
       state=$(make_state "$case_name" --Lx 2.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+22)) --flow-mode uniform --mean-ux ${ORECT_INITIAL_UX:-0.03} --solid-rect 0.25,0.50,0.35,0.60)
       write_params_open_rect "$case_name" "$out_dir" "$params" "$state"
       desc="inlet/outlet channel with rectangular solid obstacle, complete Q6+resampling"
+      ;;
+    segmented_u_turn_full)
+      state=$(make_state "$case_name" --Lx 1.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+44)) --flow-mode zero)
+      write_params_segmented_u_turn "$case_name" "$out_dir" "$params" "$state"
+      desc="closed box with same-face segmented inlet/outlet on x=0, U-turn validation, complete Q6+resampling"
       ;;
     piston_virial_full)
       state=$(make_state "$case_name" --Lx 1.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+33)) --flow-mode zero --active-y-max ${PISTON_YTOP0:-0.95})
