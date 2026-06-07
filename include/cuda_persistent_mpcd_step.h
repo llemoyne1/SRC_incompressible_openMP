@@ -69,6 +69,30 @@ struct CudaPersistentMpcdStepConfig {
     double thermostatEpsilon = 1.0e-30;
     int cycles = 1;
     int threadsPerBlock = 256;
+
+    // 0274: optional classic-resident fast path that fuses force/streaming
+    // into the collision deposit pass for the strictly validated periodic and
+    // wall-simple cases.  This removes a separate particle traversal/kernel
+    // launch while preserving the physical order stream -> deposit -> SRC
+    // collision.  It is opt-in and should remain disabled when CPU Q6,
+    // resampling, virial or thermostat bridges need an explicit post-stream
+    // host/device synchronization point.
+    int fusedStreamDeposit0274 = 0;
+    // 1 = periodic x/y, 2 = periodic-x + bounded-y wall-simple.
+    int fusedStreamMode0274 = 0;
+    double streamDt0274 = 0.0;
+    double streamBodyAccelerationX0274 = 0.0;
+    double streamBodyAccelerationY0274 = 0.0;
+    int streamTaylorGreenEnable0274 = 0;
+    double streamTaylorGreenAmplitude0274 = 0.0;
+    int streamTaylorGreenModeX0274 = 1;
+    int streamTaylorGreenModeY0274 = 1;
+    int streamBottomMode0274 = 0;
+    int streamTopMode0274 = 0;
+    double streamWallUxBottom0274 = 0.0;
+    double streamWallUyBottom0274 = 0.0;
+    double streamWallUxTop0274 = 0.0;
+    double streamWallUyTop0274 = 0.0;
 };
 
 struct CudaPersistentMpcdStepDiagnostics {

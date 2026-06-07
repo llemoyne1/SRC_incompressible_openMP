@@ -530,6 +530,12 @@ int persistent_env_int_value(const char* name, const int fallback) {
     catch (...) { return fallback; }
 }
 
+int encode_stream_wall_mode_0274(const std::string& mode) {
+    if (mode == "solid" || mode == "specular") return 1;
+    if (mode == "bounceback") return 2;
+    return 0;
+}
+
 struct CudaPersistentCollisionActiveRow {
     std::uint64_t step = 0u;
     std::uint64_t particlesVisited = 0u;
@@ -947,8 +953,24 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.wallRightEnabled = face_has_wall_coupling(params.bcRight, params) ? 1 : 0;
     cfg.wallBottomEnabled = face_has_wall_coupling(params.bcBottom, params) ? 1 : 0;
     cfg.wallTopEnabled = face_has_wall_coupling(params.bcTop, params) ? 1 : 0;
-    const ParticleRoleCounts roleCountsForCudaWall = count_particle_roles(state);
-    const double inferredGammaForCudaWall = static_cast<double>(roleCountsForCudaWall.fluid) / static_cast<double>(std::max(1, grid.numCells));
+    const bool cudaVirtualWallOrImmersed0273 =
+        (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled ||
+         (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Rectangle));
+    const bool disableExplicitGammaRoleFastPath0273 =
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_EXPLICIT_GAMMA_ROLE_FASTPATH_0273", false);
+    double inferredGammaForCudaWall = 0.0;
+    if (cudaVirtualWallOrImmersed0273 && (!(params.wallVpGamma > 0.0) || disableExplicitGammaRoleFastPath0273)) {
+        // 0273: only infer gamma from host roles when the CUDA virtual-wall
+        // contribution actually needs it.  The classic resident validators set
+        // wallVpGamma explicitly; scanning every particle here made wall-simple
+        // look collision-bound although the CUDA collision kernel itself was
+        // already cheap.  With MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_EXPLICIT_GAMMA_ROLE_FASTPATH_0273=1
+        // the old diagnostic scan is restored even when wallVpGamma is explicit.
+        // When Q6/resampling are re-enabled later, leaving wallVpGamma<=0 still
+        // preserves the old inference behavior.
+        const ParticleRoleCounts roleCountsForCudaWall = count_particle_roles(state);
+        inferredGammaForCudaWall = static_cast<double>(roleCountsForCudaWall.fluid) / static_cast<double>(std::max(1, grid.numCells));
+    }
     cfg.wallAccommodation = params.wallAccommodation;
     cfg.wallGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGammaForCudaWall;
     cfg.wallVpMass = params.wallVpMass;
@@ -970,6 +992,41 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.thermostatEpsilon = params.thermostatEpsilon;
     cfg.cycles = 1;
     cfg.threadsPerBlock = std::max(32, persistent_env_int_value("MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK", 256));
+
+    const bool fusedStreamDeposit0274Requested =
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274", false) &&
+        !persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FUSED_STREAM_DEPOSIT_0274", false);
+    const bool classicOnlyFused0274 =
+        !params.projectionEnable && !params.resamplingEnable &&
+        !params.closedCapacityResponseEnable && !params.thermostatEnable;
+    const bool fusedPeriodic0274 = fusedStreamDeposit0274Requested && classicOnlyFused0274 &&
+        persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) &&
+        !persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) &&
+        is_x_periodic(params) && is_y_periodic(params) &&
+        !params.openBoundarySegmentsEnable && !immersed_solid_enabled(params);
+    const bool fusedWall0274 = fusedStreamDeposit0274Requested && classicOnlyFused0274 &&
+        persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) &&
+        is_x_periodic(params) && !is_y_periodic(params) &&
+        face_has_wall_coupling(params.bcBottom, params) &&
+        face_has_wall_coupling(params.bcTop, params) &&
+        !params.openBoundarySegmentsEnable && !immersed_solid_enabled(params);
+    if (fusedPeriodic0274 || fusedWall0274) {
+        cfg.fusedStreamDeposit0274 = 1;
+        cfg.fusedStreamMode0274 = fusedWall0274 ? 2 : 1;
+        cfg.streamDt0274 = params.dt;
+        cfg.streamBodyAccelerationX0274 = params.bodyAccelerationX;
+        cfg.streamBodyAccelerationY0274 = params.bodyAccelerationY;
+        cfg.streamTaylorGreenEnable0274 = params.taylorGreenForcingEnable ? 1 : 0;
+        cfg.streamTaylorGreenAmplitude0274 = params.taylorGreenForcingAmplitude;
+        cfg.streamTaylorGreenModeX0274 = params.taylorGreenForcingModeX;
+        cfg.streamTaylorGreenModeY0274 = params.taylorGreenForcingModeY;
+        cfg.streamBottomMode0274 = encode_stream_wall_mode_0274(params.bcBottom);
+        cfg.streamTopMode0274 = encode_stream_wall_mode_0274(params.bcTop);
+        cfg.streamWallUxBottom0274 = params.wallVpUxBottom;
+        cfg.streamWallUyBottom0274 = domain.vyMin + params.wallVpUyBottom;
+        cfg.streamWallUxTop0274 = params.wallVpUxTop;
+        cfg.streamWallUyTop0274 = domain.vyMax + params.wallVpUyTop;
+    }
 
     ThermostatDiagnostics consumedThermostat{};
     const bool applyPersistentThermostat = persistentCollisionThermostat && params.thermostatEnable &&

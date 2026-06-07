@@ -790,6 +790,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // resampling or thermostat reactivation can still force explicit
     // host/device synchronization where needed.
     bool wallSimpleResidentStreamHandled0270 = false;
+    bool periodicFusedStreamHandled0274 = false;
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
@@ -818,6 +819,68 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 try_apply_cuda_piston_streaming_0247b(state, params, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "piston_0247b", "force_stream", cudaStreaming0247b);
             handledByCudaStreaming = cudaStreaming0247b.handled;
+        }
+        const bool fusedClassicOnly0274 =
+            !params.projectionEnable && !params.resamplingEnable &&
+            !params.closedCapacityResponseEnable && !params.thermostatEnable;
+        const bool fusedStreamDeposit0274 = fusedClassicOnly0274 &&
+            env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274") &&
+            !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FUSED_STREAM_DEPOSIT_0274");
+        if (!handledByCudaStreaming && fusedStreamDeposit0274 && residentClassicWall0261) {
+            CudaWallSimpleStreaming0246Diagnostics deferred{};
+            deferred.requested = true;
+            deferred.supported = true;
+            deferred.handled = true;
+            deferred.applied = true;
+            deferred.particles = state.Np;
+            deferred.fluidParticles = state.Np;
+            const auto upload0 = ProfileClock::now();
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+            if (!cuda_shared_particle_state_0251_is_fresh()) {
+                CudaParticleStateDiagnostics particleDiag{};
+                cuda_shared_particle_state_0251().upload_all(state, &particleDiag);
+                cuda_shared_particle_state_0251_mark_fresh("fused_stream_deposit_0274_initial_wall_upload");
+                deferred.allocationCalls = particleDiag.allocationCalls;
+                deferred.uploadCalls = particleDiag.uploadCalls;
+            }
+#else
+            deferred.handled = false;
+            deferred.applied = false;
+#endif
+            const auto upload1 = ProfileClock::now();
+            deferred.totalSeconds = std::chrono::duration<double>(upload1 - upload0).count();
+            deferred.uploadSeconds = deferred.totalSeconds;
+            record_cuda_resident_profile_0266(params.outputDir, step, "wall_simple_0274_fused_deferred", "force_stream", deferred);
+            handledByCudaStreaming = deferred.handled;
+            wallSimpleResidentStreamHandled0270 = deferred.handled;
+        }
+        if (!handledByCudaStreaming && fusedStreamDeposit0274 && residentClassicPeriodic0260) {
+            CudaPeriodicStreaming0245Diagnostics deferred{};
+            deferred.requested = true;
+            deferred.supported = true;
+            deferred.handled = true;
+            deferred.applied = true;
+            deferred.particles = state.Np;
+            deferred.fluidParticles = state.Np;
+            const auto upload0 = ProfileClock::now();
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+            if (!cuda_shared_particle_state_0251_is_fresh()) {
+                CudaParticleStateDiagnostics particleDiag{};
+                cuda_shared_particle_state_0251().upload_all(state, &particleDiag);
+                cuda_shared_particle_state_0251_mark_fresh("fused_stream_deposit_0274_initial_periodic_upload");
+                deferred.allocationCalls = particleDiag.allocationCalls;
+                deferred.uploadCalls = particleDiag.uploadCalls;
+            }
+#else
+            deferred.handled = false;
+            deferred.applied = false;
+#endif
+            const auto upload1 = ProfileClock::now();
+            deferred.totalSeconds = std::chrono::duration<double>(upload1 - upload0).count();
+            deferred.uploadSeconds = deferred.totalSeconds;
+            record_cuda_resident_profile_0266(params.outputDir, step, "periodic_0274_fused_deferred", "force_stream", deferred);
+            handledByCudaStreaming = deferred.handled;
+            periodicFusedStreamHandled0274 = deferred.handled;
         }
         if (!handledByCudaStreaming && cuda_wall_simple_streaming_0246_requested()) {
             const CudaWallSimpleStreaming0246Diagnostics cudaStreaming0246 =
@@ -874,6 +937,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 result.boundary = cudaIoBoundary0263.boundary;
                 handledByCudaBoundary = true;
             }
+        }
+        if (!handledByCudaBoundary && periodicFusedStreamHandled0274) {
+            result.boundary = BoundaryDiagnostics{};
+            handledByCudaBoundary = true;
         }
         if (!handledByCudaBoundary && wallSimpleResidentStreamHandled0270 &&
             !env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0270_DISABLE_BOUNDARY_SKIP")) {

@@ -53,6 +53,34 @@ std::uint64_t splitmix64_host(std::uint64_t x) {
     return x ^ (x >> 31U);
 }
 
+__device__ inline std::uint64_t splitmix64_device_0272(std::uint64_t x) {
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27U)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31U);
+}
+
+__global__ void fill_rotation_tables_persistent_0272_kernel(int nc,
+                                                            double cosAngle,
+                                                            double sinAngle,
+                                                            int randomRotationSign,
+                                                            std::uint64_t rngSeed,
+                                                            std::uint64_t step,
+                                                            double* cosA,
+                                                            double* sinA) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    double sa = sinAngle;
+    if (randomRotationSign) {
+        const std::uint64_t h = splitmix64_device_0272(rngSeed ^
+                                                       (step * 0x9e3779b97f4a7c15ULL) ^
+                                                       static_cast<std::uint64_t>(c));
+        if ((h & 1ULL) == 0ULL) sa = -sa;
+    }
+    cosA[c] = cosAngle;
+    sinA[c] = sa;
+}
+
 std::vector<std::uint8_t> normalized_roles(const ParticleState& state) {
     const std::size_t n = static_cast<std::size_t>(state.Np);
     if (state.role.empty()) return std::vector<std::uint8_t>(n, kParticleRoleFluid);
@@ -91,6 +119,16 @@ struct DeviceConfig {
     int immersedFractionSamples;
     double immersedXMin, immersedXMax, immersedYMin, immersedYMax;
     double immersedWallUx, immersedWallUy;
+    int fusedStreamDeposit0274;
+    int fusedStreamMode0274;
+    double streamDt0274;
+    double streamBodyAccelerationX0274, streamBodyAccelerationY0274;
+    int streamTaylorGreenEnable0274;
+    double streamTaylorGreenAmplitude0274;
+    int streamTaylorGreenModeX0274, streamTaylorGreenModeY0274;
+    int streamBottomMode0274, streamTopMode0274;
+    double streamWallUxBottom0274, streamWallUyBottom0274;
+    double streamWallUxTop0274, streamWallUyTop0274;
     unsigned char fluidRole;
 };
 
@@ -127,6 +165,87 @@ __device__ int cell_index_device(double x, double y, DeviceConfig cfg) {
         ? periodic_cell_index_device(ys, cfg.Ly, cfg.dy, cfg.Ny)
         : bounded_cell_index_device(ys, cfg.Ly, cfg.dy, cfg.Ny);
     return ix + cfg.Nx * iy;
+}
+
+__device__ inline double clamp_persistent_0274(double x, double lo, double hi) {
+    return fmin(fmax(x, lo), hi);
+}
+
+__device__ inline void apply_stream_wall_reflection_0274(
+    const int mode,
+    const double wallUx,
+    const double wallUy,
+    double& vx,
+    double& vy)
+{
+    if (mode == 2) {
+        vx = 2.0 * wallUx - vx;
+        vy = 2.0 * wallUy - vy;
+    } else {
+        (void)wallUx;
+        vy = 2.0 * wallUy - vy;
+    }
+}
+
+__device__ inline void apply_fused_stream_0274(DeviceConfig cfg,
+                                               double& x,
+                                               double& y,
+                                               double& vx,
+                                               double& vy) {
+    if (!cfg.fusedStreamDeposit0274) return;
+
+    const double x0 = x;
+    const double y0 = y;
+    double ax = cfg.streamBodyAccelerationX0274;
+    double ay = cfg.streamBodyAccelerationY0274;
+    if (cfg.streamTaylorGreenEnable0274 && cfg.streamTaylorGreenAmplitude0274 > 0.0) {
+        constexpr double pi = 3.141592653589793238462643383279502884;
+        const double kx = 2.0 * pi * static_cast<double>(cfg.streamTaylorGreenModeX0274) / cfg.Lx;
+        const double ky = 2.0 * pi * static_cast<double>(cfg.streamTaylorGreenModeY0274) / cfg.Ly;
+        const double sx = sin(kx * x0);
+        const double cx = cos(kx * x0);
+        const double sy = sin(ky * y0);
+        const double cy = cos(ky * y0);
+        ax += cfg.streamTaylorGreenAmplitude0274 * sx * cy;
+        ay += -cfg.streamTaylorGreenAmplitude0274 * cx * sy;
+    }
+
+    const double dt = cfg.streamDt0274;
+    double vx1 = vx + ax * dt;
+    double vy1 = vy + ay * dt;
+    double x1 = wrap_periodic(x0 + vx1 * dt, cfg.Lx);
+    double y1 = y0 + vy1 * dt;
+
+    if (cfg.fusedStreamMode0274 == 1) {
+        y1 = wrap_periodic(y1, cfg.Ly);
+    } else if (cfg.fusedStreamMode0274 == 2) {
+        int guard = 0;
+        while (y1 < cfg.domainYMin || y1 > cfg.domainYMax) {
+            if (++guard > 64) {
+                y1 = clamp_persistent_0274(y1, cfg.domainYMin, cfg.domainYMax);
+                break;
+            }
+            if (y1 < cfg.domainYMin) {
+                y1 = 2.0 * cfg.domainYMin - y1;
+                apply_stream_wall_reflection_0274(cfg.streamBottomMode0274,
+                                                  cfg.streamWallUxBottom0274,
+                                                  cfg.streamWallUyBottom0274,
+                                                  vx1, vy1);
+            } else if (y1 > cfg.domainYMax) {
+                y1 = 2.0 * cfg.domainYMax - y1;
+                apply_stream_wall_reflection_0274(cfg.streamTopMode0274,
+                                                  cfg.streamWallUxTop0274,
+                                                  cfg.streamWallUyTop0274,
+                                                  vx1, vy1);
+            }
+        }
+        y1 = clamp_persistent_0274(y1, cfg.domainYMin, cfg.domainYMax);
+    }
+
+    x = x1;
+    y = y1;
+    vx = vx1;
+    vy = vy1;
 }
 
 __device__ double overlap_length_device(double a0, double a1, double b0, double b1) {
@@ -263,10 +382,10 @@ __global__ void reset_persistent_cells_kernel(int n, int nc,
 }
 
 __global__ void deposit_persistent_kernel(int n,
-                                          const double* x,
-                                          const double* y,
-                                          const double* vx,
-                                          const double* vy,
+                                          double* x,
+                                          double* y,
+                                          double* vx,
+                                          double* vy,
                                           const double* mass,
                                           const unsigned char* role,
                                           DeviceConfig cfg,
@@ -279,13 +398,26 @@ __global__ void deposit_persistent_kernel(int n,
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     if (role[i] != cfg.fluidRole) return;
-    const int c = cell_index_device(x[i], y[i], cfg);
+
+    double xi = x[i];
+    double yi = y[i];
+    double vxi = vx[i];
+    double vyi = vy[i];
+    apply_fused_stream_0274(cfg, xi, yi, vxi, vyi);
+    if (cfg.fusedStreamDeposit0274) {
+        x[i] = xi;
+        y[i] = yi;
+        vx[i] = vxi;
+        vy[i] = vyi;
+    }
+
+    const int c = cell_index_device(xi, yi, cfg);
     cellId[i] = c;
     const double m = mass[i];
     atomicAdd(&count[c], 1u);
     atomicAdd(&cellMass[c], m);
-    atomicAdd(&cellPx[c], m * vx[i]);
-    atomicAdd(&cellPy[c], m * vy[i]);
+    atomicAdd(&cellPx[c], m * vxi);
+    atomicAdd(&cellPy[c], m * vyi);
     atomicAdd(fluidCounter, 1ull);
 }
 
@@ -566,6 +698,21 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.immersedYMax = config.immersedYMax;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
+    cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
+    cfg.fusedStreamMode0274 = config.fusedStreamMode0274;
+    cfg.streamDt0274 = config.streamDt0274;
+    cfg.streamBodyAccelerationX0274 = config.streamBodyAccelerationX0274;
+    cfg.streamBodyAccelerationY0274 = config.streamBodyAccelerationY0274;
+    cfg.streamTaylorGreenEnable0274 = config.streamTaylorGreenEnable0274;
+    cfg.streamTaylorGreenAmplitude0274 = config.streamTaylorGreenAmplitude0274;
+    cfg.streamTaylorGreenModeX0274 = config.streamTaylorGreenModeX0274;
+    cfg.streamTaylorGreenModeY0274 = config.streamTaylorGreenModeY0274;
+    cfg.streamBottomMode0274 = config.streamBottomMode0274;
+    cfg.streamTopMode0274 = config.streamTopMode0274;
+    cfg.streamWallUxBottom0274 = config.streamWallUxBottom0274;
+    cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
+    cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
+    cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -850,6 +997,21 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedYMax = config.immersedYMax;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
+    cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
+    cfg.fusedStreamMode0274 = config.fusedStreamMode0274;
+    cfg.streamDt0274 = config.streamDt0274;
+    cfg.streamBodyAccelerationX0274 = config.streamBodyAccelerationX0274;
+    cfg.streamBodyAccelerationY0274 = config.streamBodyAccelerationY0274;
+    cfg.streamTaylorGreenEnable0274 = config.streamTaylorGreenEnable0274;
+    cfg.streamTaylorGreenAmplitude0274 = config.streamTaylorGreenAmplitude0274;
+    cfg.streamTaylorGreenModeX0274 = config.streamTaylorGreenModeX0274;
+    cfg.streamTaylorGreenModeY0274 = config.streamTaylorGreenModeY0274;
+    cfg.streamBottomMode0274 = config.streamBottomMode0274;
+    cfg.streamTopMode0274 = config.streamTopMode0274;
+    cfg.streamWallUxBottom0274 = config.streamWallUxBottom0274;
+    cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
+    cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
+    cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1085,6 +1247,21 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedYMax = config.immersedYMax;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
+    cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
+    cfg.fusedStreamMode0274 = config.fusedStreamMode0274;
+    cfg.streamDt0274 = config.streamDt0274;
+    cfg.streamBodyAccelerationX0274 = config.streamBodyAccelerationX0274;
+    cfg.streamBodyAccelerationY0274 = config.streamBodyAccelerationY0274;
+    cfg.streamTaylorGreenEnable0274 = config.streamTaylorGreenEnable0274;
+    cfg.streamTaylorGreenAmplitude0274 = config.streamTaylorGreenAmplitude0274;
+    cfg.streamTaylorGreenModeX0274 = config.streamTaylorGreenModeX0274;
+    cfg.streamTaylorGreenModeY0274 = config.streamTaylorGreenModeY0274;
+    cfg.streamBottomMode0274 = config.streamBottomMode0274;
+    cfg.streamTopMode0274 = config.streamTopMode0274;
+    cfg.streamWallUxBottom0274 = config.streamWallUxBottom0274;
+    cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
+    cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
+    cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1255,6 +1432,26 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     const int cellBlocks = std::max(1, (nc + threads - 1) / threads);
     const int resetBlocks = std::max(particleBlocks, cellBlocks);
 
+    const bool residentClassicMode0273 =
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+    const bool lazyKernelLaunchCheck0273 =
+        residentClassicMode0273 &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_LAZY_KERNEL_CHECK_0273", false);
+    const bool skipSetupSync0273 =
+        residentClassicMode0273 &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_SETUP_SYNC_0273", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_SKIP_SETUP_SYNC_0273", false);
+    auto checkKernelLaunch0273 = [&]() {
+        if (!lazyKernelLaunchCheck0273) {
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
+    };
+
     cellWorkspace.ensure_capacity(pv.n, nc, nullptr);
     const CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
     if (cv.cellId == nullptr || cv.count == nullptr || cv.cellMass == nullptr || cv.cellPx == nullptr ||
@@ -1266,14 +1463,22 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         throw std::runtime_error("persistent CUDA shared collision step: CudaCellWorkspace capacity mismatch");
     }
 
-    std::vector<double> cosHost(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
-    std::vector<double> sinHost(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
-    if (config.randomRotationSign) {
-        for (int c = 0; c < nc; ++c) {
-            const std::uint64_t h = splitmix64_host(config.rngSeed ^
-                                                    (config.step * 0x9e3779b97f4a7c15ULL) ^
-                                                    static_cast<std::uint64_t>(c));
-            if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
+    const bool deviceRotationTables0272 =
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_DEVICE_ROTATION_0272", false);
+
+    std::vector<double> cosHost;
+    std::vector<double> sinHost;
+    if (!deviceRotationTables0272) {
+        cosHost.assign(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
+        sinHost.assign(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
+        if (config.randomRotationSign) {
+            for (int c = 0; c < nc; ++c) {
+                const std::uint64_t h = splitmix64_host(config.rngSeed ^
+                                                        (config.step * 0x9e3779b97f4a7c15ULL) ^
+                                                        static_cast<std::uint64_t>(c));
+                if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
+            }
         }
     }
 
@@ -1288,12 +1493,21 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 
     const auto tTotal0 = Clock::now();
     auto t0 = Clock::now();
-    MPCD_CUDA_CHECK(cudaMemcpy(cv.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
-    MPCD_CUDA_CHECK(cudaMemcpy(cv.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    if (deviceRotationTables0272) {
+        fill_rotation_tables_persistent_0272_kernel<<<cellBlocks, threads>>>(
+            nc, std::cos(config.rotationAngle), std::sin(config.rotationAngle),
+            config.randomRotationSign, config.rngSeed, config.step, cv.cosA, cv.sinA);
+        checkKernelLaunch0273();
+    } else {
+        MPCD_CUDA_CHECK(cudaMemcpy(cv.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
+        MPCD_CUDA_CHECK(cudaMemcpy(cv.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    }
     MPCD_CUDA_CHECK(cudaMemset(cv.fluidCounter, 0, sizeof(unsigned long long)));
     MPCD_CUDA_CHECK(cudaMemset(cv.rotatedCounter, 0, sizeof(unsigned long long)));
     MPCD_CUDA_CHECK(cudaMemset(cv.invalidCounter, 0, sizeof(unsigned long long)));
-    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    if (!skipSetupSync0273) {
+        MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    }
     diag.uploadSeconds = seconds_since(t0);
 
     DeviceConfig cfg{};
@@ -1335,6 +1549,21 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedYMax = config.immersedYMax;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
+    cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
+    cfg.fusedStreamMode0274 = config.fusedStreamMode0274;
+    cfg.streamDt0274 = config.streamDt0274;
+    cfg.streamBodyAccelerationX0274 = config.streamBodyAccelerationX0274;
+    cfg.streamBodyAccelerationY0274 = config.streamBodyAccelerationY0274;
+    cfg.streamTaylorGreenEnable0274 = config.streamTaylorGreenEnable0274;
+    cfg.streamTaylorGreenAmplitude0274 = config.streamTaylorGreenAmplitude0274;
+    cfg.streamTaylorGreenModeX0274 = config.streamTaylorGreenModeX0274;
+    cfg.streamTaylorGreenModeY0274 = config.streamTaylorGreenModeY0274;
+    cfg.streamBottomMode0274 = config.streamBottomMode0274;
+    cfg.streamTopMode0274 = config.streamTopMode0274;
+    cfg.streamWallUxBottom0274 = config.streamWallUxBottom0274;
+    cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
+    cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
+    cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1342,65 +1571,92 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, cv.cellId, cv.count, cv.cellMass,
                                                                 cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy,
                                                                 cv.cellKinetic, cv.cellScale);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        checkKernelLaunch0273();
         deposit_persistent_kernel<<<particleBlocks, threads>>>(nInt, pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role,
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        checkKernelLaunch0273();
         if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
-            MPCD_CUDA_CHECK(cudaGetLastError());
+            checkKernelLaunch0273();
         }
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        checkKernelLaunch0273();
         src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx, cv.cellUy,
                                                                   cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
                                                                   cv.rotatedCounter, cv.invalidCounter);
+        checkKernelLaunch0273();
+    }
+    if (lazyKernelLaunchCheck0273) {
         MPCD_CUDA_CHECK(cudaGetLastError());
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    const bool residentClassicNoVelocityDownload =
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+    const bool residentClassicNoVelocityDownload = residentClassicMode0273;
     if (!residentClassicNoVelocityDownload) {
         gpuState.download_velocities(downloadTarget);
     }
-    cellIdOut.assign(n, -1);
+    const bool skipWorkspaceDownload0272 =
+        residentClassicNoVelocityDownload &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_SKIP_WORKSPACE_DOWNLOAD_0272", false);
+    const bool skipFinalDownloadSync0272 =
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_FINAL_SYNC_0272", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_SKIP_FINAL_SYNC_0272", false);
+
     const bool minimalDownload0257 = env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257", false);
-    if (minimalDownload0257) {
-        // 0257 conservative minimal-download mode: keep cellCount on the host
-        // because runtime summaries/validation still consume population
-        // diagnostics, but skip the heavier post-collision cellMass/cellUx/cellUy
-        // arrays which are not needed by the current CPU continuation.
+    if (skipWorkspaceDownload0272) {
+        // 0272b safe classic-resident fast path: the validated classic-only
+        // runners have Q6/resampling/thermostat disabled, and the host
+        // ParticleState is intentionally stale between summaries.  However,
+        // runtime summaries and validation comparisons still consume
+        // cellCountOut for meanN/stdN/minN/maxN, especially in wall-simple
+        // Poiseuille.  Keep the lightweight per-cell count download and skip
+        // only the heavier particle cellId and post-collision mass/velocity
+        // workspaces.  Future Q6/resampling/host consumers must still leave
+        // MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272
+        // disabled unless a dedicated synchronization bridge is implemented.
+        cellIdOut.clear();
         cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
         cellMassOut.clear();
         cellUxOut.clear();
         cellUyOut.clear();
+        MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
     } else {
-        cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
-        cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
-        cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
-        cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
-    }
-    MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
-    if (!minimalDownload0257) {
-        MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+        cellIdOut.assign(n, -1);
+        if (minimalDownload0257) {
+            // 0257 conservative minimal-download mode: keep cellCount on the host
+            // because runtime summaries/validation still consume population
+            // diagnostics, but skip the heavier post-collision cellMass/cellUx/cellUy
+            // arrays which are not needed by the current CPU continuation.
+            cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+            cellMassOut.clear();
+            cellUxOut.clear();
+            cellUyOut.clear();
+        } else {
+            cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
+            cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+            cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+            cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+        }
+        MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), cv.cellId, nBytesI, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
+        if (!minimalDownload0257) {
+            MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+        }
     }
     unsigned long long fluid = 0ull, rotated = 0ull, invalid = 0ull;
     MPCD_CUDA_CHECK(cudaMemcpy(&fluid, cv.fluidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&rotated, cv.rotatedCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     MPCD_CUDA_CHECK(cudaMemcpy(&invalid, cv.invalidCounter, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    if (!skipFinalDownloadSync0272) {
+        MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    }
     diag.downloadSeconds = seconds_since(t0);
 
     diag.fluidParticles = static_cast<std::uint64_t>(fluid) / static_cast<std::uint64_t>(cycles);
