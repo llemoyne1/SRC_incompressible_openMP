@@ -323,6 +323,16 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
                  key == "openOutletHybridBlend") p.openBoundaryOutletHybridBlend = parse_double(value, key);
         else if (key == "openBoundaryOutletFeedbackGain" || key == "outletFeedbackGain" ||
                  key == "openOutletFeedbackGain" || key == "openBoundaryOutletMassFeedbackGain") p.openBoundaryOutletFeedbackGain = parse_double(value, key);
+        else if (key == "openBoundaryOutletForcedMassFlux" || key == "outletForcedMassFlux" ||
+                 key == "openOutletForcedMassFlux" || key == "outletSuctionMassFlux") p.openBoundaryOutletForcedMassFlux = parse_double(value, key);
+        else if (key == "openBoundaryOutletForcedMassPerStep" || key == "outletForcedMassPerStep" ||
+                 key == "openOutletForcedMassPerStep" || key == "outletSuctionMassPerStep") p.openBoundaryOutletForcedMassPerStep = parse_double(value, key);
+        else if (key == "openBoundaryOutletForcedParticleFlux" || key == "outletForcedParticleFlux" ||
+                 key == "openOutletForcedParticleFlux" || key == "outletSuctionParticleFlux") p.openBoundaryOutletForcedParticleFlux = parse_double(value, key);
+        else if (key == "openBoundaryOutletForcedParticlesPerStep" || key == "outletForcedParticlesPerStep" ||
+                 key == "openOutletForcedParticlesPerStep" || key == "outletSuctionParticlesPerStep") p.openBoundaryOutletForcedParticlesPerStep = parse_int(value, key);
+        else if (key == "openBoundaryOutletForcedLayerCells" || key == "outletForcedLayerCells" ||
+                 key == "openOutletForcedLayerCells" || key == "outletSuctionLayerCells") p.openBoundaryOutletForcedLayerCells = parse_int(value, key);
         else if (key == "wallVpEnable") p.wallVpEnable = parse_bool(value, key);
         else if (key == "wallVpMode") p.wallVpMode = get_lower(kv, key);
         else if (key == "wallAccommodation") p.wallAccommodation = parse_double(value, key);
@@ -743,14 +753,31 @@ void validate_simulation_params(const SimulationParams& p) {
                 outletMode != "dirichlet" && outletMode != "neumann" &&
                 outletMode != "free" && outletMode != "zero_gradient" &&
                 outletMode != "zero_normal_gradient" && outletMode != "hybrid" &&
-                outletMode != "neumann_feedback" && outletMode != "hybrid_feedback") {
-                throw std::runtime_error("openBoundaryOutletMode must be balanced_flux, neumann, or hybrid");
+                outletMode != "neumann_feedback" && outletMode != "hybrid_feedback" &&
+                outletMode != "equilibrium_flux" && outletMode != "equilibrium" &&
+                outletMode != "balanced_particle_flux" && outletMode != "forced_flux" &&
+                outletMode != "forced_mass_flux" && outletMode != "suction" &&
+                outletMode != "forced") {
+                throw std::runtime_error("openBoundaryOutletMode must be neumann, equilibrium_flux, forced_flux, balanced_flux, or hybrid");
             }
             if (p.openBoundaryOutletHybridBlend < 0.0 || p.openBoundaryOutletHybridBlend > 1.0) {
                 throw std::runtime_error("openBoundaryOutletHybridBlend must be in [0,1]");
             }
             if (p.openBoundaryOutletFeedbackGain < 0.0 || p.openBoundaryOutletFeedbackGain > 1.0) {
                 throw std::runtime_error("openBoundaryOutletFeedbackGain must be in [0,1]");
+            }
+            if (p.openBoundaryOutletForcedMassFlux < 0.0 || p.openBoundaryOutletForcedMassPerStep < 0.0 ||
+                p.openBoundaryOutletForcedParticleFlux < 0.0 || p.openBoundaryOutletForcedParticlesPerStep < 0) {
+                throw std::runtime_error("forced outlet flux parameters must be non-negative");
+            }
+            if (p.openBoundaryOutletForcedLayerCells < 1) {
+                throw std::runtime_error("openBoundaryOutletForcedLayerCells must be >= 1");
+            }
+            if ((outletMode == "forced_flux" || outletMode == "forced_mass_flux" ||
+                 outletMode == "suction" || outletMode == "forced") &&
+                p.openBoundaryOutletForcedMassFlux <= 0.0 && p.openBoundaryOutletForcedMassPerStep <= 0.0 &&
+                p.openBoundaryOutletForcedParticleFlux <= 0.0 && p.openBoundaryOutletForcedParticlesPerStep <= 0) {
+                throw std::runtime_error("openBoundaryOutletMode=forced_flux requires a positive forced mass or particle flux");
             }
         }
         if (p.openBoundarySegmentsEnable) {
@@ -762,9 +789,12 @@ void validate_simulation_params(const SimulationParams& p) {
             if (has_outlet_open_boundary_segment(p)) {
                 const bool outletModeOk = segmentOutletMode == "neumann" || segmentOutletMode == "free" ||
                     segmentOutletMode == "zero_gradient" || segmentOutletMode == "zero_normal_gradient" ||
-                    segmentOutletMode == "hybrid" || segmentOutletMode == "neumann_feedback" || segmentOutletMode == "hybrid_feedback";
+                    segmentOutletMode == "hybrid" || segmentOutletMode == "neumann_feedback" || segmentOutletMode == "hybrid_feedback" ||
+                    segmentOutletMode == "equilibrium_flux" || segmentOutletMode == "equilibrium" ||
+                    segmentOutletMode == "balanced_particle_flux" || segmentOutletMode == "forced_flux" ||
+                    segmentOutletMode == "forced_mass_flux" || segmentOutletMode == "suction" || segmentOutletMode == "forced";
                 if (!outletModeOk) {
-                    throw std::runtime_error("0143 segmented outlets require openBoundaryOutletMode=neumann or hybrid; balanced_flux is ambiguous for same-face/multiple outlets");
+                    throw std::runtime_error("0143 segmented outlets require openBoundaryOutletMode=neumann, hybrid, equilibrium_flux, or forced_flux; balanced_flux is ambiguous for same-face/multiple outlets");
                 }
                 if ((segmentOutletMode == "hybrid" || segmentOutletMode == "neumann_feedback" || segmentOutletMode == "hybrid_feedback") &&
                     p.openBoundaryOutletHybridBlend != 0.0) {

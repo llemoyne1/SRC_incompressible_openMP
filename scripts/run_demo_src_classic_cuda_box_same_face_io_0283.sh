@@ -7,6 +7,15 @@ Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-96}"; NY="${NY:-96}"
 GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-3000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628303}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.08}"; UOUT="${UOUT:--0.08}"
+# THERMOSTAT_ENABLE is read by src_gpu_demo_common_0283.sh and written to
+# thermostatEnable in params.kv. It also gates CUDA thermostat environment flags.
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
+OUTLET_MODE="${OUTLET_MODE:-neumann}"
+OUTLET_FORCED_MASS_FLUX="${OUTLET_FORCED_MASS_FLUX:-0.0}"
+OUTLET_FORCED_MASS_PER_STEP="${OUTLET_FORCED_MASS_PER_STEP:-0.0}"
+OUTLET_FORCED_PARTICLE_FLUX="${OUTLET_FORCED_PARTICLE_FLUX:-0.0}"
+OUTLET_FORCED_PARTICLES_PER_STEP="${OUTLET_FORCED_PARTICLES_PER_STEP:-0}"
+OUTLET_FORCED_LAYER_CELLS="${OUTLET_FORCED_LAYER_CELLS:-3}"
 RUN_ROOT="${RUN_ROOT:-runs/demo_src_classic_cuda_box_same_face_io_0283}"
 prepare_demo_dirs_0283 "$RUN_ROOT"
 STATE_FILE="$RUN_ROOT/init/${CASE_NAME}_${NX}x${NY}_g${GAMMA}.smpcd"
@@ -59,9 +68,14 @@ inletHardCellThermalRescale = true
 inletRandomizeTangential = true
 inletReinjectBackflow = true
 
-openBoundaryOutletMode = hybrid
+openBoundaryOutletMode = ${OUTLET_MODE}
 openBoundaryOutletHybridBlend = 0.0
 openBoundaryOutletFeedbackGain = 0.0
+openBoundaryOutletForcedMassFlux = ${OUTLET_FORCED_MASS_FLUX}
+openBoundaryOutletForcedMassPerStep = ${OUTLET_FORCED_MASS_PER_STEP}
+openBoundaryOutletForcedParticleFlux = ${OUTLET_FORCED_PARTICLE_FLUX}
+openBoundaryOutletForcedParticlesPerStep = ${OUTLET_FORCED_PARTICLES_PER_STEP}
+openBoundaryOutletForcedLayerCells = ${OUTLET_FORCED_LAYER_CELLS}
 
 wallAccommodation = 1.0
 wallVpGamma = ${GAMMA}

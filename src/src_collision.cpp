@@ -940,7 +940,13 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                                               std::uint64_t step,
                                               CollisionWorkspace& ws) {
     const bool persistentCollision = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE", false);
-    const bool persistentCollisionThermostat = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE", false);
+    const bool persistentCollisionThermostatRequested =
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE", false);
+    // 0291b: thermostatEnable is the authoritative physical switch.
+    // Environment flags may select an accelerated CUDA thermostat backend, but
+    // they must not force a thermostat when params.thermostatEnable=false.
+    const bool persistentCollisionThermostat =
+        persistentCollisionThermostatRequested && params.thermostatEnable;
     if (!persistentCollision && !persistentCollisionThermostat) return false;
 
     std::string reason;
@@ -957,7 +963,6 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             if (strict) throw std::runtime_error("CUDA persistent SRC+thermostat unsupported: " + why);
             return false;
         };
-        if (!params.thermostatEnable) return failThermostat("thermostatEnable=false");
         if (params.thermostatEvery <= 0) return failThermostat("thermostatEvery must be positive");
         if ((step % static_cast<std::uint64_t>(params.thermostatEvery)) != 0u) {
             // No thermostat on this step; keep using the collision-only persistent path if requested.
@@ -1085,7 +1090,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
     const bool useSharedParticleState0251 =
         persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251", false);
-    const bool useSharedThermostatState0260 =
+    const bool useSharedThermostatState0260 = applyPersistentThermostat &&
         persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260", false);
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
     if (useSharedParticleState || useSharedParticleState0251 || useSharedThermostatState0260) {

@@ -150,6 +150,10 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double segmentUy[kOpenBoundaryMaxSegments]{};
     double segmentMass[kOpenBoundaryMaxSegments]{};
     std::uint32_t segmentType[kOpenBoundaryMaxSegments]{};
+    int outletRegimeCode = 0; // 0 passive/neumann, 1 equilibrium_flux, 2 forced_flux
+    double outletForcedMassPerStep = 0.0;
+    unsigned long long outletForcedParticlesPerStep = 0ULL;
+    int outletForcedLayerCells = 1;
 };
 
 struct CudaClassicSrcIoCounters0263 {
@@ -170,6 +174,13 @@ struct CudaClassicSrcIoCounters0263 {
     int maxYReflections = 0;
     int failureFlag = 0;
     int overflowFlag = 0;
+};
+
+struct CudaForcedOutletBudget0291 {
+    double targetMass = 0.0;
+    double removedMass = 0.0;
+    unsigned long long targetParticles = 0ULL;
+    unsigned long long claimedParticles = 0ULL;
 };
 
 __device__ inline double clamp_device_0263(double x, double lo, double hi) {
@@ -491,6 +502,44 @@ __device__ bool point_in_inlet_reservoir_device_0263(double x, double y, const C
     return false;
 }
 
+
+
+__device__ bool point_in_forced_outlet_layer_device_0291(double x, double y, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int layersX = imax_device_0263(1, imin_device_0263(cfg.outletForcedLayerCells, nx));
+    const int layersY = imax_device_0263(1, imin_device_0263(cfg.outletForcedLayerCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+
+    if (cfg.segmentedEnable) {
+        if (x >= cfg.xMin && x < cfg.xMin + static_cast<double>(layersX) * dx) {
+            const double s = segment_s_device_0263(0, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 0, s) == 2) return true;
+        }
+        if (x > cfg.xMax - static_cast<double>(layersX) * dx && x <= cfg.xMax) {
+            const double s = segment_s_device_0263(1, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 1, s) == 2) return true;
+        }
+        if (y >= cfg.yMin && y < cfg.yMin + static_cast<double>(layersY) * dy) {
+            const double s = segment_s_device_0263(2, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 2, s) == 2) return true;
+        }
+        if (y > cfg.yMax - static_cast<double>(layersY) * dy && y <= cfg.yMax) {
+            const double s = segment_s_device_0263(3, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 3, s) == 2) return true;
+        }
+        return false;
+    }
+
+    if (cfg.leftMode == 2 && x >= cfg.xMin && x < cfg.xMin + static_cast<double>(layersX) * dx) return true;
+    if (cfg.rightMode == 2 && x > cfg.xMax - static_cast<double>(layersX) * dx && x <= cfg.xMax) return true;
+    // Full-face 0263 currently validates x-pair inlet/outlet; keep y-face support
+    // here for future extensions and for consistency with segmented outlets.
+    if (cfg.bottomWallMode == 0 && y >= cfg.yMin && y < cfg.yMin + static_cast<double>(layersY) * dy) return true;
+    if (cfg.topWallMode == 0 && y > cfg.yMax - static_cast<double>(layersY) * dy && y <= cfg.yMax) return true;
+    return false;
+}
 
 __host__ __device__ bool reservoir_cell_center_inside_immersed_core_0285(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
     if (cfg.immersedRectangleEnabled) {
@@ -873,6 +922,40 @@ __device__ inline void merge_particle_boundary_counter_0267(CudaClassicSrcIoCoun
     add_counter_ull_0267(&counters->fluidParticles, local.fluidParticles);
     if (local.failureFlag != 0) atomicMax(&counters->failureFlag, local.failureFlag);
     if (local.maxYReflections != 0) atomicMax(&counters->maxYReflections, local.maxYReflections);
+}
+
+__global__ void io_forced_outlet_extraction_kernel_0291(
+    std::uint64_t n,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const double* __restrict__ mass,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    CudaForcedOutletBudget0291* budget,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    if (role[i] != fluidRole) return;
+    if (!point_in_forced_outlet_layer_device_0291(x[i], y[i], cfg)) return;
+
+    bool remove = false;
+    if (budget->targetParticles > 0ULL) {
+        const unsigned long long old = atomicAdd(&budget->claimedParticles, 1ULL);
+        remove = old < budget->targetParticles;
+    } else if (budget->targetMass > 0.0) {
+        const double m = isfinite(mass[i]) && mass[i] > 0.0 ? mass[i] : cfg.refMass;
+        const double old = atomicAdd(&budget->removedMass, m);
+        remove = old < budget->targetMass;
+    }
+
+    if (remove) {
+        role[i] = inactiveRole;
+        add_counter_ull_0267(&counters->outletParticlesDeleted, 1ULL);
+    }
 }
 
 __global__ void io_fullface_boundary_particles_kernel_0267(
@@ -1341,17 +1424,6 @@ bool reservoir_cell_center_inside_immersed_host_0269(double xc, double yc, const
     return reservoir_cell_center_inside_immersed_core_0285(xc, yc, cfg);
 }
 
-int inlet_segment_index_for_cell_host_0269(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
-    if (!cfg.segmentedEnable) return -1;
-    for (int k = 0; k < cfg.segmentCount; ++k) {
-        if (cfg.segmentFace[k] == face && cfg.segmentMode[k] == 1 &&
-            s >= cfg.segmentSMin[k] && s <= cfg.segmentSMax[k]) {
-            return k;
-        }
-    }
-    return -1;
-}
-
 std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
     const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
     const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
@@ -1414,6 +1486,46 @@ std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFul
         }
     }
     return out;
+}
+
+
+unsigned long long fullface_reservoir_target_particles_host_0293(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    const int targetN = cfg.inletTargetOccupancy;
+    if (targetN <= 0) return 0ULL;
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = std::max(1, std::min(cfg.inletReservoirCells, nx));
+    const int cellsY = std::max(1, std::min(cfg.inletReservoirCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    unsigned long long out = 0ULL;
+    auto add_cell = [&](int ix, int iy) {
+        const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+        const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+        if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) return;
+        out += static_cast<unsigned long long>(targetN);
+    };
+    if (cfg.inletFace == 0) {
+        for (int ix = 0; ix < cellsX; ++ix) for (int iy = 0; iy < ny; ++iy) add_cell(ix, iy);
+    } else if (cfg.inletFace == 1) {
+        for (int ix = nx - cellsX; ix < nx; ++ix) for (int iy = 0; iy < ny; ++iy) add_cell(ix, iy);
+    } else if (cfg.inletFace == 2) {
+        for (int iy = 0; iy < cellsY; ++iy) for (int ix = 0; ix < nx; ++ix) add_cell(ix, iy);
+    } else if (cfg.inletFace == 3) {
+        for (int iy = ny - cellsY; iy < ny; ++iy) for (int ix = 0; ix < nx; ++ix) add_cell(ix, iy);
+    }
+    return out;
+}
+
+unsigned long long segmented_reservoir_target_particles_host_0293(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    const int targetN = cfg.inletTargetOccupancy;
+    if (targetN <= 0) return 0ULL;
+    // Conservative but simple: 0288 already clips insertion cells; this helper
+    // intentionally estimates the target from the accepted inlet cells so that
+    // equilibrium outlet extraction can free pool slots before hard insertion.
+    // Exact partial-cell targets are accounted for by the insertion counters;
+    // this pre-extraction is only a capacity guard and mass-balance predictor.
+    return segmented_reservoir_cell_count_host_0269(cfg) * static_cast<unsigned long long>(targetN);
 }
 
 __device__ bool map_segmented_reservoir_cell_device_0269(
@@ -1561,6 +1673,25 @@ bool wall_like_mode_0264(const std::string& mode) {
     return mode == "solid" || mode == "specular" || mode == "bounceback";
 }
 
+int outlet_regime_code_0291(const SimulationParams& params) {
+    std::string mode = params.openBoundaryOutletMode;
+    std::replace(mode.begin(), mode.end(), '-', '_');
+    if (mode == "equilibrium_flux" || mode == "equilibrium" || mode == "balanced_particle_flux") return 1;
+    if (mode == "forced_flux" || mode == "forced_mass_flux" || mode == "suction" || mode == "forced") return 2;
+    return 0;
+}
+
+unsigned long long forced_particles_per_step_0291(const SimulationParams& params) {
+    if (params.openBoundaryOutletForcedParticlesPerStep > 0) {
+        return static_cast<unsigned long long>(params.openBoundaryOutletForcedParticlesPerStep);
+    }
+    if (params.openBoundaryOutletForcedParticleFlux > 0.0 && params.dt > 0.0) {
+        const double particles = params.openBoundaryOutletForcedParticleFlux * params.dt;
+        return particles > 0.0 ? static_cast<unsigned long long>(std::floor(particles + 0.5)) : 0ULL;
+    }
+    return 0ULL;
+}
+
 int profile_code_0263(const SimulationParams& params) {
     if (params.inletVelocitySpatialProfile == "poiseuille_y_max") return 1;
     if (params.inletVelocitySpatialProfile == "poiseuille_y" ||
@@ -1625,6 +1756,14 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     cfg.step = step;
     cfg.refMass = 1.0;
     cfg.refType = 0u;
+    cfg.outletRegimeCode = outlet_regime_code_0291(params);
+    cfg.outletForcedMassPerStep = std::max(0.0, params.openBoundaryOutletForcedMassPerStep);
+    if (params.openBoundaryOutletForcedMassFlux > 0.0) {
+        cfg.outletForcedMassPerStep = std::max(cfg.outletForcedMassPerStep,
+                                               params.openBoundaryOutletForcedMassFlux * params.dt);
+    }
+    cfg.outletForcedParticlesPerStep = forced_particles_per_step_0291(params);
+    cfg.outletForcedLayerCells = std::max(1, params.openBoundaryOutletForcedLayerCells);
     for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
         if (is_fluid_particle(state, i)) {
             cfg.refMass = state.mass[i];
@@ -1742,6 +1881,57 @@ bool supported_segmented_0264(const SimulationParams& params) {
         hasLeft = true;
     }
     return hasInlet && hasOutlet && hasLeft;
+}
+
+void maybe_apply_forced_outlet_extraction_0291(
+    const CudaParticleDeviceView& view,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaClassicSrcIoCounters0263* dCounters,
+    const char* context,
+    unsigned long long equilibriumPredictedInletInsertions = 0ULL)
+{
+    if (cfg.outletRegimeCode == 0 || view.n == 0u) return;
+
+    CudaForcedOutletBudget0291 hBudget{};
+    if (cfg.outletRegimeCode == 1) {
+        CudaClassicSrcIoCounters0263 h{};
+        check_cuda_0263(cudaMemcpy(&h, dCounters, sizeof(CudaClassicSrcIoCounters0263), cudaMemcpyDeviceToHost),
+                        "copy counters before equilibrium outlet extraction");
+        const unsigned long long inserted = equilibriumPredictedInletInsertions > 0ULL
+            ? equilibriumPredictedInletInsertions
+            : h.inletParticlesInserted;
+        const long long net = static_cast<long long>(inserted) -
+                              static_cast<long long>(h.inletReservoirDeleted) -
+                              static_cast<long long>(h.inletBackflowDeleted) -
+                              static_cast<long long>(h.outletParticlesDeleted);
+        if (net <= 0LL) return;
+        hBudget.targetParticles = static_cast<unsigned long long>(net);
+    } else if (cfg.outletRegimeCode == 2) {
+        hBudget.targetParticles = cfg.outletForcedParticlesPerStep;
+        if (hBudget.targetParticles == 0ULL) hBudget.targetMass = cfg.outletForcedMassPerStep;
+        if (hBudget.targetParticles == 0ULL && !(hBudget.targetMass > 0.0)) return;
+    } else {
+        return;
+    }
+
+    CudaForcedOutletBudget0291* dBudget = nullptr;
+    check_cuda_0263(cudaMalloc(&dBudget, sizeof(CudaForcedOutletBudget0291)), "allocate forced outlet budget 0291");
+    check_cuda_0263(cudaMemcpy(dBudget, &hBudget, sizeof(CudaForcedOutletBudget0291), cudaMemcpyHostToDevice),
+                    "upload forced outlet budget 0291");
+
+    const int threads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0291_FORCED_OUTLET_THREADS",
+                                    env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS", 256));
+    const std::uint64_t blocks64 = (view.n + static_cast<std::uint64_t>(threads) - 1u) /
+                                   static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+        check_cuda_0263(cudaFree(dBudget), "free forced outlet budget after grid-too-large");
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0291 forced outlet extraction launch");
+    }
+    io_forced_outlet_extraction_kernel_0291<<<static_cast<unsigned int>(blocks64), threads>>>(
+        view.n, view.x, view.y, view.mass, view.role,
+        kParticleRoleFluid, kParticleRoleInactive, cfg, dBudget, dCounters);
+    check_cuda_0263(cudaGetLastError(), context);
+    check_cuda_0263(cudaFree(dBudget), "free forced outlet budget 0291");
 }
 
 } // namespace
@@ -1865,6 +2055,17 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
 
         const bool usePoolInsert0268 = !cfg.segmentedEnable &&
             !env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_DISABLE_POOL");
+        const unsigned long long equilibriumPredictedInsertions0293 = cfg.segmentedEnable
+            ? segmented_reservoir_target_particles_host_0293(cfg)
+            : fullface_reservoir_target_particles_host_0293(cfg);
+        // 0293: outlet extraction must run before hard inlet insertion.
+        // Otherwise equilibrium/forced outlet modes may be too late to free
+        // inactive slots and the inlet pool can overflow even though an outlet
+        // extraction was requested for the same step.
+        maybe_apply_forced_outlet_extraction_0291(view, cfg, dCounters,
+                                                  "io_fullface_pre_insert_outlet_extraction_kernel_0293 launch",
+                                                  equilibriumPredictedInsertions0293);
+        check_cuda_0263(cudaDeviceSynchronize(), "io_fullface_pre_insert_outlet_extraction_kernel_0293 synchronize");
         if (usePoolInsert0268) {
             if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
                 throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0268 inactive-prefix pool");
@@ -1941,8 +2142,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     }
     if (h.overflowFlag != 0) {
         throw std::runtime_error(
-            std::string("cuda_classic_src_io_resident_0263: hard reservoir needs more inactive slots; ") +
-            "GPU append is intentionally disabled in 0263; " +
+            std::string("cuda_classic_src_io_resident_0263: Reservoir exhausted at step ") +
+            std::to_string(static_cast<unsigned long long>(cfg.step)) +
+            " in full-face hard inlet reservoir; GPU append is disabled. Increase inactive slots or reduce the net injected flux. Details: " +
             "reservoirCells=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirCells)) +
             " targetParticles=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirTargetParticles)) +
             " reservoirDeleted=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirDeleted)) +
@@ -2099,6 +2301,14 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
         check_cuda_0263(cudaGetLastError(), "io_segmented_boundary_particles_kernel_0267 launch");
 
         const bool useSegmentedPool0269 = !env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_DISABLE_SEGMENTED_POOL");
+        const unsigned long long equilibriumPredictedInsertions0293 = segmented_reservoir_target_particles_host_0293(cfg);
+        // 0293: outlet extraction must run before hard segmented inlet refill.
+        // This lets equilibrium_flux/forced_flux free inactive slots before
+        // reservoir insertion consumes the pool.
+        maybe_apply_forced_outlet_extraction_0291(view, cfg, dCounters,
+                                                  "io_segmented_pre_insert_outlet_extraction_kernel_0293 launch",
+                                                  equilibriumPredictedInsertions0293);
+        check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_pre_insert_outlet_extraction_kernel_0293 synchronize");
         if (useSegmentedPool0269) {
             if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
                 throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0269 segmented inactive-prefix pool");
@@ -2172,8 +2382,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     }
     if (h.overflowFlag != 0) {
         throw std::runtime_error(
-            std::string("cuda_classic_src_io_resident_0263: segmented hard reservoir needs more inactive slots; ") +
-            "GPU append is intentionally disabled in 0264; " +
+            std::string("cuda_classic_src_io_resident_0263: Reservoir exhausted at step ") +
+            std::to_string(static_cast<unsigned long long>(cfg.step)) +
+            " in segmented hard inlet reservoir; GPU append is disabled. Increase inactive slots or reduce the net injected flux. Details: " +
             "reservoirCells=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirCells)) +
             " targetParticles=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirTargetParticles)) +
             " reservoirDeleted=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirDeleted)) +

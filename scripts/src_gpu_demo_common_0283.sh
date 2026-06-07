@@ -17,7 +17,7 @@ src_gpu_demo_root() {
 ROOT_DIR="${ROOT_DIR:-$(src_gpu_demo_root)}"
 cd "$ROOT_DIR"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0288}"
+BIN="${BIN:-build/src_mpcd_base_cuda_0291b}"
 THREADS="${THREADS:-8}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
 export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
@@ -27,6 +27,9 @@ export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+# 0291b: one physical switch controls the thermostat in both CPU and CUDA
+# paths.  CUDA environment flags may only select the implementation backend.
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 
 ensure_src_gpu_demo_binary_0283() {
   if [[ -x "$BIN" ]]; then
@@ -36,7 +39,13 @@ ensure_src_gpu_demo_binary_0283() {
     echo "[0283-demo] missing binary: $BIN" >&2
     exit 127
   fi
-  if [[ -f scripts/build_src_mpcd_cuda_0288.sh ]]; then
+  if [[ -f scripts/build_src_mpcd_cuda_0291b.sh ]]; then
+    echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0291b.sh"
+    OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0291b.sh
+  elif [[ -f scripts/build_src_mpcd_cuda_0291.sh ]]; then
+    echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0291.sh"
+    OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0291.sh
+  elif [[ -f scripts/build_src_mpcd_cuda_0288.sh ]]; then
     echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0288.sh"
     OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0288.sh
   elif [[ -f scripts/build_src_mpcd_cuda_0286.sh ]]; then
@@ -170,6 +179,24 @@ print(f'[state] output={out} grid={Nx}x{Ny} activeCells={active_cells} skippedCe
 PY
 }
 
+
+src_gpu_bool_is_true_0283() {
+  local v
+  v="$(printf '%s' "${1:-0}" | tr '[:upper:]' '[:lower:]')"
+  case "$v" in
+    1|true|yes|on|enable|enabled) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+src_gpu_thermostat_enable_kv_0291b() {
+  if src_gpu_bool_is_true_0283 "$THERMOSTAT_ENABLE"; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 write_src_classic_common_params_0283() {
   local steps=$1 dt=$2 kbt=$3 seed=$4 summary_every=$5 dump_every=$6 threads=$7 rotation_angle=${8:-2.0943951023931953}
   cat <<PARAMS
@@ -186,7 +213,7 @@ resamplingEnable = false
 closedCapacityResponseEnable = false
 closedCapacityVirialKickEnable = false
 
-thermostatEnable = true
+thermostatEnable = $(src_gpu_thermostat_enable_kv_0291b)
 thermostatMode = cell_relative_rescale
 thermostatEvery = 1
 thermostatTargetKBT = -1.0
@@ -291,13 +318,31 @@ src_gpu_cuda_env_clear_0283() {
   export MPCD_CUDA_RESAMPLING_PERSISTENT_0240=0
 }
 
+
+src_gpu_cuda_env_enable_src_thermostat_0291b() {
+  # Argument: 1 means the caller wants the shared 0251->0260 fused consumer;
+  # 0 means a post-boundary persistent thermostat backend without shared fused
+  # consumption.  In both cases, THERMOSTAT_ENABLE=false disables the backend.
+  local shared_requested="${1:-0}"
+  if src_gpu_bool_is_true_0283 "$THERMOSTAT_ENABLE"; then
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+    if [[ "$shared_requested" == "1" ]]; then
+      export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=1
+    else
+      export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=0
+    fi
+  else
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=0
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=0
+  fi
+}
+
 src_gpu_cuda_env_periodic_resident_thermostat_0283() {
   src_gpu_cuda_env_clear_0283
   export MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260=1
   export MPCD_CUDA_STREAMING_PERIODIC_0245=1
   export MPCD_CUDA_STREAMING_PERIODIC_0245_DOWNLOAD_ALL=0
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=1
+  src_gpu_cuda_env_enable_src_thermostat_0291b 1
 }
 
 src_gpu_cuda_env_wall_resident_thermostat_0283() {
@@ -306,7 +351,7 @@ src_gpu_cuda_env_wall_resident_thermostat_0283() {
   export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+  src_gpu_cuda_env_enable_src_thermostat_0291b 0
   export MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1
   export MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=1
   export MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1
@@ -323,8 +368,7 @@ src_gpu_cuda_env_io_fullface_resident_thermostat_0283() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=1
+  src_gpu_cuda_env_enable_src_thermostat_0291b 1
 }
 
 src_gpu_cuda_env_io_segmented_resident_thermostat_0283() {
@@ -334,8 +378,7 @@ src_gpu_cuda_env_io_segmented_resident_thermostat_0283() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=1
+  src_gpu_cuda_env_enable_src_thermostat_0291b 1
 }
 
 src_gpu_cuda_env_circle_boundary_cpu_collision_cuda_0283() {
@@ -350,7 +393,7 @@ src_gpu_cuda_env_circle_boundary_cpu_collision_cuda_0283() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=0
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=0
-  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+  src_gpu_cuda_env_enable_src_thermostat_0291b 0
   export MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1
   export MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=1
   export MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1

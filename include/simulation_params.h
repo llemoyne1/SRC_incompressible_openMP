@@ -178,6 +178,23 @@ struct SimulationParams {
     double openBoundaryOutletHybridBlend = 0.0;   // 0: pure Neumann local profile, 1: balanced profile
     double openBoundaryOutletFeedbackGain = 0.0;  // 0: off, 1: cancel current projection flux imbalance
 
+    // CUDA SRC classic outlet regimes for particle reservoirs. These options
+    // only affect the particle-level inlet/outlet path; Q6 outlet handling keeps
+    // its own projection semantics.
+    //   neumann          : passive outlet; only particles that actually cross
+    //                      the outlet boundary are deleted.
+    //   equilibrium_flux : after natural outlet deletion, delete extra particles
+    //                      in the outlet layer to cancel the current net inlet
+    //                      particle gain. This is convenient, but coupled to inlet.
+    //   forced_flux      : delete a user-prescribed mass/particle flux from the
+    //                      outlet layer, independent of inlet. This is the mode
+    //                      intended for suction/drainage tests.
+    double openBoundaryOutletForcedMassFlux = 0.0;       // mass per unit time; target per step = flux*dt
+    double openBoundaryOutletForcedMassPerStep = 0.0;    // optional direct mass per step override
+    double openBoundaryOutletForcedParticleFlux = 0.0;   // particles per unit time; target per step = flux*dt
+    int openBoundaryOutletForcedParticlesPerStep = 0;    // optional direct particle-count override
+    int openBoundaryOutletForcedLayerCells = 1;          // outlet suction layer thickness in grid cells
+
     // Generic thermal solid-wall coupling. Solid walls are geometrically
     // impermeable; wall coupling is represented by aggregate virtual wall mass
     // and momentum in boundary-cut collision cells. The recommended path is
