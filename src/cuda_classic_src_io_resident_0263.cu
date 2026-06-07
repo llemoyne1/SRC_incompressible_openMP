@@ -273,6 +273,96 @@ __device__ inline int inlet_segment_index_for_cell_device_0263(const CudaClassic
     return -1;
 }
 
+
+__host__ __device__ inline double max2_device_0288(double a, double b) { return a > b ? a : b; }
+__host__ __device__ inline double min2_device_0288(double a, double b) { return a < b ? a : b; }
+
+__host__ __device__ inline bool interval_overlap_device_0288(double a0, double a1,
+                                                              double b0, double b1,
+                                                              double& lo,
+                                                              double& hi) {
+    lo = max2_device_0288(a0, b0);
+    hi = min2_device_0288(a1, b1);
+    return hi > lo;
+}
+
+__host__ __device__ inline int inlet_segment_index_for_cell_interval_core_0288(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int face,
+    double s0,
+    double s1)
+{
+    if (!cfg.segmentedEnable) return -1;
+    if (s1 < s0) { const double tmp = s0; s0 = s1; s1 = tmp; }
+    for (int k = 0; k < cfg.segmentCount; ++k) {
+        if (cfg.segmentFace[k] != face || cfg.segmentMode[k] != 1) continue;
+        double lo = 0.0, hi = 0.0;
+        if (interval_overlap_device_0288(s0, s1, cfg.segmentSMin[k], cfg.segmentSMax[k], lo, hi)) {
+            return k;
+        }
+    }
+    return -1;
+}
+
+__device__ inline int inlet_segment_index_for_cell_interval_device_0288(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int face,
+    double s0,
+    double s1)
+{
+    return inlet_segment_index_for_cell_interval_core_0288(cfg, face, s0, s1);
+}
+
+__host__ inline int inlet_segment_index_for_cell_interval_host_0288(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int face,
+    double s0,
+    double s1)
+{
+    return inlet_segment_index_for_cell_interval_core_0288(cfg, face, s0, s1);
+}
+
+__device__ inline bool clip_reservoir_cell_to_segment_device_0288(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int inletFace,
+    int segmentIndex,
+    double& x0,
+    double& x1,
+    double& y0,
+    double& y1,
+    double& areaFraction)
+{
+    areaFraction = 1.0;
+    if (segmentIndex < 0 || segmentIndex >= cfg.segmentCount) return true;
+    if (cfg.segmentFace[segmentIndex] != inletFace || cfg.segmentMode[segmentIndex] != 1) return false;
+
+    const double sMin = cfg.segmentSMin[segmentIndex];
+    const double sMax = cfg.segmentSMax[segmentIndex];
+    if (inletFace == 0 || inletFace == 1) {
+        const double h = cfg.yMax - cfg.yMin;
+        if (!(h > 0.0) || !(y1 > y0)) return false;
+        const double segY0 = cfg.yMin + sMin * h;
+        const double segY1 = cfg.yMin + sMax * h;
+        double cy0 = 0.0, cy1 = 0.0;
+        if (!interval_overlap_device_0288(y0, y1, segY0, segY1, cy0, cy1)) return false;
+        areaFraction = (cy1 - cy0) / (y1 - y0);
+        y0 = cy0; y1 = cy1;
+        return areaFraction > 0.0;
+    }
+    if (inletFace == 2 || inletFace == 3) {
+        const double w = cfg.xMax - cfg.xMin;
+        if (!(w > 0.0) || !(x1 > x0)) return false;
+        const double segX0 = cfg.xMin + sMin * w;
+        const double segX1 = cfg.xMin + sMax * w;
+        double cx0 = 0.0, cx1 = 0.0;
+        if (!interval_overlap_device_0288(x0, x1, segX0, segX1, cx0, cx1)) return false;
+        areaFraction = (cx1 - cx0) / (x1 - x0);
+        x0 = cx0; x1 = cx1;
+        return areaFraction > 0.0;
+    }
+    return true;
+}
+
 __device__ inline double smoothstep01_device_0263(double x) {
     x = clamp_device_0263(x, 0.0, 1.0);
     return x * x * (3.0 - 2.0 * x);
@@ -522,22 +612,29 @@ __device__ void insert_reservoir_cell_device_0263(
     CudaClassicSrcIoCounters0263& local)
 {
     if (targetN <= 0) return;
-    const double x0 = cfg.xMin + static_cast<double>(ix) * dx;
-    const double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
-    const double y0 = cfg.yMin + static_cast<double>(iy) * dy;
-    const double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+    double x0 = cfg.xMin + static_cast<double>(ix) * dx;
+    double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
+    double y0 = cfg.yMin + static_cast<double>(iy) * dy;
+    double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+    double areaFraction = 1.0;
+    if (!clip_reservoir_cell_to_segment_device_0288(cfg, inletFace, segmentIndex, x0, x1, y0, y1, areaFraction)) return;
+    int effectiveTargetN = targetN;
+    if (segmentIndex >= 0) {
+        effectiveTargetN = static_cast<int>(floor(static_cast<double>(targetN) * areaFraction + 0.5));
+        if (effectiveTargetN <= 0) return;
+    }
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
     local.inletReservoirCells += 1ULL;
-    local.inletReservoirTargetParticles += static_cast<unsigned long long>(targetN);
+    local.inletReservoirTargetParticles += static_cast<unsigned long long>(effectiveTargetN);
     const std::uint64_t seed = splitmix64_device_0263(cfg.rngSeed ^ (cfg.step * 0x9e3779b97f4a7c15ULL) ^
                                                       (ordinal * 0xbf58476d1ce4e5b9ULL) ^
                                                       face_tag_0263(inletFace));
     ++ordinal;
     Mt19937_64_Device_0263 rng{};
     mt_seed_device_0263(rng, seed);
-    for (int k = 0; k < targetN; ++k) {
+    for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
         const double ry = uniform01_device_0263(rng);
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
@@ -917,8 +1014,9 @@ __global__ void io_fullface_hard_reservoir_insert_kernel_0267(
             if (face == 0) {
                 for (int ix = 0; ix < cellsX; ++ix) {
                     for (int iy = 0; iy < ny; ++iy) {
-                        const double sseg = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                        const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                         insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                           fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
                                                           targetN, time, face, seg, inactiveCursor, ordinal, local);
@@ -929,8 +1027,9 @@ __global__ void io_fullface_hard_reservoir_insert_kernel_0267(
             } else if (face == 1) {
                 for (int ix = nx - cellsX; ix < nx; ++ix) {
                     for (int iy = 0; iy < ny; ++iy) {
-                        const double sseg = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                        const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                         insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                           fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
                                                           targetN, time, face, seg, inactiveCursor, ordinal, local);
@@ -941,8 +1040,9 @@ __global__ void io_fullface_hard_reservoir_insert_kernel_0267(
             } else if (face == 2) {
                 for (int iy = 0; iy < cellsY; ++iy) {
                     for (int ix = 0; ix < nx; ++ix) {
-                        const double sseg = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                        const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                         insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                           fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
                                                           targetN, time, face, seg, inactiveCursor, ordinal, local);
@@ -953,8 +1053,9 @@ __global__ void io_fullface_hard_reservoir_insert_kernel_0267(
             } else if (face == 3) {
                 for (int iy = ny - cellsY; iy < ny; ++iy) {
                     for (int ix = 0; ix < nx; ++ix) {
-                        const double sseg = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                        const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                         insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                           fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
                                                           targetN, time, face, seg, inactiveCursor, ordinal, local);
@@ -1105,22 +1206,29 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     CudaClassicSrcIoCounters0263& local)
 {
     if (targetN <= 0) return;
-    const double x0 = cfg.xMin + static_cast<double>(ix) * dx;
-    const double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
-    const double y0 = cfg.yMin + static_cast<double>(iy) * dy;
-    const double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+    double x0 = cfg.xMin + static_cast<double>(ix) * dx;
+    double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
+    double y0 = cfg.yMin + static_cast<double>(iy) * dy;
+    double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+    double areaFraction = 1.0;
+    if (!clip_reservoir_cell_to_segment_device_0288(cfg, inletFace, segmentIndex, x0, x1, y0, y1, areaFraction)) return;
+    int effectiveTargetN = targetN;
+    if (segmentIndex >= 0) {
+        effectiveTargetN = static_cast<int>(floor(static_cast<double>(targetN) * areaFraction + 0.5));
+        if (effectiveTargetN <= 0) return;
+    }
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
     local.inletReservoirCells += 1ULL;
-    local.inletReservoirTargetParticles += static_cast<unsigned long long>(targetN);
+    local.inletReservoirTargetParticles += static_cast<unsigned long long>(effectiveTargetN);
     const std::uint64_t seed = splitmix64_device_0263(cfg.rngSeed ^ (cfg.step * 0x9e3779b97f4a7c15ULL) ^
                                                       (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^
                                                       face_tag_0263(inletFace));
     Mt19937_64_Device_0263 rng{};
     mt_seed_device_0263(rng, seed);
     const std::uint64_t baseSlot = cellOrdinal * static_cast<std::uint64_t>(targetN);
-    for (int k = 0; k < targetN; ++k) {
+    for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
         const double ry = uniform01_device_0263(rng);
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
@@ -1258,8 +1366,9 @@ std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFul
         if (face == 0) {
             for (int ix = 0; ix < cellsX; ++ix) {
                 for (int iy = 0; iy < ny; ++iy) {
-                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
@@ -1269,8 +1378,9 @@ std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFul
         } else if (face == 1) {
             for (int ix = nx - cellsX; ix < nx; ++ix) {
                 for (int iy = 0; iy < ny; ++iy) {
-                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
@@ -1280,8 +1390,9 @@ std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFul
         } else if (face == 2) {
             for (int iy = 0; iy < cellsY; ++iy) {
                 for (int ix = 0; ix < nx; ++ix) {
-                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
@@ -1291,8 +1402,9 @@ std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFul
         } else if (face == 3) {
             for (int iy = ny - cellsY; iy < ny; ++iy) {
                 for (int ix = 0; ix < nx; ++ix) {
-                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
@@ -1325,8 +1437,9 @@ __device__ bool map_segmented_reservoir_cell_device_0269(
         if (face == 0) {
             for (int ix = 0; ix < cellsX; ++ix) {
                 for (int iy = 0; iy < ny; ++iy) {
-                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
@@ -1337,8 +1450,9 @@ __device__ bool map_segmented_reservoir_cell_device_0269(
         } else if (face == 1) {
             for (int ix = nx - cellsX; ix < nx; ++ix) {
                 for (int iy = 0; iy < ny; ++iy) {
-                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
-                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
@@ -1349,8 +1463,9 @@ __device__ bool map_segmented_reservoir_cell_device_0269(
         } else if (face == 2) {
             for (int iy = 0; iy < cellsY; ++iy) {
                 for (int ix = 0; ix < nx; ++ix) {
-                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
@@ -1361,8 +1476,9 @@ __device__ bool map_segmented_reservoir_cell_device_0269(
         } else if (face == 3) {
             for (int iy = ny - cellsY; iy < ny; ++iy) {
                 for (int ix = 0; ix < nx; ++ix) {
-                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
-                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_device_0288(cfg, face, s0, s1) != seg) continue;
                     const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
                     const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
                     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;

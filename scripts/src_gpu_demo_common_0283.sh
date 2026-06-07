@@ -17,7 +17,7 @@ src_gpu_demo_root() {
 ROOT_DIR="${ROOT_DIR:-$(src_gpu_demo_root)}"
 cd "$ROOT_DIR"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0281}"
+BIN="${BIN:-build/src_mpcd_base_cuda_0288}"
 THREADS="${THREADS:-8}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
 export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
@@ -36,7 +36,13 @@ ensure_src_gpu_demo_binary_0283() {
     echo "[0283-demo] missing binary: $BIN" >&2
     exit 127
   fi
-  if [[ -f scripts/build_src_mpcd_cuda_0281.sh ]]; then
+  if [[ -f scripts/build_src_mpcd_cuda_0288.sh ]]; then
+    echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0288.sh"
+    OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0288.sh
+  elif [[ -f scripts/build_src_mpcd_cuda_0286.sh ]]; then
+    echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0286.sh"
+    OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0286.sh
+  elif [[ -f scripts/build_src_mpcd_cuda_0281.sh ]]; then
     echo "[0283-demo] building $BIN with build_src_mpcd_cuda_0281.sh"
     OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0281.sh
   elif [[ -f scripts/build_src_mpcd_cuda_0275.sh ]]; then

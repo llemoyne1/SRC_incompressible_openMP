@@ -4,7 +4,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.s
 
 CASE_NAME="backward_step_io"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-4000}"; DT="${DT:-0.0008}"; KBT="${KBT:-0.001}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-15000}"; DT="${DT:-0.0008}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628304}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.08}"
 STEP_XMIN="${STEP_XMIN:-0.0}"; STEP_XMAX="${STEP_XMAX:-0.75}"; STEP_YMIN="${STEP_YMIN:-0.0}"; STEP_YMAX="${STEP_YMAX:-0.42}"

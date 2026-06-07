@@ -4,7 +4,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.s
 
 CASE_NAME="box_same_face_io"
 Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-96}"; NY="${NY:-96}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-30000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-3000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628303}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.08}"; UOUT="${UOUT:--0.08}"
 RUN_ROOT="${RUN_ROOT:-runs/demo_src_classic_cuda_box_same_face_io_0283}"
@@ -14,12 +14,6 @@ PARAMS_FILE="$RUN_ROOT/params/${CASE_NAME}.kv"
 OUT_DIR="$RUN_ROOT/output"
 LOG_FILE="$RUN_ROOT/logs/${CASE_NAME}.log"
 TIME_FILE="$RUN_ROOT/logs/${CASE_NAME}.time"
-# Same-face inlet/outlet is a closed-box recirculation demo.
-# During the initial transient the inlet reservoir can create particles faster
-# than the upper outlet segment deletes them, so the CUDA resident path needs a
-# generous inactive pool.  GPU append is intentionally disabled in the 0264
-# segmented fast path; preallocating the inactive pool is therefore the correct
-# demo-level fix.
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-$((GAMMA * NX * NY))}"
 
 generate_demo_state_0283 "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" zero 0.0 0.0 0.0 0.0 -1.0 0.0 -1.0 "$INACTIVE_SLOTS" none
