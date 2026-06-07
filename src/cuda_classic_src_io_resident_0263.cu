@@ -1082,6 +1082,7 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     int targetN,
     double time,
     int inletFace,
+    int segmentIndex,
     std::uint64_t cellOrdinal,
     CudaClassicSrcIoCounters0263& local)
 {
@@ -1107,12 +1108,22 @@ __device__ void insert_reservoir_cell_pool_device_0268(
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
         const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
         double ux = 0.0, uy = 0.0;
-        inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
+        double particleMass = cfg.refMass;
+        std::uint32_t particleType = cfg.refType;
+        if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
+            const double fRamp = ramp_factor_device_0263(cfg, time);
+            ux = fRamp * cfg.segmentUx[segmentIndex];
+            uy = fRamp * cfg.segmentUy[segmentIndex];
+            particleMass = cfg.segmentMass[segmentIndex];
+            particleType = cfg.segmentType[segmentIndex];
+        } else {
+            inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
+        }
         activate_reservoir_pool_slot_device_0268(x, y, vx, vy, mass, type, role,
                                                  fluidRole, inactiveRole,
                                                  inactiveIndices, inactiveCount,
                                                  baseSlot + static_cast<std::uint64_t>(k),
-                                                 xp, yp, ux, uy, cfg.refMass, cfg.refType, local);
+                                                 xp, yp, ux, uy, particleMass, particleType, local);
         if (local.overflowFlag) return;
     }
 }
@@ -1184,7 +1195,7 @@ __global__ void io_fullface_hard_reservoir_insert_pool_kernel_0268(
                                            fluidRole, inactiveRole,
                                            inactiveIndices, inactiveCount,
                                            cfg, ix, iy, dx, dy,
-                                           targetN, time, cfg.inletFace,
+                                           targetN, time, cfg.inletFace, -1,
                                            cellOrdinal, local);
     merge_reservoir_insert_counter_0268(counters, local);
 }
@@ -1197,6 +1208,194 @@ std::uint64_t fullface_reservoir_cell_count_host_0268(const CudaClassicSrcIoFull
     if (cfg.inletFace == 0 || cfg.inletFace == 1) return static_cast<std::uint64_t>(cellsX) * static_cast<std::uint64_t>(ny);
     if (cfg.inletFace == 2 || cfg.inletFace == 3) return static_cast<std::uint64_t>(cellsY) * static_cast<std::uint64_t>(nx);
     return 0ULL;
+}
+
+
+bool reservoir_cell_center_inside_immersed_host_0269(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    if (!cfg.immersedRectangleEnabled) return false;
+    return xc >= cfg.immersedXMin && xc <= cfg.immersedXMax && yc >= cfg.immersedYMin && yc <= cfg.immersedYMax;
+}
+
+int inlet_segment_index_for_cell_host_0269(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
+    if (!cfg.segmentedEnable) return -1;
+    for (int k = 0; k < cfg.segmentCount; ++k) {
+        if (cfg.segmentFace[k] == face && cfg.segmentMode[k] == 1 &&
+            s >= cfg.segmentSMin[k] && s <= cfg.segmentSMax[k]) {
+            return k;
+        }
+    }
+    return -1;
+}
+
+std::uint64_t segmented_reservoir_cell_count_host_0269(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = std::max(1, std::min(cfg.inletReservoirCells, nx));
+    const int cellsY = std::max(1, std::min(cfg.inletReservoirCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    std::uint64_t out = 0ULL;
+    for (int seg = 0; seg < cfg.segmentCount; ++seg) {
+        if (cfg.segmentMode[seg] != 1) continue;
+        const int face = cfg.segmentFace[seg];
+        if (face == 0) {
+            for (int ix = 0; ix < cellsX; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
+                    ++out;
+                }
+            }
+        } else if (face == 1) {
+            for (int ix = nx - cellsX; ix < nx; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
+                    ++out;
+                }
+            }
+        } else if (face == 2) {
+            for (int iy = 0; iy < cellsY; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
+                    ++out;
+                }
+            }
+        } else if (face == 3) {
+            for (int iy = ny - cellsY; iy < ny; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_host_0269(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) continue;
+                    ++out;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+__device__ bool map_segmented_reservoir_cell_device_0269(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    std::uint64_t wantedOrdinal,
+    int& outIx,
+    int& outIy,
+    int& outFace,
+    int& outSegment)
+{
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, nx));
+    const int cellsY = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    std::uint64_t ordinal = 0ULL;
+    for (int seg = 0; seg < cfg.segmentCount; ++seg) {
+        if (cfg.segmentMode[seg] != 1) continue;
+        const int face = cfg.segmentFace[seg];
+        if (face == 0) {
+            for (int ix = 0; ix < cellsX; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
+                    if (ordinal == wantedOrdinal) { outIx = ix; outIy = iy; outFace = face; outSegment = seg; return true; }
+                    ++ordinal;
+                }
+            }
+        } else if (face == 1) {
+            for (int ix = nx - cellsX; ix < nx; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
+                    if (ordinal == wantedOrdinal) { outIx = ix; outIy = iy; outFace = face; outSegment = seg; return true; }
+                    ++ordinal;
+                }
+            }
+        } else if (face == 2) {
+            for (int iy = 0; iy < cellsY; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
+                    if (ordinal == wantedOrdinal) { outIx = ix; outIy = iy; outFace = face; outSegment = seg; return true; }
+                    ++ordinal;
+                }
+            }
+        } else if (face == 3) {
+            for (int iy = ny - cellsY; iy < ny; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                    const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+                    const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+                    if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) continue;
+                    if (ordinal == wantedOrdinal) { outIx = ix; outIy = iy; outFace = face; outSegment = seg; return true; }
+                    ++ordinal;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+__global__ void io_segmented_hard_reservoir_insert_pool_kernel_0269(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const std::uint64_t cellOrdinal = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                                      static_cast<std::uint64_t>(threadIdx.x);
+    int ix = 0;
+    int iy = 0;
+    int face = -1;
+    int seg = -1;
+    if (!map_segmented_reservoir_cell_device_0269(cfg, cellOrdinal, ix, iy, face, seg)) return;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    const int targetN = cfg.inletTargetOccupancy;
+    const double time = static_cast<double>(cfg.step) * cfg.dt;
+
+    CudaClassicSrcIoCounters0263 local{};
+    insert_reservoir_cell_pool_device_0268(x, y, vx, vy, mass, type, role,
+                                           fluidRole, inactiveRole,
+                                           inactiveIndices, inactiveCount,
+                                           cfg, ix, iy, dx, dy,
+                                           targetN, time, face, seg,
+                                           cellOrdinal, local);
+    merge_reservoir_insert_counter_0268(counters, local);
 }
 
 CudaParticleState& shared_state_0263() {
@@ -1736,10 +1935,67 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
             view.n, view.x, view.y, view.vx, view.vy, view.role,
             kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
         check_cuda_0263(cudaGetLastError(), "io_segmented_boundary_particles_kernel_0267 launch");
-        io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
-            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
-            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
-        check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_insert_kernel_0267 launch");
+
+        const bool useSegmentedPool0269 = !env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_DISABLE_SEGMENTED_POOL");
+        if (useSegmentedPool0269) {
+            if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0269 segmented inactive-prefix pool");
+            }
+            unsigned int* dInactiveFlags = nullptr;
+            unsigned int* dInactivePrefix = nullptr;
+            std::uint64_t* dInactiveIndices = nullptr;
+            check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                            "allocate 0269 segmented inactive flags");
+            check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                            "allocate 0269 segmented inactive prefix");
+            check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(view.n)),
+                            "allocate 0269 segmented inactive index pool");
+            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_POOL_THREADS", boundaryThreads);
+            const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
+                                               static_cast<std::uint64_t>(poolThreads);
+            if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0269 segmented inactive pool launch");
+            }
+            io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                view.n, view.role, kParticleRoleInactive, dInactiveFlags);
+            check_cuda_0263(cudaGetLastError(), "io_segmented_mark_inactive_flags_kernel_0269 launch");
+            thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + view.n, dInactivePrefix);
+            check_cuda_0263(cudaGetLastError(), "io_segmented inactive prefix scan 0269");
+            io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
+            check_cuda_0263(cudaGetLastError(), "io_segmented_compact_inactive_slots_kernel_0269 launch");
+            unsigned int lastFlag = 0u;
+            unsigned int lastPrefix = 0u;
+            if (view.n > 0u) {
+                check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                "copy 0269 segmented inactive last flag");
+                check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                "copy 0269 segmented inactive last prefix");
+            }
+            const unsigned int inactiveCount = lastPrefix + lastFlag;
+            const std::uint64_t reservoirCells = segmented_reservoir_cell_count_host_0269(cfg);
+            if (reservoirCells > 0ULL) {
+                const int insertThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_SEGMENTED_INSERT_THREADS", 128);
+                const std::uint64_t insertBlocks64 = (reservoirCells + static_cast<std::uint64_t>(insertThreads) - 1u) /
+                                                     static_cast<std::uint64_t>(insertThreads);
+                if (insertBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0269 segmented insert launch");
+                }
+                io_segmented_hard_reservoir_insert_pool_kernel_0269<<<static_cast<unsigned int>(insertBlocks64), insertThreads>>>(
+                    view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+                    kParticleRoleFluid, kParticleRoleInactive, cfg,
+                    dInactiveIndices, inactiveCount, dCounters);
+                check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_insert_pool_kernel_0269 launch");
+            }
+            check_cuda_0263(cudaFree(dInactiveFlags), "free 0269 segmented inactive flags");
+            check_cuda_0263(cudaFree(dInactivePrefix), "free 0269 segmented inactive prefix");
+            check_cuda_0263(cudaFree(dInactiveIndices), "free 0269 segmented inactive index pool");
+        } else {
+            io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
+                view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+                kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+            check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_insert_kernel_0267 launch");
+        }
     }
     check_cuda_0263(cudaDeviceSynchronize(), serialBoundary0267 ?
                     "io_segmented_hard_reservoir_kernel_0264 synchronize" :
