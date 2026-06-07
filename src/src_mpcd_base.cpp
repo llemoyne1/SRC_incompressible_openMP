@@ -5,6 +5,7 @@
 #include "cuda_streaming_wall_simple_0246.h"
 #include "cuda_streaming_piston_0247b.h"
 #include "cuda_immersed_rectangle_0247.h"
+#include "cuda_immersed_circle_0284.h"
 #include "cuda_inlet_outlet_fullface_0249a.h"
 #include "cuda_inlet_outlet_segmented_0249b.h"
 #include "cuda_shared_particle_state_0251.h"
@@ -407,6 +408,31 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaImmersedRectangle0247Diagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    row.immersedHits = d.hits;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaImmersedCircle0284Diagnostics& d) {
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -981,6 +1007,15 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             record_cuda_resident_profile_0266(params.outputDir, step, "immersed_rectangle_0247", "immersed_solid", cudaImmersed0247);
             if (cudaImmersed0247.handled) {
                 result.immersed.hits = cudaImmersed0247.hits;
+                handledByCudaImmersed = true;
+            }
+        }
+        if (!handledByCudaImmersed && cuda_immersed_circle_0284_requested()) {
+            const CudaImmersedCircle0284Diagnostics cudaImmersed0284 =
+                try_apply_cuda_immersed_circle_0284(state, params, result.domain, time);
+            record_cuda_resident_profile_0266(params.outputDir, step, "immersed_circle_0284", "immersed_solid", cudaImmersed0284);
+            if (cudaImmersed0284.handled) {
+                result.immersed.hits = cudaImmersed0284.hits;
                 handledByCudaImmersed = true;
             }
         }

@@ -118,6 +118,8 @@ struct DeviceConfig {
     int immersedRectangleEnabled;
     int immersedFractionSamples;
     double immersedXMin, immersedXMax, immersedYMin, immersedYMax;
+    int immersedCircleEnabled;
+    double immersedCircleCx, immersedCircleCy, immersedCircleR;
     double immersedWallUx, immersedWallUy;
     int fusedStreamDeposit0274;
     int fusedStreamMode0274;
@@ -304,6 +306,36 @@ __device__ double immersed_rectangle_fraction_device(int ix, int iy, DeviceConfi
     return static_cast<double>(inside) / static_cast<double>(denom);
 }
 
+
+__device__ bool point_inside_immersed_circle_device(double x, double y, DeviceConfig cfg) {
+    const double dx = x - cfg.immersedCircleCx;
+    const double dy = y - cfg.immersedCircleCy;
+    return dx * dx + dy * dy <= cfg.immersedCircleR * cfg.immersedCircleR;
+}
+
+__device__ double immersed_circle_fraction_device(int ix, int iy, DeviceConfig cfg) {
+    if (!cfg.immersedCircleEnabled) return 0.0;
+    const int ns = cfg.immersedFractionSamples > 0 ? cfg.immersedFractionSamples : 1;
+    const double x0 = static_cast<double>(ix) * cfg.dx - cfg.shiftX;
+    const double y0 = static_cast<double>(iy) * cfg.dy - cfg.shiftY;
+    int inside = 0;
+    int fluidSamples = 0;
+    const int total = ns * ns;
+    for (int sy = 0; sy < ns; ++sy) {
+        double y = y0 + (static_cast<double>(sy) + 0.5) * cfg.dy / static_cast<double>(ns);
+        if (cfg.periodicY) y = wrap_periodic(y, cfg.Ly);
+        for (int sx = 0; sx < ns; ++sx) {
+            double x = x0 + (static_cast<double>(sx) + 0.5) * cfg.dx / static_cast<double>(ns);
+            if (cfg.periodicX) x = wrap_periodic(x, cfg.Lx);
+            if (!point_inside_domain_device(x, y, cfg)) continue;
+            ++fluidSamples;
+            if (point_inside_immersed_circle_device(x, y, cfg)) ++inside;
+        }
+    }
+    const int denom = fluidSamples > 0 ? fluidSamples : total;
+    return static_cast<double>(inside) / static_cast<double>(denom);
+}
+
 __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
                                                          DeviceConfig cfg,
                                                          double* cellMass,
@@ -347,6 +379,11 @@ __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
     }
     if (cfg.immersedRectangleEnabled) {
         const double solidFraction = immersed_rectangle_fraction_device(ix, iy, cfg);
+        add_virtual_wall_mass_momentum_device(solidFraction * fullCellArea, fullCellArea,
+                                              cfg.immersedWallUx, cfg.immersedWallUy, cfg, mass, px, py);
+    }
+    if (cfg.immersedCircleEnabled) {
+        const double solidFraction = immersed_circle_fraction_device(ix, iy, cfg);
         add_virtual_wall_mass_momentum_device(solidFraction * fullCellArea, fullCellArea,
                                               cfg.immersedWallUx, cfg.immersedWallUy, cfg, mass, px, py);
     }
@@ -742,6 +779,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.immersedXMax = config.immersedXMax;
     cfg.immersedYMin = config.immersedYMin;
     cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedCircleEnabled = config.immersedCircleEnabled;
+    cfg.immersedCircleCx = config.immersedCircleCx;
+    cfg.immersedCircleCy = config.immersedCircleCy;
+    cfg.immersedCircleR = config.immersedCircleR;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
     cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
@@ -771,7 +812,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
@@ -1049,6 +1090,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedXMax = config.immersedXMax;
     cfg.immersedYMin = config.immersedYMin;
     cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedCircleEnabled = config.immersedCircleEnabled;
+    cfg.immersedCircleCx = config.immersedCircleCx;
+    cfg.immersedCircleCy = config.immersedCircleCy;
+    cfg.immersedCircleR = config.immersedCircleR;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
     cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
@@ -1078,7 +1123,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
@@ -1307,6 +1352,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedXMax = config.immersedXMax;
     cfg.immersedYMin = config.immersedYMin;
     cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedCircleEnabled = config.immersedCircleEnabled;
+    cfg.immersedCircleCx = config.immersedCircleCx;
+    cfg.immersedCircleCy = config.immersedCircleCy;
+    cfg.immersedCircleR = config.immersedCircleR;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
     cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
@@ -1336,7 +1385,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
@@ -1617,6 +1666,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.immersedXMax = config.immersedXMax;
     cfg.immersedYMin = config.immersedYMin;
     cfg.immersedYMax = config.immersedYMax;
+    cfg.immersedCircleEnabled = config.immersedCircleEnabled;
+    cfg.immersedCircleCx = config.immersedCircleCx;
+    cfg.immersedCircleCy = config.immersedCircleCy;
+    cfg.immersedCircleR = config.immersedCircleR;
     cfg.immersedWallUx = config.immersedWallUx;
     cfg.immersedWallUy = config.immersedWallUy;
     cfg.fusedStreamDeposit0274 = config.fusedStreamDeposit0274;
@@ -1646,7 +1699,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         checkKernelLaunch0273();
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
             checkKernelLaunch0273();
         }

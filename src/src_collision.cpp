@@ -643,6 +643,10 @@ bool cuda_immersed_rect_collision_0254_enabled() {
     return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254", false);
 }
 
+bool cuda_immersed_circle_collision_0284_enabled() {
+    return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284", false);
+}
+
 bool cuda_piston_collision_0255_enabled() {
     return persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_PISTON_0255", false);
 }
@@ -667,8 +671,14 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
         if (reason != nullptr) *reason = why;
         return false;
     };
-    if (immersed_solid_enabled(params) && !cuda_immersed_rect_collision_0254_enabled()) {
-        return fail("immersed solid requires MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=1");
+    if (immersed_solid_enabled(params)) {
+        const ImmersedSolidShape cudaShape = immersed_solid_shape(params);
+        const bool cudaImmersedCollisionEnabled =
+            (cudaShape == ImmersedSolidShape::Rectangle && cuda_immersed_rect_collision_0254_enabled()) ||
+            (cudaShape == ImmersedSolidShape::Circle && cuda_immersed_circle_collision_0284_enabled());
+        if (!cudaImmersedCollisionEnabled) {
+            return fail("immersed solid requires a matching CUDA collision flag: RECT_0254 for rectangles, CIRCLE_0284 for circles");
+        }
     }
     const bool fullDomainBounds = is_full_domain_bounds(grid, domain, nullptr);
     if (!fullDomainBounds && !cuda_piston_collision_0255_enabled()) {
@@ -738,6 +748,32 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
             return fail("segmented resident 0264 invalid wall accommodation/mass");
         }
         if (reason != nullptr) *reason = "supported_segmented_static_box_0264";
+        return true;
+    }
+
+    if (cuda_immersed_circle_collision_0284_enabled()) {
+        if (!immersed_solid_enabled(params)) return fail("immersed-circle 0284 requires immersedSolidEnable=true");
+        if (immersed_solid_shape(params) != ImmersedSolidShape::Circle) {
+            return fail("immersed-circle 0284 supports circle only");
+        }
+        if (std::abs(params.immersedSolidVx) > 1.0e-15 ||
+            std::abs(params.immersedSolidVy) > 1.0e-15 ||
+            std::abs(params.immersedSolidOmega) > 1.0e-15) {
+            return fail("immersed-circle 0284 supports static circles only");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("immersed-circle 0284 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("immersed-circle 0284 invalid wall accommodation/mass");
+        }
+        if (!(params.immersedSolidR > 0.0)) {
+            return fail("immersed-circle 0284 requires immersedSolidR>0");
+        }
+        if (params.immersedSolidFractionSamples <= 0) {
+            return fail("immersed-circle 0284 requires positive fraction samples");
+        }
+        if (reason != nullptr) *reason = "supported_immersed_circle_0284";
         return true;
     }
 
@@ -955,7 +991,9 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.wallTopEnabled = face_has_wall_coupling(params.bcTop, params) ? 1 : 0;
     const bool cudaVirtualWallOrImmersed0273 =
         (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled ||
-         (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Rectangle));
+         (immersed_solid_enabled(params) &&
+          (immersed_solid_shape(params) == ImmersedSolidShape::Rectangle ||
+           immersed_solid_shape(params) == ImmersedSolidShape::Circle)));
     const bool disableExplicitGammaRoleFastPath0273 =
         persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_EXPLICIT_GAMMA_ROLE_FASTPATH_0273", false);
     double inferredGammaForCudaWall = 0.0;
@@ -986,6 +1024,15 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         const double cx = 0.5 * (cfg.immersedXMin + cfg.immersedXMax);
         const double cy = 0.5 * (cfg.immersedYMin + cfg.immersedYMax);
         immersed_solid_wall_velocity(params, cx, cy, immersedTime, cfg.immersedWallUx, cfg.immersedWallUy);
+    }
+    if (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Circle) {
+        cfg.immersedCircleEnabled = 1;
+        cfg.immersedFractionSamples = std::max(1, params.immersedSolidFractionSamples);
+        const double immersedTime = static_cast<double>(step) * params.dt;
+        immersed_solid_circle_center(params, immersedTime, cfg.immersedCircleCx, cfg.immersedCircleCy);
+        cfg.immersedCircleR = params.immersedSolidR;
+        immersed_solid_wall_velocity(params, cfg.immersedCircleCx, cfg.immersedCircleCy, immersedTime,
+                                     cfg.immersedWallUx, cfg.immersedWallUy);
     }
     cfg.targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
     cfg.thermostatMinParticles = params.thermostatMinParticles;

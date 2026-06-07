@@ -45,17 +45,21 @@ struct CudaPersistentMpcdStepConfig {
     double wallUxTop = 0.0;
     double wallUyTop = 0.0;
 
-    // 0254: deterministic immersed-rectangle virtual-wall contribution for
+    // 0254/0284: deterministic immersed-solid virtual-wall contribution for
     // the SRC collision. This mirrors the CPU collision's
-    // immersed_solid_fraction_in_cell() term for the static rectangle subset
-    // used by open_rect_obstacle_full. Thermal noise, moving solids and
-    // circular/rotating solids remain CPU-only until dedicated validation.
+    // immersed_solid_fraction_in_cell() term for the validated static
+    // rectangle and circle subsets. Thermal noise and moving/rotating solids
+    // remain CPU-only until dedicated validation.
     int immersedRectangleEnabled = 0;
     int immersedFractionSamples = 4;
     double immersedXMin = 0.0;
     double immersedXMax = 0.0;
     double immersedYMin = 0.0;
     double immersedYMax = 0.0;
+    int immersedCircleEnabled = 0;
+    double immersedCircleCx = 0.0;
+    double immersedCircleCy = 0.0;
+    double immersedCircleR = 0.0;
     double immersedWallUx = 0.0;
     double immersedWallUy = 0.0;
 

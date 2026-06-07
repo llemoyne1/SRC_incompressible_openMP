@@ -24,6 +24,7 @@ ROLE_INACTIVE = 0
 ROLE_FLUID = 1
 
 Rect = Tuple[float, float, float, float]
+Circle = Tuple[float, float, float]
 
 
 def positive_int(text: str) -> int:
@@ -57,6 +58,16 @@ def parse_rect(text: str) -> Rect:
     return xmin, xmax, ymin, ymax
 
 
+def parse_circle(text: str) -> Circle:
+    parts = [float(x) for x in text.replace(",", " ").split()]
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("solid circle must be 'cx,cy,r'")
+    cx, cy, r = parts
+    if not (r > 0.0):
+        raise argparse.ArgumentTypeError("invalid solid circle radius")
+    return cx, cy, r
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate deterministic validation .smpcd V2 states.")
     p.add_argument("--output", required=True)
@@ -85,6 +96,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--active-y-min", type=float, default=0.0)
     p.add_argument("--active-y-max", type=float, default=-1.0, help="negative means Ly")
     p.add_argument("--solid-rect", action="append", type=parse_rect, default=[])
+    p.add_argument("--solid-circle", action="append", type=parse_circle, default=[])
     p.add_argument(
         "--inactive-slots",
         type=int,
@@ -138,6 +150,21 @@ def in_rect(x: float, y: float, rect: Rect) -> bool:
 
 def in_any_rect(x: float, y: float, rects: Iterable[Rect]) -> bool:
     return any(in_rect(x, y, r) for r in rects)
+
+
+def in_circle(x: float, y: float, circle: Circle) -> bool:
+    cx, cy, r = circle
+    dx = x - cx
+    dy = y - cy
+    return dx * dx + dy * dy <= r * r
+
+
+def in_any_circle(x: float, y: float, circles: Iterable[Circle]) -> bool:
+    return any(in_circle(x, y, c) for c in circles)
+
+
+def in_any_solid(x: float, y: float, rects: Iterable[Rect], circles: Iterable[Circle]) -> bool:
+    return in_any_rect(x, y, rects) or in_any_circle(x, y, circles)
 
 
 def base_velocity(args: argparse.Namespace, xp: float, yp: float) -> Tuple[float, float]:
@@ -203,7 +230,7 @@ def main() -> int:
             if cx < ax0 or cx > ax1:
                 skipped_cells += 1
                 continue
-            if args.skip_cell_if_center_in_solid and in_any_rect(cx, cy, args.solid_rect):
+            if args.skip_cell_if_center_in_solid and in_any_solid(cx, cy, args.solid_rect, args.solid_circle):
                 skipped_cells += 1
                 continue
             x0 = i * dx
@@ -217,7 +244,7 @@ def main() -> int:
                     if xp < ax0 or xp > ax1 or yp < ay0 or yp > ay1:
                         rejected_samples += 1
                         continue
-                    if in_any_rect(xp, yp, args.solid_rect):
+                    if in_any_solid(xp, yp, args.solid_rect, args.solid_circle):
                         rejected_samples += 1
                         continue
                     accepted = True

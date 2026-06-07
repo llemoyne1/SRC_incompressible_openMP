@@ -1,0 +1,2 @@
+case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
+open_circle_obstacle_classic,3.628419373,2.101341172,1.7267159761337412,3.69,2.24,1.6473214285714284,0,76,PASS

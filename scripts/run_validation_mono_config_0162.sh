@@ -303,6 +303,87 @@ $(write_resampling_block)
 PARAMS
 }
 
+write_params_open_circle_obstacle_classic() {
+  local label=$1 out_dir=$2 params=$3 state=$4
+  cat > "$params" <<PARAMS
+inputState = $state
+outputDir = $out_dir
+
+Lx = 2.0
+Ly = 1.0
+Nx = $NX
+Ny = $NY
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = $DT
+nSteps = $STEPS
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = inlet
+bcRight = outlet
+bcBottom = solid
+bcTop = solid
+
+inletUxLeft = ${OCIRC_INLET_UX:-0.08}
+inletUyLeft = 0.0
+inletVelocityRampEnable = true
+inletVelocityRampStartTime = 0.0
+inletVelocityRampEndTime = ${OCIRC_RAMP_END_TIME:-0.25}
+inletVelocityRampInitialFactor = 0.2
+inletVelocityRampFinalFactor = 1.0
+inletVelocityRampProfile = smoothstep
+inletVelocitySpatialProfile = flat_taper_y
+inletVelocityWallTaperCells = 2.0
+inletKBT = -1.0
+inletThermalNoise = ${INLET_THERMAL_NOISE:-0.0}
+inletInjectionMode = hard_cell_density
+inletReservoirMode = hard_cell_density
+inletReservoirCells = ${OCIRC_RESERVOIR_CELLS:-3}
+inletTargetOccupancy = $GAMMA
+inletHardCellVelocityMean = true
+inletHardCellThermalRescale = true
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+openBoundaryOutletMode = hybrid
+openBoundaryOutletHybridBlend = ${OCIRC_OUTLET_BLEND:-0.0}
+openBoundaryOutletFeedbackGain = 0.0
+
+projectionOperator = elliptic_fv_cg
+projectionImmersedSolidMaskEnable = true
+projectionImmersedSolidCloseCutFaces = true
+projectionImmersedSolidFluidFractionThreshold = 0.5
+projectionAllowUnmaskedImmersedSolid = false
+
+immersedSolidEnable = true
+immersedSolidShape = circle
+immersedSolidCx = ${CIRCLE_CX:-0.65}
+immersedSolidCy = ${CIRCLE_CY:-0.50}
+immersedSolidR = ${CIRCLE_R:-0.12}
+immersedSolidFractionSamples = 4
+immersedSolidVx = 0.0
+immersedSolidVy = 0.0
+immersedSolidWallUx = 0.0
+immersedSolidWallUy = 0.0
+immersedSolidOmega = 0.0
+
+wallAccommodation = 1.0
+wallVpGamma = $GAMMA
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-0.0}
+
+$(write_common_runtime_block)
+$(write_resampling_block)
+PARAMS
+}
+
 write_params_periodic_rect_obstacle_classic() {
   local label=$1 out_dir=$2 params=$3 state=$4
   cat > "$params" <<PARAMS
@@ -342,6 +423,62 @@ immersedSolidXMin = 0.35
 immersedSolidXMax = 0.65
 immersedSolidYMin = 0.35
 immersedSolidYMax = 0.65
+immersedSolidFractionSamples = 4
+immersedSolidVx = 0.0
+immersedSolidVy = 0.0
+immersedSolidWallUx = 0.0
+immersedSolidWallUy = 0.0
+immersedSolidOmega = 0.0
+
+wallAccommodation = 1.0
+wallVpGamma = $GAMMA
+wallVpMass = 1.0
+wallKBT = -1.0
+wallThermalNoise = ${WALL_THERMAL_NOISE:-0.0}
+
+$(write_common_runtime_block)
+$(write_resampling_block)
+PARAMS
+}
+
+write_params_periodic_circle_obstacle_classic() {
+  local label=$1 out_dir=$2 params=$3 state=$4
+  cat > "$params" <<PARAMS
+inputState = $state
+outputDir = $out_dir
+
+Lx = 1.0
+Ly = 1.0
+Nx = $NX
+Ny = $NY
+
+fluidXMin0 = 0.0
+fluidXMax0 = -1.0
+fluidYMin0 = 0.0
+fluidYMax0 = -1.0
+
+dt = $DT
+nSteps = $STEPS
+
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = periodic
+bcTop = periodic
+
+projectionOperator = elliptic_fv_cg
+projectionImmersedSolidMaskEnable = true
+projectionImmersedSolidCloseCutFaces = true
+projectionImmersedSolidFluidFractionThreshold = 0.5
+projectionAllowUnmaskedImmersedSolid = false
+
+immersedSolidEnable = true
+immersedSolidShape = circle
+immersedSolidCx = ${CIRCLE_CX:-0.50}
+immersedSolidCy = ${CIRCLE_CY:-0.50}
+immersedSolidR = ${CIRCLE_R:-0.15}
 immersedSolidFractionSamples = 4
 immersedSolidVx = 0.0
 immersedSolidVy = 0.0
@@ -526,6 +663,16 @@ prepare_case() {
       state=$(make_state "$case_name" --Lx 1.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+55)) --flow-mode taylor_green --flow-amplitude ${SOLID_CLASSIC_U0:-0.04} --solid-rect 0.35,0.65,0.35,0.65)
       write_params_periodic_rect_obstacle_classic "$case_name" "$out_dir" "$params" "$state"
       desc="periodic classic SRC validation with static rectangular immersed solid, Q6/resampling disabled by runner"
+      ;;
+    periodic_circle_obstacle_classic)
+      state=$(make_state "$case_name" --Lx 1.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+66)) --flow-mode taylor_green --flow-amplitude ${SOLID_CLASSIC_U0:-0.04} --solid-circle ${CIRCLE_CX:-0.50},${CIRCLE_CY:-0.50},${CIRCLE_R:-0.15})
+      write_params_periodic_circle_obstacle_classic "$case_name" "$out_dir" "$params" "$state"
+      desc="periodic classic SRC validation with static circular immersed solid, Q6/resampling disabled by runner"
+      ;;
+    open_circle_obstacle_classic)
+      state=$(make_state "$case_name" --Lx 2.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+77)) --flow-mode uniform --mean-ux ${OCIRC_INITIAL_UX:-0.03} --solid-circle ${CIRCLE_CX:-0.65},${CIRCLE_CY:-0.50},${CIRCLE_R:-0.12})
+      write_params_open_circle_obstacle_classic "$case_name" "$out_dir" "$params" "$state"
+      desc="inlet/outlet channel with static circular immersed solid, classic SRC validation, Q6/resampling disabled by runner"
       ;;
     segmented_u_turn_full)
       state=$(make_state "$case_name" --Lx 1.0 --Ly 1.0 --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" --kBT "$KBT" --seed $((SEED+44)) --flow-mode zero)

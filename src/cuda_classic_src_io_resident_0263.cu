@@ -136,6 +136,10 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double immersedXMax = 0.0;
     double immersedYMin = 0.0;
     double immersedYMax = 0.0;
+    int immersedCircleEnabled = 0;
+    double immersedCircleCx = 0.0;
+    double immersedCircleCy = 0.0;
+    double immersedCircleR = 0.0;
     int segmentedEnable = 0;
     int segmentCount = 0;
     int segmentFace[kOpenBoundaryMaxSegments]{};
@@ -398,9 +402,23 @@ __device__ bool point_in_inlet_reservoir_device_0263(double x, double y, const C
 }
 
 
+__host__ __device__ bool reservoir_cell_center_inside_immersed_core_0285(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    if (cfg.immersedRectangleEnabled) {
+        if (xc >= cfg.immersedXMin && xc <= cfg.immersedXMax &&
+            yc >= cfg.immersedYMin && yc <= cfg.immersedYMax) {
+            return true;
+        }
+    }
+    if (cfg.immersedCircleEnabled) {
+        const double dx = xc - cfg.immersedCircleCx;
+        const double dy = yc - cfg.immersedCircleCy;
+        return dx * dx + dy * dy <= cfg.immersedCircleR * cfg.immersedCircleR;
+    }
+    return false;
+}
+
 __device__ bool reservoir_cell_center_inside_immersed_device_0263(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
-    if (!cfg.immersedRectangleEnabled) return false;
-    return xc >= cfg.immersedXMin && xc <= cfg.immersedXMax && yc >= cfg.immersedYMin && yc <= cfg.immersedYMax;
+    return reservoir_cell_center_inside_immersed_core_0285(xc, yc, cfg);
 }
 
 __global__ void io_fullface_force_stream_kernel_0263(
@@ -1212,8 +1230,7 @@ std::uint64_t fullface_reservoir_cell_count_host_0268(const CudaClassicSrcIoFull
 
 
 bool reservoir_cell_center_inside_immersed_host_0269(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
-    if (!cfg.immersedRectangleEnabled) return false;
-    return xc >= cfg.immersedXMin && xc <= cfg.immersedXMax && yc >= cfg.immersedYMin && yc <= cfg.immersedYMax;
+    return reservoir_cell_center_inside_immersed_core_0285(xc, yc, cfg);
 }
 
 int inlet_segment_index_for_cell_host_0269(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
@@ -1502,6 +1519,11 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     if (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Rectangle) {
         cfg.immersedRectangleEnabled = 1;
         immersed_solid_rectangle_bounds(params, time, cfg.immersedXMin, cfg.immersedXMax, cfg.immersedYMin, cfg.immersedYMax);
+    }
+    if (immersed_solid_enabled(params) && immersed_solid_shape(params) == ImmersedSolidShape::Circle) {
+        cfg.immersedCircleEnabled = 1;
+        immersed_solid_circle_center(params, time, cfg.immersedCircleCx, cfg.immersedCircleCy);
+        cfg.immersedCircleR = params.immersedSolidR;
     }
     if (params.openBoundarySegmentsEnable) {
         cfg.segmentedEnable = 1;
