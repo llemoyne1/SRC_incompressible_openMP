@@ -215,6 +215,241 @@ bool cuda_classic_src_io_segmented_resident_0264_active(const SimulationParams& 
 }
 
 
+
+bool cuda_resident_profile_0266_enabled() {
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_CUDA_RESIDENT_PROFILE_0266");
+        if (v != nullptr && *v != '\0') {
+            const std::string s(v);
+            return !(s == "0" || s == "false" || s == "FALSE" ||
+                     s == "off" || s == "OFF" || s == "no" || s == "NO");
+        }
+        return internal_profiles_enabled_0176();
+    }();
+    return enabled;
+}
+
+struct CudaResidentProfileRow0266 {
+    std::uint64_t step = 0u;
+    std::string mode;
+    std::string phase;
+    int requested = 0;
+    int supported = 0;
+    int handled = 0;
+    int applied = 0;
+    std::uint64_t particles = 0u;
+    std::uint64_t fluidParticles = 0u;
+    std::uint64_t allocationCalls = 0u;
+    std::uint64_t uploadCalls = 0u;
+    std::uint64_t downloadCalls = 0u;
+    double uploadSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+    std::uint64_t hitsBottom = 0u;
+    std::uint64_t hitsTop = 0u;
+    std::uint64_t immersedHits = 0u;
+    int maxReflections = 0;
+    std::uint64_t inletReservoirCells = 0u;
+    std::uint64_t inletReservoirTargetParticles = 0u;
+    std::uint64_t inletReservoirDeleted = 0u;
+    std::uint64_t inletBackflowDeleted = 0u;
+    std::uint64_t outletParticlesDeleted = 0u;
+    std::uint64_t inletParticlesInserted = 0u;
+    std::int64_t inletNetParticleDelta = 0;
+};
+
+class CudaResidentProfileAccumulator0266 {
+public:
+    void set_output_dir(const std::string& dir) {
+        if (!dir.empty()) outputDir_ = dir;
+    }
+
+    void add(const CudaResidentProfileRow0266& row) {
+        if (!cuda_resident_profile_0266_enabled()) return;
+        rows_.push_back(row);
+    }
+
+    ~CudaResidentProfileAccumulator0266() {
+        if (!cuda_resident_profile_0266_enabled() || outputDir_.empty() || rows_.empty()) return;
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir_, ec);
+        const std::filesystem::path path = std::filesystem::path(outputDir_) / "cuda_resident_phase_profile_0266.csv";
+        std::ofstream out(path);
+        if (!out) return;
+        out << std::setprecision(17);
+        out << "step,mode,phase,requested,supported,handled,applied,particles,fluidParticles,allocationCalls,uploadCalls,downloadCalls,uploadSeconds,kernelSeconds,downloadSeconds,totalSeconds,hitsBottom,hitsTop,immersedHits,maxReflections,inletReservoirCells,inletReservoirTargetParticles,inletReservoirDeleted,inletBackflowDeleted,outletParticlesDeleted,inletParticlesInserted,inletNetParticleDelta\n";
+        for (const auto& r : rows_) {
+            out << r.step << ',' << r.mode << ',' << r.phase << ','
+                << r.requested << ',' << r.supported << ',' << r.handled << ',' << r.applied << ','
+                << r.particles << ',' << r.fluidParticles << ','
+                << r.allocationCalls << ',' << r.uploadCalls << ',' << r.downloadCalls << ','
+                << r.uploadSeconds << ',' << r.kernelSeconds << ',' << r.downloadSeconds << ',' << r.totalSeconds << ','
+                << r.hitsBottom << ',' << r.hitsTop << ',' << r.immersedHits << ',' << r.maxReflections << ','
+                << r.inletReservoirCells << ',' << r.inletReservoirTargetParticles << ','
+                << r.inletReservoirDeleted << ',' << r.inletBackflowDeleted << ','
+                << r.outletParticlesDeleted << ',' << r.inletParticlesInserted << ','
+                << r.inletNetParticleDelta << '\n';
+        }
+    }
+
+private:
+    std::string outputDir_;
+    std::vector<CudaResidentProfileRow0266> rows_;
+};
+
+CudaResidentProfileAccumulator0266& cuda_resident_profile_accumulator_0266() {
+    static CudaResidentProfileAccumulator0266 acc;
+    return acc;
+}
+
+CudaResidentProfileRow0266 make_cuda_resident_profile_row_0266(std::uint64_t step,
+                                                                const char* mode,
+                                                                const char* phase) {
+    CudaResidentProfileRow0266 row{};
+    row.step = step;
+    row.mode = mode != nullptr ? mode : "unknown";
+    row.phase = phase != nullptr ? phase : "unknown";
+    return row;
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaPeriodicStreaming0245Diagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaWallSimpleStreaming0246Diagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    row.hitsBottom = d.hitsBottom;
+    row.hitsTop = d.hitsTop;
+    row.maxReflections = d.maxYWallReflectionsPerParticle;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaPistonStreaming0247bDiagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    row.hitsBottom = d.hitsBottom;
+    row.hitsTop = d.hitsTop;
+    row.maxReflections = d.maxYWallReflectionsPerParticle;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaImmersedRectangle0247Diagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    row.immersedHits = d.hits;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
+void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                       std::uint64_t step,
+                                       const char* mode,
+                                       const char* phase,
+                                       const CudaClassicSrcIoResident0263Diagnostics& d) {
+    auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+    row.requested = d.requested ? 1 : 0;
+    row.supported = d.supported ? 1 : 0;
+    row.handled = d.handled ? 1 : 0;
+    row.applied = d.applied ? 1 : 0;
+    row.particles = d.particles;
+    row.fluidParticles = d.fluidParticles;
+    row.allocationCalls = d.allocationCalls;
+    row.uploadCalls = d.uploadCalls;
+    row.downloadCalls = d.downloadCalls;
+    row.uploadSeconds = d.uploadSeconds;
+    row.kernelSeconds = d.kernelSeconds;
+    row.downloadSeconds = d.downloadSeconds;
+    row.totalSeconds = d.totalSeconds;
+    row.hitsBottom = d.boundary.hitsBottom;
+    row.hitsTop = d.boundary.hitsTop;
+    row.maxReflections = d.boundary.maxYWallReflectionsPerParticle;
+    row.inletReservoirCells = d.boundary.inletReservoirCells;
+    row.inletReservoirTargetParticles = d.boundary.inletReservoirTargetParticles;
+    row.inletReservoirDeleted = d.boundary.inletReservoirDeleted;
+    row.inletBackflowDeleted = d.boundary.inletBackflowDeleted;
+    row.outletParticlesDeleted = d.boundary.outletParticlesDeleted;
+    row.inletParticlesInserted = d.boundary.inletParticlesInserted;
+    row.inletNetParticleDelta = d.boundary.inletNetParticleDelta;
+    auto& acc = cuda_resident_profile_accumulator_0266();
+    acc.set_output_dir(outputDir);
+    acc.add(row);
+}
+
 struct PostGuardDepositProfileAccumulator {
     std::string outputDir;
     std::uint64_t calls = 0u;
@@ -549,27 +784,32 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
             const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0264 =
                 try_apply_cuda_classic_src_io_segmented_stream_0264(state, params, streamDomain, step);
+            record_cuda_resident_profile_0266(params.outputDir, step, "io_segmented_0264", "force_stream", cudaIoStream0264);
             handledByCudaStreaming = cudaIoStream0264.handled;
         }
         if (!handledByCudaStreaming && residentClassicIo0263) {
             const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
             const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0263 =
                 try_apply_cuda_classic_src_io_fullface_stream_0263(state, params, streamDomain, step);
+            record_cuda_resident_profile_0266(params.outputDir, step, "io_fullface_0263", "force_stream", cudaIoStream0263);
             handledByCudaStreaming = cudaIoStream0263.handled;
         }
         if (!handledByCudaStreaming && cuda_piston_streaming_0247b_requested()) {
             const CudaPistonStreaming0247bDiagnostics cudaStreaming0247b =
                 try_apply_cuda_piston_streaming_0247b(state, params, step);
+            record_cuda_resident_profile_0266(params.outputDir, step, "piston_0247b", "force_stream", cudaStreaming0247b);
             handledByCudaStreaming = cudaStreaming0247b.handled;
         }
         if (!handledByCudaStreaming && cuda_wall_simple_streaming_0246_requested()) {
             const CudaWallSimpleStreaming0246Diagnostics cudaStreaming0246 =
                 try_apply_cuda_wall_simple_streaming_0246(state, params, step);
+            record_cuda_resident_profile_0266(params.outputDir, step, "wall_simple_0246", "force_stream", cudaStreaming0246);
             handledByCudaStreaming = cudaStreaming0246.handled;
         }
         if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
                 try_apply_cuda_periodic_streaming_0245(state, params, step);
+            record_cuda_resident_profile_0266(params.outputDir, step, "periodic_0245", "force_stream", cudaStreaming0245);
             handledByCudaStreaming = cudaStreaming0245.handled;
         }
         if (!handledByCudaStreaming) {
@@ -600,6 +840,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (residentClassicIo0264) {
             const CudaClassicSrcIoResident0263Diagnostics cudaIoBoundary0264 =
                 try_apply_cuda_classic_src_io_segmented_boundary_0264(state, params, result.domain, step, time);
+            record_cuda_resident_profile_0266(params.outputDir, step, "io_segmented_0264", "boundary_conditions", cudaIoBoundary0264);
             if (cudaIoBoundary0264.handled) {
                 result.boundary = cudaIoBoundary0264.boundary;
                 handledByCudaBoundary = true;
@@ -608,6 +849,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (!handledByCudaBoundary && residentClassicIo0263) {
             const CudaClassicSrcIoResident0263Diagnostics cudaIoBoundary0263 =
                 try_apply_cuda_classic_src_io_fullface_boundary_0263(state, params, result.domain, step, time);
+            record_cuda_resident_profile_0266(params.outputDir, step, "io_fullface_0263", "boundary_conditions", cudaIoBoundary0263);
             if (cudaIoBoundary0263.handled) {
                 result.boundary = cudaIoBoundary0263.boundary;
                 handledByCudaBoundary = true;
@@ -638,6 +880,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (cuda_immersed_rectangle_0247_requested()) {
             const CudaImmersedRectangle0247Diagnostics cudaImmersed0247 =
                 try_apply_cuda_immersed_rectangle_0247(state, params, result.domain, time);
+            record_cuda_resident_profile_0266(params.outputDir, step, "immersed_rectangle_0247", "immersed_solid", cudaImmersed0247);
             if (cudaImmersed0247.handled) {
                 result.immersed.hits = cudaImmersed0247.hits;
                 handledByCudaImmersed = true;

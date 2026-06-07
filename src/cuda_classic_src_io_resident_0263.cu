@@ -739,6 +739,256 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
     *counters = local;
 }
 
+__device__ inline void add_counter_ull_0267(unsigned long long* dst, unsigned long long v) {
+    if (v != 0ULL) atomicAdd(dst, v);
+}
+
+__device__ inline void merge_particle_boundary_counter_0267(CudaClassicSrcIoCounters0263* counters,
+                                                             const CudaClassicSrcIoCounters0263& local) {
+    add_counter_ull_0267(&counters->hitsLeft, local.hitsLeft);
+    add_counter_ull_0267(&counters->hitsRight, local.hitsRight);
+    add_counter_ull_0267(&counters->hitsBottom, local.hitsBottom);
+    add_counter_ull_0267(&counters->hitsTop, local.hitsTop);
+    add_counter_ull_0267(&counters->inletReservoirDeleted, local.inletReservoirDeleted);
+    add_counter_ull_0267(&counters->inletBackflowDeleted, local.inletBackflowDeleted);
+    add_counter_ull_0267(&counters->outletParticlesDeleted, local.outletParticlesDeleted);
+    add_counter_ull_0267(&counters->fluidParticles, local.fluidParticles);
+    if (local.failureFlag != 0) atomicMax(&counters->failureFlag, local.failureFlag);
+    if (local.maxYReflections != 0) atomicMax(&counters->maxYReflections, local.maxYReflections);
+}
+
+__global__ void io_fullface_boundary_particles_kernel_0267(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    if (role[i] != fluidRole) return;
+
+    CudaClassicSrcIoCounters0263 local{};
+    int maxY = 0;
+
+    if (!isfinite(x[i]) || !isfinite(y[i]) || !isfinite(vx[i]) || !isfinite(vy[i])) {
+        local.failureFlag = 1;
+        merge_particle_boundary_counter_0267(counters, local);
+        return;
+    }
+
+    bool remove = false;
+    int removeMode = 0;
+
+    int guardX = 0;
+    while (x[i] < cfg.xMin || x[i] > cfg.xMax) {
+        if (++guardX > 64) { local.failureFlag = 3; break; }
+        if (x[i] < cfg.xMin) {
+            local.hitsLeft += 1ULL;
+            int mode = cfg.leftMode;
+            if (cfg.segmentedEnable) {
+                const double sseg = segment_s_device_0263(0, x[i], y[i], cfg);
+                mode = segment_mode_at_device_0263(cfg, 0, sseg);
+            }
+            if (mode != 0) { remove = true; removeMode = mode; break; }
+            x[i] = 2.0 * cfg.xMin - x[i];
+            apply_x_wall_reflection_device_0263(cfg.leftWallMode == 0 ? 1 : cfg.leftWallMode, 0.0, 0.0, vx[i], vy[i]);
+        } else if (x[i] > cfg.xMax) {
+            local.hitsRight += 1ULL;
+            int mode = cfg.rightMode;
+            if (cfg.segmentedEnable) {
+                const double sseg = segment_s_device_0263(1, x[i], y[i], cfg);
+                mode = segment_mode_at_device_0263(cfg, 1, sseg);
+            }
+            if (mode != 0) { remove = true; removeMode = mode; break; }
+            x[i] = 2.0 * cfg.xMax - x[i];
+            apply_x_wall_reflection_device_0263(cfg.rightWallMode == 0 ? 1 : cfg.rightWallMode, 0.0, 0.0, vx[i], vy[i]);
+        }
+    }
+
+    if (!remove) {
+        int guard = 0;
+        while (y[i] < cfg.yMin || y[i] > cfg.yMax) {
+            if (++guard > 64) { local.failureFlag = 2; break; }
+            if (y[i] < cfg.yMin) {
+                y[i] = 2.0 * cfg.yMin - y[i];
+                local.hitsBottom += 1ULL;
+                apply_y_wall_reflection_device_0263(cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx[i], vy[i]);
+            } else if (y[i] > cfg.yMax) {
+                y[i] = 2.0 * cfg.yMax - y[i];
+                local.hitsTop += 1ULL;
+                apply_y_wall_reflection_device_0263(cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx[i], vy[i]);
+            }
+        }
+        if (guard > maxY) maxY = guard;
+    }
+
+    if (!remove && point_in_inlet_reservoir_device_0263(x[i], y[i], cfg)) {
+        local.inletReservoirDeleted += 1ULL;
+        remove = true;
+    }
+
+    if (remove) {
+        x[i] = clamp_device_0263(x[i], cfg.xMin, cfg.xMax);
+        y[i] = clamp_device_0263(y[i], cfg.yMin, cfg.yMax);
+        role[i] = inactiveRole;
+        if (removeMode == 1) local.inletBackflowDeleted += 1ULL;
+        else if (removeMode == 2) local.outletParticlesDeleted += 1ULL;
+    } else {
+        local.fluidParticles += 1ULL;
+    }
+
+    local.maxYReflections = maxY;
+    merge_particle_boundary_counter_0267(counters, local);
+}
+
+__device__ inline void merge_reservoir_insert_counter_0267(CudaClassicSrcIoCounters0263* counters,
+                                                            const CudaClassicSrcIoCounters0263& local) {
+    counters->inletReservoirCells += local.inletReservoirCells;
+    counters->inletReservoirTargetParticles += local.inletReservoirTargetParticles;
+    counters->inletParticlesInserted += local.inletParticlesInserted;
+    counters->inletMeanUxSum += local.inletMeanUxSum;
+    counters->inletMeanUySum += local.inletMeanUySum;
+    counters->inletKbtNumerator += local.inletKbtNumerator;
+    counters->fluidParticles += local.inletParticlesInserted;
+    if (local.overflowFlag != 0) counters->overflowFlag = local.overflowFlag;
+    if (local.failureFlag != 0 && counters->failureFlag == 0) counters->failureFlag = local.failureFlag;
+}
+
+__global__ void io_fullface_hard_reservoir_insert_kernel_0267(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    CudaClassicSrcIoCounters0263 local{};
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, nx));
+    const int cellsY = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    const int targetN = cfg.inletTargetOccupancy;
+    std::uint64_t inactiveCursor = 0ULL;
+    std::uint64_t ordinal = 0ULL;
+    const double time = static_cast<double>(cfg.step) * cfg.dt;
+
+    if (cfg.segmentedEnable) {
+        for (int seg = 0; seg < cfg.segmentCount; ++seg) {
+            if (cfg.segmentMode[seg] != 1) continue;
+            const int face = cfg.segmentFace[seg];
+            if (face == 0) {
+                for (int ix = 0; ix < cellsX; ++ix) {
+                    for (int iy = 0; iy < ny; ++iy) {
+                        const double sseg = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 1) {
+                for (int ix = nx - cellsX; ix < nx; ++ix) {
+                    for (int iy = 0; iy < ny; ++iy) {
+                        const double sseg = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 2) {
+                for (int iy = 0; iy < cellsY; ++iy) {
+                    for (int ix = 0; ix < nx; ++ix) {
+                        const double sseg = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 3) {
+                for (int iy = ny - cellsY; iy < ny; ++iy) {
+                    for (int ix = 0; ix < nx; ++ix) {
+                        const double sseg = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, sseg) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            }
+            if (local.overflowFlag) break;
+        }
+    } else if (cfg.inletFace == 0) {
+        for (int ix = 0; ix < cellsX; ++ix) {
+            for (int iy = 0; iy < ny; ++iy) {
+                insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                  fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
+                if (local.overflowFlag) break;
+            }
+            if (local.overflowFlag) break;
+        }
+    } else if (cfg.inletFace == 1) {
+        for (int ix = nx - cellsX; ix < nx; ++ix) {
+            for (int iy = 0; iy < ny; ++iy) {
+                insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                  fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
+                if (local.overflowFlag) break;
+            }
+            if (local.overflowFlag) break;
+        }
+    } else if (cfg.inletFace == 2) {
+        for (int iy = 0; iy < cellsY; ++iy) {
+            for (int ix = 0; ix < nx; ++ix) {
+                insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                  fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
+                if (local.overflowFlag) break;
+            }
+            if (local.overflowFlag) break;
+        }
+    } else if (cfg.inletFace == 3) {
+        for (int iy = ny - cellsY; iy < ny; ++iy) {
+            for (int ix = 0; ix < nx; ++ix) {
+                insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                  fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
+                if (local.overflowFlag) break;
+            }
+            if (local.overflowFlag) break;
+        }
+    }
+
+    merge_reservoir_insert_counter_0267(counters, local);
+}
+
 CudaParticleState& shared_state_0263() {
     return cuda_shared_particle_state_0251();
 }
@@ -1023,11 +1273,32 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear counters");
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
-    io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
-        kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
-    check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_kernel_0263 launch");
-    check_cuda_0263(cudaDeviceSynchronize(), "io_fullface_hard_reservoir_kernel_0263 synchronize");
+    const bool serialBoundary0267 = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY");
+    if (serialBoundary0267) {
+        io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_kernel_0263 launch");
+    } else {
+        const int boundaryThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS",
+                                                env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256));
+        const std::uint64_t boundaryBlocks64 = (view.n + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
+                                               static_cast<std::uint64_t>(boundaryThreads);
+        if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+            throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 full-face boundary launch");
+        }
+        io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_fullface_boundary_particles_kernel_0267 launch");
+        io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_insert_kernel_0267 launch");
+    }
+    check_cuda_0263(cudaDeviceSynchronize(), serialBoundary0267 ?
+                    "io_fullface_hard_reservoir_kernel_0263 synchronize" :
+                    "io_fullface_boundary_insert_0267 synchronize");
     const auto tAfterKernel = Clock::now();
 
     CudaClassicSrcIoCounters0263 h{};
@@ -1175,11 +1446,33 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear segmented counters");
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
-    io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
-        kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
-    check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_kernel_0264 launch");
-    check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_hard_reservoir_kernel_0264 synchronize");
+    const bool serialBoundary0267 = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY");
+    if (serialBoundary0267) {
+        io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_kernel_0264 launch");
+    } else {
+        const int boundaryThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS",
+                                                env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_THREADS",
+                                                            env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256)));
+        const std::uint64_t boundaryBlocks64 = (view.n + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
+                                               static_cast<std::uint64_t>(boundaryThreads);
+        if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+            throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 segmented boundary launch");
+        }
+        io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_segmented_boundary_particles_kernel_0267 launch");
+        io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+        check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_insert_kernel_0267 launch");
+    }
+    check_cuda_0263(cudaDeviceSynchronize(), serialBoundary0267 ?
+                    "io_segmented_hard_reservoir_kernel_0264 synchronize" :
+                    "io_segmented_boundary_insert_0267 synchronize");
     const auto tAfterKernel = Clock::now();
 
     CudaClassicSrcIoCounters0263 h{};
