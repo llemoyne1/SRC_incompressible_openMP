@@ -6,6 +6,8 @@
 #include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
 
 #include <algorithm>
 #include <chrono>
@@ -13,6 +15,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <stdexcept>
+#include <limits>
 #include <string>
 
 namespace mpcd {
@@ -989,6 +992,213 @@ __global__ void io_fullface_hard_reservoir_insert_kernel_0267(
     merge_reservoir_insert_counter_0267(counters, local);
 }
 
+
+__global__ void io_fullface_mark_inactive_flags_kernel_0268(
+    std::uint64_t n,
+    const unsigned char* __restrict__ role,
+    unsigned char inactiveRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    flags[i] = (role[i] == inactiveRole) ? 1u : 0u;
+}
+
+__global__ void io_fullface_compact_inactive_slots_kernel_0268(
+    std::uint64_t n,
+    const unsigned char* __restrict__ role,
+    unsigned char inactiveRole,
+    const unsigned int* __restrict__ prefix,
+    std::uint64_t* __restrict__ inactiveIndices)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    if (role[i] == inactiveRole) {
+        inactiveIndices[prefix[i]] = i;
+    }
+}
+
+__device__ void activate_reservoir_pool_slot_device_0268(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    std::uint64_t slotOrdinal,
+    double xp,
+    double yp,
+    double vxp,
+    double vyp,
+    double particleMass,
+    std::uint32_t particleType,
+    CudaClassicSrcIoCounters0263& local)
+{
+    if (slotOrdinal >= static_cast<std::uint64_t>(inactiveCount)) {
+        local.overflowFlag = 1;
+        return;
+    }
+    const std::uint64_t slot = inactiveIndices[slotOrdinal];
+    if (role[slot] != inactiveRole) {
+        local.overflowFlag = 2;
+        return;
+    }
+    x[slot] = xp;
+    y[slot] = yp;
+    vx[slot] = vxp;
+    vy[slot] = vyp;
+    mass[slot] = particleMass;
+    type[slot] = particleType;
+    role[slot] = fluidRole;
+    local.inletParticlesInserted += 1ULL;
+    local.inletMeanUxSum += vxp;
+    local.inletMeanUySum += vyp;
+}
+
+__device__ void insert_reservoir_cell_pool_device_0268(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int ix,
+    int iy,
+    double dx,
+    double dy,
+    int targetN,
+    double time,
+    int inletFace,
+    std::uint64_t cellOrdinal,
+    CudaClassicSrcIoCounters0263& local)
+{
+    if (targetN <= 0) return;
+    const double x0 = cfg.xMin + static_cast<double>(ix) * dx;
+    const double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
+    const double y0 = cfg.yMin + static_cast<double>(iy) * dy;
+    const double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+    const double xc = 0.5 * (x0 + x1);
+    const double yc = 0.5 * (y0 + y1);
+    if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
+    local.inletReservoirCells += 1ULL;
+    local.inletReservoirTargetParticles += static_cast<unsigned long long>(targetN);
+    const std::uint64_t seed = splitmix64_device_0263(cfg.rngSeed ^ (cfg.step * 0x9e3779b97f4a7c15ULL) ^
+                                                      (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^
+                                                      face_tag_0263(inletFace));
+    Mt19937_64_Device_0263 rng{};
+    mt_seed_device_0263(rng, seed);
+    const std::uint64_t baseSlot = cellOrdinal * static_cast<std::uint64_t>(targetN);
+    for (int k = 0; k < targetN; ++k) {
+        const double rx = uniform01_device_0263(rng);
+        const double ry = uniform01_device_0263(rng);
+        const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
+        const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
+        double ux = 0.0, uy = 0.0;
+        inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
+        activate_reservoir_pool_slot_device_0268(x, y, vx, vy, mass, type, role,
+                                                 fluidRole, inactiveRole,
+                                                 inactiveIndices, inactiveCount,
+                                                 baseSlot + static_cast<std::uint64_t>(k),
+                                                 xp, yp, ux, uy, cfg.refMass, cfg.refType, local);
+        if (local.overflowFlag) return;
+    }
+}
+
+__device__ inline void merge_reservoir_insert_counter_0268(CudaClassicSrcIoCounters0263* counters,
+                                                            const CudaClassicSrcIoCounters0263& local) {
+    add_counter_ull_0267(&counters->inletReservoirCells, local.inletReservoirCells);
+    add_counter_ull_0267(&counters->inletReservoirTargetParticles, local.inletReservoirTargetParticles);
+    add_counter_ull_0267(&counters->inletParticlesInserted, local.inletParticlesInserted);
+    add_counter_ull_0267(&counters->fluidParticles, local.inletParticlesInserted);
+    if (local.inletMeanUxSum != 0.0) atomicAdd(&counters->inletMeanUxSum, local.inletMeanUxSum);
+    if (local.inletMeanUySum != 0.0) atomicAdd(&counters->inletMeanUySum, local.inletMeanUySum);
+    if (local.inletKbtNumerator != 0.0) atomicAdd(&counters->inletKbtNumerator, local.inletKbtNumerator);
+    if (local.overflowFlag != 0) atomicMax(&counters->overflowFlag, local.overflowFlag);
+    if (local.failureFlag != 0) atomicMax(&counters->failureFlag, local.failureFlag);
+}
+
+__global__ void io_fullface_hard_reservoir_insert_pool_kernel_0268(
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const std::uint64_t cellOrdinal = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                                      static_cast<std::uint64_t>(threadIdx.x);
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, nx));
+    const int cellsY = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, ny));
+    std::uint64_t cellCount = 0ULL;
+    if (cfg.inletFace == 0 || cfg.inletFace == 1) cellCount = static_cast<std::uint64_t>(cellsX) * static_cast<std::uint64_t>(ny);
+    else if (cfg.inletFace == 2 || cfg.inletFace == 3) cellCount = static_cast<std::uint64_t>(cellsY) * static_cast<std::uint64_t>(nx);
+    if (cellOrdinal >= cellCount) return;
+
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    const int targetN = cfg.inletTargetOccupancy;
+    const double time = static_cast<double>(cfg.step) * cfg.dt;
+
+    int ix = 0;
+    int iy = 0;
+    if (cfg.inletFace == 0) {
+        ix = static_cast<int>(cellOrdinal / static_cast<std::uint64_t>(ny));
+        iy = static_cast<int>(cellOrdinal % static_cast<std::uint64_t>(ny));
+    } else if (cfg.inletFace == 1) {
+        ix = nx - cellsX + static_cast<int>(cellOrdinal / static_cast<std::uint64_t>(ny));
+        iy = static_cast<int>(cellOrdinal % static_cast<std::uint64_t>(ny));
+    } else if (cfg.inletFace == 2) {
+        iy = static_cast<int>(cellOrdinal / static_cast<std::uint64_t>(nx));
+        ix = static_cast<int>(cellOrdinal % static_cast<std::uint64_t>(nx));
+    } else if (cfg.inletFace == 3) {
+        iy = ny - cellsY + static_cast<int>(cellOrdinal / static_cast<std::uint64_t>(nx));
+        ix = static_cast<int>(cellOrdinal % static_cast<std::uint64_t>(nx));
+    } else {
+        return;
+    }
+
+    CudaClassicSrcIoCounters0263 local{};
+    insert_reservoir_cell_pool_device_0268(x, y, vx, vy, mass, type, role,
+                                           fluidRole, inactiveRole,
+                                           inactiveIndices, inactiveCount,
+                                           cfg, ix, iy, dx, dy,
+                                           targetN, time, cfg.inletFace,
+                                           cellOrdinal, local);
+    merge_reservoir_insert_counter_0268(counters, local);
+}
+
+std::uint64_t fullface_reservoir_cell_count_host_0268(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = std::max(1, std::min(cfg.inletReservoirCells, nx));
+    const int cellsY = std::max(1, std::min(cfg.inletReservoirCells, ny));
+    if (cfg.inletFace == 0 || cfg.inletFace == 1) return static_cast<std::uint64_t>(cellsX) * static_cast<std::uint64_t>(ny);
+    if (cfg.inletFace == 2 || cfg.inletFace == 3) return static_cast<std::uint64_t>(cellsY) * static_cast<std::uint64_t>(nx);
+    return 0ULL;
+}
+
 CudaParticleState& shared_state_0263() {
     return cuda_shared_particle_state_0251();
 }
@@ -1291,10 +1501,71 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
             view.n, view.x, view.y, view.vx, view.vy, view.role,
             kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
         check_cuda_0263(cudaGetLastError(), "io_fullface_boundary_particles_kernel_0267 launch");
-        io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
-            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
-            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
-        check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_insert_kernel_0267 launch");
+
+        const bool usePoolInsert0268 = !cfg.segmentedEnable &&
+            !env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_DISABLE_POOL");
+        if (usePoolInsert0268) {
+            if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0268 inactive-prefix pool");
+            }
+            const unsigned int n32 = static_cast<unsigned int>(view.n);
+            unsigned int* dInactiveFlags = nullptr;
+            unsigned int* dInactivePrefix = nullptr;
+            std::uint64_t* dInactiveIndices = nullptr;
+            check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
+                            "allocate 0268 inactive flags");
+            check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
+                            "allocate 0268 inactive prefix");
+            check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(n32)),
+                            "allocate 0268 inactive index pool");
+
+            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_POOL_THREADS", boundaryThreads);
+            const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
+                                               static_cast<std::uint64_t>(poolThreads);
+            if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0268 inactive pool launch");
+            }
+            io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                view.n, view.role, kParticleRoleInactive, dInactiveFlags);
+            check_cuda_0263(cudaGetLastError(), "io_fullface_mark_inactive_flags_kernel_0268 launch");
+            thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + n32, dInactivePrefix);
+            check_cuda_0263(cudaGetLastError(), "io_fullface inactive prefix scan 0268");
+            io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
+            check_cuda_0263(cudaGetLastError(), "io_fullface_compact_inactive_slots_kernel_0268 launch");
+
+            unsigned int lastFlag = 0u;
+            unsigned int lastPrefix = 0u;
+            if (n32 > 0u) {
+                check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                "copy 0268 inactive last flag");
+                check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                "copy 0268 inactive last prefix");
+            }
+            const unsigned int inactiveCount = lastPrefix + lastFlag;
+            const std::uint64_t reservoirCells = fullface_reservoir_cell_count_host_0268(cfg);
+            if (reservoirCells > 0u) {
+                const int insertThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_INSERT_THREADS", 128);
+                const std::uint64_t insertBlocks64 = (reservoirCells + static_cast<std::uint64_t>(insertThreads) - 1u) /
+                                                     static_cast<std::uint64_t>(insertThreads);
+                if (insertBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0268 full-face insert launch");
+                }
+                io_fullface_hard_reservoir_insert_pool_kernel_0268<<<static_cast<unsigned int>(insertBlocks64), insertThreads>>>(
+                    view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+                    kParticleRoleFluid, kParticleRoleInactive, cfg,
+                    dInactiveIndices, inactiveCount, dCounters);
+                check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_insert_pool_kernel_0268 launch");
+            }
+            check_cuda_0263(cudaFree(dInactiveFlags), "free 0268 inactive flags");
+            check_cuda_0263(cudaFree(dInactivePrefix), "free 0268 inactive prefix");
+            check_cuda_0263(cudaFree(dInactiveIndices), "free 0268 inactive index pool");
+        } else {
+            io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
+                view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+                kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+            check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_insert_kernel_0267 launch");
+        }
     }
     check_cuda_0263(cudaDeviceSynchronize(), serialBoundary0267 ?
                     "io_fullface_hard_reservoir_kernel_0263 synchronize" :
