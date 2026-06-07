@@ -135,6 +135,12 @@ bool cuda_periodic_streaming_0245_download_all_requested_0260() {
     return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
+bool cuda_periodic_streaming_0271_async_resident_enabled(const bool resident0260, const bool downloadAll) {
+    if (!resident0260 || downloadAll) return false;
+    return env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_ASYNC_STREAM") &&
+           !env_truthy_0245("MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_DISABLE_ASYNC_STREAM");
+}
+
 bool cuda_periodic_streaming_0245_supported(const SimulationParams& params) {
     if (!is_periodic_pair_0245(params.bcLeft, params.bcRight)) return false;
     if (!is_periodic_pair_0245(params.bcBottom, params.bcTop)) return false;
@@ -183,6 +189,9 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_streaming_periodic_0245: grid too large for 1D launch");
     }
+    const bool downloadAll = cuda_periodic_streaming_0245_download_all_requested_0260();
+    const bool asyncResident0271 = cuda_periodic_streaming_0271_async_resident_enabled(resident0260, downloadAll);
+
     periodic_force_stream_kernel_0245<<<static_cast<unsigned int>(blocks64), threads>>>(
         view.n, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
@@ -193,10 +202,11 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
         params.taylorGreenForcingModeX,
         params.taylorGreenForcingModeY);
     check_cuda_0245(cudaGetLastError(), "periodic_force_stream_kernel_0245 launch");
-    check_cuda_0245(cudaDeviceSynchronize(), "periodic_force_stream_kernel_0245 synchronize");
+    if (!asyncResident0271) {
+        check_cuda_0245(cudaDeviceSynchronize(), "periodic_force_stream_kernel_0245 synchronize");
+    }
     const auto tAfterKernel = Clock::now();
 
-    const bool downloadAll = cuda_periodic_streaming_0245_download_all_requested_0260();
     if (downloadAll) {
         gpuState.download_all(state, &particleDiag);
     }

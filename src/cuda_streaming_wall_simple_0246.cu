@@ -141,20 +141,26 @@ __global__ void wall_simple_force_stream_kernel_0246(
     int guard = 0;
     while (y1 < yMin || y1 > yMax) {
         if (++guard > 64) {
-            atomicExch(failureFlag, 1);
+            if (failureFlag != nullptr) {
+                atomicExch(failureFlag, 1);
+            }
             return;
         }
         if (y1 < yMin) {
             y1 = 2.0 * yMin - y1;
-            atomicAdd(bottomHits, 1ULL);
+            if (bottomHits != nullptr) {
+                atomicAdd(bottomHits, 1ULL);
+            }
             apply_wall_reflection_device_0246(bottomMode, wallUxBottom, wallUyBottom, vx1, vy1);
         } else if (y1 > yMax) {
             y1 = 2.0 * yMax - y1;
-            atomicAdd(topHits, 1ULL);
+            if (topHits != nullptr) {
+                atomicAdd(topHits, 1ULL);
+            }
             apply_wall_reflection_device_0246(topMode, wallUxTop, wallUyTop, vx1, vy1);
         }
     }
-    if (guard > 0) {
+    if (guard > 0 && maxYReflections != nullptr) {
         atomicMax(maxYReflections, guard);
     }
 
@@ -185,6 +191,18 @@ bool cuda_wall_simple_streaming_0246_download_all_requested_0261() {
     }
     const std::string s(v);
     return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+bool cuda_wall_simple_streaming_0271_async_resident_enabled(const bool resident0261, const bool downloadAll) {
+    if (!resident0261 || downloadAll) return false;
+    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_ASYNC_STREAM") &&
+           !env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_DISABLE_ASYNC_STREAM");
+}
+
+bool cuda_wall_simple_streaming_0271_fast_diagnostics_enabled(const bool asyncResident0271) {
+    if (!asyncResident0271) return false;
+    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0271_FAST_DIAGNOSTICS") &&
+           !env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0271_DISABLE_FAST_DIAGNOSTICS");
 }
 
 bool cuda_wall_simple_streaming_0246_supported(const SimulationParams& params) {
@@ -225,6 +243,9 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     CudaParticleStateDiagnostics particleDiag{};
     CudaParticleState& gpuState = persistent_streaming_state_0246();
     const bool resident0261 = cuda_wall_simple_streaming_0246_resident_0261_requested();
+    const bool downloadAll = cuda_wall_simple_streaming_0246_download_all_requested_0261();
+    const bool asyncResident0271 = cuda_wall_simple_streaming_0271_async_resident_enabled(resident0261, downloadAll);
+    const bool fastDiagnostics0271 = cuda_wall_simple_streaming_0271_fast_diagnostics_enabled(asyncResident0271);
     const bool canReuseResident = resident0261 && cuda_shared_particle_state_0251_is_fresh();
     if (!canReuseResident) {
         gpuState.upload_all(state, &particleDiag);
@@ -235,14 +256,16 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     unsigned long long* dTopHits = nullptr;
     int* dMaxY = nullptr;
     int* dFailure = nullptr;
-    check_cuda_0246(cudaMalloc(&dBottomHits, sizeof(unsigned long long)), "allocate bottom hits");
-    check_cuda_0246(cudaMalloc(&dTopHits, sizeof(unsigned long long)), "allocate top hits");
-    check_cuda_0246(cudaMalloc(&dMaxY, sizeof(int)), "allocate max y reflections");
-    check_cuda_0246(cudaMalloc(&dFailure, sizeof(int)), "allocate failure flag");
-    check_cuda_0246(cudaMemset(dBottomHits, 0, sizeof(unsigned long long)), "clear bottom hits");
-    check_cuda_0246(cudaMemset(dTopHits, 0, sizeof(unsigned long long)), "clear top hits");
-    check_cuda_0246(cudaMemset(dMaxY, 0, sizeof(int)), "clear max y reflections");
-    check_cuda_0246(cudaMemset(dFailure, 0, sizeof(int)), "clear failure flag");
+    if (!fastDiagnostics0271) {
+        check_cuda_0246(cudaMalloc(&dBottomHits, sizeof(unsigned long long)), "allocate bottom hits");
+        check_cuda_0246(cudaMalloc(&dTopHits, sizeof(unsigned long long)), "allocate top hits");
+        check_cuda_0246(cudaMalloc(&dMaxY, sizeof(int)), "allocate max y reflections");
+        check_cuda_0246(cudaMalloc(&dFailure, sizeof(int)), "allocate failure flag");
+        check_cuda_0246(cudaMemset(dBottomHits, 0, sizeof(unsigned long long)), "clear bottom hits");
+        check_cuda_0246(cudaMemset(dTopHits, 0, sizeof(unsigned long long)), "clear top hits");
+        check_cuda_0246(cudaMemset(dMaxY, 0, sizeof(int)), "clear max y reflections");
+        check_cuda_0246(cudaMemset(dFailure, 0, sizeof(int)), "clear failure flag");
+    }
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS", 256);
@@ -272,26 +295,29 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
         wallUxBottom, wallUyBottom, wallUxTop, wallUyTop,
         dBottomHits, dTopHits, dMaxY, dFailure);
     check_cuda_0246(cudaGetLastError(), "wall_simple_force_stream_kernel_0246 launch");
-    check_cuda_0246(cudaDeviceSynchronize(), "wall_simple_force_stream_kernel_0246 synchronize");
+    if (!asyncResident0271) {
+        check_cuda_0246(cudaDeviceSynchronize(), "wall_simple_force_stream_kernel_0246 synchronize");
+    }
     const auto tAfterKernel = Clock::now();
 
     unsigned long long hBottomHits = 0ULL;
     unsigned long long hTopHits = 0ULL;
     int hMaxY = 0;
     int hFailure = 0;
-    check_cuda_0246(cudaMemcpy(&hBottomHits, dBottomHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy bottom hits");
-    check_cuda_0246(cudaMemcpy(&hTopHits, dTopHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy top hits");
-    check_cuda_0246(cudaMemcpy(&hMaxY, dMaxY, sizeof(int), cudaMemcpyDeviceToHost), "copy max y reflections");
-    check_cuda_0246(cudaMemcpy(&hFailure, dFailure, sizeof(int), cudaMemcpyDeviceToHost), "copy failure flag");
-    check_cuda_0246(cudaFree(dBottomHits), "free bottom hits");
-    check_cuda_0246(cudaFree(dTopHits), "free top hits");
-    check_cuda_0246(cudaFree(dMaxY), "free max y reflections");
-    check_cuda_0246(cudaFree(dFailure), "free failure flag");
-    if (hFailure != 0) {
-        throw std::runtime_error("cuda_streaming_wall_simple_0246: too many y-wall reflections in one step");
+    if (!fastDiagnostics0271) {
+        check_cuda_0246(cudaMemcpy(&hBottomHits, dBottomHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy bottom hits");
+        check_cuda_0246(cudaMemcpy(&hTopHits, dTopHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy top hits");
+        check_cuda_0246(cudaMemcpy(&hMaxY, dMaxY, sizeof(int), cudaMemcpyDeviceToHost), "copy max y reflections");
+        check_cuda_0246(cudaMemcpy(&hFailure, dFailure, sizeof(int), cudaMemcpyDeviceToHost), "copy failure flag");
+        check_cuda_0246(cudaFree(dBottomHits), "free bottom hits");
+        check_cuda_0246(cudaFree(dTopHits), "free top hits");
+        check_cuda_0246(cudaFree(dMaxY), "free max y reflections");
+        check_cuda_0246(cudaFree(dFailure), "free failure flag");
+        if (hFailure != 0) {
+            throw std::runtime_error("cuda_streaming_wall_simple_0246: too many y-wall reflections in one step");
+        }
     }
 
-    const bool downloadAll = cuda_wall_simple_streaming_0246_download_all_requested_0261();
     if (downloadAll) {
         gpuState.download_all(state, &particleDiag);
     }
