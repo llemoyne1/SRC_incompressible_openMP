@@ -1,0 +1,3 @@
+Fatal error: CUDA persistent SRC+thermostat 0260 requested shared 0251 state, but it is stale; lastWriter=none lastInvalidator=cpu_boundary_conditions_edited_particles
+Command exited with non-zero status 1
+elapsed=0.28 user=0.26 sys=0.03

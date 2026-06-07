@@ -470,6 +470,52 @@ __global__ void src_rotate_persistent_kernel(int n,
     atomicAdd(rotatedCounter, 1ull);
 }
 
+// 0276: Thermostat means must be reconstructed from real post-collision
+// particles only.  The SRC collision mean above may deliberately include
+// virtual wall/solid particles; reusing it for relative rescaling is correct
+// in fully periodic tests but biases wall/solid/piston/open-boundary cases.
+// The CPU thermostat in src/thermostat.cpp recomputes these moments from the
+// real particles, so the CUDA persistent fused path does the same here.
+__global__ void reset_thermostat_real_moments_persistent_0276_kernel(int nc,
+                                                                     double* cellMass,
+                                                                     double* cellPx,
+                                                                     double* cellPy,
+                                                                     double* cellUx,
+                                                                     double* cellUy,
+                                                                     double* cellKinetic,
+                                                                     double* cellScale) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    cellMass[c] = 0.0;
+    cellPx[c] = 0.0;
+    cellPy[c] = 0.0;
+    cellUx[c] = 0.0;
+    cellUy[c] = 0.0;
+    cellKinetic[c] = 0.0;
+    cellScale[c] = 1.0;
+}
+
+__global__ void deposit_thermostat_real_moments_persistent_0276_kernel(int n,
+                                                                       const int* cellId,
+                                                                       const unsigned char* role,
+                                                                       const double* mass,
+                                                                       const double* vx,
+                                                                       const double* vy,
+                                                                       DeviceConfig cfg,
+                                                                       double* cellMass,
+                                                                       double* cellPx,
+                                                                       double* cellPy) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    if (role[i] != cfg.fluidRole) return;
+    const int c = cellId[i];
+    if (c < 0 || c >= cfg.numCells) return;
+    const double m = mass[i];
+    atomicAdd(&cellMass[c], m);
+    atomicAdd(&cellPx[c], m * vx[i]);
+    atomicAdd(&cellPy[c], m * vy[i]);
+}
+
 __global__ void kinetic_persistent_kernel(int n,
                                           const int* cellId,
                                           const unsigned char* role,
@@ -737,7 +783,15 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
                                                                   b.rotatedCounter, b.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
         if (applyThermostat) {
-            MPCD_CUDA_CHECK(cudaMemset(b.cellKinetic, 0, cBytesD));
+            reset_thermostat_real_moments_persistent_0276_kernel<<<cellBlocks, threads>>>(
+                nc, b.cellMass, b.cellPx, b.cellPy, b.cellUx, b.cellUy, b.cellKinetic, b.cellScale);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+            deposit_thermostat_real_moments_persistent_0276_kernel<<<particleBlocks, threads>>>(
+                nInt, b.cellId, b.role, b.mass, b.vx, b.vy, cfg, b.cellMass, b.cellPx, b.cellPy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
+            finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
+                                                                         b.cellUx, b.cellUy);
+            MPCD_CUDA_CHECK(cudaGetLastError());
             kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.mass, b.vx, b.vy,
                                                                    b.cellUx, b.cellUy, cfg, b.cellKinetic);
             MPCD_CUDA_CHECK(cudaGetLastError());
@@ -1035,7 +1089,15 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                   b.cosA, b.sinA, cfg, pv.vx, pv.vy,
                                                                   b.rotatedCounter, b.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        MPCD_CUDA_CHECK(cudaMemset(b.cellKinetic, 0, cBytesD));
+        reset_thermostat_real_moments_persistent_0276_kernel<<<cellBlocks, threads>>>(
+            nc, b.cellMass, b.cellPx, b.cellPy, b.cellUx, b.cellUy, b.cellKinetic, b.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        deposit_thermostat_real_moments_persistent_0276_kernel<<<particleBlocks, threads>>>(
+            nInt, b.cellId, pv.role, pv.mass, pv.vx, pv.vy, cfg, b.cellMass, b.cellPx, b.cellPy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
+                                                                     b.cellUx, b.cellUy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
         kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, pv.mass, pv.vx, pv.vy,
                                                                b.cellUx, b.cellUy, cfg, b.cellKinetic);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -1285,7 +1347,15 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                   cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
                                                                   cv.rotatedCounter, cv.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        MPCD_CUDA_CHECK(cudaMemset(cv.cellKinetic, 0, cBytesD));
+        reset_thermostat_real_moments_persistent_0276_kernel<<<cellBlocks, threads>>>(
+            nc, cv.cellMass, cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy, cv.cellKinetic, cv.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        deposit_thermostat_real_moments_persistent_0276_kernel<<<particleBlocks, threads>>>(
+            nInt, cv.cellId, pv.role, pv.mass, pv.vx, pv.vy, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
+                                                                     cv.cellUx, cv.cellUy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
         kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, pv.mass, pv.vx, pv.vy,
                                                                cv.cellUx, cv.cellUy, cfg, cv.cellKinetic);
         MPCD_CUDA_CHECK(cudaGetLastError());

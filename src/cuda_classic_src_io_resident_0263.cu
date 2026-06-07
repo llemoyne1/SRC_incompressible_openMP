@@ -1521,12 +1521,34 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     return cfg;
 }
 
+bool fused_src_thermostat_resident_io_0280c_requested() {
+    return env_truthy_0263("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE");
+}
+
+bool thermostat_allowed_for_resident_io_0280c(const SimulationParams& params) {
+    if (!params.thermostatEnable) return true;
+    // 0280c: the original classic resident inlet/outlet gates were deliberately
+    // classic-only and rejected thermostatEnable=true.  That made the 0279/0280
+    // thermostat validators silently fall back to the CPU inlet/outlet path (or,
+    // for segmented shared-state mode, leave no fresh CUDA state for the fused
+    // thermostat consumer).  Permit the thermostat only when the validated
+    // fused persistent SRC+thermostat consumer is explicitly requested and no
+    // CPU continuation (Q6, resampling, virial/capacity) can intervene between
+    // collision and thermostat.
+    if (!fused_src_thermostat_resident_io_0280c_requested()) return false;
+    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (params.thermostatEvery <= 0) return false;
+    if (params.thermostatMode != "cell_relative_rescale") return false;
+    return true;
+}
+
 bool supported_common_0263(const SimulationParams& params) {
     if (!params.srcClassicCudaModeEnable) return false;
     if (!hard_inlet_reservoir_enabled_0263(params)) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable || params.thermostatEnable) return false;
+    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
     if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||
@@ -1549,11 +1571,13 @@ bool supported_segmented_0264(const SimulationParams& params) {
     if (static_cast<int>(params.openBoundarySegments.size()) != params.openBoundarySegmentCount) return false;
     if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    // 0264 is the classic-only resident segmented validation subset. Q6 and
-    // resampling are deliberately disabled here, but the host/GPU freshness
-    // protocol is left intact so they can be reintroduced as CPU continuations
-    // in a later patch.
-    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable || params.thermostatEnable) return false;
+    // 0264 is still restricted to the classic SRC resident subset: Q6,
+    // resampling and virial/capacity continuations remain disabled.  Since
+    // 0280c, thermostatEnable=true is accepted only for the fused persistent
+    // SRC+thermostat CUDA consumer, so no CPU stage is inserted between
+    // collision and thermostat.
+    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
     if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||

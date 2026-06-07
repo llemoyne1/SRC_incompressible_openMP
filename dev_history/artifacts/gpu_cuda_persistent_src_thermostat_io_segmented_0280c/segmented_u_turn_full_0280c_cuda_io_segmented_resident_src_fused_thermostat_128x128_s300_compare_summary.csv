@@ -1,0 +1,2 @@
+case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
+segmented_u_turn_full,16.041491279,2.906970902,5.5182840901377554,16.24,3.18,5.10691823899371,0,76,PASS

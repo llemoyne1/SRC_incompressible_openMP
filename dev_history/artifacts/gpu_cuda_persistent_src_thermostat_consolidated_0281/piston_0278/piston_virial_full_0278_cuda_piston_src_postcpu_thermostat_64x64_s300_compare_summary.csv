@@ -1,0 +1,2 @@
+case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
+piston_virial_full,2.199276676,4.00375108,0.5493040481427732,2.26,4.08,0.5539215686274509,0,76,PASS
