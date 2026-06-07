@@ -3,6 +3,7 @@
 #include "cuda_particle_state.h"
 #include "cuda_shared_particle_state_0251.h"
 #include "immersed_solid.h"
+#include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
 
@@ -90,6 +91,8 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double yMax = 1.0;
     int leftMode = 0;   // 0 none/wall, 1 inlet, 2 outlet
     int rightMode = 0;
+    int leftWallMode = 0;
+    int rightWallMode = 0;
     int bottomWallMode = 0; // 1 specular/solid, 2 bounceback
     int topWallMode = 0;
     double wallUxBottom = 0.0;
@@ -130,6 +133,16 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double immersedXMax = 0.0;
     double immersedYMin = 0.0;
     double immersedYMax = 0.0;
+    int segmentedEnable = 0;
+    int segmentCount = 0;
+    int segmentFace[kOpenBoundaryMaxSegments]{};
+    int segmentMode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
+    double segmentSMin[kOpenBoundaryMaxSegments]{};
+    double segmentSMax[kOpenBoundaryMaxSegments]{};
+    double segmentUx[kOpenBoundaryMaxSegments]{};
+    double segmentUy[kOpenBoundaryMaxSegments]{};
+    double segmentMass[kOpenBoundaryMaxSegments]{};
+    std::uint32_t segmentType[kOpenBoundaryMaxSegments]{};
 };
 
 struct CudaClassicSrcIoCounters0263 {
@@ -220,6 +233,39 @@ __device__ double uniform01_device_0263(Mt19937_64_Device_0263& r) {
 __device__ inline int imin_device_0263(int a, int b) { return a < b ? a : b; }
 __device__ inline int imax_device_0263(int a, int b) { return a > b ? a : b; }
 
+__device__ inline double segment_s_device_0263(int face, double x, double y, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
+    if (face == 0 || face == 1) {
+        const double h = cfg.yMax - cfg.yMin;
+        return h > 0.0 ? (y - cfg.yMin) / h : -1.0;
+    }
+    if (face == 2 || face == 3) {
+        const double w = cfg.xMax - cfg.xMin;
+        return w > 0.0 ? (x - cfg.xMin) / w : -1.0;
+    }
+    return -1.0;
+}
+
+__device__ inline int segment_mode_at_device_0263(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
+    if (!cfg.segmentedEnable) return 0;
+    for (int k = 0; k < cfg.segmentCount; ++k) {
+        if (cfg.segmentFace[k] == face && s >= cfg.segmentSMin[k] && s <= cfg.segmentSMax[k]) {
+            return cfg.segmentMode[k];
+        }
+    }
+    return 0;
+}
+
+__device__ inline int inlet_segment_index_for_cell_device_0263(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
+    if (!cfg.segmentedEnable) return -1;
+    for (int k = 0; k < cfg.segmentCount; ++k) {
+        if (cfg.segmentFace[k] == face && cfg.segmentMode[k] == 1 &&
+            s >= cfg.segmentSMin[k] && s <= cfg.segmentSMax[k]) {
+            return k;
+        }
+    }
+    return -1;
+}
+
 __device__ inline double smoothstep01_device_0263(double x) {
     x = clamp_device_0263(x, 0.0, 1.0);
     return x * x * (3.0 - 2.0 * x);
@@ -303,17 +349,51 @@ __device__ inline void apply_y_wall_reflection_device_0263(int mode,
     }
 }
 
+__device__ inline void apply_x_wall_reflection_device_0263(int mode,
+                                                           double wallUx,
+                                                           double wallUy,
+                                                           double& vx,
+                                                           double& vy) {
+    if (mode == 2) {
+        vx = 2.0 * wallUx - vx;
+        vy = 2.0 * wallUy - vy;
+    } else {
+        (void)wallUy;
+        vx = 2.0 * wallUx - vx;
+    }
+}
+
 __device__ bool point_in_inlet_reservoir_device_0263(double x, double y, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
     const int cellsX = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, cfg.Nx));
     const int cellsY = imax_device_0263(1, imin_device_0263(cfg.inletReservoirCells, cfg.Ny));
     const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(cfg.Nx > 0 ? cfg.Nx : 1);
     const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(cfg.Ny > 0 ? cfg.Ny : 1);
+    if (cfg.segmentedEnable) {
+        if (x >= cfg.xMin && x < cfg.xMin + static_cast<double>(cellsX) * dx) {
+            const double s = segment_s_device_0263(0, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 0, s) == 1) return true;
+        }
+        if (x > cfg.xMax - static_cast<double>(cellsX) * dx && x <= cfg.xMax) {
+            const double s = segment_s_device_0263(1, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 1, s) == 1) return true;
+        }
+        if (y >= cfg.yMin && y < cfg.yMin + static_cast<double>(cellsY) * dy) {
+            const double s = segment_s_device_0263(2, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 2, s) == 1) return true;
+        }
+        if (y > cfg.yMax - static_cast<double>(cellsY) * dy && y <= cfg.yMax) {
+            const double s = segment_s_device_0263(3, x, y, cfg);
+            if (segment_mode_at_device_0263(cfg, 3, s) == 1) return true;
+        }
+        return false;
+    }
     if (cfg.inletFace == 0) return x >= cfg.xMin && x < cfg.xMin + static_cast<double>(cellsX) * dx;
     if (cfg.inletFace == 1) return x > cfg.xMax - static_cast<double>(cellsX) * dx && x <= cfg.xMax;
     if (cfg.inletFace == 2) return y >= cfg.yMin && y < cfg.yMin + static_cast<double>(cellsY) * dy;
     if (cfg.inletFace == 3) return y > cfg.yMax - static_cast<double>(cellsY) * dy && y <= cfg.yMax;
     return false;
 }
+
 
 __device__ bool reservoir_cell_center_inside_immersed_device_0263(double xc, double yc, const CudaClassicSrcIoFullfaceConfig0263& cfg) {
     if (!cfg.immersedRectangleEnabled) return false;
@@ -374,6 +454,8 @@ __device__ void activate_reservoir_slot_device_0263(
     double yp,
     double vxp,
     double vyp,
+    double particleMass,
+    std::uint32_t particleType,
     CudaClassicSrcIoCounters0263& local)
 {
     while (inactiveCursor < n && role[inactiveCursor] != inactiveRole) ++inactiveCursor;
@@ -385,8 +467,8 @@ __device__ void activate_reservoir_slot_device_0263(
     y[inactiveCursor] = yp;
     vx[inactiveCursor] = vxp;
     vy[inactiveCursor] = vyp;
-    mass[inactiveCursor] = cfg.refMass;
-    type[inactiveCursor] = cfg.refType;
+    mass[inactiveCursor] = particleMass;
+    type[inactiveCursor] = particleType;
     role[inactiveCursor] = fluidRole;
     ++inactiveCursor;
     local.inletParticlesInserted += 1ULL;
@@ -412,6 +494,8 @@ __device__ void insert_reservoir_cell_device_0263(
     double dy,
     int targetN,
     double time,
+    int inletFace,
+    int segmentIndex,
     std::uint64_t& inactiveCursor,
     std::uint64_t& ordinal,
     CudaClassicSrcIoCounters0263& local)
@@ -428,7 +512,7 @@ __device__ void insert_reservoir_cell_device_0263(
     local.inletReservoirTargetParticles += static_cast<unsigned long long>(targetN);
     const std::uint64_t seed = splitmix64_device_0263(cfg.rngSeed ^ (cfg.step * 0x9e3779b97f4a7c15ULL) ^
                                                       (ordinal * 0xbf58476d1ce4e5b9ULL) ^
-                                                      face_tag_0263(cfg.inletFace));
+                                                      face_tag_0263(inletFace));
     ++ordinal;
     Mt19937_64_Device_0263 rng{};
     mt_seed_device_0263(rng, seed);
@@ -438,10 +522,20 @@ __device__ void insert_reservoir_cell_device_0263(
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
         const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
         double ux = 0.0, uy = 0.0;
-        inlet_velocity_device_0263(cfg, cfg.inletFace, xp, yp, time, ux, uy);
+        double particleMass = cfg.refMass;
+        std::uint32_t particleType = cfg.refType;
+        if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
+            const double fRamp = ramp_factor_device_0263(cfg, time);
+            ux = fRamp * cfg.segmentUx[segmentIndex];
+            uy = fRamp * cfg.segmentUy[segmentIndex];
+            particleMass = cfg.segmentMass[segmentIndex];
+            particleType = cfg.segmentType[segmentIndex];
+        } else {
+            inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
+        }
         activate_reservoir_slot_device_0263(n, x, y, vx, vy, mass, type, role,
                                             fluidRole, inactiveRole, cfg, inactiveCursor,
-                                            xp, yp, ux, uy, local);
+                                            xp, yp, ux, uy, particleMass, particleType, local);
         if (local.overflowFlag) return;
     }
 }
@@ -473,12 +567,30 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
         bool remove = false;
         int removeMode = 0;
 
-        if (x[i] < cfg.xMin) {
-            local.hitsLeft += 1ULL;
-            if (cfg.leftMode != 0) { remove = true; removeMode = cfg.leftMode; }
-        } else if (x[i] > cfg.xMax) {
-            local.hitsRight += 1ULL;
-            if (cfg.rightMode != 0) { remove = true; removeMode = cfg.rightMode; }
+        int guardX = 0;
+        while (x[i] < cfg.xMin || x[i] > cfg.xMax) {
+            if (++guardX > 64) { local.failureFlag = 3; break; }
+            if (x[i] < cfg.xMin) {
+                local.hitsLeft += 1ULL;
+                int mode = cfg.leftMode;
+                if (cfg.segmentedEnable) {
+                    const double s = segment_s_device_0263(0, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 0, s);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                x[i] = 2.0 * cfg.xMin - x[i];
+                apply_x_wall_reflection_device_0263(cfg.leftWallMode == 0 ? 1 : cfg.leftWallMode, 0.0, 0.0, vx[i], vy[i]);
+            } else if (x[i] > cfg.xMax) {
+                local.hitsRight += 1ULL;
+                int mode = cfg.rightMode;
+                if (cfg.segmentedEnable) {
+                    const double s = segment_s_device_0263(1, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 1, s);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                x[i] = 2.0 * cfg.xMax - x[i];
+                apply_x_wall_reflection_device_0263(cfg.rightWallMode == 0 ? 1 : cfg.rightWallMode, 0.0, 0.0, vx[i], vy[i]);
+            }
         }
 
         if (!remove) {
@@ -523,12 +635,67 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
     std::uint64_t ordinal = 0ULL;
     const double time = static_cast<double>(cfg.step) * cfg.dt;
 
-    if (cfg.inletFace == 0) {
+    if (cfg.segmentedEnable) {
+        for (int seg = 0; seg < cfg.segmentCount; ++seg) {
+            if (cfg.segmentMode[seg] != 1) continue;
+            const int face = cfg.segmentFace[seg];
+            if (face == 0) {
+                for (int ix = 0; ix < cellsX; ++ix) {
+                    for (int iy = 0; iy < ny; ++iy) {
+                        const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 1) {
+                for (int ix = nx - cellsX; ix < nx; ++ix) {
+                    for (int iy = 0; iy < ny; ++iy) {
+                        const double s = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 2) {
+                for (int iy = 0; iy < cellsY; ++iy) {
+                    for (int ix = 0; ix < nx; ++ix) {
+                        const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            } else if (face == 3) {
+                for (int iy = ny - cellsY; iy < ny; ++iy) {
+                    for (int ix = 0; ix < nx; ++ix) {
+                        const double s = (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
+                        if (inlet_segment_index_for_cell_device_0263(cfg, face, s) != seg) continue;
+                        insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
+                                                          fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
+                                                          targetN, time, face, seg, inactiveCursor, ordinal, local);
+                        if (local.overflowFlag) break;
+                    }
+                    if (local.overflowFlag) break;
+                }
+            }
+            if (local.overflowFlag) break;
+        }
+    } else if (cfg.inletFace == 0) {
         for (int ix = 0; ix < cellsX; ++ix) {
             for (int iy = 0; iy < ny; ++iy) {
                 insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                   fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
-                                                  targetN, time, inactiveCursor, ordinal, local);
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
                 if (local.overflowFlag) break;
             }
             if (local.overflowFlag) break;
@@ -538,7 +705,7 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
             for (int iy = 0; iy < ny; ++iy) {
                 insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                   fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
-                                                  targetN, time, inactiveCursor, ordinal, local);
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
                 if (local.overflowFlag) break;
             }
             if (local.overflowFlag) break;
@@ -548,7 +715,7 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
             for (int ix = 0; ix < nx; ++ix) {
                 insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                   fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
-                                                  targetN, time, inactiveCursor, ordinal, local);
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
                 if (local.overflowFlag) break;
             }
             if (local.overflowFlag) break;
@@ -558,7 +725,7 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
             for (int ix = 0; ix < nx; ++ix) {
                 insert_reservoir_cell_device_0263(n, x, y, vx, vy, mass, type, role,
                                                   fluidRole, inactiveRole, cfg, ix, iy, dx, dy,
-                                                  targetN, time, inactiveCursor, ordinal, local);
+                                                  targetN, time, cfg.inletFace, -1, inactiveCursor, ordinal, local);
                 if (local.overflowFlag) break;
             }
             if (local.overflowFlag) break;
@@ -582,6 +749,24 @@ int inlet_face_code_0263(const SimulationParams& params) {
     if (is_inlet_boundary_mode(params.bcBottom)) return 2;
     if (is_inlet_boundary_mode(params.bcTop)) return 3;
     return -1;
+}
+
+int segment_face_code_0264(const std::string& face) {
+    if (face == "left") return 0;
+    if (face == "right") return 1;
+    if (face == "bottom") return 2;
+    if (face == "top") return 3;
+    return -1;
+}
+
+int segment_mode_code_0264(const OpenBoundarySegment& seg) {
+    if (open_boundary_segment_is_inlet(seg)) return 1;
+    if (open_boundary_segment_is_outlet(seg)) return 2;
+    return 0;
+}
+
+bool wall_like_mode_0264(const std::string& mode) {
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
 }
 
 int profile_code_0263(const SimulationParams& params) {
@@ -611,6 +796,8 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     cfg.yMax = domain.yMax;
     cfg.leftMode = io_mode_code_0263(params.bcLeft);
     cfg.rightMode = io_mode_code_0263(params.bcRight);
+    cfg.leftWallMode = wall_mode_code_0263(params.bcLeft);
+    cfg.rightWallMode = wall_mode_code_0263(params.bcRight);
     cfg.bottomWallMode = wall_mode_code_0263(params.bcBottom);
     cfg.topWallMode = wall_mode_code_0263(params.bcTop);
     cfg.wallUxBottom = params.wallVpUxBottom;
@@ -657,6 +844,21 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
         cfg.immersedRectangleEnabled = 1;
         immersed_solid_rectangle_bounds(params, time, cfg.immersedXMin, cfg.immersedXMax, cfg.immersedYMin, cfg.immersedYMax);
     }
+    if (params.openBoundarySegmentsEnable) {
+        cfg.segmentedEnable = 1;
+        cfg.segmentCount = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
+        for (int k = 0; k < cfg.segmentCount; ++k) {
+            const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
+            cfg.segmentFace[k] = segment_face_code_0264(seg.face);
+            cfg.segmentMode[k] = segment_mode_code_0264(seg);
+            cfg.segmentSMin[k] = seg.sMin;
+            cfg.segmentSMax[k] = seg.sMax;
+            cfg.segmentUx[k] = seg.ux;
+            cfg.segmentUy[k] = seg.uy;
+            cfg.segmentMass[k] = seg.mass;
+            cfg.segmentType[k] = seg.type;
+        }
+    }
     return cfg;
 }
 
@@ -681,6 +883,46 @@ bool supported_common_0263(const SimulationParams& params) {
     return xPair;
 }
 
+bool supported_segmented_0264(const SimulationParams& params) {
+    if (!params.srcClassicCudaModeEnable) return false;
+    if (!hard_inlet_reservoir_enabled_0263(params)) return false;
+    if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) return false;
+    if (static_cast<int>(params.openBoundarySegments.size()) != params.openBoundarySegmentCount) return false;
+    if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
+    if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
+    // 0264 is the classic-only resident segmented validation subset. Q6 and
+    // resampling are deliberately disabled here, but the host/GPU freshness
+    // protocol is left intact so they can be reintroduced as CPU continuations
+    // in a later patch.
+    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable || params.thermostatEnable) return false;
+    if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
+    if (params.closedCapacityInletMassFluxEnable) return false;
+    if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||
+        params.fluidYMinVelocity != 0.0 || params.fluidYMaxVelocity != 0.0) return false;
+    if (params.immersedSolidEnable) return false;
+    if (is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight) ||
+        is_io_boundary_mode(params.bcBottom) || is_io_boundary_mode(params.bcTop)) return false;
+    if (!wall_like_mode_0264(params.bcLeft) || !wall_like_mode_0264(params.bcRight) ||
+        !wall_like_mode_0264(params.bcBottom) || !wall_like_mode_0264(params.bcTop)) return false;
+
+    bool hasInlet = false;
+    bool hasOutlet = false;
+    bool hasLeft = false;
+    for (const OpenBoundarySegment& seg : params.openBoundarySegments) {
+        const int face = segment_face_code_0264(seg.face);
+        const int mode = segment_mode_code_0264(seg);
+        if (face < 0 || mode == 0) return false;
+        // Same conservative validation scope as 0249b: U-turn inlet and outlet
+        // segments on the left face. Broader segment topologies remain CPU.
+        if (face != 0) return false;
+        if (!(seg.sMin >= 0.0 && seg.sMax <= 1.0 && seg.sMax >= seg.sMin)) return false;
+        if (mode == 1) hasInlet = true;
+        if (mode == 2) hasOutlet = true;
+        hasLeft = true;
+    }
+    return hasInlet && hasOutlet && hasLeft;
+}
+
 } // namespace
 
 bool cuda_classic_src_io_fullface_resident_0263_requested() {
@@ -689,6 +931,14 @@ bool cuda_classic_src_io_fullface_resident_0263_requested() {
 
 bool cuda_classic_src_io_fullface_resident_0263_supported(const SimulationParams& params) {
     return supported_common_0263(params);
+}
+
+bool cuda_classic_src_io_segmented_resident_0264_requested() {
+    return env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264");
+}
+
+bool cuda_classic_src_io_segmented_resident_0264_supported(const SimulationParams& params) {
+    return supported_segmented_0264(params);
 }
 
 CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_stream_0263(
@@ -799,6 +1049,158 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     }
 
     cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_boundary_0263");
+    const auto tAfterDownload = Clock::now();
+
+    BoundaryDiagnostics b{};
+    b.inletHardReservoirEnabled = 1;
+    b.hitsLeft = static_cast<std::uint64_t>(h.hitsLeft);
+    b.hitsRight = static_cast<std::uint64_t>(h.hitsRight);
+    b.hitsBottom = static_cast<std::uint64_t>(h.hitsBottom);
+    b.hitsTop = static_cast<std::uint64_t>(h.hitsTop);
+    b.inletReservoirCells = static_cast<std::uint64_t>(h.inletReservoirCells);
+    b.inletReservoirTargetParticles = static_cast<std::uint64_t>(h.inletReservoirTargetParticles);
+    b.inletReservoirDeleted = static_cast<std::uint64_t>(h.inletReservoirDeleted);
+    b.inletBackflowDeleted = static_cast<std::uint64_t>(h.inletBackflowDeleted);
+    b.outletParticlesDeleted = static_cast<std::uint64_t>(h.outletParticlesDeleted);
+    b.inletParticlesInserted = static_cast<std::uint64_t>(h.inletParticlesInserted);
+    const std::int64_t deleted = static_cast<std::int64_t>(b.inletReservoirDeleted + b.inletBackflowDeleted + b.outletParticlesDeleted);
+    b.inletNetParticleDelta = static_cast<std::int64_t>(b.inletParticlesInserted) - deleted;
+    b.inletReservoirMeanN = b.inletReservoirCells == 0u ? 0.0 : static_cast<double>(std::max(0, params.inletTargetOccupancy));
+    b.inletReservoirStdN = 0.0;
+    b.inletReservoirMinN = b.inletReservoirCells == 0u ? 0u : static_cast<std::uint32_t>(std::max(0, params.inletTargetOccupancy));
+    b.inletReservoirMaxN = b.inletReservoirCells == 0u ? 0u : static_cast<std::uint32_t>(std::max(0, params.inletTargetOccupancy));
+    b.inletReservoirEmptyFraction = b.inletReservoirCells == 0u ? 0.0 : (params.inletTargetOccupancy == 0 ? 1.0 : 0.0);
+    if (b.inletParticlesInserted > 0u) {
+        const double inserted = static_cast<double>(b.inletParticlesInserted);
+        b.inletMeanUx = h.inletMeanUxSum / inserted;
+        b.inletMeanUy = h.inletMeanUySum / inserted;
+        b.inletKBT = h.inletKbtNumerator / (2.0 * inserted);
+    }
+    b.maxYWallReflectionsPerParticle = h.maxYReflections;
+
+    diag.handled = true;
+    diag.applied = true;
+    diag.boundary = b;
+    diag.fluidParticles = static_cast<std::uint64_t>(h.fluidParticles);
+    diag.allocationCalls = particleDiag.allocationCalls;
+    diag.uploadCalls = particleDiag.uploadCalls;
+    diag.downloadCalls = particleDiag.downloadCalls;
+    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload);
+    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
+    diag.downloadSeconds = elapsed_0263(tAfterKernel, tAfterDownload);
+    diag.totalSeconds = elapsed_0263(t0, tAfterDownload);
+    return diag;
+}
+
+CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_stream_0264(
+    ParticleState& state,
+    const SimulationParams& params,
+    const FluidDomainBounds& domain,
+    std::uint64_t step)
+{
+    CudaClassicSrcIoResident0263Diagnostics diag{};
+    diag.requested = cuda_classic_src_io_segmented_resident_0264_requested();
+    diag.supported = cuda_classic_src_io_segmented_resident_0264_supported(params);
+    diag.particles = state.Np;
+    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    if (!cuda_particle_state_available()) return diag;
+
+    const auto t0 = Clock::now();
+    CudaParticleStateDiagnostics particleDiag{};
+    CudaParticleState& gpuState = shared_state_0263();
+    if (!cuda_shared_particle_state_0251_is_fresh()) {
+        gpuState.upload_all(state, &particleDiag);
+    }
+    const auto tAfterUpload = Clock::now();
+
+    const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(
+        state, params, domain, step, static_cast<double>(step) * params.dt);
+    const int threads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_THREADS",
+                                     env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256));
+    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+                                   static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for segmented stream launch");
+    }
+    CudaParticleDeviceView view = gpuState.device_view();
+    io_fullface_force_stream_kernel_0263<<<static_cast<unsigned int>(blocks64), threads>>>(
+        view.n, view.x, view.y, view.vx, view.vy, view.role, kParticleRoleFluid, cfg);
+    check_cuda_0263(cudaGetLastError(), "io_segmented_force_stream_kernel_0264 launch");
+    check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_force_stream_kernel_0264 synchronize");
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_stream_0264");
+    const auto tAfterKernel = Clock::now();
+
+    diag.handled = true;
+    diag.applied = true;
+    diag.allocationCalls = particleDiag.allocationCalls;
+    diag.uploadCalls = particleDiag.uploadCalls;
+    diag.downloadCalls = particleDiag.downloadCalls;
+    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload);
+    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
+    diag.downloadSeconds = 0.0;
+    diag.totalSeconds = elapsed_0263(t0, tAfterKernel);
+    return diag;
+}
+
+CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_boundary_0264(
+    ParticleState& state,
+    const SimulationParams& params,
+    const FluidDomainBounds& domain,
+    std::uint64_t step,
+    double time)
+{
+    CudaClassicSrcIoResident0263Diagnostics diag{};
+    diag.requested = cuda_classic_src_io_segmented_resident_0264_requested();
+    diag.supported = cuda_classic_src_io_segmented_resident_0264_supported(params);
+    diag.particles = state.Np;
+    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    if (!cuda_particle_state_available()) return diag;
+    if (!cuda_shared_particle_state_0251_is_fresh()) {
+        const bool strict = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT");
+        if (strict) {
+            throw std::runtime_error(std::string("0264 boundary requested but shared CUDA state is stale; lastWriter=") +
+                                     cuda_shared_particle_state_0251_last_writer() +
+                                     " lastInvalidator=" + cuda_shared_particle_state_0251_last_invalidator());
+        }
+        return diag;
+    }
+
+    const auto t0 = Clock::now();
+    CudaParticleStateDiagnostics particleDiag{};
+    CudaParticleState& gpuState = shared_state_0263();
+    const auto tAfterUpload = Clock::now();
+
+    CudaClassicSrcIoCounters0263* dCounters = nullptr;
+    check_cuda_0263(cudaMalloc(&dCounters, sizeof(CudaClassicSrcIoCounters0263)), "allocate segmented counters");
+    check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear segmented counters");
+    const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
+    CudaParticleDeviceView view = gpuState.device_view();
+    io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
+        view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+        kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
+    check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_kernel_0264 launch");
+    check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_hard_reservoir_kernel_0264 synchronize");
+    const auto tAfterKernel = Clock::now();
+
+    CudaClassicSrcIoCounters0263 h{};
+    check_cuda_0263(cudaMemcpy(&h, dCounters, sizeof(CudaClassicSrcIoCounters0263), cudaMemcpyDeviceToHost), "copy segmented counters");
+    check_cuda_0263(cudaFree(dCounters), "free segmented counters");
+    if (h.failureFlag != 0) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: non-finite particle or too many wall reflections in segmented boundary kernel");
+    }
+    if (h.overflowFlag != 0) {
+        throw std::runtime_error(
+            std::string("cuda_classic_src_io_resident_0263: segmented hard reservoir needs more inactive slots; ") +
+            "GPU append is intentionally disabled in 0264; " +
+            "reservoirCells=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirCells)) +
+            " targetParticles=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirTargetParticles)) +
+            " reservoirDeleted=" + std::to_string(static_cast<unsigned long long>(h.inletReservoirDeleted)) +
+            " outletDeleted=" + std::to_string(static_cast<unsigned long long>(h.outletParticlesDeleted)) +
+            " insertedBeforeOverflow=" + std::to_string(static_cast<unsigned long long>(h.inletParticlesInserted)) +
+            " fluidAfterBoundary=" + std::to_string(static_cast<unsigned long long>(h.fluidParticles)));
+    }
+
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_boundary_0264");
     const auto tAfterDownload = Clock::now();
 
     BoundaryDiagnostics b{};

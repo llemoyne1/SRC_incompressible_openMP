@@ -30,6 +30,8 @@ struct CudaClassicSrcIoResident0263Diagnostics {
 
 bool cuda_classic_src_io_fullface_resident_0263_requested();
 bool cuda_classic_src_io_fullface_resident_0263_supported(const SimulationParams& params);
+bool cuda_classic_src_io_segmented_resident_0264_requested();
+bool cuda_classic_src_io_segmented_resident_0264_supported(const SimulationParams& params);
 CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_stream_0263(
     ParticleState& state,
     const SimulationParams& params,
@@ -41,14 +43,31 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     const FluidDomainBounds& domain,
     std::uint64_t step,
     double time);
+CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_stream_0264(
+    ParticleState& state,
+    const SimulationParams& params,
+    const FluidDomainBounds& domain,
+    std::uint64_t step);
+CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_boundary_0264(
+    ParticleState& state,
+    const SimulationParams& params,
+    const FluidDomainBounds& domain,
+    std::uint64_t step,
+    double time);
 
 #else
 
 inline bool cuda_classic_src_io_fullface_resident_0263_requested() { return false; }
 inline bool cuda_classic_src_io_fullface_resident_0263_supported(const SimulationParams&) { return false; }
+inline bool cuda_classic_src_io_segmented_resident_0264_requested() { return false; }
+inline bool cuda_classic_src_io_segmented_resident_0264_supported(const SimulationParams&) { return false; }
 inline CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_stream_0263(
     ParticleState&, const SimulationParams&, const FluidDomainBounds&, std::uint64_t) { return {}; }
 inline CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_boundary_0263(
+    ParticleState&, const SimulationParams&, const FluidDomainBounds&, std::uint64_t, double) { return {}; }
+inline CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_stream_0264(
+    ParticleState&, const SimulationParams&, const FluidDomainBounds&, std::uint64_t) { return {}; }
+inline CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_boundary_0264(
     ParticleState&, const SimulationParams&, const FluidDomainBounds&, std::uint64_t, double) { return {}; }
 
 #endif

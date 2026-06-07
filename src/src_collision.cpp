@@ -711,6 +711,30 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
         return true;
     }
 
+    if (persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false)) {
+        if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) {
+            return fail("segmented resident 0264 requires open-boundary segments");
+        }
+        if (!fullDomainBounds) return fail("segmented resident 0264 requires full domain bounds");
+        if (!face_has_wall_coupling(params.bcLeft, params) ||
+            !face_has_wall_coupling(params.bcRight, params) ||
+            !face_has_wall_coupling(params.bcBottom, params) ||
+            !face_has_wall_coupling(params.bcTop, params)) {
+            return fail("segmented resident 0264 requires static wall coupling on all four boundary faces");
+        }
+        if (immersed_solid_enabled(params)) {
+            return fail("segmented resident 0264 collision subset does not combine with immersed solids yet");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("segmented resident 0264 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("segmented resident 0264 invalid wall accommodation/mass");
+        }
+        if (reason != nullptr) *reason = "supported_segmented_static_box_0264";
+        return true;
+    }
+
     if (cuda_immersed_rect_collision_0254_enabled()) {
         if (!immersed_solid_enabled(params)) return fail("immersed-rectangle 0254 requires immersedSolidEnable=true");
         if (immersed_solid_shape(params) != ImmersedSolidShape::Rectangle) {

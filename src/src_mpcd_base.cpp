@@ -209,6 +209,11 @@ bool cuda_classic_src_io_fullface_resident_0263_active(const SimulationParams& p
            cuda_classic_src_io_fullface_resident_0263_supported(params);
 }
 
+bool cuda_classic_src_io_segmented_resident_0264_active(const SimulationParams& params) {
+    return cuda_classic_src_io_segmented_resident_0264_requested() &&
+           cuda_classic_src_io_segmented_resident_0264_supported(params);
+}
+
 
 struct PostGuardDepositProfileAccumulator {
     std::string outputDir;
@@ -523,8 +528,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const bool residentClassicWall0261 = cuda_classic_src_wall_resident_0261_active(params);
     const bool residentClassicSolid0262 = cuda_classic_src_solid_resident_0262_active(params);
     const bool residentClassicIo0263 = cuda_classic_src_io_fullface_resident_0263_active(params);
+    const bool residentClassicIo0264 = cuda_classic_src_io_segmented_resident_0264_active(params);
     const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261 ||
-                                     residentClassicSolid0262 || residentClassicIo0263;
+                                     residentClassicSolid0262 || residentClassicIo0263 || residentClassicIo0264;
     if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
         cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     }
@@ -539,7 +545,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
         bool handledByCudaStreaming = false;
-        if (residentClassicIo0263) {
+        if (residentClassicIo0264) {
+            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
+            const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0264 =
+                try_apply_cuda_classic_src_io_segmented_stream_0264(state, params, streamDomain, step);
+            handledByCudaStreaming = cudaIoStream0264.handled;
+        }
+        if (!handledByCudaStreaming && residentClassicIo0263) {
             const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
             const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0263 =
                 try_apply_cuda_classic_src_io_fullface_stream_0263(state, params, streamDomain, step);
@@ -585,7 +597,15 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, Boundary);
         bool handledByCudaBoundary = false;
-        if (residentClassicIo0263) {
+        if (residentClassicIo0264) {
+            const CudaClassicSrcIoResident0263Diagnostics cudaIoBoundary0264 =
+                try_apply_cuda_classic_src_io_segmented_boundary_0264(state, params, result.domain, step, time);
+            if (cudaIoBoundary0264.handled) {
+                result.boundary = cudaIoBoundary0264.boundary;
+                handledByCudaBoundary = true;
+            }
+        }
+        if (!handledByCudaBoundary && residentClassicIo0263) {
             const CudaClassicSrcIoResident0263Diagnostics cudaIoBoundary0263 =
                 try_apply_cuda_classic_src_io_fullface_boundary_0263(state, params, result.domain, step, time);
             if (cudaIoBoundary0263.handled) {
@@ -675,7 +695,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         return result;
     }
 
-    // 0260/0261/0262/0263 resident classic CUDA keeps the host ParticleState stale between summaries.
+    // 0260/0261/0262/0263/0264 resident classic CUDA keeps the host ParticleState stale between summaries.
     // The disabled-resampling diagnostics below still read the host state to report
     // resampStdN/resampMRel* in runtime_summary.csv.  Synchronize only on summary/final
     // steps, i.e. exactly when collectResamplingDiagnosticsWhenDisabled is true, so the

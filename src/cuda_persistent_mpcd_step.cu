@@ -1367,7 +1367,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false);
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
     if (!residentClassicNoVelocityDownload) {
         gpuState.download_velocities(downloadTarget);
     }
