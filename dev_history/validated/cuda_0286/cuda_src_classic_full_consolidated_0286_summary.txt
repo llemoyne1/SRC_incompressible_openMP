@@ -1,0 +1,5 @@
+CUDA SRC classic full consolidated validation 0286
+result=PASS
+rows=14
+errors=none
+manifest=dev_history/artifacts/gpu_cuda_src_classic_full_consolidated_0286/cuda_src_classic_full_consolidated_0286_manifest.csv

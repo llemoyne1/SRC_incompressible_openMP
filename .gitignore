@@ -57,3 +57,10 @@ CMakeLists.txt
 # Generated SRC/MPCD particle state files
 *.smpcd
 *.patch
+
+# Raw generated validation/demo artifacts.  Curated lightweight validation
+# summaries are kept under dev_history/validated/ and remain versionable.
+dev_history/artifacts/
+
+# Timing files produced by /usr/bin/time wrappers.
+*.time

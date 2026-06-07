@@ -1,0 +1,5 @@
+CUDA thermostat consolidated validation 0281
+result=PASS
+rows=10
+errors=none
+csv=dev_history/artifacts/gpu_cuda_persistent_src_thermostat_consolidated_0281/cuda_persistent_src_thermostat_consolidated_0281.csv
