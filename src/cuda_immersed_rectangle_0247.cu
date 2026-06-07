@@ -241,7 +241,8 @@ bool cuda_immersed_rectangle_0247_requested() {
 
 
 bool cuda_immersed_rectangle_0247_resident_0262_requested() {
-    return env_truthy_0247("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262");
+    return env_truthy_0247("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262") ||
+           env_truthy_0247("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263");
 }
 
 bool cuda_immersed_rectangle_0247_download_all_requested_0262() {

@@ -91,7 +91,12 @@ make_state() {
   local state
   state=$(state_path "$name")
   if [[ ! -f "$state" ]]; then
-    python3 scripts/generate_validation_state_0162.py --output "$state" "$@" >&2
+    local inactive_slots=${VALIDATION_INACTIVE_SLOTS:-0}
+    local extra_args=()
+    if [[ "$inactive_slots" != "0" && "$inactive_slots" != "" ]]; then
+      extra_args+=(--inactive-slots "$inactive_slots")
+    fi
+    python3 scripts/generate_validation_state_0162.py --output "$state" "${extra_args[@]}" "$@" >&2
   fi
   echo "$state"
 }
@@ -254,7 +259,7 @@ inletVelocityRampProfile = smoothstep
 inletVelocitySpatialProfile = flat_taper_y
 inletVelocityWallTaperCells = 2.0
 inletKBT = -1.0
-inletThermalNoise = 1.0
+inletThermalNoise = ${INLET_THERMAL_NOISE:-1.0}
 inletInjectionMode = hard_cell_density
 inletReservoirMode = hard_cell_density
 inletReservoirCells = 3
@@ -395,7 +400,7 @@ inletVelocityRampFinalFactor = 1.0
 inletVelocityRampProfile = smoothstep
 inletVelocitySpatialProfile = uniform
 inletKBT = -1.0
-inletThermalNoise = 1.0
+inletThermalNoise = ${INLET_THERMAL_NOISE:-1.0}
 inletInjectionMode = hard_cell_density
 inletReservoirMode = hard_cell_density
 inletReservoirCells = 3

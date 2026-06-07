@@ -20,6 +20,7 @@ from typing import Iterable, List, Sequence, Tuple
 MAGIC = b"SRCMPCD_STATE" + b"\0" * (16 - len("SRCMPCD_STATE"))
 ENDIAN_MARKER = 0x01020304
 VERSION_V2 = 2
+ROLE_INACTIVE = 0
 ROLE_FLUID = 1
 
 Rect = Tuple[float, float, float, float]
@@ -84,6 +85,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--active-y-min", type=float, default=0.0)
     p.add_argument("--active-y-max", type=float, default=-1.0, help="negative means Ly")
     p.add_argument("--solid-rect", action="append", type=parse_rect, default=[])
+    p.add_argument(
+        "--inactive-slots",
+        type=int,
+        default=0,
+        help="Append this many inactive V2 particle slots for resident GPU reservoir tests.",
+    )
     p.add_argument(
         "--skip-cell-if-center-in-solid",
         action="store_true",
@@ -167,6 +174,8 @@ def main() -> int:
     ay1 = args.active_y_max if args.active_y_max > 0.0 else args.Ly
     if not (0.0 <= ax0 < ax1 <= args.Lx and 0.0 <= ay0 < ay1 <= args.Ly):
         raise SystemExit("invalid active-domain bounds")
+    if args.inactive_slots < 0:
+        raise SystemExit("--inactive-slots must be non-negative")
 
     dx = args.Lx / args.Nx
     dy = args.Ly / args.Ny
@@ -245,13 +254,28 @@ def main() -> int:
         mean_vx = 0.0
         mean_vy = 0.0
 
+    inactive_slots = int(args.inactive_slots)
+    if inactive_slots > 0:
+        # Inactive slots are ignored by the physics until a hard inlet reservoir
+        # activates them.  Place them inside the numerical box with finite,
+        # harmless values so the standard state validator accepts the payload.
+        x.extend([ax0] * inactive_slots)
+        y.extend([ay0] * inactive_slots)
+        vx.extend([0.0] * inactive_slots)
+        vy.extend([0.0] * inactive_slots)
+        ptype.extend([args.ptype] * inactive_slots)
+        mass.extend([particle_mass] * inactive_slots)
+        role.extend([ROLE_INACTIVE] * inactive_slots)
+
     write_smpcd_v2(args.output, x, y, vx, vy, ptype, mass, role)
     print("Generated validation V2 state:")
     print(f"  output        : {args.output}")
     print(f"  grid          : {args.Nx} x {args.Ny}")
     print(f"  active cells  : {active_cells}")
     print(f"  skipped cells : {skipped_cells}")
-    print(f"  particles     : {n}")
+    print(f"  fluid particles : {n}")
+    print(f"  inactive slots  : {inactive_slots}")
+    print(f"  particles       : {n + inactive_slots}")
     print(f"  gamma target  : {args.gamma}")
     print(f"  mass factor   : {args.mass_factor:.12g}")
     print(f"  flow/kBT      : {args.flow_mode} / {args.kBT:.12g}")

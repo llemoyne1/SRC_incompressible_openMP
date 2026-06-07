@@ -8,6 +8,7 @@
 #include "cuda_inlet_outlet_fullface_0249a.h"
 #include "cuda_inlet_outlet_segmented_0249b.h"
 #include "cuda_shared_particle_state_0251.h"
+#include "cuda_classic_src_io_resident_0263.h"
 
 #include <algorithm>
 #include <chrono>
@@ -161,6 +162,7 @@ bool cuda_classic_src_wall_resident_0261_supported(const SimulationParams& param
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
            !params.resamplingEnable &&
+           !params.thermostatEnable &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
 }
@@ -192,6 +194,7 @@ bool cuda_classic_src_solid_resident_0262_supported(const SimulationParams& para
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
            !params.resamplingEnable &&
+           !params.thermostatEnable &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
 }
@@ -199,6 +202,11 @@ bool cuda_classic_src_solid_resident_0262_supported(const SimulationParams& para
 bool cuda_classic_src_solid_resident_0262_active(const SimulationParams& params) {
     return cuda_classic_src_solid_resident_0262_requested() &&
            cuda_classic_src_solid_resident_0262_supported(params);
+}
+
+bool cuda_classic_src_io_fullface_resident_0263_active(const SimulationParams& params) {
+    return cuda_classic_src_io_fullface_resident_0263_requested() &&
+           cuda_classic_src_io_fullface_resident_0263_supported(params);
 }
 
 
@@ -514,11 +522,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const bool residentClassicPeriodic0260 = cuda_classic_src_periodic_resident_0260_active(params);
     const bool residentClassicWall0261 = cuda_classic_src_wall_resident_0261_active(params);
     const bool residentClassicSolid0262 = cuda_classic_src_solid_resident_0262_active(params);
-    const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261 || residentClassicSolid0262;
+    const bool residentClassicIo0263 = cuda_classic_src_io_fullface_resident_0263_active(params);
+    const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261 ||
+                                     residentClassicSolid0262 || residentClassicIo0263;
     if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
         cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     }
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const double time = static_cast<double>(step) * params.dt;
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
@@ -528,7 +539,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
         bool handledByCudaStreaming = false;
-        if (cuda_piston_streaming_0247b_requested()) {
+        if (residentClassicIo0263) {
+            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
+            const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0263 =
+                try_apply_cuda_classic_src_io_fullface_stream_0263(state, params, streamDomain, step);
+            handledByCudaStreaming = cudaIoStream0263.handled;
+        }
+        if (!handledByCudaStreaming && cuda_piston_streaming_0247b_requested()) {
             const CudaPistonStreaming0247bDiagnostics cudaStreaming0247b =
                 try_apply_cuda_piston_streaming_0247b(state, params, step);
             handledByCudaStreaming = cudaStreaming0247b.handled;
@@ -561,28 +578,38 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
     }
 
-    const double time = static_cast<double>(step) * params.dt;
     {
         MPCD_PROFILE_PHASE(result.profile, Domain);
         result.domain = make_fluid_domain_bounds(params, time);
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Boundary);
-        CudaInletOutletSegmented0249bDiagnostics cudaIo0249b{};
-        if (cuda_inlet_outlet_segmented_0249b_requested()) {
-            cudaIo0249b = try_apply_cuda_inlet_outlet_segmented_0249b(
-                state, params, result.domain, step, time);
+        bool handledByCudaBoundary = false;
+        if (residentClassicIo0263) {
+            const CudaClassicSrcIoResident0263Diagnostics cudaIoBoundary0263 =
+                try_apply_cuda_classic_src_io_fullface_boundary_0263(state, params, result.domain, step, time);
+            if (cudaIoBoundary0263.handled) {
+                result.boundary = cudaIoBoundary0263.boundary;
+                handledByCudaBoundary = true;
+            }
         }
-        CudaInletOutletFullface0249aDiagnostics cudaIo0249a{};
-        if (cuda_inlet_outlet_fullface_0249a_requested()) {
-            cudaIo0249a = try_apply_cuda_inlet_outlet_fullface_0249a(
-                state, params, result.domain, step, time);
-        }
-        result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
-        merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
-        merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
-        if (boundary_cpu_may_have_edited_particles_0251(result.boundary)) {
-            cuda_shared_particle_state_0251_invalidate("cpu_boundary_conditions_edited_particles");
+        if (!handledByCudaBoundary) {
+            CudaInletOutletSegmented0249bDiagnostics cudaIo0249b{};
+            if (cuda_inlet_outlet_segmented_0249b_requested()) {
+                cudaIo0249b = try_apply_cuda_inlet_outlet_segmented_0249b(
+                    state, params, result.domain, step, time);
+            }
+            CudaInletOutletFullface0249aDiagnostics cudaIo0249a{};
+            if (cuda_inlet_outlet_fullface_0249a_requested()) {
+                cudaIo0249a = try_apply_cuda_inlet_outlet_fullface_0249a(
+                    state, params, result.domain, step, time);
+            }
+            result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
+            merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
+            merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
+            if (boundary_cpu_may_have_edited_particles_0251(result.boundary)) {
+                cuda_shared_particle_state_0251_invalidate("cpu_boundary_conditions_edited_particles");
+            }
         }
     }
     {
@@ -648,7 +675,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         return result;
     }
 
-    // 0260/0261/0262 resident classic CUDA keeps the host ParticleState stale between summaries.
+    // 0260/0261/0262/0263 resident classic CUDA keeps the host ParticleState stale between summaries.
     // The disabled-resampling diagnostics below still read the host state to report
     // resampStdN/resampMRel* in runtime_summary.csv.  Synchronize only on summary/final
     // steps, i.e. exactly when collectResamplingDiagnosticsWhenDisabled is true, so the
