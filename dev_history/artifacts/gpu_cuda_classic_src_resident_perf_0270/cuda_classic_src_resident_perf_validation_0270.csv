@@ -1,0 +1,7 @@
+suite,script,gridCases,outputCsv,exitCode,rows,passRows,failRows,verdict
+periodic_0260,scripts/run_cuda_classic_src_periodic_resident_0260.sh,64:64:220 128:128:140,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/periodic_0260/cuda_classic_src_periodic_resident_0260.csv,0,4,4,0,PASS
+wall_simple_0261,scripts/run_cuda_classic_src_wall_resident_0261.sh,64:64:220 128:128:140,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/wall_0261/cuda_classic_src_wall_resident_0261.csv,0,4,4,0,PASS
+solid_rectangle_0262,scripts/run_cuda_classic_src_solid_resident_0262.sh,64:64:220 128:128:140,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/solid_0262/cuda_classic_src_solid_resident_0262.csv,0,4,4,0,PASS
+piston_mobile_wall_0255_legacy,scripts/run_cuda_persistent_src_collision_piston_0255.sh,64:64:160,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/piston_0255/cuda_persistent_src_collision_0255.csv,0,2,2,0,PASS
+io_fullface_0263d,scripts/run_cuda_classic_src_io_fullface_resident_0263.sh,64:64:220 128:128:140,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/io_fullface_0263/cuda_classic_src_io_fullface_resident_0263.csv,0,2,2,0,PASS
+io_segmented_0264,scripts/run_cuda_classic_src_io_segmented_resident_0264.sh,64:64:220 128:128:140,dev_history/artifacts/gpu_cuda_classic_src_resident_perf_0270/validation_runs/io_segmented_0264/cuda_classic_src_io_segmented_resident_0264.csv,0,2,2,0,PASS

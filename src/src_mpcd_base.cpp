@@ -112,6 +112,17 @@ bool internal_profiles_enabled_0176() {
 }
 
 
+bool env_truthy_0270(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') {
+        return false;
+    }
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+
 bool cuda_classic_src_periodic_resident_0260_requested() {
     const char* v = std::getenv("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260");
     if (v == nullptr || *v == '\0') {
@@ -772,6 +783,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const double time = static_cast<double>(step) * params.dt;
 
+    // 0270: wall-simple resident CUDA performs y-wall reflection directly in
+    // the force/stream kernel.  The generic CPU boundary pass is therefore a
+    // redundant full particle scan for the validated Poiseuille wall subset.
+    // Keep this as a per-step fact rather than a global guard so future Q6,
+    // resampling or thermostat reactivation can still force explicit
+    // host/device synchronization where needed.
+    bool wallSimpleResidentStreamHandled0270 = false;
+
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
     // pre-stream particle position. CUDA offloads are enabled only for explicitly
@@ -805,6 +824,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 try_apply_cuda_wall_simple_streaming_0246(state, params, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "wall_simple_0246", "force_stream", cudaStreaming0246);
             handledByCudaStreaming = cudaStreaming0246.handled;
+            wallSimpleResidentStreamHandled0270 = residentClassicWall0261 && cudaStreaming0246.handled;
         }
         if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
@@ -854,6 +874,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 result.boundary = cudaIoBoundary0263.boundary;
                 handledByCudaBoundary = true;
             }
+        }
+        if (!handledByCudaBoundary && wallSimpleResidentStreamHandled0270 &&
+            !env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0270_DISABLE_BOUNDARY_SKIP")) {
+            // The wall-simple CUDA stream kernel already applies the periodic-x
+            // wrap and bounded-y reflections for the validated static channel
+            // subset.  Re-running apply_boundary_conditions() here only scans
+            // the host ParticleState, which is intentionally stale in resident
+            // mode.  Preserve the historical resident summaries by leaving the
+            // BoundaryDiagnostics counters at their default zero values.
+            result.boundary = BoundaryDiagnostics{};
+            handledByCudaBoundary = true;
         }
         if (!handledByCudaBoundary) {
             CudaInletOutletSegmented0249bDiagnostics cudaIo0249b{};
