@@ -100,6 +100,16 @@ int env_int_0295(const char* name, int fallback) {
     }
 }
 
+std::string env_string_0295(const char* name, const std::string& fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    std::string s(v);
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
 std::string csv_escape_0295(const std::string& s) {
     if (s.find_first_of(",\"\n\r") == std::string::npos) return s;
     std::string out = "\"";
@@ -234,6 +244,7 @@ struct DeviceFlagBuffer0295 {
 };
 
 thread_local CudaCellWorkspace g_surveyCellWorkspace0295;
+thread_local CudaParticleState g_surveyPrivateParticleState0295;
 thread_local DeviceFlagBuffer0295 g_surveyFlags0295;
 
 DeviceSurveyConfig0295 make_config_0295(const SimulationParams& params,
@@ -352,11 +363,55 @@ CudaResamplingSupportSurvey0295Diagnostics try_run_cuda_resampling_support_surve
         throw std::runtime_error("cuda_resampling_support_survey_0295: invalid grid");
     }
 
+    // 0295 diagnostic modes.  These modes deliberately split the passive
+    // survey into progressively more invasive read-only operations so the VK
+    // open-boundary/circle case can be bisected without guessing.  None of
+    // these modes writes particle state.
+    const std::string surveyMode = env_string_0295(
+        "MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295_MODE", "full");
+    d.stage += std::string(";mode=") + surveyMode;
+
+    if (surveyMode == "csv_only" || surveyMode == "metadata_only") {
+        d.sharedStateFreshBefore = cuda_shared_particle_state_0251_is_fresh();
+        d.handled = true;
+        d.totalSeconds = seconds_between(t0, Clock::now());
+        write_csv_row_0295(params, d);
+        return d;
+    }
+
+    if (surveyMode == "sync_only") {
+        d.sharedStateFreshBefore = cuda_shared_particle_state_0251_is_fresh();
+        const Clock::time_point ts0 = Clock::now();
+        cuda_check_0295(cudaDeviceSynchronize(), "diagnostic sync_only");
+        d.surveyKernelSeconds = seconds_between(ts0, Clock::now());
+        d.handled = true;
+        d.totalSeconds = seconds_between(t0, Clock::now());
+        write_csv_row_0295(params, d);
+        return d;
+    }
+
+    if (surveyMode != "full" && surveyMode != "alloc_only" && surveyMode != "deposit_only") {
+        throw std::runtime_error("cuda_resampling_support_survey_0295: unsupported mode '" +
+                                 surveyMode + "'");
+    }
+
     d.sharedStateFreshBefore = cuda_shared_particle_state_0251_is_fresh();
+
+    // 0295 non-mutation rule:
+    // The survey must never repair or refresh the process-global shared CUDA
+    // particle state.  Earlier 0295 drafts uploaded the host mirror into
+    // cuda_shared_particle_state_0251() when the freshness flag was false.  That
+    // is harmless for pure CPU paths, but it can corrupt resident CUDA cases in
+    // which the host mirror is intentionally stale between summaries (notably
+    // circle + inlet/outlet).  Use the authoritative shared state only when it is
+    // explicitly fresh; otherwise upload the host mirror to a private temporary
+    // CUDA state owned by the survey.  This keeps the diagnostic passive even
+    // when the fallback survey is less authoritative than the resident state.
+    CudaParticleState* surveyParticleState = &cuda_shared_particle_state_0251();
     if (!d.sharedStateFreshBefore) {
         CudaParticleStateDiagnostics uploadDiag{};
-        cuda_shared_particle_state_0251().upload_all(hostMirror, &uploadDiag);
-        cuda_shared_particle_state_0251_mark_fresh("cuda_resampling_support_survey_0295_host_upload");
+        g_surveyPrivateParticleState0295.upload_all(hostMirror, &uploadDiag);
+        surveyParticleState = &g_surveyPrivateParticleState0295;
         d.uploadedHostState = true;
         d.depositUploadSeconds += uploadDiag.allocateSeconds + uploadDiag.uploadSeconds;
     }
@@ -364,6 +419,14 @@ CudaResamplingSupportSurvey0295Diagnostics try_run_cuda_resampling_support_surve
     CudaCellWorkspaceDiagnostics workspaceDiag{};
     g_surveyCellWorkspace0295.ensure_capacity(hostMirror.Np, grid.numCells, &workspaceDiag);
     d.depositUploadSeconds += workspaceDiag.allocateSeconds;
+
+    if (surveyMode == "alloc_only") {
+        g_surveyFlags0295.ensure(static_cast<std::size_t>(grid.numCells));
+        d.handled = true;
+        d.totalSeconds = seconds_between(t0, Clock::now());
+        write_csv_row_0295(params, d);
+        return d;
+    }
 
     CudaCellMoments moments{};
     CudaCellMomentsDiagnostics depositDiag{};
@@ -377,7 +440,7 @@ CudaResamplingSupportSurvey0295Diagnostics try_run_cuda_resampling_support_surve
 
     cuda_deposit_cell_moments_atomic_from_persistent_state(
         hostMirror,
-        cuda_shared_particle_state_0251(),
+        *surveyParticleState,
         g_surveyCellWorkspace0295,
         grid,
         GridShift{},
@@ -395,9 +458,23 @@ CudaResamplingSupportSurvey0295Diagnostics try_run_cuda_resampling_support_surve
     d.fluidParticles = 0u;
     d.cells = static_cast<std::uint64_t>(grid.numCells);
 
+    if (surveyMode == "deposit_only") {
+        for (int c = 0; c < grid.numCells; ++c) {
+            const std::size_t cc = static_cast<std::size_t>(c);
+            d.fluidParticles += static_cast<std::uint64_t>(moments.cellCount[cc]);
+            d.totalMass += moments.cellMass[cc];
+            d.totalPx += moments.cellPx[cc];
+            d.totalPy += moments.cellPy[cc];
+        }
+        d.handled = true;
+        d.totalSeconds = seconds_between(t0, Clock::now());
+        write_csv_row_0295(params, d);
+        return d;
+    }
+
     const DeviceSurveyConfig0295 cfg = make_config_0295(params, grid, domain, time);
     CudaCellWorkspaceDeviceView cv = g_surveyCellWorkspace0295.device_view();
-    CudaParticleDeviceView pv = cuda_shared_particle_state_0251().device_view();
+    CudaParticleDeviceView pv = surveyParticleState->device_view();
     if (cv.cellKinetic == nullptr || cv.count == nullptr || cv.cellMass == nullptr ||
         cv.cellPx == nullptr || cv.cellPy == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr ||
         cv.cellId == nullptr || pv.vx == nullptr || pv.vy == nullptr || pv.mass == nullptr || pv.role == nullptr) {

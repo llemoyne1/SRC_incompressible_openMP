@@ -16,9 +16,9 @@ AUTO_BUILD=0
 
 CASE_NAME="von_karman_cylinder"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-15000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-50000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
-UIN="${UIN:-2.}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.12}"
+UIN="${UIN:-0.2}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.2}"
 RUN_ROOT="${RUN_ROOT:-runs/demo_src_classic_cuda_von_karman_cylinder_0285}"
 prepare_demo_dirs_0283 "$RUN_ROOT"
 STATE_FILE="$RUN_ROOT/init/${CASE_NAME}_${NX}x${NY}_g${GAMMA}.smpcd"
