@@ -72,6 +72,9 @@ struct DeviceBuffers0297 {
     unsigned int* dPoorDonor = nullptr;
     unsigned int* dRichKeep = nullptr;
     unsigned int* dRichExtract = nullptr;
+    double* dKrelBefore0298 = nullptr;
+    double* dKrelAfter0298 = nullptr;
+    unsigned long long* dEnergyRestoreCounters0298 = nullptr; // 0 applied cells, 1 skipped cells
     unsigned long long* dCounters = nullptr; // 0 merge, 1 split, 2 noInactive, 3 noDonor, 4 noPair
     int cellCapacity = 0;
     std::uint64_t particleCapacity = 0u;
@@ -89,6 +92,9 @@ struct DeviceBuffers0297 {
         if (dPoorDonor) cudaFree(dPoorDonor);
         if (dRichKeep) cudaFree(dRichKeep);
         if (dRichExtract) cudaFree(dRichExtract);
+        if (dKrelBefore0298) cudaFree(dKrelBefore0298);
+        if (dKrelAfter0298) cudaFree(dKrelAfter0298);
+        if (dEnergyRestoreCounters0298) cudaFree(dEnergyRestoreCounters0298);
         if (dCounters) cudaFree(dCounters);
         dPoorCells = nullptr;
         dRichCells = nullptr;
@@ -100,6 +106,9 @@ struct DeviceBuffers0297 {
         dPoorDonor = nullptr;
         dRichKeep = nullptr;
         dRichExtract = nullptr;
+        dKrelBefore0298 = nullptr;
+        dKrelAfter0298 = nullptr;
+        dEnergyRestoreCounters0298 = nullptr;
         dCounters = nullptr;
         cellCapacity = 0;
         particleCapacity = 0u;
@@ -108,7 +117,8 @@ struct DeviceBuffers0297 {
     void ensure(int numCells, std::uint64_t nParticles) {
         if (numCells <= cellCapacity && nParticles <= particleCapacity && dPoorCells && dRichCells &&
             dPoorCount && dRichCount && dInactiveList && dInactiveCount && dInactiveCursor && dPoorDonor &&
-            dRichKeep && dRichExtract && dCounters) {
+            dRichKeep && dRichExtract && dKrelBefore0298 && dKrelAfter0298 &&
+            dEnergyRestoreCounters0298 && dCounters) {
             return;
         }
         release();
@@ -134,6 +144,12 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc rich keep: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dRichExtract), sizeof(unsigned int) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc rich extract: ") + cudaGetErrorString(err));
+        err = cudaMalloc(reinterpret_cast<void**>(&dKrelBefore0298), sizeof(double) * static_cast<std::size_t>(numCells));
+        if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 krel before: ") + cudaGetErrorString(err));
+        err = cudaMalloc(reinterpret_cast<void**>(&dKrelAfter0298), sizeof(double) * static_cast<std::size_t>(numCells));
+        if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 krel after: ") + cudaGetErrorString(err));
+        err = cudaMalloc(reinterpret_cast<void**>(&dEnergyRestoreCounters0298), sizeof(unsigned long long) * 2u);
+        if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 energy counters: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 5u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc counters: ") + cudaGetErrorString(err));
         cellCapacity = numCells;
@@ -153,6 +169,23 @@ void cuda_check_0297(cudaError_t err, const char* context) {
         throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: ") +
                                  context + ": " + cudaGetErrorString(err));
     }
+}
+
+__device__ inline double atomic_add_double_compat_0297(double* address, double value) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+    return atomicAdd(address, value);
+#else
+    auto* addressAsUll = reinterpret_cast<unsigned long long int*>(address);
+    unsigned long long int old = *addressAsUll;
+    unsigned long long int assumed;
+    do {
+        assumed = old;
+        old = atomicCAS(addressAsUll,
+                        assumed,
+                        __double_as_longlong(value + __longlong_as_double(assumed)));
+    } while (assumed != old);
+    return __longlong_as_double(old);
+#endif
 }
 
 bool env_truthy_0297(const char* name) {
@@ -443,6 +476,90 @@ __global__ void split_poor_cells_kernel_0297(
     atomicAdd(&counters[1], 1ull);
 }
 
+__global__ void reset_krel_buffer_kernel_0298(int numCells,
+                                                double* __restrict__ krel,
+                                                unsigned long long* __restrict__ counters) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c < numCells) {
+        krel[c] = 0.0;
+    }
+    if (c == 0 && counters != nullptr) {
+        counters[0] = 0ull;
+        counters[1] = 0ull;
+    }
+}
+
+__global__ void accumulate_cell_relative_energy_kernel_0298(
+    int nParticles,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const double* __restrict__ mass,
+    const unsigned char* __restrict__ role,
+    const int* __restrict__ cellId,
+    const double* __restrict__ cellUx,
+    const double* __restrict__ cellUy,
+    double* __restrict__ krel) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nParticles) return;
+    if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
+    const int c = cellId[i];
+    if (c < 0) return;
+    const double m = mass[i];
+    if (!(m > 0.0)) return;
+    const double dvx = vx[i] - cellUx[c];
+    const double dvy = vy[i] - cellUy[c];
+    const double e = 0.5 * m * (dvx * dvx + dvy * dvy);
+    if (isfinite(e)) {
+        atomic_add_double_compat_0297(&krel[c], e);
+    }
+}
+
+__global__ void restore_cell_relative_energy_kernel_0298(
+    int nParticles,
+    const double* __restrict__ targetKrel,
+    const double* __restrict__ currentKrel,
+    const unsigned int* __restrict__ cellCount,
+    const double* __restrict__ cellMass,
+    const double* __restrict__ cellUx,
+    const double* __restrict__ cellUy,
+    const int* __restrict__ cellId,
+    const unsigned char* __restrict__ role,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double minCurrentKrel,
+    double maxScale,
+    double absTol,
+    double relTol,
+    unsigned long long* __restrict__ counters) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nParticles) return;
+    if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
+    const int c = cellId[i];
+    if (c < 0) return;
+    if (cellCount[c] < 2u || !(cellMass[c] > 0.0)) return;
+    const double target = targetKrel[c];
+    const double current = currentKrel[c];
+    if (!(target >= 0.0) || !(current > minCurrentKrel) || !isfinite(target) || !isfinite(current)) {
+        return;
+    }
+    const double diff = fabs(current - target);
+    const double den = fmax(1.0, fabs(target));
+    if (diff <= absTol + relTol * den) {
+        return;
+    }
+    double scale = sqrt(target / current);
+    if (!isfinite(scale)) return;
+    if (scale > maxScale) scale = maxScale;
+    if (scale < 0.0) scale = 0.0;
+    const double ux = cellUx[c];
+    const double uy = cellUy[c];
+    vx[i] = ux + scale * (vx[i] - ux);
+    vy[i] = uy + scale * (vy[i] - uy);
+    // The per-particle counter over-counts active cells, but it is useful as an
+    // inexpensive indication that the restoration kernel was actually applied.
+    atomicAdd(&counters[0], 1ull);
+}
+
 DevicePopulationGuardConfig0297 make_config_0297(const SimulationParams& params,
                                                  const CellGrid& grid,
                                                  const FluidDomainBounds& domain,
@@ -496,6 +613,10 @@ void write_csv_row_0297(const SimulationParams& params,
                "wetCellsBefore,wetCellsAfter,poorCells,richCells,mergeApplied,splitApplied,splitSkippedNoInactive,"
                "splitSkippedNoDonor,mergeSkippedNoPair,nMin,nTarget,nMax,splitFraction,minDonorMassAfterSplit,"
                "totalMassBefore,totalMassAfter,totalPxBefore,totalPxAfter,totalPyBefore,totalPyAfter,"
+               "momentRestoreRequested0298,energyRestoreApplied0298,energyRestoreParticleUpdates0298,energyRestoreSkippedParticles0298,"
+               "energyRestoreMaxScale0298,totalKrelBefore0298,totalKrelAfterPreRestore0298,totalKrelAfter0298,"
+               "maxAbsCellKrelErrorPreRestore0298,maxRelCellKrelErrorPreRestore0298,"
+               "maxAbsCellKrelError0298,maxRelCellKrelError0298,"
                "maxAbsCellMassError,maxRelCellMassError,maxAbsCellMomentumError,maxRelCellMomentumError,"
                "depositBeforeSeconds,kernelSeconds,depositAfterSeconds,downloadSeconds,totalSeconds\n";
     }
@@ -518,6 +639,13 @@ void write_csv_row_0297(const SimulationParams& params,
         << d.totalMassBefore << ',' << d.totalMassAfter << ','
         << d.totalPxBefore << ',' << d.totalPxAfter << ','
         << d.totalPyBefore << ',' << d.totalPyAfter << ','
+        << (d.momentRestoreRequested0298 ? 1 : 0) << ','
+        << (d.energyRestoreApplied0298 ? 1 : 0) << ','
+        << d.energyRestoreParticleUpdates0298 << ',' << d.energyRestoreSkippedParticles0298 << ','
+        << d.energyRestoreMaxScale0298 << ','
+        << d.totalKrelBefore0298 << ',' << d.totalKrelAfterPreRestore0298 << ',' << d.totalKrelAfter0298 << ','
+        << d.maxAbsCellKrelErrorPreRestore0298 << ',' << d.maxRelCellKrelErrorPreRestore0298 << ','
+        << d.maxAbsCellKrelError0298 << ',' << d.maxRelCellKrelError0298 << ','
         << d.maxAbsCellMassError << ',' << d.maxRelCellMassError << ','
         << d.maxAbsCellMomentumError << ',' << d.maxRelCellMomentumError << ','
         << d.depositBeforeSeconds << ',' << d.kernelSeconds << ','
@@ -564,6 +692,50 @@ void compare_before_after_0297(const CudaCellMoments& before,
     }
 }
 
+std::vector<double> compute_cell_krel_0298(int nParticles,
+                                           int numCells,
+                                           int particleGrid,
+                                           int cellGrid,
+                                           int block,
+                                           const CudaParticleDeviceView& pv,
+                                           const CudaCellWorkspaceDeviceView& cv,
+                                           double* dKrel,
+                                           unsigned long long* countersOrNull,
+                                           const char* label) {
+    reset_krel_buffer_kernel_0298<<<cellGrid, block>>>(numCells, dKrel, countersOrNull);
+    cuda_check_0297(cudaGetLastError(), label);
+    accumulate_cell_relative_energy_kernel_0298<<<particleGrid, block>>>(
+        nParticles, pv.vx, pv.vy, pv.mass, pv.role, cv.cellId, cv.cellUx, cv.cellUy, dKrel);
+    cuda_check_0297(cudaGetLastError(), "launch accumulate_cell_relative_energy_kernel_0298");
+    cuda_check_0297(cudaDeviceSynchronize(), "synchronize 0298 krel accumulation");
+    std::vector<double> out(static_cast<std::size_t>(numCells), 0.0);
+    cuda_check_0297(cudaMemcpy(out.data(), dKrel, sizeof(double) * static_cast<std::size_t>(numCells),
+                               cudaMemcpyDeviceToHost),
+                    "copy 0298 krel D2H");
+    return out;
+}
+
+double sum_vector_0298(const std::vector<double>& v) {
+    double s = 0.0;
+    for (const double x : v) s += x;
+    return s;
+}
+
+void compare_krel_vectors_0298(const std::vector<double>& target,
+                               const std::vector<double>& observed,
+                               double& maxAbs,
+                               double& maxRel) {
+    const std::size_t n = std::min(target.size(), observed.size());
+    maxAbs = 0.0;
+    maxRel = 0.0;
+    for (std::size_t c = 0; c < n; ++c) {
+        const double diff = observed[c] - target[c];
+        const double den = std::max(1.0, std::abs(target[c]));
+        maxAbs = std::max(maxAbs, std::abs(diff));
+        maxRel = std::max(maxRel, std::abs(diff) / den);
+    }
+}
+
 } // namespace
 
 bool cuda_resampling_population_guard_0297_requested(std::uint64_t step) {
@@ -592,6 +764,11 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.nMax = cfg.nMax;
     d.splitFraction = cfg.splitFraction;
     d.minDonorMassAfterSplit = cfg.minDonorMassAfterSplit;
+    d.momentRestoreRequested0298 = env_truthy_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298");
+    d.energyRestoreMaxScale0298 = std::max(1.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_MAX_SCALE", 4.0));
+    const double minCurrentKrel0298 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_MIN_CURRENT_KREL", 1.0e-30));
+    const double restoreAbsTol0298 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_ABS_TOL", 1.0e-14));
+    const double restoreRelTol0298 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_REL_TOL", 1.0e-12));
     const Clock::time_point t0 = Clock::now();
 
     d.cudaAvailable = cuda_cell_moments_available();
@@ -653,6 +830,12 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     const int block = options.threadsPerBlock;
     const int cellGrid = std::max(1, (grid.numCells + block - 1) / block);
     const int particleGrid = std::max(1, (static_cast<int>(hostMirror.Np) + block - 1) / block);
+
+    std::vector<double> krelBefore0298 = compute_cell_krel_0298(
+        static_cast<int>(hostMirror.Np), grid.numCells, particleGrid, cellGrid, block,
+        pv, cv, g_populationGuardBuffers0297.dKrelBefore0298, nullptr,
+        "reset 0298 krel before");
+    d.totalKrelBefore0298 = sum_vector_0298(krelBefore0298);
 
     const Clock::time_point tk0 = Clock::now();
     reset_population_guard_buffers_kernel_0297<<<cellGrid, block>>>(
@@ -763,6 +946,70 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         hostMirror, gpuState, g_populationGuardWorkspace0297, grid, GridShift{}, params,
         after, &afterDiag, options);
     d.depositAfterSeconds = afterDiag.totalSeconds;
+
+    // 0298: after the support mutation, measure the cell-relative kinetic
+    // energy loss/gain against the pre-mutation target.  This is the missing
+    // budget for merge operations: mass and momentum are conserved by 0297,
+    // while relative kinetic energy generally is not unless we rescale the
+    // post-mutation relative velocities inside each affected cell.
+    std::vector<double> krelAfterPreRestore0298 = compute_cell_krel_0298(
+        static_cast<int>(hostMirror.Np), grid.numCells, particleGrid, cellGrid, block,
+        pv, g_populationGuardWorkspace0297.device_view(),
+        g_populationGuardBuffers0297.dKrelAfter0298,
+        g_populationGuardBuffers0297.dEnergyRestoreCounters0298,
+        "reset 0298 krel after pre-restore");
+    d.totalKrelAfterPreRestore0298 = sum_vector_0298(krelAfterPreRestore0298);
+    compare_krel_vectors_0298(krelBefore0298,
+                              krelAfterPreRestore0298,
+                              d.maxAbsCellKrelErrorPreRestore0298,
+                              d.maxRelCellKrelErrorPreRestore0298);
+
+    if (d.momentRestoreRequested0298 && (d.mergeApplied > 0u || d.splitApplied > 0u)) {
+        restore_cell_relative_energy_kernel_0298<<<particleGrid, block>>>(
+            static_cast<int>(hostMirror.Np),
+            g_populationGuardBuffers0297.dKrelBefore0298,
+            g_populationGuardBuffers0297.dKrelAfter0298,
+            g_populationGuardWorkspace0297.device_view().count,
+            g_populationGuardWorkspace0297.device_view().cellMass,
+            g_populationGuardWorkspace0297.device_view().cellUx,
+            g_populationGuardWorkspace0297.device_view().cellUy,
+            g_populationGuardWorkspace0297.device_view().cellId,
+            pv.role, pv.vx, pv.vy,
+            minCurrentKrel0298, d.energyRestoreMaxScale0298,
+            restoreAbsTol0298, restoreRelTol0298,
+            g_populationGuardBuffers0297.dEnergyRestoreCounters0298);
+        cuda_check_0297(cudaGetLastError(), "launch restore_cell_relative_energy_kernel_0298");
+        cuda_check_0297(cudaDeviceSynchronize(), "synchronize 0298 energy restoration");
+        unsigned long long hEnergyCounters0298[2] = {0ull, 0ull};
+        cuda_check_0297(cudaMemcpy(hEnergyCounters0298,
+                                   g_populationGuardBuffers0297.dEnergyRestoreCounters0298,
+                                   sizeof(hEnergyCounters0298), cudaMemcpyDeviceToHost),
+                        "copy 0298 energy counters D2H");
+        d.energyRestoreParticleUpdates0298 = static_cast<std::uint64_t>(hEnergyCounters0298[0]);
+        d.energyRestoreSkippedParticles0298 = static_cast<std::uint64_t>(hEnergyCounters0298[1]);
+        d.energyRestoreApplied0298 = d.energyRestoreParticleUpdates0298 > 0u;
+        if (d.energyRestoreApplied0298) {
+            cuda_shared_particle_state_0251_mark_fresh("cuda_resampling_moment_restore_0298");
+        }
+
+        CudaCellMomentsDiagnostics restoredDiag{};
+        cuda_deposit_cell_moments_atomic_from_persistent_state(
+            hostMirror, gpuState, g_populationGuardWorkspace0297, grid, GridShift{}, params,
+            after, &restoredDiag, options);
+        d.depositAfterSeconds += restoredDiag.totalSeconds;
+    }
+
+    std::vector<double> krelAfter0298 = compute_cell_krel_0298(
+        static_cast<int>(hostMirror.Np), grid.numCells, particleGrid, cellGrid, block,
+        pv, g_populationGuardWorkspace0297.device_view(),
+        g_populationGuardBuffers0297.dKrelAfter0298, nullptr,
+        "reset 0298 krel final");
+    d.totalKrelAfter0298 = sum_vector_0298(krelAfter0298);
+    compare_krel_vectors_0298(krelBefore0298,
+                              krelAfter0298,
+                              d.maxAbsCellKrelError0298,
+                              d.maxRelCellKrelError0298);
+
     accumulate_global_diagnostics_0297(after,
                                        d.fluidParticlesAfter,
                                        d.wetCellsAfter,

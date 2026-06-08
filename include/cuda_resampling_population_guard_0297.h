@@ -58,6 +58,21 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     double totalPxAfter = 0.0;
     double totalPyBefore = 0.0;
     double totalPyAfter = 0.0;
+
+    // 0298: cell-relative kinetic energy diagnostics/restoration after support mutation.
+    bool momentRestoreRequested0298 = false;
+    bool energyRestoreApplied0298 = false;
+    std::uint64_t energyRestoreParticleUpdates0298 = 0u;
+    std::uint64_t energyRestoreSkippedParticles0298 = 0u;
+    double energyRestoreMaxScale0298 = 4.0;
+    double totalKrelBefore0298 = 0.0;
+    double totalKrelAfterPreRestore0298 = 0.0;
+    double totalKrelAfter0298 = 0.0;
+    double maxAbsCellKrelErrorPreRestore0298 = 0.0;
+    double maxRelCellKrelErrorPreRestore0298 = 0.0;
+    double maxAbsCellKrelError0298 = 0.0;
+    double maxRelCellKrelError0298 = 0.0;
+
     double maxAbsCellMassError = 0.0;
     double maxRelCellMassError = 0.0;
     double maxAbsCellMomentumError = 0.0;
