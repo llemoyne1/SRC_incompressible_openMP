@@ -10,6 +10,7 @@
 #include "cuda_inlet_outlet_segmented_0249b.h"
 #include "cuda_shared_particle_state_0251.h"
 #include "cuda_classic_src_io_resident_0263.h"
+#include "cuda_resampling_support_survey_0295.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1063,6 +1064,19 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
         }
     }
+
+    // 0295: passive CUDA support survey at the physically validated insertion
+    // point for future non-destructive resampling: after SRC classic has produced
+    // the step state, after optional CPU Q6/capacity stages if they are enabled
+    // in a non-classic run, and before the existing CPU resampling block.  The
+    // survey uses the physical non-shifted grid, matching the validated
+    // MATLAB/OpenMP resampling placement; it never mutates particles, masses or
+    // roles.
+    if (cuda_resampling_support_survey_0295_requested(step)) {
+        (void)try_run_cuda_resampling_support_survey_0295(
+            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_resampling");
+    }
+
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
     // needed on steps for which the caller will write a runtime summary.  The
     // default public API keeps the previous conservative behavior; the main
