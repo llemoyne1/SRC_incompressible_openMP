@@ -12,6 +12,7 @@
 #include "cuda_classic_src_io_resident_0263.h"
 #include "cuda_resampling_support_survey_0295.h"
 #include "cuda_resampling_mass_recondition_0296.h"
+#include "cuda_resampling_population_guard_0297.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1085,6 +1086,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // from the future population guard (0297).
     if (cuda_resampling_mass_recondition_0296_requested(step)) {
         (void)try_apply_cuda_resampling_mass_recondition_0296(
+            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
+    }
+
+    // 0297: minimal local CUDA population guard at the same post-SRC,
+    // physical-grid insertion point.  Unlike 0296, this brick can change the
+    // support by one local merge per rich cell and one local split per poor cell,
+    // preserving local mass and momentum up to roundoff.  It remains independent
+    // of Q6 CUDA and does not build long-distance transfer plans.
+    if (cuda_resampling_population_guard_0297_requested(step)) {
+        (void)try_apply_cuda_resampling_population_guard_0297(
             state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
     }
 

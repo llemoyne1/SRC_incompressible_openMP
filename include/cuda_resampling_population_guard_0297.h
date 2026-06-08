@@ -1,0 +1,108 @@
+#pragma once
+
+#include "cell_grid.h"
+#include "fluid_domain.h"
+#include "particle_state.h"
+#include "simulation_params.h"
+
+#include <cstdint>
+#include <string>
+
+namespace mpcd {
+
+// 0297: minimal local post-SRC CUDA population guard.
+//
+// This is the first support-changing CUDA resampling brick.  It is deliberately
+// local and conservative:
+//   - poor wet cells can receive at most one local split per application;
+//   - rich cells can undergo at most one local merge per application;
+//   - no long-distance transfer plan is built;
+//   - no Q6 CUDA is introduced;
+//   - mass and momentum are conserved by construction for each local split/merge
+//     up to floating-point roundoff.
+struct CudaResamplingPopulationGuard0297Diagnostics {
+    bool attempted = false;
+    bool handled = false;
+    bool cudaAvailable = false;
+    bool sharedStateFreshBefore = false;
+    bool skippedBecauseStateNotFresh = false;
+    std::uint64_t step = 0u;
+    std::string stage;
+    std::string outputCsv;
+
+    std::uint64_t particles = 0u;
+    std::uint64_t cells = 0u;
+    std::uint64_t fluidParticlesBefore = 0u;
+    std::uint64_t fluidParticlesAfter = 0u;
+    std::uint64_t inactiveParticlesBefore = 0u;
+    std::uint64_t inactiveParticlesAfter = 0u;
+    std::uint64_t wetCellsBefore = 0u;
+    std::uint64_t wetCellsAfter = 0u;
+    std::uint64_t poorCells = 0u;
+    std::uint64_t richCells = 0u;
+    std::uint64_t mergeApplied = 0u;
+    std::uint64_t splitApplied = 0u;
+    std::uint64_t splitSkippedNoInactive = 0u;
+    std::uint64_t splitSkippedNoDonor = 0u;
+    std::uint64_t mergeSkippedNoPair = 0u;
+
+    int nMin = 0;
+    int nTarget = 0;
+    int nMax = 0;
+    double splitFraction = 0.5;
+    double minDonorMassAfterSplit = 1.0e-12;
+
+    double totalMassBefore = 0.0;
+    double totalMassAfter = 0.0;
+    double totalPxBefore = 0.0;
+    double totalPxAfter = 0.0;
+    double totalPyBefore = 0.0;
+    double totalPyAfter = 0.0;
+    double maxAbsCellMassError = 0.0;
+    double maxRelCellMassError = 0.0;
+    double maxAbsCellMomentumError = 0.0;
+    double maxRelCellMomentumError = 0.0;
+
+    double depositBeforeSeconds = 0.0;
+    double kernelSeconds = 0.0;
+    double depositAfterSeconds = 0.0;
+    double downloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+#if defined(MPCD_ENABLE_CUDA_RESAMPLING) && \
+    defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && \
+    defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE) && \
+    defined(MPCD_ENABLE_CUDA_CELL_MOMENTS)
+
+bool cuda_resampling_population_guard_0297_requested(std::uint64_t step);
+
+CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_population_guard_0297(
+    ParticleState& hostMirror,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    const FluidDomainBounds& domain,
+    std::uint64_t step,
+    double time,
+    const char* stage);
+
+#else
+
+inline bool cuda_resampling_population_guard_0297_requested(std::uint64_t) {
+    return false;
+}
+
+inline CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_population_guard_0297(
+    ParticleState&,
+    const SimulationParams&,
+    const CellGrid&,
+    const FluidDomainBounds&,
+    std::uint64_t,
+    double,
+    const char*) {
+    return CudaResamplingPopulationGuard0297Diagnostics{};
+}
+
+#endif
+
+} // namespace mpcd
