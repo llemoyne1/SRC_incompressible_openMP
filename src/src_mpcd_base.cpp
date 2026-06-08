@@ -11,6 +11,7 @@
 #include "cuda_shared_particle_state_0251.h"
 #include "cuda_classic_src_io_resident_0263.h"
 #include "cuda_resampling_support_survey_0295.h"
+#include "cuda_resampling_mass_recondition_0296.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1075,6 +1076,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (cuda_resampling_support_survey_0295_requested(step)) {
         (void)try_run_cuda_resampling_support_survey_0295(
             state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_resampling");
+    }
+
+    // 0296: conservative CUDA mass reconditioning at the same post-SRC,
+    // non-shifted-grid insertion point.  This first mutating resampling brick
+    // changes neither support nor roles: it only smooths particle masses inside
+    // wet cells and restores the cell momentum.  It is intentionally separate
+    // from the future population guard (0297).
+    if (cuda_resampling_mass_recondition_0296_requested(step)) {
+        (void)try_apply_cuda_resampling_mass_recondition_0296(
+            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
     }
 
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
