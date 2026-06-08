@@ -78,6 +78,18 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     double maxAbsCellMomentumError = 0.0;
     double maxRelCellMomentumError = 0.0;
 
+    // 0299: boundary-aware candidate filtering for the local guard.  These
+    // counters describe cells that would otherwise be considered for split/merge
+    // but are intentionally excluded from the local mutating guard because they
+    // lie in a configurable wall/open-boundary/solid halo.
+    bool boundaryAware0299 = false;
+    int boundaryHaloCells0299 = 0;
+    int openBoundaryHaloCells0299 = 0;
+    int solidHaloCells0299 = 0;
+    std::uint64_t excludedBoundaryCells0299 = 0u;
+    std::uint64_t excludedOpenBoundaryCells0299 = 0u;
+    std::uint64_t excludedSolidHaloCells0299 = 0u;
+
     double depositBeforeSeconds = 0.0;
     double kernelSeconds = 0.0;
     double depositAfterSeconds = 0.0;

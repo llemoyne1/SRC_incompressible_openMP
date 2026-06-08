@@ -59,6 +59,19 @@ struct DevicePopulationGuardConfig0297 {
     int nMax = 0;
     double splitFraction = 0.5;
     double minDonorMassAfterSplit = 1.0e-12;
+
+    int boundaryAware0299 = 0;
+    int boundaryHaloCells0299 = 0;
+    int openBoundaryHaloCells0299 = 0;
+    int solidHaloCells0299 = 0;
+    int faceOpenLeft0299 = 0;
+    int faceOpenRight0299 = 0;
+    int faceOpenBottom0299 = 0;
+    int faceOpenTop0299 = 0;
+    int faceWallLeft0299 = 0;
+    int faceWallRight0299 = 0;
+    int faceWallBottom0299 = 0;
+    int faceWallTop0299 = 0;
 };
 
 struct DeviceBuffers0297 {
@@ -75,7 +88,7 @@ struct DeviceBuffers0297 {
     double* dKrelBefore0298 = nullptr;
     double* dKrelAfter0298 = nullptr;
     unsigned long long* dEnergyRestoreCounters0298 = nullptr; // 0 applied cells, 1 skipped cells
-    unsigned long long* dCounters = nullptr; // 0 merge, 1 split, 2 noInactive, 3 noDonor, 4 noPair
+    unsigned long long* dCounters = nullptr; // 0 merge, 1 split, 2 noInactive, 3 noDonor, 4 noPair, 5 boundary, 6 open, 7 solidHalo
     int cellCapacity = 0;
     std::uint64_t particleCapacity = 0u;
 
@@ -150,7 +163,7 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 krel after: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dEnergyRestoreCounters0298), sizeof(unsigned long long) * 2u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 energy counters: ") + cudaGetErrorString(err));
-        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 5u);
+        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 8u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc counters: ") + cudaGetErrorString(err));
         cellCapacity = numCells;
         particleCapacity = nParticles;
@@ -218,6 +231,31 @@ double env_double_0297(const char* name, double fallback) {
     }
 }
 
+std::string lower_copy_0299(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+bool mode_is_periodic_0299(const std::string& mode) {
+    return lower_copy_0299(mode) == "periodic";
+}
+
+bool mode_is_open_0299(const std::string& mode) {
+    const std::string m = lower_copy_0299(mode);
+    return m == "inlet" || m == "outlet" || m.find("inlet") != std::string::npos ||
+           m.find("outlet") != std::string::npos || m.find("open") != std::string::npos;
+}
+
+void mark_segment_face_open_0299(DevicePopulationGuardConfig0297& cfg, const std::string& face) {
+    const std::string f = lower_copy_0299(face);
+    if (f == "left") cfg.faceOpenLeft0299 = 1;
+    else if (f == "right") cfg.faceOpenRight0299 = 1;
+    else if (f == "bottom") cfg.faceOpenBottom0299 = 1;
+    else if (f == "top") cfg.faceOpenTop0299 = 1;
+}
+
 std::string csv_escape_0297(const std::string& s) {
     if (s.find_first_of(",\"\n\r") == std::string::npos) return s;
     std::string out = "\"";
@@ -254,6 +292,49 @@ __device__ bool cell_center_inside_active_domain_0297(int c, DevicePopulationGua
     return point_inside_active_domain_0297(cx, cy, cfg);
 }
 
+__device__ int population_guard_exclusion_reason_0299(int c, DevicePopulationGuardConfig0297 cfg) {
+    if (!cfg.boundaryAware0299) return 0;
+    const int ix = c % cfg.nx;
+    const int iy = c / cfg.nx;
+
+    const int openHalo = cfg.openBoundaryHaloCells0299;
+    if (openHalo > 0) {
+        if (cfg.faceOpenLeft0299 && ix < openHalo) return 2;
+        if (cfg.faceOpenRight0299 && ix >= cfg.nx - openHalo) return 2;
+        if (cfg.faceOpenBottom0299 && iy < openHalo) return 2;
+        if (cfg.faceOpenTop0299 && iy >= cfg.ny - openHalo) return 2;
+    }
+
+    const int wallHalo = cfg.boundaryHaloCells0299;
+    if (wallHalo > 0) {
+        if (cfg.faceWallLeft0299 && ix < wallHalo) return 1;
+        if (cfg.faceWallRight0299 && ix >= cfg.nx - wallHalo) return 1;
+        if (cfg.faceWallBottom0299 && iy < wallHalo) return 1;
+        if (cfg.faceWallTop0299 && iy >= cfg.ny - wallHalo) return 1;
+    }
+
+    const int solidHalo = cfg.solidHaloCells0299;
+    if (solidHalo > 0 && cfg.solidShape != 0) {
+        const double cx = (static_cast<double>(ix) + 0.5) * cfg.dx;
+        const double cy = (static_cast<double>(iy) + 0.5) * cfg.dy;
+        const double halo = static_cast<double>(solidHalo) * fmax(cfg.dx, cfg.dy);
+        if (cfg.solidShape == 1) {
+            const double dx = cx - cfg.circleCx;
+            const double dy = cy - cfg.circleCy;
+            const double r = sqrt(dx * dx + dy * dy);
+            if (r >= cfg.circleR && r <= cfg.circleR + halo) return 3;
+        } else if (cfg.solidShape == 2) {
+            const double qx = fmax(fmax(cfg.rectXMin - cx, 0.0), cx - cfg.rectXMax);
+            const double qy = fmax(fmax(cfg.rectYMin - cy, 0.0), cy - cfg.rectYMax);
+            const double dist = sqrt(qx * qx + qy * qy);
+            const bool outsideRect = !(cx >= cfg.rectXMin && cx <= cfg.rectXMax &&
+                                       cy >= cfg.rectYMin && cy <= cfg.rectYMax);
+            if (outsideRect && dist <= halo) return 3;
+        }
+    }
+    return 0;
+}
+
 __global__ void reset_population_guard_buffers_kernel_0297(
     int numCells,
     unsigned int* __restrict__ poorCount,
@@ -273,7 +354,7 @@ __global__ void reset_population_guard_buffers_kernel_0297(
         *poorCount = 0u;
         *richCount = 0u;
         *inactiveCount = 0u;
-        for (int i = 0; i < 5; ++i) counters[i] = 0ull;
+        for (int i = 0; i < 8; ++i) counters[i] = 0ull;
     }
 }
 
@@ -283,12 +364,27 @@ __global__ void classify_population_guard_cells_kernel_0297(
     unsigned int* __restrict__ poorCells,
     unsigned int* __restrict__ richCells,
     unsigned int* __restrict__ poorCount,
-    unsigned int* __restrict__ richCount) {
+    unsigned int* __restrict__ richCount,
+    unsigned long long* __restrict__ counters) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= cfg.numCells) return;
     if (!cell_center_inside_active_domain_0297(c, cfg)) return;
     const int n = static_cast<int>(cellCount[c]);
-    if (n > 0 && cfg.nMin > 0 && n < cfg.nMin) {
+    if (!(n > 0 && ((cfg.nMin > 0 && n < cfg.nMin) || (cfg.nMax > 0 && n > cfg.nMax)))) return;
+    const int reason0299 = population_guard_exclusion_reason_0299(c, cfg);
+    if (reason0299 == 1) {
+        atomicAdd(&counters[5], 1ull);
+        return;
+    }
+    if (reason0299 == 2) {
+        atomicAdd(&counters[6], 1ull);
+        return;
+    }
+    if (reason0299 == 3) {
+        atomicAdd(&counters[7], 1ull);
+        return;
+    }
+    if (cfg.nMin > 0 && n < cfg.nMin) {
         const unsigned int k = atomicAdd(poorCount, 1u);
         poorCells[k] = static_cast<unsigned int>(c);
     } else if (cfg.nMax > 0 && n > cfg.nMax) {
@@ -581,6 +677,32 @@ DevicePopulationGuardConfig0297 make_config_0297(const SimulationParams& params,
     cfg.nMax = std::max(0, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NMAX", 0));
     cfg.splitFraction = std::clamp(env_double_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_SPLIT_FRACTION", 0.5), 1.0e-6, 0.5);
     cfg.minDonorMassAfterSplit = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_MIN_DONOR_MASS_AFTER_SPLIT", 1.0e-12));
+    cfg.boundaryAware0299 = env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE") ? 1 : 0;
+    if (const char* v = std::getenv("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE")) {
+        (void)v;
+    } else {
+        // Boundary-aware filtering is enabled by default for 0299, but the
+        // default halo widths below are deliberately conservative and only the
+        // open-boundary reservoir layer is excluded by default.
+        cfg.boundaryAware0299 = 1;
+    }
+    cfg.boundaryHaloCells0299 = std::max(0, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_HALO_CELLS", 0));
+    cfg.openBoundaryHaloCells0299 = std::max(0, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_OPEN_BOUNDARY_HALO_CELLS", 1));
+    cfg.solidHaloCells0299 = std::max(0, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_SOLID_HALO_CELLS", 0));
+
+    cfg.faceOpenLeft0299 = mode_is_open_0299(params.bcLeft) ? 1 : 0;
+    cfg.faceOpenRight0299 = mode_is_open_0299(params.bcRight) ? 1 : 0;
+    cfg.faceOpenBottom0299 = mode_is_open_0299(params.bcBottom) ? 1 : 0;
+    cfg.faceOpenTop0299 = mode_is_open_0299(params.bcTop) ? 1 : 0;
+    cfg.faceWallLeft0299 = (!mode_is_periodic_0299(params.bcLeft) && !cfg.faceOpenLeft0299) ? 1 : 0;
+    cfg.faceWallRight0299 = (!mode_is_periodic_0299(params.bcRight) && !cfg.faceOpenRight0299) ? 1 : 0;
+    cfg.faceWallBottom0299 = (!mode_is_periodic_0299(params.bcBottom) && !cfg.faceOpenBottom0299) ? 1 : 0;
+    cfg.faceWallTop0299 = (!mode_is_periodic_0299(params.bcTop) && !cfg.faceOpenTop0299) ? 1 : 0;
+    if (params.openBoundarySegmentsEnable) {
+        for (const auto& seg : params.openBoundarySegments) {
+            if (mode_is_open_0299(seg.mode)) mark_segment_face_open_0299(cfg, seg.face);
+        }
+    }
 
     if (immersed_solid_enabled(params)) {
         const ImmersedSolidShape shape = immersed_solid_shape(params);
@@ -618,6 +740,8 @@ void write_csv_row_0297(const SimulationParams& params,
                "maxAbsCellKrelErrorPreRestore0298,maxRelCellKrelErrorPreRestore0298,"
                "maxAbsCellKrelError0298,maxRelCellKrelError0298,"
                "maxAbsCellMassError,maxRelCellMassError,maxAbsCellMomentumError,maxRelCellMomentumError,"
+               "boundaryAware0299,boundaryHaloCells0299,openBoundaryHaloCells0299,solidHaloCells0299,"
+               "excludedBoundaryCells0299,excludedOpenBoundaryCells0299,excludedSolidHaloCells0299,"
                "depositBeforeSeconds,kernelSeconds,depositAfterSeconds,downloadSeconds,totalSeconds\n";
     }
     out << std::setprecision(17)
@@ -648,6 +772,9 @@ void write_csv_row_0297(const SimulationParams& params,
         << d.maxAbsCellKrelError0298 << ',' << d.maxRelCellKrelError0298 << ','
         << d.maxAbsCellMassError << ',' << d.maxRelCellMassError << ','
         << d.maxAbsCellMomentumError << ',' << d.maxRelCellMomentumError << ','
+        << (d.boundaryAware0299 ? 1 : 0) << ','
+        << d.boundaryHaloCells0299 << ',' << d.openBoundaryHaloCells0299 << ',' << d.solidHaloCells0299 << ','
+        << d.excludedBoundaryCells0299 << ',' << d.excludedOpenBoundaryCells0299 << ',' << d.excludedSolidHaloCells0299 << ','
         << d.depositBeforeSeconds << ',' << d.kernelSeconds << ','
         << d.depositAfterSeconds << ',' << d.downloadSeconds << ',' << d.totalSeconds << '\n';
 }
@@ -764,6 +891,10 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.nMax = cfg.nMax;
     d.splitFraction = cfg.splitFraction;
     d.minDonorMassAfterSplit = cfg.minDonorMassAfterSplit;
+    d.boundaryAware0299 = cfg.boundaryAware0299 != 0;
+    d.boundaryHaloCells0299 = cfg.boundaryHaloCells0299;
+    d.openBoundaryHaloCells0299 = cfg.openBoundaryHaloCells0299;
+    d.solidHaloCells0299 = cfg.solidHaloCells0299;
     d.momentRestoreRequested0298 = env_truthy_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298");
     d.energyRestoreMaxScale0298 = std::max(1.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_MAX_SCALE", 4.0));
     const double minCurrentKrel0298 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298_MIN_CURRENT_KREL", 1.0e-30));
@@ -855,7 +986,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         g_populationGuardBuffers0297.dPoorCells,
         g_populationGuardBuffers0297.dRichCells,
         g_populationGuardBuffers0297.dPoorCount,
-        g_populationGuardBuffers0297.dRichCount);
+        g_populationGuardBuffers0297.dRichCount,
+        g_populationGuardBuffers0297.dCounters);
     cuda_check_0297(cudaGetLastError(), "launch classify_population_guard_cells_kernel_0297");
 
     select_population_guard_primary_particles_kernel_0297<<<particleGrid, block>>>(
@@ -923,7 +1055,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 
-    unsigned long long hCounters[5] = {0ull, 0ull, 0ull, 0ull, 0ull};
+    unsigned long long hCounters[8] = {0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull};
     const Clock::time_point td0 = Clock::now();
     cuda_check_0297(cudaMemcpy(hCounters, g_populationGuardBuffers0297.dCounters,
                                sizeof(hCounters), cudaMemcpyDeviceToHost),
@@ -935,6 +1067,9 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.splitSkippedNoInactive = static_cast<std::uint64_t>(hCounters[2]);
     d.splitSkippedNoDonor = static_cast<std::uint64_t>(hCounters[3]);
     d.mergeSkippedNoPair = static_cast<std::uint64_t>(hCounters[4]);
+    d.excludedBoundaryCells0299 = static_cast<std::uint64_t>(hCounters[5]);
+    d.excludedOpenBoundaryCells0299 = static_cast<std::uint64_t>(hCounters[6]);
+    d.excludedSolidHaloCells0299 = static_cast<std::uint64_t>(hCounters[7]);
 
     if (d.mergeApplied > 0u || d.splitApplied > 0u) {
         cuda_shared_particle_state_0251_mark_fresh("cuda_resampling_population_guard_0297");
