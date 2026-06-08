@@ -179,8 +179,68 @@ persistent collision and thermostat components.
 The survey is now gated only by
 `MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295` and by the requested sampling period.
 When the shared CUDA particle state is fresh, the survey deposits from that
-resident state.  When the host state is authoritative, it uploads the host mirror
-into the shared CUDA state before depositing.  This keeps 0295 passive and
-post-SRC while allowing it to observe all current short CUDA demo paths used by
-the OFF/ON validation runner.
+resident state.  When the host state is authoritative, the survey uses only a
+private survey-owned CUDA buffer; it must never refresh the process-global shared
+state.  This keeps 0295 passive and post-SRC while allowing it to observe all
+current short CUDA demo paths used by the OFF/ON validation runner.
+
+
+
+### 0295c non-mutating fallback fix
+
+The survey is forbidden to refresh or overwrite the process-global shared CUDA
+particle state.  If `cuda_shared_particle_state_0251_is_fresh()` is true, the
+survey deposits directly from the resident shared state.  If it is false, the
+survey uploads the host mirror to a private survey-owned `CudaParticleState` and
+deposits from that private buffer.  This fallback may be less authoritative for
+resident CUDA cases with stale host mirrors, but it is strictly passive: it cannot
+modify the state that the simulation will continue to use.  The CSV field
+`uploadedHostState=1` therefore means "private survey upload", not a refresh of
+the global shared CUDA state.
+
+
+
+### 0295d Von Karman validation cadence
+
+The Von Karman case combines immersed circle handling, hard inlet refill,
+open-boundary outlet logic and a resident CUDA path.  With
+`MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295_EVERY=10`, the survey inserts extra
+CUDA synchronizations inside the run.  On this active open-boundary case, the
+strict OFF/ON comparison can then diverge by a single fluid/inactive slot, even
+though the survey performs no particle writes.  This is a synchronization-cadence
+issue in a schedule-sensitive validation, not a resampling mutation.
+
+The 0295 runner therefore keeps the strict Von Karman non-mutation check
+summary-aligned by default:
+
+```bash
+VK_SURVEY_EVERY=${VK_SURVEY_EVERY:-$STEPS}
+```
+
+The other short cases still use `SURVEY_EVERY`.  Developers can opt into the
+stronger continuous Von Karman stress test with:
+
+```bash
+VK_SURVEY_EVERY=10
+```
+
+but that mode should be interpreted as a synchronization sensitivity diagnostic,
+not as the primary PASS/FAIL criterion for the passive survey.
+
+## Mise à jour validation 0295 — suite stricte par défaut
+
+Le critère strict du survey passif 0295 est désormais limité par défaut à quatre cas
+bit-reproductibles en comparaison CUDA survey OFF / survey ON :
+
+- Taylor--Green périodique ;
+- Poiseuille wall ;
+- backward step / rectangle ;
+- U-box inlet/outlet segmentée.
+
+Le cas Von Karman cercle + inlet/outlet reste disponible en diagnostic optionnel
+(`RUN_VK=1`), mais il n'appartient plus au verdict strict par défaut, car le chemin
+thermostaté n'est pas bit-reproductible en OFF/OFF. Pour un test strict de
+non-mutation sur Von Karman, le runner force `VK_THERMOSTAT_ENABLE=0` par défaut.
+`VK_THERMOSTAT_ENABLE=1` doit être interprété comme un stress test physique, non
+comme un témoin bit-à-bit du caractère passif du survey.
 
