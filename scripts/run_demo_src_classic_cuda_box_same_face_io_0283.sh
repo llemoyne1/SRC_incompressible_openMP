@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# 0303: resampling-capable demo wrapper.  RESAMPLING_ENABLE=0 keeps the
+# classic CUDA path while preserving the passive survey for diagnostics.
+BIN="${BIN:-build/src_mpcd_base_cuda_0303}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_resampling_demo_common_0303.sh"
 
 CASE_NAME="box_same_face_io"
 Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-96}"; NY="${NY:-96}"
@@ -16,7 +20,8 @@ OUTLET_FORCED_MASS_PER_STEP="${OUTLET_FORCED_MASS_PER_STEP:-0.0}"
 OUTLET_FORCED_PARTICLE_FLUX="${OUTLET_FORCED_PARTICLE_FLUX:-0.0}"
 OUTLET_FORCED_PARTICLES_PER_STEP="${OUTLET_FORCED_PARTICLES_PER_STEP:-0}"
 OUTLET_FORCED_LAYER_CELLS="${OUTLET_FORCED_LAYER_CELLS:-3}"
-RUN_ROOT="${RUN_ROOT:-runs/demo_src_classic_cuda_box_same_face_io_0283}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/demo_src_resampling_cuda_${CASE_NAME}_0303}"
+RUN_ROOT="${RUN_ROOT:-$(resampling_demo_root_0303 "$CASE_NAME" "$BASE_RUN_ROOT")}"
 prepare_demo_dirs_0283 "$RUN_ROOT"
 STATE_FILE="$RUN_ROOT/init/${CASE_NAME}_${NX}x${NY}_g${GAMMA}.smpcd"
 PARAMS_FILE="$RUN_ROOT/params/${CASE_NAME}.kv"
@@ -95,4 +100,7 @@ $(write_src_classic_common_params_0283 "$STEPS" "$DT" "$KBT" "$SEED" "$SUMMARY_E
 PARAMS
 
 src_gpu_cuda_env_io_segmented_resident_thermostat_0283
+src_gpu_resampling_env_0303
+write_resampling_demo_metadata_0303 "$RUN_ROOT/logs/resampling_0303.env"
+print_resampling_demo_banner_0303 "$CASE_NAME" "$RUN_ROOT"
 run_demo_case_0283 "$PARAMS_FILE" "$LOG_FILE" "$TIME_FILE" "$OUT_DIR"

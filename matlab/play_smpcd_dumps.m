@@ -16,10 +16,10 @@ function out = play_smpcd_dumps(runDir, varargin)
     addParameter(p, 'paramsFile', '', @(s) ischar(s) || isstring(s));
     addParameter(p, 'frameStride', 1, @isnumeric);
     addParameter(p, 'pauseTime', 0.05, @isnumeric);
-    addParameter(p, 'particleDecimation', 10, @isnumeric);
+    addParameter(p, 'particleDecimation', 0, @isnumeric);
     addParameter(p, 'showParticles', true, @islogical);
     addParameter(p, 'showVelocityVectors', false, @islogical);
-    addParameter(p, 'velocityDecimation', 2, @isnumeric);
+    addParameter(p, 'velocityDecimation', 3, @isnumeric);
     addParameter(p, 'clim', [], @isnumeric);
     parse(p, runDir, varargin{:});
 

@@ -39,6 +39,38 @@ struct CudaResamplingAdaptiveFlag0304Diagnostics {
     std::uint64_t lowNCells = 0u;
     std::uint64_t fluidParticles = 0u;
 
+    // 0305: boundary/solid/open-boundary classified support diagnostics.
+    // These counters are intentionally non-exclusive except for bulk. A cell
+    // can be both wall-adjacent and corner-adjacent, for example. Bulk means
+    // active fluid cell not adjacent to wall, open boundary, or immersed solid.
+    std::uint64_t emptyBulkCells0305 = 0u;
+    std::uint64_t emptyWallAdjacentCells0305 = 0u;
+    std::uint64_t emptySolidAdjacentCells0305 = 0u;
+    std::uint64_t emptyOpenAdjacentCells0305 = 0u;
+    std::uint64_t emptyCornerAdjacentCells0305 = 0u;
+    std::uint64_t lowNBulkCells0305 = 0u;
+    std::uint64_t lowNWallAdjacentCells0305 = 0u;
+    std::uint64_t lowNSolidAdjacentCells0305 = 0u;
+    std::uint64_t lowNOpenAdjacentCells0305 = 0u;
+    std::uint64_t lowNCornerAdjacentCells0305 = 0u;
+    std::uint64_t wetBulkCells0305 = 0u;
+    std::uint64_t wetWallAdjacentCells0305 = 0u;
+    std::uint64_t wetSolidAdjacentCells0305 = 0u;
+    std::uint64_t wetOpenAdjacentCells0305 = 0u;
+    std::uint64_t wetCornerAdjacentCells0305 = 0u;
+    std::uint64_t highUBulkCells0305 = 0u;
+    std::uint64_t highUWallAdjacentCells0305 = 0u;
+    std::uint64_t highUSolidAdjacentCells0305 = 0u;
+    std::uint64_t highUOpenAdjacentCells0305 = 0u;
+    std::uint64_t highUCornerAdjacentCells0305 = 0u;
+
+    double highUThreshold0305 = 0.0;
+    double maxAbsUBulk0305 = 0.0;
+    double maxAbsUWallAdjacent0305 = 0.0;
+    double maxAbsUSolidAdjacent0305 = 0.0;
+    double maxAbsUOpenAdjacent0305 = 0.0;
+    double maxAbsUCornerAdjacent0305 = 0.0;
+
     int triggerNMin = 0;
     int triggerEmpty = 1;
     int minNWet = 0;
