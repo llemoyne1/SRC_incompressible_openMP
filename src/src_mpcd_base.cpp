@@ -11,6 +11,7 @@
 #include "cuda_shared_particle_state_0251.h"
 #include "cuda_classic_src_io_resident_0263.h"
 #include "cuda_resampling_support_survey_0295.h"
+#include "cuda_resampling_adaptive_flag_0304.h"
 #include "cuda_resampling_mass_recondition_0296.h"
 #include "cuda_resampling_population_guard_0297.h"
 
@@ -1065,6 +1066,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (params.keepMeanFlowEnable || !residentClassicCuda) {
             cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
         }
+    }
+
+    // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally
+    // placed at the same post-SRC/post-thermostat physical-grid point as the
+    // survey and future guard/refill decisions.  It deposits only enough cell
+    // population information to emit low-N / empty-cell flags and compact
+    // counters; it never triggers resampling yet and never mutates particles.
+    if (cuda_resampling_adaptive_flag_0304_requested(step)) {
+        (void)try_run_cuda_resampling_adaptive_flag_0304(
+            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_adaptive_flag");
     }
 
     // 0295: passive CUDA support survey at the physically validated insertion
