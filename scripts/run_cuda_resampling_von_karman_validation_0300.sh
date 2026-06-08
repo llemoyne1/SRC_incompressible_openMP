@@ -1,32 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 0285 — Von Karman cylinder demonstration on the full CUDA SRC classic path.
-# SRC classic means: advection/streaming + random grid shift + SRC rotation/collision + thermostat.
-# Q6, resampling and virial/capacity closure remain disabled in this demo.
+# 0300 — isolated Von Karman validation case for CUDA resampling sweeps.
+#
+# This script intentionally does not call or modify
+# scripts/run_demo_src_classic_cuda_von_karman_cylinder_0285.sh.  It is a
+# self-contained validation harness derived from the validated 0285 setup, with
+# short-run defaults and thermostat disabled by default so that it can be used
+# as a strict reproducibility witness when requested.
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0293}"
+BIN="${BIN:-build/src_mpcd_base_cuda_0300}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.sh"
 
 if [[ ! -x "$BIN" ]]; then
-  echo "[0285-demo] building $BIN with build_src_mpcd_cuda_0293.sh"
-  OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0293.sh
+  echo "[0300-vk] building $BIN with build_src_mpcd_cuda_0300.sh"
+  OUT="$BIN" CUDA_ARCH_FLAGS="${CUDA_ARCH_FLAGS:-}" bash scripts/build_src_mpcd_cuda_0300.sh
 fi
 AUTO_BUILD=0
 
-CASE_NAME="von_karman_cylinder"
-Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-10000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
-SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
-UIN="${UIN:-0.2}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.15}"
-RUN_ROOT="${RUN_ROOT:-runs/demo_src_classic_cuda_von_karman_cylinder_0285}"
+CASE_NAME="von_karman_resampling_validation_0300"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-64}"; NY="${NY:-64}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-80}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
+SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-$STEPS}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-$STEPS}"
+UIN="${UIN:-0.30}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.12}"
+RUN_ROOT="${RUN_ROOT:-runs/cuda_resampling_von_karman_validation_0300}"
 prepare_demo_dirs_0283 "$RUN_ROOT"
 STATE_FILE="$RUN_ROOT/init/${CASE_NAME}_${NX}x${NY}_g${GAMMA}.smpcd"
 PARAMS_FILE="$RUN_ROOT/params/${CASE_NAME}.kv"
 OUT_DIR="$RUN_ROOT/output"
 LOG_FILE="$RUN_ROOT/logs/${CASE_NAME}.log"
 TIME_FILE="$RUN_ROOT/logs/${CASE_NAME}.time"
-# Hard reservoir reuses inactive slots; allocate a generous pool for long animated runs.
+
+# The hard inlet reservoir uses inactive slots.  Keep this local to the
+# validation script so user edits to the 0285 demo cannot affect sweep runs.
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-$((GAMMA * NY * 32))}"
 OUTLET_MODE="${OUTLET_MODE:-equilibrium_flux}"
 OUTLET_FORCED_MASS_FLUX="${OUTLET_FORCED_MASS_FLUX:-0.0}"
@@ -34,8 +40,11 @@ OUTLET_FORCED_MASS_PER_STEP="${OUTLET_FORCED_MASS_PER_STEP:-0.0}"
 OUTLET_FORCED_PARTICLE_FLUX="${OUTLET_FORCED_PARTICLE_FLUX:-0.0}"
 OUTLET_FORCED_PARTICLES_PER_STEP="${OUTLET_FORCED_PARTICLES_PER_STEP:-0}"
 OUTLET_FORCED_LAYER_CELLS="${OUTLET_FORCED_LAYER_CELLS:-3}"
-THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-0}"
 
+# Disable Q6/virial/resampling by parameters; CUDA resampling validation modules
+# are activated only through explicit MPCD_CUDA_RESAMPLING_* environment flags
+# supplied by the parent sweep script.
 generate_demo_state_0283 "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" uniform "$UIN" 0.0 0.0 0.0 -1.0 0.0 -1.0 "$INACTIVE_SLOTS" "circle:${CYLINDER_CX},${CYLINDER_CY},${CYLINDER_R}"
 mkdir -p "$OUT_DIR"
 cat > "$PARAMS_FILE" <<PARAMS
@@ -47,17 +56,12 @@ Ly = ${Ly}
 Nx = ${NX}
 Ny = ${NY}
 
-# bcLeft = inlet
-# bcRight = outlet
-# bcBottom = solid
-# bcTop = solid
-
-bcLeft = periodic
-bcRight = periodic
+bcLeft = inlet
+bcRight = outlet
 bcBottom = solid
 bcTop = solid
 
-bodyAccelerationX = 0.05
+bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
 taylorGreenForcingEnable = false
 keepMeanFlowEnable = false
