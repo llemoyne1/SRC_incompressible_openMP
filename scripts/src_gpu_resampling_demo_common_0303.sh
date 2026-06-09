@@ -30,7 +30,10 @@ OPEN_BOUNDARY_HALO_CELLS="${OPEN_BOUNDARY_HALO_CELLS:-1}"
 BOUNDARY_HALO_CELLS="${BOUNDARY_HALO_CELLS:-0}"
 SOLID_HALO_CELLS="${SOLID_HALO_CELLS:-0}"
 
-INACTIVE_SLOTS=5000000 
+# Do not force a global inactive-slot reservoir here.  Case scripts own their
+# physical reservoir size and users may override INACTIVE_SLOTS from the shell.
+# A previous debug default of 5e6 slots made every visual/resampling run scan a
+# huge particle capacity and masked the requested per-case values.
 
 resampling_demo_bool_on_0303() {
   case "${1:-0}" in
@@ -122,6 +125,7 @@ BOUNDARY_AWARE=${BOUNDARY_AWARE}
 OPEN_BOUNDARY_HALO_CELLS=${OPEN_BOUNDARY_HALO_CELLS}
 BOUNDARY_HALO_CELLS=${BOUNDARY_HALO_CELLS}
 SOLID_HALO_CELLS=${SOLID_HALO_CELLS}
+INACTIVE_SLOTS=${INACTIVE_SLOTS:-unset}
 META
 }
 
@@ -134,4 +138,5 @@ print_resampling_demo_banner_0303() {
   echo "[0303-demo] guard       : enable=$RESAMPLING_ENABLE every=$GUARD_EVERY nmin=$GUARD_NMIN ntarget=$GUARD_NTARGET nmax=$GUARD_NMAX"
   echo "[0303-demo] restore     : enable=$RESTORE_ENABLE maxScale=$RESTORE_MAX_SCALE"
   echo "[0303-demo] boundary0299: enable=$BOUNDARY_AWARE openHalo=$OPEN_BOUNDARY_HALO_CELLS wallHalo=$BOUNDARY_HALO_CELLS solidHalo=$SOLID_HALO_CELLS"
+  echo "[0303-demo] inactive slots: ${INACTIVE_SLOTS:-case-default}"
 }

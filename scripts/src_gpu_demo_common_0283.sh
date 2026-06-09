@@ -222,6 +222,8 @@ kBT = ${kbt}
 
 summaryEvery = ${summary_every}
 dumpStateEvery = ${dump_every}
+dumpRoleFilter = ${DUMP_ROLE_FILTER:-all}
+summaryRoleFilter = ${SUMMARY_ROLE_FILTER:-all}
 numThreads = ${threads}
 PARAMS
 }

@@ -46,6 +46,29 @@ void sync_cuda_resident_state_for_host_0260(mpcd::ParticleState& state) {
     }
 }
 
+bool role_filter_fluid_0314(const std::string& filter) {
+    return filter == "fluid";
+}
+
+void write_state_dump_0314(const std::string& filepath,
+                           mpcd::ParticleState& hostState,
+                           const mpcd::SimulationParams& params) {
+    if (role_filter_fluid_0314(params.dumpRoleFilter)) {
+        mpcd::ParticleState compact;
+        mpcd::ParticleRoleCounts counts{};
+        if (mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(
+                compact, mpcd::kParticleRoleFluid, &counts)) {
+            mpcd::write_smpcd_state(filepath, compact);
+            return;
+        }
+        mpcd::write_smpcd_state_role_filtered(filepath, hostState, mpcd::kParticleRoleFluid);
+        return;
+    }
+
+    sync_cuda_resident_state_for_host_0260(hostState);
+    mpcd::write_smpcd_state(filepath, hostState);
+}
+
 
 std::string state_dump_name(const std::string& outputDir, int step) {
     std::ostringstream oss;
@@ -358,7 +381,7 @@ int main(int argc, char** argv) {
                                                      &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                                                      &initialResampling, ompActiveThreads));
         if (params.dumpStateEvery > 0) {
-            mpcd::write_smpcd_state(state_dump_name(params.outputDir, 0), state);
+            write_state_dump_0314(state_dump_name(params.outputDir, 0), state, params);
         }
 
 
@@ -381,7 +404,9 @@ int main(int argc, char** argv) {
                   << " steps=" << params.nSteps
                   << " threadsActive=" << ompActiveThreads
                   << " threadsMax=" << ompMaxThreads
-                  << " outputDir=" << params.outputDir << '\n';
+                  << " outputDir=" << params.outputDir
+                  << " dumpRoleFilter=" << params.dumpRoleFilter
+                  << " summaryRoleFilter=" << params.summaryRoleFilter << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
             const bool collectResamplingDiagnostics =
@@ -436,9 +461,19 @@ int main(int argc, char** argv) {
             }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
-                sync_cuda_resident_state_for_host_0260(state);
+                mpcd::ParticleState summaryState;
+                mpcd::ParticleRoleCounts compactRoleCounts{};
+                bool compactSummary0314 = false;
+                if (role_filter_fluid_0314(params.summaryRoleFilter)) {
+                    compactSummary0314 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(
+                        summaryState, mpcd::kParticleRoleFluid, &compactRoleCounts);
+                }
+                if (!compactSummary0314) {
+                    sync_cuda_resident_state_for_host_0260(state);
+                    summaryState = state;
+                }
                 const double wallTime = elapsed_seconds(t0);
-                const auto s = mpcd::compute_runtime_summary(state, params, step, wallTime,
+                auto s = mpcd::compute_runtime_summary(summaryState, params, step, wallTime,
                                                            &workspace.collision.cellCount,
                                                            &stepResult.boundary,
                                                            &stepResult.immersed,
@@ -448,6 +483,12 @@ int main(int argc, char** argv) {
                                                            &stepResult.thermostat,
                                                            &stepResult.resampling,
                                                            ompActiveThreads);
+                if (compactSummary0314) {
+                    s.Np = state.Np;
+                    s.nFluidParticles = compactRoleCounts.fluid;
+                    s.nInactiveParticles = compactRoleCounts.inactive;
+                    s.nLatentParticles = compactRoleCounts.latent;
+                }
                 summary.append(s);
     std::cout << "\r\033[K[src_mpcd_base] step=" << step
           << "/" << params.nSteps
@@ -461,8 +502,7 @@ int main(int argc, char** argv) {
             }
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
-                sync_cuda_resident_state_for_host_0260(state);
-                mpcd::write_smpcd_state(state_dump_name(params.outputDir, step), state);
+                write_state_dump_0314(state_dump_name(params.outputDir, step), state, params);
             }
         }
 

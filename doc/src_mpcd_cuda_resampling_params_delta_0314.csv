@@ -1,0 +1,6 @@
+Clé params.kv / alias script,Catégorie,Statut,Type attendu,Défaut nominal,Effet / rôle,Remarques
+dumpRoleFilter,Dumps et post-traitement,ajout 0314,all|fluid,all dans le cœur; fluid dans scripts visuels,Contrôle si les dumps .smpcd écrivent tous les slots ou seulement les particules Fluid.,fluid accélère visualisation/post-traitement mais ne doit pas être utilisé pour un restart complet.
+summaryRoleFilter,Summaries runtime,ajout 0314,all|fluid,all dans le cœur; fluid dans scripts visuels,Contrôle si les summaries parcourent tous les slots ou un état compact fluide.,fluid réduit le coût lorsque INACTIVE_SLOTS est grand.
+DUMP_ROLE_FILTER,Alias script,ajout 0314,all|fluid,fluid dans scripts visual 0309+,Alias exporté par les scripts vers dumpRoleFilter.,"Paramètre de script, pas toujours une clé directe."
+SUMMARY_ROLE_FILTER,Alias script,ajout 0314,all|fluid,fluid dans scripts visual 0309+,Alias exporté par les scripts vers summaryRoleFilter.,"Paramètre de script, pas toujours une clé directe."
+INACTIVE_SLOTS,Capacité particulaire,consolidé 0311-0312,entier,50k-120k selon cas; pas de défaut universel,Nombre de slots Inactive préalloués par les générateurs/scripts.,La réserve peut être grande sans être écrite dans les dumps si dumpRoleFilter=fluid.

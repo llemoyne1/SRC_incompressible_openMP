@@ -535,6 +535,104 @@ void CudaParticleState::download_all(ParticleState& state, CudaParticleStateDiag
 #endif
 }
 
+
+void CudaParticleState::download_role_filtered(ParticleState& state,
+                                               unsigned char keepRole,
+                                               ParticleRoleCounts* roleCounts,
+                                               CudaParticleStateDiagnostics* diag) const {
+#ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    (void)state; (void)keepRole; (void)roleCounts; (void)diag;
+    throw std::runtime_error("CudaParticleState::download_role_filtered called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    if (impl_ == nullptr) throw std::runtime_error("CudaParticleState::download_role_filtered: null impl");
+    const std::size_t n = static_cast<std::size_t>(impl_->n);
+    if (static_cast<std::uint64_t>(n) != impl_->n) {
+        throw std::runtime_error("CudaParticleState::download_role_filtered: particle count does not fit size_t");
+    }
+
+    const auto t0 = Clock::now();
+    std::vector<unsigned char> roles(n, kParticleRoleFluid);
+    if (n > 0u) {
+        MPCD_CUDA_CHECK(cudaMemcpy(roles.data(), impl_->role, n * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+    }
+
+    ParticleRoleCounts counts{};
+    std::size_t selected = 0u;
+    std::vector<std::pair<std::size_t, std::size_t>> runs;
+    std::size_t i = 0u;
+    while (i < n) {
+        const unsigned char r = roles[i];
+        if (r == kParticleRoleFluid) ++counts.fluid;
+        else if (r == kParticleRoleInactive) ++counts.inactive;
+        else if (r == kParticleRoleLatent) ++counts.latent;
+
+        if (r != keepRole) {
+            ++i;
+            continue;
+        }
+        const std::size_t start = i;
+        while (i < n && roles[i] == keepRole) {
+            ++i;
+        }
+        const std::size_t len = i - start;
+        runs.emplace_back(start, len);
+        selected += len;
+    }
+    // Finish role counts for non-selected runs skipped by the inner loop above.
+    // The loop above counted only the first element of each selected run before
+    // consuming it, so recount exactly once here for clarity and robustness.
+    counts = {};
+    for (unsigned char r : roles) {
+        if (r == kParticleRoleFluid) ++counts.fluid;
+        else if (r == kParticleRoleInactive) ++counts.inactive;
+        else if (r == kParticleRoleLatent) ++counts.latent;
+    }
+    if (roleCounts != nullptr) {
+        *roleCounts = counts;
+    }
+
+    ParticleState out{};
+    out.dim = 2u;
+    out.Np = static_cast<std::uint64_t>(selected);
+    out.x.resize(selected);
+    out.y.resize(selected);
+    out.vx.resize(selected);
+    out.vy.resize(selected);
+    out.mass.resize(selected);
+    out.type.resize(selected);
+    out.role.assign(selected, keepRole);
+
+    std::size_t dst = 0u;
+    std::uint64_t copiedBytes = static_cast<std::uint64_t>(n * sizeof(unsigned char));
+    for (const auto& run : runs) {
+        const std::size_t start = run.first;
+        const std::size_t len = run.second;
+        const std::size_t bytesD = len * sizeof(double);
+        const std::size_t bytesU = len * sizeof(std::uint32_t);
+        if (len == 0u) continue;
+        MPCD_CUDA_CHECK(cudaMemcpy(out.x.data() + dst, impl_->x + start, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(out.y.data() + dst, impl_->y + start, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(out.vx.data() + dst, impl_->vx + start, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(out.vy.data() + dst, impl_->vy + start, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(out.mass.data() + dst, impl_->mass + start, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(out.type.data() + dst, impl_->type + start, bytesU, cudaMemcpyDeviceToHost));
+        copiedBytes += static_cast<std::uint64_t>(5u * bytesD + bytesU);
+        dst += len;
+    }
+    validate_particle_state(out, "CudaParticleState::download_role_filtered(after)");
+    state = std::move(out);
+
+    if (diag != nullptr) {
+        diag->downloadCalls += 1u;
+        diag->deviceToHostBytes += copiedBytes;
+        diag->downloadSeconds += elapsed_seconds(t0);
+        diag->particles = static_cast<std::uint64_t>(selected);
+        diag->capacity = impl_->capacity;
+        diag->allocatedBytes = impl_->allocatedBytes;
+    }
+#endif
+}
+
 CudaParticleDeviceView CudaParticleState::device_view() {
     if (impl_ == nullptr) return {};
     return CudaParticleDeviceView{impl_->n, impl_->x, impl_->y, impl_->vx, impl_->vy, impl_->mass, impl_->type, impl_->role};

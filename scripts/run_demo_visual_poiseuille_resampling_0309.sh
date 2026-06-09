@@ -27,6 +27,12 @@ export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_EMPTY="${MPCD_CUDA_RESAMP
 export MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U="${MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U:-1.0}"
 export MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD="${MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD:-1.0}"
 
+# 0314: visual runs usually do not need restart-compatible dumps containing a
+# huge Inactive reservoir.  Write and summarize only Fluid particles by default;
+# override with DUMP_ROLE_FILTER=all SUMMARY_ROLE_FILTER=all for restart dumps.
+export DUMP_ROLE_FILTER="${DUMP_ROLE_FILTER:-fluid}"
+export SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
+
 run_modes_0309() {
   local script="$1"
   local base_root="$2"

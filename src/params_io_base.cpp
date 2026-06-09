@@ -444,6 +444,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingPopulationMaxExtractionsPerStep" || key == "resamplingNMaxExtractionsPerStep") p.resamplingPopulationMaxExtractionsPerStep = parse_int(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
+        else if (key == "dumpRoleFilter" || key == "dumpParticleRoleFilter") p.dumpRoleFilter = get_lower(kv, key);
+        else if (key == "summaryRoleFilter" || key == "summaryParticleRoleFilter") p.summaryRoleFilter = get_lower(kv, key);
         else if (key == "numThreads") p.numThreads = parse_int(value, key);
         else {
             throw std::runtime_error("Unknown parameter key in base SRC/MPCD executable: " + key);
@@ -1103,6 +1105,12 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.dumpStateEvery < 0) {
         throw std::runtime_error("dumpStateEvery must be non-negative");
+    }
+    if (!(p.dumpRoleFilter == "all" || p.dumpRoleFilter == "fluid")) {
+        throw std::runtime_error("dumpRoleFilter must be 'all' or 'fluid'");
+    }
+    if (!(p.summaryRoleFilter == "all" || p.summaryRoleFilter == "fluid")) {
+        throw std::runtime_error("summaryRoleFilter must be 'all' or 'fluid'");
     }
     if (p.numThreads < 0) {
         throw std::runtime_error("numThreads must be non-negative");

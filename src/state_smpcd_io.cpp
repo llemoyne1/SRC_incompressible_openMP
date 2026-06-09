@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
 
 namespace mpcd {
 namespace {
@@ -102,6 +103,32 @@ void require_supported_version(std::uint32_t version) {
     if (version != kVersionV1 && version != kVersionV2) {
         throw std::runtime_error("Unsupported .smpcd version");
     }
+}
+
+
+ParticleState filter_particle_state_by_role_0314(const ParticleState& state, std::uint8_t keepRole) {
+    ParticleState normalized = state;
+    ensure_particle_roles(normalized, ParticleRole::Fluid);
+    validate_particle_state(normalized, "filter_particle_state_by_role_0314(input)");
+
+    ParticleState out{};
+    out.dim = normalized.dim;
+    const std::size_t n = static_cast<std::size_t>(normalized.Np);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (particle_role_value(normalized, i) != keepRole) {
+            continue;
+        }
+        out.x.push_back(normalized.x[i]);
+        out.y.push_back(normalized.y[i]);
+        out.vx.push_back(normalized.vx[i]);
+        out.vy.push_back(normalized.vy[i]);
+        out.type.push_back(normalized.type.empty() ? 0u : normalized.type[i]);
+        out.mass.push_back(normalized.mass[i]);
+        out.role.push_back(keepRole);
+    }
+    out.Np = static_cast<std::uint64_t>(out.x.size());
+    validate_particle_state(out, "filter_particle_state_by_role_0314(output)");
+    return out;
 }
 
 } // namespace
@@ -226,6 +253,12 @@ void write_smpcd_state(const std::string& filepath, const ParticleState& state) 
     write_vector(fout, normalized.type, "type");
     write_vector(fout, normalized.mass, "mass");
     write_vector(fout, normalized.role, "role");
+}
+
+void write_smpcd_state_role_filtered(const std::string& filepath,
+                                     const ParticleState& state,
+                                     std::uint8_t keepRole) {
+    write_smpcd_state(filepath, filter_particle_state_by_role_0314(state, keepRole));
 }
 
 } // namespace mpcd

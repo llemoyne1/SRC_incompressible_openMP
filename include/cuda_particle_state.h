@@ -98,6 +98,16 @@ public:
     void download_velocities(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
     void download_all(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
 
+    // 0314: compact host download for visualization/summary paths when the
+    // device particle state contains a large inactive reservoir.  The role
+    // array is scanned on the host, then only contiguous selected ranges are
+    // copied for x/y/vx/vy/mass/type.  The optional roleCounts reports counts
+    // over the full resident state.
+    void download_role_filtered(ParticleState& state,
+                                unsigned char keepRole,
+                                ParticleRoleCounts* roleCounts = nullptr,
+                                CudaParticleStateDiagnostics* diag = nullptr) const;
+
     CudaParticleDeviceView device_view();
     CudaParticleDeviceView device_view() const;
 

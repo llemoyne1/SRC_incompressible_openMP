@@ -577,6 +577,61 @@ __global__ void build_inactive_list_kernel_0297(
     }
 }
 
+// 0313: bounded inactive-tail collector for the population guard.  The old
+// build_inactive_list_kernel_0297 scans all particle slots.  With a large
+// appended inactive reservoir that makes guard cost scale with capacity rather
+// than with active support.  This fast path scans only a bounded tail window and
+// falls back to the exact full scan when not enough inactive slots are found.
+__global__ void build_inactive_tail_list_kernel_0313(
+    int nParticles,
+    int tailScan,
+    const unsigned char* __restrict__ role,
+    unsigned int* __restrict__ inactiveList,
+    unsigned int* __restrict__ inactiveCount) {
+    const int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= tailScan || k >= nParticles) return;
+    const int i = nParticles - 1 - k;
+    if (role && role[i] == static_cast<unsigned char>(kParticleRoleInactive)) {
+        const unsigned int pos = atomicAdd(inactiveCount, 1u);
+        if (pos < static_cast<unsigned int>(tailScan)) inactiveList[pos] = static_cast<unsigned int>(i);
+    }
+}
+
+int inactive_tail_scan_count_0313(int nParticles, unsigned int need) {
+    if (nParticles <= 0 || need == 0u) return 0;
+    const int minScan = std::max(1, env_int_0297("MPCD_CUDA_INACTIVE_TAIL_POOL_MIN_SCAN_0313", 8192));
+    const int maxScan = std::max(1, env_int_0297("MPCD_CUDA_INACTIVE_TAIL_POOL_MAX_SCAN_0313", 262144));
+    const int mult = std::max(1, env_int_0297("MPCD_CUDA_INACTIVE_TAIL_POOL_SCAN_MULT_0313", 4));
+    long long scan = std::max<long long>(minScan, static_cast<long long>(need) * mult + 1024ll);
+    scan = std::min<long long>(scan, maxScan);
+    scan = std::min<long long>(scan, nParticles);
+    return static_cast<int>(scan);
+}
+
+bool build_inactive_tail_list_0313(int nParticles,
+                                   unsigned int need,
+                                   const unsigned char* role,
+                                   int block,
+                                   unsigned int* inactiveList,
+                                   unsigned int* inactiveCount) {
+    const char* enableEnv0313 = std::getenv("MPCD_CUDA_INACTIVE_TAIL_POOL_0313");
+    if (enableEnv0313 != nullptr && !env_truthy_0297("MPCD_CUDA_INACTIVE_TAIL_POOL_0313")) return false;
+    if (nParticles <= 0 || need == 0u || role == nullptr || inactiveList == nullptr || inactiveCount == nullptr) return false;
+    const int tailScan = inactive_tail_scan_count_0313(nParticles, need);
+    if (tailScan <= 0) return false;
+    cuda_check_0297(cudaMemset(inactiveCount, 0, sizeof(unsigned int)), "reset 0313 inactive tail count");
+    const int grid = std::max(1, (tailScan + block - 1) / block);
+    build_inactive_tail_list_kernel_0313<<<grid, block>>>(nParticles, tailScan, role, inactiveList, inactiveCount);
+    cuda_check_0297(cudaGetLastError(), "launch build_inactive_tail_list_kernel_0313");
+    unsigned int hCount = 0u;
+    cuda_check_0297(cudaMemcpy(&hCount, inactiveCount, sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                    "copy 0313 inactive tail count");
+    if (hCount < need && !env_truthy_0297("MPCD_CUDA_INACTIVE_TAIL_POOL_NO_FALLBACK_0313")) {
+        return false;
+    }
+    return true;
+}
+
 __device__ double clamp_0297(double v, double lo, double hi) {
     return fmin(fmax(v, lo), hi);
 }
@@ -1179,13 +1234,19 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     }
     cuda_check_0297(cudaDeviceSynchronize(), "synchronize after rich merge");
 
-    cuda_check_0297(cudaMemset(g_populationGuardBuffers0297.dInactiveCount, 0, sizeof(unsigned int)),
-                    "reset inactive count");
-    build_inactive_list_kernel_0297<<<particleGrid, block>>>(
-        static_cast<int>(hostMirror.Np), pv.role,
+    const bool usedTailInactivePool0313 = build_inactive_tail_list_0313(
+        static_cast<int>(hostMirror.Np), hPoorCount, pv.role, block,
         g_populationGuardBuffers0297.dInactiveList,
         g_populationGuardBuffers0297.dInactiveCount);
-    cuda_check_0297(cudaGetLastError(), "launch build_inactive_list_kernel_0297");
+    if (!usedTailInactivePool0313) {
+        cuda_check_0297(cudaMemset(g_populationGuardBuffers0297.dInactiveCount, 0, sizeof(unsigned int)),
+                        "reset inactive count");
+        build_inactive_list_kernel_0297<<<particleGrid, block>>>(
+            static_cast<int>(hostMirror.Np), pv.role,
+            g_populationGuardBuffers0297.dInactiveList,
+            g_populationGuardBuffers0297.dInactiveCount);
+        cuda_check_0297(cudaGetLastError(), "launch build_inactive_list_kernel_0297");
+    }
     cuda_check_0297(cudaMemset(g_populationGuardBuffers0297.dInactiveCursor, 0, sizeof(unsigned int)),
                     "reset inactive cursor");
 

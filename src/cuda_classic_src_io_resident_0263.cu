@@ -1222,6 +1222,83 @@ __global__ void io_fullface_compact_inactive_slots_kernel_0268(
     }
 }
 
+// 0313: bounded inactive-tail pool collector. This avoids the previous
+// full-capacity prefix scan over all slots when a large inactive reservoir is
+// appended to the particle array. It is a fast path only: when the tail window
+// does not contain enough inactive slots, the exact full scan remains the
+// fallback.
+__global__ void io_collect_tail_inactive_slots_kernel_0313(
+    std::uint64_t n,
+    std::uint64_t tailScan,
+    const unsigned char* __restrict__ role,
+    unsigned char inactiveRole,
+    std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int* __restrict__ inactiveCount)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailScan || k >= n) return;
+    const std::uint64_t i = n - 1u - k;
+    if (role[i] == inactiveRole) {
+        const unsigned int pos = atomicAdd(inactiveCount, 1u);
+        if (pos < tailScan) inactiveIndices[pos] = i;
+    }
+}
+
+std::uint64_t inactive_tail_scan_count_0313(std::uint64_t n, std::uint64_t need) {
+    if (n == 0u) return 0u;
+    const std::uint64_t minScan = static_cast<std::uint64_t>(std::max(1, env_int_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_MIN_SCAN_0313", 8192)));
+    const std::uint64_t maxScan = static_cast<std::uint64_t>(std::max(1, env_int_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_MAX_SCAN_0313", 262144)));
+    const std::uint64_t mult = static_cast<std::uint64_t>(std::max(1, env_int_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_SCAN_MULT_0313", 4)));
+    std::uint64_t scan = std::max(minScan, need * mult + 1024u);
+    scan = std::min(scan, maxScan);
+    scan = std::min(scan, n);
+    return scan;
+}
+
+bool collect_tail_inactive_pool_0313(std::uint64_t n,
+                                      unsigned char* dRole,
+                                      unsigned char inactiveRole,
+                                      std::uint64_t need,
+                                      int threads,
+                                      std::uint64_t** dInactiveIndicesOut,
+                                      unsigned int* inactiveCountOut) {
+    const char* enableEnv0313 = std::getenv("MPCD_CUDA_INACTIVE_TAIL_POOL_0313");
+    if (enableEnv0313 != nullptr && !env_truthy_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_0313")) return false;
+    if (n == 0u || need == 0u || dRole == nullptr || dInactiveIndicesOut == nullptr || inactiveCountOut == nullptr) return false;
+    const std::uint64_t tailScan = inactive_tail_scan_count_0313(n, need);
+    if (tailScan == 0u || tailScan > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) return false;
+    std::uint64_t* dInactiveIndices = nullptr;
+    unsigned int* dInactiveCount = nullptr;
+    check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(tailScan)),
+                    "allocate 0313 inactive tail index pool");
+    check_cuda_0263(cudaMalloc(&dInactiveCount, sizeof(unsigned int)),
+                    "allocate 0313 inactive tail count");
+    check_cuda_0263(cudaMemset(dInactiveCount, 0, sizeof(unsigned int)),
+                    "clear 0313 inactive tail count");
+    const int block = std::max(32, threads);
+    const std::uint64_t blocks64 = (tailScan + static_cast<std::uint64_t>(block) - 1u) / static_cast<std::uint64_t>(block);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+        cudaFree(dInactiveIndices);
+        cudaFree(dInactiveCount);
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0313 inactive tail pool launch");
+    }
+    io_collect_tail_inactive_slots_kernel_0313<<<static_cast<unsigned int>(blocks64), block>>>(
+        n, tailScan, dRole, inactiveRole, dInactiveIndices, dInactiveCount);
+    check_cuda_0263(cudaGetLastError(), "io_collect_tail_inactive_slots_kernel_0313 launch");
+    unsigned int count = 0u;
+    check_cuda_0263(cudaMemcpy(&count, dInactiveCount, sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                    "copy 0313 inactive tail count");
+    cudaFree(dInactiveCount);
+    if (count < need && !env_truthy_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_NO_FALLBACK_0313")) {
+        cudaFree(dInactiveIndices);
+        return false;
+    }
+    *dInactiveIndicesOut = dInactiveIndices;
+    *inactiveCountOut = count;
+    return true;
+}
+
 __device__ void activate_reservoir_pool_slot_device_0268(
     double* __restrict__ x,
     double* __restrict__ y,
@@ -2067,45 +2144,56 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
                                                   equilibriumPredictedInsertions0293);
         check_cuda_0263(cudaDeviceSynchronize(), "io_fullface_pre_insert_outlet_extraction_kernel_0293 synchronize");
         if (usePoolInsert0268) {
-            if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
-                throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0268 inactive-prefix pool");
-            }
-            const unsigned int n32 = static_cast<unsigned int>(view.n);
+            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_POOL_THREADS", boundaryThreads);
+            const std::uint64_t reservoirCells = fullface_reservoir_cell_count_host_0268(cfg);
+            const std::uint64_t neededInactive = std::max<std::uint64_t>(
+                reservoirCells * static_cast<std::uint64_t>(std::max(0, cfg.inletTargetOccupancy)),
+                static_cast<std::uint64_t>(equilibriumPredictedInsertions0293));
+            std::uint64_t* dInactiveIndices = nullptr;
+            unsigned int inactiveCount = 0u;
+            bool usedTailPool0313 = collect_tail_inactive_pool_0313(
+                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
+                &dInactiveIndices, &inactiveCount);
+
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
-            std::uint64_t* dInactiveIndices = nullptr;
-            check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
-                            "allocate 0268 inactive flags");
-            check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
-                            "allocate 0268 inactive prefix");
-            check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(n32)),
-                            "allocate 0268 inactive index pool");
+            if (!usedTailPool0313) {
+                if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0268 inactive-prefix pool");
+                }
+                const unsigned int n32 = static_cast<unsigned int>(view.n);
+                check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
+                                "allocate 0268 inactive flags");
+                check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(n32)),
+                                "allocate 0268 inactive prefix");
+                check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(n32)),
+                                "allocate 0268 inactive index pool");
 
-            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_POOL_THREADS", boundaryThreads);
-            const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
-                                               static_cast<std::uint64_t>(poolThreads);
-            if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
-                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0268 inactive pool launch");
-            }
-            io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
-                view.n, view.role, kParticleRoleInactive, dInactiveFlags);
-            check_cuda_0263(cudaGetLastError(), "io_fullface_mark_inactive_flags_kernel_0268 launch");
-            thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + n32, dInactivePrefix);
-            check_cuda_0263(cudaGetLastError(), "io_fullface inactive prefix scan 0268");
-            io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
-                view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
-            check_cuda_0263(cudaGetLastError(), "io_fullface_compact_inactive_slots_kernel_0268 launch");
+                const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
+                                                   static_cast<std::uint64_t>(poolThreads);
+                if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0268 inactive pool launch");
+                }
+                io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                    view.n, view.role, kParticleRoleInactive, dInactiveFlags);
+                check_cuda_0263(cudaGetLastError(), "io_fullface_mark_inactive_flags_kernel_0268 launch");
+                thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + n32, dInactivePrefix);
+                check_cuda_0263(cudaGetLastError(), "io_fullface inactive prefix scan 0268");
+                io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                    view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
+                check_cuda_0263(cudaGetLastError(), "io_fullface_compact_inactive_slots_kernel_0268 launch");
 
-            unsigned int lastFlag = 0u;
-            unsigned int lastPrefix = 0u;
-            if (n32 > 0u) {
-                check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
-                                "copy 0268 inactive last flag");
-                check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
-                                "copy 0268 inactive last prefix");
+                unsigned int lastFlag = 0u;
+                unsigned int lastPrefix = 0u;
+                if (n32 > 0u) {
+                    check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                    "copy 0268 inactive last flag");
+                    check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                    "copy 0268 inactive last prefix");
+                }
+                inactiveCount = lastPrefix + lastFlag;
             }
-            const unsigned int inactiveCount = lastPrefix + lastFlag;
-            const std::uint64_t reservoirCells = fullface_reservoir_cell_count_host_0268(cfg);
+
             if (reservoirCells > 0u) {
                 const int insertThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0268_INSERT_THREADS", 128);
                 const std::uint64_t insertBlocks64 = (reservoirCells + static_cast<std::uint64_t>(insertThreads) - 1u) /
@@ -2119,9 +2207,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
                     dInactiveIndices, inactiveCount, dCounters);
                 check_cuda_0263(cudaGetLastError(), "io_fullface_hard_reservoir_insert_pool_kernel_0268 launch");
             }
-            check_cuda_0263(cudaFree(dInactiveFlags), "free 0268 inactive flags");
-            check_cuda_0263(cudaFree(dInactivePrefix), "free 0268 inactive prefix");
-            check_cuda_0263(cudaFree(dInactiveIndices), "free 0268 inactive index pool");
+            if (dInactiveFlags != nullptr) check_cuda_0263(cudaFree(dInactiveFlags), "free 0268 inactive flags");
+            if (dInactivePrefix != nullptr) check_cuda_0263(cudaFree(dInactivePrefix), "free 0268 inactive prefix");
+            if (dInactiveIndices != nullptr) check_cuda_0263(cudaFree(dInactiveIndices), usedTailPool0313 ? "free 0313 inactive tail index pool" : "free 0268 inactive index pool");
         } else {
             io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
                 view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
@@ -2310,42 +2398,53 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
                                                   equilibriumPredictedInsertions0293);
         check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_pre_insert_outlet_extraction_kernel_0293 synchronize");
         if (useSegmentedPool0269) {
-            if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
-                throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0269 segmented inactive-prefix pool");
-            }
+            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_POOL_THREADS", boundaryThreads);
+            const std::uint64_t reservoirCells = segmented_reservoir_cell_count_host_0269(cfg);
+            const std::uint64_t neededInactive = std::max<std::uint64_t>(
+                reservoirCells * static_cast<std::uint64_t>(std::max(0, cfg.inletTargetOccupancy)),
+                static_cast<std::uint64_t>(equilibriumPredictedInsertions0293));
+            std::uint64_t* dInactiveIndices = nullptr;
+            unsigned int inactiveCount = 0u;
+            bool usedTailPool0313 = collect_tail_inactive_pool_0313(
+                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
+                &dInactiveIndices, &inactiveCount);
+
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
-            std::uint64_t* dInactiveIndices = nullptr;
-            check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
-                            "allocate 0269 segmented inactive flags");
-            check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
-                            "allocate 0269 segmented inactive prefix");
-            check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(view.n)),
-                            "allocate 0269 segmented inactive index pool");
-            const int poolThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_POOL_THREADS", boundaryThreads);
-            const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
-                                               static_cast<std::uint64_t>(poolThreads);
-            if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
-                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0269 segmented inactive pool launch");
+            if (!usedTailPool0313) {
+                if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0269 segmented inactive-prefix pool");
+                }
+                check_cuda_0263(cudaMalloc(&dInactiveFlags, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                                "allocate 0269 segmented inactive flags");
+                check_cuda_0263(cudaMalloc(&dInactivePrefix, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                                "allocate 0269 segmented inactive prefix");
+                check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(view.n)),
+                                "allocate 0269 segmented inactive index pool");
+                const std::uint64_t poolBlocks64 = (view.n + static_cast<std::uint64_t>(poolThreads) - 1u) /
+                                                   static_cast<std::uint64_t>(poolThreads);
+                if (poolBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                    throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0269 segmented inactive pool launch");
+                }
+                io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                    view.n, view.role, kParticleRoleInactive, dInactiveFlags);
+                check_cuda_0263(cudaGetLastError(), "io_segmented_mark_inactive_flags_kernel_0269 launch");
+                thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + view.n, dInactivePrefix);
+                check_cuda_0263(cudaGetLastError(), "io_segmented inactive prefix scan 0269");
+                io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
+                    view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
+                check_cuda_0263(cudaGetLastError(), "io_segmented_compact_inactive_slots_kernel_0269 launch");
+                unsigned int lastFlag = 0u;
+                unsigned int lastPrefix = 0u;
+                if (view.n > 0u) {
+                    check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                    "copy 0269 segmented inactive last flag");
+                    check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                                    "copy 0269 segmented inactive last prefix");
+                }
+                inactiveCount = lastPrefix + lastFlag;
             }
-            io_fullface_mark_inactive_flags_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
-                view.n, view.role, kParticleRoleInactive, dInactiveFlags);
-            check_cuda_0263(cudaGetLastError(), "io_segmented_mark_inactive_flags_kernel_0269 launch");
-            thrust::exclusive_scan(thrust::device, dInactiveFlags, dInactiveFlags + view.n, dInactivePrefix);
-            check_cuda_0263(cudaGetLastError(), "io_segmented inactive prefix scan 0269");
-            io_fullface_compact_inactive_slots_kernel_0268<<<static_cast<unsigned int>(poolBlocks64), poolThreads>>>(
-                view.n, view.role, kParticleRoleInactive, dInactivePrefix, dInactiveIndices);
-            check_cuda_0263(cudaGetLastError(), "io_segmented_compact_inactive_slots_kernel_0269 launch");
-            unsigned int lastFlag = 0u;
-            unsigned int lastPrefix = 0u;
-            if (view.n > 0u) {
-                check_cuda_0263(cudaMemcpy(&lastFlag, dInactiveFlags + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
-                                "copy 0269 segmented inactive last flag");
-                check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
-                                "copy 0269 segmented inactive last prefix");
-            }
-            const unsigned int inactiveCount = lastPrefix + lastFlag;
-            const std::uint64_t reservoirCells = segmented_reservoir_cell_count_host_0269(cfg);
+
             if (reservoirCells > 0ULL) {
                 const int insertThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_SEGMENTED_INSERT_THREADS", 128);
                 const std::uint64_t insertBlocks64 = (reservoirCells + static_cast<std::uint64_t>(insertThreads) - 1u) /
@@ -2359,9 +2458,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
                     dInactiveIndices, inactiveCount, dCounters);
                 check_cuda_0263(cudaGetLastError(), "io_segmented_hard_reservoir_insert_pool_kernel_0269 launch");
             }
-            check_cuda_0263(cudaFree(dInactiveFlags), "free 0269 segmented inactive flags");
-            check_cuda_0263(cudaFree(dInactivePrefix), "free 0269 segmented inactive prefix");
-            check_cuda_0263(cudaFree(dInactiveIndices), "free 0269 segmented inactive index pool");
+            if (dInactiveFlags != nullptr) check_cuda_0263(cudaFree(dInactiveFlags), "free 0269 segmented inactive flags");
+            if (dInactivePrefix != nullptr) check_cuda_0263(cudaFree(dInactivePrefix), "free 0269 segmented inactive prefix");
+            if (dInactiveIndices != nullptr) check_cuda_0263(cudaFree(dInactiveIndices), usedTailPool0313 ? "free 0313 segmented inactive tail index pool" : "free 0269 segmented inactive index pool");
         } else {
             io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
                 view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,

@@ -393,6 +393,15 @@ struct SimulationParams {
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 
+    // 0314: optional compact runtime summaries and dumps for CUDA-resident
+    // runs with large Inactive reservoirs.  The default "all" preserves
+    // legacy restart-compatible dumps and full-state summaries.  "fluid"
+    // writes/uses only role=Fluid particles for visualization/diagnostics,
+    // avoiding work proportional to large inactive tails when the CUDA state is
+    // resident and fresh.
+    std::string dumpRoleFilter = "all";      // all | fluid
+    std::string summaryRoleFilter = "all";   // all | fluid
+
     // If >0 and OpenMP is enabled, the executable calls omp_set_num_threads(numThreads).
     int numThreads = 0;
 };
