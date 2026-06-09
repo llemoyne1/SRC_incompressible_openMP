@@ -11,7 +11,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.s
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_resampling_demo_common_0303.sh"
 
 CASE_NAME="von_karman_cylinder"
-Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-384}"; NY="${NY:-128}"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-64}"
 GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-75000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.60}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.12}"
