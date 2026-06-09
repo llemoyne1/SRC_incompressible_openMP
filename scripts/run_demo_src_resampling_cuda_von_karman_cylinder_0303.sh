@@ -11,10 +11,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.s
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_resampling_demo_common_0303.sh"
 
 CASE_NAME="von_karman_cylinder"
-Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-15000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-384}"; NY="${NY:-128}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-75000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.60}"; CYLINDER_CX="${CYLINDER_CX:-0.65}"; CYLINDER_CY="${CYLINDER_CY:-0.50}"; CYLINDER_R="${CYLINDER_R:-0.12}"
+UINIT="${UINIT:-0.0}"
 THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 OUTLET_MODE="${OUTLET_MODE:-equilibrium_flux}"
 OUTLET_FORCED_MASS_FLUX="${OUTLET_FORCED_MASS_FLUX:-0.0}"
@@ -34,7 +35,7 @@ TIME_FILE="$RUN_ROOT/logs/${CASE_NAME}.time"
 # animated wake runs and override INACTIVE_SLOTS locally if needed.
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-$((GAMMA * NY * 32))}"
 
-generate_demo_state_0283 "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" uniform "$UIN" 0.0 0.0 0.0 -1.0 0.0 -1.0 "$INACTIVE_SLOTS" "circle:${CYLINDER_CX},${CYLINDER_CY},${CYLINDER_R}"
+generate_demo_state_0283 "$STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" uniform "$UINIT" 0.0 0.0 0.0 -1.0 0.0 -1.0 "$INACTIVE_SLOTS" "circle:${CYLINDER_CX},${CYLINDER_CY},${CYLINDER_R}"
 mkdir -p "$OUT_DIR"
 cat > "$PARAMS_FILE" <<PARAMS
 inputState = ${STATE_FILE}

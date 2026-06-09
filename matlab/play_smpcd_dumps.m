@@ -3,6 +3,25 @@ function out = play_smpcd_dumps(runDir, varargin)
 %
 % out = play_smpcd_dumps('runs/periodic_base', 'field', 'omega')
 %
+% Particle overlay options:
+%   'showParticles', true
+%   'particleColorMode', 'role'      % role | type | single | mass | masslog | speed | speedlog
+%   'particleRoleFilter', 'all'      % all | fluid | inactive | latent | noninactive
+%   'particleMassMin', -Inf          % threshold filter for overlay particles
+%   'particleMassMax', Inf
+%   'particleSpeedMin', -Inf
+%   'particleSpeedMax', Inf
+%   'particleThresholdLogic', 'and'   % and | or, for active mass/speed filters
+%   'particleLabelMode', 'none'       % none | id | mass | speed | mass_speed | role
+%   'particleLabelMax', 30
+%   'showParticleLegend', true
+%
+% Role color convention used by plot_smpcd_frame:
+%   role = 0 : inactive slot, grey
+%   role = 1 : fluid particle, red
+%   role = 2 : latent particle, blue
+%   other    : magenta
+%
 % The function returns the frame table and the last binned field. Use
 % postprocess_smpcd_run for a higher-level workflow including summaries.
 
@@ -16,8 +35,21 @@ function out = play_smpcd_dumps(runDir, varargin)
     addParameter(p, 'paramsFile', '', @(s) ischar(s) || isstring(s));
     addParameter(p, 'frameStride', 1, @isnumeric);
     addParameter(p, 'pauseTime', 0.05, @isnumeric);
-    addParameter(p, 'particleDecimation', 0, @isnumeric);
+    addParameter(p, 'particleDecimation', 10, @isnumeric);
+    addParameter(p, 'particleMarkerSize', 6, @isnumeric);
     addParameter(p, 'showParticles', true, @islogical);
+    addParameter(p, 'particleColorMode', 'role', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'particleRoleFilter', 'fluid', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'particleMassMin', -Inf, @isnumeric);
+    addParameter(p, 'particleMassMax', Inf, @isnumeric);
+    addParameter(p, 'particleSpeedMin', -Inf, @isnumeric);
+    addParameter(p, 'particleSpeedMax', Inf, @isnumeric);
+    addParameter(p, 'particleThresholdLogic', 'and', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'particleLabelMode', 'none', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'particleLabelMax', 30, @isnumeric);
+    addParameter(p, 'particleLabelFontSize', 8, @isnumeric);
+    addParameter(p, 'particleClim', [], @isnumeric);
+    addParameter(p, 'showParticleLegend', true, @islogical);
     addParameter(p, 'showVelocityVectors', false, @islogical);
     addParameter(p, 'velocityDecimation', 3, @isnumeric);
     addParameter(p, 'clim', [], @isnumeric);
@@ -32,7 +64,7 @@ function out = play_smpcd_dumps(runDir, varargin)
     end
 
     frameStride = max(1, round(p.Results.frameStride));
-    indices =1:frameStride:height(frameTable);
+    indices = 1:frameStride:height(frameTable);
     fig = figure('Name', sprintf('SRC/MPCD dumps: %s', runDir));
     lastFields = [];
 
@@ -44,7 +76,20 @@ function out = play_smpcd_dumps(runDir, varargin)
             'step', frameTable.step(kk), ...
             'time', frameTable.time(kk), ...
             'particleDecimation', p.Results.particleDecimation, ...
+            'particleMarkerSize', p.Results.particleMarkerSize, ...
             'showParticles', p.Results.showParticles, ...
+            'particleColorMode', char(p.Results.particleColorMode), ...
+            'particleRoleFilter', char(p.Results.particleRoleFilter), ...
+            'particleMassMin', p.Results.particleMassMin, ...
+            'particleMassMax', p.Results.particleMassMax, ...
+            'particleSpeedMin', p.Results.particleSpeedMin, ...
+            'particleSpeedMax', p.Results.particleSpeedMax, ...
+            'particleThresholdLogic', char(p.Results.particleThresholdLogic), ...
+            'particleLabelMode', char(p.Results.particleLabelMode), ...
+            'particleLabelMax', p.Results.particleLabelMax, ...
+            'particleLabelFontSize', p.Results.particleLabelFontSize, ...
+            'particleClim', p.Results.particleClim, ...
+            'showParticleLegend', p.Results.showParticleLegend, ...
             'showVelocityVectors', p.Results.showVelocityVectors, ...
             'velocityDecimation', p.Results.velocityDecimation, ...
             'clim', p.Results.clim, ...

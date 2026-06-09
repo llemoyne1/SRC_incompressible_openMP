@@ -52,6 +52,32 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     double splitFraction = 0.5;
     double minDonorMassAfterSplit = 1.0e-12;
 
+    // 0307: split-cascade diagnostics and optional prevention.  The default
+    // behavior is diagnostic-only unless MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307
+    // is enabled.  The goal is to detect and optionally prevent repeated local
+    // splitting from generating nearly massless representative particles,
+    // especially in solid-adjacent cells.
+    bool splitSafety0307 = false;
+    bool preferMaxMassDonor0307 = false;
+    double splitDonorMinMass0307 = 0.0;
+    double splitNewParticleMinMass0307 = 0.0;
+    double solidAdjacentDonorMinMass0307 = 0.0;
+    int solidAdjacentSplitMode0307 = 0; // 0 normal, 1 cautious, 2 off.
+    int solidAdjacentHaloCells0307 = 1;
+    double tinyMassThreshold0307 = 0.25;
+
+    std::uint64_t splitCandidatesSolidAdjacent0307 = 0u;
+    std::uint64_t splitAppliedSolidAdjacent0307 = 0u;
+    std::uint64_t splitSkippedDonorMass0307 = 0u;
+    std::uint64_t splitSkippedNewMass0307 = 0u;
+    std::uint64_t splitSkippedSolidAdjacent0307 = 0u;
+    std::uint64_t splitFromMassBelow0p5_0307 = 0u;
+    std::uint64_t splitFromMassBelow0p25_0307 = 0u;
+    std::uint64_t splitFromMassBelow0p1_0307 = 0u;
+    double minSplitDonorMass0307 = 0.0;
+    double minSplitNewParticleMass0307 = 0.0;
+    double minPostSplitDonorMass0307 = 0.0;
+
     double totalMassBefore = 0.0;
     double totalMassAfter = 0.0;
     double totalPxBefore = 0.0;

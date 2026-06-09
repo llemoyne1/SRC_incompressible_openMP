@@ -72,6 +72,16 @@ struct DevicePopulationGuardConfig0297 {
     int faceWallRight0299 = 0;
     int faceWallBottom0299 = 0;
     int faceWallTop0299 = 0;
+
+    // 0307 split cascade diagnostics/prevention.
+    int splitSafety0307 = 0;
+    int preferMaxMassDonor0307 = 0;
+    double splitDonorMinMass0307 = 0.0;
+    double splitNewParticleMinMass0307 = 0.0;
+    double solidAdjacentDonorMinMass0307 = 0.0;
+    int solidAdjacentSplitMode0307 = 0; // 0 normal, 1 cautious, 2 off.
+    int solidAdjacentHaloCells0307 = 1;
+    double tinyMassThreshold0307 = 0.25;
 };
 
 struct DeviceBuffers0297 {
@@ -83,6 +93,8 @@ struct DeviceBuffers0297 {
     unsigned int* dInactiveCount = nullptr;
     unsigned int* dInactiveCursor = nullptr;
     unsigned int* dPoorDonor = nullptr;
+    unsigned long long* dPoorDonorMassBits0307 = nullptr;
+    double* dMinima0307 = nullptr;
     unsigned int* dRichKeep = nullptr;
     unsigned int* dRichExtract = nullptr;
     double* dKrelBefore0298 = nullptr;
@@ -103,6 +115,8 @@ struct DeviceBuffers0297 {
         if (dInactiveCount) cudaFree(dInactiveCount);
         if (dInactiveCursor) cudaFree(dInactiveCursor);
         if (dPoorDonor) cudaFree(dPoorDonor);
+        if (dPoorDonorMassBits0307) cudaFree(dPoorDonorMassBits0307);
+        if (dMinima0307) cudaFree(dMinima0307);
         if (dRichKeep) cudaFree(dRichKeep);
         if (dRichExtract) cudaFree(dRichExtract);
         if (dKrelBefore0298) cudaFree(dKrelBefore0298);
@@ -117,6 +131,8 @@ struct DeviceBuffers0297 {
         dInactiveCount = nullptr;
         dInactiveCursor = nullptr;
         dPoorDonor = nullptr;
+        dPoorDonorMassBits0307 = nullptr;
+        dMinima0307 = nullptr;
         dRichKeep = nullptr;
         dRichExtract = nullptr;
         dKrelBefore0298 = nullptr;
@@ -130,6 +146,7 @@ struct DeviceBuffers0297 {
     void ensure(int numCells, std::uint64_t nParticles) {
         if (numCells <= cellCapacity && nParticles <= particleCapacity && dPoorCells && dRichCells &&
             dPoorCount && dRichCount && dInactiveList && dInactiveCount && dInactiveCursor && dPoorDonor &&
+            dPoorDonorMassBits0307 && dMinima0307 &&
             dRichKeep && dRichExtract && dKrelBefore0298 && dKrelAfter0298 &&
             dEnergyRestoreCounters0298 && dCounters) {
             return;
@@ -153,6 +170,10 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc inactive cursor: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dPoorDonor), sizeof(unsigned int) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc poor donor: ") + cudaGetErrorString(err));
+        err = cudaMalloc(reinterpret_cast<void**>(&dPoorDonorMassBits0307), sizeof(unsigned long long) * static_cast<std::size_t>(numCells));
+        if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0307 poor donor mass bits: ") + cudaGetErrorString(err));
+        err = cudaMalloc(reinterpret_cast<void**>(&dMinima0307), sizeof(double) * 3u);
+        if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0307 minima: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dRichKeep), sizeof(unsigned int) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc rich keep: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dRichExtract), sizeof(unsigned int) * static_cast<std::size_t>(numCells));
@@ -163,7 +184,7 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 krel after: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dEnergyRestoreCounters0298), sizeof(unsigned long long) * 2u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0298 energy counters: ") + cudaGetErrorString(err));
-        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 8u);
+        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 24u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc counters: ") + cudaGetErrorString(err));
         cellCapacity = numCells;
         particleCapacity = nParticles;
@@ -200,6 +221,20 @@ __device__ inline double atomic_add_double_compat_0297(double* address, double v
     return __longlong_as_double(old);
 #endif
 }
+
+__device__ inline void atomic_min_double_positive_0307(double* address, double value) {
+    if (!(value >= 0.0) || !isfinite(value)) return;
+    auto* addressAsUll = reinterpret_cast<unsigned long long int*>(address);
+    unsigned long long int old = *addressAsUll;
+    unsigned long long int assumed;
+    do {
+        assumed = old;
+        const double oldVal = __longlong_as_double(static_cast<long long>(assumed));
+        if (oldVal <= value) return;
+        old = atomicCAS(addressAsUll, assumed, static_cast<unsigned long long int>(__double_as_longlong(value)));
+    } while (assumed != old);
+}
+
 
 bool env_truthy_0297(const char* name) {
     const char* v = std::getenv(name);
@@ -335,18 +370,47 @@ __device__ int population_guard_exclusion_reason_0299(int c, DevicePopulationGua
     return 0;
 }
 
+
+__device__ bool population_guard_solid_adjacent_0307(int c, DevicePopulationGuardConfig0297 cfg) {
+    if (cfg.solidShape == 0) return false;
+    const int ix = c % cfg.nx;
+    const int iy = c / cfg.nx;
+    const double cx = (static_cast<double>(ix) + 0.5) * cfg.dx;
+    const double cy = (static_cast<double>(iy) + 0.5) * cfg.dy;
+    const int haloCells0307 = cfg.solidAdjacentHaloCells0307 > 1 ? cfg.solidAdjacentHaloCells0307 : 1;
+    const double halo = static_cast<double>(haloCells0307) * fmax(cfg.dx, cfg.dy);
+    if (cfg.solidShape == 1) {
+        const double dx = cx - cfg.circleCx;
+        const double dy = cy - cfg.circleCy;
+        const double r = sqrt(dx * dx + dy * dy);
+        return (r >= cfg.circleR && r <= cfg.circleR + halo);
+    }
+    if (cfg.solidShape == 2) {
+        const bool insideRect = (cx >= cfg.rectXMin && cx <= cfg.rectXMax && cy >= cfg.rectYMin && cy <= cfg.rectYMax);
+        if (insideRect) return false;
+        const double qx = fmax(fmax(cfg.rectXMin - cx, 0.0), cx - cfg.rectXMax);
+        const double qy = fmax(fmax(cfg.rectYMin - cy, 0.0), cy - cfg.rectYMax);
+        const double dist = sqrt(qx * qx + qy * qy);
+        return dist <= halo;
+    }
+    return false;
+}
+
 __global__ void reset_population_guard_buffers_kernel_0297(
     int numCells,
     unsigned int* __restrict__ poorCount,
     unsigned int* __restrict__ richCount,
     unsigned int* __restrict__ inactiveCount,
     unsigned int* __restrict__ poorDonor,
+    unsigned long long* __restrict__ poorDonorMassBits0307,
+    double* __restrict__ minima0307,
     unsigned int* __restrict__ richKeep,
     unsigned int* __restrict__ richExtract,
     unsigned long long* __restrict__ counters) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c < numCells) {
         poorDonor[c] = kInvalidParticle0297;
+        if (poorDonorMassBits0307) poorDonorMassBits0307[c] = 0ull;
         richKeep[c] = kInvalidParticle0297;
         richExtract[c] = kInvalidParticle0297;
     }
@@ -354,7 +418,12 @@ __global__ void reset_population_guard_buffers_kernel_0297(
         *poorCount = 0u;
         *richCount = 0u;
         *inactiveCount = 0u;
-        for (int i = 0; i < 8; ++i) counters[i] = 0ull;
+        for (int i = 0; i < 24; ++i) counters[i] = 0ull;
+        if (minima0307) {
+            minima0307[0] = 1.0e300;
+            minima0307[1] = 1.0e300;
+            minima0307[2] = 1.0e300;
+        }
     }
 }
 
@@ -400,8 +469,10 @@ __global__ void select_population_guard_primary_particles_kernel_0297(
     const unsigned char* __restrict__ role,
     const int* __restrict__ cellId,
     const unsigned int* __restrict__ cellCount,
+    const double* __restrict__ mass,
     DevicePopulationGuardConfig0297 cfg,
     unsigned int* __restrict__ poorDonor,
+    unsigned long long* __restrict__ poorDonorMassBits0307,
     unsigned int* __restrict__ richKeep) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nParticles) return;
@@ -411,7 +482,16 @@ __global__ void select_population_guard_primary_particles_kernel_0297(
     if (!point_inside_active_domain_0297(x[i], y[i], cfg)) return;
     const int n = static_cast<int>(cellCount[c]);
     if (n > 0 && cfg.nMin > 0 && n < cfg.nMin) {
-        atomicMin(&poorDonor[c], static_cast<unsigned int>(i));
+        if (cfg.preferMaxMassDonor0307 && mass != nullptr && poorDonorMassBits0307 != nullptr) {
+            const double mi = mass[i];
+            if (mi > 0.0 && isfinite(mi)) {
+                const unsigned long long bits = static_cast<unsigned long long>(__double_as_longlong(mi));
+                const unsigned long long old = atomicMax(&poorDonorMassBits0307[c], bits);
+                if (bits >= old) poorDonor[c] = static_cast<unsigned int>(i);
+            }
+        } else {
+            atomicMin(&poorDonor[c], static_cast<unsigned int>(i));
+        }
     } else if (cfg.nMax > 0 && n > cfg.nMax) {
         atomicMin(&richKeep[c], static_cast<unsigned int>(i));
     }
@@ -516,7 +596,8 @@ __global__ void split_poor_cells_kernel_0297(
     unsigned int* __restrict__ type,
     unsigned char* __restrict__ role,
     DevicePopulationGuardConfig0297 cfg,
-    unsigned long long* __restrict__ counters) {
+    unsigned long long* __restrict__ counters,
+    double* __restrict__ minima0307) {
     const unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
     if (k >= poorCount) return;
     const unsigned int c = poorCells[k];
@@ -536,14 +617,45 @@ __global__ void split_poor_cells_kernel_0297(
         return;
     }
     const double md = mass[donor];
-    if (!(md > 0.0)) {
+    if (!(md > 0.0) || !isfinite(md)) {
         atomicAdd(&counters[3], 1ull);
         return;
     }
-    const double dm = fmin(md * cfg.splitFraction, fmax(0.0, md - cfg.minDonorMassAfterSplit));
+    const bool solidAdjacent0307 = population_guard_solid_adjacent_0307(static_cast<int>(c), cfg);
+    if (solidAdjacent0307) atomicAdd(&counters[10], 1ull);
+    if (minima0307) atomic_min_double_positive_0307(&minima0307[0], md);
+
+    if (cfg.splitSafety0307) {
+        double donorMin = cfg.splitDonorMinMass0307;
+        if (solidAdjacent0307 && cfg.solidAdjacentSplitMode0307 == 2) {
+            atomicAdd(&counters[11], 1ull);
+            return;
+        }
+        if (solidAdjacent0307 && cfg.solidAdjacentSplitMode0307 == 1) {
+            donorMin = fmax(donorMin, cfg.solidAdjacentDonorMinMass0307);
+        }
+        if (donorMin > 0.0 && md < donorMin) {
+            atomicAdd(&counters[8], 1ull);
+            return;
+        }
+    }
+
+    const double postFloor = fmax(cfg.minDonorMassAfterSplit, cfg.splitSafety0307 ? cfg.splitNewParticleMinMass0307 : 0.0);
+    const double dm = fmin(md * cfg.splitFraction, fmax(0.0, md - postFloor));
     if (!(dm > 0.0) || !isfinite(dm)) {
         atomicAdd(&counters[3], 1ull);
         return;
+    }
+    if (cfg.splitSafety0307 && cfg.splitNewParticleMinMass0307 > 0.0 && dm < cfg.splitNewParticleMinMass0307) {
+        atomicAdd(&counters[9], 1ull);
+        return;
+    }
+    if (md < 0.5) atomicAdd(&counters[13], 1ull);
+    if (md < 0.25) atomicAdd(&counters[14], 1ull);
+    if (md < 0.1) atomicAdd(&counters[15], 1ull);
+    if (minima0307) {
+        atomic_min_double_positive_0307(&minima0307[1], dm);
+        atomic_min_double_positive_0307(&minima0307[2], md - dm);
     }
 
     const int ix = static_cast<int>(c % static_cast<unsigned int>(cfg.nx));
@@ -570,6 +682,7 @@ __global__ void split_poor_cells_kernel_0297(
     type[slot] = type[donor];
     role[slot] = static_cast<unsigned char>(kParticleRoleFluid);
     atomicAdd(&counters[1], 1ull);
+    if (solidAdjacent0307) atomicAdd(&counters[12], 1ull);
 }
 
 __global__ void reset_krel_buffer_kernel_0298(int numCells,
@@ -677,6 +790,17 @@ DevicePopulationGuardConfig0297 make_config_0297(const SimulationParams& params,
     cfg.nMax = std::max(0, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NMAX", 0));
     cfg.splitFraction = std::clamp(env_double_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_SPLIT_FRACTION", 0.5), 1.0e-6, 0.5);
     cfg.minDonorMassAfterSplit = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_MIN_DONOR_MASS_AFTER_SPLIT", 1.0e-12));
+    cfg.splitSafety0307 = env_truthy_0297("MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307") ? 1 : 0;
+    cfg.preferMaxMassDonor0307 = env_truthy_0297("MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307") ? 1 : 0;
+    if (cfg.splitSafety0307 && !std::getenv("MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307")) {
+        cfg.preferMaxMassDonor0307 = 1;
+    }
+    cfg.splitDonorMinMass0307 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307", 0.0));
+    cfg.splitNewParticleMinMass0307 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307", 0.0));
+    cfg.solidAdjacentDonorMinMass0307 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_SOLID_ADJACENT_DONOR_MIN_MASS_0307", cfg.splitDonorMinMass0307));
+    cfg.solidAdjacentSplitMode0307 = std::clamp(env_int_0297("MPCD_CUDA_RESAMPLING_SOLID_ADJACENT_SPLIT_MODE_0307", 0), 0, 2);
+    cfg.solidAdjacentHaloCells0307 = std::max(1, env_int_0297("MPCD_CUDA_RESAMPLING_SOLID_ADJACENT_HALO_CELLS_0307", 1));
+    cfg.tinyMassThreshold0307 = std::max(0.0, env_double_0297("MPCD_CUDA_RESAMPLING_TINY_MASS_THRESHOLD_0307", 0.25));
     cfg.boundaryAware0299 = env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE") ? 1 : 0;
     if (const char* v = std::getenv("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE")) {
         (void)v;
@@ -734,6 +858,12 @@ void write_csv_row_0297(const SimulationParams& params,
                "particles,cells,fluidParticlesBefore,fluidParticlesAfter,inactiveParticlesBefore,inactiveParticlesAfter,"
                "wetCellsBefore,wetCellsAfter,poorCells,richCells,mergeApplied,splitApplied,splitSkippedNoInactive,"
                "splitSkippedNoDonor,mergeSkippedNoPair,nMin,nTarget,nMax,splitFraction,minDonorMassAfterSplit,"
+               "splitSafety0307,preferMaxMassDonor0307,splitDonorMinMass0307,splitNewParticleMinMass0307,"
+               "solidAdjacentDonorMinMass0307,solidAdjacentSplitMode0307,solidAdjacentHaloCells0307,tinyMassThreshold0307,"
+               "splitCandidatesSolidAdjacent0307,splitAppliedSolidAdjacent0307,splitSkippedDonorMass0307,"
+               "splitSkippedNewMass0307,splitSkippedSolidAdjacent0307,splitFromMassBelow0p5_0307,"
+               "splitFromMassBelow0p25_0307,splitFromMassBelow0p1_0307,minSplitDonorMass0307,"
+               "minSplitNewParticleMass0307,minPostSplitDonorMass0307,"
                "totalMassBefore,totalMassAfter,totalPxBefore,totalPxAfter,totalPyBefore,totalPyAfter,"
                "momentRestoreRequested0298,energyRestoreApplied0298,energyRestoreParticleUpdates0298,energyRestoreSkippedParticles0298,"
                "energyRestoreMaxScale0298,totalKrelBefore0298,totalKrelAfterPreRestore0298,totalKrelAfter0298,"
@@ -760,6 +890,17 @@ void write_csv_row_0297(const SimulationParams& params,
         << d.splitSkippedNoInactive << ',' << d.splitSkippedNoDonor << ',' << d.mergeSkippedNoPair << ','
         << d.nMin << ',' << d.nTarget << ',' << d.nMax << ','
         << d.splitFraction << ',' << d.minDonorMassAfterSplit << ','
+        << (d.splitSafety0307 ? 1 : 0) << ','
+        << (d.preferMaxMassDonor0307 ? 1 : 0) << ','
+        << d.splitDonorMinMass0307 << ',' << d.splitNewParticleMinMass0307 << ','
+        << d.solidAdjacentDonorMinMass0307 << ',' << d.solidAdjacentSplitMode0307 << ','
+        << d.solidAdjacentHaloCells0307 << ',' << d.tinyMassThreshold0307 << ','
+        << d.splitCandidatesSolidAdjacent0307 << ',' << d.splitAppliedSolidAdjacent0307 << ','
+        << d.splitSkippedDonorMass0307 << ',' << d.splitSkippedNewMass0307 << ','
+        << d.splitSkippedSolidAdjacent0307 << ',' << d.splitFromMassBelow0p5_0307 << ','
+        << d.splitFromMassBelow0p25_0307 << ',' << d.splitFromMassBelow0p1_0307 << ','
+        << d.minSplitDonorMass0307 << ',' << d.minSplitNewParticleMass0307 << ','
+        << d.minPostSplitDonorMass0307 << ','
         << d.totalMassBefore << ',' << d.totalMassAfter << ','
         << d.totalPxBefore << ',' << d.totalPxAfter << ','
         << d.totalPyBefore << ',' << d.totalPyAfter << ','
@@ -891,6 +1032,14 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.nMax = cfg.nMax;
     d.splitFraction = cfg.splitFraction;
     d.minDonorMassAfterSplit = cfg.minDonorMassAfterSplit;
+    d.splitSafety0307 = cfg.splitSafety0307 != 0;
+    d.preferMaxMassDonor0307 = cfg.preferMaxMassDonor0307 != 0;
+    d.splitDonorMinMass0307 = cfg.splitDonorMinMass0307;
+    d.splitNewParticleMinMass0307 = cfg.splitNewParticleMinMass0307;
+    d.solidAdjacentDonorMinMass0307 = cfg.solidAdjacentDonorMinMass0307;
+    d.solidAdjacentSplitMode0307 = cfg.solidAdjacentSplitMode0307;
+    d.solidAdjacentHaloCells0307 = cfg.solidAdjacentHaloCells0307;
+    d.tinyMassThreshold0307 = cfg.tinyMassThreshold0307;
     d.boundaryAware0299 = cfg.boundaryAware0299 != 0;
     d.boundaryHaloCells0299 = cfg.boundaryHaloCells0299;
     d.openBoundaryHaloCells0299 = cfg.openBoundaryHaloCells0299;
@@ -975,6 +1124,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         g_populationGuardBuffers0297.dRichCount,
         g_populationGuardBuffers0297.dInactiveCount,
         g_populationGuardBuffers0297.dPoorDonor,
+        g_populationGuardBuffers0297.dPoorDonorMassBits0307,
+        g_populationGuardBuffers0297.dMinima0307,
         g_populationGuardBuffers0297.dRichKeep,
         g_populationGuardBuffers0297.dRichExtract,
         g_populationGuardBuffers0297.dCounters);
@@ -992,8 +1143,9 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
 
     select_population_guard_primary_particles_kernel_0297<<<particleGrid, block>>>(
         static_cast<int>(hostMirror.Np),
-        pv.x, pv.y, pv.role, cv.cellId, cv.count, cfg,
+        pv.x, pv.y, pv.role, cv.cellId, cv.count, pv.mass, cfg,
         g_populationGuardBuffers0297.dPoorDonor,
+        g_populationGuardBuffers0297.dPoorDonorMassBits0307,
         g_populationGuardBuffers0297.dRichKeep);
     cuda_check_0297(cudaGetLastError(), "launch select_population_guard_primary_particles_kernel_0297");
     select_population_guard_rich_extract_kernel_0297<<<particleGrid, block>>>(
@@ -1048,18 +1200,23 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardBuffers0297.dPoorDonor,
             pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.type, pv.role,
             cfg,
-            g_populationGuardBuffers0297.dCounters);
+            g_populationGuardBuffers0297.dCounters,
+            g_populationGuardBuffers0297.dMinima0307);
         cuda_check_0297(cudaGetLastError(), "launch split_poor_cells_kernel_0297");
     }
     cuda_check_0297(cudaDeviceSynchronize(), "synchronize population guard kernels");
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 
-    unsigned long long hCounters[8] = {0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull};
+    unsigned long long hCounters[24] = {};
+    double hMinima0307[3] = {1.0e300, 1.0e300, 1.0e300};
     const Clock::time_point td0 = Clock::now();
     cuda_check_0297(cudaMemcpy(hCounters, g_populationGuardBuffers0297.dCounters,
                                sizeof(hCounters), cudaMemcpyDeviceToHost),
                     "copy counters D2H");
+    cuda_check_0297(cudaMemcpy(hMinima0307, g_populationGuardBuffers0297.dMinima0307,
+                               sizeof(hMinima0307), cudaMemcpyDeviceToHost),
+                    "copy 0307 minima D2H");
     const Clock::time_point td1 = Clock::now();
     d.downloadSeconds = seconds_between(td0, td1);
     d.mergeApplied = static_cast<std::uint64_t>(hCounters[0]);
@@ -1070,6 +1227,17 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.excludedBoundaryCells0299 = static_cast<std::uint64_t>(hCounters[5]);
     d.excludedOpenBoundaryCells0299 = static_cast<std::uint64_t>(hCounters[6]);
     d.excludedSolidHaloCells0299 = static_cast<std::uint64_t>(hCounters[7]);
+    d.splitSkippedDonorMass0307 = static_cast<std::uint64_t>(hCounters[8]);
+    d.splitSkippedNewMass0307 = static_cast<std::uint64_t>(hCounters[9]);
+    d.splitCandidatesSolidAdjacent0307 = static_cast<std::uint64_t>(hCounters[10]);
+    d.splitSkippedSolidAdjacent0307 = static_cast<std::uint64_t>(hCounters[11]);
+    d.splitAppliedSolidAdjacent0307 = static_cast<std::uint64_t>(hCounters[12]);
+    d.splitFromMassBelow0p5_0307 = static_cast<std::uint64_t>(hCounters[13]);
+    d.splitFromMassBelow0p25_0307 = static_cast<std::uint64_t>(hCounters[14]);
+    d.splitFromMassBelow0p1_0307 = static_cast<std::uint64_t>(hCounters[15]);
+    d.minSplitDonorMass0307 = hMinima0307[0] < 1.0e299 ? hMinima0307[0] : 0.0;
+    d.minSplitNewParticleMass0307 = hMinima0307[1] < 1.0e299 ? hMinima0307[1] : 0.0;
+    d.minPostSplitDonorMass0307 = hMinima0307[2] < 1.0e299 ? hMinima0307[2] : 0.0;
 
     if (d.mergeApplied > 0u || d.splitApplied > 0u) {
         cuda_shared_particle_state_0251_mark_fresh("cuda_resampling_population_guard_0297");

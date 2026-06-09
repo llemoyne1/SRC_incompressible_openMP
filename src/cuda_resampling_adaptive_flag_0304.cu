@@ -53,6 +53,7 @@ struct DeviceFlagConfig0304 {
     int triggerNMin = 6;
     int triggerEmpty = 1;
     double highUThreshold = 1.0;
+    double outlierUThreshold0306 = 1.0;
 
     int bcLeftOpen = 0;
     int bcRightOpen = 0;
@@ -109,6 +110,45 @@ struct DeviceFlagStats0304 {
     double maxAbsUSolidAdjacent0305;
     double maxAbsUOpenAdjacent0305;
     double maxAbsUCornerAdjacent0305;
+
+    double outlierUThreshold0306;
+    unsigned int cellsN1_0306;
+    unsigned int cellsN2_0306;
+    unsigned int cellsN3_0306;
+    unsigned int cellsN4To6_0306;
+    unsigned int cellsN7ToNmin_0306;
+    unsigned int cellsNgeNmin_0306;
+    unsigned int highUN1_0306;
+    unsigned int highUN2_0306;
+    unsigned int highUN3_0306;
+    unsigned int highUN4To6_0306;
+    unsigned int highUN7ToNmin_0306;
+    unsigned int highUNgeNmin_0306;
+    double maxAbsUN1_0306;
+    double maxAbsUN2_0306;
+    double maxAbsUN3_0306;
+    double maxAbsUN4To6_0306;
+    double maxAbsUN7ToNmin_0306;
+    double maxAbsUNgeNmin_0306;
+    double maxKBTBulk0306;
+    double maxKBTWallAdjacent0306;
+    double maxKBTSolidAdjacent0306;
+    double maxKBTOpenAdjacent0306;
+    double maxKBTCornerAdjacent0306;
+    int worstCellI0306;
+    int worstCellJ0306;
+    int worstCellN0306;
+    double worstCellMass0306;
+    double worstCellUx0306;
+    double worstCellUy0306;
+    double worstCellAbsU0306;
+    double worstCellKrel0306;
+    double worstCellKBT0306;
+    int worstCellBulk0306;
+    int worstCellWallAdjacent0306;
+    int worstCellSolidAdjacent0306;
+    int worstCellOpenAdjacent0306;
+    int worstCellCornerAdjacent0306;
 };
 
 struct DeviceDepositBuffers0304 {
@@ -118,6 +158,7 @@ struct DeviceDepositBuffers0304 {
     double* d_mass = nullptr;
     double* d_px = nullptr;
     double* d_py = nullptr;
+    double* d_sumMv2 = nullptr;
     DeviceFlagStats0304* d_stats = nullptr;
 
     ~DeviceDepositBuffers0304() { release(); }
@@ -127,11 +168,13 @@ struct DeviceDepositBuffers0304 {
         if (d_mass) cudaFree(d_mass);
         if (d_px) cudaFree(d_px);
         if (d_py) cudaFree(d_py);
+        if (d_sumMv2) cudaFree(d_sumMv2);
         if (d_stats) cudaFree(d_stats);
         d_count = nullptr;
         d_mass = nullptr;
         d_px = nullptr;
         d_py = nullptr;
+        d_sumMv2 = nullptr;
         d_stats = nullptr;
         particleCapacity = 0u;
         cellCapacity = 0u;
@@ -145,6 +188,7 @@ struct DeviceDepositBuffers0304 {
         cudaMalloc(reinterpret_cast<void**>(&d_mass), cellCapacity * sizeof(double));
         cudaMalloc(reinterpret_cast<void**>(&d_px), cellCapacity * sizeof(double));
         cudaMalloc(reinterpret_cast<void**>(&d_py), cellCapacity * sizeof(double));
+        cudaMalloc(reinterpret_cast<void**>(&d_sumMv2), cellCapacity * sizeof(double));
         cudaMalloc(reinterpret_cast<void**>(&d_stats), sizeof(DeviceFlagStats0304));
     }
 };
@@ -268,6 +312,7 @@ __global__ void reset_adaptive_flag_deposit_kernel_0304(
     double* mass,
     double* px,
     double* py,
+    double* sumMv2,
     DeviceFlagStats0304* stats) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     for (int c = tid; c < numCells; c += blockDim.x * gridDim.x) {
@@ -275,6 +320,7 @@ __global__ void reset_adaptive_flag_deposit_kernel_0304(
         mass[c] = 0.0;
         px[c] = 0.0;
         py[c] = 0.0;
+        sumMv2[c] = 0.0;
     }
     if (tid == 0) {
         stats->triggerFlag = 0u;
@@ -315,6 +361,45 @@ __global__ void reset_adaptive_flag_deposit_kernel_0304(
         stats->maxAbsUSolidAdjacent0305 = 0.0;
         stats->maxAbsUOpenAdjacent0305 = 0.0;
         stats->maxAbsUCornerAdjacent0305 = 0.0;
+
+        stats->outlierUThreshold0306 = 0.0;
+        stats->cellsN1_0306 = 0u;
+        stats->cellsN2_0306 = 0u;
+        stats->cellsN3_0306 = 0u;
+        stats->cellsN4To6_0306 = 0u;
+        stats->cellsN7ToNmin_0306 = 0u;
+        stats->cellsNgeNmin_0306 = 0u;
+        stats->highUN1_0306 = 0u;
+        stats->highUN2_0306 = 0u;
+        stats->highUN3_0306 = 0u;
+        stats->highUN4To6_0306 = 0u;
+        stats->highUN7ToNmin_0306 = 0u;
+        stats->highUNgeNmin_0306 = 0u;
+        stats->maxAbsUN1_0306 = 0.0;
+        stats->maxAbsUN2_0306 = 0.0;
+        stats->maxAbsUN3_0306 = 0.0;
+        stats->maxAbsUN4To6_0306 = 0.0;
+        stats->maxAbsUN7ToNmin_0306 = 0.0;
+        stats->maxAbsUNgeNmin_0306 = 0.0;
+        stats->maxKBTBulk0306 = 0.0;
+        stats->maxKBTWallAdjacent0306 = 0.0;
+        stats->maxKBTSolidAdjacent0306 = 0.0;
+        stats->maxKBTOpenAdjacent0306 = 0.0;
+        stats->maxKBTCornerAdjacent0306 = 0.0;
+        stats->worstCellI0306 = -1;
+        stats->worstCellJ0306 = -1;
+        stats->worstCellN0306 = 0;
+        stats->worstCellMass0306 = 0.0;
+        stats->worstCellUx0306 = 0.0;
+        stats->worstCellUy0306 = 0.0;
+        stats->worstCellAbsU0306 = 0.0;
+        stats->worstCellKrel0306 = 0.0;
+        stats->worstCellKBT0306 = 0.0;
+        stats->worstCellBulk0306 = 0;
+        stats->worstCellWallAdjacent0306 = 0;
+        stats->worstCellSolidAdjacent0306 = 0;
+        stats->worstCellOpenAdjacent0306 = 0;
+        stats->worstCellCornerAdjacent0306 = 0;
     }
 }
 
@@ -330,7 +415,8 @@ __global__ void deposit_adaptive_flag_moments_kernel_0304(
     unsigned int* __restrict__ count,
     double* __restrict__ mass,
     double* __restrict__ px,
-    double* __restrict__ py) {
+    double* __restrict__ py,
+    double* __restrict__ sumMv2) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= nParticles) return;
     if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
@@ -340,6 +426,7 @@ __global__ void deposit_adaptive_flag_moments_kernel_0304(
     atomic_add_double_compat_0304(&mass[c], m);
     atomic_add_double_compat_0304(&px[c], m * vx[i]);
     atomic_add_double_compat_0304(&py[c], m * vy[i]);
+    atomic_add_double_compat_0304(&sumMv2[c], m * (vx[i] * vx[i] + vy[i] * vy[i]));
 }
 
 
@@ -448,6 +535,107 @@ __device__ double atomic_max_double_compat_0305(double* address, double value) {
     return __longlong_as_double(static_cast<long long>(old));
 }
 
+
+__device__ void update_population_bin_counts_0306(DeviceFlagStats0304* stats,
+                                                  unsigned int n,
+                                                  int triggerNMin,
+                                                  double absU,
+                                                  double threshold) {
+    double* maxPtr = nullptr;
+    unsigned int* countPtr = nullptr;
+    unsigned int* highPtr = nullptr;
+    if (n == 1u) {
+        countPtr = &stats->cellsN1_0306;
+        highPtr = &stats->highUN1_0306;
+        maxPtr = &stats->maxAbsUN1_0306;
+    } else if (n == 2u) {
+        countPtr = &stats->cellsN2_0306;
+        highPtr = &stats->highUN2_0306;
+        maxPtr = &stats->maxAbsUN2_0306;
+    } else if (n == 3u) {
+        countPtr = &stats->cellsN3_0306;
+        highPtr = &stats->highUN3_0306;
+        maxPtr = &stats->maxAbsUN3_0306;
+    } else if (n <= 6u) {
+        countPtr = &stats->cellsN4To6_0306;
+        highPtr = &stats->highUN4To6_0306;
+        maxPtr = &stats->maxAbsUN4To6_0306;
+    } else if (triggerNMin > 6 && static_cast<int>(n) <= triggerNMin) {
+        countPtr = &stats->cellsN7ToNmin_0306;
+        highPtr = &stats->highUN7ToNmin_0306;
+        maxPtr = &stats->maxAbsUN7ToNmin_0306;
+    } else {
+        countPtr = &stats->cellsNgeNmin_0306;
+        highPtr = &stats->highUNgeNmin_0306;
+        maxPtr = &stats->maxAbsUNgeNmin_0306;
+    }
+    atomicAdd(countPtr, 1u);
+    atomic_max_double_compat_0305(maxPtr, absU);
+    if (threshold > 0.0 && absU >= threshold) {
+        atomicAdd(highPtr, 1u);
+    }
+}
+
+__device__ void update_kbt_geometry_max_0306(DeviceFlagStats0304* stats,
+                                             double kbt,
+                                             bool bulk,
+                                             bool wallAdj,
+                                             bool solidAdj,
+                                             bool openAdj,
+                                             bool cornerAdj) {
+    if (bulk) atomic_max_double_compat_0305(&stats->maxKBTBulk0306, kbt);
+    if (wallAdj) atomic_max_double_compat_0305(&stats->maxKBTWallAdjacent0306, kbt);
+    if (solidAdj) atomic_max_double_compat_0305(&stats->maxKBTSolidAdjacent0306, kbt);
+    if (openAdj) atomic_max_double_compat_0305(&stats->maxKBTOpenAdjacent0306, kbt);
+    if (cornerAdj) atomic_max_double_compat_0305(&stats->maxKBTCornerAdjacent0306, kbt);
+}
+
+__device__ bool atomic_update_worst_absu_0306(double* address, double value) {
+    if (value <= 0.0) return false;
+    unsigned long long int* addressAsUll = reinterpret_cast<unsigned long long int*>(address);
+    unsigned long long int old = *addressAsUll;
+    unsigned long long int assumed;
+    do {
+        assumed = old;
+        const double oldVal = __longlong_as_double(static_cast<long long>(assumed));
+        if (oldVal >= value) return false;
+        old = atomicCAS(addressAsUll, assumed, static_cast<unsigned long long int>(__double_as_longlong(value)));
+    } while (assumed != old);
+    return true;
+}
+
+__device__ void maybe_update_worst_cell_0306(DeviceFlagStats0304* stats,
+                                             int ix,
+                                             int iy,
+                                             unsigned int n,
+                                             double m,
+                                             double ux,
+                                             double uy,
+                                             double absU,
+                                             double krel,
+                                             double kbt,
+                                             bool bulk,
+                                             bool wallAdj,
+                                             bool solidAdj,
+                                             bool openAdj,
+                                             bool cornerAdj) {
+    if (atomic_update_worst_absu_0306(&stats->worstCellAbsU0306, absU)) {
+        stats->worstCellI0306 = ix;
+        stats->worstCellJ0306 = iy;
+        stats->worstCellN0306 = static_cast<int>(n);
+        stats->worstCellMass0306 = m;
+        stats->worstCellUx0306 = ux;
+        stats->worstCellUy0306 = uy;
+        stats->worstCellKrel0306 = krel;
+        stats->worstCellKBT0306 = kbt;
+        stats->worstCellBulk0306 = bulk ? 1 : 0;
+        stats->worstCellWallAdjacent0306 = wallAdj ? 1 : 0;
+        stats->worstCellSolidAdjacent0306 = solidAdj ? 1 : 0;
+        stats->worstCellOpenAdjacent0306 = openAdj ? 1 : 0;
+        stats->worstCellCornerAdjacent0306 = cornerAdj ? 1 : 0;
+    }
+}
+
 __device__ void update_geometry_class_counts_0305(DeviceFlagStats0304* stats,
                                                   bool isEmpty,
                                                   bool isLowN,
@@ -499,9 +687,11 @@ __global__ void classify_adaptive_flag_cells_kernel_0304(
     const double* __restrict__ mass,
     const double* __restrict__ px,
     const double* __restrict__ py,
+    const double* __restrict__ sumMv2,
     DeviceFlagConfig0304 cfg,
     DeviceFlagStats0304* stats) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c == 0) stats->outlierUThreshold0306 = cfg.outlierUThreshold0306;
     if (c >= cfg.numCells) return;
     const int ix = c % cfg.nx;
     const int iy = c / cfg.nx;
@@ -535,16 +725,29 @@ __global__ void classify_adaptive_flag_cells_kernel_0304(
     atomic_add_double_compat_0304(&stats->totalPy, py[c]);
 
     const double m = mass[c];
+    double ux = 0.0;
+    double uy = 0.0;
     double absU = 0.0;
+    double krel = 0.0;
+    double kbt = 0.0;
     if (m > 0.0) {
-        const double ux = px[c] / m;
-        const double uy = py[c] / m;
+        ux = px[c] / m;
+        uy = py[c] / m;
         absU = sqrt(ux * ux + uy * uy);
+        const double translational = (px[c] * px[c] + py[c] * py[c]) / m;
+        krel = 0.5 * fmax(0.0, sumMv2[c] - translational);
+        // In 2D, K_rel ~= (N-1) kBT for equal-mass samples after removing
+        // the cell mean.  This is a diagnostic estimator, not a thermostat.
+        if (n > 1u) kbt = krel / static_cast<double>(n - 1u);
     }
 
     const bool isLowN = (cfg.triggerNMin > 0 && static_cast<int>(n) <= cfg.triggerNMin);
     update_geometry_class_counts_0305(stats, false, isLowN, true, absU,
                                       bulk, wallAdj, solidAdj, openAdj, cornerAdj, cfg);
+    update_population_bin_counts_0306(stats, n, cfg.triggerNMin, absU, cfg.outlierUThreshold0306);
+    update_kbt_geometry_max_0306(stats, kbt, bulk, wallAdj, solidAdj, openAdj, cornerAdj);
+    maybe_update_worst_cell_0306(stats, ix, iy, n, m, ux, uy, absU, krel, kbt,
+                                 bulk, wallAdj, solidAdj, openAdj, cornerAdj);
 
     if (isLowN) {
         atomicAdd(&stats->lowNCells, 1u);
@@ -599,6 +802,10 @@ DeviceFlagConfig0304 make_config_0304(const SimulationParams& params,
     cfg.triggerEmpty = env_truthy_0304("MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_EMPTY") ? 1 : 0;
     cfg.highUThreshold = std::max(0.0, std::atof(std::getenv("MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U") ?
                                                  std::getenv("MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U") : "1.0"));
+    cfg.outlierUThreshold0306 = std::max(0.0, std::atof(std::getenv("MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD") ?
+                                                        std::getenv("MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD") :
+                                                        (std::getenv("MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U") ?
+                                                         std::getenv("MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U") : "1.0")));
 
     cfg.bcLeftOpen = boundary_open_mode_0305(params.bcLeft) ? 1 : 0;
     cfg.bcRightOpen = boundary_open_mode_0305(params.bcRight) ? 1 : 0;
@@ -657,6 +864,12 @@ void write_csv_row_0304(const SimulationParams& params,
                "wetBulkCells0305,wetWallAdjacentCells0305,wetSolidAdjacentCells0305,wetOpenAdjacentCells0305,wetCornerAdjacentCells0305,"
                "highUThreshold0305,highUBulkCells0305,highUWallAdjacentCells0305,highUSolidAdjacentCells0305,highUOpenAdjacentCells0305,highUCornerAdjacentCells0305,"
                "maxAbsUBulk0305,maxAbsUWallAdjacent0305,maxAbsUSolidAdjacent0305,maxAbsUOpenAdjacent0305,maxAbsUCornerAdjacent0305,"
+               "outlierUThreshold0306,cellsN1_0306,cellsN2_0306,cellsN3_0306,cellsN4To6_0306,cellsN7ToNmin_0306,cellsNgeNmin_0306,"
+               "highUN1_0306,highUN2_0306,highUN3_0306,highUN4To6_0306,highUN7ToNmin_0306,highUNgeNmin_0306,"
+               "maxAbsUN1_0306,maxAbsUN2_0306,maxAbsUN3_0306,maxAbsUN4To6_0306,maxAbsUN7ToNmin_0306,maxAbsUNgeNmin_0306,"
+               "maxKBTBulk0306,maxKBTWallAdjacent0306,maxKBTSolidAdjacent0306,maxKBTOpenAdjacent0306,maxKBTCornerAdjacent0306,"
+               "worstCellI0306,worstCellJ0306,worstCellN0306,worstCellMass0306,worstCellUx0306,worstCellUy0306,worstCellAbsU0306,worstCellKrel0306,worstCellKBT0306,"
+               "worstCellBulk0306,worstCellWallAdjacent0306,worstCellSolidAdjacent0306,worstCellOpenAdjacent0306,worstCellCornerAdjacent0306,"
                "uploadSeconds,depositKernelSeconds,flagKernelSeconds,downloadSeconds,totalSeconds\n";
     }
     out << std::setprecision(17)
@@ -690,6 +903,20 @@ void write_csv_row_0304(const SimulationParams& params,
         << d.maxAbsUBulk0305 << ',' << d.maxAbsUWallAdjacent0305 << ','
         << d.maxAbsUSolidAdjacent0305 << ',' << d.maxAbsUOpenAdjacent0305 << ','
         << d.maxAbsUCornerAdjacent0305 << ','
+        << d.outlierUThreshold0306 << ','
+        << d.cellsN1_0306 << ',' << d.cellsN2_0306 << ',' << d.cellsN3_0306 << ','
+        << d.cellsN4To6_0306 << ',' << d.cellsN7ToNmin_0306 << ',' << d.cellsNgeNmin_0306 << ','
+        << d.highUN1_0306 << ',' << d.highUN2_0306 << ',' << d.highUN3_0306 << ','
+        << d.highUN4To6_0306 << ',' << d.highUN7ToNmin_0306 << ',' << d.highUNgeNmin_0306 << ','
+        << d.maxAbsUN1_0306 << ',' << d.maxAbsUN2_0306 << ',' << d.maxAbsUN3_0306 << ','
+        << d.maxAbsUN4To6_0306 << ',' << d.maxAbsUN7ToNmin_0306 << ',' << d.maxAbsUNgeNmin_0306 << ','
+        << d.maxKBTBulk0306 << ',' << d.maxKBTWallAdjacent0306 << ',' << d.maxKBTSolidAdjacent0306 << ','
+        << d.maxKBTOpenAdjacent0306 << ',' << d.maxKBTCornerAdjacent0306 << ','
+        << d.worstCellI0306 << ',' << d.worstCellJ0306 << ',' << d.worstCellN0306 << ','
+        << d.worstCellMass0306 << ',' << d.worstCellUx0306 << ',' << d.worstCellUy0306 << ','
+        << d.worstCellAbsU0306 << ',' << d.worstCellKrel0306 << ',' << d.worstCellKBT0306 << ','
+        << d.worstCellBulk0306 << ',' << d.worstCellWallAdjacent0306 << ',' << d.worstCellSolidAdjacent0306 << ','
+        << d.worstCellOpenAdjacent0306 << ',' << d.worstCellCornerAdjacent0306 << ','
         << d.uploadSeconds << ',' << d.depositKernelSeconds << ',' << d.flagKernelSeconds << ','
         << d.downloadSeconds << ',' << d.totalSeconds << '\n';
 }
@@ -764,11 +991,12 @@ CudaResamplingAdaptiveFlag0304Diagnostics try_run_cuda_resampling_adaptive_flag_
     const Clock::time_point tk0 = Clock::now();
     reset_adaptive_flag_deposit_kernel_0304<<<cellGrid, block>>>(
         grid.numCells, g_buffers0304.d_count, g_buffers0304.d_mass,
-        g_buffers0304.d_px, g_buffers0304.d_py, g_buffers0304.d_stats);
+        g_buffers0304.d_px, g_buffers0304.d_py, g_buffers0304.d_sumMv2, g_buffers0304.d_stats);
     cuda_check_0304(cudaGetLastError(), "launch reset_adaptive_flag_deposit_kernel_0304");
     deposit_adaptive_flag_moments_kernel_0304<<<particleGrid, block>>>(
         static_cast<int>(hostMirror.Np), pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role, cfg,
-        g_buffers0304.d_count, g_buffers0304.d_mass, g_buffers0304.d_px, g_buffers0304.d_py);
+        g_buffers0304.d_count, g_buffers0304.d_mass, g_buffers0304.d_px, g_buffers0304.d_py,
+        g_buffers0304.d_sumMv2);
     cuda_check_0304(cudaGetLastError(), "launch deposit_adaptive_flag_moments_kernel_0304");
     cuda_check_0304(cudaDeviceSynchronize(), "synchronize adaptive flag deposit");
     const Clock::time_point tk1 = Clock::now();
@@ -777,7 +1005,7 @@ CudaResamplingAdaptiveFlag0304Diagnostics try_run_cuda_resampling_adaptive_flag_
     const Clock::time_point tf0 = Clock::now();
     classify_adaptive_flag_cells_kernel_0304<<<cellGrid, block>>>(
         g_buffers0304.d_count, g_buffers0304.d_mass, g_buffers0304.d_px, g_buffers0304.d_py,
-        cfg, g_buffers0304.d_stats);
+        g_buffers0304.d_sumMv2, cfg, g_buffers0304.d_stats);
     cuda_check_0304(cudaGetLastError(), "launch classify_adaptive_flag_cells_kernel_0304");
     cuda_check_0304(cudaDeviceSynchronize(), "synchronize adaptive flag classify");
     const Clock::time_point tf1 = Clock::now();
@@ -829,6 +1057,44 @@ CudaResamplingAdaptiveFlag0304Diagnostics try_run_cuda_resampling_adaptive_flag_
     d.maxAbsUSolidAdjacent0305 = hs.maxAbsUSolidAdjacent0305;
     d.maxAbsUOpenAdjacent0305 = hs.maxAbsUOpenAdjacent0305;
     d.maxAbsUCornerAdjacent0305 = hs.maxAbsUCornerAdjacent0305;
+    d.outlierUThreshold0306 = hs.outlierUThreshold0306;
+    d.cellsN1_0306 = hs.cellsN1_0306;
+    d.cellsN2_0306 = hs.cellsN2_0306;
+    d.cellsN3_0306 = hs.cellsN3_0306;
+    d.cellsN4To6_0306 = hs.cellsN4To6_0306;
+    d.cellsN7ToNmin_0306 = hs.cellsN7ToNmin_0306;
+    d.cellsNgeNmin_0306 = hs.cellsNgeNmin_0306;
+    d.highUN1_0306 = hs.highUN1_0306;
+    d.highUN2_0306 = hs.highUN2_0306;
+    d.highUN3_0306 = hs.highUN3_0306;
+    d.highUN4To6_0306 = hs.highUN4To6_0306;
+    d.highUN7ToNmin_0306 = hs.highUN7ToNmin_0306;
+    d.highUNgeNmin_0306 = hs.highUNgeNmin_0306;
+    d.maxAbsUN1_0306 = hs.maxAbsUN1_0306;
+    d.maxAbsUN2_0306 = hs.maxAbsUN2_0306;
+    d.maxAbsUN3_0306 = hs.maxAbsUN3_0306;
+    d.maxAbsUN4To6_0306 = hs.maxAbsUN4To6_0306;
+    d.maxAbsUN7ToNmin_0306 = hs.maxAbsUN7ToNmin_0306;
+    d.maxAbsUNgeNmin_0306 = hs.maxAbsUNgeNmin_0306;
+    d.maxKBTBulk0306 = hs.maxKBTBulk0306;
+    d.maxKBTWallAdjacent0306 = hs.maxKBTWallAdjacent0306;
+    d.maxKBTSolidAdjacent0306 = hs.maxKBTSolidAdjacent0306;
+    d.maxKBTOpenAdjacent0306 = hs.maxKBTOpenAdjacent0306;
+    d.maxKBTCornerAdjacent0306 = hs.maxKBTCornerAdjacent0306;
+    d.worstCellI0306 = hs.worstCellI0306;
+    d.worstCellJ0306 = hs.worstCellJ0306;
+    d.worstCellN0306 = hs.worstCellN0306;
+    d.worstCellMass0306 = hs.worstCellMass0306;
+    d.worstCellUx0306 = hs.worstCellUx0306;
+    d.worstCellUy0306 = hs.worstCellUy0306;
+    d.worstCellAbsU0306 = hs.worstCellAbsU0306;
+    d.worstCellKrel0306 = hs.worstCellKrel0306;
+    d.worstCellKBT0306 = hs.worstCellKBT0306;
+    d.worstCellBulk0306 = hs.worstCellBulk0306;
+    d.worstCellWallAdjacent0306 = hs.worstCellWallAdjacent0306;
+    d.worstCellSolidAdjacent0306 = hs.worstCellSolidAdjacent0306;
+    d.worstCellOpenAdjacent0306 = hs.worstCellOpenAdjacent0306;
+    d.worstCellCornerAdjacent0306 = hs.worstCellCornerAdjacent0306;
     d.handled = true;
     d.totalSeconds = seconds_between(t0, Clock::now());
     write_csv_row_0304(params, d);

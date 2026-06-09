@@ -71,6 +71,48 @@ struct CudaResamplingAdaptiveFlag0304Diagnostics {
     double maxAbsUOpenAdjacent0305 = 0.0;
     double maxAbsUCornerAdjacent0305 = 0.0;
 
+    // 0306: velocity-outlier diagnostics by local population bin and geometry.
+    // These diagnostics target cells where the support may be non-empty but
+    // statistically non-representative, producing very large cell velocities.
+    double outlierUThreshold0306 = 0.0;
+    std::uint64_t cellsN1_0306 = 0u;
+    std::uint64_t cellsN2_0306 = 0u;
+    std::uint64_t cellsN3_0306 = 0u;
+    std::uint64_t cellsN4To6_0306 = 0u;
+    std::uint64_t cellsN7ToNmin_0306 = 0u;
+    std::uint64_t cellsNgeNmin_0306 = 0u;
+    std::uint64_t highUN1_0306 = 0u;
+    std::uint64_t highUN2_0306 = 0u;
+    std::uint64_t highUN3_0306 = 0u;
+    std::uint64_t highUN4To6_0306 = 0u;
+    std::uint64_t highUN7ToNmin_0306 = 0u;
+    std::uint64_t highUNgeNmin_0306 = 0u;
+    double maxAbsUN1_0306 = 0.0;
+    double maxAbsUN2_0306 = 0.0;
+    double maxAbsUN3_0306 = 0.0;
+    double maxAbsUN4To6_0306 = 0.0;
+    double maxAbsUN7ToNmin_0306 = 0.0;
+    double maxAbsUNgeNmin_0306 = 0.0;
+    double maxKBTBulk0306 = 0.0;
+    double maxKBTWallAdjacent0306 = 0.0;
+    double maxKBTSolidAdjacent0306 = 0.0;
+    double maxKBTOpenAdjacent0306 = 0.0;
+    double maxKBTCornerAdjacent0306 = 0.0;
+    int worstCellI0306 = -1;
+    int worstCellJ0306 = -1;
+    int worstCellN0306 = 0;
+    double worstCellMass0306 = 0.0;
+    double worstCellUx0306 = 0.0;
+    double worstCellUy0306 = 0.0;
+    double worstCellAbsU0306 = 0.0;
+    double worstCellKrel0306 = 0.0;
+    double worstCellKBT0306 = 0.0;
+    int worstCellBulk0306 = 0;
+    int worstCellWallAdjacent0306 = 0;
+    int worstCellSolidAdjacent0306 = 0;
+    int worstCellOpenAdjacent0306 = 0;
+    int worstCellCornerAdjacent0306 = 0;
+
     int triggerNMin = 0;
     int triggerEmpty = 1;
     int minNWet = 0;

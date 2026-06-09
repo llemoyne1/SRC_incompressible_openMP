@@ -11,9 +11,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.s
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_resampling_demo_common_0303.sh"
 
 CASE_NAME="taylor_green_hole"
-Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-64}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-1200}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
-SEED="${SEED:-1628605}"; SUMMARY_EVERY="${SUMMARY_EVERY:-50}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-200}"
+Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-10}"; NY="${NY:-10}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-100}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
+SEED="${SEED:-1628605}"; SUMMARY_EVERY="${SUMMARY_EVERY:-1}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1}"
 TG_U0="${TG_U0:-0.04}"; TG_FORCING_AMPLITUDE="${TG_FORCING_AMPLITUDE:-0.02}"
 HOLE_XMIN="${HOLE_XMIN:-0.45}"; HOLE_XMAX="${HOLE_XMAX:-0.55}"
 HOLE_YMIN="${HOLE_YMIN:-0.45}"; HOLE_YMAX="${HOLE_YMAX:-0.55}"
