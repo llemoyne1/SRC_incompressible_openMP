@@ -181,7 +181,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_moments(
 #else
     validate_particle_state(state, "cuda_apply_cell_relative_rescale_thermostat_from_moments");
     if (numCells <= 0) throw std::runtime_error("cuda thermostat: invalid numCells");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     if (cellId.size() != n) throw std::runtime_error("cuda thermostat: cellId size mismatch");
     if (cellCount.size() != static_cast<std::size_t>(numCells) ||
         cellUx.size() != static_cast<std::size_t>(numCells) ||
@@ -196,7 +196,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_moments(
     const int cellBlocks = (numCells + threads - 1) / threads;
 
     CudaCellThermostatDiagnostics localDiag{};
-    localDiag.particlesVisited = state.Np;
+    localDiag.particlesVisited = static_cast<std::uint64_t>(n);
     localDiag.numCells = numCells;
 
     const auto tTotal0 = Clock::now();
@@ -243,7 +243,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_moments(
     localDiag.uploadSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    kinetic_relative_kernel<<<particleBlocks, threads>>>(state.Np, dCellId, dRole, dMass, dVx, dVy,
+    kinetic_relative_kernel<<<particleBlocks, threads>>>(static_cast<std::uint64_t>(n), dCellId, dRole, dMass, dVx, dVy,
                                                          dCellUx, dCellUy, numCells,
                                                          kParticleRoleFluid, dCellKinetic, dFluidCounter);
     MPCD_CUDA_CHECK(cudaGetLastError());
@@ -258,7 +258,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_moments(
     localDiag.scaleKernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    apply_rescale_kernel<<<particleBlocks, threads>>>(state.Np, dCellId, dRole, dCellUx, dCellUy,
+    apply_rescale_kernel<<<particleBlocks, threads>>>(static_cast<std::uint64_t>(n), dCellId, dRole, dCellUx, dCellUy,
                                                       dCellScale, numCells, kParticleRoleFluid,
                                                       dVx, dVy);
     MPCD_CUDA_CHECK(cudaGetLastError());
@@ -321,9 +321,9 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_shared_st
 #else
     validate_particle_state(downloadTarget, "cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258");
     if (numCells <= 0) throw std::runtime_error("cuda thermostat 0258: invalid numCells");
-    const std::size_t n = static_cast<std::size_t>(downloadTarget.Np);
+    const std::size_t n = active_fluid_count_size(downloadTarget);
     if (gpuState.size() != downloadTarget.Np) throw std::runtime_error("cuda thermostat 0258: particle-state size mismatch");
-    if (cellWorkspace.particle_capacity() < downloadTarget.Np || cellWorkspace.cell_capacity() < numCells) {
+    if (cellWorkspace.particle_capacity() < active_fluid_count(downloadTarget) || cellWorkspace.cell_capacity() < numCells) {
         throw std::runtime_error("cuda thermostat 0258: cell workspace capacity too small");
     }
     if (cellId.size() != n) throw std::runtime_error("cuda thermostat 0258: cellId size mismatch");
@@ -341,7 +341,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_shared_st
     const int cellBlocks = (numCells + threads - 1) / threads;
 
     CudaCellThermostatDiagnostics localDiag{};
-    localDiag.particlesVisited = downloadTarget.Np;
+    localDiag.particlesVisited = static_cast<std::uint64_t>(n);
     localDiag.numCells = numCells;
 
     const auto tTotal0 = Clock::now();
@@ -369,7 +369,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_shared_st
     localDiag.uploadSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    kinetic_relative_kernel<<<particleBlocks, threads>>>(downloadTarget.Np, cv.cellId,
+    kinetic_relative_kernel<<<particleBlocks, threads>>>(static_cast<std::uint64_t>(n), cv.cellId,
                                                          reinterpret_cast<const std::uint8_t*>(pv.role),
                                                          pv.mass, pv.vx, pv.vy,
                                                          cv.cellUx, cv.cellUy, numCells,
@@ -386,7 +386,7 @@ ThermostatDiagnostics cuda_apply_cell_relative_rescale_thermostat_from_shared_st
     localDiag.scaleKernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    apply_rescale_kernel<<<particleBlocks, threads>>>(downloadTarget.Np, cv.cellId,
+    apply_rescale_kernel<<<particleBlocks, threads>>>(static_cast<std::uint64_t>(n), cv.cellId,
                                                       reinterpret_cast<const std::uint8_t*>(pv.role),
                                                       cv.cellUx, cv.cellUy, cv.cellScale,
                                                       numCells, kParticleRoleFluid,

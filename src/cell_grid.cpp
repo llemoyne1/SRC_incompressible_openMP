@@ -96,7 +96,7 @@ std::vector<std::uint32_t> compute_cell_counts(const ParticleState& state,
                                                const GridShift& shift,
                                                const SimulationParams& params) {
     validate_particle_state(state, "compute_cell_counts");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nc = grid.numCells;
     if (nc <= 0) {
         throw std::runtime_error("compute_cell_counts: invalid number of cells");

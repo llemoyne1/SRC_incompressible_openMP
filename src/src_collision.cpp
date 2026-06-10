@@ -395,7 +395,7 @@ bool try_cuda_cell_moments_active(const ParticleState& state,
         cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
     }
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nc = grid.numCells;
     if (cuda.cellId.size() != n || cuda.cellCount.size() != static_cast<std::size_t>(nc) ||
         cuda.cellMass.size() != static_cast<std::size_t>(nc) || cuda.cellPx.size() != static_cast<std::size_t>(nc) ||
@@ -444,7 +444,7 @@ void maybe_validate_cuda_cell_moments_shadow(const ParticleState& state,
     opts.threadsPerBlock = std::max(32, env_int_value("MPCD_CUDA_CELL_MOMENTS_THREADS_PER_BLOCK", 256));
     cuda_deposit_cell_moments_atomic(state, grid, shift, params, cuda, &diag, opts);
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nc = grid.numCells;
     if (cuda.cellId.size() != n || cuda.cellCount.size() != static_cast<std::size_t>(nc)) {
         throw std::runtime_error("CUDA cell moments shadow: incompatible CUDA output sizes");
@@ -830,8 +830,8 @@ void populate_cuda_persistent_wall_virtual_diagnostics_0253(CollisionDiagnostics
     if (is_x_periodic(params) && is_y_periodic(params)) return;
     const int nc = grid.numCells;
     if (nc <= 0) return;
-    const ParticleRoleCounts roleCounts = count_particle_roles(state);
-    const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    const double inferredGamma = static_cast<double>(nActiveFluid) / static_cast<double>(nc);
     const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
     const double wallKBT = params.wallKBT > 0.0 ? params.wallKBT :
                            (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
@@ -1011,8 +1011,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         // the old diagnostic scan is restored even when wallVpGamma is explicit.
         // When Q6/resampling are re-enabled later, leaving wallVpGamma<=0 still
         // preserves the old inference behavior.
-        const ParticleRoleCounts roleCountsForCudaWall = count_particle_roles(state);
-        inferredGammaForCudaWall = static_cast<double>(roleCountsForCudaWall.fluid) / static_cast<double>(std::max(1, grid.numCells));
+        inferredGammaForCudaWall = static_cast<double>(active_fluid_count(state)) / static_cast<double>(std::max(1, grid.numCells));
     }
     cfg.wallAccommodation = params.wallAccommodation;
     cfg.wallGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGammaForCudaWall;
@@ -1590,15 +1589,15 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
                                         CollisionWorkspace& ws) {
     validate_particle_state(state, "src_collision_step");
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
-    const ParticleRoleCounts roleCounts = count_particle_roles(state);
+    const std::size_t n = active_fluid_count_size(state);
+    const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const int nc = grid.numCells;
     if (nc <= 0) {
         throw std::runtime_error("src_collision_step: invalid number of cells");
     }
 
     const int nt = std::max(1, thread_count());
-    resize_collision_workspace(ws, state.Np, nc, nt);
+    resize_collision_workspace(ws, nActiveFluid, nc, nt);
 
     CollisionDiagnostics diag{};
     diag.shift = sample_grid_shift(params, step);
@@ -1657,7 +1656,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     }
 #endif
 
-    const double inferredGamma = static_cast<double>(roleCounts.fluid) / static_cast<double>(nc);
+    const double inferredGamma = static_cast<double>(nActiveFluid) / static_cast<double>(nc);
     const double wallVpGamma = params.wallVpGamma > 0.0 ? params.wallVpGamma : inferredGamma;
     const double wallKBT = params.wallKBT > 0.0 ? params.wallKBT :
                            (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);

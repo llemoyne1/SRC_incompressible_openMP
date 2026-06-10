@@ -71,7 +71,9 @@ std::uint64_t cuda_particle_metadata_signature(const ParticleState& state) {
     constexpr std::uint64_t offset = 1469598103934665603ULL;
     std::uint64_t h = offset;
     const std::uint64_t n = state.Np;
+    const std::uint64_t nActive = active_fluid_count(state);
     h = fnv1a_bytes(h, &n, sizeof(n));
+    h = fnv1a_bytes(h, &nActive, sizeof(nActive));
     const std::size_t nn = static_cast<std::size_t>(n);
     if (n > 0u) {
         h = fnv1a_bytes(h, state.mass.data(), nn * sizeof(double));
@@ -115,6 +117,7 @@ struct CudaParticleState::Impl {
     unsigned char* role = nullptr;
     std::uint64_t n = 0u;
     std::uint64_t capacity = 0u;
+    std::uint64_t nActiveFluid = 0u;
     std::uint64_t allocatedBytes = 0u;
     std::uint64_t metadataSignature = 0u;
     std::uint64_t metadataParticles = 0u;
@@ -130,6 +133,7 @@ struct CudaParticleState::Impl {
         cuda_free_ptr(role);
         n = 0u;
         capacity = 0u;
+        nActiveFluid = 0u;
         allocatedBytes = 0u;
         metadataSignature = 0u;
         metadataParticles = 0u;
@@ -180,6 +184,7 @@ void CudaParticleState::release() {
     if (impl_ != nullptr) {
         impl_->n = 0u;
         impl_->capacity = 0u;
+        impl_->nActiveFluid = 0u;
         impl_->allocatedBytes = 0u;
     }
 #endif
@@ -198,6 +203,7 @@ void CudaParticleState::ensure_capacity(std::uint64_t n, CudaParticleStateDiagno
     }
     if (n <= impl_->capacity && impl_->x != nullptr) {
         impl_->n = n;
+        if (impl_->nActiveFluid > n) impl_->nActiveFluid = n;
         if (diag != nullptr) {
             diag->reusedAllocation = 1;
             diag->capacity = impl_->capacity;
@@ -230,6 +236,7 @@ void CudaParticleState::ensure_capacity(std::uint64_t n, CudaParticleStateDiagno
     MPCD_CUDA_CHECK(cudaMalloc(&impl_->role, bytesR));
     impl_->n = n;
     impl_->capacity = n;
+    impl_->nActiveFluid = n;
     impl_->allocatedBytes = 5u * bytesD + bytesU + bytesR;
     impl_->metadataSignature = 0u;
     impl_->metadataParticles = 0u;
@@ -251,6 +258,7 @@ void CudaParticleState::upload_positions(const ParticleState& state, CudaParticl
 #else
     validate_particle_state(state, "CudaParticleState::upload_positions");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesD = n * sizeof(double);
     const auto t0 = Clock::now();
@@ -276,6 +284,7 @@ void CudaParticleState::upload_velocities(const ParticleState& state, CudaPartic
 #else
     validate_particle_state(state, "CudaParticleState::upload_velocities");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesD = n * sizeof(double);
     const auto t0 = Clock::now();
@@ -301,6 +310,7 @@ void CudaParticleState::upload_roles(const ParticleState& state, CudaParticleSta
 #else
     validate_particle_state(state, "CudaParticleState::upload_roles");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesR = n * sizeof(unsigned char);
     const unsigned char* roleHost = role_upload_ptr_or_null(state);
@@ -333,6 +343,7 @@ void CudaParticleState::upload_masses_and_roles(const ParticleState& state, Cuda
 #else
     validate_particle_state(state, "CudaParticleState::upload_masses_and_roles");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
@@ -371,6 +382,7 @@ void CudaParticleState::upload_all(const ParticleState& state, CudaParticleState
 #else
     validate_particle_state(state, "CudaParticleState::upload_all");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
@@ -415,6 +427,7 @@ void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleSta
 #else
     validate_particle_state(state, "CudaParticleState::upload_kinematics_with_cached_metadata");
     ensure_capacity(state.Np, diag);
+    impl_->nActiveFluid = active_fluid_count(state);
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
@@ -489,6 +502,7 @@ void CudaParticleState::download_velocities(ParticleState& state, CudaParticleSt
         MPCD_CUDA_CHECK(cudaMemcpy(state.vx.data(), impl_->vx, bytesD, cudaMemcpyDeviceToHost));
         MPCD_CUDA_CHECK(cudaMemcpy(state.vy.data(), impl_->vy, bytesD, cudaMemcpyDeviceToHost));
     }
+    state.NactiveFluid = impl_->nActiveFluid;
     if (diag != nullptr) {
         diag->downloadCalls += 1u;
         diag->deviceToHostBytes += 2u * bytesD;
@@ -523,6 +537,7 @@ void CudaParticleState::download_all(ParticleState& state, CudaParticleStateDiag
         MPCD_CUDA_CHECK(cudaMemcpy(state.type.data(), impl_->type, bytesU, cudaMemcpyDeviceToHost));
         MPCD_CUDA_CHECK(cudaMemcpy(state.role.data(), impl_->role, bytesR, cudaMemcpyDeviceToHost));
     }
+    refresh_active_fluid_count(state);
     if (diag != nullptr) {
         diag->downloadCalls += 1u;
         diag->deviceToHostBytes += 5u * bytesD + bytesU + bytesR;
@@ -594,6 +609,7 @@ void CudaParticleState::download_role_filtered(ParticleState& state,
     ParticleState out{};
     out.dim = 2u;
     out.Np = static_cast<std::uint64_t>(selected);
+    out.NactiveFluid = (keepRole == kParticleRoleFluid) ? out.Np : 0u;
     out.x.resize(selected);
     out.y.resize(selected);
     out.vx.resize(selected);
@@ -635,16 +651,21 @@ void CudaParticleState::download_role_filtered(ParticleState& state,
 
 CudaParticleDeviceView CudaParticleState::device_view() {
     if (impl_ == nullptr) return {};
-    return CudaParticleDeviceView{impl_->n, impl_->x, impl_->y, impl_->vx, impl_->vy, impl_->mass, impl_->type, impl_->role};
+    return CudaParticleDeviceView{impl_->n, impl_->capacity, impl_->nActiveFluid,
+                                  impl_->x, impl_->y, impl_->vx, impl_->vy,
+                                  impl_->mass, impl_->type, impl_->role};
 }
 
 CudaParticleDeviceView CudaParticleState::device_view() const {
     if (impl_ == nullptr) return {};
-    return CudaParticleDeviceView{impl_->n, impl_->x, impl_->y, impl_->vx, impl_->vy, impl_->mass, impl_->type, impl_->role};
+    return CudaParticleDeviceView{impl_->n, impl_->capacity, impl_->nActiveFluid,
+                                  impl_->x, impl_->y, impl_->vx, impl_->vy,
+                                  impl_->mass, impl_->type, impl_->role};
 }
 
 std::uint64_t CudaParticleState::size() const { return impl_ ? impl_->n : 0u; }
 std::uint64_t CudaParticleState::capacity() const { return impl_ ? impl_->capacity : 0u; }
+std::uint64_t CudaParticleState::active_fluid_size() const { return impl_ ? impl_->nActiveFluid : 0u; }
 std::uint64_t CudaParticleState::allocated_bytes() const { return impl_ ? impl_->allocatedBytes : 0u; }
 
 void cuda_particle_state_smoke_increment_fluid_velocities(CudaParticleState& gpuState,

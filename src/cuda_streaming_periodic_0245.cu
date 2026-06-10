@@ -164,8 +164,9 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     CudaPeriodicStreaming0245Diagnostics diag{};
     diag.requested = cuda_periodic_streaming_0245_requested();
     diag.supported = cuda_periodic_streaming_0245_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -184,7 +185,7 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0245("MPCD_CUDA_STREAMING_PERIODIC_0245_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_streaming_periodic_0245: grid too large for 1D launch");
@@ -193,7 +194,7 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     const bool asyncResident0271 = cuda_periodic_streaming_0271_async_resident_enabled(resident0260, downloadAll);
 
     periodic_force_stream_kernel_0245<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role,
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
         params.dt, params.Lx, params.Ly,
         params.bodyAccelerationX, params.bodyAccelerationY,
@@ -215,14 +216,7 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
 
     diag.handled = true;
     diag.applied = true;
-    if (downloadAll || !resident0260) {
-        diag.fluidParticles = 0u;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-            if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-        }
-    } else {
-        diag.fluidParticles = state.Np;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.allocationCalls = particleDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls;

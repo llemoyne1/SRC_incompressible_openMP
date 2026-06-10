@@ -266,9 +266,10 @@ CudaInletOutletSegmented0249bDiagnostics try_apply_cuda_inlet_outlet_segmented_0
     CudaInletOutletSegmented0249bDiagnostics diag{};
     diag.requested = cuda_inlet_outlet_segmented_0249b_requested();
     diag.supported = cuda_inlet_outlet_segmented_0249b_supported(params);
-    diag.particles = state.Np;
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
     diag.segments = params.openBoundarySegments.size();
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -334,14 +335,14 @@ CudaInletOutletSegmented0249bDiagnostics try_apply_cuda_inlet_outlet_segmented_0
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0249b("MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_inlet_outlet_segmented_0249b: grid too large for 1D launch");
     }
 
     inlet_outlet_segmented_mark_exits_kernel_0249b<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n,
+        nActiveFluid,
         view.x, view.y, view.role, view.role,
         kParticleRoleFluid, kParticleRoleInactive,
         domain.xMin, domain.xMax, domain.yMin, domain.yMax,
@@ -392,10 +393,7 @@ CudaInletOutletSegmented0249bDiagnostics try_apply_cuda_inlet_outlet_segmented_0
     diag.hitsTop = static_cast<std::uint64_t>(hHitsTop);
     diag.inletBackflowDeleted = static_cast<std::uint64_t>(hInletBackflowDeleted);
     diag.outletParticlesDeleted = static_cast<std::uint64_t>(hOutletParticlesDeleted);
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.allocationCalls = particleDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls;

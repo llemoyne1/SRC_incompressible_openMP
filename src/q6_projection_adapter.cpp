@@ -197,7 +197,7 @@ void deposit_cell_velocity(const ParticleState& state,
                            const FluidDomainBounds& domain,
                            Q6ProjectionWorkspace& ws,
                            Q6ProjectionDiagnostics& diag) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
 
@@ -1308,7 +1308,7 @@ void apply_cell_velocity_correction(ParticleState& state,
                                     const Q6ProjectionWorkspace& ws,
                                     Q6ProjectionDiagnostics& diag,
                                     bool momentumCorrectionEnable) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     double mass = 0.0;
     double dpx = 0.0;
     double dpy = 0.0;
@@ -1400,7 +1400,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     const int nt = std::max(1, thread_count());
     {
         MPCD_Q6_PROFILE(diag.profile, ResizeWorkspace);
-        resize_q6_workspace(workspace, state.Np, nc, nt);
+        resize_q6_workspace(workspace, active_fluid_count(state), nc, nt);
     }
 
     {

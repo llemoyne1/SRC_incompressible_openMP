@@ -289,7 +289,7 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
     }
 
     const Clock::time_point t0 = Clock::now();
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) {
         throw std::runtime_error("cuda_deposit_cell_moments_atomic: particle count exceeds int range for prototype kernel");
@@ -414,7 +414,7 @@ void cuda_deposit_cell_moments_atomic(const ParticleState& state,
     const Clock::time_point t1 = Clock::now();
     if (diagnostics != nullptr) {
         diagnostics->particlesVisited = static_cast<std::uint64_t>(n);
-        diagnostics->fluidParticles = fluidParticles;
+        diagnostics->fluidParticles = static_cast<std::uint64_t>(n);
         diagnostics->numCells = nc;
         diagnostics->uploadSeconds = seconds_between(tu0, tu1);
         diagnostics->kernelSeconds = seconds_between(tk0, tk1);
@@ -450,7 +450,7 @@ void cuda_deposit_cell_moments_atomic_from_persistent_state(
     }
 
     const Clock::time_point t0 = Clock::now();
-    const std::size_t n = static_cast<std::size_t>(hostMirror.Np);
+    const std::size_t n = active_fluid_count_size(hostMirror);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) {
         throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: particle count exceeds int range for prototype kernel");
@@ -504,10 +504,10 @@ void cuda_deposit_cell_moments_atomic_from_persistent_state(
     }
 
     CudaCellWorkspaceDiagnostics workspaceDiag{};
-    cellWorkspace.ensure_capacity(hostMirror.Np, nc, &workspaceDiag);
+    cellWorkspace.ensure_capacity(static_cast<std::uint64_t>(n), nc, &workspaceDiag);
     CudaCellWorkspaceDeviceView cell = cellWorkspace.device_view();
     CudaParticleDeviceView particles = gpuState.device_view();
-    if (cell.particleCapacity < hostMirror.Np || cell.numCells < nc ||
+    if (cell.particleCapacity < static_cast<std::uint64_t>(n) || cell.numCells < nc ||
         cell.cellId == nullptr || cell.count == nullptr || cell.cellMass == nullptr ||
         cell.cellPx == nullptr || cell.cellPy == nullptr) {
         throw std::runtime_error("cuda_deposit_cell_moments_atomic_from_persistent_state: invalid persistent cell workspace");
@@ -575,7 +575,7 @@ void cuda_deposit_cell_moments_atomic_from_persistent_state(
     const Clock::time_point t1 = Clock::now();
     if (diagnostics != nullptr) {
         diagnostics->particlesVisited = static_cast<std::uint64_t>(n);
-        diagnostics->fluidParticles = fluidParticles;
+        diagnostics->fluidParticles = static_cast<std::uint64_t>(n);
         diagnostics->numCells = nc;
         diagnostics->uploadSeconds = 0.0;
         diagnostics->kernelSeconds = seconds_between(tk0, tk1);

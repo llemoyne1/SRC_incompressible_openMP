@@ -28,12 +28,15 @@ RuntimeSummary compute_runtime_summary(const ParticleState& state,
     s.wallTime = wallTime;
     s.numThreadsUsed = numThreadsUsed > 0 ? numThreadsUsed : 1;
     s.Np = state.Np;
-    const ParticleRoleCounts roleCounts = count_particle_roles(state);
+    ParticleRoleCounts roleCounts{};
+    roleCounts.fluid = active_fluid_count(state);
+    roleCounts.inactive = state.Np >= roleCounts.fluid ? (state.Np - roleCounts.fluid) : 0u;
+    roleCounts.latent = 0u;
     s.nFluidParticles = roleCounts.fluid;
     s.nInactiveParticles = roleCounts.inactive;
     s.nLatentParticles = roleCounts.latent;
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = static_cast<std::size_t>(roleCounts.fluid);
     double mass = 0.0;
     double px = 0.0;
     double py = 0.0;

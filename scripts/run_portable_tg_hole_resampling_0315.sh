@@ -19,7 +19,8 @@ export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
-RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare
+#RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare
+RUN_MODES="${RUN_MODES:-classic resampling}"   # set to "classic resampling" to compare
 
 # Compact output defaults: fluid-only dumps are lighter and suitable for most
 # visual post-processing.  Set DUMP_ROLE_FILTER=all for restart-compatible dumps
@@ -421,12 +422,12 @@ portable_mode_root_0315() {
 
 CASE_NAME="taylor_green_hole_forced_0315"
 Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-64}"; NY="${NY:-64}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-2500}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-25000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
 SEED="${SEED:-1628605}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 TG_U0="${TG_U0:-0.04}"; TG_FORCING_AMPLITUDE="${TG_FORCING_AMPLITUDE:-0.02}"
 HOLE_XMIN="${HOLE_XMIN:-0.45}"; HOLE_XMAX="${HOLE_XMAX:-0.55}"; HOLE_YMIN="${HOLE_YMIN:-0.45}"; HOLE_YMAX="${HOLE_YMAX:-0.55}"
 THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
-INACTIVE_SLOTS="${INACTIVE_SLOTS:-50000}"
+INACTIVE_SLOTS="${INACTIVE_SLOTS:-5000}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_tg_hole_resampling_0315}"
 
 run_mode_0315() {

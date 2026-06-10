@@ -290,7 +290,7 @@ void maybe_validate_cuda_cell_thermostat_shadow(const ParticleState& preState,
 
     CudaThermostatShadowRow row{};
     row.step = step;
-    row.particlesVisited = preState.Np;
+    row.particlesVisited = active_fluid_count(preState);
     row.fluidParticles = cudaRaw.fluidParticles;
     row.numCells = grid.numCells;
     row.cellsRescaledCpu = cpuDiag.cellsRescaled;
@@ -311,7 +311,7 @@ void maybe_validate_cuda_cell_thermostat_shadow(const ParticleState& preState,
     row.downloadSeconds = cudaRaw.downloadSeconds;
     row.totalSeconds = cudaRaw.totalSeconds;
 
-    const std::size_t n = static_cast<std::size_t>(preState.Np);
+    const std::size_t n = active_fluid_count_size(preState);
     const double tol = env_double_value("MPCD_CUDA_THERMOSTAT_SHADOW_TOL", 1.0e-10);
     double sumSq = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
@@ -398,8 +398,9 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     if (params.thermostatMode != "cell_relative_rescale") {
         throw std::runtime_error("Unsupported thermostatMode: " + params.thermostatMode);
     }
-    if (cellId.size() != static_cast<std::size_t>(state.Np)) {
-        throw std::runtime_error("Thermostat cellId array has wrong size");
+    const std::size_t n = active_fluid_count_size(state);
+    if (cellId.size() != n) {
+        throw std::runtime_error("Thermostat cellId array has wrong active-particle size");
     }
 
     const double targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
@@ -420,10 +421,9 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     }
 #endif
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
-    resize_thermostat_workspace(ws, state.Np, nc, nt);
+    resize_thermostat_workspace(ws, active_fluid_count(state), nc, nt);
 
     std::fill(ws.cellCount.begin(), ws.cellCount.end(), 0u);
     std::fill(ws.cellMass.begin(), ws.cellMass.end(), 0.0);
@@ -519,7 +519,7 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
             gpuState.upload_all(state, &particleDiag);
         }
         auto& cellWorkspace = cuda_thermostat_cell_workspace_0258_tls();
-        cellWorkspace.ensure_capacity(state.Np, grid.numCells, &workspaceDiag);
+        cellWorkspace.ensure_capacity(active_fluid_count(state), grid.numCells, &workspaceDiag);
 
         diag = cuda_apply_cell_relative_rescale_thermostat_from_shared_state_0258(
             gpuState, cellWorkspace, state, nc, cellId, ws.cellCount, ws.cellUx, ws.cellUy,

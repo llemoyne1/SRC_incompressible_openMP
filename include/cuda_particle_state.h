@@ -14,7 +14,12 @@ namespace mpcd {
 // x/y/vx/vy/mass/role buffers. Later patches can pass device_view() to deposit,
 // collision, thermostat and projection boundary adapters.
 struct CudaParticleDeviceView {
+    // n/capacity keep the historical full storage size.  nActiveFluid is the
+    // 0315a logical particle count that later kernels should use for physical
+    // operators once migrated away from scanning inactive slots.
     std::uint64_t n = 0u;
+    std::uint64_t capacity = 0u;
+    std::uint64_t nActiveFluid = 0u;
     double* x = nullptr;
     double* y = nullptr;
     double* vx = nullptr;
@@ -113,6 +118,7 @@ public:
 
     std::uint64_t size() const;
     std::uint64_t capacity() const;
+    std::uint64_t active_fluid_size() const;
     std::uint64_t allocated_bytes() const;
 
 private:

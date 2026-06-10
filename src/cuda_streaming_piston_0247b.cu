@@ -171,8 +171,9 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
     CudaPistonStreaming0247bDiagnostics diag{};
     diag.requested = cuda_piston_streaming_0247b_requested();
     diag.supported = cuda_piston_streaming_0247b_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -203,7 +204,7 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0247b("MPCD_CUDA_STREAMING_PISTON_0247B_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         check_cuda_0247b(cudaFree(dBottomHits), "free bottom hits after grid-size failure");
@@ -219,7 +220,7 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
     const double wallUyTop = domain.vyMax + params.wallVpUyTop;
 
     piston_force_stream_kernel_0247b<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role,
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
         params.dt, params.Lx,
         domain.yMin, domain.yMax,
@@ -254,10 +255,7 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
 
     diag.handled = true;
     diag.applied = true;
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.hitsBottom = static_cast<std::uint64_t>(hBottomHits);
     diag.hitsTop = static_cast<std::uint64_t>(hTopHits);
     diag.maxYWallReflectionsPerParticle = hMaxY;

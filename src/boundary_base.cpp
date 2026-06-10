@@ -907,8 +907,12 @@ void append_particle(ParticleState& state,
     state.vy.push_back(vy);
     state.type.push_back(type);
     state.mass.push_back(mass);
-    state.role.push_back(static_cast<std::uint8_t>(role));
+    const std::uint8_t r = static_cast<std::uint8_t>(role);
+    state.role.push_back(r);
     state.Np = static_cast<std::uint64_t>(state.x.size());
+    if (r == kParticleRoleFluid) {
+        ++state.NactiveFluid;
+    }
 }
 
 void activate_or_append_particle(ParticleState& state,
@@ -932,7 +936,7 @@ void activate_or_append_particle(ParticleState& state,
             state.vy[idx] = vy;
             state.type[idx] = type;
             state.mass[idx] = mass;
-            state.role[idx] = kParticleRoleFluid;
+            set_particle_role(state, idx, ParticleRole::Fluid);
             return;
         }
     }
@@ -1074,7 +1078,8 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
 
     std::uint32_t refType = 0u;
     double refMass = 1.0;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    const std::size_t nActiveRef = active_fluid_count_size(state);
+    for (std::size_t i = 0; i < nActiveRef; ++i) {
         if (is_fluid_particle(state, i)) {
             refType = state.type[i];
             refMass = state.mass[i];
@@ -1274,7 +1279,7 @@ BoundaryDiagnostics apply_boundary_conditions(ParticleState& state,
         return apply_hard_inlet_reservoir_boundary(state, params, domain, step, time);
     }
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const bool periodicX = is_x_periodic(params);
     const bool periodicY = is_y_periodic(params);
     const bool ioX = is_io_boundary_mode(params.bcLeft) || is_io_boundary_mode(params.bcRight) ||

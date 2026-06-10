@@ -427,7 +427,8 @@ void run_cuda_resampling_transfer_shadow_0234(const ParticleState& state,
                                               ResamplingDepositProfileContext context) {
     if (!cuda_resampling_transfer_shadow_enabled_0234()) return;
     if (!d.donorParticleSelectionBuilt || ws.selectedDonorParticles.empty()) return;
-    if (ws.cellId.size() < static_cast<std::size_t>(state.Np)) return;
+    const std::size_t nActiveShadow = active_fluid_count_size(state);
+    if (ws.cellId.size() < nActiveShadow) return;
 
     const std::uint64_t maxTransfers = cuda_resampling_transfer_shadow_max_transfers_0234();
     std::vector<std::uint32_t> particleCell;
@@ -435,13 +436,13 @@ void run_cuda_resampling_transfer_shadow_0234(const ParticleState& state,
     std::vector<double> particleMass;
     std::vector<double> particleVx;
     std::vector<double> particleVy;
-    particleCell.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
-    particleRole.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
-    particleMass.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
-    particleVx.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
-    particleVy.reserve(static_cast<std::size_t>(state.Np) + ws.selectedDonorParticles.size());
+    particleCell.reserve(nActiveShadow + ws.selectedDonorParticles.size());
+    particleRole.reserve(nActiveShadow + ws.selectedDonorParticles.size());
+    particleMass.reserve(nActiveShadow + ws.selectedDonorParticles.size());
+    particleVx.reserve(nActiveShadow + ws.selectedDonorParticles.size());
+    particleVy.reserve(nActiveShadow + ws.selectedDonorParticles.size());
 
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    for (std::size_t i = 0; i < nActiveShadow; ++i) {
         int c = ws.cellId[i];
         if (c < 0) c = 0;
         particleCell.push_back(static_cast<std::uint32_t>(c));
@@ -1683,7 +1684,7 @@ void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
     ws.cellParticleIndices.assign(static_cast<std::size_t>(ws.cellParticleOffsets.back()),
                                   kInvalidParticleIndex);
     ws.cellParticleCursor.assign(ws.cellParticleOffsets.begin(), ws.cellParticleOffsets.end() - 1);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     for (std::size_t i = 0; i < n; ++i) {
         if (!is_fluid_particle(state, i)) {
             continue;
@@ -2249,6 +2250,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
         d.scaleMax = std::max(d.scaleMax, scale);
     }
 
+    const std::size_t nActiveRemapThermal = active_fluid_count_size(state);
+
     if (depositWorkspace.remapThermalEnergyTarget.size() == static_cast<std::size_t>(nc) &&
         depositWorkspace.remapThermalCell.size() == static_cast<std::size_t>(nc)) {
         std::fill(depositWorkspace.remapThermalEnergyTarget.begin(),
@@ -2263,7 +2266,7 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
                 depositWorkspace.remapThermalCell[kk] = 1u;
             }
         }
-        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+        for (std::size_t i = 0; i < nActiveRemapThermal; ++i) {
             if (!is_fluid_particle(state, i)) {
                 continue;
             }
@@ -2285,7 +2288,7 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
         }
     }
 
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    for (std::size_t i = 0; i < nActiveRemapThermal; ++i) {
         if (!is_fluid_particle(state, i)) {
             continue;
         }
@@ -2380,7 +2383,7 @@ ResamplingThermalRenormalizationDiagnostics apply_resampling_local_thermal_renor
     std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
     std::vector<std::uint8_t> renormCell(static_cast<std::size_t>(nc), 0u);
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nt = std::max(1, thread_count());
     const bool parallelParticles = n > 10000u;
 
@@ -2690,7 +2693,7 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
 
         nc = depositWorkspace.allocatedCells;
         if (nc <= 0 || depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc) ||
-            depositWorkspace.cellId.size() < static_cast<std::size_t>(state.Np)) {
+            depositWorkspace.cellId.size() < active_fluid_count_size(state)) {
             throw std::runtime_error("apply_resampling_particle_mass_guards: invalid deposit workspace");
         }
         if (!(d.massMinBound >= 0.0) || !(d.massMaxBound > d.massMinBound) ||
@@ -2704,7 +2707,8 @@ ResamplingMassGuardDiagnostics apply_resampling_particle_mass_guards(
     std::vector<std::vector<std::size_t>> particlesByCell(static_cast<std::size_t>(nc));
     {
         MPCD_MASS_GUARD_PROFILE(d.profile, BuildParticlesByCell);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    const std::size_t nActiveMassGuard = active_fluid_count_size(state);
+    for (std::size_t i = 0; i < nActiveMassGuard; ++i) {
         if (!is_fluid_particle(state, i)) {
             continue;
         }
@@ -3059,9 +3063,9 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         if (nc <= 0) {
             throw std::runtime_error("deposit_weighted_real_fluid: invalid number of cells");
         }
-        n = static_cast<std::size_t>(state.Np);
+        n = active_fluid_count_size(state);
         nt = std::max(1, thread_count());
-        resize_weighted_real_fluid_deposit(ws, state.Np, nc, nt);
+        resize_weighted_real_fluid_deposit(ws, active_fluid_count(state), nc, nt);
     }
 
     const bool useExistingCellIds =
@@ -3109,7 +3113,9 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     ParticleRoleCounts roles{};
     {
         MPCD_DEPOSIT_PROFILE(depositProfileSeconds, RoleCounts);
-        roles = count_particle_roles(state);
+        roles.fluid = static_cast<std::uint64_t>(n);
+        roles.inactive = state.Np >= roles.fluid ? (state.Np - roles.fluid) : 0u;
+        roles.latent = 0u;
     }
 
     double particleMassSum = 0.0;

@@ -127,6 +127,7 @@ ParticleState filter_particle_state_by_role_0314(const ParticleState& state, std
         out.role.push_back(keepRole);
     }
     out.Np = static_cast<std::uint64_t>(out.x.size());
+    out.NactiveFluid = (keepRole == kParticleRoleFluid) ? out.Np : 0u;
     validate_particle_state(out, "filter_particle_state_by_role_0314(output)");
     return out;
 }
@@ -203,6 +204,8 @@ ParticleState read_smpcd_state(const std::string& filepath) {
         state.role.assign(n, kParticleRoleFluid);
     }
 
+    ensure_particle_roles(state, ParticleRole::Fluid);
+    compact_active_fluid_prefix(state);
     validate_particle_state(state, "read_smpcd_state");
     return state;
 }
@@ -210,6 +213,7 @@ ParticleState read_smpcd_state(const std::string& filepath) {
 void write_smpcd_state(const std::string& filepath, const ParticleState& state) {
     ParticleState normalized = state;
     ensure_particle_roles(normalized, ParticleRole::Fluid);
+    refresh_active_fluid_count(normalized);
     validate_particle_state(normalized, "write_smpcd_state");
 
     std::ofstream fout(filepath, std::ios::binary);

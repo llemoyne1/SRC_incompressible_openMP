@@ -155,8 +155,9 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
     CudaImmersedCircle0284Diagnostics diag{};
     diag.requested = cuda_immersed_circle_0284_requested();
     diag.supported = cuda_immersed_circle_0284_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -184,7 +185,7 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0284("MPCD_CUDA_IMMERSED_CIRCLE_0284_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         check_cuda_0284(cudaFree(dHits), "free hit counter after grid-size failure");
@@ -192,7 +193,7 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
     }
 
     immersed_circle_reflection_kernel_0284<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role,
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
         cx, cy, R, eps,
         params.immersedSolidVx, params.immersedSolidVy,
@@ -217,10 +218,7 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
     diag.handled = true;
     diag.applied = true;
     diag.hits = static_cast<std::uint64_t>(hHits);
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.allocationCalls = particleDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls;

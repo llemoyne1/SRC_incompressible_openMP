@@ -349,7 +349,7 @@ ImmersedSolidDiagnostics apply_immersed_solid_reflection(ParticleState& state,
     }
 
     validate_particle_state(state, "apply_immersed_solid_reflection");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const double epsBase = 1.0e-12 * std::max({1.0, domain.xMax - domain.xMin, domain.yMax - domain.yMin});
 
     std::uint64_t hits = 0;

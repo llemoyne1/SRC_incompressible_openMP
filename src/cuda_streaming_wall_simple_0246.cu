@@ -228,8 +228,9 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     CudaWallSimpleStreaming0246Diagnostics diag{};
     diag.requested = cuda_wall_simple_streaming_0246_requested();
     diag.supported = cuda_wall_simple_streaming_0246_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -269,7 +270,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_streaming_wall_simple_0246: grid too large for 1D launch");
@@ -281,7 +282,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     const double wallUyTop = domain.vyMax + params.wallVpUyTop;
 
     wall_simple_force_stream_kernel_0246<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role,
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
         params.dt, params.Lx, params.Ly,
         domain.yMin, domain.yMax,
@@ -326,14 +327,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
 
     diag.handled = true;
     diag.applied = true;
-    if (downloadAll || !resident0261) {
-        diag.fluidParticles = 0u;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-            if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-        }
-    } else {
-        diag.fluidParticles = state.Np;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.hitsBottom = static_cast<std::uint64_t>(hBottomHits);
     diag.hitsTop = static_cast<std::uint64_t>(hTopHits);
     diag.maxYWallReflectionsPerParticle = hMaxY;

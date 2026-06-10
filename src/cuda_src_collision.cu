@@ -94,7 +94,7 @@ CudaSrcCollisionDiagnostics cuda_apply_src_collision_from_cell_moments(
 #else
     validate_particle_state(state, "cuda_apply_src_collision_from_cell_moments");
     if (numCells <= 0) throw std::runtime_error("cuda SRC collision: invalid numCells");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     if (cellId.size() != n) throw std::runtime_error("cuda SRC collision: cellId size mismatch");
     const std::size_t nc = static_cast<std::size_t>(numCells);
     if (cellUx.size() != nc || cellUy.size() != nc || cosA.size() != nc || sinA.size() != nc) {
@@ -102,7 +102,7 @@ CudaSrcCollisionDiagnostics cuda_apply_src_collision_from_cell_moments(
     }
 
     CudaSrcCollisionDiagnostics diag{};
-    diag.particlesVisited = state.Np;
+    diag.particlesVisited = static_cast<std::uint64_t>(n);
     diag.numCells = numCells;
 
     const int threads = std::max(32, options.threadsPerBlock);
@@ -151,7 +151,7 @@ CudaSrcCollisionDiagnostics cuda_apply_src_collision_from_cell_moments(
 
     t0 = Clock::now();
     if (blocks > 0) {
-        src_rotate_kernel<<<blocks, threads>>>(state.Np, dCellId, dRole, dCellUx, dCellUy, dCosA, dSinA,
+        src_rotate_kernel<<<blocks, threads>>>(static_cast<std::uint64_t>(n), dCellId, dRole, dCellUx, dCellUy, dCosA, dSinA,
                                                numCells, kParticleRoleFluid, dVx, dVy,
                                                dRotatedCounter, dInvalidCellCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());

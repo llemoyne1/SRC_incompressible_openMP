@@ -92,7 +92,8 @@ void deposit_cell_mass_for_capacity(const ParticleState& state,
         const int tid = thread_id();
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
+        const std::size_t nActive = active_fluid_count_size(state);
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nActive); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
             if (!is_fluid_particle(state, i)) continue;
             const int c = cell_index_from_position(state.x[i], state.y[i], params, domain);
@@ -397,7 +398,7 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
 
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
-    resize_capacity_workspace(ws, nc, state.Np, nt);
+    resize_capacity_workspace(ws, nc, active_fluid_count(state), nt);
     deposit_cell_mass_for_capacity(state, params, grid, domain, ws);
 
     ClosedCapacityResponseDiagnostics d = compute_closed_capacity_response_from_cell_masses(
@@ -474,8 +475,9 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     double mass = 0.0;
     double dpx = 0.0;
     double dpy = 0.0;
-#pragma omp parallel for reduction(+:mass,dpx,dpy) if(state.Np > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
+const std::size_t nActiveKick = active_fluid_count_size(state);
+#pragma omp parallel for reduction(+:mass,dpx,dpy) if(nActiveKick > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nActiveKick); ++ii) {
         const std::size_t i = static_cast<std::size_t>(ii);
         if (!is_fluid_particle(state, i)) continue;
         const int c = ws.cellId[i];
@@ -496,8 +498,8 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
         const double cvy = dpy / mass;
         d.virialMomentumCorrectionVx = cvx;
         d.virialMomentumCorrectionVy = cvy;
-#pragma omp parallel for if(state.Np > 10000)
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
+#pragma omp parallel for if(nActiveKick > 10000)
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nActiveKick); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
             if (!is_fluid_particle(state, i)) continue;
             state.vx[i] -= cvx;

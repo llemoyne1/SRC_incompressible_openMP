@@ -1,6 +1,8 @@
 #include "particle_state.h"
 
+#include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace mpcd {
 
@@ -34,6 +36,9 @@ void validate_particle_state(const ParticleState& state, const std::string& cont
     if (!state.role.empty() && state.role.size() != n) {
         throw std::runtime_error(context + ": inconsistent particle role array size");
     }
+    if (state.NactiveFluid > state.Np) {
+        throw std::runtime_error(context + ": NactiveFluid exceeds total particle storage capacity Np");
+    }
     for (std::size_t i = 0; i < state.role.size(); ++i) {
         if (!valid_particle_role_value(state.role[i])) {
             throw std::runtime_error(context + ": invalid particle role value at index " + std::to_string(i));
@@ -47,6 +52,7 @@ void ensure_particle_roles(ParticleState& state, ParticleRole defaultRole) {
     if (state.role.empty()) {
         state.role.assign(n, static_cast<std::uint8_t>(defaultRole));
     }
+    refresh_active_fluid_count(state);
     validate_particle_state(state, "ensure_particle_roles(after)");
 }
 
@@ -86,7 +92,113 @@ void set_particle_role(ParticleState& state, std::size_t i, ParticleRole role) {
     if (i >= state.role.size()) {
         throw std::runtime_error("set_particle_role: index out of range");
     }
-    state.role[i] = static_cast<std::uint8_t>(role);
+    const std::uint8_t oldRole = state.role[i];
+    const std::uint8_t newRole = static_cast<std::uint8_t>(role);
+    state.role[i] = newRole;
+    if (oldRole != newRole) {
+        if (oldRole == kParticleRoleFluid && state.NactiveFluid > 0u) {
+            --state.NactiveFluid;
+        } else if (newRole == kParticleRoleFluid && state.NactiveFluid < state.Np) {
+            ++state.NactiveFluid;
+        }
+    }
+}
+
+namespace {
+
+void swap_particle_slots(ParticleState& state, std::size_t a, std::size_t b) {
+    if (a == b) return;
+    using std::swap;
+    swap(state.x[a], state.x[b]);
+    swap(state.y[a], state.y[b]);
+    swap(state.vx[a], state.vx[b]);
+    swap(state.vy[a], state.vy[b]);
+    swap(state.type[a], state.type[b]);
+    swap(state.mass[a], state.mass[b]);
+    swap(state.role[a], state.role[b]);
+}
+
+} // namespace
+
+std::uint64_t compute_active_fluid_count(const ParticleState& state) {
+    validate_particle_state(state, "compute_active_fluid_count");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    if (state.role.empty()) {
+        return static_cast<std::uint64_t>(n);
+    }
+    std::uint64_t count = 0u;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (state.role[i] == kParticleRoleFluid) ++count;
+    }
+    return count;
+}
+
+std::uint64_t active_fluid_count(const ParticleState& state) {
+    validate_particle_state(state, "active_fluid_count");
+    if (state.Np == 0u) return 0u;
+    // Backward-compatible fallback for old construction paths that have not yet
+    // refreshed the 0315a metadata.  Hot physical loops should call this only
+    // after states are normalized/compacted by read_smpcd_state() or explicit
+    // pool-transition code.
+    if (state.NactiveFluid == 0u) {
+        return compute_active_fluid_count(state);
+    }
+    return state.NactiveFluid;
+}
+
+void refresh_active_fluid_count(ParticleState& state) {
+    state.NactiveFluid = compute_active_fluid_count(state);
+}
+
+bool has_active_fluid_prefix(const ParticleState& state) {
+    validate_particle_state(state, "has_active_fluid_prefix");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t nf = static_cast<std::size_t>(active_fluid_count(state));
+    if (nf > n) return false;
+    if (state.role.empty()) {
+        return nf == n;
+    }
+    for (std::size_t i = 0; i < nf; ++i) {
+        if (state.role[i] != kParticleRoleFluid) return false;
+    }
+    for (std::size_t i = nf; i < n; ++i) {
+        if (state.role[i] == kParticleRoleFluid) return false;
+    }
+    return true;
+}
+
+void validate_active_fluid_prefix(const ParticleState& state, const std::string& context) {
+    if (!has_active_fluid_prefix(state)) {
+        throw std::runtime_error(context + ": active fluid particles are not stored as a compact prefix");
+    }
+}
+
+void compact_active_fluid_prefix(ParticleState& state) {
+    ensure_particle_roles(state, ParticleRole::Fluid);
+    validate_particle_state(state, "compact_active_fluid_prefix(before)");
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    if (n == 0u) {
+        state.NactiveFluid = 0u;
+        return;
+    }
+
+    std::size_t left = 0u;
+    std::size_t right = n;
+    while (left < right) {
+        while (left < right && state.role[left] == kParticleRoleFluid) {
+            ++left;
+        }
+        while (left < right && state.role[right - 1u] != kParticleRoleFluid) {
+            --right;
+        }
+        if (left < right) {
+            swap_particle_slots(state, left, right - 1u);
+            ++left;
+            --right;
+        }
+    }
+    state.NactiveFluid = compute_active_fluid_count(state);
+    validate_active_fluid_prefix(state, "compact_active_fluid_prefix(after)");
 }
 
 ParticleRoleCounts count_particle_roles(const ParticleState& state) {

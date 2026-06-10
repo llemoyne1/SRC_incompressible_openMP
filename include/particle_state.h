@@ -36,8 +36,16 @@ struct ParticleRoleMasks {
 // Particle state used by the new generic SRC/MPCD core.
 // Storage is structure-of-arrays (SoA) to keep the in-memory layout close to
 // the .smpcd binary state format and to prepare OpenMP/MPI/GPU backends.
+//
+// 0315a global active/inactive layout:
+//   Np           = total storage capacity (Fluid + Inactive + Latent slots);
+//   NactiveFluid = logical number of active fluid particles in the compact
+//                  prefix [0, NactiveFluid).  Physical operators should be
+//                  migrated to this count; storage/pool management may still
+//                  inspect the full capacity when it explicitly manages slots.
 struct ParticleState {
     std::uint64_t Np = 0;
+    std::uint64_t NactiveFluid = 0;
     std::uint32_t dim = 2;
 
     std::vector<double> x;
@@ -71,6 +79,20 @@ bool is_fluid_particle(const ParticleState& state, std::size_t i);
 bool is_inactive_particle(const ParticleState& state, std::size_t i);
 bool is_latent_particle(const ParticleState& state, std::size_t i);
 void set_particle_role(ParticleState& state, std::size_t i, ParticleRole role);
+
+// 0315a active-prefix helpers.  These are intentionally generic and independent
+// of the classic/Q6/resampling/virial choice.  The compaction routine is meant
+// for load/restart and explicit pool-transition points, not for per-step
+// diagnostics.
+std::uint64_t compute_active_fluid_count(const ParticleState& state);
+std::uint64_t active_fluid_count(const ParticleState& state);
+inline std::size_t active_fluid_count_size(const ParticleState& state) {
+    return static_cast<std::size_t>(active_fluid_count(state));
+}
+void refresh_active_fluid_count(ParticleState& state);
+bool has_active_fluid_prefix(const ParticleState& state);
+void validate_active_fluid_prefix(const ParticleState& state, const std::string& context = "ParticleState");
+void compact_active_fluid_prefix(ParticleState& state);
 
 ParticleRoleCounts count_particle_roles(const ParticleState& state);
 ParticleRoleMasks build_particle_role_masks(const ParticleState& state);

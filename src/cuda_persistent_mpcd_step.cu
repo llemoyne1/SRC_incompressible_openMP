@@ -670,7 +670,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     if (!(config.Lx > 0.0) || !(config.Ly > 0.0)) throw std::runtime_error("persistent CUDA step: invalid domain");
     if (!(config.targetKBT > 0.0)) throw std::runtime_error("persistent CUDA step: targetKBT must be positive");
 
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA step: too many particles for prototype int kernels");
     const int nc = config.Nx * config.Ny;
@@ -693,7 +693,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     }
 
     CudaPersistentMpcdStepDiagnostics diag{};
-    diag.particlesVisited = state.Np;
+    diag.particlesVisited = static_cast<std::uint64_t>(n);
     diag.numCells = nc;
     diag.cycles = cycles;
 
@@ -994,7 +994,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         throw std::runtime_error("persistent CUDA shared-state step: incomplete CudaParticleState device view");
     }
 
-    const std::size_t n = static_cast<std::size_t>(pv.n);
+    const std::uint64_t nActive64 = pv.nActiveFluid > 0u ? pv.nActiveFluid : active_fluid_count(downloadTarget);
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA shared-state step: too many particles for prototype int kernels");
     const int nc = config.Nx * config.Ny;
@@ -1016,7 +1017,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     }
 
     CudaPersistentMpcdStepDiagnostics diag{};
-    diag.particlesVisited = pv.n;
+    diag.particlesVisited = nActive64;
     diag.numCells = nc;
     diag.cycles = cycles;
 
@@ -1263,7 +1264,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         throw std::runtime_error("persistent CUDA shared particle+cell step: incomplete CudaParticleState device view");
     }
 
-    const std::size_t n = static_cast<std::size_t>(pv.n);
+    const std::uint64_t nActive64 = pv.nActiveFluid > 0u ? pv.nActiveFluid : active_fluid_count(downloadTarget);
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA shared particle+cell step: too many particles for prototype int kernels");
     const int nc = config.Nx * config.Ny;
@@ -1273,7 +1275,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     const int cellBlocks = std::max(1, (nc + threads - 1) / threads);
     const int resetBlocks = std::max(particleBlocks, cellBlocks);
 
-    cellWorkspace.ensure_capacity(pv.n, nc, nullptr);
+    cellWorkspace.ensure_capacity(nActive64, nc, nullptr);
     const CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
     if (cv.cellId == nullptr || cv.count == nullptr || cv.cellMass == nullptr || cv.cellPx == nullptr ||
         cv.cellPy == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr || cv.cosA == nullptr ||
@@ -1281,7 +1283,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         cv.fluidCounter == nullptr || cv.rotatedCounter == nullptr || cv.invalidCounter == nullptr) {
         throw std::runtime_error("persistent CUDA shared particle+cell step: incomplete CudaCellWorkspace device view");
     }
-    if (cv.particleCapacity < pv.n || cv.numCells < nc) {
+    if (cv.particleCapacity < nActive64 || cv.numCells < nc) {
         throw std::runtime_error("persistent CUDA shared particle+cell step: CudaCellWorkspace capacity mismatch");
     }
 
@@ -1297,7 +1299,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     }
 
     CudaPersistentMpcdStepDiagnostics diag{};
-    diag.particlesVisited = pv.n;
+    diag.particlesVisited = nActive64;
     diag.numCells = nc;
     diag.cycles = cycles;
 
@@ -1541,7 +1543,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         throw std::runtime_error("persistent CUDA shared collision step: incomplete CudaParticleState device view");
     }
 
-    const std::size_t n = static_cast<std::size_t>(pv.n);
+    const std::uint64_t nActive64 = pv.nActiveFluid > 0u ? pv.nActiveFluid : active_fluid_count(downloadTarget);
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const int nInt = static_cast<int>(n);
     if (static_cast<std::size_t>(nInt) != n) throw std::runtime_error("persistent CUDA shared collision step: too many particles for prototype int kernels");
     const int nc = config.Nx * config.Ny;
@@ -1571,14 +1574,14 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         }
     };
 
-    cellWorkspace.ensure_capacity(pv.n, nc, nullptr);
+    cellWorkspace.ensure_capacity(nActive64, nc, nullptr);
     const CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
     if (cv.cellId == nullptr || cv.count == nullptr || cv.cellMass == nullptr || cv.cellPx == nullptr ||
         cv.cellPy == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr || cv.cosA == nullptr ||
         cv.sinA == nullptr || cv.fluidCounter == nullptr || cv.rotatedCounter == nullptr || cv.invalidCounter == nullptr) {
         throw std::runtime_error("persistent CUDA shared collision step: incomplete CudaCellWorkspace device view");
     }
-    if (cv.particleCapacity < pv.n || cv.numCells < nc) {
+    if (cv.particleCapacity < nActive64 || cv.numCells < nc) {
         throw std::runtime_error("persistent CUDA shared collision step: CudaCellWorkspace capacity mismatch");
     }
 
@@ -1602,7 +1605,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     }
 
     CudaPersistentMpcdStepDiagnostics diag{};
-    diag.particlesVisited = pv.n;
+    diag.particlesVisited = nActive64;
     diag.numCells = nc;
     diag.cycles = cycles;
 

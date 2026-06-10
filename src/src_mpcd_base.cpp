@@ -633,7 +633,8 @@ void capture_resampling_thermal_reference(const ParticleState& state,
             targetCell[kk] = 1u;
         }
     }
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    const std::size_t nActiveThermalRef = active_fluid_count_size(state);
+    for (std::size_t i = 0; i < nActiveThermalRef; ++i) {
         if (!is_fluid_particle(state, i) || i >= deposit.cellId.size()) {
             continue;
         }
@@ -695,7 +696,7 @@ bool cuda_resampling_persistent_active_path_0240_requested(const ParticleState& 
     if (minParticlesEnv != nullptr && minParticlesEnv[0] != '\0') {
         try {
             const std::uint64_t minParticles = static_cast<std::uint64_t>(std::stoull(minParticlesEnv));
-            if (state.Np < minParticles) {
+            if (active_fluid_count(state) < minParticles) {
                 return false;
             }
         } catch (...) {
@@ -710,7 +711,7 @@ void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) 
         return;
     }
     validate_particle_state(state, "apply_keep_mean_flow");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
 
     double mass = 0.0;
     double px = 0.0;
@@ -810,7 +811,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
         cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     }
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::size_t n = active_fluid_count_size(state);
+    const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const double time = static_cast<double>(step) * params.dt;
 
     // 0270: wall-simple resident CUDA performs y-wall reflection directly in
@@ -862,8 +864,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             deferred.supported = true;
             deferred.handled = true;
             deferred.applied = true;
-            deferred.particles = state.Np;
-            deferred.fluidParticles = state.Np;
+            deferred.particles = nActiveFluid;
+            deferred.fluidParticles = nActiveFluid;
             const auto upload0 = ProfileClock::now();
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
             if (!cuda_shared_particle_state_0251_is_fresh()) {
@@ -890,8 +892,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             deferred.supported = true;
             deferred.handled = true;
             deferred.applied = true;
-            deferred.particles = state.Np;
-            deferred.fluidParticles = state.Np;
+            deferred.particles = nActiveFluid;
+            deferred.fluidParticles = nActiveFluid;
             const auto upload0 = ProfileClock::now();
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
             if (!cuda_shared_particle_state_0251_is_fresh()) {

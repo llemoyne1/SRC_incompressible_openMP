@@ -50,12 +50,12 @@ addParameter(p, 'timeAverageStartFraction', 0.0, @(x) isnumeric(x) && isscalar(x
 addParameter(p, 'filterType', 'none', @(s) ischar(s) || isstring(s));
 addParameter(p, 'filterWidth', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'filterDiscreteFields', false, @(x) islogical(x) || isnumeric(x));
-addParameter(p, 'temporalHalfWindow', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
-addParameter(p, 'pauseTime', 0.5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'temporalHalfWindow', 3, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'pauseTime', 0.05, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
 addParameter(p, 'showVelocityVectors', true, @(x) islogical(x) || isnumeric(x));
 addParameter(p, 'maskVelocityVectors', false, @(x) islogical(x) || isnumeric(x));
-addParameter(p, 'vectorStride', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+addParameter(p, 'vectorStride', 5, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'maskOverlay', 'solid', @(s) ischar(s) || isstring(s));
 addParameter(p, 'solidSampleSubdiv', 5, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'writeMaskStats', false, @(x) islogical(x) || isnumeric(x));
@@ -169,6 +169,7 @@ for ii = 1:numel(selectedIdx)
         runDir, fld, ii, numel(selectedIdx), times(ii)), ...
         'Interpreter', 'none');
     xlabel('x'); ylabel('y');
+
     drawnow;
     pause(opts.pauseTime);
 end

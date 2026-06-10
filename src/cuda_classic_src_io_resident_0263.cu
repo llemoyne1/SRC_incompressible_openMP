@@ -1841,7 +1841,8 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     }
     cfg.outletForcedParticlesPerStep = forced_particles_per_step_0291(params);
     cfg.outletForcedLayerCells = std::max(1, params.openBoundaryOutletForcedLayerCells);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
+    const std::size_t nActiveRef = active_fluid_count_size(state);
+    for (std::size_t i = 0; i < nActiveRef; ++i) {
         if (is_fluid_particle(state, i)) {
             cfg.refMass = state.mass[i];
             cfg.refType = state.type[i];
@@ -2038,8 +2039,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_s
     CudaClassicSrcIoResident0263Diagnostics diag{};
     diag.requested = cuda_classic_src_io_fullface_resident_0263_requested();
     diag.supported = cuda_classic_src_io_fullface_resident_0263_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) return diag;
     if (!cuda_particle_state_available()) return diag;
 
     const auto t0 = Clock::now();
@@ -2053,14 +2055,14 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_s
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(
         state, params, domain, step, static_cast<double>(step) * params.dt);
     const int threads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for stream launch");
     }
     CudaParticleDeviceView view = gpuState.device_view();
     io_fullface_force_stream_kernel_0263<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role, kParticleRoleFluid, cfg);
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role, kParticleRoleFluid, cfg);
     check_cuda_0263(cudaGetLastError(), "io_fullface_force_stream_kernel_0263 launch");
     check_cuda_0263(cudaDeviceSynchronize(), "io_fullface_force_stream_kernel_0263 synchronize");
     cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_stream_0263");
@@ -2088,8 +2090,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     CudaClassicSrcIoResident0263Diagnostics diag{};
     diag.requested = cuda_classic_src_io_fullface_resident_0263_requested();
     diag.supported = cuda_classic_src_io_fullface_resident_0263_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) return diag;
     if (!cuda_particle_state_available()) return diag;
     if (!cuda_shared_particle_state_0251_is_fresh()) {
         const bool strict = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_STRICT");
@@ -2120,13 +2123,13 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     } else {
         const int boundaryThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS",
                                                 env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256));
-        const std::uint64_t boundaryBlocks64 = (view.n + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
+        const std::uint64_t boundaryBlocks64 = (nActiveFluid + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
                                                static_cast<std::uint64_t>(boundaryThreads);
         if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
             throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 full-face boundary launch");
         }
         io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
-            view.n, view.x, view.y, view.vx, view.vy, view.role,
+            nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
             kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
         check_cuda_0263(cudaGetLastError(), "io_fullface_boundary_particles_kernel_0267 launch");
 
@@ -2294,8 +2297,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     CudaClassicSrcIoResident0263Diagnostics diag{};
     diag.requested = cuda_classic_src_io_segmented_resident_0264_requested();
     diag.supported = cuda_classic_src_io_segmented_resident_0264_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) return diag;
     if (!cuda_particle_state_available()) return diag;
 
     const auto t0 = Clock::now();
@@ -2310,14 +2314,14 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
         state, params, domain, step, static_cast<double>(step) * params.dt);
     const int threads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_THREADS",
                                      env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256));
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for segmented stream launch");
     }
     CudaParticleDeviceView view = gpuState.device_view();
     io_fullface_force_stream_kernel_0263<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.role, kParticleRoleFluid, cfg);
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role, kParticleRoleFluid, cfg);
     check_cuda_0263(cudaGetLastError(), "io_segmented_force_stream_kernel_0264 launch");
     check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_force_stream_kernel_0264 synchronize");
     cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_stream_0264");
@@ -2345,8 +2349,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     CudaClassicSrcIoResident0263Diagnostics diag{};
     diag.requested = cuda_classic_src_io_segmented_resident_0264_requested();
     diag.supported = cuda_classic_src_io_segmented_resident_0264_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) return diag;
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) return diag;
     if (!cuda_particle_state_available()) return diag;
     if (!cuda_shared_particle_state_0251_is_fresh()) {
         const bool strict = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT");
@@ -2378,13 +2383,13 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
         const int boundaryThreads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS",
                                                 env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_THREADS",
                                                             env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_THREADS", 256)));
-        const std::uint64_t boundaryBlocks64 = (view.n + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
+        const std::uint64_t boundaryBlocks64 = (nActiveFluid + static_cast<std::uint64_t>(boundaryThreads) - 1u) /
                                                static_cast<std::uint64_t>(boundaryThreads);
         if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
             throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 segmented boundary launch");
         }
         io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
-            view.n, view.x, view.y, view.vx, view.vy, view.role,
+            nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
             kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters);
         check_cuda_0263(cudaGetLastError(), "io_segmented_boundary_particles_kernel_0267 launch");
 

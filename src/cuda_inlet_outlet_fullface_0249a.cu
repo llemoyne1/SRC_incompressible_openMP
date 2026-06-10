@@ -191,8 +191,9 @@ CudaInletOutletFullface0249aDiagnostics try_apply_cuda_inlet_outlet_fullface_024
     CudaInletOutletFullface0249aDiagnostics diag{};
     diag.requested = cuda_inlet_outlet_fullface_0249a_requested();
     diag.supported = cuda_inlet_outlet_fullface_0249a_supported(params);
-    diag.particles = state.Np;
-    if (!diag.requested || !diag.supported || state.Np == 0u) {
+    const std::uint64_t nActiveFluid = active_fluid_count(state);
+    diag.particles = nActiveFluid;
+    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -229,14 +230,14 @@ CudaInletOutletFullface0249aDiagnostics try_apply_cuda_inlet_outlet_fullface_024
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0249a("MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A_THREADS", 256);
-    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_inlet_outlet_fullface_0249a: grid too large for 1D launch");
     }
 
     inlet_outlet_fullface_mark_exits_kernel_0249a<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n,
+        nActiveFluid,
         view.x, view.y, view.role, view.role,
         kParticleRoleFluid, kParticleRoleInactive,
         domain.xMin, domain.xMax, domain.yMin, domain.yMax,
@@ -285,10 +286,7 @@ CudaInletOutletFullface0249aDiagnostics try_apply_cuda_inlet_outlet_fullface_024
     diag.hitsTop = static_cast<std::uint64_t>(hHitsTop);
     diag.inletBackflowDeleted = static_cast<std::uint64_t>(hInletBackflowDeleted);
     diag.outletParticlesDeleted = static_cast<std::uint64_t>(hOutletParticlesDeleted);
-    diag.fluidParticles = 0u;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (is_fluid_particle(state, i)) ++diag.fluidParticles;
-    }
+    diag.fluidParticles = nActiveFluid;
     diag.allocationCalls = particleDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls;
