@@ -1,10 +1,24 @@
 #include "particle_state.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace mpcd {
+
+namespace {
+
+bool env_truthy_0315l(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+} // namespace
 
 bool valid_particle_role_value(std::uint8_t value) {
     return value == kParticleRoleInactive || value == kParticleRoleFluid || value == kParticleRoleLatent;
@@ -39,9 +53,15 @@ void validate_particle_state(const ParticleState& state, const std::string& cont
     if (state.NactiveFluid > state.Np) {
         throw std::runtime_error(context + ": NactiveFluid exceeds total particle storage capacity Np");
     }
-    for (std::size_t i = 0; i < state.role.size(); ++i) {
-        if (!valid_particle_role_value(state.role[i])) {
-            throw std::runtime_error(context + ": invalid particle role value at index " + std::to_string(i));
+    // 0315l: this validator is used in hot CUDA wrappers.  Scanning
+    // role[0:Np_total] on every upload/summary made even TG scale with the
+    // inactive reservoir.  Keep the default validation structural; full role
+    // value validation remains available for debugging corrupted states.
+    if (env_truthy_0315l("MPCD_VALIDATE_PARTICLE_ROLES_FULLSCAN_0315L")) {
+        for (std::size_t i = 0; i < state.role.size(); ++i) {
+            if (!valid_particle_role_value(state.role[i])) {
+                throw std::runtime_error(context + ": invalid particle role value at index " + std::to_string(i));
+            }
         }
     }
 }
@@ -49,11 +69,39 @@ void validate_particle_state(const ParticleState& state, const std::string& cont
 void ensure_particle_roles(ParticleState& state, ParticleRole defaultRole) {
     validate_particle_state(state, "ensure_particle_roles(before)");
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const std::uint8_t defaultValue = static_cast<std::uint8_t>(defaultRole);
     if (state.role.empty()) {
-        state.role.assign(n, static_cast<std::uint8_t>(defaultRole));
+        state.role.assign(n, defaultValue);
+        state.NactiveFluid = (defaultValue == kParticleRoleFluid) ? state.Np : 0u;
+        validate_particle_state(state, "ensure_particle_roles(after)");
+        return;
     }
-    refresh_active_fluid_count(state);
-    validate_particle_state(state, "ensure_particle_roles(after)");
+
+    // 0315m: ensure_particle_roles() is called at the beginning of every SRC
+    // step and by several wrappers.  The previous 0315a implementation always
+    // called refresh_active_fluid_count(), which scans role[0:Np_total].  That
+    // single hidden O(Np_total) pass was enough to keep TG/Poiseuille/step/box
+    // scaling with the inactive reservoir even after the physical kernels had
+    // been migrated to NactiveFluid.  Treat role[] as storage metadata here:
+    // when an explicit role array already exists and NactiveFluid is within
+    // capacity, do not rescan it.  Full refresh remains available for debug or
+    // legacy construction paths that have not installed active-prefix metadata.
+    if (env_truthy_0315l("MPCD_ENSURE_PARTICLE_ROLES_FULL_REFRESH_0315M")) {
+        refresh_active_fluid_count(state);
+        validate_particle_state(state, "ensure_particle_roles(after full-refresh 0315m)");
+        return;
+    }
+
+    if (state.NactiveFluid > state.Np) {
+        throw std::runtime_error("ensure_particle_roles: NactiveFluid exceeds Np");
+    }
+
+    // If the caller supplied explicit roles but no active-prefix count, leave
+    // this as a lazy legacy state.  active_fluid_count()/compaction paths still
+    // compute the exact count when they really need it.  Hot normalized states
+    // loaded by read_smpcd_state() or maintained by CUDA active-prefix logic
+    // always have NactiveFluid installed.
+    validate_particle_state(state, "ensure_particle_roles(after metadata-only 0315m)");
 }
 
 std::uint8_t particle_role_value(const ParticleState& state, std::size_t i) {

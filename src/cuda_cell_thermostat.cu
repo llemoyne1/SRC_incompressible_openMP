@@ -99,11 +99,14 @@ __global__ void apply_rescale_kernel(const std::uint64_t n,
 }
 
 std::vector<std::uint8_t> normalized_roles(const ParticleState& state) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    // 0315l: legacy CUDA wrappers launch kernels only over the active prefix.
+    // Do not materialise role[0:Np_total] just to guard those active-prefix
+    // kernels; that made the wrappers scale with the inactive reservoir.
+    const std::size_t n = active_fluid_count_size(state);
     if (state.role.empty()) {
         return std::vector<std::uint8_t>(n, kParticleRoleFluid);
     }
-    return state.role;
+    return std::vector<std::uint8_t>(state.role.begin(), state.role.begin() + static_cast<std::ptrdiff_t>(n));
 }
 
 ThermostatDiagnostics diagnostics_from_cells(const std::vector<std::uint32_t>& cellCount,

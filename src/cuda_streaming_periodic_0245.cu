@@ -209,7 +209,7 @@ CudaPeriodicStreaming0245Diagnostics try_apply_cuda_periodic_streaming_0245(
     const auto tAfterKernel = Clock::now();
 
     if (downloadAll) {
-        gpuState.download_all(state, &particleDiag);
+        gpuState.download_active_prefix(state, &particleDiag);
     }
     cuda_shared_particle_state_0251_mark_fresh("streaming_periodic_0245");
     const auto tAfterDownload = Clock::now();

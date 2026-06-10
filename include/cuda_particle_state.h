@@ -101,6 +101,7 @@ public:
     void upload_masses_and_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
 
     void download_velocities(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
+    void download_active_prefix(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
     void download_all(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
 
     // 0314: compact host download for visualization/summary paths when the
@@ -119,6 +120,7 @@ public:
     std::uint64_t size() const;
     std::uint64_t capacity() const;
     std::uint64_t active_fluid_size() const;
+    void set_active_fluid_size(std::uint64_t nActiveFluid);
     std::uint64_t allocated_bytes() const;
 
 private:

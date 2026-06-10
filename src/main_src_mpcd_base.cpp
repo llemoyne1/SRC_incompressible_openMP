@@ -46,6 +46,22 @@ void sync_cuda_resident_state_for_host_0260(mpcd::ParticleState& state) {
     }
 }
 
+
+
+bool disabled_resampling_summary_diagnostics_enabled_0315g(const mpcd::SimulationParams& params) {
+    // 0315g: when resampling is disabled, the historical runtime-summary
+    // resampling diagnostics rebuild a particle pool and redeposit the whole
+    // fluid on summary steps.  In resident CUDA runs this forces an active
+    // host mirror and becomes a performance consumer unrelated to the physical
+    // SRC classic step.  Keep the old behaviour only on explicit request, and
+    // always keep full diagnostics when resampling itself is enabled.
+    if (params.resamplingEnable) {
+        return true;
+    }
+    return env_truthy_0260("MPCD_DISABLED_RESAMPLING_SUMMARY_DIAGNOSTICS_0315G") ||
+           env_truthy_0260("MPCD_RESAMPLING_DISABLED_DIAGNOSTICS_LEGACY_0315G");
+}
+
 bool role_filter_fluid_0314(const std::string& filter) {
     return filter == "fluid";
 }
@@ -372,14 +388,21 @@ int main(int argc, char** argv) {
 
         const std::vector<std::uint32_t> initialCellCount =
             mpcd::compute_cell_counts(state, grid, mpcd::GridShift{}, params);
-        const mpcd::ResamplingParticlePoolDiagnostics initialPool =
-            mpcd::rebuild_resampling_particle_pool(state, workspace.resamplingPool);
-        mpcd::WeightedResamplingDiagnostics initialResampling =
-            mpcd::deposit_weighted_real_fluid(state, params, grid, initialDomain, 0.0, mpcd::GridShift{}, workspace.resampling);
-        mpcd::attach_resampling_pool_diagnostics(initialResampling, initialPool);
+        const bool disabledResamplingSummaryDiagnostics0315g =
+            disabled_resampling_summary_diagnostics_enabled_0315g(params);
+        mpcd::WeightedResamplingDiagnostics initialResampling{};
+        const mpcd::WeightedResamplingDiagnostics* initialResamplingSummary0315g = nullptr;
+        if (disabledResamplingSummaryDiagnostics0315g) {
+            const mpcd::ResamplingParticlePoolDiagnostics initialPool =
+                mpcd::rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            initialResampling =
+                mpcd::deposit_weighted_real_fluid(state, params, grid, initialDomain, 0.0, mpcd::GridShift{}, workspace.resampling);
+            mpcd::attach_resampling_pool_diagnostics(initialResampling, initialPool);
+            initialResamplingSummary0315g = &initialResampling;
+        }
         summary.append(mpcd::compute_runtime_summary(state, params, 0, elapsed_seconds(t0),
                                                      &initialCellCount, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                                     &initialResampling, ompActiveThreads));
+                                                     initialResamplingSummary0315g, ompActiveThreads));
         if (params.dumpStateEvery > 0) {
             write_state_dump_0314(state_dump_name(params.outputDir, 0), state, params);
         }
@@ -409,8 +432,11 @@ int main(int argc, char** argv) {
                   << " summaryRoleFilter=" << params.summaryRoleFilter << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
-            const bool collectResamplingDiagnostics =
+            const bool summaryStep0315g =
                 (step % params.summaryEvery == 0) || (step == params.nSteps);
+            const bool collectResamplingDiagnostics =
+                params.resamplingEnable ||
+                (disabledResamplingSummaryDiagnostics0315g && summaryStep0315g);
             const mpcd::StepResult stepResult = mpcd::run_src_mpcd_base_step(
                 state, params, grid, static_cast<std::uint64_t>(step), workspace,
                 collectResamplingDiagnostics);
@@ -473,6 +499,8 @@ int main(int argc, char** argv) {
                     summaryState = state;
                 }
                 const double wallTime = elapsed_seconds(t0);
+                const mpcd::WeightedResamplingDiagnostics* resamplingSummary0315g =
+                    stepResult.resampling.computed ? &stepResult.resampling : nullptr;
                 auto s = mpcd::compute_runtime_summary(summaryState, params, step, wallTime,
                                                            &workspace.collision.cellCount,
                                                            &stepResult.boundary,
@@ -481,7 +509,7 @@ int main(int argc, char** argv) {
                                                            &stepResult.q6,
                                                            &stepResult.capacity,
                                                            &stepResult.thermostat,
-                                                           &stepResult.resampling,
+                                                           resamplingSummary0315g,
                                                            ompActiveThreads);
                 if (compactSummary0314) {
                     s.Np = state.Np;

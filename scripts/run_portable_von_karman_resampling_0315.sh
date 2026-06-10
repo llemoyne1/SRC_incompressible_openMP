@@ -9,7 +9,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0314}"
+#BIN="${BIN:-build/src_mpcd_base_cuda_0314}"
+BIN="${BIN:-build/src_mpcd_base_cuda_0315d}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-8}"
@@ -19,7 +20,7 @@ export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
-RUN_MODES="${RUN_MODES:-classic resampling}"   # set to "classic resampling" to compare to resampling
+RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare to resampling
 
 # Compact output defaults: fluid-only dumps are lighter and suitable for most
 # visual post-processing.  Set DUMP_ROLE_FILTER=all for restart-compatible dumps
@@ -421,8 +422,8 @@ portable_mode_root_0315() {
 
 CASE_NAME="von_karman_cylinder_0315"
 VK_MODE="${VK_MODE:-periodic}"   # io | periodic
-Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-384}"; NY="${NY:-192}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-60000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
+Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1200}"; NY="${NY:-640}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-7500}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 UIN="${UIN:-0.9}"; UINIT="${UINIT:-0.001}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 CYLINDER_CX="${CYLINDER_CX:-0.35}"; CYLINDER_CY="${CYLINDER_CY:-0.475}"; CYLINDER_R="${CYLINDER_R:-0.125}"

@@ -338,7 +338,7 @@ CudaImmersedRectangle0247Diagnostics try_apply_cuda_immersed_rectangle_0247(
 
     const bool downloadAll = cuda_immersed_rectangle_0247_download_all_requested_0262();
     if (downloadAll || !resident0262) {
-        gpuState.download_all(state, &particleDiag);
+        gpuState.download_active_prefix(state, &particleDiag);
     }
     cuda_shared_particle_state_0251_mark_fresh("immersed_rectangle_0247");
     const auto tAfterDownload = Clock::now();

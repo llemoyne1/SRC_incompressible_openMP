@@ -82,9 +82,11 @@ __global__ void fill_rotation_tables_persistent_0272_kernel(int nc,
 }
 
 std::vector<std::uint8_t> normalized_roles(const ParticleState& state) {
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    // 0315l: kernels in this file are migrated to the active prefix.
+    // Avoid constructing a role vector over the inactive capacity.
+    const std::size_t n = active_fluid_count_size(state);
     if (state.role.empty()) return std::vector<std::uint8_t>(n, kParticleRoleFluid);
-    return state.role;
+    return std::vector<std::uint8_t>(state.role.begin(), state.role.begin() + static_cast<std::ptrdiff_t>(n));
 }
 
 struct DeviceBuffers {
@@ -1021,6 +1023,20 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.numCells = nc;
     diag.cycles = cycles;
 
+    // 0315f: shared-state classic resident mode keeps the device particle arrays
+    // authoritative across boundary -> immersed -> collision -> thermostat.
+    // Avoid downloading velocities for the inactive reservoir; host consumers
+    // synchronize lazily through active-prefix downloads when needed.
+    const bool residentClassicMode0315f =
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+    const bool skipVelocityDownload0315f =
+        residentClassicMode0315f &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_DISABLE_SKIP_VELOCITY_DOWNLOAD_0315F", false);
+
     DeviceBuffers b;
     const std::size_t nBytesI = n * sizeof(int);
     const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
@@ -1159,17 +1175,27 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    gpuState.download_velocities(downloadTarget);
+    if (!skipVelocityDownload0315f) {
+        gpuState.download_velocities(downloadTarget);
+    }
     cellIdOut.assign(n, -1);
     cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
-    cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
-    cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
-    MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), b.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    if (!skipVelocityDownload0315f) {
+        cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
+        cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
+        MPCD_CUDA_CHECK(cudaMemcpy(cellIdOut.data(), b.cellId, nBytesI, cudaMemcpyDeviceToHost));
+    } else {
+        cellMassOut.clear();
+        cellUxOut.clear();
+        cellUyOut.clear();
+    }
     MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), b.count, cBytesU, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), b.cellMass, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), b.cellUx, cBytesD, cudaMemcpyDeviceToHost));
-    MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), b.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    if (!skipVelocityDownload0315f) {
+        MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), b.cellMass, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), b.cellUx, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), b.cellUy, cBytesD, cudaMemcpyDeviceToHost));
+    }
 
     std::vector<double> kineticHost(static_cast<std::size_t>(nc), 0.0);
     std::vector<double> scaleHost(static_cast<std::size_t>(nc), 1.0);
@@ -1303,6 +1329,22 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.numCells = nc;
     diag.cycles = cycles;
 
+    // 0315f: in all classic resident CUDA families, the shared particle state
+    // remains device-authoritative after the fused collision+thermostat substep.
+    // Do not download vx/vy to the host merely to keep a stale mirror alive;
+    // summaries/dumps and host diagnostics already perform a lazy active-prefix
+    // download when they actually need particle arrays.  The legacy behavior can
+    // be restored for debugging through the DISABLE flag below.
+    const bool residentClassicMode0315f =
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+    const bool skipVelocityDownload0315f =
+        residentClassicMode0315f &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_DISABLE_SKIP_VELOCITY_DOWNLOAD_0315F", false);
+
     const std::size_t nBytesI = n * sizeof(int);
     const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
     const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
@@ -1422,16 +1464,15 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
-    const bool residentPeriodic0260 = env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260", false);
-    if (!residentPeriodic0260) {
+    if (!skipVelocityDownload0315f) {
         gpuState.download_velocities(downloadTarget);
     }
     // The later thermostat phase checks that cellId has the particle count even
-    // when it only consumes diagnostics recorded here. In resident 0260 mode the
-    // values themselves are not needed on the host, so only size the vector.
+    // when it only consumes diagnostics recorded here. In resident classic mode
+    // the values themselves are not needed on the host, so only size the vector.
     cellIdOut.assign(n, -1);
     cellCountOut.assign(static_cast<std::size_t>(nc), 0u);
-    if (!residentPeriodic0260) {
+    if (!skipVelocityDownload0315f) {
         cellMassOut.assign(static_cast<std::size_t>(nc), 0.0);
         cellUxOut.assign(static_cast<std::size_t>(nc), 0.0);
         cellUyOut.assign(static_cast<std::size_t>(nc), 0.0);
@@ -1444,7 +1485,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     // Keep population diagnostics available for runtime summaries; this is much
     // cheaper than downloading full velocities and cell moments every step.
     MPCD_CUDA_CHECK(cudaMemcpy(cellCountOut.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
-    if (!residentPeriodic0260) {
+    if (!skipVelocityDownload0315f) {
         MPCD_CUDA_CHECK(cudaMemcpy(cellMassOut.data(), cv.cellMass, cBytesD, cudaMemcpyDeviceToHost));
         MPCD_CUDA_CHECK(cudaMemcpy(cellUxOut.data(), cv.cellUx, cBytesD, cudaMemcpyDeviceToHost));
         MPCD_CUDA_CHECK(cudaMemcpy(cellUyOut.data(), cv.cellUy, cBytesD, cudaMemcpyDeviceToHost));

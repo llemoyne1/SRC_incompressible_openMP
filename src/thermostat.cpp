@@ -512,12 +512,27 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
         CudaParticleStateDiagnostics particleDiag{};
         CudaCellWorkspaceDiagnostics workspaceDiag{};
         auto& gpuState = cuda_shared_particle_state_0251();
-        const bool metadataCache = env_flag_enabled("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_METADATA_CACHE", true);
-        if (metadataCache) {
-            gpuState.upload_kinematics_with_cached_metadata(state, &particleDiag);
+
+        // 0315c-fix05: in resident CUDA mode, an upstream boundary/solid step can
+        // have just mutated and compacted the active Fluid prefix on the device.
+        // Re-uploading host kinematics here would overwrite that fresh device
+        // state with stale host x/y/vx/vy/role arrays.  When the shared 0251
+        // particle state is fresh, consume it directly and only synchronize the
+        // host logical active count needed for sizing/checks.  Non-resident or
+        // stale paths keep the previous upload behavior.
+        const bool sharedParticleStateFresh0315c = cuda_shared_particle_state_0251_is_fresh();
+        if (sharedParticleStateFresh0315c) {
+            state.NactiveFluid = gpuState.active_fluid_size();
         } else {
-            gpuState.upload_all(state, &particleDiag);
+            const bool metadataCache = env_flag_enabled("MPCD_CUDA_THERMOSTAT_PERSISTENT_0258_METADATA_CACHE", true);
+            if (metadataCache) {
+                gpuState.upload_kinematics_with_cached_metadata(state, &particleDiag);
+            } else {
+                gpuState.upload_all(state, &particleDiag);
+            }
+            cuda_shared_particle_state_0251_mark_fresh("cuda_thermostat_persistent_0258_upload_0315c");
         }
+
         auto& cellWorkspace = cuda_thermostat_cell_workspace_0258_tls();
         cellWorkspace.ensure_capacity(active_fluid_count(state), grid.numCells, &workspaceDiag);
 

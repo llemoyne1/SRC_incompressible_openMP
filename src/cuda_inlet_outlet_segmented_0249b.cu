@@ -380,7 +380,7 @@ CudaInletOutletSegmented0249bDiagnostics try_apply_cuda_inlet_outlet_segmented_0
     check_cuda_0249b(cudaFree(dOutletParticlesDeleted), "free outletParticlesDeleted");
     check_cuda_0249b(cudaFree(dRoleChanges), "free roleChanges");
 
-    gpuState.download_all(state, &particleDiag);
+    gpuState.download_active_prefix(state, &particleDiag);
     cuda_shared_particle_state_0251_mark_fresh("inlet_outlet_segmented_0249b");
     const auto tAfterDownload = Clock::now();
 

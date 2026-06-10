@@ -127,6 +127,163 @@ bool env_truthy_0270(const char* name) {
              s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
+// 0315e: after CUDA inlet/outlet active-prefix compaction, the shared GPU
+// particle state can remain authoritative provided every immediately downstream
+// consumer also consumes that shared state.  This helper is intentionally
+// conservative: when it cannot prove that collision + thermostat are handled by
+// the validated persistent shared CUDA path, the caller synchronizes only the
+// active host prefix before continuing.  Summary/dump synchronization remains
+// lazy and is handled separately through cuda_shared_particle_state_0251_*.
+bool cuda_src_classic_shared_collision_thermostat_pipeline_0315e(const SimulationParams& params,
+                                                                const CellGrid& grid,
+                                                                const FluidDomainBounds& domain,
+                                                                std::uint64_t step) {
+    (void)grid;
+    (void)domain;
+    if (!params.srcClassicCudaModeEnable) {
+        return false;
+    }
+    if (params.projectionEnable || params.resamplingEnable ||
+        params.closedCapacityResponseEnable || params.closedCapacityVirialKickEnable) {
+        return false;
+    }
+    if (!env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE") ||
+        !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251")) {
+        return false;
+    }
+    if (!cuda_shared_particle_state_0251_is_fresh()) {
+        return false;
+    }
+
+    // If the physical thermostat is due on this step, it must be consumed by the
+    // fused persistent SRC+thermostat shared-state path.  Otherwise
+    // apply_cell_relative_rescale_thermostat() may perform a host-side deposit.
+    if (params.thermostatEnable) {
+        if (params.thermostatEvery <= 0) {
+            return false;
+        }
+        const bool thermostatDue =
+            (step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u;
+        if (thermostatDue) {
+            if (params.thermostatMode != "cell_relative_rescale") {
+                return false;
+            }
+            if (!env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE") ||
+                !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260")) {
+                return false;
+            }
+        }
+    }
+
+    // Mean-flow correction is still a CPU particle pass.
+    if (params.keepMeanFlowEnable) {
+        return false;
+    }
+    return true;
+}
+
+bool cuda_immersed_solid_is_handled_on_device_0315e(const SimulationParams& params) {
+    if (!immersed_solid_enabled(params)) {
+        return true;
+    }
+    const ImmersedSolidShape shape = immersed_solid_shape(params);
+    if (shape == ImmersedSolidShape::Rectangle) {
+        return cuda_immersed_rectangle_0247_requested();
+    }
+    if (shape == ImmersedSolidShape::Circle) {
+        return cuda_immersed_circle_0284_requested();
+    }
+    return false;
+}
+
+bool cuda_io_boundary_requires_active_host_prefix_sync_0315e(const SimulationParams& params,
+                                                            const CellGrid& grid,
+                                                            const FluidDomainBounds& domain,
+                                                            std::uint64_t step,
+                                                            bool collectResamplingDiagnosticsWhenDisabled) {
+    // Explicit override for all-GPU experiments.  Unsafe unless all downstream
+    // consumers are known to be device/shared-state consumers.
+    if (env_truthy_0270("MPCD_CUDA_ACTIVE_PREFIX_ASSUME_NO_HOST_CONSUMERS_0315D")) {
+        return false;
+    }
+
+    if (!cuda_immersed_solid_is_handled_on_device_0315e(params)) {
+        return true;
+    }
+    if (!cuda_src_classic_shared_collision_thermostat_pipeline_0315e(params, grid, domain, step)) {
+        return true;
+    }
+
+    // Q6/capacity/resampling are host particle consumers in the current mixed
+    // pipeline.  They are normally disabled in srcClassicCudaMode validation,
+    // but keep the guard here so the active-prefix invariant stays global.
+    if (params.projectionEnable || params.closedCapacityResponseEnable ||
+        params.closedCapacityVirialKickEnable || params.resamplingEnable) {
+        return true;
+    }
+
+    // Disabled-resampling diagnostics are summary-only and already synchronize
+    // lazily just before rebuild_resampling_particle_pool()/deposit below. Do
+    // not pay this cost every step merely because a future summary may need it.
+    (void)collectResamplingDiagnosticsWhenDisabled;
+    return false;
+}
+
+
+
+
+bool cuda_io_resident_state_is_device_fresh_0315f(bool residentClassicIo0263,
+                                                  bool residentClassicIo0264) {
+    return (residentClassicIo0263 || residentClassicIo0264) &&
+           cuda_shared_particle_state_0251_is_fresh();
+}
+
+void cuda_io_sync_active_prefix_before_host_consumer_0315f(ParticleState& state,
+                                                           bool residentClassicIo0263,
+                                                           bool residentClassicIo0264,
+                                                           const char* /*reason*/) {
+    if (!cuda_io_resident_state_is_device_fresh_0315f(residentClassicIo0263, residentClassicIo0264)) {
+        return;
+    }
+    // 0315f: keep this as an active-prefix download only.  It repairs the
+    // remaining mixed host/device consumers without returning to the 0315b-fix02
+    // full download -> host compact -> upload cycle, and without scanning the
+    // inactive reservoir.
+    (void)cuda_shared_particle_state_0251_download_if_fresh(state);
+}
+
+bool cuda_collision_wrapper_still_needs_host_particles_0315f(const SimulationParams& params,
+                                                             const CellGrid& /*grid*/,
+                                                             const FluidDomainBounds& /*domain*/,
+                                                             std::uint64_t step) {
+    // The persistent SRC collision kernels can consume the shared 0251 device
+    // state, but the current wrapper still passes ParticleState into the CUDA
+    // call for sizing/metadata/diagnostic side inputs.  After an IO boundary has
+    // compacted the active prefix on device, leaving the host kinematics stale
+    // changes the trajectory for box/step.  Until that wrapper is made purely
+    // device-authoritative, synchronize the active prefix just before collision.
+    if (!params.srcClassicCudaModeEnable) {
+        return true;
+    }
+    if (!env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE") ||
+        !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251")) {
+        return true;
+    }
+    if (params.thermostatEnable && params.thermostatEvery > 0) {
+        const bool thermostatDue =
+            (step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u;
+        if (thermostatDue) {
+            // If the thermostat is not fused/consumed by the persistent SRC
+            // collision, apply_cell_relative_rescale_thermostat() performs a
+            // host-side deposit before any CUDA active thermostat path.
+            if (!env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE") ||
+                !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260")) {
+                return true;
+            }
+        }
+    }
+    return env_truthy_0270("MPCD_CUDA_COLLISION_WRAPPER_HOST_SYNC_0315F");
+}
 
 bool cuda_classic_src_periodic_resident_0260_requested() {
     const char* v = std::getenv("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260");
@@ -1004,9 +1161,37 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    // 0315e: synchronize the active host prefix only when an immediate
+    // downstream CPU/host particle consumer is actually present.  In the
+    // validated resident IO classic path, collision and the due thermostat can
+    // consume the shared 0251 device state directly; summaries/dumps keep using
+    // their own lazy active-prefix download later.  This removes the per-step
+    // host mirror that 0315d-fix07 needed as a conservative safety net.
+    if ((residentClassicIo0263 || residentClassicIo0264) &&
+        cuda_shared_particle_state_0251_is_fresh() &&
+        cuda_io_boundary_requires_active_host_prefix_sync_0315e(
+            params, grid, result.domain, step, collectResamplingDiagnosticsWhenDisabled)) {
+        (void)cuda_shared_particle_state_0251_download_if_fresh(state);
+    }
+
     {
         MPCD_PROFILE_PHASE(result.profile, Immersed);
         bool handledByCudaImmersed = false;
+
+        // 0315e-fix09: the CUDA immersed-solid handlers are not yet fully
+        // device-authoritative with respect to the active-prefix IO boundary
+        // update.  The backward-step validation uses the rectangle handler and
+        // diverges if it is called with a stale host ParticleState after the
+        // resident inlet/outlet CUDA compaction.  Synchronize only the active
+        // prefix, and only when a CUDA immersed handler is actually requested.
+        // This preserves the optimized box/TG/Poiseuille paths while restoring
+        // the validated step trajectory.
+        if (cuda_immersed_rectangle_0247_requested() || cuda_immersed_circle_0284_requested()) {
+            cuda_io_sync_active_prefix_before_host_consumer_0315f(
+                state, residentClassicIo0263, residentClassicIo0264,
+                "cuda_immersed_handler_host_side_inputs");
+        }
+
         if (cuda_immersed_rectangle_0247_requested()) {
             const CudaImmersedRectangle0247Diagnostics cudaImmersed0247 =
                 try_apply_cuda_immersed_rectangle_0247(state, params, result.domain, time);
@@ -1026,6 +1211,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
         if (!handledByCudaImmersed) {
+            cuda_io_sync_active_prefix_before_host_consumer_0315f(
+                state, residentClassicIo0263, residentClassicIo0264, "cpu_immersed_solid_fallback");
             result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
             if (result.immersed.hits != 0u) {
                 cuda_shared_particle_state_0251_invalidate("cpu_immersed_solid_edited_particles");
@@ -1034,6 +1221,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     {
         MPCD_PROFILE_PHASE(result.profile, Collision);
+        if (cuda_collision_wrapper_still_needs_host_particles_0315f(params, grid, result.domain, step)) {
+            cuda_io_sync_active_prefix_before_host_consumer_0315f(
+                state, residentClassicIo0263, residentClassicIo0264, "collision_wrapper_host_side_inputs");
+        }
         result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     }
     {

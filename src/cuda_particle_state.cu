@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -27,6 +28,59 @@ using Clock = std::chrono::steady_clock;
 
 double elapsed_seconds(const Clock::time_point& t0) {
     return std::chrono::duration<double>(Clock::now() - t0).count();
+}
+
+bool env_truthy_0315d(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+
+void validate_particle_state_shape_only_0315j(const ParticleState& state, const char* context) {
+    if (state.dim != 2u) {
+        throw std::runtime_error(std::string(context) + ": only dim=2 is supported");
+    }
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    if (static_cast<std::uint64_t>(n) != state.Np) {
+        throw std::runtime_error(std::string(context) + ": particle count does not fit in std::size_t");
+    }
+    if (state.NactiveFluid > state.Np) {
+        throw std::runtime_error(std::string(context) + ": NactiveFluid exceeds Np");
+    }
+    if (state.x.size() != n || state.y.size() != n ||
+        state.vx.size() != n || state.vy.size() != n ||
+        state.mass.size() != n || state.type.size() != n ||
+        (!state.role.empty() && state.role.size() != n)) {
+        throw std::runtime_error(std::string(context) + ": inconsistent host SoA sizes");
+    }
+}
+
+bool active_prefix_upload_all_enabled_0315j(const ParticleState& state) {
+    if (env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_UPLOAD_ALL_LEGACY_0315J")) return false;
+    if (env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_UPLOAD_ALL_FULL_VALIDATE_0315J")) return false;
+    if (state.Np == 0u) return true;
+    if (state.role.empty()) return state.NactiveFluid == 0u || state.NactiveFluid == state.Np;
+    // Avoid the legacy active_fluid_count() fallback here: if NactiveFluid is
+    // stale/zero for a state with an inactive reservoir, falling back to a full
+    // role scan would reintroduce the O(Np_total) cost that 0315j removes.
+    return state.NactiveFluid > 0u && state.NactiveFluid <= state.Np;
+}
+
+std::uint64_t active_prefix_count_no_fullscan_0315l(const ParticleState& state, const char* context) {
+    validate_particle_state_shape_only_0315j(state, context);
+    if (state.Np == 0u) return 0u;
+    if (state.role.empty()) return state.Np;
+    if (state.NactiveFluid == 0u) {
+        throw std::runtime_error(std::string(context) +
+            ": NactiveFluid is zero with explicit roles; compact/refresh active prefix before hot CUDA upload");
+    }
+    if (state.NactiveFluid > state.Np) {
+        throw std::runtime_error(std::string(context) + ": active prefix exceeds capacity");
+    }
+    return state.NactiveFluid;
 }
 
 template <typename T>
@@ -68,24 +122,31 @@ std::uint64_t fnv1a_bytes(std::uint64_t h, const void* data, std::size_t nbytes)
 }
 
 std::uint64_t cuda_particle_metadata_signature(const ParticleState& state) {
+    // 0315l: metadata signatures are evaluated in the hot
+    // upload_kinematics_with_cached_metadata() path.  Hashing mass/type/role
+    // over the full storage capacity kept the runtime proportional to the
+    // inactive reservoir.  Under the active-prefix invariant, inactive tail
+    // payload is free storage; only the active prefix and the logical
+    // [Fluid prefix][Inactive tail] layout must enter the cache key.
     constexpr std::uint64_t offset = 1469598103934665603ULL;
     std::uint64_t h = offset;
     const std::uint64_t n = state.Np;
-    const std::uint64_t nActive = active_fluid_count(state);
+    const std::uint64_t nActive = active_prefix_count_no_fullscan_0315l(state,
+        "cuda_particle_metadata_signature(0315l)");
     h = fnv1a_bytes(h, &n, sizeof(n));
     h = fnv1a_bytes(h, &nActive, sizeof(nActive));
-    const std::size_t nn = static_cast<std::size_t>(n);
-    if (n > 0u) {
-        h = fnv1a_bytes(h, state.mass.data(), nn * sizeof(double));
+    const std::size_t na = static_cast<std::size_t>(nActive);
+    if (nActive > 0u) {
+        h = fnv1a_bytes(h, state.mass.data(), na * sizeof(double));
         const bool hasType = !state.type.empty();
         const bool hasRole = !state.role.empty();
         h = fnv1a_bytes(h, &hasType, sizeof(hasType));
         h = fnv1a_bytes(h, &hasRole, sizeof(hasRole));
         if (hasType) {
-            h = fnv1a_bytes(h, state.type.data(), nn * sizeof(std::uint32_t));
+            h = fnv1a_bytes(h, state.type.data(), na * sizeof(std::uint32_t));
         }
         if (hasRole) {
-            h = fnv1a_bytes(h, state.role.data(), nn * sizeof(unsigned char));
+            h = fnv1a_bytes(h, state.role.data(), na * sizeof(unsigned char));
         }
     }
     return h;
@@ -122,6 +183,9 @@ struct CudaParticleState::Impl {
     std::uint64_t metadataSignature = 0u;
     std::uint64_t metadataParticles = 0u;
     bool metadataUploaded = false;
+    bool activePrefixRoleLayoutInitialized0315k = false;
+    std::uint64_t activePrefixRoleLayoutActive0315k = 0u;
+    std::uint64_t activePrefixRoleLayoutCapacity0315k = 0u;
 
     void release() {
         cuda_free_ptr(x);
@@ -138,6 +202,9 @@ struct CudaParticleState::Impl {
         metadataSignature = 0u;
         metadataParticles = 0u;
         metadataUploaded = false;
+        activePrefixRoleLayoutInitialized0315k = false;
+        activePrefixRoleLayoutActive0315k = 0u;
+        activePrefixRoleLayoutCapacity0315k = 0u;
     }
 };
 
@@ -256,10 +323,11 @@ void CudaParticleState::upload_positions(const ParticleState& state, CudaParticl
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_positions called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_positions");
+    const std::uint64_t nActive64 = active_prefix_count_no_fullscan_0315l(state,
+        "CudaParticleState::upload_positions(0315l)");
     ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    impl_->nActiveFluid = nActive64;
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesD = n * sizeof(double);
     const auto t0 = Clock::now();
     if (n > 0u) {
@@ -270,7 +338,7 @@ void CudaParticleState::upload_positions(const ParticleState& state, CudaParticl
         diag->uploadCalls += 1u;
         diag->hostToDeviceBytes += 2u * bytesD;
         diag->uploadSeconds += elapsed_seconds(t0);
-        diag->particles = state.Np;
+        diag->particles = nActive64;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
     }
@@ -282,10 +350,11 @@ void CudaParticleState::upload_velocities(const ParticleState& state, CudaPartic
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_velocities called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_velocities");
+    const std::uint64_t nActive64 = active_prefix_count_no_fullscan_0315l(state,
+        "CudaParticleState::upload_velocities(0315l)");
     ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    impl_->nActiveFluid = nActive64;
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesD = n * sizeof(double);
     const auto t0 = Clock::now();
     if (n > 0u) {
@@ -296,7 +365,7 @@ void CudaParticleState::upload_velocities(const ParticleState& state, CudaPartic
         diag->uploadCalls += 1u;
         diag->hostToDeviceBytes += 2u * bytesD;
         diag->uploadSeconds += elapsed_seconds(t0);
-        diag->particles = state.Np;
+        diag->particles = nActive64;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
     }
@@ -308,10 +377,11 @@ void CudaParticleState::upload_roles(const ParticleState& state, CudaParticleSta
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_roles called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_roles");
+    const std::uint64_t nActive64 = active_prefix_count_no_fullscan_0315l(state,
+        "CudaParticleState::upload_roles(0315l)");
     ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    impl_->nActiveFluid = nActive64;
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesR = n * sizeof(unsigned char);
     const unsigned char* roleHost = role_upload_ptr_or_null(state);
     const auto t0 = Clock::now();
@@ -329,7 +399,7 @@ void CudaParticleState::upload_roles(const ParticleState& state, CudaParticleSta
         diag->uploadCalls += 1u;
         diag->hostToDeviceBytes += bytesR;
         diag->uploadSeconds += elapsed_seconds(t0);
-        diag->particles = state.Np;
+        diag->particles = nActive64;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
     }
@@ -341,10 +411,11 @@ void CudaParticleState::upload_masses_and_roles(const ParticleState& state, Cuda
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_masses_and_roles called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_masses_and_roles");
+    const std::uint64_t nActive64 = active_prefix_count_no_fullscan_0315l(state,
+        "CudaParticleState::upload_masses_and_roles(0315l)");
     ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    impl_->nActiveFluid = nActive64;
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
     const std::size_t bytesR = n * sizeof(unsigned char);
@@ -368,7 +439,7 @@ void CudaParticleState::upload_masses_and_roles(const ParticleState& state, Cuda
         diag->uploadCalls += 1u;
         diag->hostToDeviceBytes += bytesD + bytesU + bytesR;
         diag->uploadSeconds += elapsed_seconds(t0);
-        diag->particles = state.Np;
+        diag->particles = nActive64;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
     }
@@ -380,36 +451,131 @@ void CudaParticleState::upload_all(const ParticleState& state, CudaParticleState
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_all called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_all");
-    ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
-    const std::size_t bytesD = n * sizeof(double);
-    const std::size_t bytesU = n * sizeof(std::uint32_t);
-    const std::size_t bytesR = n * sizeof(unsigned char);
-    const unsigned char* roleHost = role_upload_ptr_or_null(state);
-    const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
-    const auto t0 = Clock::now();
-    if (n > 0u) {
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->y, state.y.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->vy, state.vy.data(), bytesD, cudaMemcpyHostToDevice));
-        MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
-        if (typeHost != nullptr) {
-            MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost, bytesU, cudaMemcpyHostToDevice));
-        } else {
-            MPCD_CUDA_CHECK(cudaMemset(impl_->type, 0, bytesU));
-        }
-        if (roleHost != nullptr) {
-            MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
-        } else {
-            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
-        }
+    // 0315j: upload_all is still the first resident-CUDA entry point in many
+    // classic runs.  The legacy implementation copied x/y/vx/vy/mass/type/role
+    // over the full storage capacity, so short runs still scaled with the
+    // inactive reservoir even after all physical kernels were migrated to
+    // NactiveFluid.  In the active-prefix layout, inactive tail slots are free
+    // storage and their x/y/v/m/type payload is irrelevant until an insertion
+    // kernel overwrites it.  Upload only [0,NactiveFluid) and initialise role[]
+    // as [Fluid prefix][Inactive tail].
+    const bool legacyFullValidate0315j =
+        env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_UPLOAD_ALL_FULL_VALIDATE_0315J");
+    if (legacyFullValidate0315j) {
+        validate_particle_state(state, "CudaParticleState::upload_all(legacy full validate 0315j)");
+    } else {
+        validate_particle_state_shape_only_0315j(state, "CudaParticleState::upload_all(0315j)");
     }
+
+    ensure_capacity(state.Np, diag);
+
+    if (!active_prefix_upload_all_enabled_0315j(state)) {
+        // Legacy exact path for old/non-normalised states or debugging.
+        impl_->nActiveFluid = active_fluid_count(state);
+        const std::size_t n = static_cast<std::size_t>(state.Np);
+        const std::size_t bytesD = n * sizeof(double);
+        const std::size_t bytesU = n * sizeof(std::uint32_t);
+        const std::size_t bytesR = n * sizeof(unsigned char);
+        const unsigned char* roleHost = role_upload_ptr_or_null(state);
+        const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
+        const auto t0 = Clock::now();
+        if (n > 0u) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->y, state.y.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->vy, state.vy.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
+            if (typeHost != nullptr) {
+                MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, typeHost, bytesU, cudaMemcpyHostToDevice));
+            } else {
+                MPCD_CUDA_CHECK(cudaMemset(impl_->type, 0, bytesU));
+            }
+            if (roleHost != nullptr) {
+                MPCD_CUDA_CHECK(cudaMemcpy(impl_->role, roleHost, bytesR, cudaMemcpyHostToDevice));
+            } else {
+                MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesR));
+            }
+        }
+        impl_->metadataUploaded = false;
+        impl_->activePrefixRoleLayoutInitialized0315k = false;
+        impl_->activePrefixRoleLayoutActive0315k = 0u;
+        impl_->activePrefixRoleLayoutCapacity0315k = 0u;
+        if (diag != nullptr) {
+            diag->uploadCalls += 1u;
+            diag->hostToDeviceBytes += 5u * bytesD + bytesU + bytesR;
+            diag->uploadSeconds += elapsed_seconds(t0);
+            diag->particles = state.Np;
+            diag->capacity = impl_->capacity;
+            diag->allocatedBytes = impl_->allocatedBytes;
+        }
+        return;
+    }
+
+    const std::uint64_t nActive64 = state.role.empty() ? state.Np : state.NactiveFluid;
+    if (nActive64 > state.Np) {
+        throw std::runtime_error("CudaParticleState::upload_all(0315j): active prefix exceeds capacity");
+    }
+    impl_->nActiveFluid = nActive64;
+
+    const std::size_t nTotal = static_cast<std::size_t>(state.Np);
+    const std::size_t nActive = static_cast<std::size_t>(nActive64);
+    const std::size_t bytesD = nActive * sizeof(double);
+    const std::size_t bytesU = nActive * sizeof(std::uint32_t);
+    const std::size_t bytesRolePrefix = nActive * sizeof(unsigned char);
+    const bool forceFullRoleTail0315k =
+        env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_UPLOAD_FULL_ROLE_TAIL_0315K");
+    const bool needFullRoleTail0315k =
+        forceFullRoleTail0315k ||
+        !impl_->activePrefixRoleLayoutInitialized0315k ||
+        impl_->activePrefixRoleLayoutCapacity0315k != state.Np;
+    const std::uint64_t oldRoleActive0315k = impl_->activePrefixRoleLayoutActive0315k;
+    std::uint64_t roleBytesTouched0315k = 0u;
+    const auto t0 = Clock::now();
+    if (nTotal > 0u) {
+        if (nActive > 0u) {
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->y, state.y.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->vy, state.vy.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->mass, state.mass.data(), bytesD, cudaMemcpyHostToDevice));
+            MPCD_CUDA_CHECK(cudaMemcpy(impl_->type, state.type.data(), bytesU, cudaMemcpyHostToDevice));
+        }
+        // 0315k: the initial active-prefix upload must initialise role[] over
+        // the inactive tail when pool scans may later consume it, but doing a
+        // full-capacity cudaMemset on every wall/nonresident streaming step
+        // reintroduced O(Np_total) scaling.  After the layout is known on this
+        // allocation, refresh only the active prefix and, if Nactive shrank,
+        // the crossed tail slice.  A full repair remains available through
+        // MPCD_CUDA_ACTIVE_PREFIX_UPLOAD_FULL_ROLE_TAIL_0315K=1.
+        if (needFullRoleTail0315k) {
+            const std::size_t bytesRoleTotal = nTotal * sizeof(unsigned char);
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleInactive, bytesRoleTotal));
+            roleBytesTouched0315k += static_cast<std::uint64_t>(bytesRoleTotal);
+        } else if (oldRoleActive0315k > nActive64) {
+            const std::uint64_t delta = oldRoleActive0315k - nActive64;
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role + nActive, kParticleRoleInactive,
+                                       static_cast<std::size_t>(delta) * sizeof(unsigned char)));
+            roleBytesTouched0315k += delta * sizeof(unsigned char);
+        }
+        if (nActive > 0u) {
+            MPCD_CUDA_CHECK(cudaMemset(impl_->role, kParticleRoleFluid, bytesRolePrefix));
+            roleBytesTouched0315k += static_cast<std::uint64_t>(bytesRolePrefix);
+        }
+        impl_->activePrefixRoleLayoutInitialized0315k = true;
+        impl_->activePrefixRoleLayoutActive0315k = nActive64;
+        impl_->activePrefixRoleLayoutCapacity0315k = state.Np;
+    }
+
+    // The full metadata cache is deliberately invalidated: only the active
+    // prefix payload was uploaded.  Legacy CPU-owned kinematic paths that call
+    // upload_kinematics_with_cached_metadata() must refresh their own metadata.
+    impl_->metadataUploaded = false;
+    impl_->metadataSignature = 0u;
+    impl_->metadataParticles = 0u;
+
     if (diag != nullptr) {
         diag->uploadCalls += 1u;
-        diag->hostToDeviceBytes += 5u * bytesD + bytesU + bytesR;
+        diag->hostToDeviceBytes += static_cast<std::uint64_t>(5u * bytesD + bytesU) + roleBytesTouched0315k;
         diag->uploadSeconds += elapsed_seconds(t0);
         diag->particles = state.Np;
         diag->capacity = impl_->capacity;
@@ -425,10 +591,11 @@ void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleSta
     (void)state; (void)diag;
     throw std::runtime_error("CudaParticleState::upload_kinematics_with_cached_metadata called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
 #else
-    validate_particle_state(state, "CudaParticleState::upload_kinematics_with_cached_metadata");
+    const std::uint64_t nActive64 = active_prefix_count_no_fullscan_0315l(state,
+        "CudaParticleState::upload_kinematics_with_cached_metadata(0315l)");
     ensure_capacity(state.Np, diag);
-    impl_->nActiveFluid = active_fluid_count(state);
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    impl_->nActiveFluid = nActive64;
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesD = n * sizeof(double);
     const std::size_t bytesU = n * sizeof(std::uint32_t);
     const std::size_t bytesR = n * sizeof(unsigned char);
@@ -436,12 +603,14 @@ void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleSta
     const std::uint32_t* typeHost = type_upload_ptr_or_null(state);
     const std::uint64_t sig = cuda_particle_metadata_signature(state);
     const bool mustUploadMetadata =
-        !impl_->metadataUploaded || impl_->metadataParticles != state.Np || impl_->metadataSignature != sig;
+        !impl_->metadataUploaded || impl_->metadataParticles != state.Np ||
+        impl_->nActiveFluid != nActive64 || impl_->metadataSignature != sig;
 
     const auto t0 = Clock::now();
     if (n > 0u) {
-        // CPU transport still owns positions and velocities before this
-        // substep, so x/y/vx/vy must be refreshed every call.
+        // 0315l: CPU transport owns only the active prefix.  Inactive tail
+        // payloads are uninitialised free slots and must not be uploaded every
+        // step.
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->x, state.x.data(), bytesD, cudaMemcpyHostToDevice));
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->y, state.y.data(), bytesD, cudaMemcpyHostToDevice));
         MPCD_CUDA_CHECK(cudaMemcpy(impl_->vx, state.vx.data(), bytesD, cudaMemcpyHostToDevice));
@@ -462,11 +631,17 @@ void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleSta
             impl_->metadataSignature = sig;
             impl_->metadataParticles = state.Np;
             impl_->metadataUploaded = true;
+            impl_->activePrefixRoleLayoutActive0315k = nActive64;
+            impl_->activePrefixRoleLayoutCapacity0315k = state.Np;
+            impl_->activePrefixRoleLayoutInitialized0315k = true;
         }
     } else {
         impl_->metadataSignature = sig;
         impl_->metadataParticles = state.Np;
         impl_->metadataUploaded = true;
+        impl_->activePrefixRoleLayoutActive0315k = 0u;
+        impl_->activePrefixRoleLayoutCapacity0315k = state.Np;
+        impl_->activePrefixRoleLayoutInitialized0315k = true;
     }
 
     if (diag != nullptr) {
@@ -479,7 +654,7 @@ void CudaParticleState::upload_kinematics_with_cached_metadata(const ParticleSta
             diag->metadataBytesSkipped += bytesD + bytesU + bytesR;
         }
         diag->uploadSeconds += elapsed_seconds(t0);
-        diag->particles = state.Np;
+        diag->particles = nActive64;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
     }
@@ -494,8 +669,10 @@ void CudaParticleState::download_velocities(ParticleState& state, CudaParticleSt
 #else
     if (impl_ == nullptr) throw std::runtime_error("CudaParticleState::download_velocities: null impl");
     if (state.Np != impl_->n) throw std::runtime_error("CudaParticleState::download_velocities: host particle count mismatch");
-    validate_particle_state(state, "CudaParticleState::download_velocities");
-    const std::size_t n = static_cast<std::size_t>(state.Np);
+    validate_particle_state_shape_only_0315j(state, "CudaParticleState::download_velocities(0315l)");
+    const std::uint64_t nActive64 = impl_->nActiveFluid;
+    if (nActive64 > impl_->n) throw std::runtime_error("CudaParticleState::download_velocities: active count exceeds capacity");
+    const std::size_t n = static_cast<std::size_t>(nActive64);
     const std::size_t bytesD = n * sizeof(double);
     const auto t0 = Clock::now();
     if (n > 0u) {
@@ -507,9 +684,118 @@ void CudaParticleState::download_velocities(ParticleState& state, CudaParticleSt
         diag->downloadCalls += 1u;
         diag->deviceToHostBytes += 2u * bytesD;
         diag->downloadSeconds += elapsed_seconds(t0);
+        diag->particles = nActive64;
+        diag->capacity = impl_->capacity;
+        diag->allocatedBytes = impl_->allocatedBytes;
+    }
+#endif
+}
+
+
+void CudaParticleState::download_active_prefix(ParticleState& state, CudaParticleStateDiagnostics* diag) const {
+#ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    (void)state; (void)diag;
+    throw std::runtime_error("CudaParticleState::download_active_prefix called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    if (impl_ == nullptr) throw std::runtime_error("CudaParticleState::download_active_prefix: null impl");
+    if (state.Np != impl_->n) throw std::runtime_error("CudaParticleState::download_active_prefix: host particle count mismatch");
+
+    // 0315h: this routine is now on the hot path for remaining mixed
+    // host/device consumers after a CUDA inlet/outlet active-prefix mutation.
+    // The previous 0315c-fix06 implementation copied only the active prefix,
+    // but still performed two O(Np_total) host operations on every call:
+    //   - validate_particle_state()/validate_active_fluid_prefix() scanned role[];
+    //   - std::fill([Nactive,Np), Inactive) rewrote the entire inactive reservoir.
+    // With 1e6 reserved inactive slots this erased much of the active-prefix
+    // benefit.  Keep the production path O(Nactive + |delta Nactive|).  Full
+    // tail repair / full validation remain available for debugging.
+    const bool fullValidate0315h = env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_HOST_FULL_VALIDATE_0315H");
+    const bool fullTailRepair0315h = env_truthy_0315d("MPCD_CUDA_ACTIVE_PREFIX_HOST_TAIL_FULL_REPAIR_0315H");
+
+    if (fullValidate0315h) {
+        validate_particle_state(state, "CudaParticleState::download_active_prefix(before 0315h)");
+    } else {
+        const std::size_t nCheck = static_cast<std::size_t>(state.Np);
+        if (static_cast<std::uint64_t>(nCheck) != state.Np) {
+            throw std::runtime_error("CudaParticleState::download_active_prefix: host particle count does not fit size_t");
+        }
+        if (state.dim != 2u ||
+            state.x.size() != nCheck || state.y.size() != nCheck ||
+            state.vx.size() != nCheck || state.vy.size() != nCheck ||
+            state.mass.size() != nCheck || state.type.size() != nCheck ||
+            (!state.role.empty() && state.role.size() != nCheck) ||
+            state.NactiveFluid > state.Np) {
+            throw std::runtime_error("CudaParticleState::download_active_prefix: inconsistent host SoA sizes");
+        }
+    }
+
+    const std::uint64_t nActive64 = impl_->nActiveFluid;
+    if (nActive64 > impl_->n) throw std::runtime_error("CudaParticleState::download_active_prefix: active count exceeds capacity");
+    const std::size_t nTotal = static_cast<std::size_t>(state.Np);
+    const std::size_t nActive = static_cast<std::size_t>(nActive64);
+    if (static_cast<std::uint64_t>(nActive) != nActive64) {
+        throw std::runtime_error("CudaParticleState::download_active_prefix: active count does not fit size_t");
+    }
+
+    std::size_t oldActive = 0u;
+    if (!state.role.empty()) {
+        if (state.NactiveFluid <= state.Np) {
+            oldActive = static_cast<std::size_t>(state.NactiveFluid);
+        }
+    } else {
+        state.role.assign(nTotal, kParticleRoleInactive);
+    }
+
+    const std::size_t bytesD = nActive * sizeof(double);
+    const std::size_t bytesU = nActive * sizeof(std::uint32_t);
+    const auto t0 = Clock::now();
+    if (nActive > 0u) {
+        MPCD_CUDA_CHECK(cudaMemcpy(state.x.data(), impl_->x, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.y.data(), impl_->y, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.vx.data(), impl_->vx, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.vy.data(), impl_->vy, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.mass.data(), impl_->mass, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.type.data(), impl_->type, bytesU, cudaMemcpyDeviceToHost));
+    }
+
+    if (fullTailRepair0315h) {
+        std::fill(state.role.begin(), state.role.begin() + static_cast<std::ptrdiff_t>(nActive), kParticleRoleFluid);
+        std::fill(state.role.begin() + static_cast<std::ptrdiff_t>(nActive), state.role.end(), kParticleRoleInactive);
+    } else {
+        // 0315h-fix10: always repair the complete active prefix role mirror.
+        // The previous incremental-only update was too optimistic: after a
+        // CUDA IO/solid compaction, the active count may be unchanged while the
+        // host-side role pattern in [0,nActive) is stale.  Several CPU wrappers
+        // still use role[] as a guard even though they loop only on Nactive, so
+        // stale holes in the prefix changed the trajectory.  Repairing the
+        // prefix is O(Nactive), which is acceptable and still removes the
+        // catastrophic O(Np_total) inactive-tail scan/fill.
+        if (nActive > 0u) {
+            std::fill(state.role.begin(),
+                      state.role.begin() + static_cast<std::ptrdiff_t>(nActive),
+                      kParticleRoleFluid);
+        }
+
+        // Only repair the tail slice crossed since the previous host mirror.
+        // This preserves the 0315h objective: no full inactive reservoir sweep.
+        if (oldActive > nActive) {
+            std::fill(state.role.begin() + static_cast<std::ptrdiff_t>(nActive),
+                      state.role.begin() + static_cast<std::ptrdiff_t>(oldActive),
+                      kParticleRoleInactive);
+        }
+    }
+    state.NactiveFluid = nActive64;
+
+    if (diag != nullptr) {
+        diag->downloadCalls += 1u;
+        diag->deviceToHostBytes += 5u * bytesD + bytesU;
+        diag->downloadSeconds += elapsed_seconds(t0);
         diag->particles = state.Np;
         diag->capacity = impl_->capacity;
         diag->allocatedBytes = impl_->allocatedBytes;
+    }
+    if (fullValidate0315h) {
+        validate_active_fluid_prefix(state, "CudaParticleState::download_active_prefix(after 0315h)");
     }
 #endif
 }
@@ -566,6 +852,64 @@ void CudaParticleState::download_role_filtered(ParticleState& state,
     }
 
     const auto t0 = Clock::now();
+
+    // 0315d: with the active-prefix invariant, the overwhelmingly common
+    // production consumer is a fluid-only summary/dump.  Avoid downloading and
+    // scanning the full role array of the reserved inactive capacity; copy only
+    // [0, nActiveFluid).  A legacy full role scan remains available for
+    // debugging mixed latent tails.
+    if (keepRole == kParticleRoleFluid &&
+        !env_truthy_0315d("MPCD_CUDA_ROLE_FILTER_FULL_ROLE_SCAN_0315D")) {
+        const std::uint64_t nActive64 = impl_->nActiveFluid;
+        if (nActive64 > impl_->n) {
+            throw std::runtime_error("CudaParticleState::download_role_filtered: active count exceeds storage size");
+        }
+        const std::size_t nActive = static_cast<std::size_t>(nActive64);
+        if (static_cast<std::uint64_t>(nActive) != nActive64) {
+            throw std::runtime_error("CudaParticleState::download_role_filtered: active count does not fit size_t");
+        }
+
+        ParticleState out{};
+        out.dim = 2u;
+        out.Np = nActive64;
+        out.NactiveFluid = nActive64;
+        out.x.resize(nActive);
+        out.y.resize(nActive);
+        out.vx.resize(nActive);
+        out.vy.resize(nActive);
+        out.mass.resize(nActive);
+        out.type.resize(nActive);
+        out.role.assign(nActive, kParticleRoleFluid);
+
+        const std::size_t bytesD = nActive * sizeof(double);
+        const std::size_t bytesU = nActive * sizeof(std::uint32_t);
+        if (nActive > 0u) {
+            MPCD_CUDA_CHECK(cudaMemcpy(out.x.data(), impl_->x, bytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(out.y.data(), impl_->y, bytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(out.vx.data(), impl_->vx, bytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(out.vy.data(), impl_->vy, bytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(out.mass.data(), impl_->mass, bytesD, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_CHECK(cudaMemcpy(out.type.data(), impl_->type, bytesU, cudaMemcpyDeviceToHost));
+        }
+        validate_particle_state(out, "CudaParticleState::download_role_filtered(active-prefix 0315d)");
+        state = std::move(out);
+
+        if (roleCounts != nullptr) {
+            roleCounts->fluid = nActive64;
+            roleCounts->inactive = impl_->n - nActive64;
+            roleCounts->latent = 0u;
+        }
+        if (diag != nullptr) {
+            diag->downloadCalls += 1u;
+            diag->deviceToHostBytes += static_cast<std::uint64_t>(5u * bytesD + bytesU);
+            diag->downloadSeconds += elapsed_seconds(t0);
+            diag->particles = nActive64;
+            diag->capacity = impl_->capacity;
+            diag->allocatedBytes = impl_->allocatedBytes;
+        }
+        return;
+    }
+
     std::vector<unsigned char> roles(n, kParticleRoleFluid);
     if (n > 0u) {
         MPCD_CUDA_CHECK(cudaMemcpy(roles.data(), impl_->role, n * sizeof(unsigned char), cudaMemcpyDeviceToHost));
@@ -666,6 +1010,20 @@ CudaParticleDeviceView CudaParticleState::device_view() const {
 std::uint64_t CudaParticleState::size() const { return impl_ ? impl_->n : 0u; }
 std::uint64_t CudaParticleState::capacity() const { return impl_ ? impl_->capacity : 0u; }
 std::uint64_t CudaParticleState::active_fluid_size() const { return impl_ ? impl_->nActiveFluid : 0u; }
+
+void CudaParticleState::set_active_fluid_size(std::uint64_t nActiveFluid) {
+#ifdef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    if (impl_ == nullptr) throw std::runtime_error("CudaParticleState::set_active_fluid_size: null impl");
+    if (nActiveFluid > impl_->n) {
+        throw std::runtime_error("CudaParticleState::set_active_fluid_size: active count exceeds storage size");
+    }
+    impl_->nActiveFluid = nActiveFluid;
+#else
+    (void)nActiveFluid;
+    throw std::runtime_error("CudaParticleState::set_active_fluid_size called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#endif
+}
+
 std::uint64_t CudaParticleState::allocated_bytes() const { return impl_ ? impl_->allocatedBytes : 0u; }
 
 void cuda_particle_state_smoke_increment_fluid_velocities(CudaParticleState& gpuState,

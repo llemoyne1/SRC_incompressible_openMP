@@ -1125,7 +1125,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             if (sharedFresh) {
                 auto& gpuState = cuda_shared_particle_state_0251();
                 auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
-                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
                 raw.uploadSeconds += cellDiag.allocateSeconds;
@@ -1148,7 +1148,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
 #if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
             if (canUseSharedCellWorkspace) {
                 auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
-                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
             } else
@@ -1185,7 +1185,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             if (sharedFresh) {
                 auto& gpuState = cuda_shared_particle_state_0251();
                 auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
-                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
                 raw.uploadSeconds += cellDiag.allocateSeconds;
@@ -1207,7 +1207,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
 #if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
             if (canUseSharedCellWorkspace) {
                 auto& cellWorkspace = cuda_persistent_cell_workspace_tls();
-                cellWorkspace.ensure_capacity(state.Np, grid.Nx * grid.Ny, &cellDiag);
+                cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
             } else

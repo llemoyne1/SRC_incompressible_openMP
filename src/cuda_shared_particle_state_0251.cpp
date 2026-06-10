@@ -1,5 +1,8 @@
 #include "cuda_shared_particle_state_0251.h"
 
+#include <cstdlib>
+#include <string>
+
 namespace mpcd {
 
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
@@ -15,6 +18,14 @@ struct SharedParticleState0251Registry {
 SharedParticleState0251Registry& registry_0251() {
     static SharedParticleState0251Registry r;
     return r;
+}
+
+bool env_truthy_0315d(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return false;
+    const std::string s(v);
+    return !(s == "0" || s == "false" || s == "FALSE" ||
+             s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
 } // namespace
@@ -52,7 +63,16 @@ bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState& state) {
     if (!r.fresh) {
         return false;
     }
-    r.state.download_all(state, nullptr);
+    // 0315d: the shared CUDA state is authoritative in resident runs.  Host
+    // synchronization is now a lazy consumer operation for summaries/dumps,
+    // and inactive slots are storage only.  Download only the active fluid
+    // prefix by default instead of the full reserved capacity; retain the full
+    // download behind an explicit compatibility flag for legacy debugging.
+    if (env_truthy_0315d("MPCD_CUDA_SHARED_STATE_DOWNLOAD_ALL_LEGACY_0315D")) {
+        r.state.download_all(state, nullptr);
+    } else {
+        r.state.download_active_prefix(state, nullptr);
+    }
     return true;
 }
 

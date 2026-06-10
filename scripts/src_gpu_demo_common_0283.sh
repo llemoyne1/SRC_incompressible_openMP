@@ -261,10 +261,17 @@ run_demo_case_0283() {
   fi
   local dump_count=0
   dump_count=$(find "$out_dir" -maxdepth 1 -name 'state_step_*.smpcd' -type f | wc -l | tr -d ' ')
+  local require_dumps="${SRC_GPU_DEMO_REQUIRE_DUMPS:-1}"
   if [[ "$dump_count" == "0" ]]; then
-    echo "[0283-demo] ERROR: no animation dumps found in $out_dir" >&2
-    echo "[0283-demo] check dumpStateEvery in $params_file" >&2
-    exit 3
+    if [[ "$require_dumps" == "1" || "$require_dumps" == "true" || "$require_dumps" == "TRUE" ]]; then
+      echo "[0283-demo] ERROR: no animation dumps found in $out_dir" >&2
+      echo "[0283-demo] check dumpStateEvery in $params_file" >&2
+      echo "[0283-demo] set SRC_GPU_DEMO_REQUIRE_DUMPS=0 for benchmark/no-dump runs" >&2
+      exit 3
+    fi
+    echo "[0283-demo] summary: $out_dir/summary_runtime.csv"
+    echo "[0283-demo] dumps  : disabled/none (SRC_GPU_DEMO_REQUIRE_DUMPS=0)"
+    return 0
   fi
   echo "[0283-demo] summary: $out_dir/summary_runtime.csv"
   echo "[0283-demo] dumps  : $out_dir/state_step_*.smpcd ($dump_count files)"
@@ -349,8 +356,18 @@ src_gpu_cuda_env_periodic_resident_thermostat_0283() {
 
 src_gpu_cuda_env_wall_resident_thermostat_0283() {
   src_gpu_cuda_env_clear_0283
+  # 0315j-fix01: keep the validated wall-simple Poiseuille path by default.
+  # Enabling MPCD_CUDA_WALL_RESIDENT_FAST_0315J=1 switches to the experimental
+  # fully resident wall path for performance exploration, but it is not used by
+  # the regression/validation harness unless requested explicitly.
+  if src_gpu_bool_is_true_0283 "${MPCD_CUDA_WALL_RESIDENT_FAST_0315J:-0}"; then
+    export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=1
+    export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=0
+  else
+    export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=0
+    export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=1
+  fi
   export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
-  export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   src_gpu_cuda_env_enable_src_thermostat_0291b 0

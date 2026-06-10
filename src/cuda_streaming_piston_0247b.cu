@@ -249,7 +249,7 @@ CudaPistonStreaming0247bDiagnostics try_apply_cuda_piston_streaming_0247b(
         throw std::runtime_error("cuda_streaming_piston_0247b: too many y-wall reflections in one step");
     }
 
-    gpuState.download_all(state, &particleDiag);
+    gpuState.download_active_prefix(state, &particleDiag);
     cuda_shared_particle_state_0251_mark_fresh("streaming_piston_0247b");
     const auto tAfterDownload = Clock::now();
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -103,6 +104,25 @@ EXACT_COLUMNS = {
     "capacityResponseComputed", "capacityVirialKickApplied", "capacityReferenceCells",
 }
 
+
+
+
+def env_truthy_0315g(name: str) -> bool:
+    v = os.environ.get(name, "")
+    if not v:
+        return False
+    return v not in {"0", "false", "FALSE", "off", "OFF", "no", "NO"}
+
+
+def selected_columns_for_case_0315g(mode: str) -> List[str]:
+    # 0315g removes disabled-resampling runtime diagnostics from classic
+    # validation by default.  They were development/support diagnostics and
+    # forced host particle consumers even when resamplingEnable=false.  Keep
+    # comparing them for actual resampling mode, or when explicitly requested.
+    if mode == "classic" and not env_truthy_0315g("MPCD_COMPARE_DISABLED_RESAMPLING_DIAGNOSTICS_0315G"):
+        resamp = set(RESAMP_COLUMNS)
+        return [c for c in SELECTED_COLUMNS if c not in resamp]
+    return SELECTED_COLUMNS
 
 def read_csv(path: Path) -> List[Dict[str, str]]:
     if not path.exists() or path.stat().st_size == 0:
@@ -274,7 +294,8 @@ def main() -> int:
             verdict = "FAIL"
             failed = 1
         else:
-            details, compared, failed = compare_rows(ref_rows, test_rows, SELECTED_COLUMNS, args.abs_tol, args.rel_tol)
+            columns = selected_columns_for_case_0315g(mode)
+            details, compared, failed = compare_rows(ref_rows, test_rows, columns, args.abs_tol, args.rel_tol)
             for d in details:
                 dd = {"caseName": case, "modeName": mode}
                 dd.update(d)

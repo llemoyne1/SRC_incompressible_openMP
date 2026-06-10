@@ -320,7 +320,16 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     }
 
     if (downloadAll) {
-        gpuState.download_all(state, &particleDiag);
+        // 0315k: the validated nonresident wall-simple path still downloads
+        // after streaming so the downstream CPU boundary/collision wrappers see
+        // a coherent host state.  With the global active-prefix invariant that
+        // mirror only needs [0,NactiveFluid); copying the inactive reservoir is
+        // pure overhead and was the dominant Poiseuille scaling term.
+        if (env_truthy_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_DOWNLOAD_ALL_LEGACY_0315K")) {
+            gpuState.download_all(state, &particleDiag);
+        } else {
+            gpuState.download_active_prefix(state, &particleDiag);
+        }
     }
     cuda_shared_particle_state_0251_mark_fresh("streaming_wall_simple_0246");
     const auto tAfterDownload = Clock::now();

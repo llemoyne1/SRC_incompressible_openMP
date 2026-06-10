@@ -1299,6 +1299,589 @@ bool collect_tail_inactive_pool_0313(std::uint64_t n,
     return true;
 }
 
+
+// 0315c: device-side active-fluid prefix repair used after inlet/outlet
+// mutations. It replaces the 0315b-fix02 host roundtrip. 0315c-fix04 counts
+// the actual Fluid roles on-device after all mutations, then applies a
+// swap-tail compaction equivalent to compact_active_fluid_prefix(). This avoids
+// trusting inlet/outlet counters for the active-size invariant.
+struct ActivePrefixTemp0315c {
+    double* x = nullptr;
+    double* y = nullptr;
+    double* vx = nullptr;
+    double* vy = nullptr;
+    double* mass = nullptr;
+    std::uint32_t* type = nullptr;
+    std::uint64_t n = 0u;
+};
+
+void free_active_prefix_temp_0315c(ActivePrefixTemp0315c& t) {
+    if (t.x != nullptr) cudaFree(t.x);
+    if (t.y != nullptr) cudaFree(t.y);
+    if (t.vx != nullptr) cudaFree(t.vx);
+    if (t.vy != nullptr) cudaFree(t.vy);
+    if (t.mass != nullptr) cudaFree(t.mass);
+    if (t.type != nullptr) cudaFree(t.type);
+    t = {};
+}
+
+void allocate_active_prefix_temp_0315c(ActivePrefixTemp0315c& t, std::uint64_t n) {
+    t.n = n;
+    if (n == 0u) return;
+    const std::size_t nn = static_cast<std::size_t>(n);
+    if (static_cast<std::uint64_t>(nn) != n) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c active prefix temp size does not fit size_t");
+    }
+    check_cuda_0263(cudaMalloc(&t.x, nn * sizeof(double)), "allocate 0315c temp x");
+    check_cuda_0263(cudaMalloc(&t.y, nn * sizeof(double)), "allocate 0315c temp y");
+    check_cuda_0263(cudaMalloc(&t.vx, nn * sizeof(double)), "allocate 0315c temp vx");
+    check_cuda_0263(cudaMalloc(&t.vy, nn * sizeof(double)), "allocate 0315c temp vy");
+    check_cuda_0263(cudaMalloc(&t.mass, nn * sizeof(double)), "allocate 0315c temp mass");
+    check_cuda_0263(cudaMalloc(&t.type, nn * sizeof(std::uint32_t)), "allocate 0315c temp type");
+}
+
+__global__ void io_mark_fluid_flags_kernel_0315c(
+    std::uint64_t n,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    flags[i] = (role[i] == fluidRole) ? 1u : 0u;
+}
+
+__global__ void io_mark_tail_fluid_flags_kernel_0315c(
+    std::uint64_t n,
+    std::uint64_t tailScan,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailScan || k >= n) return;
+    const std::uint64_t start = n - tailScan;
+    const std::uint64_t i = start + k;
+    flags[k] = (role[i] == fluidRole) ? 1u : 0u;
+}
+
+__global__ void io_scatter_fluid_range_to_temp_kernel_0315c(
+    std::uint64_t n,
+    std::uint64_t srcOffset,
+    std::uint64_t dstOffset,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const double* __restrict__ mass,
+    const std::uint32_t* __restrict__ type,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    const unsigned int* __restrict__ flags,
+    const unsigned int* __restrict__ prefix,
+    double* __restrict__ tx,
+    double* __restrict__ ty,
+    double* __restrict__ tvx,
+    double* __restrict__ tvy,
+    double* __restrict__ tmass,
+    std::uint32_t* __restrict__ ttype)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= n) return;
+    if (flags[k] == 0u) return;
+    const std::uint64_t src = srcOffset + k;
+    if (role[src] != fluidRole) return;
+    const std::uint64_t dst = dstOffset + static_cast<std::uint64_t>(prefix[k]);
+    tx[dst] = x[src];
+    ty[dst] = y[src];
+    tvx[dst] = vx[src];
+    tvy[dst] = vy[src];
+    tmass[dst] = mass[src];
+    ttype[dst] = type[src];
+}
+
+__global__ void io_copy_temp_to_prefix_kernel_0315c(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    const double* __restrict__ tx,
+    const double* __restrict__ ty,
+    const double* __restrict__ tvx,
+    const double* __restrict__ tvy,
+    const double* __restrict__ tmass,
+    const std::uint32_t* __restrict__ ttype)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n) return;
+    x[i] = tx[i];
+    y[i] = ty[i];
+    vx[i] = tvx[i];
+    vy[i] = tvy[i];
+    mass[i] = tmass[i];
+    type[i] = ttype[i];
+    role[i] = fluidRole;
+}
+
+__global__ void io_set_role_range_kernel_0315c(
+    std::uint64_t start,
+    std::uint64_t n,
+    unsigned char* __restrict__ role,
+    unsigned char value)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= n) return;
+    role[start + k] = value;
+}
+
+unsigned int copy_scan_count_0315c(unsigned int* dFlags, unsigned int* dPrefix, std::uint64_t n, const char* context) {
+    if (n == 0u) return 0u;
+    unsigned int lastFlag = 0u;
+    unsigned int lastPrefix = 0u;
+    check_cuda_0263(cudaMemcpy(&lastFlag, dFlags + (n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost), context);
+    check_cuda_0263(cudaMemcpy(&lastPrefix, dPrefix + (n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost), context);
+    return lastPrefix + lastFlag;
+}
+
+void launch_set_role_range_0315c(std::uint64_t start,
+                                 std::uint64_t n,
+                                 unsigned char* role,
+                                 unsigned char value,
+                                 int threads,
+                                 const char* context) {
+    if (n == 0u) return;
+    const std::uint64_t blocks64 = (n + static_cast<std::uint64_t>(threads) - 1u) / static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0315c role cleanup");
+    }
+    io_set_role_range_kernel_0315c<<<static_cast<unsigned int>(blocks64), threads>>>(start, n, role, value);
+    check_cuda_0263(cudaGetLastError(), context);
+}
+
+
+__global__ void io_mark_prefix_hole_flags_kernel_0315c(
+    std::uint64_t nPrefix,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= nPrefix) return;
+    flags[i] = (role[i] == fluidRole) ? 0u : 1u;
+}
+
+__global__ void io_mark_tail_fluid_reverse_flags_kernel_0315c(
+    std::uint64_t nTotal,
+    std::uint64_t nActive,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t tailN = nTotal - nActive;
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailN) return;
+    const std::uint64_t idx = nTotal - 1u - k;
+    flags[k] = (role[idx] == fluidRole) ? 1u : 0u;
+}
+
+__global__ void io_collect_prefix_holes_kernel_0315c(
+    std::uint64_t nPrefix,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    const unsigned int* __restrict__ flags,
+    const unsigned int* __restrict__ prefix,
+    std::uint64_t* __restrict__ holeIndices)
+{
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= nPrefix) return;
+    if (flags[i] == 0u) return;
+    if (role[i] == fluidRole) return;
+    holeIndices[static_cast<std::uint64_t>(prefix[i])] = i;
+}
+
+__global__ void io_collect_tail_donors_reverse_kernel_0315c(
+    std::uint64_t nTotal,
+    std::uint64_t nActive,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    const unsigned int* __restrict__ flags,
+    const unsigned int* __restrict__ prefix,
+    std::uint64_t* __restrict__ donorIndices)
+{
+    const std::uint64_t tailN = nTotal - nActive;
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailN) return;
+    if (flags[k] == 0u) return;
+    const std::uint64_t idx = nTotal - 1u - k;
+    if (role[idx] != fluidRole) return;
+    donorIndices[static_cast<std::uint64_t>(prefix[k])] = idx;
+}
+
+__global__ void io_mark_tail_fluid_reverse_flags_kernel_0315k(
+    std::uint64_t nTotal,
+    std::uint64_t tailScan,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned int* __restrict__ flags)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailScan || k >= nTotal) return;
+    const std::uint64_t idx = nTotal - 1u - k;
+    flags[k] = (role[idx] == fluidRole) ? 1u : 0u;
+}
+
+__global__ void io_collect_tail_donors_bounded_reverse_kernel_0315k(
+    std::uint64_t nTotal,
+    std::uint64_t tailScan,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    const unsigned int* __restrict__ flags,
+    const unsigned int* __restrict__ prefix,
+    std::uint64_t* __restrict__ donorIndices)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= tailScan || k >= nTotal) return;
+    if (flags[k] == 0u) return;
+    const std::uint64_t idx = nTotal - 1u - k;
+    if (role[idx] != fluidRole) return;
+    donorIndices[static_cast<std::uint64_t>(prefix[k])] = idx;
+}
+
+
+__global__ void io_swap_particle_pairs_kernel_0315c(
+    std::uint64_t nPairs,
+    const std::uint64_t* __restrict__ holeIndices,
+    const std::uint64_t* __restrict__ donorIndices,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role)
+{
+    const std::uint64_t k = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (k >= nPairs) return;
+    const std::uint64_t a = holeIndices[k];
+    const std::uint64_t b = donorIndices[k];
+    if (a == b) return;
+
+    double td = x[a]; x[a] = x[b]; x[b] = td;
+    td = y[a]; y[a] = y[b]; y[b] = td;
+    td = vx[a]; vx[a] = vx[b]; vx[b] = td;
+    td = vy[a]; vy[a] = vy[b]; vy[b] = td;
+    td = mass[a]; mass[a] = mass[b]; mass[b] = td;
+
+    std::uint32_t tt = type[a]; type[a] = type[b]; type[b] = tt;
+    unsigned char tr = role[a]; role[a] = role[b]; role[b] = tr;
+}
+
+bool try_compact_active_prefix_bounded_0315k(CudaParticleState& gpuState,
+                                             ParticleState& state,
+                                             const std::uint64_t expectedActive,
+                                             const std::uint64_t tailScanHint,
+                                             const int threads,
+                                             CudaParticleStateDiagnostics& diag,
+                                             std::uint64_t& actualActiveOut)
+{
+    if (env_truthy_0263("MPCD_CUDA_ACTIVE_PREFIX_COMPACT_FULLSCAN_0315K") ||
+        env_truthy_0263("MPCD_CUDA_ACTIVE_PREFIX_COMPACT_FULLSCAN_0315C")) {
+        return false;
+    }
+    CudaParticleDeviceView view = gpuState.device_view();
+    if (view.n == 0u) {
+        actualActiveOut = 0u;
+        return true;
+    }
+    if (expectedActive > view.n) return false;
+    const std::uint64_t tailScan = std::min<std::uint64_t>(tailScanHint, view.n - expectedActive);
+    if (tailScan == 0u) return false;
+    if (expectedActive > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max()) ||
+        tailScan > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+        return false;
+    }
+
+    const auto t0 = Clock::now();
+    unsigned int* dHoleFlags = nullptr;
+    unsigned int* dHoleScan = nullptr;
+    unsigned int* dDonorFlags = nullptr;
+    unsigned int* dDonorScan = nullptr;
+    std::uint64_t* dHoleIndices = nullptr;
+    std::uint64_t* dDonorIndices = nullptr;
+    auto cleanup = [&]() {
+        if (dHoleFlags != nullptr) cudaFree(dHoleFlags);
+        if (dHoleScan != nullptr) cudaFree(dHoleScan);
+        if (dDonorFlags != nullptr) cudaFree(dDonorFlags);
+        if (dDonorScan != nullptr) cudaFree(dDonorScan);
+        if (dHoleIndices != nullptr) cudaFree(dHoleIndices);
+        if (dDonorIndices != nullptr) cudaFree(dDonorIndices);
+    };
+
+    try {
+        unsigned int holeCount = 0u;
+        if (expectedActive > 0u) {
+            check_cuda_0263(cudaMalloc(&dHoleFlags, sizeof(unsigned int) * static_cast<std::size_t>(expectedActive)),
+                            "allocate 0315k bounded hole flags");
+            check_cuda_0263(cudaMalloc(&dHoleScan, sizeof(unsigned int) * static_cast<std::size_t>(expectedActive)),
+                            "allocate 0315k bounded hole scan");
+            const std::uint64_t blocks64 = (expectedActive + static_cast<std::uint64_t>(threads) - 1u) /
+                                           static_cast<std::uint64_t>(threads);
+            if (blocks64 > static_cast<std::uint64_t>(2147483647)) { cleanup(); return false; }
+            io_mark_prefix_hole_flags_kernel_0315c<<<static_cast<unsigned int>(blocks64), threads>>>(
+                expectedActive, view.role, kParticleRoleFluid, dHoleFlags);
+            check_cuda_0263(cudaGetLastError(), "0315k bounded hole flag launch");
+            thrust::exclusive_scan(thrust::device, dHoleFlags, dHoleFlags + expectedActive, dHoleScan);
+            check_cuda_0263(cudaGetLastError(), "0315k bounded hole scan");
+            holeCount = copy_scan_count_0315c(dHoleFlags, dHoleScan, expectedActive,
+                                              "copy 0315k bounded hole count");
+        }
+
+        unsigned int donorCount = 0u;
+        check_cuda_0263(cudaMalloc(&dDonorFlags, sizeof(unsigned int) * static_cast<std::size_t>(tailScan)),
+                        "allocate 0315k bounded donor flags");
+        check_cuda_0263(cudaMalloc(&dDonorScan, sizeof(unsigned int) * static_cast<std::size_t>(tailScan)),
+                        "allocate 0315k bounded donor scan");
+        const std::uint64_t donorBlocks64 = (tailScan + static_cast<std::uint64_t>(threads) - 1u) /
+                                            static_cast<std::uint64_t>(threads);
+        if (donorBlocks64 > static_cast<std::uint64_t>(2147483647)) { cleanup(); return false; }
+        io_mark_tail_fluid_reverse_flags_kernel_0315k<<<static_cast<unsigned int>(donorBlocks64), threads>>>(
+            view.n, tailScan, view.role, kParticleRoleFluid, dDonorFlags);
+        check_cuda_0263(cudaGetLastError(), "0315k bounded donor flag launch");
+        thrust::exclusive_scan(thrust::device, dDonorFlags, dDonorFlags + tailScan, dDonorScan);
+        check_cuda_0263(cudaGetLastError(), "0315k bounded donor scan");
+        donorCount = copy_scan_count_0315c(dDonorFlags, dDonorScan, tailScan,
+                                           "copy 0315k bounded donor count");
+
+        if (holeCount != donorCount) {
+            cleanup();
+            return false;
+        }
+
+        if (holeCount > 0u) {
+            const std::uint64_t nPairs = static_cast<std::uint64_t>(holeCount);
+            check_cuda_0263(cudaMalloc(&dHoleIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(nPairs)),
+                            "allocate 0315k bounded hole indices");
+            check_cuda_0263(cudaMalloc(&dDonorIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(nPairs)),
+                            "allocate 0315k bounded donor indices");
+            const std::uint64_t holeBlocks64 = (expectedActive + static_cast<std::uint64_t>(threads) - 1u) /
+                                               static_cast<std::uint64_t>(threads);
+            io_collect_prefix_holes_kernel_0315c<<<static_cast<unsigned int>(holeBlocks64), threads>>>(
+                expectedActive, view.role, kParticleRoleFluid, dHoleFlags, dHoleScan, dHoleIndices);
+            check_cuda_0263(cudaGetLastError(), "0315k bounded collect holes launch");
+            io_collect_tail_donors_bounded_reverse_kernel_0315k<<<static_cast<unsigned int>(donorBlocks64), threads>>>(
+                view.n, tailScan, view.role, kParticleRoleFluid, dDonorFlags, dDonorScan, dDonorIndices);
+            check_cuda_0263(cudaGetLastError(), "0315k bounded collect donors launch");
+            const std::uint64_t swapBlocks64 = (nPairs + static_cast<std::uint64_t>(threads) - 1u) /
+                                               static_cast<std::uint64_t>(threads);
+            if (swapBlocks64 > static_cast<std::uint64_t>(2147483647)) { cleanup(); return false; }
+            io_swap_particle_pairs_kernel_0315c<<<static_cast<unsigned int>(swapBlocks64), threads>>>(
+                nPairs, dHoleIndices, dDonorIndices,
+                view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
+            check_cuda_0263(cudaGetLastError(), "0315k bounded swaps launch");
+        }
+
+        check_cuda_0263(cudaDeviceSynchronize(), "0315k bounded active-prefix compaction synchronize");
+        gpuState.set_active_fluid_size(expectedActive);
+        state.NactiveFluid = expectedActive;
+        actualActiveOut = expectedActive;
+        cleanup();
+        diag.kernelSeconds += elapsed_0263(t0, Clock::now());
+        diag.particles = expectedActive;
+        diag.capacity = view.capacity;
+        return true;
+    } catch (...) {
+        cleanup();
+        throw;
+    }
+}
+
+std::uint64_t compact_active_prefix_device_0315c(CudaParticleState& gpuState,
+                                                 ParticleState& state,
+                                                 const std::uint64_t oldActive,
+                                                 const std::uint64_t expectedActive,
+                                                 const std::uint64_t tailScanHint,
+                                                 CudaParticleStateDiagnostics& diag)
+{
+    (void)oldActive;
+    (void)tailScanHint;
+
+    CudaParticleDeviceView view = gpuState.device_view();
+    if (view.n == 0u) {
+        state.NactiveFluid = 0u;
+        gpuState.set_active_fluid_size(0u);
+        return 0u;
+    }
+    if (expectedActive > view.n) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: invalid 0315c active-prefix bounds");
+    }
+
+    const auto t0 = Clock::now();
+    const int threads = std::max(32, env_int_0263("MPCD_CUDA_ACTIVE_PREFIX_COMPACT_THREADS_0315C", 256));
+
+    // 0315k: in the hard-inlet resident path, inserted particles are allocated
+    // from a bounded tail pool.  The exact 0315c-fix04 repair scanned role[] over
+    // the full storage capacity to recompute actualActive and find donors, which
+    // made box/step runtime scale with inactive slots.  Try the bounded repair
+    // first; if the step is deletion-only or otherwise outside that invariant,
+    // fall back to the exact full scan below.
+    std::uint64_t boundedActual0315k = 0u;
+    if (try_compact_active_prefix_bounded_0315k(gpuState, state, expectedActive,
+                                                tailScanHint, threads, diag, boundedActual0315k)) {
+        return boundedActual0315k;
+    }
+
+    if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c exact swap scan range exceeds uint capacity");
+    }
+
+    unsigned int* dAllFluidFlags = nullptr;
+    unsigned int* dAllFluidScan = nullptr;
+    unsigned int* dHoleFlags = nullptr;
+    unsigned int* dHoleScan = nullptr;
+    unsigned int* dDonorFlags = nullptr;
+    unsigned int* dDonorScan = nullptr;
+    std::uint64_t* dHoleIndices = nullptr;
+    std::uint64_t* dDonorIndices = nullptr;
+
+    auto cleanup = [&]() {
+        if (dAllFluidFlags != nullptr) cudaFree(dAllFluidFlags);
+        if (dAllFluidScan != nullptr) cudaFree(dAllFluidScan);
+        if (dHoleFlags != nullptr) cudaFree(dHoleFlags);
+        if (dHoleScan != nullptr) cudaFree(dHoleScan);
+        if (dDonorFlags != nullptr) cudaFree(dDonorFlags);
+        if (dDonorScan != nullptr) cudaFree(dDonorScan);
+        if (dHoleIndices != nullptr) cudaFree(dHoleIndices);
+        if (dDonorIndices != nullptr) cudaFree(dDonorIndices);
+    };
+
+    try {
+        check_cuda_0263(cudaMalloc(&dAllFluidFlags, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                        "allocate 0315c-fix04 all-fluid flags");
+        check_cuda_0263(cudaMalloc(&dAllFluidScan, sizeof(unsigned int) * static_cast<std::size_t>(view.n)),
+                        "allocate 0315c-fix04 all-fluid scan");
+        const std::uint64_t allBlocks64 = (view.n + static_cast<std::uint64_t>(threads) - 1u) /
+                                          static_cast<std::uint64_t>(threads);
+        if (allBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+            throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0315c-fix04 active count");
+        }
+        io_mark_fluid_flags_kernel_0315c<<<static_cast<unsigned int>(allBlocks64), threads>>>(
+            view.n, view.role, kParticleRoleFluid, dAllFluidFlags);
+        check_cuda_0263(cudaGetLastError(), "io_mark_fluid_flags_kernel_0315c active-count launch");
+        thrust::exclusive_scan(thrust::device, dAllFluidFlags, dAllFluidFlags + view.n, dAllFluidScan);
+        check_cuda_0263(cudaGetLastError(), "0315c-fix04 all-fluid exclusive scan");
+        const unsigned int actualActive32 = copy_scan_count_0315c(dAllFluidFlags, dAllFluidScan, view.n,
+                                                                  "copy 0315c-fix04 active count");
+        const std::uint64_t actualActive = static_cast<std::uint64_t>(actualActive32);
+        if (env_truthy_0263("MPCD_CUDA_ACTIVE_PREFIX_STRICT_EXPECTED_0315C") && actualActive != expectedActive) {
+            throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c-fix04 actual active count differs from inlet/outlet counter prediction");
+        }
+
+        unsigned int holeCount = 0u;
+        if (actualActive > 0u) {
+            check_cuda_0263(cudaMalloc(&dHoleFlags, sizeof(unsigned int) * static_cast<std::size_t>(actualActive)),
+                            "allocate 0315c exact hole flags");
+            check_cuda_0263(cudaMalloc(&dHoleScan, sizeof(unsigned int) * static_cast<std::size_t>(actualActive)),
+                            "allocate 0315c exact hole scan");
+            const std::uint64_t blocks64 = (actualActive + static_cast<std::uint64_t>(threads) - 1u) /
+                                           static_cast<std::uint64_t>(threads);
+            if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0315c exact holes");
+            }
+            io_mark_prefix_hole_flags_kernel_0315c<<<static_cast<unsigned int>(blocks64), threads>>>(
+                actualActive, view.role, kParticleRoleFluid, dHoleFlags);
+            check_cuda_0263(cudaGetLastError(), "io_mark_prefix_hole_flags_kernel_0315c launch");
+            thrust::exclusive_scan(thrust::device, dHoleFlags, dHoleFlags + actualActive, dHoleScan);
+            check_cuda_0263(cudaGetLastError(), "0315c exact hole exclusive scan");
+            holeCount = copy_scan_count_0315c(dHoleFlags, dHoleScan, actualActive,
+                                              "copy 0315c exact hole scan count");
+        }
+
+        const std::uint64_t tailN = view.n - actualActive;
+        unsigned int donorCount = 0u;
+        if (tailN > 0u) {
+            check_cuda_0263(cudaMalloc(&dDonorFlags, sizeof(unsigned int) * static_cast<std::size_t>(tailN)),
+                            "allocate 0315c exact donor flags");
+            check_cuda_0263(cudaMalloc(&dDonorScan, sizeof(unsigned int) * static_cast<std::size_t>(tailN)),
+                            "allocate 0315c exact donor scan");
+            const std::uint64_t blocks64 = (tailN + static_cast<std::uint64_t>(threads) - 1u) /
+                                           static_cast<std::uint64_t>(threads);
+            if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0315c exact donors");
+            }
+            io_mark_tail_fluid_reverse_flags_kernel_0315c<<<static_cast<unsigned int>(blocks64), threads>>>(
+                view.n, actualActive, view.role, kParticleRoleFluid, dDonorFlags);
+            check_cuda_0263(cudaGetLastError(), "io_mark_tail_fluid_reverse_flags_kernel_0315c launch");
+            thrust::exclusive_scan(thrust::device, dDonorFlags, dDonorFlags + tailN, dDonorScan);
+            check_cuda_0263(cudaGetLastError(), "0315c exact donor exclusive scan");
+            donorCount = copy_scan_count_0315c(dDonorFlags, dDonorScan, tailN,
+                                               "copy 0315c exact donor scan count");
+        }
+
+        if (holeCount != donorCount) {
+            throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c exact swap compaction count mismatch");
+        }
+
+        if (holeCount > 0u) {
+            const std::uint64_t nPairs = static_cast<std::uint64_t>(holeCount);
+            check_cuda_0263(cudaMalloc(&dHoleIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(nPairs)),
+                            "allocate 0315c exact hole indices");
+            check_cuda_0263(cudaMalloc(&dDonorIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(nPairs)),
+                            "allocate 0315c exact donor indices");
+
+            const std::uint64_t holeBlocks64 = (actualActive + static_cast<std::uint64_t>(threads) - 1u) /
+                                               static_cast<std::uint64_t>(threads);
+            io_collect_prefix_holes_kernel_0315c<<<static_cast<unsigned int>(holeBlocks64), threads>>>(
+                actualActive, view.role, kParticleRoleFluid, dHoleFlags, dHoleScan, dHoleIndices);
+            check_cuda_0263(cudaGetLastError(), "io_collect_prefix_holes_kernel_0315c launch");
+
+            const std::uint64_t donorBlocks64 = (tailN + static_cast<std::uint64_t>(threads) - 1u) /
+                                                static_cast<std::uint64_t>(threads);
+            io_collect_tail_donors_reverse_kernel_0315c<<<static_cast<unsigned int>(donorBlocks64), threads>>>(
+                view.n, actualActive, view.role, kParticleRoleFluid, dDonorFlags, dDonorScan, dDonorIndices);
+            check_cuda_0263(cudaGetLastError(), "io_collect_tail_donors_reverse_kernel_0315c launch");
+
+            const std::uint64_t swapBlocks64 = (nPairs + static_cast<std::uint64_t>(threads) - 1u) /
+                                               static_cast<std::uint64_t>(threads);
+            if (swapBlocks64 > static_cast<std::uint64_t>(2147483647)) {
+                throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0315c exact swaps");
+            }
+            io_swap_particle_pairs_kernel_0315c<<<static_cast<unsigned int>(swapBlocks64), threads>>>(
+                nPairs, dHoleIndices, dDonorIndices,
+                view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
+            check_cuda_0263(cudaGetLastError(), "io_swap_particle_pairs_kernel_0315c launch");
+        }
+
+        check_cuda_0263(cudaDeviceSynchronize(), "0315c exact active-prefix swap compaction synchronize");
+        gpuState.set_active_fluid_size(actualActive);
+        state.NactiveFluid = actualActive;
+        cleanup();
+        diag.kernelSeconds += elapsed_0263(t0, Clock::now());
+        diag.particles = actualActive;
+        diag.capacity = view.capacity;
+        return actualActive;
+    } catch (...) {
+        cleanup();
+        throw;
+    }
+}
+
 __device__ void activate_reservoir_pool_slot_device_0268(
     double* __restrict__ x,
     double* __restrict__ y,
@@ -1968,7 +2551,8 @@ void maybe_apply_forced_outlet_extraction_0291(
     const char* context,
     unsigned long long equilibriumPredictedInletInsertions = 0ULL)
 {
-    if (cfg.outletRegimeCode == 0 || view.n == 0u) return;
+    const std::uint64_t nActiveFluid = view.nActiveFluid;
+    if (cfg.outletRegimeCode == 0 || nActiveFluid == 0u) return;
 
     CudaForcedOutletBudget0291 hBudget{};
     if (cfg.outletRegimeCode == 1) {
@@ -1999,32 +2583,19 @@ void maybe_apply_forced_outlet_extraction_0291(
 
     const int threads = env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0291_FORCED_OUTLET_THREADS",
                                     env_int_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_BOUNDARY_THREADS", 256));
-    const std::uint64_t blocks64 = (view.n + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         check_cuda_0263(cudaFree(dBudget), "free forced outlet budget after grid-too-large");
         throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0291 forced outlet extraction launch");
     }
     io_forced_outlet_extraction_kernel_0291<<<static_cast<unsigned int>(blocks64), threads>>>(
-        view.n, view.x, view.y, view.mass, view.role,
+        nActiveFluid, view.x, view.y, view.mass, view.role,
         kParticleRoleFluid, kParticleRoleInactive, cfg, dBudget, dCounters);
     check_cuda_0263(cudaGetLastError(), context);
     check_cuda_0263(cudaFree(dBudget), "free forced outlet budget 0291");
 }
 
-void repair_active_prefix_after_io_mutation_0315b(CudaParticleState& gpuState,
-                                                 ParticleState& state,
-                                                 CudaParticleStateDiagnostics& diag)
-{
-    // 0315b-fix02: resident inlet/outlet kernels can mark active particles
-    // inactive and activate reservoir slots outside the current active prefix.
-    // Until 315c introduces a true device-side active-prefix/free-list update,
-    // conservatively rebuild the host prefix and re-upload it so all subsequent
-    // physical kernels that run on nActiveFluid see a compact Fluid prefix.
-    gpuState.download_all(state, &diag);
-    compact_active_fluid_prefix(state);
-    gpuState.upload_all(state, &diag);
-}
 
 } // namespace
 
@@ -2128,6 +2699,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear counters");
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
+    std::uint64_t activePrefixCompactTailScan0315c = 0u;
+    const std::uint64_t oldActivePrefix0315c = nActiveFluid;
     const bool serialBoundary0267 = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY");
     if (serialBoundary0267) {
         io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
@@ -2168,9 +2741,11 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
                 static_cast<std::uint64_t>(equilibriumPredictedInsertions0293));
             std::uint64_t* dInactiveIndices = nullptr;
             unsigned int inactiveCount = 0u;
+            const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
             bool usedTailPool0313 = collect_tail_inactive_pool_0313(
                 view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
                 &dInactiveIndices, &inactiveCount);
+            if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
 
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
@@ -2259,8 +2834,28 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     }
 
     CudaParticleStateDiagnostics prefixRepairDiag{};
-    repair_active_prefix_after_io_mutation_0315b(gpuState, state, prefixRepairDiag);
-    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_boundary_0263_prefix_repaired_0315b");
+    const std::uint64_t deleted0315c = static_cast<std::uint64_t>(h.inletReservoirDeleted + h.inletBackflowDeleted + h.outletParticlesDeleted);
+    if (deleted0315c > oldActivePrefix0315c) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c deletion count exceeds active prefix");
+    }
+    const std::uint64_t expectedActive0315c = oldActivePrefix0315c - deleted0315c +
+                                             static_cast<std::uint64_t>(h.inletParticlesInserted);
+    const std::uint64_t actualActive0315c = compact_active_prefix_device_0315c(
+        gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+        activePrefixCompactTailScan0315c, prefixRepairDiag);
+    // 0315d: keep the device state authoritative after inlet/outlet mutation.
+    // The 0315c-fix06 eager host mirror was functionally safe but expensive
+    // for large active prefixes.  By default we now update only the logical
+    // active count on the host; runtime summaries/dumps pull an active-prefix
+    // mirror lazily through cuda_shared_particle_state_0251_download_if_fresh().
+    // Use MPCD_CUDA_ACTIVE_PREFIX_EAGER_HOST_MIRROR_0315D=1 for legacy
+    // step-by-step debugging.
+    if (env_truthy_0263("MPCD_CUDA_ACTIVE_PREFIX_EAGER_HOST_MIRROR_0315D")) {
+        gpuState.download_active_prefix(state, &prefixRepairDiag);
+    } else {
+        state.NactiveFluid = actualActive0315c;
+    }
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_boundary_0263_prefix_compacted_0315c");
     const auto tAfterDownload = Clock::now();
 
     BoundaryDiagnostics b{};
@@ -2293,13 +2888,13 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     diag.handled = true;
     diag.applied = true;
     diag.boundary = b;
-    diag.fluidParticles = static_cast<std::uint64_t>(h.fluidParticles);
+    diag.fluidParticles = actualActive0315c;
     diag.allocationCalls = particleDiag.allocationCalls + prefixRepairDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls + prefixRepairDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls + prefixRepairDiag.downloadCalls;
     diag.uploadSeconds = elapsed_0263(t0, tAfterUpload) + prefixRepairDiag.uploadSeconds;
-    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
-    diag.downloadSeconds = prefixRepairDiag.downloadSeconds;
+    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel) + prefixRepairDiag.kernelSeconds;
+    diag.downloadSeconds = 0.0;
     diag.totalSeconds = elapsed_0263(t0, tAfterDownload);
     return diag;
 }
@@ -2389,6 +2984,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear segmented counters");
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
+    std::uint64_t activePrefixCompactTailScan0315c = 0u;
+    const std::uint64_t oldActivePrefix0315c = nActiveFluid;
     const bool serialBoundary0267 = env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY");
     if (serialBoundary0267) {
         io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
@@ -2426,9 +3023,11 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
                 static_cast<std::uint64_t>(equilibriumPredictedInsertions0293));
             std::uint64_t* dInactiveIndices = nullptr;
             unsigned int inactiveCount = 0u;
+            const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
             bool usedTailPool0313 = collect_tail_inactive_pool_0313(
                 view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
                 &dInactiveIndices, &inactiveCount);
+            if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
 
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
@@ -2514,8 +3113,24 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     }
 
     CudaParticleStateDiagnostics prefixRepairDiag{};
-    repair_active_prefix_after_io_mutation_0315b(gpuState, state, prefixRepairDiag);
-    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_boundary_0264_prefix_repaired_0315b");
+    const std::uint64_t deleted0315c = static_cast<std::uint64_t>(h.inletReservoirDeleted + h.inletBackflowDeleted + h.outletParticlesDeleted);
+    if (deleted0315c > oldActivePrefix0315c) {
+        throw std::runtime_error("cuda_classic_src_io_resident_0263: 0315c segmented deletion count exceeds active prefix");
+    }
+    const std::uint64_t expectedActive0315c = oldActivePrefix0315c - deleted0315c +
+                                             static_cast<std::uint64_t>(h.inletParticlesInserted);
+    const std::uint64_t actualActive0315c = compact_active_prefix_device_0315c(
+        gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+        activePrefixCompactTailScan0315c, prefixRepairDiag);
+    // 0315d: lazy host mirror for segmented inlet/outlet as well.  Keep only
+    // the logical active count on the host during normal resident execution;
+    // summaries/dumps synchronize the active prefix on demand.
+    if (env_truthy_0263("MPCD_CUDA_ACTIVE_PREFIX_EAGER_HOST_MIRROR_0315D")) {
+        gpuState.download_active_prefix(state, &prefixRepairDiag);
+    } else {
+        state.NactiveFluid = actualActive0315c;
+    }
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_boundary_0264_prefix_compacted_0315c");
     const auto tAfterDownload = Clock::now();
 
     BoundaryDiagnostics b{};
@@ -2548,13 +3163,13 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     diag.handled = true;
     diag.applied = true;
     diag.boundary = b;
-    diag.fluidParticles = static_cast<std::uint64_t>(h.fluidParticles);
+    diag.fluidParticles = actualActive0315c;
     diag.allocationCalls = particleDiag.allocationCalls + prefixRepairDiag.allocationCalls;
     diag.uploadCalls = particleDiag.uploadCalls + prefixRepairDiag.uploadCalls;
     diag.downloadCalls = particleDiag.downloadCalls + prefixRepairDiag.downloadCalls;
     diag.uploadSeconds = elapsed_0263(t0, tAfterUpload) + prefixRepairDiag.uploadSeconds;
-    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
-    diag.downloadSeconds = prefixRepairDiag.downloadSeconds;
+    diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel) + prefixRepairDiag.kernelSeconds;
+    diag.downloadSeconds = 0.0;
     diag.totalSeconds = elapsed_0263(t0, tAfterDownload);
     return diag;
 }
