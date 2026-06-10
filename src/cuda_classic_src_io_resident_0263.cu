@@ -2012,6 +2012,20 @@ void maybe_apply_forced_outlet_extraction_0291(
     check_cuda_0263(cudaFree(dBudget), "free forced outlet budget 0291");
 }
 
+void repair_active_prefix_after_io_mutation_0315b(CudaParticleState& gpuState,
+                                                 ParticleState& state,
+                                                 CudaParticleStateDiagnostics& diag)
+{
+    // 0315b-fix02: resident inlet/outlet kernels can mark active particles
+    // inactive and activate reservoir slots outside the current active prefix.
+    // Until 315c introduces a true device-side active-prefix/free-list update,
+    // conservatively rebuild the host prefix and re-upload it so all subsequent
+    // physical kernels that run on nActiveFluid see a compact Fluid prefix.
+    gpuState.download_all(state, &diag);
+    compact_active_fluid_prefix(state);
+    gpuState.upload_all(state, &diag);
+}
+
 } // namespace
 
 bool cuda_classic_src_io_fullface_resident_0263_requested() {
@@ -2244,7 +2258,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
             " fluidAfterBoundary=" + std::to_string(static_cast<unsigned long long>(h.fluidParticles)));
     }
 
-    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_boundary_0263");
+    CudaParticleStateDiagnostics prefixRepairDiag{};
+    repair_active_prefix_after_io_mutation_0315b(gpuState, state, prefixRepairDiag);
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_fullface_boundary_0263_prefix_repaired_0315b");
     const auto tAfterDownload = Clock::now();
 
     BoundaryDiagnostics b{};
@@ -2278,12 +2294,12 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     diag.applied = true;
     diag.boundary = b;
     diag.fluidParticles = static_cast<std::uint64_t>(h.fluidParticles);
-    diag.allocationCalls = particleDiag.allocationCalls;
-    diag.uploadCalls = particleDiag.uploadCalls;
-    diag.downloadCalls = particleDiag.downloadCalls;
-    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload);
+    diag.allocationCalls = particleDiag.allocationCalls + prefixRepairDiag.allocationCalls;
+    diag.uploadCalls = particleDiag.uploadCalls + prefixRepairDiag.uploadCalls;
+    diag.downloadCalls = particleDiag.downloadCalls + prefixRepairDiag.downloadCalls;
+    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload) + prefixRepairDiag.uploadSeconds;
     diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
-    diag.downloadSeconds = elapsed_0263(tAfterKernel, tAfterDownload);
+    diag.downloadSeconds = prefixRepairDiag.downloadSeconds;
     diag.totalSeconds = elapsed_0263(t0, tAfterDownload);
     return diag;
 }
@@ -2497,7 +2513,9 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
             " fluidAfterBoundary=" + std::to_string(static_cast<unsigned long long>(h.fluidParticles)));
     }
 
-    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_boundary_0264");
+    CudaParticleStateDiagnostics prefixRepairDiag{};
+    repair_active_prefix_after_io_mutation_0315b(gpuState, state, prefixRepairDiag);
+    cuda_shared_particle_state_0251_mark_fresh("classic_src_io_segmented_boundary_0264_prefix_repaired_0315b");
     const auto tAfterDownload = Clock::now();
 
     BoundaryDiagnostics b{};
@@ -2531,12 +2549,12 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     diag.applied = true;
     diag.boundary = b;
     diag.fluidParticles = static_cast<std::uint64_t>(h.fluidParticles);
-    diag.allocationCalls = particleDiag.allocationCalls;
-    diag.uploadCalls = particleDiag.uploadCalls;
-    diag.downloadCalls = particleDiag.downloadCalls;
-    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload);
+    diag.allocationCalls = particleDiag.allocationCalls + prefixRepairDiag.allocationCalls;
+    diag.uploadCalls = particleDiag.uploadCalls + prefixRepairDiag.uploadCalls;
+    diag.downloadCalls = particleDiag.downloadCalls + prefixRepairDiag.downloadCalls;
+    diag.uploadSeconds = elapsed_0263(t0, tAfterUpload) + prefixRepairDiag.uploadSeconds;
     diag.kernelSeconds = elapsed_0263(tAfterUpload, tAfterKernel);
-    diag.downloadSeconds = elapsed_0263(tAfterKernel, tAfterDownload);
+    diag.downloadSeconds = prefixRepairDiag.downloadSeconds;
     diag.totalSeconds = elapsed_0263(t0, tAfterDownload);
     return diag;
 }

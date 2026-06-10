@@ -1243,6 +1243,13 @@ BoundaryDiagnostics apply_hard_inlet_reservoir_boundary(ParticleState& state,
                                          inactiveSlots, inactiveCursor, diag);
     }
 
+    // 0315b-fix02: hard inlet/outlet mutates Fluid <-> Inactive roles.
+    // Restore the global active-fluid prefix before any later physical
+    // operator uses NactiveFluid as its logical particle range. 315c will
+    // replace this conservative full compaction by an incremental free-list
+    // update, but correctness must not depend on scanning inactive slots.
+    compact_active_fluid_prefix(state);
+
     diag.inletReservoirMeanN = cells.empty() ? 0.0 : static_cast<double>(params.inletTargetOccupancy);
     diag.inletReservoirStdN = 0.0;
     diag.inletReservoirMinN = cells.empty() ? 0u : static_cast<std::uint32_t>(params.inletTargetOccupancy);

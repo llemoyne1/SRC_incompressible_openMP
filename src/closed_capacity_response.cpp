@@ -87,12 +87,13 @@ void deposit_cell_mass_for_capacity(const ParticleState& state,
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
     std::fill(ws.cellId.begin(), ws.cellId.end(), -1);
 
+    const std::size_t nActive = active_fluid_count_size(state);
+
 #pragma omp parallel
     {
         const int tid = thread_id();
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 #pragma omp for
-        const std::size_t nActive = active_fluid_count_size(state);
         for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nActive); ++ii) {
             const std::size_t i = static_cast<std::size_t>(ii);
             if (!is_fluid_particle(state, i)) continue;
