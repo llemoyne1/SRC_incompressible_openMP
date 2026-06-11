@@ -1385,18 +1385,35 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     const bool kernelBreakdown0324 =
         env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324", false) &&
         !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_KERNEL_BREAKDOWN_0324", false);
+    const bool kernelBreakdownAppend0328 =
+        kernelBreakdown0324 &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_APPEND_0328", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_KERNEL_BREAKDOWN_APPEND_0328", false);
     std::FILE* kernelBreakdownFile0324 = nullptr;
     cudaEvent_t kernelBreakdownStart0324 = nullptr;
     cudaEvent_t kernelBreakdownStop0324 = nullptr;
     if (kernelBreakdown0324) {
         const char* p = std::getenv("MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324_FILE");
         const std::string path = (p != nullptr && *p != '\0') ? std::string(p) : std::string("cuda_persistent_kernel_breakdown_0324.csv");
-        kernelBreakdownFile0324 = std::fopen(path.c_str(), "w");
-        if (kernelBreakdownFile0324 == nullptr) {
-            throw std::runtime_error("0324 kernel breakdown: unable to open output file: " + path);
+        bool writeHeader0324 = true;
+        if (kernelBreakdownAppend0328) {
+            std::FILE* existing0328 = std::fopen(path.c_str(), "rb");
+            if (existing0328 != nullptr) {
+                if (std::fseek(existing0328, 0, SEEK_END) == 0) {
+                    const long size0328 = std::ftell(existing0328);
+                    writeHeader0324 = (size0328 <= 0L);
+                }
+                std::fclose(existing0328);
+            }
         }
-        std::fprintf(kernelBreakdownFile0324,
-                     "step,kernel,ms,nActiveFluid,numCells,particleBlocks,cellBlocks,resetBlocks,threads\n");
+        kernelBreakdownFile0324 = std::fopen(path.c_str(), kernelBreakdownAppend0328 ? "a" : "w");
+        if (kernelBreakdownFile0324 == nullptr) {
+            throw std::runtime_error("0324/0328 kernel breakdown: unable to open output file: " + path);
+        }
+        if (writeHeader0324) {
+            std::fprintf(kernelBreakdownFile0324,
+                         "step,kernel,ms,nActiveFluid,numCells,particleBlocks,cellBlocks,resetBlocks,threads\n");
+        }
         MPCD_CUDA_CHECK(cudaEventCreate(&kernelBreakdownStart0324));
         MPCD_CUDA_CHECK(cudaEventCreate(&kernelBreakdownStop0324));
     }

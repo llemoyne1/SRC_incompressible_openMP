@@ -118,6 +118,13 @@ export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=1
 export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_STRICT=1
 export MPCD_CUDA_IMMERSED_CIRCLE_0284=1
 export MPCD_CUDA_IMMERSED_CIRCLE_0284_DOWNLOAD_ALL=0
+# 0330: fast immersed-circle diagnostics for the classic resident VK benchmark.
+# The CUDA circle reflection still modifies particles on device, but the per-step
+# diagnostic hit counter allocation/copy/free is skipped.  This only affects the
+# immersed hits diagnostic reported in summary_runtime.csv; set
+# SRC_GPU_IMMERSED_CIRCLE_FAST_DIAG_0330=0 to restore the legacy hit counter.
+export MPCD_CUDA_IMMERSED_CIRCLE_FAST_DIAGNOSTICS_0330="${SRC_GPU_IMMERSED_CIRCLE_FAST_DIAG_0330:-1}"
+echo "[0330b-demo] IMMERSED_CIRCLE_FAST_DIAG_0330=${MPCD_CUDA_IMMERSED_CIRCLE_FAST_DIAGNOSTICS_0330}"
 # 0318b: force the measured wall+circle resident path after
 # src_gpu_cuda_env_clear_0283.  The clear helper resets
 # MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=0, so relying on an outer environment
@@ -177,7 +184,12 @@ echo "[0327b-demo] SKIP_HOST_CELLID_FILL_0327=${MPCD_CUDA_PERSISTENT_SRC_COLLISI
 # SRC_GPU_KERNEL_BREAKDOWN_0324=1.
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324="${SRC_GPU_KERNEL_BREAKDOWN_0324:-0}"
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324_FILE="${OUT_DIR}/cuda_persistent_kernel_breakdown_0324.csv"
+# 0328: when enabled, 0324 microprofile rows are appended over all steps
+# instead of keeping only the last step.  This is profiling-only and remains
+# disabled in normal runs.
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_APPEND_0328="${SRC_GPU_KERNEL_BREAKDOWN_APPEND_0328:-0}"
 echo "[0324-demo] KERNEL_BREAKDOWN_0324=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324} FILE=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324_FILE}"
+echo "[0328-demo] KERNEL_BREAKDOWN_APPEND_0328=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_APPEND_0328}"
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284=1
 if [[ "${THERMOSTAT_ENABLE}" == "1" || "${THERMOSTAT_ENABLE}" == "true" || "${THERMOSTAT_ENABLE}" == "TRUE" ]]; then

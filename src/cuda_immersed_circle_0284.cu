@@ -106,7 +106,9 @@ __global__ void immersed_circle_reflection_kernel_0284(
     const double vn = vrx * nx + vry * ny;
     vx[i] = wallUx + vrx - 2.0 * vn * nx;
     vy[i] = wallUy + vry - 2.0 * vn * ny;
-    atomicAdd(hits, 1ULL);
+    if (hits != nullptr) {
+        atomicAdd(hits, 1ULL);
+    }
 }
 
 CudaParticleState& persistent_immersed_circle_state_0284() {
@@ -127,6 +129,10 @@ bool cuda_immersed_circle_0284_download_all_requested() {
     const std::string flag(v);
     return !(flag == "0" || flag == "false" || flag == "FALSE" ||
              flag == "off" || flag == "OFF" || flag == "no" || flag == "NO");
+}
+
+bool cuda_immersed_circle_0330_fast_diagnostics_requested() {
+    return env_truthy_0284("MPCD_CUDA_IMMERSED_CIRCLE_FAST_DIAGNOSTICS_0330");
 }
 
 } // namespace
@@ -179,16 +185,21 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
     }
     const auto tAfterUpload = Clock::now();
 
+    const bool fastDiagnostics0330 = cuda_immersed_circle_0330_fast_diagnostics_requested();
     unsigned long long* dHits = nullptr;
-    check_cuda_0284(cudaMalloc(&dHits, sizeof(unsigned long long)), "allocate hit counter");
-    check_cuda_0284(cudaMemset(dHits, 0, sizeof(unsigned long long)), "clear hit counter");
+    if (!fastDiagnostics0330) {
+        check_cuda_0284(cudaMalloc(&dHits, sizeof(unsigned long long)), "allocate hit counter");
+        check_cuda_0284(cudaMemset(dHits, 0, sizeof(unsigned long long)), "clear hit counter");
+    }
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0284("MPCD_CUDA_IMMERSED_CIRCLE_0284_THREADS", 256);
     const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
-        check_cuda_0284(cudaFree(dHits), "free hit counter after grid-size failure");
+        if (dHits != nullptr) {
+            check_cuda_0284(cudaFree(dHits), "free hit counter after grid-size failure");
+        }
         throw std::runtime_error("cuda_immersed_circle_0284: grid too large for 1D launch");
     }
 
@@ -205,8 +216,10 @@ CudaImmersedCircle0284Diagnostics try_apply_cuda_immersed_circle_0284(
     const auto tAfterKernel = Clock::now();
 
     unsigned long long hHits = 0ULL;
-    check_cuda_0284(cudaMemcpy(&hHits, dHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy hit counter");
-    check_cuda_0284(cudaFree(dHits), "free hit counter");
+    if (!fastDiagnostics0330 && dHits != nullptr) {
+        check_cuda_0284(cudaMemcpy(&hHits, dHits, sizeof(unsigned long long), cudaMemcpyDeviceToHost), "copy hit counter");
+        check_cuda_0284(cudaFree(dHits), "free hit counter");
+    }
 
     const bool downloadAll = cuda_immersed_circle_0284_download_all_requested();
     if (downloadAll || !resident) {

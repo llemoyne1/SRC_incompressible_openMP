@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Portable CUDA SRC/MPCD + split-safe post-SRC resampling demo.
+# Portable CUDA SRC/MPCD + split-safe post-SRC resampling demo (updated 0330b checkpoint).
 # This script is self-contained: it does not source any repository demo helper.
 # It generates its own initial .smpcd state, writes its own .kv parameters, sets
 # CUDA/resampling environment flags explicitly, and launches the selected binary.
@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0314}"
+BIN="${BIN:-build/src_mpcd_base_cuda_0330b}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-8}"
@@ -252,6 +252,17 @@ portable_cuda_clear_0315() {
   export MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE=1
   export MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE=1
   export MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK="${MPCD_CUDA_PERSISTENT_THREADS_PER_BLOCK:-256}"
+  # 0318b/0319/0320/0321/0327b/0330b fast-path flags are opt-in per mode.
+  # Keep 0325 and 0329 disabled: both were measured as regressions and rolled back.
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318=0
+  export MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_ASYNC_STREAM=0
+  export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0271_FAST_DIAGNOSTICS=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WALL_VP_DIAG_0319=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327=0
+  export MPCD_CUDA_IMMERSED_CIRCLE_FAST_DIAGNOSTICS_0330=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSE_WALL_FINALIZE_ROTATION_0325=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ROTATION_TABLE_CACHE_0329=0
   export MPCD_CUDA_INACTIVE_TAIL_POOL_0313="${MPCD_CUDA_INACTIVE_TAIL_POOL_0313:-1}"
 }
 
@@ -267,12 +278,35 @@ portable_cuda_enable_thermostat_0315() {
   fi
 }
 
+portable_cuda_classic_fast_flags_0330b() {
+  # Validated checkpoint for SRC classic CUDA resident performance:
+  #   keep 0318b/0319/0320/0321/0322/0327b/0330b;
+  #   keep 0324 optional but off by default;
+  #   keep rejected 0325/0329 disabled.
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WALL_VP_DIAG_0319="${SRC_GPU_SKIP_WALL_VP_DIAG_0319:-1}"
+  export MPCD_CUDA_CLASSIC_SRC_RESIDENT_0271_ASYNC_STREAM="${SRC_GPU_ASYNC_STREAM_0320:-1}"
+  export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0271_FAST_DIAGNOSTICS="${SRC_GPU_WALL_FAST_DIAG_0320:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321="${SRC_GPU_FAST_THERMOSTAT_DIAG_0321:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272="${SRC_GPU_DEVICE_ROTATION_0322:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273="${SRC_GPU_LAZY_KERNEL_CHECK_0322:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_SETUP_SYNC_0273="${SRC_GPU_SKIP_SETUP_SYNC_0322:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327="${SRC_GPU_SKIP_HOST_CELLID_FILL_0327:-1}"
+  export MPCD_CUDA_IMMERSED_CIRCLE_FAST_DIAGNOSTICS_0330="${SRC_GPU_IMMERSED_CIRCLE_FAST_DIAG_0330:-1}"
+
+  # Explicitly disable rejected experiments unless the user deliberately overrides
+  # the low-level MPCD_CUDA_* variables after this helper.
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSE_WALL_FINALIZE_ROTATION_0325=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ROTATION_TABLE_CACHE_0329=0
+}
+
+
 portable_cuda_periodic_0315() {
   portable_cuda_clear_0315
   export MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260=1
   export MPCD_CUDA_STREAMING_PERIODIC_0245=1
   export MPCD_CUDA_STREAMING_PERIODIC_0245_DOWNLOAD_ALL=0
   portable_cuda_enable_thermostat_0315 1
+  portable_cuda_classic_fast_flags_0330b
 }
 
 portable_cuda_wall_0315() {
@@ -282,6 +316,7 @@ portable_cuda_wall_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   portable_cuda_enable_thermostat_0315 0
+  portable_cuda_classic_fast_flags_0330b
 }
 
 portable_cuda_io_fullface_rect_0315() {
@@ -296,6 +331,7 @@ portable_cuda_io_fullface_rect_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=1
   portable_cuda_enable_thermostat_0315 1
+  portable_cuda_classic_fast_flags_0330b
 }
 
 portable_cuda_io_segmented_0315() {
@@ -306,6 +342,7 @@ portable_cuda_io_segmented_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
   portable_cuda_enable_thermostat_0315 1
+  portable_cuda_classic_fast_flags_0330b
 }
 
 portable_cuda_io_fullface_circle_0315() {
@@ -319,6 +356,7 @@ portable_cuda_io_fullface_circle_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284=1
   portable_cuda_enable_thermostat_0315 1
+  portable_cuda_classic_fast_flags_0330b
 }
 
 portable_cuda_periodic_circle_0315() {
@@ -332,6 +370,8 @@ portable_cuda_periodic_circle_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284=1
   portable_cuda_enable_thermostat_0315 0
+  portable_cuda_classic_fast_flags_0330b
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318="${SRC_GPU_WALL_CIRCLE_RESIDENT_0318:-1}"
 }
 
 portable_resampling_env_0315() {
@@ -382,7 +422,7 @@ portable_resampling_env_0315() {
 portable_write_env_file_0315() {
   local file=$1 mode=$2
   mkdir -p "$(dirname "$file")"
-  env | grep -E '^(MPCD_CUDA_|OMP_|BIN=|THREADS=|RUN_MODES=|DUMP_ROLE_FILTER=|SUMMARY_ROLE_FILTER=)' | sort > "$file"
+  env | grep -E '^(MPCD_CUDA_|SRC_GPU_|OMP_|BIN=|THREADS=|RUN_MODES=|DUMP_ROLE_FILTER=|SUMMARY_ROLE_FILTER=)' | sort > "$file"
   cat >> "$file" <<META
 mode=${mode}
 GUARD_EVERY=${GUARD_EVERY:-5}
@@ -397,6 +437,7 @@ portable_run_binary_0315() {
   local params=$1 log=$2 time=$3 out_dir=$4
   portable_ensure_binary_0315
   echo "[0315-portable] binary : $BIN"
+  echo "[0330b-portable] checkpoint: 0318b+0319+0320+0321+0322+0327b+0330b; 0325/0329 disabled"
   echo "[0315-portable] params : $params"
   echo "[0315-portable] output : $out_dir"
   local rc=0
