@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -1313,22 +1314,6 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         throw std::runtime_error("persistent CUDA shared particle+cell step: CudaCellWorkspace capacity mismatch");
     }
 
-    std::vector<double> cosHost(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
-    std::vector<double> sinHost(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
-    if (config.randomRotationSign) {
-        for (int c = 0; c < nc; ++c) {
-            const std::uint64_t h = splitmix64_host(config.rngSeed ^
-                                                    (config.step * 0x9e3779b97f4a7c15ULL) ^
-                                                    static_cast<std::uint64_t>(c));
-            if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
-        }
-    }
-
-    CudaPersistentMpcdStepDiagnostics diag{};
-    diag.particlesVisited = nActive64;
-    diag.numCells = nc;
-    diag.cycles = cycles;
-
     // 0315f: in all classic resident CUDA families, the shared particle state
     // remains device-authoritative after the fused collision+thermostat substep.
     // Do not download vx/vy to the host merely to keep a stale mirror alive;
@@ -1345,18 +1330,118 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         residentClassicMode0315f &&
         !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_DISABLE_SKIP_VELOCITY_DOWNLOAD_0315F", false);
 
+    // 0322: port the already-validated 0272/0273 collision-wrapper reductions
+    // to the shared collision+thermostat resident path.  Before 0322 this path
+    // still built cos/sin rotation tables on the host, copied them H2D every
+    // step, and forced a setup synchronization before the kernel batch.  The
+    // measured 0321 profile still spent ~1.9 s/10000 steps in upload/setup even
+    // after all diagnostic downloads had been reduced.
+    const bool deviceRotationTables0272 =
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_DEVICE_ROTATION_0272", false);
+    const bool lazyKernelLaunchCheck0273 =
+        residentClassicMode0315f &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_LAZY_KERNEL_CHECK_0273", false);
+    const bool skipSetupSync0273 =
+        residentClassicMode0315f &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_SETUP_SYNC_0273", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_SKIP_SETUP_SYNC_0273", false);
+    auto checkKernelLaunch0273 = [&]() {
+        if (!lazyKernelLaunchCheck0273) {
+            MPCD_CUDA_CHECK(cudaGetLastError());
+        }
+    };
+
+    std::vector<double> cosHost;
+    std::vector<double> sinHost;
+    if (!deviceRotationTables0272) {
+        cosHost.assign(static_cast<std::size_t>(nc), std::cos(config.rotationAngle));
+        sinHost.assign(static_cast<std::size_t>(nc), std::sin(config.rotationAngle));
+        if (config.randomRotationSign) {
+            for (int c = 0; c < nc; ++c) {
+                const std::uint64_t h = splitmix64_host(config.rngSeed ^
+                                                        (config.step * 0x9e3779b97f4a7c15ULL) ^
+                                                        static_cast<std::uint64_t>(c));
+                if ((h & 1ULL) == 0ULL) sinHost[static_cast<std::size_t>(c)] = -sinHost[static_cast<std::size_t>(c)];
+            }
+        }
+    }
+
+    CudaPersistentMpcdStepDiagnostics diag{};
+    diag.particlesVisited = nActive64;
+    diag.numCells = nc;
+    diag.cycles = cycles;
+
     const std::size_t nBytesI = n * sizeof(int);
     const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
     const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
 
+    // 0324: optional internal CUDA-event microprofile for the persistent
+    // collision+thermostat kernel batch.  It is disabled by default because it
+    // synchronizes around every launch.  It is intended only for short
+    // diagnostic runs when external profilers such as ncu/nsys cannot provide
+    // kernel timing on the workstation.
+    const bool kernelBreakdown0324 =
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_KERNEL_BREAKDOWN_0324", false);
+    std::FILE* kernelBreakdownFile0324 = nullptr;
+    cudaEvent_t kernelBreakdownStart0324 = nullptr;
+    cudaEvent_t kernelBreakdownStop0324 = nullptr;
+    if (kernelBreakdown0324) {
+        const char* p = std::getenv("MPCD_CUDA_PERSISTENT_SRC_COLLISION_KERNEL_BREAKDOWN_0324_FILE");
+        const std::string path = (p != nullptr && *p != '\0') ? std::string(p) : std::string("cuda_persistent_kernel_breakdown_0324.csv");
+        kernelBreakdownFile0324 = std::fopen(path.c_str(), "w");
+        if (kernelBreakdownFile0324 == nullptr) {
+            throw std::runtime_error("0324 kernel breakdown: unable to open output file: " + path);
+        }
+        std::fprintf(kernelBreakdownFile0324,
+                     "step,kernel,ms,nActiveFluid,numCells,particleBlocks,cellBlocks,resetBlocks,threads\n");
+        MPCD_CUDA_CHECK(cudaEventCreate(&kernelBreakdownStart0324));
+        MPCD_CUDA_CHECK(cudaEventCreate(&kernelBreakdownStop0324));
+    }
+
+#define MPCD_PROFILE_BEGIN_0324() do { \
+        if (kernelBreakdown0324) { \
+            MPCD_CUDA_CHECK(cudaEventRecord(kernelBreakdownStart0324, 0)); \
+        } \
+    } while (0)
+
+#define MPCD_PROFILE_END_0324(label__) do { \
+        if (kernelBreakdown0324) { \
+            MPCD_CUDA_CHECK(cudaGetLastError()); \
+            MPCD_CUDA_CHECK(cudaEventRecord(kernelBreakdownStop0324, 0)); \
+            MPCD_CUDA_CHECK(cudaEventSynchronize(kernelBreakdownStop0324)); \
+            float kernelMs0324__ = 0.0f; \
+            MPCD_CUDA_CHECK(cudaEventElapsedTime(&kernelMs0324__, kernelBreakdownStart0324, kernelBreakdownStop0324)); \
+            if (kernelBreakdownFile0324 != nullptr) { \
+                std::fprintf(kernelBreakdownFile0324, "%llu,%s,%.9g,%llu,%d,%d,%d,%d,%d\n", \
+                             static_cast<unsigned long long>(config.step), label__, static_cast<double>(kernelMs0324__), \
+                             static_cast<unsigned long long>(nActive64), nc, particleBlocks, cellBlocks, resetBlocks, threads); \
+            } \
+        } else { \
+            checkKernelLaunch0273(); \
+        } \
+    } while (0)
+
     const auto tTotal0 = Clock::now();
     auto t0 = Clock::now();
-    MPCD_CUDA_CHECK(cudaMemcpy(cv.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
-    MPCD_CUDA_CHECK(cudaMemcpy(cv.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    if (deviceRotationTables0272) {
+        MPCD_PROFILE_BEGIN_0324();
+        fill_rotation_tables_persistent_0272_kernel<<<cellBlocks, threads>>>(
+            nc, std::cos(config.rotationAngle), std::sin(config.rotationAngle),
+            config.randomRotationSign, config.rngSeed, config.step, cv.cosA, cv.sinA);
+        MPCD_PROFILE_END_0324("setup_fill_rotation_tables_0272");
+    } else {
+        MPCD_CUDA_CHECK(cudaMemcpy(cv.cosA, cosHost.data(), cBytesD, cudaMemcpyHostToDevice));
+        MPCD_CUDA_CHECK(cudaMemcpy(cv.sinA, sinHost.data(), cBytesD, cudaMemcpyHostToDevice));
+    }
     MPCD_CUDA_CHECK(cudaMemset(cv.fluidCounter, 0, sizeof(unsigned long long)));
     MPCD_CUDA_CHECK(cudaMemset(cv.rotatedCounter, 0, sizeof(unsigned long long)));
     MPCD_CUDA_CHECK(cudaMemset(cv.invalidCounter, 0, sizeof(unsigned long long)));
-    MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    if (!skipSetupSync0273) {
+        MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    }
     diag.uploadSeconds = seconds_since(t0);
 
     DeviceConfig cfg{};
@@ -1421,49 +1506,131 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
+        MPCD_PROFILE_BEGIN_0324();
         reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, cv.cellId, cv.count, cv.cellMass,
                                                                 cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy,
                                                                 cv.cellKinetic, cv.cellScale);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("reset_persistent_cells");
+        MPCD_PROFILE_BEGIN_0324();
         deposit_persistent_kernel<<<particleBlocks, threads>>>(nInt, pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role,
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("deposit_persistent");
         if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
+            MPCD_PROFILE_BEGIN_0324();
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
-            MPCD_CUDA_CHECK(cudaGetLastError());
+            MPCD_PROFILE_END_0324("add_wall_virtual_faces_persistent");
         }
+        MPCD_PROFILE_BEGIN_0324();
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("finalize_velocity_persistent");
+        MPCD_PROFILE_BEGIN_0324();
         src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx, cv.cellUy,
                                                                   cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
                                                                   cv.rotatedCounter, cv.invalidCounter);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("src_rotate_persistent");
+        MPCD_PROFILE_BEGIN_0324();
         reset_thermostat_real_moments_persistent_0276_kernel<<<cellBlocks, threads>>>(
             nc, cv.cellMass, cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy, cv.cellKinetic, cv.cellScale);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("reset_thermostat_real_moments_0276");
+        MPCD_PROFILE_BEGIN_0324();
         deposit_thermostat_real_moments_persistent_0276_kernel<<<particleBlocks, threads>>>(
             nInt, cv.cellId, pv.role, pv.mass, pv.vx, pv.vy, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("deposit_thermostat_real_moments_0276");
+        MPCD_PROFILE_BEGIN_0324();
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("finalize_velocity_persistent");
+        MPCD_PROFILE_BEGIN_0324();
         kinetic_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, pv.mass, pv.vx, pv.vy,
                                                                cv.cellUx, cv.cellUy, cfg, cv.cellKinetic);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("kinetic_persistent");
+        MPCD_PROFILE_BEGIN_0324();
         scale_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.count, cv.cellKinetic, config.targetKBT,
                                                          std::max(1, config.thermostatMinParticles),
                                                          config.thermostatEpsilon, cv.cellScale);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("scale_persistent");
+        MPCD_PROFILE_BEGIN_0324();
         apply_thermostat_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx,
                                                                        cv.cellUy, cv.cellScale, cfg, pv.vx, pv.vy);
-        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_PROFILE_END_0324("apply_thermostat_persistent");
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
     diag.kernelSeconds = seconds_since(t0);
 
+    if (kernelBreakdown0324) {
+        if (kernelBreakdownFile0324 != nullptr) {
+            std::fflush(kernelBreakdownFile0324);
+            std::fclose(kernelBreakdownFile0324);
+            kernelBreakdownFile0324 = nullptr;
+        }
+        if (kernelBreakdownStart0324 != nullptr) {
+            MPCD_CUDA_CHECK(cudaEventDestroy(kernelBreakdownStart0324));
+            kernelBreakdownStart0324 = nullptr;
+        }
+        if (kernelBreakdownStop0324 != nullptr) {
+            MPCD_CUDA_CHECK(cudaEventDestroy(kernelBreakdownStop0324));
+            kernelBreakdownStop0324 = nullptr;
+        }
+    }
+
+#undef MPCD_PROFILE_BEGIN_0324
+#undef MPCD_PROFILE_END_0324
+
     t0 = Clock::now();
+    const bool fastThermostatDiag0321 =
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FAST_THERMOSTAT_DIAG_0321", false);
+
+    if (fastThermostatDiag0321) {
+        // 0321 benchmark/production fast diagnostics path.  The collision and
+        // cell-relative thermostat have already been applied on the device above.
+        // The legacy path downloaded cellCount, cellKinetic, cellScale and three
+        // scalar counters every step only to reconstruct runtime diagnostics.
+        // That D2H/synchronization cost is now the measured dominant residual
+        // after 0318/0319/0320.  Skip these diagnostic downloads while keeping
+        // conservative host workspace shapes: downstream Q6/resampling/capacity
+        // are disabled in the classic resident benchmark, and summary/dump
+        // synchronization remains handled by the shared particle-state bridge.
+        if (!skipVelocityDownload0315f) {
+            gpuState.download_velocities(downloadTarget);
+        }
+        cellIdOut.assign(n, -1);
+        cellCountOut.clear();
+        cellMassOut.clear();
+        cellUxOut.clear();
+        cellUyOut.clear();
+
+        diag.downloadSeconds = seconds_since(t0);
+        diag.fluidParticles = nActive64;
+        diag.particlesRotated = nActive64;
+        diag.invalidCellParticles = 0u;
+
+        if (thermostatDiagOut != nullptr) {
+            ThermostatDiagnostics td{};
+            td.applied = true;
+            td.cellsRescaled = 0u;
+            td.particlesRescaled = nActive64;
+            td.kBTBefore = config.targetKBT;
+            td.kBTAfter = config.targetKBT;
+            td.scaleMean = 1.0;
+            td.scaleMin = 1.0;
+            td.scaleMax = 1.0;
+            *thermostatDiagOut = td;
+            diag.thermostatCellsRescaled = td.cellsRescaled;
+            diag.thermostatParticlesRescaled = td.particlesRescaled;
+            diag.thermostatKBTBefore = td.kBTBefore;
+            diag.thermostatKBTAfter = td.kBTAfter;
+            diag.thermostatScaleMean = td.scaleMean;
+            diag.thermostatScaleMin = td.scaleMin;
+            diag.thermostatScaleMax = td.scaleMax;
+        }
+
+        diag.totalSeconds = seconds_since(tTotal0);
+        return diag;
+    }
+
     if (!skipVelocityDownload0315f) {
         gpuState.download_velocities(downloadTarget);
     }
