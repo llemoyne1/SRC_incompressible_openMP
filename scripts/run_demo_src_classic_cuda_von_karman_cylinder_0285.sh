@@ -160,6 +160,17 @@ export MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272="${SRC_GPU_DEVICE
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273="${SRC_GPU_LAZY_KERNEL_CHECK_0322:-1}"
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_SETUP_SYNC_0273="${SRC_GPU_SKIP_SETUP_SYNC_0322:-1}"
 echo "[0322-demo] DEVICE_ROTATION_0322=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272} LAZY_KERNEL_CHECK_0322=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273} SKIP_SETUP_SYNC_0322=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_SETUP_SYNC_0273}"
+# 0327b: measured post-0322 residual includes host-side sentinel filling of
+# cellIdOut in the strict classic resident fast-diagnostics path.  The 0327b
+# implementation keeps cellIdOut sized with resize(n), rather than clear(),
+# because the CPU thermostat wrapper still validates the vector size before
+# consuming GPU thermostat diagnostics.  The classic
+# VK benchmark has no CPU Q6/resampling/virial continuation after the fused
+# GPU collision+thermostat step; hybrid paths must keep using their own runner
+# with srcClassicCudaModeEnable=false.  Set SRC_GPU_SKIP_HOST_CELLID_FILL_0327=0
+# to restore the conservative host vector shape for debugging.
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327="${SRC_GPU_SKIP_HOST_CELLID_FILL_0327:-1}"
+echo "[0327b-demo] SKIP_HOST_CELLID_FILL_0327=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327} MODE=resize_no_sentinel_fill"
 # 0324: optional internal CUDA-event kernel breakdown for the persistent
 # collision+thermostat batch.  Disabled by default because it synchronizes
 # after every kernel launch.  Enable only on short profiling runs with

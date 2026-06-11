@@ -1582,6 +1582,19 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     const bool fastThermostatDiag0321 =
         env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321", false) &&
         !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FAST_THERMOSTAT_DIAG_0321", false);
+    // 0327: in the strict classic resident fast-diagnostics path, no CPU
+    // continuation consumes the per-particle host cellId vector after the
+    // fused collision+thermostat step.  0321 already skipped all heavy
+    // thermostat diagnostic downloads but still filled cellIdOut with n
+    // sentinel values every step, which shows up in the measured residual
+    // download/envelope time.  Keep this guarded by both resident classic mode
+    // and fastThermostatDiag0321 so Q6/resampling/virial hybrid paths keep the
+    // conservative host workspaces they need.
+    const bool skipHostCellIdFill0327 =
+        residentClassicMode0315f &&
+        fastThermostatDiag0321 &&
+        env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327", false) &&
+        !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_SKIP_HOST_CELLID_FILL_0327", false);
 
     if (fastThermostatDiag0321) {
         // 0321 benchmark/production fast diagnostics path.  The collision and
@@ -1596,7 +1609,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         if (!skipVelocityDownload0315f) {
             gpuState.download_velocities(downloadTarget);
         }
-        cellIdOut.assign(n, -1);
+        if (skipHostCellIdFill0327) {
+            // 0327b: keep the host vector shape because the legacy CPU
+            // thermostat wrapper validates cellId.size()==Nactive before it
+            // consumes the GPU thermostat diagnostics.  resize(n) avoids the
+            // per-step sentinel fill while satisfying that size contract; after
+            // the first step the capacity/size are stable in strict classic
+            // resident mode.
+            cellIdOut.resize(n);
+        } else {
+            cellIdOut.assign(n, -1);
+        }
         cellCountOut.clear();
         cellMassOut.clear();
         cellUxOut.clear();
