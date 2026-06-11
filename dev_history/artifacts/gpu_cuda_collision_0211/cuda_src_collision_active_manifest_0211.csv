@@ -1,7 +1,0 @@
-file,action,notes
-src/src_collision.cpp,modify,add active CUDA SRC collision runtime path under MPCD_CUDA_SRC_COLLISION_USE
-scripts/build_src_mpcd_cuda_0211.sh,add,build CUDA-enabled simulation binary with SRC collision active path
-scripts/run_cuda_src_collision_active_0211.sh,add,compare CPU baseline against active CUDA SRC collision path
-doc/README_0211_CUDA_SRC_COLLISION_ACTIVE.md,add,scope validation and runtime controls
-dev_history/artifacts/gpu_cuda_collision_0211/cuda_src_collision_active_manifest_0211.csv,add,this manifest
-dev_history/artifacts/gpu_cuda_collision_0211/cuda_src_collision_active_scope_0211.csv,add,scope summary

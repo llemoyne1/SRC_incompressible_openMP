@@ -1,7 +1,0 @@
-file,kind,description
-include/cuda_resampling_guard.h,added,CUDA resampling guard classification API
-src/cuda_resampling_guard.cu,added,CUDA cell classification implementation
-src/main_validate_cuda_resampling_guard_0227.cpp,added,Standalone CPU/CUDA validator
-scripts/build_cuda_resampling_guard_0227.sh,added,NVCC build helper
-scripts/run_cuda_resampling_guard_smoke_0227.sh,added,Smoke validation helper
-doc/README_0227_CUDA_RESAMPLING_GUARD_CLASSIFICATION.md,added,Patch documentation

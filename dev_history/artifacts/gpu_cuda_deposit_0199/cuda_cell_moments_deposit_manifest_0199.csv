@@ -1,9 +1,0 @@
-item,value
-patch,0199
-name,CUDA particle-to-cell moments deposit prototype
-branch,SRC_GPU
-base,after_0198_cuda_q6_batched_cg_mean_boundary_fix
-files_added,include/cuda_cell_moments.h;src/cuda_cell_moments.cu;src/main_validate_cuda_cell_moments_0199.cpp;scripts/build_cuda_cell_moments_0199.sh;scripts/run_cuda_cell_moments_smoke_0199.sh;doc/README_0199_CUDA_CELL_MOMENTS_DEPOSIT.md
-simulation_step_modified,no
-cuda_kernel,atomic particle-to-cell moment deposit
-validation,standalone CPU-vs-CUDA synthetic TG-like particle state

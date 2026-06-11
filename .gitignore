@@ -1,66 +1,16 @@
-# Builds
 build/
-build_*/
-cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-
-# Objets et binaires
-*.o
-*.obj
-*.a
-*.so
-*.dll
-*.dylib
-*.exe
-*.out
-
-# CUDA
-*.ptx
-*.cubin
-*.fatbin
-
-# Logs
-*.log
-slurm-*.out
-
-# Données et sorties de simulation
-data/
 runs/
-results/
-outputs/
-runout/
-dump/
-dumps/
-
-# Fichiers binaires de simulation
-*.bin
-
-# MATLAB temporaires
-*.asv
-
-# Système
-.DS_Store
-Thumbs.db
-
-# Fichiers/répertoires locaux non versionnés
-CMakeLists.txt
-
-# Archives / local backups
-*.zip
-
-# Windows metadata files sometimes created under WSL/Linux
-*:Zone.Identifier
-*Zone.Identifier
-
-# Generated SRC/MPCD particle state files
+init/
+dev_history/
 *.smpcd
-*.patch
-
-# Raw generated validation/demo artifacts.  Curated lightweight validation
-# summaries are kept under dev_history/validated/ and remain versionable.
-dev_history/artifacts/
-
-# Timing files produced by /usr/bin/time wrappers.
-*.time
+*.q9bin
+*.bin
+*.csv
+*.log
+*.nsys-rep
+*.qdstrm
+*.sqlite
+*.o
+*.so
+*.a
+*.exe

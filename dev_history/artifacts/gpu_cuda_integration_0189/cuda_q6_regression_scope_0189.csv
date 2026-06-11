@@ -1,6 +1,0 @@
-area,status,notes,next_step
-CUDA Q6 TG integration,enabled,periodic unmasked Taylor-Green only,validate 0189 regression on CUDA machine
-CUDA CG mean removal,fixed,rrNew after residual mean removal now uses sum of squares,compare q6Iterations/q6ResidualRel/q6DivAfter against CPU
-Strict long-run metric equality,not required,particle/resampling trajectories may diverge after floating-point reduction differences,use physical tolerances and Q6 diagnostics
-Poiseuille/obstacle/piston/VK CUDA,not enabled,guarded rejection remains intentional,extend only after TG Q6 is stable
-Performance assessment,deferred,correctness and diagnostics first,profile after stable CUDA Q6 path

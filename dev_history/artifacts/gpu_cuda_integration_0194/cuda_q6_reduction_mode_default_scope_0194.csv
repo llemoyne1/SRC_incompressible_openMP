@@ -1,7 +1,0 @@
-item,status,notes
-physics_scope,unchanged,CUDA Q6 remains limited to fully periodic unmasked Taylor-Green-compatible projection plans.
-cpu_default,unchanged,projectionBackend=cpu remains the default production/reference path.
-cuda_default_reduction,host_blocks,0194 restores host block-sum reduction as default because 0193 device-scalar mode regressed timing.
-device_scalar_reduction,explicit_ablation,Enable only with MPCD_CUDA_Q6_DEVICE_SCALAR_REDUCTION=1.
-unsupported_cases,guarded,Non-periodic Poiseuille and other non-TG-compatible plans must continue to fail explicitly with projectionBackend=cuda.
-next_target,planned,Reduce CG scalar synchronization count rather than reducing block-sum copy size.

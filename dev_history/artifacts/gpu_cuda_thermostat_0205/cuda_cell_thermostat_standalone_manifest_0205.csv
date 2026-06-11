@@ -1,7 +1,0 @@
-item,path,purpose
-header,include/cuda_cell_thermostat.h,Public interface for standalone CUDA cell-relative thermostat primitive
-cuda_source,src/cuda_cell_thermostat.cu,CUDA kernels for kinetic energy scale computation and velocity rescale
-validator,src/main_validate_cuda_cell_thermostat_0205.cpp,CPU/CUDA standalone thermostat comparison on synthetic cell states
-build_script,scripts/build_cuda_cell_thermostat_0205.sh,Build standalone CUDA thermostat validator
-run_script,scripts/run_cuda_cell_thermostat_smoke_0205.sh,Run 64x64 and 128x128 smoke validations
-doc,doc/README_0205_CUDA_CELL_THERMOSTAT_STANDALONE.md,Patch rationale validation and next steps

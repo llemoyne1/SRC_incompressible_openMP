@@ -1,3 +1,0 @@
-case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
-open_rect_obstacle_full,10.840601269,11.514111228,0.9415056928265414,10.89,11.63,0.9363714531384351,0,76,PASS
-piston_virial_full,4.401728747,4.637071162,0.9492476162693835,4.44,4.73,0.9386892177589852,0,76,PASS

@@ -1,8 +1,0 @@
-artifact,kind,description
-include/cuda_q6_backend.h,modified,Add CUDA Q6 device-scalar CG diagnostics fields
-src/cuda_q6_backend.cu,modified,Add device-scalar CG loop reducing host synchronization from pAp and rrNew downloads to rrNew-only downloads
-scripts/build_src_mpcd_cuda_0196.sh,added,Build CUDA-enabled SRC/MPCD executable for patch 0196
-scripts/run_cuda_q6_tg_device_scalar_0196.sh,added,Run CPU vs CUDA device-scalar and legacy-host-scalar TG regressions
-doc/README_0196_CUDA_Q6_DEVICE_SCALAR_CG.md,added,Document the device-scalar CG path and validation protocol
-dev_history/artifacts/gpu_cuda_integration_0196/cuda_q6_device_scalar_cg_manifest_0196.csv,added,Patch manifest
-dev_history/artifacts/gpu_cuda_integration_0196/cuda_q6_device_scalar_cg_scope_0196.csv,added,Patch scope and risk controls

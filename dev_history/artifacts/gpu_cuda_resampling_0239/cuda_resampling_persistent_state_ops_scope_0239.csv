@@ -1,9 +1,0 @@
-item,value
-patch_id,0239
-scope,standalone_validator_and_api
-mutates_real_step,false
-particle_state,CudaParticleState
-cell_workspace,not_used
-q6_projection,not_in_scope
-cpu_default,unchanged
-next_step,wire_active_resampling_extraction_insertion_to_CudaParticleState

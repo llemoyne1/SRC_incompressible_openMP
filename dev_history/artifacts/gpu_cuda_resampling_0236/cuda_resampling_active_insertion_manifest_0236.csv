@@ -1,6 +1,0 @@
-patch,component,file,change
-0236,resampling_cuda,include/cuda_resampling_particle_ops.h,Add active CUDA insertion operation API
-0236,resampling_cuda,src/cuda_resampling_particle_ops.cu,Add active insertion kernel and host wrapper
-0236,resampling_cpu_bridge,src/weighted_resampling.cpp,Route insertion write-back to CUDA under MPCD_CUDA_RESAMPLING_INSERTION_USE
-0236,validation,scripts/run_cuda_resampling_insertion_active_0236.sh,Add CPU-vs-CUDA active insertion harness
-0236,build,scripts/build_src_mpcd_cuda_0236.sh,Build CUDA executable with resampling kernels

@@ -1,6 +1,0 @@
-item,status,notes
-physical_scope,shadow_only,CUDA mutates temporary particle arrays only; production CPU state is unchanged.
-validated_inputs,real_deposit,Uses real WeightedRealFluidDepositWorkspace and selected donor-particle diagnostics.
-mutation_scope,conservative_bounded_transfer,One synthetic insertion per receiver and unique donor filtering for this first real-state shadow stage.
-default_runtime,off,Enable with MPCD_CUDA_RESAMPLING_TRANSFER_SHADOW=1.
-next_step,production_semantics_shadow,Move toward extraction/insertion semantics closer to the CPU resampling path before active mutation.

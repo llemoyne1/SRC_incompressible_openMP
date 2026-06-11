@@ -1,6 +1,0 @@
-artifact,description
-include/cuda_persistent_mpcd_step.h,Extends persistent collision API to return cellId plus cellCount/cellMass/cellUx/cellUy to CPU workspace
-src/cuda_persistent_mpcd_step.cu,Downloads GPU-computed cell occupancy/mass/mean velocity in collision-only persistent path
-src/src_collision.cpp,Uses returned GPU cell moments to restore workspace diagnostics after persistent SRC collision active path
-scripts/build_src_mpcd_cuda_0214.sh,Builds CUDA-enabled SRC/MPCD executable for persistent collision workspace fix
-scripts/run_cuda_persistent_src_collision_active_0214.sh,Validates persistent collision active path after workspace moment restoration

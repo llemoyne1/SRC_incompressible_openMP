@@ -1,6 +1,0 @@
-item,path,description
-script,scripts/build_src_mpcd_cuda_0203.sh,Builds the CUDA-enabled SRC/MPCD binary with both Q6 and cell-moments CUDA components.
-script,scripts/run_cuda_tg_combined_gpu_0203.sh,Runs CPU baseline, Q6-only CUDA, cell-deposit-only CUDA, and combined CUDA TG comparisons.
-doc,doc/README_0203_CUDA_TG_COMBINED_GPU_PATHS.md,Documents the combined CUDA validation scope and interpretation.
-artifact,dev_history/artifacts/gpu_cuda_combined_0203/cuda_tg_combined_gpu_manifest_0203.csv,Manifest for patch 0203.
-artifact,dev_history/artifacts/gpu_cuda_combined_0203/cuda_tg_combined_gpu_scope_0203.csv,Scope and constraints for patch 0203.

@@ -1,8 +1,0 @@
-field,value
-patch,0221
-scope,warning_cleanup_only
-numerical_change,no
-runtime_change,no
-cpu_path_change,no
-cuda_path_change,remove_unused_local_declaration
-validation_basis,0220 passed 64x64 and 128x128; rerun 0220 harness to confirm warning-free build

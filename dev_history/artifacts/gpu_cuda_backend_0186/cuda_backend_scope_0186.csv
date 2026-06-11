@@ -1,6 +1,0 @@
-area,status_after_0186,rationale,next_step
-Backend strategy,CUDA-only prototype,"Portability is deferred until the numerical value of GPU acceleration is demonstrated",keep CPU/OpenMP as reference
-Full SRC/MPCD simulations,CPU/OpenMP only,"projectionBackend=cuda is rejected explicitly to avoid silent partial acceleration",wire complete CUDA CG only after standalone validation
-CUDA primitive,implemented,"Elliptic operator application plus pAp dot product is the first hot CG kernel",add vector updates and residual reductions
-OpenMP target,not supported,"The branch is no longer multi-backend at this stage",remove from operational scripts
-OpenCL/OpenGL/SYCL/Kokkos,not used,"Deferred portability and visualization concerns",reconsider only after CUDA prototype proves useful

@@ -1,7 +1,0 @@
-item,status,notes
-backend strategy,CUDA-only,CPU/OpenMP remains default reference path
-supported CUDA physics,unchanged,fully periodic unmasked Taylor-Green/Q6 subset only
-Poiseuille CUDA support,not enabled,script verifies explicit rejection remains active
-primary goal,diagnostic,measure CG CUDA timing and grid-size dependence before further optimization
-main suspected bottleneck,host-device CG scalar synchronization,plan cache 0191 did not improve 64x64 runtime
-next likely action,conditional,if scaling remains poor reduce/fuse CG scalar reductions and launches

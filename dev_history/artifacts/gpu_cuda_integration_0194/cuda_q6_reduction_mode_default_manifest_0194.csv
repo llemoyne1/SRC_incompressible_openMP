@@ -1,7 +1,0 @@
-artifact,kind,description
-src/cuda_q6_backend.cu,modified,Restores host-block reduction as the default CUDA Q6 path and keeps 0193 device-scalar reduction as explicit ablation only.
-scripts/build_src_mpcd_cuda_0194.sh,added,Builds CUDA-enabled executable for 0194 reduction-mode tests.
-scripts/run_cuda_q6_tg_reduction_modes_0194.sh,added,Runs CPU/CUDA TG comparisons for host-block default and optional device-scalar ablation.
-doc/README_0194_CUDA_Q6_REDUCTION_MODE_DEFAULT.md,added,Documents the negative 0193 result and the 0194 default reduction-mode correction.
-dev_history/artifacts/gpu_cuda_integration_0194/cuda_q6_reduction_mode_default_manifest_0194.csv,added,Manifest for this patch.
-dev_history/artifacts/gpu_cuda_integration_0194/cuda_q6_reduction_mode_default_scope_0194.csv,added,Scope and guardrails for this patch.

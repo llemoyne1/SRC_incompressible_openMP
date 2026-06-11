@@ -1,7 +1,0 @@
-item,status,notes
-backend_strategy,cuda_only,"Portability backends deliberately deferred for this SRC_GPU prototype."
-default_runtime_backend,cpu,"Validated OpenMP-light CPU path remains default."
-auto_runtime_backend,cpu_fallback,"Explicit CPU fallback with warning; no silent GPU selection."
-cuda_runtime_backend,partially_integrated,"Enabled only in CUDA-enabled executable and fully periodic unmasked Q6 subset."
-first_physical_target,tg_periodic_full,"Fully periodic Q6+resampling validation case."
-unsupported_cases,explicit_error,"Poiseuille, open boundaries, immersed masks, obstacle, piston and Von Karman remain CPU for now."
