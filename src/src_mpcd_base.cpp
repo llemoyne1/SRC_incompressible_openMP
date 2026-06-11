@@ -346,6 +346,32 @@ bool cuda_classic_src_wall_resident_0261_active(const SimulationParams& params) 
 }
 
 
+bool cuda_classic_src_wall_circle_resident_0318_requested() {
+    return env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318");
+}
+
+bool cuda_classic_src_wall_circle_resident_0318_supported(const SimulationParams& params) {
+    return params.srcClassicCudaModeEnable &&
+           params.bcLeft == "periodic" && params.bcRight == "periodic" &&
+           cuda_wall_mode_supported_0261(params.bcBottom) &&
+           cuda_wall_mode_supported_0261(params.bcTop) &&
+           !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
+           params.immersedSolidEnable &&
+           immersed_solid_shape(params) == ImmersedSolidShape::Circle &&
+           params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 && params.immersedSolidOmega == 0.0 &&
+           !params.projectionEnable &&
+           !params.closedCapacityResponseEnable &&
+           !params.resamplingEnable &&
+           params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
+           params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
+}
+
+bool cuda_classic_src_wall_circle_resident_0318_active(const SimulationParams& params) {
+    return cuda_classic_src_wall_circle_resident_0318_requested() &&
+           cuda_classic_src_wall_circle_resident_0318_supported(params);
+}
+
+
 bool cuda_classic_src_solid_resident_0262_requested() {
     const char* v = std::getenv("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262");
     if (v == nullptr || *v == '\0') {
@@ -961,10 +987,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const bool residentClassicPeriodic0260 = cuda_classic_src_periodic_resident_0260_active(params);
     const bool residentClassicWall0261 = cuda_classic_src_wall_resident_0261_active(params);
     const bool residentClassicSolid0262 = cuda_classic_src_solid_resident_0262_active(params);
+    const bool residentClassicWallCircle0318 = cuda_classic_src_wall_circle_resident_0318_active(params);
     const bool residentClassicIo0263 = cuda_classic_src_io_fullface_resident_0263_active(params);
     const bool residentClassicIo0264 = cuda_classic_src_io_segmented_resident_0264_active(params);
     const bool residentClassicCuda = residentClassicPeriodic0260 || residentClassicWall0261 ||
-                                     residentClassicSolid0262 || residentClassicIo0263 || residentClassicIo0264;
+                                     residentClassicSolid0262 || residentClassicWallCircle0318 ||
+                                     residentClassicIo0263 || residentClassicIo0264;
     if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
         cuda_shared_particle_state_0251_invalidate("start_step_cpu_state_authoritative");
     }
@@ -1076,7 +1104,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 try_apply_cuda_wall_simple_streaming_0246(state, params, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "wall_simple_0246", "force_stream", cudaStreaming0246);
             handledByCudaStreaming = cudaStreaming0246.handled;
-            wallSimpleResidentStreamHandled0270 = residentClassicWall0261 && cudaStreaming0246.handled;
+            wallSimpleResidentStreamHandled0270 =
+                (residentClassicWall0261 || residentClassicWallCircle0318) && cudaStreaming0246.handled;
         }
         if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =

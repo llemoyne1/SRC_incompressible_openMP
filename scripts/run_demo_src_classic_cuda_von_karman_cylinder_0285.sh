@@ -118,6 +118,22 @@ export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=1
 export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_STRICT=1
 export MPCD_CUDA_IMMERSED_CIRCLE_0284=1
 export MPCD_CUDA_IMMERSED_CIRCLE_0284_DOWNLOAD_ALL=0
+# 0318b: force the measured wall+circle resident path after
+# src_gpu_cuda_env_clear_0283.  The clear helper resets
+# MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=0, so relying on an outer environment
+# variable is not sufficient.  This is script-only and does not modify the
+# solver or require recompilation.
+export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318=1
+export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
+export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=0
+# 0319: skip the CPU reconstruction of wall virtual-particle diagnostics in
+# the CUDA persistent collision path.  The CUDA collision kernel has already
+# applied the physical virtual-wall/circle contribution; this only affects the
+# runtime_summary virtualParticle*/virtualMass* diagnostic columns.  Set
+# SRC_GPU_SKIP_WALL_VP_DIAG_0319=0 to restore the legacy diagnostic.
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WALL_VP_DIAG_0319="${SRC_GPU_SKIP_WALL_VP_DIAG_0319:-1}"
+echo "[0318b-demo] WALL_CIRCLE_RESIDENT_0318=${MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318} STREAMING_WALL_SIMPLE_0246=${MPCD_CUDA_STREAMING_WALL_SIMPLE_0246} DOWNLOAD_ALL=${MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL}"
+echo "[0319-demo] SKIP_WALL_VP_DIAG_0319=${MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WALL_VP_DIAG_0319}"
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1

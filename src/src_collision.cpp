@@ -827,6 +827,14 @@ void populate_cuda_persistent_wall_virtual_diagnostics_0253(CollisionDiagnostics
                                                             const CellGrid& grid,
                                                             const FluidDomainBounds& domain,
                                                             std::uint64_t step) {
+    // 0319: this routine reconstructs wall virtual-particle diagnostics on the
+    // CPU after the CUDA persistent collision has already applied the physical
+    // virtual-wall/circle contribution.  On the 0318b VK benchmark it accounts
+    // for the large residual time inside the src_collision envelope.  It is
+    // diagnostic-only: runtime_summary virtualParticle*/virtualMass* fields are
+    // affected, but particle dynamics are not.  Keep the legacy behavior unless
+    // the benchmark/production path explicitly disables this diagnostic.
+    if (persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WALL_VP_DIAG_0319", false)) return;
     if (is_x_periodic(params) && is_y_periodic(params)) return;
     const int nc = grid.numCells;
     if (nc <= 0) return;

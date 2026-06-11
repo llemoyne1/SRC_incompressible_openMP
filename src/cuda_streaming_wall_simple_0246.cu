@@ -3,6 +3,7 @@
 #include "cuda_particle_state.h"
 #include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
+#include "immersed_solid.h"
 
 #include <cuda_runtime.h>
 
@@ -180,8 +181,13 @@ bool cuda_wall_simple_streaming_0246_requested() {
     return env_truthy_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246");
 }
 
+bool cuda_wall_circle_resident_0318_requested() {
+    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318");
+}
+
 bool cuda_wall_simple_streaming_0246_resident_0261_requested() {
-    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261");
+    return env_truthy_0246("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261") ||
+           cuda_wall_circle_resident_0318_requested();
 }
 
 bool cuda_wall_simple_streaming_0246_download_all_requested_0261() {
@@ -210,7 +216,13 @@ bool cuda_wall_simple_streaming_0246_supported(const SimulationParams& params) {
     if (params.bcBottom == "periodic" || params.bcTop == "periodic") return false;
     if (encode_wall_mode_0246(params.bcBottom) == 0 || encode_wall_mode_0246(params.bcTop) == 0) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
-    if (params.immersedSolidEnable) return false;
+    if (params.immersedSolidEnable) {
+        const bool allowFixedCircle0318 = cuda_wall_circle_resident_0318_requested() &&
+            immersed_solid_shape(params) == ImmersedSolidShape::Circle &&
+            params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 &&
+            params.immersedSolidOmega == 0.0;
+        if (!allowFixedCircle0318) return false;
+    }
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
     // 0246 is deliberately static-domain wall-simple: Poiseuille/channel walls
     // only. Moving pistons and active-domain walls remain CPU until their own
