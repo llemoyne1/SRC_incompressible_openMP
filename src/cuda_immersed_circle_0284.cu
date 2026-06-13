@@ -116,7 +116,13 @@ CudaParticleState& persistent_immersed_circle_state_0284() {
 }
 
 bool cuda_immersed_circle_0284_resident_requested() {
-    return env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262") ||
+    // 0334a: circle reflection can consume/produce the same shared resident
+    // CudaParticleState for any classic CUDA external-boundary family.  This
+    // avoids the unsafe wall+circle 0318 shortcut while keeping periodic, wall
+    // and IO families on one general resident particle-state path.
+    return env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260") ||
+           env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261") ||
+           env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262") ||
            env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263") ||
            env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264");
 }

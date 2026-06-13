@@ -252,6 +252,20 @@ void cuda_io_sync_active_prefix_before_host_consumer_0315f(ParticleState& state,
     (void)cuda_shared_particle_state_0251_download_if_fresh(state);
 }
 
+void cuda_classic_resident_sync_active_prefix_before_host_consumer_0334(
+    ParticleState& state,
+    bool residentClassicCuda,
+    const char* /*reason*/) {
+    if (!residentClassicCuda || !cuda_shared_particle_state_0251_is_fresh()) {
+        return;
+    }
+    // 0334a: the same mixed host/device safety rule is needed beyond IO.  A
+    // periodic/wall/IO resident stream may leave the host mirror stale; if a
+    // downstream CPU fallback is selected, synchronize only the active prefix
+    // before that fallback and do not scan/download the inactive reservoir.
+    (void)cuda_shared_particle_state_0251_download_if_fresh(state);
+}
+
 bool cuda_collision_wrapper_still_needs_host_particles_0315f(const SimulationParams& params,
                                                              const CellGrid& /*grid*/,
                                                              const FluidDomainBounds& /*domain*/,
@@ -296,11 +310,13 @@ bool cuda_classic_src_periodic_resident_0260_requested() {
 }
 
 bool cuda_classic_src_periodic_resident_0260_supported(const SimulationParams& params) {
+    const bool immersedOk =
+        !params.immersedSolidEnable || cuda_immersed_solid_is_handled_on_device_0315e(params);
     return params.srcClassicCudaModeEnable &&
            params.bcLeft == "periodic" && params.bcRight == "periodic" &&
            params.bcBottom == "periodic" && params.bcTop == "periodic" &&
            !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
-           !params.immersedSolidEnable &&
+           immersedOk &&
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
            !params.resamplingEnable;
@@ -1011,6 +1027,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // host/device synchronization where needed.
     bool wallSimpleResidentStreamHandled0270 = false;
     bool periodicFusedStreamHandled0274 = false;
+    bool periodicResidentStreamHandled0334 = false;
     BoundaryDiagnostics cudaWallResidentBoundaryDiagnostics0270{};
     bool cudaWallResidentBoundaryDiagnosticsValid0270 = false;
 
@@ -1125,6 +1142,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 try_apply_cuda_periodic_streaming_0245(state, params, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "periodic_0245", "force_stream", cudaStreaming0245);
             handledByCudaStreaming = cudaStreaming0245.handled;
+            periodicResidentStreamHandled0334 = residentClassicPeriodic0260 && cudaStreaming0245.handled;
         }
         if (!handledByCudaStreaming) {
 #pragma omp parallel for if(n > 10000)
@@ -1169,7 +1187,11 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 handledByCudaBoundary = true;
             }
         }
-        if (!handledByCudaBoundary && periodicFusedStreamHandled0274) {
+        if (!handledByCudaBoundary && (periodicFusedStreamHandled0274 || periodicResidentStreamHandled0334)) {
+            // 0334a: full-periodic CUDA streaming already applied the only
+            // external-boundary operation, namely periodic wrapping.  Re-running
+            // the CPU boundary pass scans a stale host ParticleState in resident
+            // mode and costs a full particle pass without changing physics.
             result.boundary = BoundaryDiagnostics{};
             handledByCudaBoundary = true;
         }
@@ -1232,9 +1254,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         // This preserves the optimized box/TG/Poiseuille paths while restoring
         // the validated step trajectory.
         if (cuda_immersed_rectangle_0247_requested() || cuda_immersed_circle_0284_requested()) {
-            cuda_io_sync_active_prefix_before_host_consumer_0315f(
-                state, residentClassicIo0263, residentClassicIo0264,
-                "cuda_immersed_handler_host_side_inputs");
+            // 0334a: CUDA immersed handlers consume the shared resident device
+            // state directly.  Avoid a pre-handler active-prefix download for
+            // all resident boundary families.  If no CUDA handler accepts the
+            // case, synchronize immediately before the CPU fallback below.
         }
 
         if (cuda_immersed_rectangle_0247_requested()) {
@@ -1256,8 +1279,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
         if (!handledByCudaImmersed) {
-            cuda_io_sync_active_prefix_before_host_consumer_0315f(
-                state, residentClassicIo0263, residentClassicIo0264, "cpu_immersed_solid_fallback");
+            cuda_classic_resident_sync_active_prefix_before_host_consumer_0334(
+                state, residentClassicCuda, "cpu_immersed_solid_fallback");
             result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
             if (result.immersed.hits != 0u) {
                 cuda_shared_particle_state_0251_invalidate("cpu_immersed_solid_edited_particles");
@@ -1267,8 +1290,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, Collision);
         if (cuda_collision_wrapper_still_needs_host_particles_0315f(params, grid, result.domain, step)) {
-            cuda_io_sync_active_prefix_before_host_consumer_0315f(
-                state, residentClassicIo0263, residentClassicIo0264, "collision_wrapper_host_side_inputs");
+            cuda_classic_resident_sync_active_prefix_before_host_consumer_0334(
+                state, residentClassicCuda, "collision_wrapper_host_side_inputs");
         }
         result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     }
