@@ -1,0 +1,22 @@
+Clé params.kv / alias script,Catégorie,Statut,Type attendu,Défaut nominal,Effet / rôle,Remarques
+BIN,Alias script / binaire,mis à jour 0337 livevis,chemin exécutable,build/src_mpcd_base_cuda_livevis_0337d dans scripts 0337,Binaire exécuté par les scripts portables livevis.,Peut être surchargé pour tester un autre build; les scripts livevis nécessitent un binaire compilé avec MPCD_ENABLE_LIVE_VIS=1.
+AUTO_BUILD,Alias script / build,mis à jour 0337 livevis,booléen,1,Autorise le script à compiler automatiquement le binaire manquant.,"Dans les scripts livevis, le build automatique passe MPCD_ENABLE_LIVE_VIS=1."
+RUN_MODES,Alias script / cas de run,existant; utilisé scripts portables,liste: classic resampling,resampling ou classic resampling selon script,Choisit les modes exécutés par les scripts portables.,Peut lancer classic et resampling pour comparaison visuelle.
+LIVE_VIS_ENABLE,Alias script livevis 0337,ajout 0337,booléen,1,Active la visualisation dans les scripts portables livevis.,Exporté vers SRC_LIVE_VIS_ENABLE. Mettre 0 pour exécuter sans fenêtre.
+LIVE_VIS_FIELD,Alias script livevis 0337,ajout 0337,ux|uy|speed|vorticity|mass|density,dépend du script,Champ affiché par défaut dans la fenêtre live.,"Par défaut: VK/TG=vorticity, Poiseuille=ux, backward-step/box=speed."
+LIVE_VIS_EVERY,Alias script livevis 0337,ajout 0337,entier >0,20,Cadence de rendu livevis.,Exporté vers SRC_LIVE_VIS_EVERY.
+LIVE_VIS_NX,Alias script livevis 0337,ajout 0337,entier,300,Résolution x du champ livevis.,Exporté vers SRC_LIVE_VIS_NX.
+LIVE_VIS_NY,Alias script livevis 0337,ajout 0337,entier,80,Résolution y du champ livevis.,Exporté vers SRC_LIVE_VIS_NY.
+LIVE_VIS_ALPHA,Alias script livevis 0337,ajout 0337,double,0.08,Lissage temporel visuel.,Principalement utile au fallback CPU.
+LIVE_VIS_CLIP,Alias script livevis 0337,ajout 0337,double; <=0 auto,-1,Échelle de saturation couleur.,Exemples: ux clip 0.2–0.5; vorticity clip 5–20 selon cas.
+LIVE_VIS_QUANTILE,Alias script livevis 0337,ajout 0337,"double dans (0,1]",0.995,Quantile auto de mise à l’échelle.,Limiter les outliers dans le fallback CPU.
+LIVE_VIS_GAIN,Alias script livevis 0337,ajout 0337,double >0,1.0,Gain couleur.,Réduire si la colormap est saturée; augmenter si le contraste est faible.
+LIVE_VIS_SMOOTH_PASSES,Alias script livevis 0337,ajout 0337,entier >=0,1,Lissage spatial du rendu.,Vorticity utilise souvent 1–2 passes.
+LIVE_VIS_WINDOW_SCALE,Alias script livevis 0337,ajout 0337,entier >=1,1,Facteur d’échelle de la fenêtre.,N’affecte pas la simulation.
+LIVE_VIS_VSYNC,Alias script livevis 0337,ajout 0337,booléen/int,0,Vsync GLFW.,0 recommandé pour ne pas brider le calcul.
+LIVE_VIS_LOG_SOURCE,Alias script livevis 0337,ajout 0337d,booléen,0,Affiche le statut source livevis sur une ligne.,Exporté vers SRC_LIVE_VIS_LOG_SOURCE; depuis 0337d ne spamme plus le terminal.
+LIVE_VIS_CUDA_FIELD,Alias script livevis 0337,ajout 0337a,booléen,1,Active le renderer CUDA de champ.,Mode recommandé par défaut pour classic et resampling livevis.
+LIVE_VIS_CUDA_SNAPSHOT,Alias script livevis 0337,ajout 0336/0337,booléen,0,Active le snapshot compact expérimental.,Non fiable après resampling; garder à 0 sauf diagnostic.
+LIVE_VIS_RESAMPLING_HOST_MIRROR,Alias script livevis 0337,ajout 0335d/0337,booléen,0,Force le fallback hôte en resampling.,Fiable mais lent; garder à 0 avec CUDA_FIELD=1.
+LIVE_VIS_FORCE_HOST_MIRROR,Alias script livevis 0337,ajout 0335c,booléen,0,Force le miroir hôte pour visualisation.,Debug seulement.
+INACTIVE_SLOTS_RESAMPLING,Alias script livevis/benchmark,confirmé 0337,entier,750000 pour certains scripts,Nombre de slots inactifs pour les cas resampling.,N’affecte pas le SRC classic si RUN_MODES=classic; utile pour réservoir resampling.
