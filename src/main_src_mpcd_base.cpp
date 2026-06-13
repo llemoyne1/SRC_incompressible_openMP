@@ -5,6 +5,7 @@
 #include "cuda_shared_particle_state_0251.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
+#include "live_visualization_0335.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
 #include "weighted_resampling.h"
@@ -360,6 +361,8 @@ int main(int argc, char** argv) {
         mpcd::apply_immersed_solid_reflection(state, params, initialDomain, 0.0);
 
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
+        mpcd::LiveVisualization0335 liveVisualization0335;
+        liveVisualization0335.maybe_initialize(params);
         mpcd::SrcMpcdBaseWorkspace workspace;
         std::array<double, mpcd::StepProfilePhaseCount> phaseProfileSeconds{};
         std::array<double, mpcd::Q6ProjectionProfilePhaseCount> q6ProfileSeconds{};
@@ -484,6 +487,27 @@ int main(int argc, char** argv) {
                     }
                     ++massGuardProfileSteps;
                 }
+            }
+
+            if (liveVisualization0335.should_draw(static_cast<std::uint64_t>(step),
+                                                      static_cast<std::uint64_t>(params.nSteps))) {
+                mpcd::ParticleState liveState;
+                mpcd::ParticleRoleCounts liveRoleCounts{};
+                const bool compactLive0335 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(
+                    liveState, mpcd::kParticleRoleFluid, &liveRoleCounts);
+                if (!compactLive0335) {
+                    sync_cuda_resident_state_for_host_0260(state);
+                    liveState = state;
+                }
+                if (env_truthy_0260("SRC_LIVE_VIS_LOG_SOURCE")) {
+                    std::cerr << "\n[livevis0335] step=" << step
+                              << " source=" << (compactLive0335 ? "cuda_compact_fluid" : "host_state_fallback")
+                              << " Np=" << liveState.Np
+                              << " NactiveFluid=" << liveState.NactiveFluid << '\n';
+                }
+                liveVisualization0335.update(liveState, params,
+                                             static_cast<std::uint64_t>(step),
+                                             static_cast<double>(step) * params.dt);
             }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {

@@ -16,6 +16,17 @@ fi
 HOST_OPENMP_FLAG=${HOST_OPENMP_FLAG:--fopenmp}
 OUT=${OUT:-build/src_mpcd_base_cuda_0315b}
 
+truthy_0335() {
+  case "${1:-0}" in 1|true|TRUE|yes|YES|on|ON|enable|enabled) return 0 ;; *) return 1 ;; esac
+}
+
+LIVE_VIS_DEFS=()
+LIVE_VIS_LIBS=()
+if truthy_0335 "${MPCD_ENABLE_LIVE_VIS:-0}"; then
+  LIVE_VIS_DEFS=(-DMPCD_ENABLE_LIVE_VIS)
+  LIVE_VIS_LIBS=(-lglfw -lGL)
+fi
+
 mkdir -p build
 if ! command -v "$NVCC" >/dev/null 2>&1; then
   echo "[0315b-cuda-build] ERROR: nvcc not found" >&2
@@ -40,6 +51,7 @@ set -x
   -DMPCD_ENABLE_CUDA_INLET_OUTLET_FULLFACE_0249A \
   -DMPCD_ENABLE_CUDA_INLET_OUTLET_SEGMENTED_0249B \
   -DMPCD_ENABLE_CUDA_CLASSIC_SRC_IO_RESIDENT_0263 \
+  "${LIVE_VIS_DEFS[@]}" \
   -Iinclude \
   -Xcompiler "$HOST_OPENMP_FLAG" \
   src/main_src_mpcd_base.cpp \
@@ -59,6 +71,7 @@ set -x
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
   src/cuda_shared_particle_state_0251.cpp \
+  src/live_visualization_0335.cpp \
   src/cuda_resampling_persistent_active_path_0240.cpp \
   src/cuda_q6_backend.cu \
   src/cuda_cell_moments.cu \
@@ -81,6 +94,7 @@ set -x
   src/cuda_inlet_outlet_fullface_0249a.cu \
   src/cuda_inlet_outlet_segmented_0249b.cu \
   src/cuda_classic_src_io_resident_0263.cu \
+  "${LIVE_VIS_LIBS[@]}" \
   -o "$OUT"
 set +x
 
