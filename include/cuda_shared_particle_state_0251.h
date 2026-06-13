@@ -22,6 +22,14 @@ bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState& state);
 bool cuda_shared_particle_state_0251_download_role_filtered_if_fresh(ParticleState& state,
                                                                     std::uint8_t keepRole,
                                                                     ParticleRoleCounts* roleCounts = nullptr);
+// 0336a: visualization/debug snapshot.  Unlike the normal consumer function,
+// this deliberately ignores the freshness flag and downloads from the process-
+// local shared CudaParticleState if it has allocated storage.  It is intended
+// for live visualization after CUDA resampling edits invalidate the 0251 fresh
+// marker but leave the resident device arrays authoritative.
+bool cuda_shared_particle_state_0251_download_role_filtered_snapshot_0336(ParticleState& state,
+                                                                         std::uint8_t keepRole,
+                                                                         ParticleRoleCounts* roleCounts = nullptr);
 #else
 inline void cuda_shared_particle_state_0251_invalidate(const char*) {}
 inline bool cuda_shared_particle_state_0251_is_fresh() { return false; }
@@ -29,6 +37,7 @@ inline const char* cuda_shared_particle_state_0251_last_writer() { return "disab
 inline const char* cuda_shared_particle_state_0251_last_invalidator() { return "disabled"; }
 inline bool cuda_shared_particle_state_0251_download_if_fresh(ParticleState&) { return false; }
 inline bool cuda_shared_particle_state_0251_download_role_filtered_if_fresh(ParticleState&, std::uint8_t, ParticleRoleCounts* = nullptr) { return false; }
+inline bool cuda_shared_particle_state_0251_download_role_filtered_snapshot_0336(ParticleState&, std::uint8_t, ParticleRoleCounts* = nullptr) { return false; }
 #endif
 
 } // namespace mpcd

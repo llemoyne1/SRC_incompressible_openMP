@@ -86,6 +86,18 @@ bool cuda_shared_particle_state_0251_download_role_filtered_if_fresh(ParticleSta
     r.state.download_role_filtered(state, keepRole, roleCounts, nullptr);
     return true;
 }
+
+
+bool cuda_shared_particle_state_0251_download_role_filtered_snapshot_0336(ParticleState& state,
+                                                                         std::uint8_t keepRole,
+                                                                         ParticleRoleCounts* roleCounts) {
+    auto& r = registry_0251();
+    if (r.state.size() == 0u) {
+        return false;
+    }
+    r.state.download_role_filtered(state, keepRole, roleCounts, nullptr);
+    return true;
+}
 #endif
 
 } // namespace mpcd
