@@ -351,6 +351,9 @@ bool cuda_classic_src_wall_circle_resident_0318_requested() {
 }
 
 bool cuda_classic_src_wall_circle_resident_0318_supported(const SimulationParams& params) {
+    if (!env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318_UNSAFE_ENABLE")) {
+        return false;
+    }
     return params.srcClassicCudaModeEnable &&
            params.bcLeft == "periodic" && params.bcRight == "periodic" &&
            cuda_wall_mode_supported_0261(params.bcBottom) &&
@@ -1008,6 +1011,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // host/device synchronization where needed.
     bool wallSimpleResidentStreamHandled0270 = false;
     bool periodicFusedStreamHandled0274 = false;
+    BoundaryDiagnostics cudaWallResidentBoundaryDiagnostics0270{};
+    bool cudaWallResidentBoundaryDiagnosticsValid0270 = false;
 
     // Uniform and optional Taylor--Green body acceleration, then free streaming
     // in the fixed numerical box. Taylor--Green forcing is evaluated at the
@@ -1106,6 +1111,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             handledByCudaStreaming = cudaStreaming0246.handled;
             wallSimpleResidentStreamHandled0270 =
                 (residentClassicWall0261 || residentClassicWallCircle0318) && cudaStreaming0246.handled;
+            if (wallSimpleResidentStreamHandled0270) {
+                cudaWallResidentBoundaryDiagnostics0270 = BoundaryDiagnostics{};
+                cudaWallResidentBoundaryDiagnostics0270.hitsBottom = cudaStreaming0246.hitsBottom;
+                cudaWallResidentBoundaryDiagnostics0270.hitsTop = cudaStreaming0246.hitsTop;
+                cudaWallResidentBoundaryDiagnostics0270.maxYWallReflectionsPerParticle =
+                    cudaStreaming0246.maxYWallReflectionsPerParticle;
+                cudaWallResidentBoundaryDiagnosticsValid0270 = true;
+            }
         }
         if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
@@ -1166,9 +1179,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             // wrap and bounded-y reflections for the validated static channel
             // subset.  Re-running apply_boundary_conditions() here only scans
             // the host ParticleState, which is intentionally stale in resident
-            // mode.  Preserve the historical resident summaries by leaving the
-            // BoundaryDiagnostics counters at their default zero values.
-            result.boundary = BoundaryDiagnostics{};
+            // mode.  The physical reflections have already been applied by
+            // CUDA 0246, so keep the CPU boundary pass skipped but propagate the
+            // CUDA wall-hit diagnostics into the runtime summary.
+            result.boundary = cudaWallResidentBoundaryDiagnosticsValid0270
+                ? cudaWallResidentBoundaryDiagnostics0270
+                : BoundaryDiagnostics{};
             handledByCudaBoundary = true;
         }
         if (!handledByCudaBoundary) {
