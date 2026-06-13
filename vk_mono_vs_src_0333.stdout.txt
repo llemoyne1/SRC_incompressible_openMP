@@ -1,0 +1,45 @@
+[0333] building monolithic build/mpcd_vkkh_play_timed_0333
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu(1662): warning #1650-D: result of call is not used
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu(1662): warning #1650-D: result of call is not used
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu(1532): warning #177-D: function "starts_with" was declared but never referenced
+
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu(1539): warning #177-D: function "mode_is_dropwall" was declared but never referenced
+
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu(1805): warning #177-D: function "visFieldName" was declared but never referenced
+
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu: In function ‘void ensureDir(const std::string&)’:
+external_benchmarks/mpcd_vkkh_play_timed_0333.cu:1662:12: warning: ignoring return value of ‘int system(const char*)’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ 1662 |     std::system(cmd.c_str());
+      |     ~~~~~~~^~~~~~~~~~~~~
+[0333] monolithic case=MONO_ANALYTIC_SPECULAR rep=1
+[0333] monolithic case=MONO_ANALYTIC_SPECULAR rep=2
+[0333] monolithic case=MONO_ANALYTIC_SPECULAR rep=3
+[0333] SRC case=SRC_CLASSIC_NINACT0 mode=classic inactive=0 rep=1
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT0_rep1/init/vk_full_periodic_0333_360x19_g20_inactive0.smpcd fluid=136800 inactive=0 total=136800 rejectedCylinder=1136
+[0333] SRC case=SRC_CLASSIC_NINACT0 mode=classic inactive=0 rep=2
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT0_rep2/init/vk_full_periodic_0333_360x19_g20_inactive0.smpcd fluid=136800 inactive=0 total=136800 rejectedCylinder=1136
+[0333] SRC case=SRC_CLASSIC_NINACT0 mode=classic inactive=0 rep=3
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT0_rep3/init/vk_full_periodic_0333_360x19_g20_inactive0.smpcd fluid=136800 inactive=0 total=136800 rejectedCylinder=1136
+[0333] SRC case=SRC_CLASSIC_NINACT750000 mode=classic inactive=750000 rep=1
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT750000_rep1/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+[0333] SRC case=SRC_CLASSIC_NINACT750000 mode=classic inactive=750000 rep=2
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT750000_rep2/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+[0333] SRC case=SRC_CLASSIC_NINACT750000 mode=classic inactive=750000 rep=3
+[0333-state] output=runs/vk_full_periodic_0333/SRC_CLASSIC_NINACT750000_rep3/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+[0333] SRC case=SRC_RESAMPLING_NINACT750000 mode=resampling inactive=750000 rep=1
+[0333-state] output=runs/vk_full_periodic_0333/SRC_RESAMPLING_NINACT750000_rep1/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+[0333] SRC case=SRC_RESAMPLING_NINACT750000 mode=resampling inactive=750000 rep=2
+[0333-state] output=runs/vk_full_periodic_0333/SRC_RESAMPLING_NINACT750000_rep2/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+[0333] SRC case=SRC_RESAMPLING_NINACT750000 mode=resampling inactive=750000 rep=3
+[0333-state] output=runs/vk_full_periodic_0333/SRC_RESAMPLING_NINACT750000_rep3/init/vk_full_periodic_0333_360x19_g20_inactive750000.smpcd fluid=136800 inactive=750000 total=886800 rejectedCylinder=1136
+Traceback (most recent call last):
+  File "/mnt/e/SRC_MPCD_DEV/SRC_GPU/scripts/analyze_vk_full_periodic_mono_vs_src_0333.py", line 108, in <module>
+    "case": r["case"], "kind":"src", "rep": int(r["rep"]), "status": int(r["status"]),
+                                            ^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: 'rep'
