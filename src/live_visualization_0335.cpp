@@ -42,6 +42,9 @@ bool LiveVisualization0335::enabled() const { return false; }
 bool LiveVisualization0335::should_draw(std::uint64_t, std::uint64_t) const { return false; }
 
 void LiveVisualization0335::update(const ParticleState&, const SimulationParams&, std::uint64_t, double) {}
+void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64_t, double,
+                                            const std::vector<unsigned char>&, int, int,
+                                            const std::string&) {}
 
 } // namespace mpcd
 
@@ -381,6 +384,41 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     glPixelZoom(static_cast<float>(fbw) / static_cast<float>(v.nx),
                 static_cast<float>(fbh) / static_cast<float>(v.ny));
     glDrawPixels(v.nx, v.ny, GL_RGBA, GL_UNSIGNED_BYTE, v.rgba.data());
+    glPixelZoom(1.0f, 1.0f);
+
+    glfwSwapBuffers(v.window);
+    glfwPollEvents();
+}
+
+void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64_t step, double time,
+                                            const std::vector<unsigned char>& frame,
+                                            int frameNx,
+                                            int frameNy,
+                                            const std::string& sourceLabel) {
+    auto& v = *impl_;
+    if (!v.enabled) return;
+    if (v.window == nullptr || glfwWindowShouldClose(v.window)) {
+        v.disable("window closed");
+        return;
+    }
+    if (frameNx <= 0 || frameNy <= 0 || frame.size() < 4u * static_cast<std::size_t>(frameNx) * static_cast<std::size_t>(frameNy)) return;
+    std::ostringstream title;
+    title << "SRC/MPCD live 0335a | " << v.field << " | " << sourceLabel
+          << " | step " << step << " | t=" << time;
+    glfwSetWindowTitle(v.window, title.str().c_str());
+    glfwMakeContextCurrent(v.window);
+    int fbw = 0, fbh = 0;
+    glfwGetFramebufferSize(v.window, &fbw, &fbh);
+    glViewport(0, 0, fbw, fbh);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, static_cast<double>(fbw), 0.0, static_cast<double>(fbh), -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glRasterPos2i(0, 0);
+    glPixelZoom(static_cast<float>(fbw) / static_cast<float>(frameNx), static_cast<float>(fbh) / static_cast<float>(frameNy));
+    glDrawPixels(frameNx, frameNy, GL_RGBA, GL_UNSIGNED_BYTE, frame.data());
     glPixelZoom(1.0f, 1.0f);
     glfwSwapBuffers(v.window);
     glfwPollEvents();

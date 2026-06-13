@@ -94,6 +94,7 @@ set -x
   src/cuda_inlet_outlet_fullface_0249a.cu \
   src/cuda_inlet_outlet_segmented_0249b.cu \
   src/cuda_classic_src_io_resident_0263.cu \
+  src/cuda_live_field_0337.cu \
   "${LIVE_VIS_LIBS[@]}" \
   -o "$OUT"
 set +x

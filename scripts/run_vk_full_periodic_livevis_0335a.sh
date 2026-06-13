@@ -59,13 +59,17 @@ export SRC_LIVE_VIS_SMOOTH_PASSES="${SRC_LIVE_VIS_SMOOTH_PASSES:-1}"
 export SRC_LIVE_VIS_WINDOW_SCALE="${SRC_LIVE_VIS_WINDOW_SCALE:-1}"
 export SRC_LIVE_VIS_VSYNC="${SRC_LIVE_VIS_VSYNC:-0}"
 if [[ "$MODE" == "resampling" ]]; then
-  export SRC_LIVE_VIS_FORCE_HOST_MIRROR="${SRC_LIVE_VIS_FORCE_HOST_MIRROR:-1}"
-  # 0335d: visual-inspection mode.  The CUDA resampling path may invalidate the
-  # shared 0251 mirror, so the live renderer otherwise falls back to a frozen
-  # host copy.  This slower mode forces host-visible updates for visualization.
-  export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="${SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR:-1}"
-else
+  # 0337a: prefer CUDA field rendering for resampling.  It renders directly
+  # from the resident device arrays to a small RGBA frame, avoiding the slow
+  # permanent host mirror used by 0335d.
+  export SRC_LIVE_VIS_CUDA_FIELD="${SRC_LIVE_VIS_CUDA_FIELD:-1}"
   export SRC_LIVE_VIS_FORCE_HOST_MIRROR="${SRC_LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+  export SRC_LIVE_VIS_CUDA_SNAPSHOT="${SRC_LIVE_VIS_CUDA_SNAPSHOT:-0}"
+  export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="${SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
+else
+  export SRC_LIVE_VIS_CUDA_FIELD="${SRC_LIVE_VIS_CUDA_FIELD:-0}"
+  export SRC_LIVE_VIS_FORCE_HOST_MIRROR="${SRC_LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+  export SRC_LIVE_VIS_CUDA_SNAPSHOT="${SRC_LIVE_VIS_CUDA_SNAPSHOT:-0}"
   export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="${SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
 fi
 

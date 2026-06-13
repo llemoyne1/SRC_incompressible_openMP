@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace mpcd {
 
@@ -21,6 +23,13 @@ public:
     bool should_draw(std::uint64_t step, std::uint64_t finalStep) const;
     void update(const ParticleState& state, const SimulationParams& params,
                 std::uint64_t step, double time);
+    void draw_rgba_frame(const SimulationParams& params,
+                         std::uint64_t step,
+                         double time,
+                         const std::vector<unsigned char>& rgba,
+                         int nx,
+                         int ny,
+                         const std::string& sourceLabel);
 
 private:
     struct Impl;

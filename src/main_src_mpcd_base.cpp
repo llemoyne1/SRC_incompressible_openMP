@@ -3,6 +3,7 @@
 #include "params_io_base.h"
 #include "runtime_summary.h"
 #include "cuda_shared_particle_state_0251.h"
+#include "cuda_live_field_0337.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 #include "live_visualization_0335.h"
@@ -12,6 +13,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -35,6 +37,24 @@ bool env_truthy_0260(const char* name) {
     const std::string s(v);
     return !(s == "0" || s == "false" || s == "FALSE" ||
              s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+int env_int_0337(const char* name, int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try { return std::stoi(v); } catch (...) { return fallback; }
+}
+
+double env_double_0337(const char* name, double fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try { return std::stod(v); } catch (...) { return fallback; }
+}
+
+std::string env_string_0337(const char* name, const std::string& fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    return std::string(v);
 }
 
 void sync_cuda_resident_state_for_host_0260(mpcd::ParticleState& state) {
@@ -312,6 +332,39 @@ void write_resampling_guard_profile_0169(
     out << "metadata,mass_guard_steps," << massSteps << ",0,0\n";
 }
 
+
+bool live_vis_state_sane_0336(const mpcd::ParticleState& state,
+                              const mpcd::SimulationParams& params) {
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    if (n == 0u || state.x.size() < n || state.y.size() < n ||
+        state.vx.size() < n || state.vy.size() < n) {
+        return false;
+    }
+    const double epsX = std::max(1.0e-12, 1.0e-6 * std::max(1.0, params.Lx));
+    const double epsY = std::max(1.0e-12, 1.0e-6 * std::max(1.0, params.Ly));
+    std::size_t finiteInside = 0u;
+    std::size_t nonZeroPosition = 0u;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double x = state.x[i];
+        const double y = state.y[i];
+        const double vx = state.vx[i];
+        const double vy = state.vy[i];
+        if (std::isfinite(x) && std::isfinite(y) &&
+            std::isfinite(vx) && std::isfinite(vy) &&
+            x >= -epsX && x <= params.Lx + epsX &&
+            y >= -epsY && y <= params.Ly + epsY) {
+            ++finiteInside;
+        }
+        if (std::abs(x) + std::abs(y) > 1.0e-14) {
+            ++nonZeroPosition;
+        }
+    }
+    // A compact live snapshot with only a handful of visible particles is not
+    // useful and typically means the shared 0251 arrays are not authoritative
+    // after resampling edits.  Keep this threshold conservative.
+    return finiteInside * 10u >= 9u * n && nonZeroPosition * 10u >= 8u * n;
+}
+
 int openmp_active_threads() {
     int active = 1;
 #ifdef _OPENMP
@@ -491,23 +544,50 @@ int main(int argc, char** argv) {
 
             if (liveVisualization0335.should_draw(static_cast<std::uint64_t>(step),
                                                       static_cast<std::uint64_t>(params.nSteps))) {
-                mpcd::ParticleState liveState;
-                mpcd::ParticleRoleCounts liveRoleCounts{};
-                const bool compactLive0335 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(
-                    liveState, mpcd::kParticleRoleFluid, &liveRoleCounts);
-                if (!compactLive0335) {
-                    sync_cuda_resident_state_for_host_0260(state);
-                    liveState = state;
+                bool drawnByCudaField0337 = false;
+                if (env_truthy_0260("SRC_LIVE_VIS_CUDA_FIELD")) {
+                    const int liveNx0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NX", 300));
+                    const int liveNy0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NY", 80));
+                    const std::string liveField0337 = env_string_0337("SRC_LIVE_VIS_FIELD", "ux");
+                    const double liveClip0337 = env_double_0337("SRC_LIVE_VIS_CLIP", -1.0);
+                    const double liveGain0337 = env_double_0337("SRC_LIVE_VIS_GAIN", 1.0);
+                    const int liveSmooth0337 = std::max(0, env_int_0337("SRC_LIVE_VIS_SMOOTH_PASSES", 1));
+                    std::vector<unsigned char> liveRgba0337;
+                    mpcd::CudaLiveField0337Diagnostics liveDiag0337{};
+                    drawnByCudaField0337 = mpcd::cuda_live_field_render_shared_0337(liveRgba0337, liveNx0337, liveNy0337, params, liveField0337, liveClip0337, liveGain0337, liveSmooth0337, &liveDiag0337);
+                    if (drawnByCudaField0337) {
+                        liveVisualization0335.draw_rgba_frame(params, static_cast<std::uint64_t>(step), static_cast<double>(step) * params.dt, liveRgba0337, liveNx0337, liveNy0337, "cuda_field_0337");
+                    }
+                    if (env_truthy_0260("SRC_LIVE_VIS_LOG_SOURCE")) {
+                        std::cerr << "\r\033[K[livevis0335] step=" << step
+                                  << " source=" << (drawnByCudaField0337 ? "cuda_field_0337" : "cuda_field_failed_fallback")
+                                  << " particles=" << liveDiag0337.particles
+                                  << " activeFluid=" << liveDiag0337.activeFluid
+                                  << " total_s=" << liveDiag0337.totalSeconds
+                                  << std::flush;
+                    }
                 }
-                if (env_truthy_0260("SRC_LIVE_VIS_LOG_SOURCE")) {
-                    std::cerr << "\n[livevis0335] step=" << step
-                              << " source=" << (compactLive0335 ? "cuda_compact_fluid" : "host_state_fallback")
-                              << " Np=" << liveState.Np
-                              << " NactiveFluid=" << liveState.NactiveFluid << '\n';
+                if (!drawnByCudaField0337) {
+                    mpcd::ParticleState liveState;
+                    mpcd::ParticleRoleCounts liveRoleCounts{};
+                    bool compactLive0335 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(liveState, mpcd::kParticleRoleFluid, &liveRoleCounts);
+                    bool snapshotLive0336 = false;
+                    bool rejectedSnapshot0336 = false;
+                    if (!compactLive0335 && env_truthy_0260("SRC_LIVE_VIS_CUDA_SNAPSHOT")) {
+                        snapshotLive0336 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_snapshot_0336(liveState, mpcd::kParticleRoleFluid, &liveRoleCounts);
+                        if (snapshotLive0336 && !live_vis_state_sane_0336(liveState, params)) { snapshotLive0336 = false; rejectedSnapshot0336 = true; liveState = mpcd::ParticleState{}; }
+                    }
+                    if (!compactLive0335 && !snapshotLive0336) { sync_cuda_resident_state_for_host_0260(state); liveState = state; }
+                    if (env_truthy_0260("SRC_LIVE_VIS_LOG_SOURCE")) {
+                        const char* liveSource0336 = compactLive0335 ? "cuda_compact_fluid" : (snapshotLive0336 ? "cuda_snapshot_fluid_0336" : (rejectedSnapshot0336 ? "cuda_snapshot_rejected_host_fallback_0336" : "host_state_fallback"));
+                        std::cerr << "\r\033[K[livevis0335] step=" << step
+                                  << " source=" << liveSource0336
+                                  << " Np=" << liveState.Np
+                                  << " NactiveFluid=" << liveState.NactiveFluid
+                                  << std::flush;
+                    }
+                    liveVisualization0335.update(liveState, params, static_cast<std::uint64_t>(step), static_cast<double>(step) * params.dt);
                 }
-                liveVisualization0335.update(liveState, params,
-                                             static_cast<std::uint64_t>(step),
-                                             static_cast<double>(step) * params.dt);
             }
 
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
