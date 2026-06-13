@@ -2,7 +2,7 @@
 set -euo pipefail
 # 0303: resampling-capable demo wrapper.  RESAMPLING_ENABLE=0 keeps the
 # classic CUDA path while preserving the passive survey for diagnostics.
-BIN="${BIN:-build/src_mpcd_base_cuda_0303}"
+BIN="${BIN:-build/src_mpcd_base_cuda_vkfix_safe_no0318}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_resampling_demo_common_0303.sh"
 

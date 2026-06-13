@@ -216,13 +216,11 @@ bool cuda_wall_simple_streaming_0246_supported(const SimulationParams& params) {
     if (params.bcBottom == "periodic" || params.bcTop == "periodic") return false;
     if (encode_wall_mode_0246(params.bcBottom) == 0 || encode_wall_mode_0246(params.bcTop) == 0) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
-    if (params.immersedSolidEnable) {
-        const bool allowFixedCircle0318 = cuda_wall_circle_resident_0318_requested() &&
-            immersed_solid_shape(params) == ImmersedSolidShape::Circle &&
-            params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 &&
-            params.immersedSolidOmega == 0.0;
-        if (!allowFixedCircle0318) return false;
-    }
+    // 0246 remains a wall-simple path only.  The wall+immersed-circle
+    // coupling through 0318 is quarantined: VK validation showed that
+    // 0246+circle changes the momentum evolution even when wall/circle hits
+    // are present.  Use the validated non-0318 path for immersed solids.
+    if (params.immersedSolidEnable) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
     // 0246 is deliberately static-domain wall-simple: Poiseuille/channel walls
     // only. Moving pistons and active-domain walls remain CPU until their own
@@ -241,8 +239,8 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     diag.requested = cuda_wall_simple_streaming_0246_requested();
     diag.supported = cuda_wall_simple_streaming_0246_supported(params);
     const std::uint64_t nActiveFluid = active_fluid_count(state);
-    diag.particles = nActiveFluid;
-    if (!diag.requested || !diag.supported || nActiveFluid == 0u) {
+    diag.particles = state.Np;
+    if (!diag.requested || !diag.supported || state.Np == 0u) {
         return diag;
     }
     if (!cuda_particle_state_available()) {
@@ -282,7 +280,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
 
     CudaParticleDeviceView view = gpuState.device_view();
     const int threads = env_int_0246("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_THREADS", 256);
-    const std::uint64_t blocks64 = (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
+    const std::uint64_t blocks64 = (state.Np + static_cast<std::uint64_t>(threads) - 1u) /
                                    static_cast<std::uint64_t>(threads);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
         throw std::runtime_error("cuda_streaming_wall_simple_0246: grid too large for 1D launch");
@@ -294,7 +292,7 @@ CudaWallSimpleStreaming0246Diagnostics try_apply_cuda_wall_simple_streaming_0246
     const double wallUyTop = domain.vyMax + params.wallVpUyTop;
 
     wall_simple_force_stream_kernel_0246<<<static_cast<unsigned int>(blocks64), threads>>>(
-        nActiveFluid, view.x, view.y, view.vx, view.vy, view.role,
+        view.n, view.x, view.y, view.vx, view.vy, view.role,
         kParticleRoleFluid,
         params.dt, params.Lx, params.Ly,
         domain.yMin, domain.yMax,

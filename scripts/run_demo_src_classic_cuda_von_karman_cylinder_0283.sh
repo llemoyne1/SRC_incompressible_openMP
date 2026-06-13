@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+BIN="${BIN:-build/src_mpcd_base_cuda_vkfix_safe_no0318}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src_gpu_demo_common_0283.sh"
 
 CASE_NAME="von_karman_cylinder"

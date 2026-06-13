@@ -17,14 +17,14 @@ src_gpu_demo_root() {
 ROOT_DIR="${ROOT_DIR:-$(src_gpu_demo_root)}"
 cd "$ROOT_DIR"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_0291b}"
+BIN="${BIN:-build/src_mpcd_base_cuda_vkfix_safe_no0318}"
 THREADS="${THREADS:-8}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
 export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
 export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 
-AUTO_BUILD="${AUTO_BUILD:-1}"
+AUTO_BUILD="${AUTO_BUILD:-0}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
 # 0291b: one physical switch controls the thermostat in both CPU and CUDA
@@ -232,6 +232,13 @@ run_demo_case_0283() {
   local params_file=$1 log_file=$2 time_file=$3 out_dir=$4
   ensure_src_gpu_demo_binary_0283
   echo "[0283-demo] binary : $BIN"
+  if command -v sha256sum >/dev/null 2>&1 && [[ -x "$BIN" ]]; then
+    local bin_sha
+    bin_sha="$(sha256sum "$BIN" | awk '{print $1}')"
+    echo "[0331-safe] bin_sha256 : $bin_sha"
+    echo "[0331-safe] expected   : 28e7f20c6a02592bd96b99c235e5f39e33dae9390cf08e58fb3573cfc117ef7c"
+    echo "[0331-safe] checkpoint : vkfix_safe_no0318; 0318 wall-circle resident path quarantined by default"
+  fi
   echo "[0283-demo] params : $params_file"
   echo "[0283-demo] output : $out_dir"
   local rc=0
@@ -289,6 +296,11 @@ src_gpu_cuda_env_clear_0283() {
   export MPCD_CUDA_STREAMING_PERIODIC_0245_DOWNLOAD_ALL=1
   export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=0
   export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246_DOWNLOAD_ALL=1
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318=0
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318_UNSAFE_ENABLE=0
+  export SRC_GPU_WALL_CIRCLE_RESIDENT_0318=0
+  export SRC_GPU_WALL_FAST_DIAG_0320=0
+  export SRC_GPU_IMMERSED_CIRCLE_FAST_DIAG_0330=0
   export MPCD_CUDA_IMMERSED_RECTANGLE_0247=0
   export MPCD_CUDA_IMMERSED_RECTANGLE_0247_DOWNLOAD_ALL=1
   export MPCD_CUDA_STREAMING_PISTON_0247B=0
