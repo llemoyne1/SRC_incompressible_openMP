@@ -14,3 +14,27 @@ dev_history/
 *.so
 *.a
 *.exe
+
+# Runtime outputs
+runs/
+init/
+output/
+*.stdout.txt
+*.stderr.txt
+*.time
+
+# Heavy/generated artifacts
+dev_history/artifacts/
+*.zip
+*.tar
+*.tar.gz
+
+# Build products
+build/
+*.o
+*.a
+*.so
+*.exe
+
+# MATLAB temporary files
+*.asv
