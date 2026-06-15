@@ -19,7 +19,7 @@ export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
-RUN_MODES="${RUN_MODES:-classic resampling}"   # set to "classic resampling" to compare to resampling
+RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare to resampling
 
 # Compact output defaults: fluid-only dumps are lighter and suitable for most
 # visual post-processing.  Set DUMP_ROLE_FILTER=all for restart-compatible dumps
@@ -31,7 +31,7 @@ SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
 # 0337 live visualization defaults. These are explicit so the demo scripts are
 # self-documenting and can be overridden from the environment.
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-omega}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
 LIVE_VIS_NX="${LIVE_VIS_NX:-600}"
 LIVE_VIS_NY="${LIVE_VIS_NY:-320}"
@@ -39,7 +39,7 @@ LIVE_VIS_ALPHA="${LIVE_VIS_ALPHA:-0.08}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--20}"
 LIVE_VIS_QUANTILE="${LIVE_VIS_QUANTILE:-0.995}"
 LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
-LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-2}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-10}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
 LIVE_VIS_LOG_SOURCE="${LIVE_VIS_LOG_SOURCE:-1}"
@@ -510,13 +510,13 @@ portable_mode_root_0315() {
 CASE_NAME="von_karman_cylinder_0315"
 VK_MODE="${VK_MODE:-io}"   # io | periodic
 Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1200}"; NY="${NY:-640}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-75000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-2000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-500}"
 UIN="${UIN:-0.9}"; UINIT="${UINIT:-0.001}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 CYLINDER_CX="${CYLINDER_CX:-0.35}"; CYLINDER_CY="${CYLINDER_CY:-0.475}"; CYLINDER_R="${CYLINDER_R:-0.125}"
 OUTLET_MODE="${OUTLET_MODE:-equilibrium_flux}"
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-7500}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_von_karman_resampling_0315}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/VK_resampling}"
 run_mode_0315() {
   local mode=$1 run_root; run_root=$(portable_mode_root_0315 "$BASE_RUN_ROOT/${VK_MODE}" "$mode")
   portable_prepare_dirs_0315 "$run_root"
@@ -628,14 +628,15 @@ PARAMS
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"
 }
-for mode in $RUN_MODES; do run_mode_0315 "$mode"; done
-cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<'MATLAB'
-root = 'runs/portable_von_karman_resampling_0315';
-mode = 'io'; % change to 'periodic' if VK_MODE=periodic was used
-resamp = fullfile(root, mode, 'resampling_split_safe', 'output');
-play_smpcd_dumps(resamp, 'field', 'speed', 'frameStride', 2, 'pauseTime', 0.03, ...
-    'showParticles', true, 'particleRoleFilter', 'fluid', 'particleColorMode', 'masslog', ...
-    'particleMassMax', 0.5, 'particleSpeedMin', 1.0, 'particleThresholdLogic', 'or', ...
-    'particleLabelMode', 'mass_speed', 'particleLabelMax', 30, 'particleMarkerSize', 12);
-MATLAB
-echo "[0315-portable] MATLAB helper: $BASE_RUN_ROOT/visualize_von_karman_0315.m"
+#for mode in $RUN_MODES; do run_mode_0315 "$mode"; done
+run_mode_0315 $RUN_MODES
+#cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<'MATLAB'
+# root = 'runs/VK_classic';
+# mode = 'io'; % change to 'periodic' if VK_MODE=periodic was used
+# resamp = fullfile(root, mode, 'resampling_split_safe', 'output');
+# play_smpcd_dumps(resamp, 'field', 'speed', 'frameStride', 2, 'pauseTime', 0.03, ...
+#     'showParticles', true, 'particleRoleFilter', 'fluid', 'particleColorMode', 'masslog', ...
+#     'particleMassMax', 0.5, 'particleSpeedMin', 1.0, 'particleThresholdLogic', 'or', ...
+#     'particleLabelMode', 'mass_speed', 'particleLabelMax', 30, 'particleMarkerSize', 12);
+# MATLAB
+# echo "[0315-portable] MATLAB helper: $BASE_RUN_ROOT/visualize_von_karman_0315.m"

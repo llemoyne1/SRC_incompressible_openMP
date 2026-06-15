@@ -47,6 +47,17 @@ bool env_flag_enabled_0257(const char* name, const bool fallback = false) {
              s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
+bool wall_circle_resident_minimal_download_0338() {
+    // 0338a is deliberately opt-in for the quarantined wall+circle resident
+    // family.  The SRC_GPU production code also supports hybrid CPU/GPU
+    // continuations (Q6, resampling, virial) that may still require conservative
+    // host mirrors.  Do not classify 0318 as a download-skipping resident path
+    // unless the benchmark/validation runner explicitly requests it.
+    return env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318", false) &&
+           env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_MINIMAL_DOWNLOAD_0338", false) &&
+           !env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_DISABLE_MINIMAL_DOWNLOAD_0338", false);
+}
+
 std::uint64_t splitmix64_host(std::uint64_t x) {
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30U)) * 0xbf58476d1ce4e5b9ULL;
@@ -1033,7 +1044,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false) ||
+        wall_circle_resident_minimal_download_0338();
     const bool skipVelocityDownload0315f =
         residentClassicMode0315f &&
         !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_DISABLE_SKIP_VELOCITY_DOWNLOAD_0315F", false);
@@ -1325,7 +1337,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false) ||
+        wall_circle_resident_minimal_download_0338();
     const bool skipVelocityDownload0315f =
         residentClassicMode0315f &&
         !env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_DISABLE_SKIP_VELOCITY_DOWNLOAD_0315F", false);
@@ -1807,7 +1820,8 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262", false) ||
         env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) ||
-        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false);
+        env_flag_enabled_0257("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false) ||
+        wall_circle_resident_minimal_download_0338();
     const bool lazyKernelLaunchCheck0273 =
         residentClassicMode0273 &&
         env_flag_enabled_0257("MPCD_CUDA_PERSISTENT_SRC_COLLISION_LAZY_KERNEL_CHECK_0273", false) &&

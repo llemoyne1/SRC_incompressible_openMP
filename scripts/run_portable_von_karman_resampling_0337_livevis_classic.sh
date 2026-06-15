@@ -31,15 +31,15 @@ SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
 # 0337 live visualization defaults. These are explicit so the demo scripts are
 # self-documenting and can be overridden from the environment.
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-vorticity}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
-LIVE_VIS_NX="${LIVE_VIS_NX:-600}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-1200}"
 LIVE_VIS_NY="${LIVE_VIS_NY:-320}"
 LIVE_VIS_ALPHA="${LIVE_VIS_ALPHA:-0.08}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--20}"
 LIVE_VIS_QUANTILE="${LIVE_VIS_QUANTILE:-0.995}"
-LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
-LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-2}"
+LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-0.5}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-10}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
 LIVE_VIS_LOG_SOURCE="${LIVE_VIS_LOG_SOURCE:-1}"
@@ -509,14 +509,14 @@ portable_mode_root_0315() {
 
 CASE_NAME="von_karman_cylinder_0315"
 VK_MODE="${VK_MODE:-io}"   # io | periodic
-Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1200}"; NY="${NY:-640}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-75000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
-SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-500}"
-UIN="${UIN:-0.9}"; UINIT="${UINIT:-0.001}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
-CYLINDER_CX="${CYLINDER_CX:-0.35}"; CYLINDER_CY="${CYLINDER_CY:-0.475}"; CYLINDER_R="${CYLINDER_R:-0.125}"
+Lx="${Lx:-0.8}"; Ly="${Ly:-0.4}"; NX="${NX:-640}"; NY="${NY:-640}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-500}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.5}"
+SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-1000}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000}"
+UIN="${UIN:-0.45}"; UINIT="${UINIT:-0.45}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
+CYLINDER_CX="${CYLINDER_CX:-0.1}"; CYLINDER_CY="${CYLINDER_CY:-0.205}"; CYLINDER_R="${CYLINDER_R:-0.04}"
 OUTLET_MODE="${OUTLET_MODE:-equilibrium_flux}"
-INACTIVE_SLOTS="${INACTIVE_SLOTS:-7500}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_von_karman_resampling_0315}"
+INACTIVE_SLOTS="${INACTIVE_SLOTS:-00}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/VK_classic_small_time}"
 run_mode_0315() {
   local mode=$1 run_root; run_root=$(portable_mode_root_0315 "$BASE_RUN_ROOT/${VK_MODE}" "$mode")
   portable_prepare_dirs_0315 "$run_root"
@@ -536,7 +536,7 @@ bcLeft = periodic
 bcRight = periodic
 bcBottom = solid
 bcTop = solid
-bodyAccelerationX = 0.0
+bodyAccelerationX = 0.000005
 bodyAccelerationY = 0.0
 taylorGreenForcingEnable = false
 keepMeanFlowEnable = false
@@ -628,14 +628,15 @@ PARAMS
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"
 }
-for mode in $RUN_MODES; do run_mode_0315 "$mode"; done
-cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<'MATLAB'
-root = 'runs/portable_von_karman_resampling_0315';
-mode = 'io'; % change to 'periodic' if VK_MODE=periodic was used
-resamp = fullfile(root, mode, 'resampling_split_safe', 'output');
-play_smpcd_dumps(resamp, 'field', 'speed', 'frameStride', 2, 'pauseTime', 0.03, ...
-    'showParticles', true, 'particleRoleFilter', 'fluid', 'particleColorMode', 'masslog', ...
-    'particleMassMax', 0.5, 'particleSpeedMin', 1.0, 'particleThresholdLogic', 'or', ...
-    'particleLabelMode', 'mass_speed', 'particleLabelMax', 30, 'particleMarkerSize', 12);
-MATLAB
-echo "[0315-portable] MATLAB helper: $BASE_RUN_ROOT/visualize_von_karman_0315.m"
+#for mode in $RUN_MODES; do run_mode_0315 "$mode"; done
+run_mode_0315 $RUN_MODES
+#cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<'MATLAB'
+# root = 'runs/VK_classic';
+# mode = 'io'; % change to 'periodic' if VK_MODE=periodic was used
+# resamp = fullfile(root, mode, 'resampling_split_safe', 'output');
+# play_smpcd_dumps(resamp, 'field', 'speed', 'frameStride', 2, 'pauseTime', 0.03, ...
+#     'showParticles', true, 'particleRoleFilter', 'fluid', 'particleColorMode', 'masslog', ...
+#     'particleMassMax', 0.5, 'particleSpeedMin', 1.0, 'particleThresholdLogic', 'or', ...
+#     'particleLabelMode', 'mass_speed', 'particleLabelMax', 30, 'particleMarkerSize', 12);
+# MATLAB
+# echo "[0315-portable] MATLAB helper: $BASE_RUN_ROOT/visualize_von_karman_0315.m"

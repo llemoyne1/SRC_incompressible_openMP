@@ -523,6 +523,20 @@ bool persistent_env_flag_enabled(const char* name, const bool fallback = false) 
              t == "off" || t == "OFF" || t == "no" || t == "NO");
 }
 
+bool wall_circle_resident_shared_thermostat_0338() {
+    // 0338c: keep the quarantined wall+circle 0318 path conservative by default.
+    // When the 0338 minimal-download benchmark flag is explicitly enabled, the
+    // immersed-circle CUDA bridge has just produced a fresh shared 0251 particle
+    // state.  Allow the persistent SRC+thermostat wrapper to consume that shared
+    // state instead of uploading a private particle mirror for the collision.
+    // Hybrid Q6/resampling/virial paths remain protected because the flag is
+    // opt-in and the production script leaves it disabled unless profiling this
+    // classic-only resident experiment.
+    return persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318", false) &&
+           persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_MINIMAL_DOWNLOAD_0338", false) &&
+           !persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_DISABLE_MINIMAL_DOWNLOAD_0338", false);
+}
+
 int persistent_env_int_value(const char* name, const int fallback) {
     const char* v = std::getenv(name);
     if (v == nullptr || *v == '\0') return fallback;
@@ -1095,10 +1109,13 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     CudaCellWorkspaceDiagnostics cellDiag{};
     const bool useSharedParticleState = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE", false);
     const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
+    const bool wallCircleSharedThermostat0338 = wall_circle_resident_shared_thermostat_0338();
     const bool useSharedParticleState0251 =
-        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251", false);
+        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251", false) ||
+        wallCircleSharedThermostat0338;
     const bool useSharedThermostatState0260 = applyPersistentThermostat &&
-        persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260", false);
+        (persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260", false) ||
+         wallCircleSharedThermostat0338);
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
     if (useSharedParticleState || useSharedParticleState0251 || useSharedThermostatState0260) {
         const bool strict = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_STRICT", true);
