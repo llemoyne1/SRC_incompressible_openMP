@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0337d}"
+BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0338c}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-12}"
@@ -31,7 +31,7 @@ SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
 # 0337 live visualization defaults. These are explicit so the demo scripts are
 # self-documenting and can be overridden from the environment.
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-vorticity}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-25}"
 LIVE_VIS_NX="${LIVE_VIS_NX:-600}"
 LIVE_VIS_NY="${LIVE_VIS_NY:-320}"
@@ -47,6 +47,11 @@ LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-1}"
 LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-0}"
 LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
 LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-}"
+LIVE_VIS_CONTROL_FILE_EFFECTIVE=""
+LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-1}"
 
 portable_bool_true_0315() {
   case "${1:-0}" in
@@ -77,6 +82,9 @@ portable_livevis_env_0337() {
   export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
   export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
   export SRC_LIVE_VIS_FORCE_HOST_MIRROR="$LIVE_VIS_FORCE_HOST_MIRROR"
+  export SRC_LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE_EFFECTIVE:-${LIVE_VIS_CONTROL_FILE:-}}"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
   if [[ "$mode" == "resampling" ]]; then
     export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
   else
@@ -84,6 +92,26 @@ portable_livevis_env_0337() {
   fi
 }
 
+portable_livevis_prepare_control_0341a() {
+  local run_root=$1
+  LIVE_VIS_CONTROL_FILE_EFFECTIVE=""
+  if ! portable_bool_true_0315 "$LIVE_VIS_CONTROL_ENABLE"; then
+    return 0
+  fi
+  LIVE_VIS_CONTROL_FILE_EFFECTIVE="${LIVE_VIS_CONTROL_FILE:-$run_root/livevis_control.kv}"
+  mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE_EFFECTIVE")"
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE_EFFECTIVE" ]]; then
+    cat > "$LIVE_VIS_CONTROL_FILE_EFFECTIVE" <<CONTROL
+# 0341a live visualization runtime controls. Edit this file while the simulation runs.
+# Supported keys: field, clip, gain, smoothPasses.
+field = ${LIVE_VIS_FIELD}
+clip = ${LIVE_VIS_CLIP}
+gain = ${LIVE_VIS_GAIN}
+smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
+CONTROL
+  fi
+  echo "[0337-livevis] runtime control file: $LIVE_VIS_CONTROL_FILE_EFFECTIVE"
+}
 
 portable_ensure_binary_0315() {
   if [[ -x "$BIN" && "$FORCE_REBUILD" != "1" && "$FORCE_REBUILD" != "true" && "$FORCE_REBUILD" != "TRUE" ]]; then
@@ -511,7 +539,7 @@ CASE_NAME="von_karman_cylinder_0315"
 VK_MODE="${VK_MODE:-io}"   # io | periodic
 
 Lx="${Lx:-0.8}"; Ly="${Ly:-0.4}"; NX="${NX:-640}"; NY="${NY:-640}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-500}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.5}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.5}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-1000}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000}"
 UIN="${UIN:-0.45}"; UINIT="${UINIT:-0.45}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 CYLINDER_CX="${CYLINDER_CX:-0.1}"; CYLINDER_CY="${CYLINDER_CY:-0.205}"; CYLINDER_R="${CYLINDER_R:-0.04}"
@@ -627,6 +655,7 @@ PARAMS
     portable_cuda_io_fullface_circle_0315
   fi
   portable_resampling_env_0315 "$mode"
+  portable_livevis_prepare_control_0341a "$run_root"
   portable_livevis_env_0337 "$mode"
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"

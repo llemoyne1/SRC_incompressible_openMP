@@ -47,6 +47,11 @@ LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-1}"
 LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-0}"
 LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
 LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-}"
+LIVE_VIS_CONTROL_FILE_EFFECTIVE=""
+LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-1}"
 
 portable_bool_true_0315() {
   case "${1:-0}" in
@@ -77,6 +82,9 @@ portable_livevis_env_0337() {
   export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
   export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
   export SRC_LIVE_VIS_FORCE_HOST_MIRROR="$LIVE_VIS_FORCE_HOST_MIRROR"
+  export SRC_LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE_EFFECTIVE:-${LIVE_VIS_CONTROL_FILE:-}}"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
   if [[ "$mode" == "resampling" ]]; then
     export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
   else
@@ -84,6 +92,26 @@ portable_livevis_env_0337() {
   fi
 }
 
+portable_livevis_prepare_control_0341a() {
+  local run_root=$1
+  LIVE_VIS_CONTROL_FILE_EFFECTIVE=""
+  if ! portable_bool_true_0315 "$LIVE_VIS_CONTROL_ENABLE"; then
+    return 0
+  fi
+  LIVE_VIS_CONTROL_FILE_EFFECTIVE="${LIVE_VIS_CONTROL_FILE:-$run_root/livevis_control.kv}"
+  mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE_EFFECTIVE")"
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE_EFFECTIVE" ]]; then
+    cat > "$LIVE_VIS_CONTROL_FILE_EFFECTIVE" <<CONTROL
+# 0341a live visualization runtime controls. Edit this file while the simulation runs.
+# Supported keys: field, clip, gain, smoothPasses.
+field = ${LIVE_VIS_FIELD}
+clip = ${LIVE_VIS_CLIP}
+gain = ${LIVE_VIS_GAIN}
+smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
+CONTROL
+  fi
+  echo "[0337-livevis] runtime control file: $LIVE_VIS_CONTROL_FILE_EFFECTIVE"
+}
 
 portable_ensure_binary_0315() {
   if [[ -x "$BIN" && "$FORCE_REBUILD" != "1" && "$FORCE_REBUILD" != "true" && "$FORCE_REBUILD" != "TRUE" ]]; then
@@ -580,6 +608,7 @@ $(portable_write_common_params_0315 "$STEPS" "$DT" "$KBT" "$SEED" "$SUMMARY_EVER
 PARAMS
   portable_cuda_io_segmented_0315
   portable_resampling_env_0315 "$mode"
+  portable_livevis_prepare_control_0341a "$run_root"
   portable_livevis_env_0337 "$mode"
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"
