@@ -1,6 +1,8 @@
 #include "live_visualization_0335.h"
 
 #include <cstdlib>
+#include <cctype>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -40,6 +42,10 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams&) {
 bool LiveVisualization0335::enabled() const { return false; }
 
 bool LiveVisualization0335::should_draw(std::uint64_t, std::uint64_t) const { return false; }
+
+void LiveVisualization0335::maybe_reload_controls(std::uint64_t) {}
+
+LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() const { return LiveVisualization0335RuntimeControls{}; }
 
 void LiveVisualization0335::update(const ParticleState&, const SimulationParams&, std::uint64_t, double) {}
 void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64_t, double,
@@ -83,13 +89,51 @@ std::string env_string_0335(const char* name, const std::string& fallback) {
     return std::string(v);
 }
 
+std::string trim_0335(const std::string& input) {
+    std::size_t begin = 0;
+    while (begin < input.size() && std::isspace(static_cast<unsigned char>(input[begin]))) ++begin;
+    std::size_t end = input.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(input[end - 1]))) --end;
+    return input.substr(begin, end - begin);
+}
+
+std::string lower_0335(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+bool parse_double_0335(const std::string& text, double& value) {
+    try {
+        std::size_t consumed = 0;
+        const double v = std::stod(text, &consumed);
+        if (consumed != trim_0335(text).size()) return false;
+        value = v;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool parse_int_0335(const std::string& text, int& value) {
+    try {
+        std::size_t consumed = 0;
+        const int v = std::stoi(text, &consumed);
+        if (consumed != trim_0335(text).size()) return false;
+        value = v;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 unsigned char clamp_u8_0335(double x) {
     const int v = static_cast<int>(std::lround(std::clamp(x, 0.0, 255.0)));
     return static_cast<unsigned char>(v);
 }
 
 bool signed_field_0335(const std::string& field) {
-    return field == "ux" || field == "uy" || field == "vx" || field == "vy" || field == "vorticity";
+    return field == "ux" || field == "uy" || field == "vx" || field == "vy" ||
+           field == "vorticity" || field == "omega" || field == "curl";
 }
 
 } // namespace
@@ -112,6 +156,9 @@ struct LiveVisualization0335::Impl {
     double gain = 1.0;
     bool overlaySolid = true;
     std::string field = "ux";
+    std::string controlFile;
+    int controlReloadEvery = 1;
+    bool controlLog = false;
 
     std::vector<double> sumUx;
     std::vector<double> sumUy;
@@ -169,6 +216,9 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
     v.quantile = std::clamp(env_double_0335("SRC_LIVE_VIS_QUANTILE", env_double_0335("MPCD_LIVE_VIS_QUANTILE", 0.995)), 0.50, 1.0);
     v.gain = std::max(1.0e-12, env_double_0335("SRC_LIVE_VIS_GAIN", env_double_0335("MPCD_LIVE_VIS_GAIN", 1.0)));
     v.smoothPasses = std::max(0, env_int_0335("SRC_LIVE_VIS_SMOOTH_PASSES", env_int_0335("MPCD_LIVE_VIS_SMOOTH_PASSES", 1)));
+    v.controlFile = env_string_0335("SRC_LIVE_VIS_CONTROL_FILE", env_string_0335("MPCD_LIVE_VIS_CONTROL_FILE", ""));
+    v.controlReloadEvery = std::max(1, env_int_0335("SRC_LIVE_VIS_CONTROL_EVERY", env_int_0335("MPCD_LIVE_VIS_CONTROL_EVERY", 1)));
+    v.controlLog = env_truthy_0335("SRC_LIVE_VIS_CONTROL_LOG") || env_truthy_0335("MPCD_LIVE_VIS_CONTROL_LOG");
     v.windowScale = std::max(1, env_int_0335("SRC_LIVE_VIS_WINDOW_SCALE", env_int_0335("MPCD_LIVE_VIS_WINDOW_SCALE", 1)));
     v.overlaySolid = !env_truthy_0335("SRC_LIVE_VIS_NO_SOLID_OVERLAY") &&
                      !env_truthy_0335("MPCD_LIVE_VIS_NO_SOLID_OVERLAY");
@@ -198,7 +248,8 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
               << " alpha=" << v.alpha
               << " clip=" << v.clip
               << " quantile=" << v.quantile
-              << " gain=" << v.gain << '\n';
+              << " gain=" << v.gain
+              << " controlFile=" << (v.controlFile.empty() ? "none" : v.controlFile) << '\n';
 }
 
 bool LiveVisualization0335::enabled() const { return impl_ && impl_->enabled; }
@@ -208,8 +259,68 @@ bool LiveVisualization0335::should_draw(std::uint64_t step, std::uint64_t finalS
     return (step % static_cast<std::uint64_t>(impl_->every) == 0u) || step == finalStep;
 }
 
+void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
+    auto& v = *impl_;
+    if (!v.enabled || v.controlFile.empty()) return;
+    if (v.controlReloadEvery > 1 && (step % static_cast<std::uint64_t>(v.controlReloadEvery)) != 0u) return;
+
+    std::ifstream in(v.controlFile);
+    if (!in) return;
+
+    const std::string oldField = v.field;
+    const double oldClip = v.clip;
+    const double oldGain = v.gain;
+    const int oldSmooth = v.smoothPasses;
+
+    std::string line;
+    while (std::getline(in, line)) {
+        const std::size_t comment = line.find('#');
+        if (comment != std::string::npos) line = line.substr(0, comment);
+        const std::size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string key = lower_0335(trim_0335(line.substr(0, eq)));
+        const std::string value = trim_0335(line.substr(eq + 1));
+        if (key.empty() || value.empty()) continue;
+
+        if (key == "field" || key == "live_vis_field" || key == "src_live_vis_field") {
+            v.field = value;
+        } else if (key == "clip" || key == "live_vis_clip" || key == "src_live_vis_clip") {
+            double parsed = v.clip;
+            if (parse_double_0335(value, parsed)) v.clip = parsed;
+        } else if (key == "gain" || key == "live_vis_gain" || key == "src_live_vis_gain") {
+            double parsed = v.gain;
+            if (parse_double_0335(value, parsed)) v.gain = std::max(1.0e-12, parsed);
+        } else if (key == "smoothpasses" || key == "smooth_passes" || key == "smooth" ||
+                   key == "live_vis_smooth_passes" || key == "src_live_vis_smooth_passes") {
+            int parsed = v.smoothPasses;
+            if (parse_int_0335(value, parsed)) v.smoothPasses = std::max(0, parsed);
+        }
+    }
+
+    if (v.controlLog && (v.field != oldField || v.clip != oldClip || v.gain != oldGain || v.smoothPasses != oldSmooth)) {
+        std::cerr << "\n[livevis0335] control reload step=" << step
+                  << " field=" << v.field
+                  << " clip=" << v.clip
+                  << " gain=" << v.gain
+                  << " smoothPasses=" << v.smoothPasses
+                  << " file=" << v.controlFile << '\n';
+    }
+}
+
+LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() const {
+    LiveVisualization0335RuntimeControls c{};
+    if (impl_) {
+        c.field = impl_->field;
+        c.clip = impl_->clip;
+        c.gain = impl_->gain;
+        c.smoothPasses = impl_->smoothPasses;
+    }
+    return c;
+}
+
 void LiveVisualization0335::update(const ParticleState& state, const SimulationParams& params,
                                    std::uint64_t step, double time) {
+    maybe_reload_controls(step);
     auto& v = *impl_;
     if (!v.enabled) return;
     if (v.window == nullptr || glfwWindowShouldClose(v.window)) {
@@ -255,7 +366,7 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         else v.scalar[c] = m;
     }
 
-    if (v.field == "vorticity") {
+    if (v.field == "vorticity" || v.field == "omega" || v.field == "curl") {
         const double dx = params.Lx / static_cast<double>(std::max(1, v.nx));
         const double dy = params.Ly / static_cast<double>(std::max(1, v.ny));
         for (int iy = 0; iy < v.ny; ++iy) {
@@ -395,6 +506,7 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
                                             int frameNx,
                                             int frameNy,
                                             const std::string& sourceLabel) {
+    maybe_reload_controls(step);
     auto& v = *impl_;
     if (!v.enabled) return;
     if (v.window == nullptr || glfwWindowShouldClose(v.window)) {

@@ -47,6 +47,10 @@ LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-1}"
 LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-0}"
 LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
 LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-}"
+LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-1}"
 
 portable_bool_true_0315() {
   case "${1:-0}" in
@@ -77,6 +81,9 @@ portable_livevis_env_0337() {
   export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
   export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
   export SRC_LIVE_VIS_FORCE_HOST_MIRROR="$LIVE_VIS_FORCE_HOST_MIRROR"
+  export SRC_LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-}"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
   if [[ "$mode" == "resampling" ]]; then
     export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
   else
@@ -624,6 +631,23 @@ PARAMS
     portable_cuda_io_fullface_circle_0315
   fi
   portable_resampling_env_0315 "$mode"
+  if portable_bool_true_0315 "$LIVE_VIS_CONTROL_ENABLE"; then
+    if [[ -z "${LIVE_VIS_CONTROL_FILE:-}" ]]; then
+      LIVE_VIS_CONTROL_FILE="$run_root/livevis_control.kv"
+    fi
+    mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE")"
+    if [[ ! -f "$LIVE_VIS_CONTROL_FILE" ]]; then
+      cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
+# 0341a live visualization runtime controls. Edit this file while the simulation runs.
+# Supported keys: field, clip, gain, smoothPasses.
+field = ${LIVE_VIS_FIELD}
+clip = ${LIVE_VIS_CLIP}
+gain = ${LIVE_VIS_GAIN}
+smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
+CONTROL
+    fi
+    echo "[0337-livevis] runtime control file: $LIVE_VIS_CONTROL_FILE"
+  fi
   portable_livevis_env_0337 "$mode"
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"

@@ -10,6 +10,13 @@ namespace mpcd {
 struct ParticleState;
 struct SimulationParams;
 
+struct LiveVisualization0335RuntimeControls {
+    std::string field;
+    double clip = -1.0;
+    double gain = 1.0;
+    int smoothPasses = 1;
+};
+
 class LiveVisualization0335 {
 public:
     LiveVisualization0335();
@@ -21,6 +28,8 @@ public:
     void maybe_initialize(const SimulationParams& params);
     bool enabled() const;
     bool should_draw(std::uint64_t step, std::uint64_t finalStep) const;
+    void maybe_reload_controls(std::uint64_t step);
+    LiveVisualization0335RuntimeControls current_controls() const;
     void update(const ParticleState& state, const SimulationParams& params,
                 std::uint64_t step, double time);
     void draw_rgba_frame(const SimulationParams& params,

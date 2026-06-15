@@ -60,7 +60,7 @@ int field_code_0337(const std::string& f) {
     if (f == "ux" || f == "vx") return 0;
     if (f == "uy" || f == "vy") return 1;
     if (f == "speed") return 2;
-    if (f == "vorticity") return 3;
+    if (f == "vorticity" || f == "omega" || f == "curl") return 3;
     if (f == "mass" || f == "density") return 4;
     return 0;
 }

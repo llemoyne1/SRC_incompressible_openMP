@@ -544,14 +544,17 @@ int main(int argc, char** argv) {
 
             if (liveVisualization0335.should_draw(static_cast<std::uint64_t>(step),
                                                       static_cast<std::uint64_t>(params.nSteps))) {
+                liveVisualization0335.maybe_reload_controls(static_cast<std::uint64_t>(step));
+                const mpcd::LiveVisualization0335RuntimeControls liveControls0337 =
+                    liveVisualization0335.current_controls();
                 bool drawnByCudaField0337 = false;
                 if (env_truthy_0260("SRC_LIVE_VIS_CUDA_FIELD")) {
                     const int liveNx0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NX", 300));
                     const int liveNy0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NY", 80));
-                    const std::string liveField0337 = env_string_0337("SRC_LIVE_VIS_FIELD", "ux");
-                    const double liveClip0337 = env_double_0337("SRC_LIVE_VIS_CLIP", -1.0);
-                    const double liveGain0337 = env_double_0337("SRC_LIVE_VIS_GAIN", 1.0);
-                    const int liveSmooth0337 = std::max(0, env_int_0337("SRC_LIVE_VIS_SMOOTH_PASSES", 1));
+                    const std::string liveField0337 = liveControls0337.field.empty() ? env_string_0337("SRC_LIVE_VIS_FIELD", "ux") : liveControls0337.field;
+                    const double liveClip0337 = liveControls0337.clip;
+                    const double liveGain0337 = liveControls0337.gain;
+                    const int liveSmooth0337 = std::max(0, liveControls0337.smoothPasses);
                     std::vector<unsigned char> liveRgba0337;
                     mpcd::CudaLiveField0337Diagnostics liveDiag0337{};
                     drawnByCudaField0337 = mpcd::cuda_live_field_render_shared_0337(liveRgba0337, liveNx0337, liveNy0337, params, liveField0337, liveClip0337, liveGain0337, liveSmooth0337, &liveDiag0337);
