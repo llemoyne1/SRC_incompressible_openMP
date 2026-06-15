@@ -136,6 +136,49 @@ bool signed_field_0335(const std::string& field) {
            field == "vorticity" || field == "omega" || field == "curl";
 }
 
+std::string normalize_colormap_0342(const std::string& input) {
+    const std::string cm = lower_0335(trim_0335(input));
+    if (cm == "gray" || cm == "grey" || cm == "grayscale" || cm == "greyscale") return "gray";
+    if (cm == "thermal" || cm == "heat" || cm == "hot") return "thermal";
+    return "blue_red";
+}
+
+void export_colormap_env_0342(const std::string& colormap) {
+#if !defined(_WIN32)
+    setenv("SRC_LIVE_VIS_COLORMAP", colormap.c_str(), 1);
+#else
+    (void)colormap;
+#endif
+}
+
+void map_color_0342(double q, bool signedField, const std::string& colormap,
+                    unsigned char& r, unsigned char& g, unsigned char& b) {
+    q = std::clamp(q, 0.0, 1.0);
+    const std::string cm = normalize_colormap_0342(colormap);
+    if (cm == "gray") {
+        const unsigned char v = clamp_u8_0335(255.0 * q);
+        r = v; g = v; b = v;
+        return;
+    }
+    if (cm == "thermal") {
+        r = clamp_u8_0335(255.0 * std::clamp(3.0 * q - 1.0, 0.0, 1.0));
+        g = clamp_u8_0335(255.0 * std::clamp(3.0 * q - 2.0, 0.0, 1.0));
+        b = clamp_u8_0335(255.0 * std::clamp(1.5 - 3.0 * q, 0.0, 1.0));
+        return;
+    }
+    if (signedField) {
+        r = clamp_u8_0335(255.0 * std::max(0.0, 2.0 * q - 1.0));
+        b = clamp_u8_0335(255.0 * std::max(0.0, 1.0 - 2.0 * q));
+        g = clamp_u8_0335(255.0 * (1.0 - std::abs(2.0 * q - 1.0)));
+        r = static_cast<unsigned char>(std::max<int>(r, g));
+        b = static_cast<unsigned char>(std::max<int>(b, g));
+    } else {
+        r = clamp_u8_0335(255.0 * std::max(0.0, 2.0 * q - 1.0));
+        g = clamp_u8_0335(255.0 * (1.0 - std::abs(2.0 * q - 1.0)));
+        b = clamp_u8_0335(255.0 * std::max(0.0, 1.0 - 2.0 * q));
+    }
+}
+
 } // namespace
 
 namespace mpcd {
@@ -156,6 +199,7 @@ struct LiveVisualization0335::Impl {
     double gain = 1.0;
     bool overlaySolid = true;
     std::string field = "ux";
+    std::string colormap = "blue_red";
     std::string controlFile;
     int controlReloadEvery = 1;
     bool controlLog = false;
@@ -211,6 +255,8 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
     v.nx = std::max(16, env_int_0335("SRC_LIVE_VIS_NX", env_int_0335("MPCD_LIVE_VIS_NX", 300)));
     v.ny = std::max(16, env_int_0335("SRC_LIVE_VIS_NY", env_int_0335("MPCD_LIVE_VIS_NY", 80)));
     v.field = env_string_0335("SRC_LIVE_VIS_FIELD", env_string_0335("MPCD_LIVE_VIS_FIELD", "ux"));
+    v.colormap = normalize_colormap_0342(env_string_0335("SRC_LIVE_VIS_COLORMAP", env_string_0335("MPCD_LIVE_VIS_COLORMAP", "blue_red")));
+    export_colormap_env_0342(v.colormap);
     v.alpha = std::clamp(env_double_0335("SRC_LIVE_VIS_ALPHA", env_double_0335("MPCD_LIVE_VIS_ALPHA", 0.08)), 0.0, 1.0);
     v.clip = env_double_0335("SRC_LIVE_VIS_CLIP", env_double_0335("MPCD_LIVE_VIS_CLIP", -1.0));
     v.quantile = std::clamp(env_double_0335("SRC_LIVE_VIS_QUANTILE", env_double_0335("MPCD_LIVE_VIS_QUANTILE", 0.995)), 0.50, 1.0);
@@ -245,6 +291,7 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
     std::cerr << "[livevis0335] enabled field=" << v.field
               << " grid=" << v.nx << "x" << v.ny
               << " every=" << v.every
+              << " colormap=" << v.colormap
               << " alpha=" << v.alpha
               << " clip=" << v.clip
               << " quantile=" << v.quantile
@@ -268,6 +315,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     if (!in) return;
 
     const std::string oldField = v.field;
+    const std::string oldColormap = v.colormap;
     const double oldClip = v.clip;
     const double oldGain = v.gain;
     const int oldSmooth = v.smoothPasses;
@@ -284,6 +332,9 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
 
         if (key == "field" || key == "live_vis_field" || key == "src_live_vis_field") {
             v.field = value;
+        } else if (key == "colormap" || key == "cmap" || key == "live_vis_colormap" || key == "src_live_vis_colormap") {
+            v.colormap = normalize_colormap_0342(value);
+            export_colormap_env_0342(v.colormap);
         } else if (key == "clip" || key == "live_vis_clip" || key == "src_live_vis_clip") {
             double parsed = v.clip;
             if (parse_double_0335(value, parsed)) v.clip = parsed;
@@ -297,9 +348,10 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
         }
     }
 
-    if (v.controlLog && (v.field != oldField || v.clip != oldClip || v.gain != oldGain || v.smoothPasses != oldSmooth)) {
+    if (v.controlLog && (v.field != oldField || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain || v.smoothPasses != oldSmooth)) {
         std::cerr << "\n[livevis0335] control reload step=" << step
                   << " field=" << v.field
+                  << " colormap=" << v.colormap
                   << " clip=" << v.clip
                   << " gain=" << v.gain
                   << " smoothPasses=" << v.smoothPasses
@@ -311,6 +363,7 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
     LiveVisualization0335RuntimeControls c{};
     if (impl_) {
         c.field = impl_->field;
+        c.colormap = impl_->colormap;
         c.clip = impl_->clip;
         c.gain = impl_->gain;
         c.smoothPasses = impl_->smoothPasses;
@@ -439,19 +492,10 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         for (int ix = 0; ix < v.nx; ++ix) {
             const std::size_t c = static_cast<std::size_t>(iy) * v.nx + ix;
             unsigned char r=0, g=0, b=0;
-            if (signedField) {
-                const double q = std::clamp(0.5 + 0.5 * v.gain * v.displayScalar[c] / denom, 0.0, 1.0);
-                r = clamp_u8_0335(255.0 * std::max(0.0, 2.0 * q - 1.0));
-                b = clamp_u8_0335(255.0 * std::max(0.0, 1.0 - 2.0 * q));
-                g = clamp_u8_0335(255.0 * (1.0 - std::abs(2.0 * q - 1.0)));
-                r = static_cast<unsigned char>(std::max<int>(r, g));
-                b = static_cast<unsigned char>(std::max<int>(b, g));
-            } else {
-                const double q = std::clamp(v.gain * v.displayScalar[c] / denom, 0.0, 1.0);
-                r = clamp_u8_0335(255.0 * std::max(0.0, 2.0 * q - 1.0));
-                g = clamp_u8_0335(255.0 * (1.0 - std::abs(2.0 * q - 1.0)));
-                b = clamp_u8_0335(255.0 * std::max(0.0, 1.0 - 2.0 * q));
-            }
+            const double q = signedField
+                ? (0.5 + 0.5 * v.gain * v.displayScalar[c] / denom)
+                : (v.gain * v.displayScalar[c] / denom);
+            map_color_0342(q, signedField, v.colormap, r, g, b);
             const std::size_t o = 4u * c;
             v.rgba[o+0] = r; v.rgba[o+1] = g; v.rgba[o+2] = b; v.rgba[o+3] = 255u;
         }
@@ -477,7 +521,7 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     }
 
     std::ostringstream title;
-    title << "SRC/MPCD live 0335a | " << v.field
+    title << "SRC/MPCD live 0335a | " << v.field << " | cmap=" << v.colormap
           << " | step " << step << " | scale=" << std::setprecision(3) << denom << " | t=" << std::fixed << std::setprecision(3) << time;
     glfwSetWindowTitle(v.window, title.str().c_str());
 
@@ -515,7 +559,7 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
     }
     if (frameNx <= 0 || frameNy <= 0 || frame.size() < 4u * static_cast<std::size_t>(frameNx) * static_cast<std::size_t>(frameNy)) return;
     std::ostringstream title;
-    title << "SRC/MPCD live 0335a | " << v.field << " | " << sourceLabel
+    title << "SRC/MPCD live 0335a | " << v.field << " | cmap=" << v.colormap << " | " << sourceLabel
           << " | step " << step << " | t=" << time;
     glfwSetWindowTitle(v.window, title.str().c_str());
     glfwMakeContextCurrent(v.window);

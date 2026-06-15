@@ -27,3 +27,30 @@ smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
 ```
 
 The binaire 0341a consumes this file at runtime. The script changes are visualization-only and do not modify solver parameters, Q6, resampling, virial closure, or host/device authority.
+
+
+## 0341c clarification
+
+The scripts now explicitly export the user-facing control variables (`LIVE_VIS_CONTROL_ENABLE`, `LIVE_VIS_CONTROL_FILE`, `LIVE_VIS_CONTROL_EVERY`, `LIVE_VIS_CONTROL_LOG`) and the resolved per-mode path (`LIVE_VIS_CONTROL_FILE_EFFECTIVE`). The binary still consumes `SRC_LIVE_VIS_CONTROL_FILE`, exported from the effective path.
+
+
+## 0341d path controls
+
+`LIVE_VIS_CONTROL_FILE_EFFECTIVE` is an internal resolved path and should not be set manually. To choose the file location, use one of the user-facing options:
+
+```bash
+LIVE_VIS_CONTROL_FILE=./livevis_control.kv
+```
+
+or:
+
+```bash
+LIVE_VIS_CONTROL_DIR=./livevis_controls
+LIVE_VIS_CONTROL_BASENAME=vk_io.kv
+```
+
+Resolution order is:
+
+1. `LIVE_VIS_CONTROL_FILE` if non-empty;
+2. `LIVE_VIS_CONTROL_DIR` + `LIVE_VIS_CONTROL_BASENAME` if `LIVE_VIS_CONTROL_DIR` is non-empty;
+3. `<run_root>/<LIVE_VIS_CONTROL_BASENAME>` otherwise.

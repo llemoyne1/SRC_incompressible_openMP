@@ -12,6 +12,7 @@ struct SimulationParams;
 
 struct LiveVisualization0335RuntimeControls {
     std::string field;
+    std::string colormap = "blue_red";
     double clip = -1.0;
     double gain = 1.0;
     int smoothPasses = 1;

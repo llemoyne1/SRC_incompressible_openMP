@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -71,6 +73,15 @@ double default_clip_0337(int code) {
     if (code == 0 || code == 1 || code == 2) return 0.2;
     if (code == 3) return 10.0;
     return 40.0;
+}
+
+int colormap_code_0342() {
+    const char* raw = std::getenv("SRC_LIVE_VIS_COLORMAP");
+    std::string cm = raw && *raw ? std::string(raw) : std::string("blue_red");
+    std::transform(cm.begin(), cm.end(), cm.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (cm == "gray" || cm == "grey" || cm == "grayscale" || cm == "greyscale") return 1;
+    if (cm == "thermal" || cm == "heat" || cm == "hot") return 2;
+    return 0;
 }
 
 __global__ void reset_field_kernel_0337(double* mass, double* ux, double* uy, double* scalar, int n) {
@@ -162,8 +173,34 @@ __device__ unsigned char clamp_u8_dev_0337(double x) {
     return static_cast<unsigned char>(llrint(x));
 }
 
+__device__ void map_color_dev_0342(double q, int signedField, int colormapCode,
+                                   unsigned char& rr, unsigned char& gg, unsigned char& bb) {
+    q = fmin(1.0, fmax(0.0, q));
+    if (colormapCode == 1) {
+        const unsigned char v = clamp_u8_dev_0337(255.0 * q);
+        rr = v; gg = v; bb = v;
+        return;
+    }
+    if (colormapCode == 2) {
+        rr = clamp_u8_dev_0337(255.0 * fmin(1.0, fmax(0.0, 3.0*q - 1.0)));
+        gg = clamp_u8_dev_0337(255.0 * fmin(1.0, fmax(0.0, 3.0*q - 2.0)));
+        bb = clamp_u8_dev_0337(255.0 * fmin(1.0, fmax(0.0, 1.5 - 3.0*q)));
+        return;
+    }
+    if (signedField) {
+        const double mid = 1.0 - fabs(2.0*q - 1.0);
+        rr = clamp_u8_dev_0337(255.0 * fmax(mid, fmax(0.0, 2.0*q - 1.0)));
+        gg = clamp_u8_dev_0337(255.0 * mid);
+        bb = clamp_u8_dev_0337(255.0 * fmax(mid, fmax(0.0, 1.0 - 2.0*q)));
+    } else {
+        rr = clamp_u8_dev_0337(255.0 * fmax(0.0, 2.0*q - 1.0));
+        gg = clamp_u8_dev_0337(255.0 * (1.0 - fabs(2.0*q - 1.0)));
+        bb = clamp_u8_dev_0337(255.0 * fmax(0.0, 1.0 - 2.0*q));
+    }
+}
+
 __global__ void rgba_kernel_0337(const double* scalar, unsigned char* rgba,
-                                 int nx, int ny, int signedField,
+                                 int nx, int ny, int signedField, int colormapCode,
                                  double scale, double gain,
                                  int overlayCircle, double Lx, double Ly,
                                  double cx, double cy, double r) {
@@ -173,18 +210,10 @@ __global__ void rgba_kernel_0337(const double* scalar, unsigned char* rgba,
     const int ix = c % nx, iy = c / nx;
     const double denom = scale > 1e-300 ? scale : 1.0;
     unsigned char rr=0, gg=0, bb=0;
-    if (signedField) {
-        const double q = fmin(1.0, fmax(0.0, 0.5 + 0.5 * gain * scalar[c] / denom));
-        const double mid = 1.0 - fabs(2.0*q - 1.0);
-        rr = clamp_u8_dev_0337(255.0 * fmax(mid, fmax(0.0, 2.0*q - 1.0)));
-        gg = clamp_u8_dev_0337(255.0 * mid);
-        bb = clamp_u8_dev_0337(255.0 * fmax(mid, fmax(0.0, 1.0 - 2.0*q)));
-    } else {
-        const double q = fmin(1.0, fmax(0.0, gain * scalar[c] / denom));
-        rr = clamp_u8_dev_0337(255.0 * fmax(0.0, 2.0*q - 1.0));
-        gg = clamp_u8_dev_0337(255.0 * (1.0 - fabs(2.0*q - 1.0)));
-        bb = clamp_u8_dev_0337(255.0 * fmax(0.0, 1.0 - 2.0*q));
-    }
+    const double q = signedField
+        ? (0.5 + 0.5 * gain * scalar[c] / denom)
+        : (gain * scalar[c] / denom);
+    map_color_dev_0342(q, signedField, colormapCode, rr, gg, bb);
     if (overlayCircle) {
         const double px = Lx / static_cast<double>(max(1, nx));
         const double py = Ly / static_cast<double>(max(1, ny));
@@ -248,7 +277,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
         std::swap(w.d_scalar, w.d_tmp);
     }
     const double scale = clip > 0.0 ? clip : default_clip_0337(fcode);
-    rgba_kernel_0337<<<cellBlocks, threads>>>(w.d_scalar, w.d_rgba, nx, ny, signed_field_0337(fcode) ? 1 : 0, scale, std::max(1.0e-12, gain), params.immersedSolidEnable ? 1 : 0, params.Lx, params.Ly, params.immersedSolidCx, params.immersedSolidCy, params.immersedSolidR);
+    rgba_kernel_0337<<<cellBlocks, threads>>>(w.d_scalar, w.d_rgba, nx, ny, signed_field_0337(fcode) ? 1 : 0, colormap_code_0342(), scale, std::max(1.0e-12, gain), params.immersedSolidEnable ? 1 : 0, params.Lx, params.Ly, params.immersedSolidCx, params.immersedSolidCy, params.immersedSolidR);
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
     local.finalizeSeconds = seconds_since_0337(ta);
     ta = std::chrono::steady_clock::now();
