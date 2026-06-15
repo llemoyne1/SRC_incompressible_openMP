@@ -34,11 +34,20 @@ void validate_particle_state(const ParticleState& state, const std::string& cont
     if (!state.role.empty() && state.role.size() != n) {
         throw std::runtime_error(context + ": inconsistent particle role array size");
     }
+
+#ifdef MPCD_ENABLE_EXPENSIVE_PARTICLE_CHECKS
+    // This loop is intentionally guarded for production/profile builds.
+    // In the resampling path, role changes are local but historically called
+    // validate_particle_state() through set_particle_role() -> ensure_particle_roles(),
+    // turning each local role mutation into a full O(Np) state scan.  Keep this
+    // expensive role-value validation available for debug/validation builds, but
+    // do not pay it in the stripped production path unless explicitly requested.
     for (std::size_t i = 0; i < state.role.size(); ++i) {
         if (!valid_particle_role_value(state.role[i])) {
             throw std::runtime_error(context + ": invalid particle role value at index " + std::to_string(i));
         }
     }
+#endif
 }
 
 void ensure_particle_roles(ParticleState& state, ParticleRole defaultRole) {

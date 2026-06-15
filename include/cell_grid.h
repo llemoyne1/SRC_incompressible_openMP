@@ -15,6 +15,15 @@ struct CellGrid {
     double Ly = 1.0;
     double dx = 1.0;
     double dy = 1.0;
+
+    // Hot-loop indexing cache.  These fields are derived once from
+    // SimulationParams in make_cell_grid() and are intentionally stored in the
+    // grid so that particle-to-cell deposits do not repeatedly query boundary
+    // strings or recompute reciprocal cell sizes.
+    double invDx = 1.0;
+    double invDy = 1.0;
+    bool periodicX = false;
+    bool periodicY = false;
 };
 
 struct GridShift {

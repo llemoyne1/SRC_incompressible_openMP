@@ -775,6 +775,7 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
 
         divAfterStats = scalar_stats(result.divAfter, mask);
     }
+#ifdef MPCD_ENABLE_EXPENSIVE_Q6_DIAGNOSTICS
     {
 
         corrStats = face_stats(result.correctionFlux);
@@ -783,6 +784,7 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
 
         projStats = face_stats(result.projectedFlux);
     }
+#endif
 
     result.diagnostics.divBeforeRms = divBeforeStats.rms;
     result.diagnostics.divBeforeMaxAbs = divBeforeStats.maxAbs;

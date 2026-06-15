@@ -1387,7 +1387,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
         diag.divAfterProjectedFluxMaxAbs = projectedDivMax;
     }
 
-    if (mask != nullptr) {
+    if (mask != nullptr && params.immersedSolidEnable) {
 
         compute_q6_solid_leak(workspace.appliedProjectedFlux, workspace.immersedMask, params, diag);
     }

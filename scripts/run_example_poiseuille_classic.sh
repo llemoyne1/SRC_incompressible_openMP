@@ -16,7 +16,7 @@ export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 
 build_solver() {
   mkdir -p "$(dirname "$BIN")"
-  local common_flags="-pg -std=c++17 -Wall -Wextra -fopenmp"
+  local common_flags="-std=c++17 -Wall -Wextra -fopenmp"
   local opt_flags
   case "$BUILD_PROFILE" in
     safe) opt_flags="-O2" ;;
@@ -64,24 +64,11 @@ import math, os, random, struct, sys
 out,Lx,Ly,Nx,Ny,gamma,kBT,seed,mode,mean_ux,mean_uy,amp,axmax,solid = sys.argv[1:]
 Lx=float(Lx); Ly=float(Ly); Nx=int(Nx); Ny=int(Ny); gamma=int(gamma); kBT=float(kBT)
 seed=int(seed); mean_ux=float(mean_ux); mean_uy=float(mean_uy); amp=float(amp); axmax=float(axmax)
-solids=[]
+rects=[]
 if solid != 'none':
-    raw = solid.strip()
-    kind = 'rect'
-    payload = raw
-    if ':' in raw:
-        kind, payload = raw.split(':', 1)
-        kind = kind.strip().lower()
-    p=[float(v) for v in payload.replace(',', ' ').split()]
-    if kind in ('rect','rectangle','box','step'):
-        if len(p)!=4: raise SystemExit('solid rect must be xmin,xmax,ymin,ymax')
-        solids.append(('rect', tuple(p)))
-    elif kind in ('circle','disk','disc','cylinder'):
-        if len(p)!=3: raise SystemExit('solid circle must be cx,cy,r')
-        if p[2] <= 0.0: raise SystemExit('solid circle radius must be > 0')
-        solids.append(('circle', tuple(p)))
-    else:
-        raise SystemExit(f'unsupported solid spec kind: {kind}')
+    p=[float(v) for v in solid.replace(',', ' ').split()]
+    if len(p)!=4: raise SystemExit('solid rect must be xmin,xmax,ymin,ymax')
+    rects.append(tuple(p))
 active_x_max = Lx if axmax < 0.0 else axmax
 rng=random.Random(seed)
 dx=Lx/Nx; dy=Ly/Ny; mass0=1.0; sigma=math.sqrt(kBT/mass0) if kBT > 0 else 0.0
@@ -89,14 +76,7 @@ x=[]; y=[]; vx=[]; vy=[]; typ=[]; mass=[]; role=[]
 def in_rect(xp,yp,r):
     xmin,xmax,ymin,ymax=r
     return xmin <= xp <= xmax and ymin <= yp <= ymax
-def in_circle(xp,yp,c):
-    cx,cy,rr=c
-    return (xp-cx)*(xp-cx) + (yp-cy)*(yp-cy) <= rr*rr
-def in_solid(xp,yp):
-    for kind, geom in solids:
-        if kind == 'rect' and in_rect(xp,yp,geom): return True
-        if kind == 'circle' and in_circle(xp,yp,geom): return True
-    return False
+def in_solid(xp,yp): return any(in_rect(xp,yp,r) for r in rects)
 def base_velocity(xp,yp):
     if mode == 'zero': return 0.0, 0.0
     if mode == 'uniform': return mean_ux, mean_uy
@@ -218,11 +198,14 @@ default_run_root_for_case() {
 absolute_path_for_guard() {
   local path_value="$1"
   if [[ "$path_value" == /* ]]; then
-    printf '%s\n' "$path_value"
+    printf '%s
+' "$path_value"
   else
-    printf '%s/%s\n' "$ROOT_DIR" "$path_value"
+    printf '%s/%s
+' "$ROOT_DIR" "$path_value"
   fi
 }
+
 prepare_run_root() {
   if [[ "${CLEAN_RUN_ROOT}" == "1" ]]; then
     if [[ -n "${RESTART_STATE:-}" ]]; then
@@ -275,21 +258,21 @@ run_case() {
 }
 
 
-NX="${NX:-135}"
+NX="${NX:-144}"
 NY="${NY:-48}"
 GAMMA="${GAMMA:-20}"
-STEPS="${STEPS:-10000}"
-SUMMARY_EVERY="${SUMMARY_EVERY:-50}"
-DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
+STEPS="${STEPS:-1500}"
+SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-250}"
 DT="${DT:-0.0005}"
-KBT="${KBT:-0.1}"
+KBT="${KBT:-0.01}"
 SEED="${SEED:-1620162}"
 Q6_PROJECTION_STRENGTH="${Q6_PROJECTION_STRENGTH:-1.0}"
 PROJECTION_MAX_ITERATIONS="${PROJECTION_MAX_ITERATIONS:-800}"
 PROJECTION_TOLERANCE="${PROJECTION_TOLERANCE:-1.0e-10}"
-RESAMP_N_MIN="${RESAMP_N_MIN:-10}"
+RESAMP_N_MIN="${RESAMP_N_MIN:-14}"
 RESAMP_N_TARGET="${RESAMP_N_TARGET:-20}"
-RESAMP_N_MAX="${RESAMP_N_MAX:-30}"
+RESAMP_N_MAX="${RESAMP_N_MAX:-26}"
 RESAMP_POP_MAX_SPLITS_PER_CELL="${RESAMP_POP_MAX_SPLITS_PER_CELL:-16}"
 RESAMP_POP_MAX_SPLITS_PER_STEP="${RESAMP_POP_MAX_SPLITS_PER_STEP:-200000}"
 RESAMP_POP_MAX_EXTRACT_PER_CELL="${RESAMP_POP_MAX_EXTRACT_PER_CELL:-64}"
@@ -303,38 +286,21 @@ CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 RESTART_STATE="${RESTART_STATE:-}"
 
-CASE_NAME="von_karman"
-Lx="${Lx:-3}"
-Ly="${Ly:-1.}"
-NX="${NX:-135}"
-NY="${NY:-48}"
-UIN="${UIN:-40}"
-CYLINDER_CX="${CYLINDER_CX:-0.40}"
-CYLINDER_R="${CYLINDER_R:-0.16}"
-CYLINDER_Y_OFFSET="${CYLINDER_Y_OFFSET:-0.02}"
-CYLINDER_CY="${CYLINDER_CY:-$(python3 - <<PY
-Ly = float('${Ly}')
-off = float('${CYLINDER_Y_OFFSET}')
-print(f'{0.5*Ly + off:.17g}')
-PY
-)}"
-INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-1}"
-INLET_RAMP_END_TIME="${INLET_RAMP_END_TIME:-0.25}"
-OUTLET_MODE="${OUTLET_MODE:-hybrid_feedback}"
-OUTLET_HYBRID_BLEND="${OUTLET_HYBRID_BLEND:-0.0}"
-OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GAIN:-0.}"
-KEEP_MEAN_FLOW_ENABLE="${KEEP_MEAN_FLOW_ENABLE:-false}"
-RUN_ROOT="${RUN_ROOT:-$(default_run_root_for_case example_von_karman)}"
+CASE_NAME="poiseuille"
+Lx="${Lx:-3.0}"
+Ly="${Ly:-1.0}"
+POIS_BODY_ACCEL_X="${POIS_BODY_ACCEL_X:-${POIS_BODY_ACCEL:-20.0}}"
+POIS_BODY_ACCEL_Y="${POIS_BODY_ACCEL_Y:-0.0}"
+RUN_ROOT="${RUN_ROOT:-$(default_run_root_for_case example_poiseuille)}"
 prepare_run_root
-GENERATED_STATE_FILE="$RUN_ROOT/init/von_karman_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
+GENERATED_STATE_FILE="$RUN_ROOT/init/poiseuille_${NX}x${NY}_g${GAMMA}_seed${SEED}.smpcd"
 STATE_FILE="$GENERATED_STATE_FILE"
-PARAMS_FILE="$RUN_ROOT/params/von_karman.kv"
+PARAMS_FILE="$RUN_ROOT/params/poiseuille.kv"
 OUT_DIR="$RUN_ROOT/output"
-LOG_FILE="$RUN_ROOT/logs/von_karman.log"
-TIME_FILE="$RUN_ROOT/logs/von_karman.time"
-SOLID_CIRCLE="circle:${CYLINDER_CX},${CYLINDER_CY},${CYLINDER_R}"
+LOG_FILE="$RUN_ROOT/logs/poiseuille.log"
+TIME_FILE="$RUN_ROOT/logs/poiseuille.time"
 
-prepare_initial_state_or_restart "$GENERATED_STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" $((SEED+44)) uniform "$UIN" 0.0 0.0 -1.0 "$SOLID_CIRCLE"
+prepare_initial_state_or_restart "$GENERATED_STATE_FILE" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" $((SEED+11)) zero 0.0 0.0 0.0 -1.0 none
 mkdir -p "$OUT_DIR"
 cat > "$PARAMS_FILE" <<PARAMS
 inputState = ${STATE_FILE}
@@ -348,77 +314,27 @@ Ny = ${NY}
 dt = ${DT}
 nSteps = ${STEPS}
 
-bodyAccelerationX = 0.0
-bodyAccelerationY = 0.0
-keepMeanFlowEnable = ${KEEP_MEAN_FLOW_ENABLE}
-targetMeanUx = ${UIN}
-targetMeanUy = 0.0
+bodyAccelerationX = ${POIS_BODY_ACCEL_X}
+bodyAccelerationY = ${POIS_BODY_ACCEL_Y}
 
-bcLeft = solid
-bcRight = solid
-bcBottom = solid
-bcTop = solid
+bcX = periodic
+bcY = solid
 rotationAngle = 1.5
 
-inletUxLeft = ${UIN}
-inletUyLeft = 0.0
-inletVelocityRampEnable = true
-inletVelocityRampStartTime = 0.0
-inletVelocityRampEndTime = ${INLET_RAMP_END_TIME}
-inletVelocityRampInitialFactor = 0.2
-inletVelocityRampFinalFactor = 1.0
-inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = flat_taper_y
-inletVelocityWallTaperCells = 2.0
-inletKBT = -1.0
-inletThermalNoise = 1.0
-inletInjectionMode = hard_cell_density
-inletReservoirMode = hard_cell_density
-inletReservoirCells = ${INLET_RESERVOIR_CELLS}
-inletTargetOccupancy = ${GAMMA}
-inletHardCellVelocityMean = true
-inletHardCellThermalRescale = true
-inletRandomizeTangential = true
-inletReinjectBackflow = true
 
-openBoundarySegmentsEnable = true
-openBoundarySegmentCount = 2
-openBoundarySegment0 = left inlet   0.0 1.0 ${UIN} 0.0 0 1.0
-openBoundarySegment1 = right outlet 0.0 1.0 ${UIN} 0.0 0 1.0
-openBoundaryOutletMode = ${OUTLET_MODE}
-openBoundaryOutletHybridBlend = ${OUTLET_HYBRID_BLEND}
-openBoundaryOutletFeedbackGain = ${OUTLET_FEEDBACK_GAIN}
-
-projectionOperator = elliptic_fv_cg
-projectionImmersedSolidMaskEnable = true
-projectionImmersedSolidCloseCutFaces = true
-projectionImmersedSolidFluidFractionThreshold = 0.5
-projectionAllowUnmaskedImmersedSolid = false
-
-immersedSolidEnable = true
-immersedSolidShape = circle
-immersedSolidCx = ${CYLINDER_CX}
-immersedSolidCy = ${CYLINDER_CY}
-immersedSolidR = ${CYLINDER_R}
-immersedSolidFractionSamples = 4
-immersedSolidVx = 0.0
-immersedSolidVy = 0.0
-immersedSolidWallUx = 0.0
-immersedSolidWallUy = 0.0
-immersedSolidOmega = 0.0
-
+wallVpEnable = true
 wallAccommodation = 1.0
 wallVpGamma = ${GAMMA}
 wallVpMass = 1.0
-wallKBT = -1.0
+wallKBT = ${KBT}
 wallThermalNoise = 1.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
 
+projectionOperator = channel_fv_cg
 $(write_common_runtime_block)
 $(write_resampling_block)
 PARAMS
-
-echo "[case] von Karman cylinder"
-echo "[case] Lx=${Lx} Ly=${Ly} Nx=${NX} Ny=${NY} UIN=${UIN}"
-echo "[case] cylinder: cx=${CYLINDER_CX} cy=${CYLINDER_CY} r=${CYLINDER_R} y_offset=${CYLINDER_Y_OFFSET}"
-echo "[case] keepMeanFlowEnable=${KEEP_MEAN_FLOW_ENABLE} outletMode=${OUTLET_MODE}"
 run_case
