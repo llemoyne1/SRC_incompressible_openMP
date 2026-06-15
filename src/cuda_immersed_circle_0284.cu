@@ -115,16 +115,29 @@ CudaParticleState& persistent_immersed_circle_state_0284() {
     return cuda_shared_particle_state_0251();
 }
 
+bool cuda_immersed_circle_0338_wall_circle_resident_bridge_requested() {
+    // 0338b: the quarantined wall+circle 0318 family is not made resident by
+    // default.  SRC_GPU also supports hybrid CPU/GPU continuations (Q6,
+    // resampling, virial) that may need conservative host mirrors.  Treat 0318
+    // as a resident producer/consumer only when the profiling/benchmark runner
+    // explicitly enables the same opt-in minimal-download flag used by 0338a.
+    return env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318") &&
+           env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_MINIMAL_DOWNLOAD_0338") &&
+           !env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_DISABLE_MINIMAL_DOWNLOAD_0338");
+}
+
 bool cuda_immersed_circle_0284_resident_requested() {
     // 0334a: circle reflection can consume/produce the same shared resident
-    // CudaParticleState for any classic CUDA external-boundary family.  This
-    // avoids the unsafe wall+circle 0318 shortcut while keeping periodic, wall
-    // and IO families on one general resident particle-state path.
+    // CudaParticleState for any classic CUDA external-boundary family.  0338b
+    // adds an opt-in bridge for the older wall+circle 0318 path; default behavior
+    // remains unchanged so Q6/resampling/virial hybrid continuations keep their
+    // host synchronization unless the benchmark runner deliberately disables it.
     return env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260") ||
            env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261") ||
            env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_SOLID_RESIDENT_0262") ||
            env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263") ||
-           env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264");
+           env_truthy_0284("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264") ||
+           cuda_immersed_circle_0338_wall_circle_resident_bridge_requested();
 }
 
 bool cuda_immersed_circle_0284_download_all_requested() {
