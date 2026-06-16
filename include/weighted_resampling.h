@@ -46,6 +46,16 @@ struct ResamplingParticlePoolWorkspace {
     std::vector<std::uint64_t> latentSlots;
     std::vector<std::uint64_t> fluidSlots;
 
+    // Optional persistent position maps for O(1) list maintenance.  Entries are
+    // kInvalidParticleIndex when a particle is not present in the corresponding
+    // role list.  They are populated by rebuild_resampling_particle_pool when
+    // incremental pool mode is enabled, then maintained by role-changing
+    // operations.
+    std::vector<std::uint64_t> freeInactiveSlotPosition;
+    std::vector<std::uint64_t> latentSlotPosition;
+    std::vector<std::uint64_t> fluidSlotPosition;
+    bool positionMapsValid = false;
+
     ResamplingParticlePoolDiagnostics diagnostics;
 };
 

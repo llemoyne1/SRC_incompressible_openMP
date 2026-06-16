@@ -147,6 +147,15 @@ bool bulk_operator_fluid_slots_enabled() {
     return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF";
 }
 
+bool incremental_resampling_pool_enabled() {
+    const char* env = std::getenv("MPCD_ENABLE_INCREMENTAL_RESAMPLING_POOL");
+    if (env == nullptr || *env == '\0') {
+        return false;
+    }
+    const std::string value(env);
+    return value == "1" || value == "true" || value == "TRUE" || value == "on" || value == "ON";
+}
+
 bool resampling_pool_slots_are_current(const ResamplingParticlePoolWorkspace& pool,
                                        std::uint64_t particleCount) {
     return pool.diagnostics.built &&
@@ -407,10 +416,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     const bool useResamplingFluidSlots = resampling_fluid_slots_enabled();
     const bool useBulkOperatorFluidSlots = bulk_operator_fluid_slots_enabled();
+    const bool useIncrementalResamplingPool = incremental_resampling_pool_enabled();
     bool resamplingPoolBuiltForStep = false;
     const std::vector<std::uint64_t>* fluidSlotsForOperators = nullptr;
     if (params.resamplingEnable && useResamplingFluidSlots && early_resampling_pool_enabled()) {
-        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        const bool canReuseCurrentPool = useIncrementalResamplingPool &&
+            resampling_pool_slots_are_current(workspace.resamplingPool, state.Np);
+        if (canReuseCurrentPool) {
+            result.resamplingPool = workspace.resamplingPool.diagnostics;
+        } else {
+            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        }
         resamplingPoolBuiltForStep = true;
         fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
         phaseTimer.mark(timing, &StepTimingRecord::resampPool0);
@@ -569,7 +585,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (planOrTransferEdited) {
         {
 
-            result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            const bool pairedExtractionInsertionOnly = useIncrementalResamplingPool &&
+                !populationGuardEdited &&
+                !latentActivation.applied &&
+                extractionApply.applied &&
+                insertionApply.applied &&
+                extractionApply.operationsApplied == insertionApply.operationsApplied &&
+                insertionApply.skippedInvalidSourceParticles == 0u &&
+                insertionApply.skippedSourceNotInactive == 0u &&
+                insertionApply.skippedInvalidReceiverCells == 0u &&
+                insertionApply.skippedNoFreeSlots == 0u &&
+                insertionApply.skippedInvalidMass == 0u &&
+                resampling_pool_slots_are_current(workspace.resamplingPool, state.Np);
+            if (pairedExtractionInsertionOnly) {
+                result.resamplingPool = workspace.resamplingPool.diagnostics;
+            } else {
+                result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            }
             if (useResamplingFluidSlots) {
                 fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
             }

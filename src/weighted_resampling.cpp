@@ -2116,11 +2116,22 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
 
     const bool useExistingCellIds = reuseExistingCellIds && ws.cellId.size() >= n;
     const bool usePoolSlots = resampling_pool_slots_are_valid(particlePool, state.Np);
+    const bool useSparseCellIdReset =
+        !useExistingCellIds && usePoolSlots && ws.cellId.size() >= n &&
+        !env_flag_enabled("MPCD_DISABLE_SPARSE_RESAMPLING_CELLID_RESET");
 
     {
         
     if (!useExistingCellIds) {
-        std::fill(ws.cellId.begin(), ws.cellId.end(), -1);
+        if (useSparseCellIdReset) {
+            for (const std::uint64_t pi64 : particlePool->fluidSlots) {
+                if (pi64 < state.Np) {
+                    ws.cellId[static_cast<std::size_t>(pi64)] = kInvalidCellIndex;
+                }
+            }
+        } else {
+            std::fill(ws.cellId.begin(), ws.cellId.end(), kInvalidCellIndex);
+        }
     }
     std::fill(ws.count.begin(), ws.count.end(), 0u);
     std::fill(ws.mass.begin(), ws.mass.end(), 0.0);
