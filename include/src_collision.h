@@ -60,6 +60,7 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
                                         const CellGrid& grid,
                                         const FluidDomainBounds& domain,
                                         std::uint64_t step,
-                                        CollisionWorkspace& ws);
+                                        CollisionWorkspace& ws,
+                                        const std::vector<std::uint64_t>* fluidSlots = nullptr);
 
 } // namespace mpcd

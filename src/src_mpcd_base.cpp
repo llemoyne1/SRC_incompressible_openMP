@@ -129,6 +129,31 @@ bool resampling_fluid_slots_enabled() {
     return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF";
 }
 
+bool early_resampling_pool_enabled() {
+    const char* env = std::getenv("MPCD_DISABLE_EARLY_RESAMPLING_POOL");
+    if (env == nullptr || *env == '\0') {
+        return true;
+    }
+    const std::string value(env);
+    return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF";
+}
+
+bool bulk_operator_fluid_slots_enabled() {
+    const char* env = std::getenv("MPCD_DISABLE_BULK_OPERATOR_FLUID_SLOTS");
+    if (env == nullptr || *env == '\0') {
+        return true;
+    }
+    const std::string value(env);
+    return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF";
+}
+
+bool resampling_pool_slots_are_current(const ResamplingParticlePoolWorkspace& pool,
+                                       std::uint64_t particleCount) {
+    return pool.diagnostics.built &&
+           pool.diagnostics.storageSlots == particleCount &&
+           pool.fluidSlots.size() == static_cast<std::size_t>(pool.diagnostics.nFluid);
+}
+
 class StepPhaseTimer {
 public:
     explicit StepPhaseTimer(std::uint64_t step)
@@ -203,7 +228,8 @@ void taylor_green_body_acceleration(const SimulationParams& params,
 void capture_resampling_thermal_reference(const ParticleState& state,
                                           const WeightedRealFluidDepositWorkspace& deposit,
                                           std::vector<double>& targetEnergy,
-                                          std::vector<std::uint8_t>& targetCell) {
+                                          std::vector<std::uint8_t>& targetCell,
+                                          const std::vector<std::uint64_t>* fluidSlots = nullptr) {
     const int nc = deposit.allocatedCells;
     targetEnergy.assign(static_cast<std::size_t>(std::max(0, nc)), 0.0);
     targetCell.assign(static_cast<std::size_t>(std::max(0, nc)), 0u);
@@ -217,8 +243,15 @@ void capture_resampling_thermal_reference(const ParticleState& state,
             targetCell[kk] = 1u;
         }
     }
-    for (std::size_t i = 0; i < static_cast<std::size_t>(state.Np); ++i) {
-        if (!is_fluid_particle(state, i) || i >= deposit.cellId.size()) {
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
+    const std::size_t nLoop = useFluidSlots ? fluidSlots->size() : n;
+    for (std::size_t ii = 0; ii < nLoop; ++ii) {
+        const std::size_t i = useFluidSlots ? static_cast<std::size_t>((*fluidSlots)[ii]) : ii;
+        if (i >= n) {
+            continue;
+        }
+        if ((!useFluidSlots && !is_fluid_particle(state, i)) || i >= deposit.cellId.size()) {
             continue;
         }
         const int c = deposit.cellId[i];
@@ -261,20 +294,29 @@ ResamplingRemapApplyDiagnostics make_thermal_reference_gate(const std::vector<st
     return d;
 }
 
-void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) {
+void apply_keep_mean_flow(ParticleState& state,
+                          const SimulationParams& params,
+                          const std::vector<std::uint64_t>* fluidSlots = nullptr) {
     if (!params.keepMeanFlowEnable) {
         return;
     }
     validate_particle_state(state, "apply_keep_mean_flow");
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
+    const std::size_t nLoop = useFluidSlots ? fluidSlots->size() : n;
 
     double mass = 0.0;
     double px = 0.0;
     double py = 0.0;
-#pragma omp parallel for reduction(+:mass,px,py) if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
+#pragma omp parallel for reduction(+:mass,px,py) if(nLoop > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) {
+            continue;
+        }
+        if (!useFluidSlots && !is_fluid_particle(state, i)) {
             continue;
         }
         const double m = state.mass[i];
@@ -288,10 +330,15 @@ void apply_keep_mean_flow(ParticleState& state, const SimulationParams& params) 
 
     const double dvx = params.targetMeanUx - px / mass;
     const double dvy = params.targetMeanUy - py / mass;
-#pragma omp parallel for if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
+#pragma omp parallel for if(nLoop > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) {
+            continue;
+        }
+        if (!useFluidSlots && !is_fluid_particle(state, i)) {
             continue;
         }
         state.vx[i] += dvx;
@@ -357,30 +404,47 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         result.immersed = apply_immersed_solid_reflection(state, params, result.domain, time);
     }
     phaseTimer.mark(timing, &StepTimingRecord::immersed);
+
+    const bool useResamplingFluidSlots = resampling_fluid_slots_enabled();
+    const bool useBulkOperatorFluidSlots = bulk_operator_fluid_slots_enabled();
+    bool resamplingPoolBuiltForStep = false;
+    const std::vector<std::uint64_t>* fluidSlotsForOperators = nullptr;
+    if (params.resamplingEnable && useResamplingFluidSlots && early_resampling_pool_enabled()) {
+        result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        resamplingPoolBuiltForStep = true;
+        fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
+        phaseTimer.mark(timing, &StepTimingRecord::resampPool0);
+    }
     {
 
-        result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
+        result.collision = src_collision_step(
+            state, params, grid, result.domain, step, workspace.collision, fluidSlotsForOperators);
     }
     phaseTimer.mark(timing, &StepTimingRecord::collision);
     {
 
-        result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+        result.q6 = apply_q6_periodic_projection(
+            state, params, grid, result.domain, time, workspace.q6,
+            useBulkOperatorFluidSlots ? fluidSlotsForOperators : nullptr);
     }
     phaseTimer.mark(timing, &StepTimingRecord::q6);
     {
 
-        result.capacity = apply_closed_capacity_virial_kick(state, params, grid, result.domain, workspace.capacity);
+        result.capacity = apply_closed_capacity_virial_kick(
+            state, params, grid, result.domain, workspace.capacity,
+            useBulkOperatorFluidSlots ? fluidSlotsForOperators : nullptr);
     }
     phaseTimer.mark(timing, &StepTimingRecord::virial);
     {
 
         result.thermostat = apply_cell_relative_rescale_thermostat(
-            state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
+            state, params, grid, workspace.collision.cellId, step, workspace.thermostat,
+            fluidSlotsForOperators);
     }
     phaseTimer.mark(timing, &StepTimingRecord::thermostat);
     {
 
-        apply_keep_mean_flow(state, params);
+        apply_keep_mean_flow(state, params, fluidSlotsForOperators);
     }
     phaseTimer.mark(timing, &StepTimingRecord::meanFlow);
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
@@ -393,15 +457,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         return result;
     }
 
-    {
-
+    if (!resamplingPoolBuiltForStep) {
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+        resamplingPoolBuiltForStep = true;
+        if (useResamplingFluidSlots) {
+            fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
+        }
+        phaseTimer.mark(timing, &StepTimingRecord::resampPool0);
     }
-    phaseTimer.mark(timing, &StepTimingRecord::resampPool0);
     const bool buildInitialResamplingPlan =
         params.resamplingEnable && params.resamplingExtractionEnable;
     const bool reuseResamplingCellIds = resampling_cellid_reuse_enabled();
-    const bool useResamplingFluidSlots = resampling_fluid_slots_enabled();
     const ResamplingParticlePoolWorkspace* resamplingPoolForDeposit =
         useResamplingFluidSlots ? &workspace.resamplingPool : nullptr;
     {
@@ -428,7 +494,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (params.resamplingThermalRenormalizationEnable) {
 
         capture_resampling_thermal_reference(
-            state, workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell);
+            state, workspace.resampling, preEditThermalEnergyTarget, preEditThermalCell,
+            fluidSlotsForOperators);
     }
     phaseTimer.mark(timing, &StepTimingRecord::resampThermalReference);
 
@@ -447,6 +514,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         {
 
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            if (useResamplingFluidSlots) {
+                fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
+            }
         }
         phaseTimer.mark(timing, &StepTimingRecord::resampPoolGuard);
         {
@@ -500,6 +570,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         {
 
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
+            if (useResamplingFluidSlots) {
+                fluidSlotsForOperators = &workspace.resamplingPool.fluidSlots;
+            }
         }
         phaseTimer.mark(timing, &StepTimingRecord::resampPoolEdit);
         {

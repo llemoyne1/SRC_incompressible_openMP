@@ -91,8 +91,10 @@ void deposit_cell_velocity(const ParticleState& state,
                            const CellGrid& grid,
                            const FluidDomainBounds& domain,
                            Q6ProjectionWorkspace& ws,
-                           Q6ProjectionDiagnostics& diag) {
+                           Q6ProjectionDiagnostics& diag,
+                           const std::vector<std::uint64_t>* fluidSlots = nullptr) {
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
 
@@ -112,9 +114,14 @@ void deposit_cell_velocity(const ParticleState& state,
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!useFluidSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             const int c = active_domain_cell_index(state.x[i], state.y[i], domain, params);
@@ -1202,16 +1209,24 @@ void face_correction_to_cell_velocity(const CellGrid& grid,
 void apply_cell_velocity_correction(ParticleState& state,
                                     const Q6ProjectionWorkspace& ws,
                                     Q6ProjectionDiagnostics& diag,
-                                    bool momentumCorrectionEnable) {
+                                    bool momentumCorrectionEnable,
+                                    const std::vector<std::uint64_t>* fluidSlots = nullptr) {
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
+    const std::size_t nLoop = useFluidSlots ? fluidSlots->size() : n;
     double mass = 0.0;
     double dpx = 0.0;
     double dpy = 0.0;
 
-#pragma omp parallel for reduction(+:mass,dpx,dpy) if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
+#pragma omp parallel for reduction(+:mass,dpx,dpy) if(nLoop > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) {
+            continue;
+        }
+        if (!useFluidSlots && !is_fluid_particle(state, i)) {
             continue;
         }
         const int c = ws.cellId[i];
@@ -1233,10 +1248,15 @@ void apply_cell_velocity_correction(ParticleState& state,
         const double cvy = dpy / mass;
         diag.momentumCorrectionVx = cvx;
         diag.momentumCorrectionVy = cvy;
-#pragma omp parallel for if(n > 10000)
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+#pragma omp parallel for if(nLoop > 10000)
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!useFluidSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             state.vx[i] -= cvx;
@@ -1257,7 +1277,8 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                                      const CellGrid& grid,
                                                      const FluidDomainBounds& domain,
                                                      double time,
-                                                     Q6ProjectionWorkspace& workspace) {
+                                                     Q6ProjectionWorkspace& workspace,
+                                                     const std::vector<std::uint64_t>* fluidSlots) {
     validate_particle_state(state, "apply_q6_periodic_projection");
 
     Q6ProjectionDiagnostics diag{};
@@ -1274,7 +1295,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
 
     {
 
-        deposit_cell_velocity(state, params, grid, domain, workspace, diag);
+        deposit_cell_velocity(state, params, grid, domain, workspace, diag, fluidSlots);
     }
     {
 
@@ -1387,7 +1408,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
         diag.divAfterProjectedFluxMaxAbs = projectedDivMax;
     }
 
-    if (mask != nullptr && params.immersedSolidEnable) {
+    if (mask != nullptr) {
 
         compute_q6_solid_leak(workspace.appliedProjectedFlux, workspace.immersedMask, params, diag);
     }
@@ -1426,7 +1447,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
 
     {
 
-        apply_cell_velocity_correction(state, workspace, diag, params.projectionMomentumCorrectionEnable);
+        apply_cell_velocity_correction(state, workspace, diag, params.projectionMomentumCorrectionEnable, fluidSlots);
     }
     return diag;
 }

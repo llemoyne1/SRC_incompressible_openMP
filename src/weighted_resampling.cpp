@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <cstdlib>
+#include <string>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -32,8 +34,55 @@ int thread_id() {
 #endif
 }
 
+bool env_flag_enabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return false;
+    }
+    const std::string s(value);
+    return !(s.empty() || s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF");
+}
 
+void refresh_pool_free_slot_diagnostics(ResamplingParticlePoolWorkspace& pool) {
+    pool.diagnostics.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    pool.diagnostics.nInactive = pool.diagnostics.freeSlots;
+    if (pool.freeInactiveSlots.empty()) {
+        pool.diagnostics.firstFreeIndex = kInvalidParticleIndex;
+        pool.diagnostics.lastFreeIndex = kInvalidParticleIndex;
+    } else {
+        pool.diagnostics.firstFreeIndex = pool.freeInactiveSlots.front();
+        pool.diagnostics.lastFreeIndex = pool.freeInactiveSlots.back();
+    }
+    if (pool.diagnostics.storageSlots > 0u) {
+        const double invStorage = 1.0 / static_cast<double>(pool.diagnostics.storageSlots);
+        pool.diagnostics.freeSlotFraction = static_cast<double>(pool.diagnostics.freeSlots) * invStorage;
+        pool.diagnostics.dormantSlotFraction =
+            static_cast<double>(pool.diagnostics.freeSlots + pool.diagnostics.latentSlots) * invStorage;
+    }
+}
 
+bool remove_free_inactive_slot_swap(ResamplingParticlePoolWorkspace& pool,
+                                    std::uint64_t slot,
+                                    std::vector<std::uint64_t>& freeSlotPosition) {
+    if (slot == kInvalidParticleIndex || slot >= freeSlotPosition.size()) {
+        return false;
+    }
+    const std::uint64_t pos64 = freeSlotPosition[static_cast<std::size_t>(slot)];
+    if (pos64 == kInvalidParticleIndex || pos64 >= pool.freeInactiveSlots.size()) {
+        return false;
+    }
+    const std::size_t pos = static_cast<std::size_t>(pos64);
+    if (pool.freeInactiveSlots[pos] != slot) {
+        return false;
+    }
+    const std::uint64_t last = pool.freeInactiveSlots.back();
+    pool.freeInactiveSlots[pos] = last;
+    freeSlotPosition[static_cast<std::size_t>(last)] = pos64;
+    pool.freeInactiveSlots.pop_back();
+    freeSlotPosition[static_cast<std::size_t>(slot)] = kInvalidParticleIndex;
+    refresh_pool_free_slot_diagnostics(pool);
+    return true;
+}
 
 
 inline void set_particle_role_preconditioned(ParticleState& state,
@@ -514,6 +563,19 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
     d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
 
+    const bool useFastFreeSlotRemoval =
+        !env_flag_enabled("MPCD_DISABLE_FAST_RESAMPLING_INSERT_REMOVE");
+    std::vector<std::uint64_t> freeSlotPosition;
+    if (useFastFreeSlotRemoval && state.Np > 0u) {
+        freeSlotPosition.assign(static_cast<std::size_t>(state.Np), kInvalidParticleIndex);
+        for (std::size_t pp = 0; pp < pool.freeInactiveSlots.size(); ++pp) {
+            const std::uint64_t slot64 = pool.freeInactiveSlots[pp];
+            if (slot64 < state.Np) {
+                freeSlotPosition[static_cast<std::size_t>(slot64)] = static_cast<std::uint64_t>(pp);
+            }
+        }
+    }
+
     for (const ResamplingPassiveExtractionOperation& op : depositWorkspace.passiveExtractionOperations) {
         if (op.particleMass > 0.0 && std::isfinite(op.particleMass)) {
             d.plannedInsertionMass += op.particleMass;
@@ -539,16 +601,25 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
             d.skippedInvalidMass += 1u;
             continue;
         }
-        auto freeIt = std::find(pool.freeInactiveSlots.begin(),
-                                pool.freeInactiveSlots.end(),
-                                op.particleIndex);
-        if (freeIt == pool.freeInactiveSlots.end()) {
+        const std::uint64_t slot64 = op.particleIndex;
+        bool freeSlotRemoved = false;
+        if (useFastFreeSlotRemoval) {
+            freeSlotRemoved = remove_free_inactive_slot_swap(pool, slot64, freeSlotPosition);
+        } else {
+            auto freeIt = std::find(pool.freeInactiveSlots.begin(),
+                                    pool.freeInactiveSlots.end(),
+                                    op.particleIndex);
+            if (freeIt != pool.freeInactiveSlots.end()) {
+                pool.freeInactiveSlots.erase(freeIt);
+                refresh_pool_free_slot_diagnostics(pool);
+                freeSlotRemoved = true;
+            }
+        }
+        if (!freeSlotRemoved) {
             d.skippedNoFreeSlots += 1u;
             continue;
         }
 
-        const std::uint64_t slot64 = op.particleIndex;
-        pool.freeInactiveSlots.erase(freeIt);
         const std::size_t slot = static_cast<std::size_t>(slot64);
 
         double newX = 0.0;

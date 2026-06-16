@@ -80,8 +80,11 @@ void deposit_cell_mass_for_capacity(const ParticleState& state,
                                     const SimulationParams& params,
                                     const CellGrid& grid,
                                     const FluidDomainBounds& domain,
-                                    ClosedCapacityResponseWorkspace& ws) {
+                                    ClosedCapacityResponseWorkspace& ws,
+                                    const std::vector<std::uint64_t>* fluidSlots = nullptr) {
     const int nc = grid.numCells;
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
     const int nt = std::max(1, thread_count());
     std::fill(ws.cellMass.begin(), ws.cellMass.end(), 0.0);
     std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
@@ -92,9 +95,12 @@ void deposit_cell_mass_for_capacity(const ParticleState& state,
         const int tid = thread_id();
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) continue;
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) continue;
+            if (!useFluidSlots && !is_fluid_particle(state, i)) continue;
             const int c = cell_index_from_position(state.x[i], state.y[i], params, domain);
             ws.cellId[i] = c;
             ws.localMass[offset + static_cast<std::size_t>(c)] += state.mass[i];
@@ -387,7 +393,8 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     const SimulationParams& params,
     const CellGrid& grid,
     const FluidDomainBounds& domain,
-    ClosedCapacityResponseWorkspace& ws) {
+    ClosedCapacityResponseWorkspace& ws,
+    const std::vector<std::uint64_t>* fluidSlots) {
     if (!params.closedCapacityResponseEnable) {
         return ClosedCapacityResponseDiagnostics{};
     }
@@ -397,8 +404,11 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
 
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
+    const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
+    const std::size_t nLoop = useFluidSlots ? fluidSlots->size() : n;
     resize_capacity_workspace(ws, nc, state.Np, nt);
-    deposit_cell_mass_for_capacity(state, params, grid, domain, ws);
+    deposit_cell_mass_for_capacity(state, params, grid, domain, ws, fluidSlots);
 
     ClosedCapacityResponseDiagnostics d = compute_closed_capacity_response_from_cell_masses(
         params, grid, domain, ws.cellMass, nullptr, params.q6ProjectionStrength);
@@ -474,10 +484,13 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     double mass = 0.0;
     double dpx = 0.0;
     double dpy = 0.0;
-#pragma omp parallel for reduction(+:mass,dpx,dpy) if(state.Np > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) continue;
+#pragma omp parallel for reduction(+:mass,dpx,dpy) if(nLoop > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) continue;
+        if (!useFluidSlots && !is_fluid_particle(state, i)) continue;
         const int c = ws.cellId[i];
         if (c < 0 || c >= nc) continue;
         const std::size_t k = static_cast<std::size_t>(c);
@@ -496,10 +509,13 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
         const double cvy = dpy / mass;
         d.virialMomentumCorrectionVx = cvx;
         d.virialMomentumCorrectionVy = cvy;
-#pragma omp parallel for if(state.Np > 10000)
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(state.Np); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) continue;
+#pragma omp parallel for if(nLoop > 10000)
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(nLoop); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) continue;
+            if (!useFluidSlots && !is_fluid_particle(state, i)) continue;
             state.vx[i] -= cvx;
             state.vy[i] -= cvy;
         }

@@ -125,6 +125,7 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
                                                      const CellGrid& grid,
                                                      const FluidDomainBounds& domain,
                                                      double time,
-                                                     Q6ProjectionWorkspace& workspace);
+                                                     Q6ProjectionWorkspace& workspace,
+                                                     const std::vector<std::uint64_t>* fluidSlots = nullptr);
 
 } // namespace mpcd

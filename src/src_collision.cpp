@@ -239,11 +239,18 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
                                         const CellGrid& grid,
                                         const FluidDomainBounds& domain,
                                         std::uint64_t step,
-                                        CollisionWorkspace& ws) {
+                                        CollisionWorkspace& ws,
+                                        const std::vector<std::uint64_t>* fluidSlots) {
     validate_particle_state(state, "src_collision_step");
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
-    const ParticleRoleCounts roleCounts = count_particle_roles(state);
+    const bool useFluidSlots = fluidSlots != nullptr;
+    ParticleRoleCounts roleCounts{};
+    if (useFluidSlots) {
+        roleCounts.fluid = static_cast<std::uint64_t>(fluidSlots->size());
+    } else {
+        roleCounts = count_particle_roles(state);
+    }
     const int nc = grid.numCells;
     if (nc <= 0) {
         throw std::runtime_error("src_collision_step: invalid number of cells");
@@ -271,9 +278,14 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!useFluidSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             const int c = cell_index_from_position(state.x[i], state.y[i], grid, diag.shift, params);
@@ -442,9 +454,14 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
     }
 
 #pragma omp parallel for if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) {
+            continue;
+        }
+        if (!useFluidSlots && !is_fluid_particle(state, i)) {
             continue;
         }
         const int c = ws.cellId[i];

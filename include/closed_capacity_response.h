@@ -115,6 +115,7 @@ ClosedCapacityResponseDiagnostics apply_closed_capacity_virial_kick(
     const SimulationParams& params,
     const CellGrid& grid,
     const FluidDomainBounds& domain,
-    ClosedCapacityResponseWorkspace& workspace);
+    ClosedCapacityResponseWorkspace& workspace,
+    const std::vector<std::uint64_t>* fluidSlots = nullptr);
 
 } // namespace mpcd

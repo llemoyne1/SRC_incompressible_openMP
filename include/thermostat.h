@@ -49,6 +49,7 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
                                                               const CellGrid& grid,
                                                               const std::vector<int>& cellId,
                                                               std::uint64_t step,
-                                                              ThermostatWorkspace& ws);
+                                                              ThermostatWorkspace& ws,
+                                                              const std::vector<std::uint64_t>* fluidSlots = nullptr);
 
 } // namespace mpcd

@@ -72,7 +72,8 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
                                                               const CellGrid& grid,
                                                               const std::vector<int>& cellId,
                                                               std::uint64_t step,
-                                                              ThermostatWorkspace& ws) {
+                                                              ThermostatWorkspace& ws,
+                                                              const std::vector<std::uint64_t>* fluidSlots) {
     validate_particle_state(state, "apply_cell_relative_rescale_thermostat");
 
     ThermostatDiagnostics diag{};
@@ -98,6 +99,7 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     }
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    const bool useFluidSlots = fluidSlots != nullptr;
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
     resize_thermostat_workspace(ws, state.Np, nc, nt);
@@ -120,9 +122,14 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!useFluidSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             const int c = cellId[i];
@@ -166,9 +173,14 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+            const std::size_t i = useFluidSlots
+                ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!useFluidSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             const int c = cellId[i];
@@ -224,9 +236,14 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     }
 
 #pragma omp parallel for if(n > 10000)
-    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-        const std::size_t i = static_cast<std::size_t>(ii);
-        if (!is_fluid_particle(state, i)) {
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(useFluidSlots ? fluidSlots->size() : n); ++ii) {
+        const std::size_t i = useFluidSlots
+            ? static_cast<std::size_t>((*fluidSlots)[static_cast<std::size_t>(ii)])
+            : static_cast<std::size_t>(ii);
+        if (i >= n) {
+            continue;
+        }
+        if (!useFluidSlots && !is_fluid_particle(state, i)) {
             continue;
         }
         const int c = cellId[i];
