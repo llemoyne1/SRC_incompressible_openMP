@@ -1,4 +1,5 @@
 #include "cell_grid.h"
+#include "particle_audit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -119,6 +120,7 @@ int cell_index_from_position(double x,
                              const CellGrid& grid,
                              const GridShift& shift,
                              const SimulationParams& params) {
+    particle_audit_cell_index_from_position();
     const double xs = x + shift.sx;
     const double ys = y + shift.sy;
 
@@ -149,6 +151,7 @@ std::vector<std::uint32_t> compute_cell_counts(const ParticleState& state,
     validate_particle_state(state, "compute_cell_counts");
     const std::size_t n = static_cast<std::size_t>(state.Np);
     const int nc = grid.numCells;
+    particle_audit_compute_cell_counts(static_cast<std::uint64_t>(n));
     if (nc <= 0) {
         throw std::runtime_error("compute_cell_counts: invalid number of cells");
     }

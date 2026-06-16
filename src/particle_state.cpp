@@ -1,4 +1,5 @@
 #include "particle_state.h"
+#include "particle_audit.h"
 
 #include <stdexcept>
 
@@ -18,6 +19,7 @@ const char* particle_role_name(std::uint8_t value) {
 }
 
 void validate_particle_state(const ParticleState& state, const std::string& context) {
+    particle_audit_validate_particle_state();
     if (state.dim != 2u) {
         throw std::runtime_error(context + ": only dim=2 is supported in this code path");
     }
@@ -51,6 +53,7 @@ void validate_particle_state(const ParticleState& state, const std::string& cont
 }
 
 void ensure_particle_roles(ParticleState& state, ParticleRole defaultRole) {
+    particle_audit_ensure_particle_roles();
     validate_particle_state(state, "ensure_particle_roles(before)");
     const std::size_t n = static_cast<std::size_t>(state.Np);
     if (state.role.empty()) {
@@ -60,6 +63,7 @@ void ensure_particle_roles(ParticleState& state, ParticleRole defaultRole) {
 }
 
 std::uint8_t particle_role_value(const ParticleState& state, std::size_t i) {
+    particle_audit_particle_role_value();
     if (i >= static_cast<std::size_t>(state.Np)) {
         throw std::runtime_error("particle_role_value: index out of range");
     }
@@ -67,30 +71,37 @@ std::uint8_t particle_role_value(const ParticleState& state, std::size_t i) {
 }
 
 bool is_fluid_role(std::uint8_t value) {
+    particle_audit_is_fluid_role();
     return value == kParticleRoleFluid;
 }
 
 bool is_inactive_role(std::uint8_t value) {
+    particle_audit_is_inactive_role();
     return value == kParticleRoleInactive;
 }
 
 bool is_latent_role(std::uint8_t value) {
+    particle_audit_is_latent_role();
     return value == kParticleRoleLatent;
 }
 
 bool is_fluid_particle(const ParticleState& state, std::size_t i) {
+    particle_audit_is_fluid_particle();
     return is_fluid_role(particle_role_value(state, i));
 }
 
 bool is_inactive_particle(const ParticleState& state, std::size_t i) {
+    particle_audit_is_inactive_particle();
     return is_inactive_role(particle_role_value(state, i));
 }
 
 bool is_latent_particle(const ParticleState& state, std::size_t i) {
+    particle_audit_is_latent_particle();
     return is_latent_role(particle_role_value(state, i));
 }
 
 void set_particle_role(ParticleState& state, std::size_t i, ParticleRole role) {
+    particle_audit_set_particle_role();
     ensure_particle_roles(state, ParticleRole::Fluid);
     if (i >= state.role.size()) {
         throw std::runtime_error("set_particle_role: index out of range");
@@ -102,6 +113,7 @@ ParticleRoleCounts count_particle_roles(const ParticleState& state) {
     validate_particle_state(state, "count_particle_roles");
     ParticleRoleCounts counts{};
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    particle_audit_count_particle_roles(static_cast<std::uint64_t>(n));
     if (state.role.empty()) {
         counts.fluid = static_cast<std::uint64_t>(n);
         return counts;
@@ -119,6 +131,7 @@ ParticleRoleCounts count_particle_roles(const ParticleState& state) {
 ParticleRoleMasks build_particle_role_masks(const ParticleState& state) {
     validate_particle_state(state, "build_particle_role_masks");
     const std::size_t n = static_cast<std::size_t>(state.Np);
+    particle_audit_build_particle_role_masks(static_cast<std::uint64_t>(n));
     ParticleRoleMasks masks{};
     masks.isInactive.assign(n, 0u);
     masks.isFluid.assign(n, 0u);

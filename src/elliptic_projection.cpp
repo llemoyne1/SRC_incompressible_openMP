@@ -1,7 +1,11 @@
 #include "elliptic_projection.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -11,7 +15,120 @@
 namespace mpcd {
 namespace {
 
+using Q6TimingClock = std::chrono::steady_clock;
 
+struct Q6TimingRecord {
+    std::uint64_t call = 0u;
+    double total = 0.0;
+    double divBefore = 0.0;
+    double fieldSetup = 0.0;
+    double solveBaseFlux = 0.0;
+    double divForSolve = 0.0;
+    double rhsBuild = 0.0;
+    double gauge = 0.0;
+    double solveTotal = 0.0;
+    double solveInit = 0.0;
+    double solveRhsNorm = 0.0;
+    double solvePlan = 0.0;
+    double solveApplyDot = 0.0;
+    double solveUpdateResidual = 0.0;
+    double solveRemoveMean = 0.0;
+    double solveBetaUpdate = 0.0;
+    double solveFinalMean = 0.0;
+    double solveFinalResidual = 0.0;
+    double fluxReconstruct = 0.0;
+    double divAfter = 0.0;
+    double stats = 0.0;
+    double unaccounted = 0.0;
+    int iterations = 0;
+    int converged = 0;
+    double residualRel = 0.0;
+};
+
+class Q6TimingWriter {
+public:
+    Q6TimingWriter() {
+        const char* pathEnv = std::getenv("MPCD_Q6_TIMING_CSV");
+        if (pathEnv == nullptr || pathEnv[0] == '\0') {
+            return;
+        }
+        path_ = pathEnv;
+        const char* everyEnv = std::getenv("MPCD_Q6_TIMING_EVERY");
+        if (everyEnv != nullptr && everyEnv[0] != '\0') {
+            char* end = nullptr;
+            const long v = std::strtol(everyEnv, &end, 10);
+            if (end != everyEnv && v > 0) {
+                every_ = static_cast<std::uint64_t>(v);
+            }
+        }
+        out_.open(path_, std::ios::out | std::ios::trunc);
+        if (!out_) {
+            return;
+        }
+        enabled_ = true;
+        out_ << "call,total,div_before,field_setup,solve_base_flux,div_for_solve,"
+             << "rhs_build,gauge,solve_total,solve_init,solve_rhs_norm,solve_plan,"
+             << "solve_apply_dot,solve_update_residual,solve_remove_mean,solve_beta_update,"
+             << "solve_final_mean,solve_final_residual,flux_reconstruct,div_after,stats,"
+             << "unaccounted,iterations,converged,residual_rel\n";
+        out_ << std::setprecision(17);
+    }
+
+    bool enabled() const { return enabled_; }
+
+    std::uint64_t next_call() { return ++callCounter_; }
+
+    bool should_record(const std::uint64_t call) const {
+        return enabled_ && every_ > 0u && ((call - 1u) % every_ == 0u);
+    }
+
+    void append(const Q6TimingRecord& r) {
+        if (!enabled_) {
+            return;
+        }
+        out_ << r.call << ','
+             << r.total << ','
+             << r.divBefore << ','
+             << r.fieldSetup << ','
+             << r.solveBaseFlux << ','
+             << r.divForSolve << ','
+             << r.rhsBuild << ','
+             << r.gauge << ','
+             << r.solveTotal << ','
+             << r.solveInit << ','
+             << r.solveRhsNorm << ','
+             << r.solvePlan << ','
+             << r.solveApplyDot << ','
+             << r.solveUpdateResidual << ','
+             << r.solveRemoveMean << ','
+             << r.solveBetaUpdate << ','
+             << r.solveFinalMean << ','
+             << r.solveFinalResidual << ','
+             << r.fluxReconstruct << ','
+             << r.divAfter << ','
+             << r.stats << ','
+             << r.unaccounted << ','
+             << r.iterations << ','
+             << r.converged << ','
+             << r.residualRel << '\n';
+    }
+
+private:
+    bool enabled_ = false;
+    std::uint64_t every_ = 1u;
+    std::uint64_t callCounter_ = 0u;
+    std::string path_;
+    std::ofstream out_;
+};
+
+Q6TimingWriter& q6_timing_writer() {
+    static Q6TimingWriter writer;
+    return writer;
+}
+
+inline double q6_seconds_since(const Q6TimingClock::time_point& t0) {
+    return std::chrono::duration<double>(Q6TimingClock::now() - t0).count();
+}
 
 int cell_index(int i, int j, int Nx) {
     return i + Nx * j;
@@ -310,7 +427,8 @@ void solve_cg(const EllipticProjectionGrid& grid,
               const EllipticProjectionMask* mask,
               std::vector<double>& phi,
               EllipticProjectionWorkspace& workspace,
-              EllipticProjectionDiagnostics& diag) {
+              EllipticProjectionDiagnostics& diag,
+              Q6TimingRecord* timing = nullptr) {
     const int nc = grid.numCells;
     require_scalar_size(workspace.r, nc, "workspace.r");
     require_scalar_size(workspace.p, nc, "workspace.p");
@@ -319,20 +437,22 @@ void solve_cg(const EllipticProjectionGrid& grid,
     require_mask(mask, nc, "solve_cg.mask");
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         phi.assign(static_cast<std::size_t>(nc), 0.0);
         workspace.r = workspace.rhs;
         workspace.p = workspace.r;
+        if (timing) timing->solveInit += q6_seconds_since(q6PhaseT0);
     }
 
     double rhsNorm2 = 0.0;
     std::uint64_t activeCount = 0u;
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         rhsNorm2 = dot_product(workspace.rhs, workspace.rhs);
         activeCount = mask_active_count(mask, nc);
         diag.rhsRms = activeCount > 0u ? std::sqrt(rhsNorm2 / static_cast<double>(activeCount)) : 0.0;
         diag.rhsMaxAbs = scalar_stats(workspace.rhs, mask).maxAbs;
+        if (timing) timing->solveRhsNorm += q6_seconds_since(q6PhaseT0);
     }
 
     if (rhsNorm2 <= std::numeric_limits<double>::epsilon()) {
@@ -352,15 +472,17 @@ void solve_cg(const EllipticProjectionGrid& grid,
     diag.iterations = 0;
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         build_elliptic_operator_plan(grid, alpha, bc, mask, workspace.operatorPlan);
+        if (timing) timing->solvePlan += q6_seconds_since(q6PhaseT0);
     }
 
     for (int it = 0; it < maxIt; ++it) {
         double pAp = 0.0;
         {
-
+            const auto q6PhaseT0 = Q6TimingClock::now();
             pAp = apply_elliptic_operator_plan_and_dot(workspace.operatorPlan, workspace.p, workspace.Ap);
+            if (timing) timing->solveApplyDot += q6_seconds_since(q6PhaseT0);
         }
         if (!(pAp > 0.0) || !std::isfinite(pAp)) {
             break;
@@ -370,7 +492,7 @@ void solve_cg(const EllipticProjectionGrid& grid,
         const bool removeMeanThisIteration = params.removePhiMean && ((it + 1) % 25 == 0);
         double rrNew = 0.0;
         {
-
+            const auto q6PhaseT0 = Q6TimingClock::now();
 #pragma omp parallel for reduction(+:rrNew) if(nc > 4096)
             for (int c = 0; c < nc; ++c) {
                 const std::size_t k = static_cast<std::size_t>(c);
@@ -380,16 +502,17 @@ void solve_cg(const EllipticProjectionGrid& grid,
                     rrNew += workspace.r[k] * workspace.r[k];
                 }
             }
+            if (timing) timing->solveUpdateResidual += q6_seconds_since(q6PhaseT0);
         }
 
         if (removeMeanThisIteration) {
-
+            const auto q6PhaseT0 = Q6TimingClock::now();
             subtract_mean(phi, mask);
             subtract_mean(workspace.r, mask);
             {
-
                 rrNew = dot_product(workspace.r, workspace.r);
             }
+            if (timing) timing->solveRemoveMean += q6_seconds_since(q6PhaseT0);
         }
         diag.iterations = it + 1;
         diag.residualAbs = std::sqrt(rrNew);
@@ -402,25 +525,28 @@ void solve_cg(const EllipticProjectionGrid& grid,
 
         const double beta = rrNew / rr;
         {
-
+            const auto q6PhaseT0 = Q6TimingClock::now();
 #pragma omp parallel for if(nc > 4096)
             for (int c = 0; c < nc; ++c) {
                 const std::size_t k = static_cast<std::size_t>(c);
                 workspace.p[k] = workspace.r[k] + beta * workspace.p[k];
             }
+            if (timing) timing->solveBetaUpdate += q6_seconds_since(q6PhaseT0);
         }
         rr = rrNew;
     }
 
     if (params.removePhiMean) {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         subtract_mean(phi, mask);
+        if (timing) timing->solveFinalMean += q6_seconds_since(q6PhaseT0);
     }
 
     if (!diag.converged) {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         diag.residualAbs = std::sqrt(dot_product(workspace.r, workspace.r));
         diag.residualRel = diag.residualAbs / rhsNorm;
+        if (timing) timing->solveFinalResidual += q6_seconds_since(q6PhaseT0);
     }
 }
 
@@ -618,19 +744,36 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     require_scalar_size(targetDivergence, grid.numCells, "project_face_field.targetDivergence");
     require_mask(mask, grid.numCells, "project_face_field.mask");
 
-    resize_elliptic_projection_workspace(workspace, grid.numCells);
+    Q6TimingWriter& q6Writer = q6_timing_writer();
+    Q6TimingRecord q6Timing{};
+    q6Timing.call = q6Writer.next_call();
+    const bool q6TimingEnabled = q6Writer.should_record(q6Timing.call);
+    const auto q6TotalT0 = Q6TimingClock::now();
+
+    {
+        const auto q6PhaseT0 = Q6TimingClock::now();
+        resize_elliptic_projection_workspace(workspace, grid.numCells);
+        if (q6TimingEnabled) q6Timing.fieldSetup += q6_seconds_since(q6PhaseT0);
+    }
 
     EllipticProjectionResult result{};
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         result.divBefore = compute_face_divergence(grid, baseFlux, bc, mask);
+        if (q6TimingEnabled) q6Timing.divBefore += q6_seconds_since(q6PhaseT0);
     }
-    result.phi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
-    resize_periodic_face_field(result.correctionFlux, grid.numCells);
-    resize_periodic_face_field(result.projectedFlux, grid.numCells);
-
-    PeriodicFaceField solveBaseFlux = baseFlux;
     {
+        const auto q6PhaseT0 = Q6TimingClock::now();
+        result.phi.assign(static_cast<std::size_t>(grid.numCells), 0.0);
+        resize_periodic_face_field(result.correctionFlux, grid.numCells);
+        resize_periodic_face_field(result.projectedFlux, grid.numCells);
+        if (q6TimingEnabled) q6Timing.fieldSetup += q6_seconds_since(q6PhaseT0);
+    }
+
+    PeriodicFaceField solveBaseFlux;
+    {
+        const auto q6PhaseT0 = Q6TimingClock::now();
+        solveBaseFlux = baseFlux;
 
     if (bc.x != EllipticBoundaryType::Periodic) {
         for (int j = 0; j < grid.Ny; ++j) {
@@ -646,44 +789,54 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
                 boundary_flux_value(bc.yHighFluxProfile, i, bc.yHighFlux);
         }
     }
+        if (q6TimingEnabled) q6Timing.solveBaseFlux += q6_seconds_since(q6PhaseT0);
     }
     // Faces with alpha=0 are internal no-flux faces.  This matters for curved
     // immersed solids where two neighbouring cell centres can both be fluid
     // while the face segment itself is cut by the solid.  The solve RHS must
     // not include base flux through such faces.
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
 #pragma omp parallel for if(grid.numCells > 4096)
         for (int c = 0; c < grid.numCells; ++c) {
             const std::size_t k = static_cast<std::size_t>(c);
             if (alpha.x[k] == 0.0) solveBaseFlux.x[k] = 0.0;
             if (alpha.y[k] == 0.0) solveBaseFlux.y[k] = 0.0;
         }
+        if (q6TimingEnabled) q6Timing.solveBaseFlux += q6_seconds_since(q6PhaseT0);
     }
     std::vector<double> divForSolve;
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         divForSolve = compute_face_divergence(grid, solveBaseFlux, bc, mask);
+        if (q6TimingEnabled) q6Timing.divForSolve += q6_seconds_since(q6PhaseT0);
     }
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         for (int c = 0; c < grid.numCells; ++c) {
             const std::size_t k = static_cast<std::size_t>(c);
             workspace.rhs[k] = mask_active(mask, c) ? (targetDivergence[k] - divForSolve[k]) : 0.0;
         }
+        if (q6TimingEnabled) q6Timing.rhsBuild += q6_seconds_since(q6PhaseT0);
     }
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         result.diagnostics.rhsMeanBeforeGauge = mean_value(workspace.rhs, mask);
         if (params.removeRhsMean) {
             subtract_mean(workspace.rhs, mask);
         }
         result.diagnostics.rhsMeanAfterGauge = mean_value(workspace.rhs, mask);
+        if (q6TimingEnabled) q6Timing.gauge += q6_seconds_since(q6PhaseT0);
     }
 
-    solve_cg(grid, alpha, params, bc, mask, result.phi, workspace, result.diagnostics);
+    {
+        const auto q6PhaseT0 = Q6TimingClock::now();
+        solve_cg(grid, alpha, params, bc, mask, result.phi, workspace, result.diagnostics,
+                 q6TimingEnabled ? &q6Timing : nullptr);
+        if (q6TimingEnabled) q6Timing.solveTotal += q6_seconds_since(q6PhaseT0);
+    }
 
     const double invDx = 1.0 / grid.dx;
     const double invDy = 1.0 / grid.dy;
@@ -691,7 +844,7 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     const bool periodicY = bc.y == EllipticBoundaryType::Periodic;
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
 #pragma omp parallel for if(grid.numCells > 4096)
         for (int j = 0; j < grid.Ny; ++j) {
         for (int i = 0; i < grid.Nx; ++i) {
@@ -751,20 +904,22 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
         }
     }
 
+        if (q6TimingEnabled) q6Timing.fluxReconstruct += q6_seconds_since(q6PhaseT0);
     }
 
     {
-
+        const auto q6PhaseT0 = Q6TimingClock::now();
         result.divAfter = compute_face_divergence(grid, result.projectedFlux, bc, mask);
+        if (q6TimingEnabled) q6Timing.divAfter += q6_seconds_since(q6PhaseT0);
     }
 
+    const auto q6StatsT0 = Q6TimingClock::now();
     ScalarStats divBeforeStats{};
     ScalarStats targetStats{};
     ScalarStats divAfterStats{};
     ScalarStats corrStats{};
     ScalarStats projStats{};
     {
-
         divBeforeStats = scalar_stats(result.divBefore, mask);
     }
     {
@@ -795,6 +950,19 @@ EllipticProjectionResult project_face_field(const EllipticProjectionGrid& grid,
     result.diagnostics.correctionFluxMaxAbs = corrStats.maxAbs;
     result.diagnostics.projectedFluxRms = projStats.rms;
     result.diagnostics.projectedFluxMaxAbs = projStats.maxAbs;
+    if (q6TimingEnabled) {
+        q6Timing.stats += q6_seconds_since(q6StatsT0);
+        q6Timing.total = q6_seconds_since(q6TotalT0);
+        q6Timing.iterations = result.diagnostics.iterations;
+        q6Timing.converged = result.diagnostics.converged ? 1 : 0;
+        q6Timing.residualRel = result.diagnostics.residualRel;
+        const double accounted = q6Timing.divBefore + q6Timing.fieldSetup +
+            q6Timing.solveBaseFlux + q6Timing.divForSolve + q6Timing.rhsBuild +
+            q6Timing.gauge + q6Timing.solveTotal + q6Timing.fluxReconstruct +
+            q6Timing.divAfter + q6Timing.stats;
+        q6Timing.unaccounted = q6Timing.total - accounted;
+        q6Writer.append(q6Timing);
+    }
 
     return result;
 }

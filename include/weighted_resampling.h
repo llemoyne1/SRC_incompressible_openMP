@@ -840,7 +840,7 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
 ResamplingLatentActivationDiagnostics apply_resampling_latent_activation(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
     const SimulationParams& params,
     const CellGrid& grid);
@@ -852,7 +852,7 @@ void attach_resampling_latent_activation_diagnostics(
 ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace);
+    WeightedRealFluidDepositWorkspace& depositWorkspace);
 
 void attach_resampling_extraction_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,
@@ -861,7 +861,7 @@ void attach_resampling_extraction_apply_diagnostics(
 ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const CellGrid& grid);
 
 void attach_resampling_insertion_apply_diagnostics(
@@ -924,7 +924,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws,
                                                           bool buildMutationPlan = true,
-                                                          bool reuseExistingCellIds = false);
+                                                          bool reuseExistingCellIds = false,
+                                                          const ResamplingParticlePoolWorkspace* particlePool = nullptr);
 
 // 0172 post-thermal refresh: after thermal renormalization, positions, roles,
 // masses, cellId, and classification masks are unchanged.  This routine updates
@@ -938,6 +939,7 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
     double time,
     const GridShift& shift,
     WeightedRealFluidDepositWorkspace& ws,
-    const WeightedResamplingDiagnostics& previousDiagnostics);
+    const WeightedResamplingDiagnostics& previousDiagnostics,
+    const ResamplingParticlePoolWorkspace* particlePool = nullptr);
 
 } // namespace mpcd

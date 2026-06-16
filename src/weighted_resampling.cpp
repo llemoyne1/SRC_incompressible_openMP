@@ -240,7 +240,7 @@ void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnosti
 ResamplingLatentActivationDiagnostics apply_resampling_latent_activation(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
     const SimulationParams& params,
     const CellGrid& grid) {
@@ -335,6 +335,9 @@ ResamplingLatentActivationDiagnostics apply_resampling_latent_activation(
             state.vy[slot] = uy;
             state.mass[slot] = d.activationParticleMass;
             set_particle_role(state, slot, ParticleRole::Fluid);
+            if (slot < depositWorkspace.cellId.size()) {
+                depositWorkspace.cellId[slot] = c;
+            }
             pool.fluidSlots.push_back(slot64);
 
             activatedPerCell[kk] += 1u;
@@ -404,7 +407,7 @@ void attach_resampling_latent_activation_diagnostics(
 ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace) {
+    WeightedRealFluidDepositWorkspace& depositWorkspace) {
     validate_particle_state(state, "apply_resampling_extraction_operations");
     ensure_particle_roles(state, ParticleRole::Fluid);
 
@@ -446,6 +449,9 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
         const double ke = 0.5 * mp * (vx * vx + vy * vy);
 
         set_particle_role(state, pi, ParticleRole::Inactive);
+        if (pi < depositWorkspace.cellId.size()) {
+            depositWorkspace.cellId[pi] = kInvalidCellIndex;
+        }
         resampling_pool_push_free_slot(pool, pi64);
 
         d.operationsApplied += 1u;
@@ -498,7 +504,7 @@ void attach_resampling_extraction_apply_diagnostics(
 ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
     ParticleState& state,
     ResamplingParticlePoolWorkspace& pool,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
+    WeightedRealFluidDepositWorkspace& depositWorkspace,
     const CellGrid& grid) {
     validate_particle_state(state, "apply_resampling_insertion_operations");
     ensure_particle_roles(state, ParticleRole::Fluid);
@@ -557,6 +563,9 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
         state.mass[slot] = op.particleMass;
         state.type[slot] = op.particleType;
         set_particle_role(state, slot, ParticleRole::Fluid);
+        if (slot < depositWorkspace.cellId.size()) {
+            depositWorkspace.cellId[slot] = op.receiverCell;
+        }
 
         d.operationsApplied += 1u;
         d.roleChanges += 1u;
@@ -615,9 +624,17 @@ void attach_resampling_insertion_apply_diagnostics(
 
 namespace {
 
+bool resampling_pool_slots_are_valid(const ResamplingParticlePoolWorkspace* pool,
+                                      std::uint64_t particleCount) {
+    return pool != nullptr && pool->diagnostics.built &&
+           pool->diagnostics.storageSlots == particleCount &&
+           pool->fluidSlots.size() == static_cast<std::size_t>(pool->diagnostics.nFluid);
+}
+
 void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
                                 const ParticleState& state,
-                                int nc) {
+                                int nc,
+                                const ResamplingParticlePoolWorkspace* particlePool = nullptr) {
     ws.cellParticleOffsets.assign(static_cast<std::size_t>(nc) + 1u, 0u);
     for (int c = 0; c < nc; ++c) {
         ws.cellParticleOffsets[static_cast<std::size_t>(c) + 1u] =
@@ -628,21 +645,43 @@ void ensure_cell_particle_index(WeightedRealFluidDepositWorkspace& ws,
                                   kInvalidParticleIndex);
     ws.cellParticleCursor.assign(ws.cellParticleOffsets.begin(), ws.cellParticleOffsets.end() - 1);
     const std::size_t n = static_cast<std::size_t>(state.Np);
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!is_fluid_particle(state, i)) {
-            continue;
+    const bool usePoolSlots = resampling_pool_slots_are_valid(particlePool, state.Np);
+    if (usePoolSlots) {
+        for (const std::uint64_t i64 : particlePool->fluidSlots) {
+            if (i64 >= state.Np) {
+                continue;
+            }
+            const std::size_t i = static_cast<std::size_t>(i64);
+            if (i >= ws.cellId.size()) {
+                continue;
+            }
+            const int c = ws.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            const std::size_t cc = static_cast<std::size_t>(c);
+            const std::size_t pos = static_cast<std::size_t>(ws.cellParticleCursor[cc]++);
+            if (pos < ws.cellParticleIndices.size()) {
+                ws.cellParticleIndices[pos] = i64;
+            }
         }
-        if (i >= ws.cellId.size()) {
-            continue;
-        }
-        const int c = ws.cellId[i];
-        if (c < 0 || c >= nc) {
-            continue;
-        }
-        const std::size_t cc = static_cast<std::size_t>(c);
-        const std::size_t pos = static_cast<std::size_t>(ws.cellParticleCursor[cc]++);
-        if (pos < ws.cellParticleIndices.size()) {
-            ws.cellParticleIndices[pos] = static_cast<std::uint64_t>(i);
+    } else {
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!is_fluid_particle(state, i)) {
+                continue;
+            }
+            if (i >= ws.cellId.size()) {
+                continue;
+            }
+            const int c = ws.cellId[i];
+            if (c < 0 || c >= nc) {
+                continue;
+            }
+            const std::size_t cc = static_cast<std::size_t>(c);
+            const std::size_t pos = static_cast<std::size_t>(ws.cellParticleCursor[cc]++);
+            if (pos < ws.cellParticleIndices.size()) {
+                ws.cellParticleIndices[pos] = static_cast<std::uint64_t>(i);
+            }
         }
     }
 }
@@ -773,7 +812,7 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
 
     {
         
-        ensure_cell_particle_index(depositWorkspace, state, nc);
+        ensure_cell_particle_index(depositWorkspace, state, nc, &pool);
     }
 
     std::uint64_t extractionBudget = params.resamplingPopulationMaxExtractionsPerStep > 0
@@ -1986,7 +2025,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                                                           const GridShift& shift,
                                                           WeightedRealFluidDepositWorkspace& ws,
                                                           bool buildMutationPlan,
-                                                          bool reuseExistingCellIds) {
+                                                          bool reuseExistingCellIds,
+                                                          const ResamplingParticlePoolWorkspace* particlePool) {
     int nc = 0;
     std::size_t n = 0u;
     int nt = 1;
@@ -2004,6 +2044,7 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
     }
 
     const bool useExistingCellIds = reuseExistingCellIds && ws.cellId.size() >= n;
+    const bool usePoolSlots = resampling_pool_slots_are_valid(particlePool, state.Np);
 
     {
         
@@ -2045,8 +2086,13 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
 
     ParticleRoleCounts roles{};
     {
-        
-        roles = count_particle_roles(state);
+        if (usePoolSlots) {
+            roles.fluid = particlePool->diagnostics.nFluid;
+            roles.inactive = particlePool->diagnostics.nInactive;
+            roles.latent = particlePool->diagnostics.nLatent;
+        } else {
+            roles = count_particle_roles(state);
+        }
     }
 
     double particleMassSum = 0.0;
@@ -2062,9 +2108,14 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         const std::size_t offset = static_cast<std::size_t>(tid * nc);
 
 #pragma omp for
-        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-            const std::size_t i = static_cast<std::size_t>(ii);
-            if (!is_fluid_particle(state, i)) {
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(usePoolSlots ? particlePool->fluidSlots.size() : n); ++ii) {
+            const std::size_t i = usePoolSlots
+                ? static_cast<std::size_t>(particlePool->fluidSlots[static_cast<std::size_t>(ii)])
+                : static_cast<std::size_t>(ii);
+            if (i >= n) {
+                continue;
+            }
+            if (!usePoolSlots && !is_fluid_particle(state, i)) {
                 continue;
             }
             const double m = state.mass[i];
@@ -2709,7 +2760,8 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
     double time,
     const GridShift& shift,
     WeightedRealFluidDepositWorkspace& ws,
-    const WeightedResamplingDiagnostics& previousDiagnostics) {
+    const WeightedResamplingDiagnostics& previousDiagnostics,
+    const ResamplingParticlePoolWorkspace* particlePool) {
     (void)params;
     (void)domain;
     (void)time;
@@ -2730,7 +2782,7 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
             // valid current deposit workspace.  This preserves correctness for
             // accidental direct use outside the post-thermal path.
             return deposit_weighted_real_fluid(
-                state, params, grid, domain, time, shift, ws, false);
+                state, params, grid, domain, time, shift, ws, false, false, particlePool);
         }
         n = static_cast<std::size_t>(state.Np);
         nt = std::max(1, thread_count());
@@ -2738,7 +2790,7 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
             ws.localPx.size() < static_cast<std::size_t>(nt * nc) ||
             ws.localPy.size() < static_cast<std::size_t>(nt * nc)) {
             return deposit_weighted_real_fluid(
-                state, params, grid, domain, time, shift, ws, false);
+                state, params, grid, domain, time, shift, ws, false, false, particlePool);
         }
     }
 
@@ -2752,6 +2804,7 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
         std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
     }
 
+    const bool usePoolSlots = resampling_pool_slots_are_valid(particlePool, state.Np);
     std::uint64_t fluidParticles = 0u;
     {
         
@@ -2760,9 +2813,14 @@ WeightedResamplingDiagnostics refresh_weighted_real_fluid_velocity_deposit(
             const int tid = thread_id();
             const std::size_t offset = static_cast<std::size_t>(tid * nc);
 #pragma omp for
-            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
-                const std::size_t i = static_cast<std::size_t>(ii);
-                if (!is_fluid_particle(state, i)) {
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(usePoolSlots ? particlePool->fluidSlots.size() : n); ++ii) {
+                const std::size_t i = usePoolSlots
+                    ? static_cast<std::size_t>(particlePool->fluidSlots[static_cast<std::size_t>(ii)])
+                    : static_cast<std::size_t>(ii);
+                if (i >= n) {
+                    continue;
+                }
+                if (!usePoolSlots && !is_fluid_particle(state, i)) {
                     continue;
                 }
                 if (i >= ws.cellId.size()) {
