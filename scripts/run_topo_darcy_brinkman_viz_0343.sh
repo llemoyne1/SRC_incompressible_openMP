@@ -45,6 +45,12 @@ DARCY_R="${DARCY_R:-0.055}"
 DARCY_INTERFACE_WIDTH="${DARCY_INTERFACE_WIDTH:-0.01}"
 DARCY_COST_EVERY="${DARCY_COST_EVERY:-20}"
 
+# 0353b: optional state dumps for high-resolution NACA/topology diagnostics.
+# Default remains zero to preserve the historical lightweight benchmark path.
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-0}"
+DUMP_ROLE_FILTER="${DUMP_ROLE_FILTER:-fluid}"
+SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
+
 # 0348a/topo benchmark observables: disabled by default to preserve the
 # historical CUDA-VIZ path.  When enabled, the first implementation only adds
 # cell-based Darcy force/drag/lift reductions at topoBenchmarkEvery cadence.
@@ -193,9 +199,9 @@ topoBenchmarkLiftDirX = ${TOPO_BENCHMARK_LIFT_DIR_X}
 topoBenchmarkLiftDirY = ${TOPO_BENCHMARK_LIFT_DIR_Y}
 
 summaryEvery = ${DARCY_COST_EVERY}
-dumpStateEvery = 0
-summaryRoleFilter = fluid
-dumpRoleFilter = fluid
+dumpStateEvery = ${DUMP_STATE_EVERY}
+summaryRoleFilter = ${SUMMARY_ROLE_FILTER}
+dumpRoleFilter = ${DUMP_ROLE_FILTER}
 numThreads = ${THREADS}
 PARAMS
   if [[ "${DARCY_CHI_MODE}" == "file" ]]; then
