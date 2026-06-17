@@ -180,9 +180,9 @@ __global__ void precompute_live_alpha_from_chi_kernel_0345(float* chiField, floa
     alphaField[c] = static_cast<float>(alpha_live_0345(chi, alphaMin, alphaMax, q));
 }
 
-std::string live_topo_signature_0345(const SimulationParams& p) {
+std::string live_topo_signature_0345(const SimulationParams& p, int liveNx, int liveNy) {
     std::ostringstream ss;
-    ss << std::setprecision(17) << p.Nx << '|' << p.Ny << '|'
+    ss << std::setprecision(17) << p.Nx << '|' << p.Ny << '|' << liveNx << '|' << liveNy << '|'
        << p.darcyChiMode << '|' << p.darcyChiFile << '|' << p.darcyChiNx << '|' << p.darcyChiNy << '|'
        << p.darcyChiFileFormat << '|' << p.darcyAlphaMin << '|' << p.darcyAlphaMax << '|' << p.darcyQ;
     return ss.str();
@@ -212,17 +212,40 @@ std::vector<float> load_live_chi_file_0345(const SimulationParams& p, std::size_
     return chi;
 }
 
-bool ensure_live_topo_file_fields_0345(LiveFieldWorkspace0337& w, const SimulationParams& p, int threads) {
+std::vector<float> resample_live_chi_nearest_0346(const std::vector<float>& src,
+                                                     int srcNx, int srcNy,
+                                                     int dstNx, int dstNy) {
+    if (srcNx <= 0 || srcNy <= 0 || dstNx <= 0 || dstNy <= 0) return {};
+    if (static_cast<std::size_t>(srcNx) * static_cast<std::size_t>(srcNy) != src.size()) return {};
+    if (srcNx == dstNx && srcNy == dstNy) return src;
+    std::vector<float> dst(static_cast<std::size_t>(dstNx) * static_cast<std::size_t>(dstNy), 1.0f);
+    for (int iy = 0; iy < dstNy; ++iy) {
+        int sy = static_cast<int>(floor((static_cast<double>(iy) + 0.5) * static_cast<double>(srcNy) / static_cast<double>(dstNy)));
+        sy = std::max(0, std::min(srcNy - 1, sy));
+        for (int ix = 0; ix < dstNx; ++ix) {
+            int sx = static_cast<int>(floor((static_cast<double>(ix) + 0.5) * static_cast<double>(srcNx) / static_cast<double>(dstNx)));
+            sx = std::max(0, std::min(srcNx - 1, sx));
+            dst[static_cast<std::size_t>(iy) * static_cast<std::size_t>(dstNx) + static_cast<std::size_t>(ix)] =
+                src[static_cast<std::size_t>(sy) * static_cast<std::size_t>(srcNx) + static_cast<std::size_t>(sx)];
+        }
+    }
+    return dst;
+}
+
+bool ensure_live_topo_file_fields_0345(LiveFieldWorkspace0337& w, const SimulationParams& p, int liveNx, int liveNy, int threads) {
     if (p.darcyChiMode != "file") return true;
-    const int ncell = p.Nx * p.Ny;
-    if (ncell <= 0 || !w.d_chi || !w.d_alpha) return false;
-    const std::string sig = live_topo_signature_0345(p);
+    const int srcNcell = p.Nx * p.Ny;
+    const int liveNcell = liveNx * liveNy;
+    if (srcNcell <= 0 || liveNcell <= 0 || !w.d_chi || !w.d_alpha) return false;
+    const std::string sig = live_topo_signature_0345(p, liveNx, liveNy);
     if (w.topoSignature == sig) return true;
-    const auto chi = load_live_chi_file_0345(p, static_cast<std::size_t>(ncell));
-    if (chi.size() != static_cast<std::size_t>(ncell)) return false;
-    if (cudaMemcpy(w.d_chi, chi.data(), chi.size() * sizeof(float), cudaMemcpyHostToDevice) != cudaSuccess) return false;
-    const int blocks = (ncell + threads - 1) / threads;
-    precompute_live_alpha_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, ncell,
+    const auto srcChi = load_live_chi_file_0345(p, static_cast<std::size_t>(srcNcell));
+    if (srcChi.size() != static_cast<std::size_t>(srcNcell)) return false;
+    const auto liveChi = resample_live_chi_nearest_0346(srcChi, p.Nx, p.Ny, liveNx, liveNy);
+    if (liveChi.size() != static_cast<std::size_t>(liveNcell)) return false;
+    if (cudaMemcpy(w.d_chi, liveChi.data(), liveChi.size() * sizeof(float), cudaMemcpyHostToDevice) != cudaSuccess) return false;
+    const int blocks = (liveNcell + threads - 1) / threads;
+    precompute_live_alpha_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, liveNcell,
                                                                    p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ);
     if (cudaDeviceSynchronize() != cudaSuccess) return false;
     w.topoSignature = sig;
@@ -374,6 +397,7 @@ int chi_mode_code_live_0343(const std::string& mode) {
     if (mode == "uniform") return 0;
     if (mode == "circle" || mode == "cylinder") return 1;
     if (mode == "box" || mode == "rectangle") return 2;
+    if (mode == "file") return 3;
     return 0;
 }
 
@@ -415,7 +439,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     if (fcode == 3) {
         vorticity_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, params.Lx, params.Ly);
     } else if (fcode == 5 || fcode == 6 || fcode == 7) {
-        if (!ensure_live_topo_file_fields_0345(w, params, threads)) { if (diag) *diag = local; return false; }
+        if (!ensure_live_topo_file_fields_0345(w, params, nx, ny, threads)) { if (diag) *diag = local; return false; }
         darcy_scalar_live_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar,
                                                                nx, ny, params.Lx, params.Ly, fcode,
                                                                chi_mode_code_live_0343(params.darcyChiMode), params.darcyUniformChi,
