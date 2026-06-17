@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import array
 import math
-import os
 from pathlib import Path
 
 
@@ -70,6 +69,18 @@ def chi_bend_pipe(x: float, y: float, args: argparse.Namespace) -> float:
     return 1.0 if d <= 0.0 else 0.0
 
 
+def chi_diagonal_channel(x: float, y: float, args: argparse.Namespace) -> float:
+    # Straight descending channel from left boundary to bottom boundary.
+    # Intended to mimic the RANS/topology reference sketch: inlet on x=0,
+    # outlet on y=0, with a smoothed diagonal conduit through the design box.
+    ax, ay = 0.0, args.inlet_y
+    bx, by = args.outlet_x, 0.0
+    d = dist_to_segment(x, y, ax, ay, bx, by) - 0.5 * args.pipe_width
+    if args.interface_width > 0.0:
+        return 1.0 - smoothstep(d / args.interface_width)
+    return 1.0 if d <= 0.0 else 0.0
+
+
 def generate(args: argparse.Namespace) -> list[float]:
     vals: list[float] = []
     for iy in range(args.Ny):
@@ -80,6 +91,8 @@ def generate(args: argparse.Namespace) -> list[float]:
                 chi = chi_circle_obstacle(x, y, args)
             elif args.mode == "bend_pipe":
                 chi = chi_bend_pipe(x, y, args)
+            elif args.mode == "diagonal_channel":
+                chi = chi_diagonal_channel(x, y, args)
             elif args.mode == "uniform":
                 chi = args.uniform_chi
             else:
@@ -90,7 +103,7 @@ def generate(args: argparse.Namespace) -> list[float]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["circle_obstacle", "bend_pipe", "uniform"], default="circle_obstacle")
+    ap.add_argument("--mode", choices=["circle_obstacle", "bend_pipe", "diagonal_channel", "uniform"], default="circle_obstacle")
     ap.add_argument("--out", required=True)
     ap.add_argument("--Nx", type=int, required=True)
     ap.add_argument("--Ny", type=int, required=True)
@@ -104,6 +117,8 @@ def main() -> None:
     ap.add_argument("--uniform-chi", type=float, default=1.0)
     ap.add_argument("--pipe-width", type=float, default=0.10)
     ap.add_argument("--bend-radius", type=float, default=0.18)
+    ap.add_argument("--inlet-y", type=float, default=0.78)
+    ap.add_argument("--outlet-x", type=float, default=0.82)
     args = ap.parse_args()
     if args.Nx <= 0 or args.Ny <= 0 or args.Lx <= 0.0 or args.Ly <= 0.0:
         raise SystemExit("Nx, Ny, Lx and Ly must be positive")
