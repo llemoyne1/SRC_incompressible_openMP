@@ -14,6 +14,7 @@
 #include "cuda_resampling_adaptive_flag_0304.h"
 #include "cuda_resampling_mass_recondition_0296.h"
 #include "cuda_resampling_population_guard_0297.h"
+#include "cuda_darcy_brinkman_0343.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1327,6 +1328,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (params.keepMeanFlowEnable || !residentClassicCuda) {
             cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
         }
+    }
+
+    // 0343/topo: pure Brinkman/Darcy penalization for SRC classic CUDA-VIZ.
+    // It is deliberately placed after thermostat/mean-flow correction and before
+    // any resampling/Q6 future continuation.  The kernel applies a collective
+    // cell-mean velocity kick, leaving thermal fluctuations unchanged.
+    if (params.darcyBrinkmanEnable) {
+        result.darcy = try_apply_cuda_darcy_brinkman_0343(state, params, grid, result.domain, step, time);
     }
 
     // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally

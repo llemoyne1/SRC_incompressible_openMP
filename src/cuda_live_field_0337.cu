@@ -64,6 +64,9 @@ int field_code_0337(const std::string& f) {
     if (f == "speed") return 2;
     if (f == "vorticity" || f == "omega" || f == "curl") return 3;
     if (f == "mass" || f == "density") return 4;
+    if (f == "chi" || f == "topo_chi") return 5;
+    if (f == "alpha" || f == "darcy_alpha") return 6;
+    if (f == "darcy_power" || f == "darcy" || f == "brinkman_power") return 7;
     return 0;
 }
 
@@ -72,6 +75,8 @@ bool signed_field_0337(int code) { return code == 0 || code == 1 || code == 3; }
 double default_clip_0337(int code) {
     if (code == 0 || code == 1 || code == 2) return 0.2;
     if (code == 3) return 10.0;
+    if (code == 5) return 1.0;
+    if (code == 6 || code == 7) return 1.0;
     return 40.0;
 }
 
@@ -148,6 +153,60 @@ __global__ void vorticity_kernel_0337(const double* mass, const double* ux, cons
     const double dy = Ly / static_cast<double>(max(1, ny));
     scalar[c] = (uy_xp - uy_xm) / (static_cast<double>(xp - xm) * dx + 1e-300)
               - (ux_yp - ux_ym) / (static_cast<double>(yp - ym) * dy + 1e-300);
+}
+
+__device__ double smoothstep_dev_0343_live(double t) {
+    t = fmin(1.0, fmax(0.0, t));
+    return t * t * (3.0 - 2.0 * t);
+}
+
+__device__ double chi_live_0343(int ix, int iy, int nx, int ny, double Lx, double Ly,
+                                int mode, double uniformChi,
+                                double circleCx, double circleCy, double circleR,
+                                double boxXMin, double boxXMax, double boxYMin, double boxYMax,
+                                double interfaceWidth) {
+    const double x = (static_cast<double>(ix) + 0.5) * Lx / static_cast<double>(max(1, nx));
+    const double y = (static_cast<double>(iy) + 0.5) * Ly / static_cast<double>(max(1, ny));
+    double chi = uniformChi;
+    if (mode == 1) {
+        const double d = sqrt((x - circleCx) * (x - circleCx) + (y - circleCy) * (y - circleCy));
+        chi = interfaceWidth > 0.0 ? smoothstep_dev_0343_live((d - circleR) / interfaceWidth) : (d <= circleR ? 0.0 : 1.0);
+    } else if (mode == 2) {
+        const bool inside = (x >= boxXMin && x <= boxXMax && y >= boxYMin && y <= boxYMax);
+        chi = inside ? 0.0 : 1.0;
+    }
+    return fmin(1.0, fmax(0.0, chi));
+}
+
+__device__ double alpha_live_0343(double chi, double alphaMin, double alphaMax, double q) {
+    const double qq = fmax(q, 1.0e-300);
+    return alphaMin + (alphaMax - alphaMin) * qq * (1.0 - chi) / (qq + chi);
+}
+
+__global__ void darcy_scalar_live_kernel_0343(const double* mass, const double* ux, const double* uy,
+                                              double* scalar, int nx, int ny, double Lx, double Ly,
+                                              int fieldCode, int chiMode, double uniformChi,
+                                              double alphaMin, double alphaMax, double q,
+                                              double uSolidX, double uSolidY,
+                                              double circleCx, double circleCy, double circleR,
+                                              double boxXMin, double boxXMax, double boxYMin, double boxYMax,
+                                              double interfaceWidth) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    const int n = nx * ny;
+    if (c >= n) return;
+    const int ix = c % nx, iy = c / nx;
+    const double chi = chi_live_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
+                                     circleCx, circleCy, circleR,
+                                     boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
+    const double alpha = alpha_live_0343(chi, alphaMin, alphaMax, q);
+    if (fieldCode == 5) { scalar[c] = chi; return; }
+    if (fieldCode == 6) { scalar[c] = alpha; return; }
+    const double m = mass[c];
+    const double u = m > 0.0 ? ux[c] / m : 0.0;
+    const double v = m > 0.0 ? uy[c] / m : 0.0;
+    const double rx = u - uSolidX;
+    const double ry = v - uSolidY;
+    scalar[c] = alpha * (rx * rx + ry * ry);
 }
 
 __global__ void smooth_scalar_kernel_0337(const double* in, double* out, int nx, int ny) {
@@ -233,6 +292,13 @@ double seconds_since_0337(std::chrono::steady_clock::time_point t0) {
 
 } // namespace
 
+int chi_mode_code_live_0343(const std::string& mode) {
+    if (mode == "uniform") return 0;
+    if (mode == "circle" || mode == "cylinder") return 1;
+    if (mode == "box" || mode == "rectangle") return 2;
+    return 0;
+}
+
 bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         int nx,
                                         int ny,
@@ -268,8 +334,21 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     local.depositSeconds = seconds_since_0337(ta);
     ta = std::chrono::steady_clock::now();
     const int fcode = field_code_0337(field);
-    if (fcode == 3) vorticity_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, params.Lx, params.Ly);
-    else finalize_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, fcode);
+    if (fcode == 3) {
+        vorticity_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, params.Lx, params.Ly);
+    } else if (fcode == 5 || fcode == 6 || fcode == 7) {
+        darcy_scalar_live_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar,
+                                                               nx, ny, params.Lx, params.Ly, fcode,
+                                                               chi_mode_code_live_0343(params.darcyChiMode), params.darcyUniformChi,
+                                                               params.darcyAlphaMin, params.darcyAlphaMax, params.darcyQ,
+                                                               params.darcyUSolidX, params.darcyUSolidY,
+                                                               params.darcyCircleCx, params.darcyCircleCy, params.darcyCircleR,
+                                                               params.darcyBoxXMin, params.darcyBoxXMax,
+                                                               params.darcyBoxYMin, params.darcyBoxYMax,
+                                                               params.darcyInterfaceWidth);
+    } else {
+        finalize_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, fcode);
+    }
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
     for (int pass = 0; pass < std::max(0, smoothPasses); ++pass) {
         smooth_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_scalar, w.d_tmp, nx, ny);

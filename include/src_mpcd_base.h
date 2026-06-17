@@ -6,6 +6,7 @@
 #include "boundary_base.h"
 #include "cell_grid.h"
 #include "closed_capacity_response.h"
+#include "cuda_darcy_brinkman_0343.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
 #include "particle_state.h"
@@ -34,6 +35,7 @@ struct StepResult {
     Q6ProjectionDiagnostics q6;
     ThermostatDiagnostics thermostat;
     ClosedCapacityResponseDiagnostics capacity;
+    CudaDarcyBrinkman0343Diagnostics darcy;
     WeightedResamplingDiagnostics resampling;
     ResamplingParticlePoolDiagnostics resamplingPool;
     StepProfile profile;

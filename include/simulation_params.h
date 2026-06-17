@@ -390,6 +390,32 @@ struct SimulationParams {
     int resamplingPopulationMaxExtractionsPerCell = 64;
     int resamplingPopulationMaxExtractionsPerStep = 200000;
 
+
+    // 0343/topo: pure Brinkman/Darcy penalization for SRC classic CUDA-VIZ.
+    // The design variable convention is chi=1 fluid, chi=0 solid/porous.
+    // alpha(chi)=alphaMin+(alphaMax-alphaMin)*q*(1-chi)/(q+chi).
+    // This first topo branch intentionally keeps full Brinkman population and
+    // does not couple to chi-aware resampling or Q6 CUDA yet.
+    bool darcyBrinkmanEnable = false;
+    std::string darcyChiMode = "uniform"; // uniform, circle/cylinder, box/rectangle
+    double darcyUniformChi = 1.0;
+    double darcyAlphaMin = 0.0;
+    double darcyAlphaMax = 0.0;
+    double darcyQ = 0.1;
+    double darcyUSolidX = 0.0;
+    double darcyUSolidY = 0.0;
+    double darcyCircleCx = 0.5;
+    double darcyCircleCy = 0.5;
+    double darcyCircleR = 0.1;
+    double darcyBoxXMin = 0.0;
+    double darcyBoxXMax = 0.0;
+    double darcyBoxYMin = 0.0;
+    double darcyBoxYMax = 0.0;
+    double darcyInterfaceWidth = 0.0;
+    int darcyCostEvery = 0;
+    std::string darcyCostFilename = "darcy_cost_0343.csv";
+    int darcyThreadsPerBlock = 256;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

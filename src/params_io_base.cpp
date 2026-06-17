@@ -419,6 +419,25 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingRichCellMassFraction" || key == "resamplingRichMassFraction") p.resamplingRichCellMassFraction = parse_double(value, key);
         else if (key == "resamplingActiveFluidFractionThreshold") p.resamplingActiveFluidFractionThreshold = parse_double(value, key);
         else if (key == "resamplingEnable" || key == "weightedResamplingEnable") p.resamplingEnable = parse_bool(value, key);
+        else if (key == "darcyBrinkmanEnable" || key == "topoDarcyEnable") p.darcyBrinkmanEnable = parse_bool(value, key);
+        else if (key == "darcyChiMode") p.darcyChiMode = lower(trim(value));
+        else if (key == "darcyUniformChi") p.darcyUniformChi = parse_double(value, key);
+        else if (key == "darcyAlphaMin") p.darcyAlphaMin = parse_double(value, key);
+        else if (key == "darcyAlphaMax") p.darcyAlphaMax = parse_double(value, key);
+        else if (key == "darcyQ") p.darcyQ = parse_double(value, key);
+        else if (key == "darcyUSolidX") p.darcyUSolidX = parse_double(value, key);
+        else if (key == "darcyUSolidY") p.darcyUSolidY = parse_double(value, key);
+        else if (key == "darcyCircleCx") p.darcyCircleCx = parse_double(value, key);
+        else if (key == "darcyCircleCy") p.darcyCircleCy = parse_double(value, key);
+        else if (key == "darcyCircleR") p.darcyCircleR = parse_double(value, key);
+        else if (key == "darcyBoxXMin") p.darcyBoxXMin = parse_double(value, key);
+        else if (key == "darcyBoxXMax") p.darcyBoxXMax = parse_double(value, key);
+        else if (key == "darcyBoxYMin") p.darcyBoxYMin = parse_double(value, key);
+        else if (key == "darcyBoxYMax") p.darcyBoxYMax = parse_double(value, key);
+        else if (key == "darcyInterfaceWidth") p.darcyInterfaceWidth = parse_double(value, key);
+        else if (key == "darcyCostEvery") p.darcyCostEvery = parse_int(value, key);
+        else if (key == "darcyCostFilename") p.darcyCostFilename = value;
+        else if (key == "darcyThreadsPerBlock") p.darcyThreadsPerBlock = parse_int(value, key);
         else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
         else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
         else if (key == "resamplingRemapEnable") p.resamplingRemapEnable = parse_bool(value, key);
@@ -1098,6 +1117,48 @@ void validate_simulation_params(const SimulationParams& p) {
         if (p.resamplingPopulationMaxSplitsPerCell < 0 || p.resamplingPopulationMaxSplitsPerStep < 0 ||
             p.resamplingPopulationMaxExtractionsPerCell < 0 || p.resamplingPopulationMaxExtractionsPerStep < 0) {
             throw std::runtime_error("resampling population guard per-cell/per-step limits must be non-negative");
+        }
+    }
+    if (p.darcyBrinkmanEnable) {
+        if (!p.srcClassicCudaModeEnable) {
+            throw std::runtime_error("darcyBrinkmanEnable=true currently requires srcClassicCudaModeEnable=true on the topo CUDA-VIZ branch");
+        }
+        if (p.resamplingEnable) {
+            throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep resamplingEnable=false until chi-aware resampling is implemented");
+        }
+        if (p.projectionEnable) {
+            throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep projectionEnable=false until Q6/Darcy ordering is implemented");
+        }
+        if (!(p.darcyChiMode == "uniform" || p.darcyChiMode == "circle" || p.darcyChiMode == "cylinder" ||
+              p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
+            throw std::runtime_error("darcyChiMode supports: uniform, circle/cylinder, box/rectangle");
+        }
+        if (!(p.darcyUniformChi >= 0.0 && p.darcyUniformChi <= 1.0) || !std::isfinite(p.darcyUniformChi)) {
+            throw std::runtime_error("darcyUniformChi must lie in [0,1]");
+        }
+        if (!(p.darcyAlphaMin >= 0.0) || !(p.darcyAlphaMax >= p.darcyAlphaMin) ||
+            !std::isfinite(p.darcyAlphaMin) || !std::isfinite(p.darcyAlphaMax)) {
+            throw std::runtime_error("darcyAlphaMin/Max must be finite and satisfy 0 <= min <= max");
+        }
+        if (!(p.darcyQ > 0.0) || !std::isfinite(p.darcyQ)) {
+            throw std::runtime_error("darcyQ must be finite and positive");
+        }
+        if (!(p.darcyCircleR >= 0.0) || !std::isfinite(p.darcyCircleR)) {
+            throw std::runtime_error("darcyCircleR must be finite and non-negative");
+        }
+        if (!(p.darcyInterfaceWidth >= 0.0) || !std::isfinite(p.darcyInterfaceWidth)) {
+            throw std::runtime_error("darcyInterfaceWidth must be finite and non-negative");
+        }
+        if (p.darcyChiMode == "box" || p.darcyChiMode == "rectangle") {
+            if (!(p.darcyBoxXMax >= p.darcyBoxXMin && p.darcyBoxYMax >= p.darcyBoxYMin)) {
+                throw std::runtime_error("darcy box mode requires darcyBoxXMax>=darcyBoxXMin and darcyBoxYMax>=darcyBoxYMin");
+            }
+        }
+        if (p.darcyCostEvery < 0) {
+            throw std::runtime_error("darcyCostEvery must be non-negative");
+        }
+        if (p.darcyThreadsPerBlock <= 0) {
+            throw std::runtime_error("darcyThreadsPerBlock must be positive");
         }
     }
     if (p.summaryEvery <= 0) {
