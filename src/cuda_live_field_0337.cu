@@ -11,6 +11,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -28,6 +32,9 @@ struct LiveFieldWorkspace0337 {
     double* d_scalar = nullptr;
     double* d_tmp = nullptr;
     unsigned char* d_rgba = nullptr;
+    float* d_chi = nullptr;
+    float* d_alpha = nullptr;
+    std::string topoSignature;
 };
 
 LiveFieldWorkspace0337& workspace_0337() {
@@ -38,12 +45,13 @@ LiveFieldWorkspace0337& workspace_0337() {
 void free_workspace_0337(LiveFieldWorkspace0337& w) {
     cudaFree(w.d_mass); cudaFree(w.d_ux); cudaFree(w.d_uy);
     cudaFree(w.d_scalar); cudaFree(w.d_tmp); cudaFree(w.d_rgba);
+    cudaFree(w.d_chi); cudaFree(w.d_alpha);
     w = LiveFieldWorkspace0337{};
 }
 
 bool ensure_workspace_0337(LiveFieldWorkspace0337& w, int nx, int ny) {
     if (nx <= 0 || ny <= 0) return false;
-    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_ux && w.d_uy && w.d_scalar && w.d_tmp && w.d_rgba) return true;
+    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_ux && w.d_uy && w.d_scalar && w.d_tmp && w.d_rgba && w.d_chi && w.d_alpha) return true;
     free_workspace_0337(w);
     w.nx = nx; w.ny = ny;
     const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
@@ -54,6 +62,8 @@ bool ensure_workspace_0337(LiveFieldWorkspace0337& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_scalar, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_tmp, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_rgba, 4u * n * sizeof(unsigned char)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_chi, n * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_alpha, n * sizeof(float)) == cudaSuccess;
     if (!ok) { free_workspace_0337(w); return false; }
     return true;
 }
@@ -155,6 +165,70 @@ __global__ void vorticity_kernel_0337(const double* mass, const double* ux, cons
               - (ux_yp - ux_ym) / (static_cast<double>(yp - ym) * dy + 1e-300);
 }
 
+
+__device__ double alpha_live_0345(double chi, double alphaMin, double alphaMax, double q) {
+    const double qq = fmax(q, 1.0e-300);
+    return alphaMin + (alphaMax - alphaMin) * qq * (1.0 - chi) / (qq + chi);
+}
+
+__global__ void precompute_live_alpha_from_chi_kernel_0345(float* chiField, float* alphaField,
+                                                           int ncell, double alphaMin, double alphaMax, double q) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= ncell) return;
+    const double chi = fmin(1.0, fmax(0.0, static_cast<double>(chiField[c])));
+    chiField[c] = static_cast<float>(chi);
+    alphaField[c] = static_cast<float>(alpha_live_0345(chi, alphaMin, alphaMax, q));
+}
+
+std::string live_topo_signature_0345(const SimulationParams& p) {
+    std::ostringstream ss;
+    ss << std::setprecision(17) << p.Nx << '|' << p.Ny << '|'
+       << p.darcyChiMode << '|' << p.darcyChiFile << '|' << p.darcyChiNx << '|' << p.darcyChiNy << '|'
+       << p.darcyChiFileFormat << '|' << p.darcyAlphaMin << '|' << p.darcyAlphaMax << '|' << p.darcyQ;
+    return ss.str();
+}
+
+std::vector<float> load_live_chi_file_0345(const SimulationParams& p, std::size_t ncell) {
+    std::ifstream in(p.darcyChiFile, std::ios::binary);
+    if (!in) return {};
+    std::vector<float> chi(ncell, 1.0f);
+    const std::string fmt = p.darcyChiFileFormat;
+    if (fmt == "float64" || fmt == "f64" || fmt == "double") {
+        std::vector<double> tmp(ncell);
+        in.read(reinterpret_cast<char*>(tmp.data()), static_cast<std::streamsize>(tmp.size() * sizeof(double)));
+        if (in.gcount() != static_cast<std::streamsize>(tmp.size() * sizeof(double))) return {};
+        for (std::size_t i = 0; i < ncell; ++i) {
+            const double v = std::isfinite(tmp[i]) ? tmp[i] : 1.0;
+            chi[i] = static_cast<float>(std::min(1.0, std::max(0.0, v)));
+        }
+    } else {
+        in.read(reinterpret_cast<char*>(chi.data()), static_cast<std::streamsize>(chi.size() * sizeof(float)));
+        if (in.gcount() != static_cast<std::streamsize>(chi.size() * sizeof(float))) return {};
+        for (float& v : chi) {
+            const double d = std::isfinite(static_cast<double>(v)) ? static_cast<double>(v) : 1.0;
+            v = static_cast<float>(std::min(1.0, std::max(0.0, d)));
+        }
+    }
+    return chi;
+}
+
+bool ensure_live_topo_file_fields_0345(LiveFieldWorkspace0337& w, const SimulationParams& p, int threads) {
+    if (p.darcyChiMode != "file") return true;
+    const int ncell = p.Nx * p.Ny;
+    if (ncell <= 0 || !w.d_chi || !w.d_alpha) return false;
+    const std::string sig = live_topo_signature_0345(p);
+    if (w.topoSignature == sig) return true;
+    const auto chi = load_live_chi_file_0345(p, static_cast<std::size_t>(ncell));
+    if (chi.size() != static_cast<std::size_t>(ncell)) return false;
+    if (cudaMemcpy(w.d_chi, chi.data(), chi.size() * sizeof(float), cudaMemcpyHostToDevice) != cudaSuccess) return false;
+    const int blocks = (ncell + threads - 1) / threads;
+    precompute_live_alpha_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, ncell,
+                                                                   p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ);
+    if (cudaDeviceSynchronize() != cudaSuccess) return false;
+    w.topoSignature = sig;
+    return true;
+}
+
 __device__ double smoothstep_dev_0343_live(double t) {
     t = fmin(1.0, fmax(0.0, t));
     return t * t * (3.0 - 2.0 * t);
@@ -186,6 +260,8 @@ __device__ double alpha_live_0343(double chi, double alphaMin, double alphaMax, 
 __global__ void darcy_scalar_live_kernel_0343(const double* mass, const double* ux, const double* uy,
                                               double* scalar, int nx, int ny, double Lx, double Ly,
                                               int fieldCode, int chiMode, double uniformChi,
+                                              const float* fileChiField,
+                                              const float* fileAlphaField,
                                               double alphaMin, double alphaMax, double q,
                                               double uSolidX, double uSolidY,
                                               double circleCx, double circleCy, double circleR,
@@ -195,10 +271,12 @@ __global__ void darcy_scalar_live_kernel_0343(const double* mass, const double* 
     const int n = nx * ny;
     if (c >= n) return;
     const int ix = c % nx, iy = c / nx;
-    const double chi = chi_live_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
-                                     circleCx, circleCy, circleR,
-                                     boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
-    const double alpha = alpha_live_0343(chi, alphaMin, alphaMax, q);
+    const double chi = (chiMode == 3 && fileChiField) ? static_cast<double>(fileChiField[c])
+                      : chi_live_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
+                                      circleCx, circleCy, circleR,
+                                      boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
+    const double alpha = (chiMode == 3 && fileAlphaField) ? static_cast<double>(fileAlphaField[c])
+                        : alpha_live_0343(chi, alphaMin, alphaMax, q);
     if (fieldCode == 5) { scalar[c] = chi; return; }
     if (fieldCode == 6) { scalar[c] = alpha; return; }
     const double m = mass[c];
@@ -337,9 +415,11 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     if (fcode == 3) {
         vorticity_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, params.Lx, params.Ly);
     } else if (fcode == 5 || fcode == 6 || fcode == 7) {
+        if (!ensure_live_topo_file_fields_0345(w, params, threads)) { if (diag) *diag = local; return false; }
         darcy_scalar_live_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar,
                                                                nx, ny, params.Lx, params.Ly, fcode,
                                                                chi_mode_code_live_0343(params.darcyChiMode), params.darcyUniformChi,
+                                                               w.d_chi, w.d_alpha,
                                                                params.darcyAlphaMin, params.darcyAlphaMax, params.darcyQ,
                                                                params.darcyUSolidX, params.darcyUSolidY,
                                                                params.darcyCircleCx, params.darcyCircleCy, params.darcyCircleR,

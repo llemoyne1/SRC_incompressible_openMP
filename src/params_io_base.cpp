@@ -422,6 +422,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "darcyBrinkmanEnable" || key == "topoDarcyEnable") p.darcyBrinkmanEnable = parse_bool(value, key);
         else if (key == "darcyChiMode") p.darcyChiMode = lower(trim(value));
         else if (key == "darcyUniformChi") p.darcyUniformChi = parse_double(value, key);
+        else if (key == "darcyChiFile") p.darcyChiFile = value;
+        else if (key == "darcyChiNx") p.darcyChiNx = parse_int(value, key);
+        else if (key == "darcyChiNy") p.darcyChiNy = parse_int(value, key);
+        else if (key == "darcyChiFileFormat") p.darcyChiFileFormat = lower(trim(value));
         else if (key == "darcyAlphaMin") p.darcyAlphaMin = parse_double(value, key);
         else if (key == "darcyAlphaMax") p.darcyAlphaMax = parse_double(value, key);
         else if (key == "darcyQ") p.darcyQ = parse_double(value, key);
@@ -1130,11 +1134,24 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep projectionEnable=false until Q6/Darcy ordering is implemented");
         }
         if (!(p.darcyChiMode == "uniform" || p.darcyChiMode == "circle" || p.darcyChiMode == "cylinder" ||
-              p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
-            throw std::runtime_error("darcyChiMode supports: uniform, circle/cylinder, box/rectangle");
+              p.darcyChiMode == "box" || p.darcyChiMode == "rectangle" || p.darcyChiMode == "file")) {
+            throw std::runtime_error("darcyChiMode supports: uniform, circle/cylinder, box/rectangle, file");
         }
         if (!(p.darcyUniformChi >= 0.0 && p.darcyUniformChi <= 1.0) || !std::isfinite(p.darcyUniformChi)) {
             throw std::runtime_error("darcyUniformChi must lie in [0,1]");
+        }
+        if (p.darcyChiMode == "file") {
+            if (p.darcyChiFile.empty()) {
+                throw std::runtime_error("darcyChiMode=file requires darcyChiFile");
+            }
+            if (p.darcyChiNx != p.Nx || p.darcyChiNy != p.Ny) {
+                throw std::runtime_error("darcyChiMode=file requires darcyChiNx=Nx and darcyChiNy=Ny in patch 0345");
+            }
+            if (!(p.darcyChiFileFormat == "float32" || p.darcyChiFileFormat == "f32" ||
+                  p.darcyChiFileFormat == "float64" || p.darcyChiFileFormat == "f64" ||
+                  p.darcyChiFileFormat == "double")) {
+                throw std::runtime_error("darcyChiFileFormat supports: float32/f32 or float64/f64/double");
+            }
         }
         if (!(p.darcyAlphaMin >= 0.0) || !(p.darcyAlphaMax >= p.darcyAlphaMin) ||
             !std::isfinite(p.darcyAlphaMin) || !std::isfinite(p.darcyAlphaMax)) {

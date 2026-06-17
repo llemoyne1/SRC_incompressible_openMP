@@ -32,6 +32,8 @@ THREADS="${THREADS:-12}"
 # Darcy/topology defaults: chi=1 fluid, chi=0 solid/porous.
 DARCY_ENABLE="${DARCY_ENABLE:-1}"
 DARCY_CHI_MODE="${DARCY_CHI_MODE:-circle}"
+DARCY_CHI_FILE="${DARCY_CHI_FILE:-}"
+DARCY_CHI_FILE_FORMAT="${DARCY_CHI_FILE_FORMAT:-float32}"
 DARCY_ALPHA_MIN="${DARCY_ALPHA_MIN:-0.0}"
 DARCY_ALPHA_MAX="${DARCY_ALPHA_MAX:-80.0}"
 DARCY_Q="${DARCY_Q:-0.1}"
@@ -173,6 +175,19 @@ summaryRoleFilter = fluid
 dumpRoleFilter = fluid
 numThreads = ${THREADS}
 PARAMS
+  if [[ "${DARCY_CHI_MODE}" == "file" ]]; then
+    if [[ -z "${DARCY_CHI_FILE}" ]]; then
+      echo "[0345-topo] ERROR: DARCY_CHI_MODE=file requires DARCY_CHI_FILE" >&2
+      exit 2
+    fi
+    cat >> "$params" <<PARAMS
+
+darcyChiFile = ${DARCY_CHI_FILE}
+darcyChiNx = ${NX}
+darcyChiNy = ${NY}
+darcyChiFileFormat = ${DARCY_CHI_FILE_FORMAT}
+PARAMS
+  fi
 }
 
 cuda_env_0343() {

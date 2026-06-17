@@ -14,7 +14,9 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace mpcd {
 
@@ -30,6 +32,10 @@ struct DarcyWorkspace0343 {
     double* d_mx = nullptr;
     double* d_my = nullptr;
     double* d_sums = nullptr; // 8 doubles
+    float* d_chi = nullptr;
+    float* d_alpha = nullptr;
+    float* d_lambda = nullptr;
+    std::string fieldSignature;
 };
 
 DarcyWorkspace0343& workspace_0343() {
@@ -42,6 +48,9 @@ void free_workspace_0343(DarcyWorkspace0343& w) {
     cudaFree(w.d_mx);
     cudaFree(w.d_my);
     cudaFree(w.d_sums);
+    cudaFree(w.d_chi);
+    cudaFree(w.d_alpha);
+    cudaFree(w.d_lambda);
     w = DarcyWorkspace0343{};
 }
 
@@ -53,7 +62,7 @@ void check_cuda_0343(cudaError_t err, const char* what) {
 
 bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     if (nx <= 0 || ny <= 0) return false;
-    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_mx && w.d_my && w.d_sums) return true;
+    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_mx && w.d_my && w.d_sums && w.d_chi && w.d_alpha && w.d_lambda) return true;
     free_workspace_0343(w);
     w.nx = nx;
     w.ny = ny;
@@ -63,6 +72,9 @@ bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_mx, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_my, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_sums, 8u * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_chi, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_alpha, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_lambda, ncell * sizeof(float)) == cudaSuccess;
     if (!ok) {
         free_workspace_0343(w);
         return false;
@@ -85,6 +97,7 @@ int chi_mode_code_0343(const std::string& mode) {
     if (mode == "uniform") return 0;
     if (mode == "circle" || mode == "cylinder") return 1;
     if (mode == "box" || mode == "rectangle") return 2;
+    if (mode == "file") return 3;
     return -1;
 }
 
@@ -132,6 +145,142 @@ __device__ double alpha_from_chi_dev_0343(double chi, double alphaMin, double al
     return alphaMin + (alphaMax - alphaMin) * frac;
 }
 
+
+__global__ void precompute_darcy_fields_kernel_0345(float* chiField,
+                                                    float* alphaField,
+                                                    float* lambdaField,
+                                                    int nx, int ny,
+                                                    double Lx, double Ly,
+                                                    int chiMode,
+                                                    double uniformChi,
+                                                    double alphaMin,
+                                                    double alphaMax,
+                                                    double q,
+                                                    double dt,
+                                                    double circleCx,
+                                                    double circleCy,
+                                                    double circleR,
+                                                    double boxXMin,
+                                                    double boxXMax,
+                                                    double boxYMin,
+                                                    double boxYMax,
+                                                    double interfaceWidth) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    const int ncell = nx * ny;
+    if (c >= ncell) return;
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const double chi = chi_at_cell_dev_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
+                                            circleCx, circleCy, circleR,
+                                            boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
+    const double alpha = alpha_from_chi_dev_0343(chi, alphaMin, alphaMax, q);
+    const double lambda = 1.0 - exp(-fmax(0.0, alpha) * fmax(0.0, dt));
+    chiField[c] = static_cast<float>(chi);
+    alphaField[c] = static_cast<float>(alpha);
+    lambdaField[c] = static_cast<float>(lambda);
+}
+
+__global__ void precompute_alpha_lambda_from_chi_kernel_0345(float* chiField,
+                                                             float* alphaField,
+                                                             float* lambdaField,
+                                                             int ncell,
+                                                             double alphaMin,
+                                                             double alphaMax,
+                                                             double q,
+                                                             double dt) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= ncell) return;
+    const double chi = fmin(1.0, fmax(0.0, static_cast<double>(chiField[c])));
+    const double alpha = alpha_from_chi_dev_0343(chi, alphaMin, alphaMax, q);
+    const double lambda = 1.0 - exp(-fmax(0.0, alpha) * fmax(0.0, dt));
+    chiField[c] = static_cast<float>(chi);
+    alphaField[c] = static_cast<float>(alpha);
+    lambdaField[c] = static_cast<float>(lambda);
+}
+
+std::string darcy_field_signature_0345(const SimulationParams& p) {
+    std::ostringstream ss;
+    ss << std::setprecision(17)
+       << p.Nx << '|' << p.Ny << '|' << p.Lx << '|' << p.Ly << '|'
+       << p.darcyChiMode << '|' << p.darcyUniformChi << '|'
+       << p.darcyChiFile << '|' << p.darcyChiNx << '|' << p.darcyChiNy << '|' << p.darcyChiFileFormat << '|'
+       << p.darcyAlphaMin << '|' << p.darcyAlphaMax << '|' << p.darcyQ << '|' << p.dt << '|'
+       << p.darcyCircleCx << '|' << p.darcyCircleCy << '|' << p.darcyCircleR << '|'
+       << p.darcyBoxXMin << '|' << p.darcyBoxXMax << '|' << p.darcyBoxYMin << '|' << p.darcyBoxYMax << '|'
+       << p.darcyInterfaceWidth;
+    return ss.str();
+}
+
+std::vector<float> load_chi_file_host_0345(const SimulationParams& p, std::size_t ncell) {
+    if (p.darcyChiFile.empty()) {
+        throw std::runtime_error("cuda_darcy_brinkman_0345: darcyChiMode=file requires darcyChiFile");
+    }
+    std::ifstream in(p.darcyChiFile, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("cuda_darcy_brinkman_0345: cannot open darcyChiFile=" + p.darcyChiFile);
+    }
+    std::vector<float> chi(ncell, 1.0f);
+    const std::string fmt = p.darcyChiFileFormat;
+    if (fmt == "float64" || fmt == "f64" || fmt == "double") {
+        std::vector<double> tmp(ncell);
+        in.read(reinterpret_cast<char*>(tmp.data()), static_cast<std::streamsize>(tmp.size() * sizeof(double)));
+        if (in.gcount() != static_cast<std::streamsize>(tmp.size() * sizeof(double))) {
+            throw std::runtime_error("cuda_darcy_brinkman_0345: darcyChiFile float64 size mismatch");
+        }
+        char extra = 0;
+        if (in.read(&extra, 1)) {
+            throw std::runtime_error("cuda_darcy_brinkman_0345: darcyChiFile has trailing bytes");
+        }
+        for (std::size_t i = 0; i < ncell; ++i) {
+            const double v = std::isfinite(tmp[i]) ? tmp[i] : 1.0;
+            chi[i] = static_cast<float>(std::min(1.0, std::max(0.0, v)));
+        }
+    } else {
+        in.read(reinterpret_cast<char*>(chi.data()), static_cast<std::streamsize>(chi.size() * sizeof(float)));
+        if (in.gcount() != static_cast<std::streamsize>(chi.size() * sizeof(float))) {
+            throw std::runtime_error("cuda_darcy_brinkman_0345: darcyChiFile float32 size mismatch");
+        }
+        char extra = 0;
+        if (in.read(&extra, 1)) {
+            throw std::runtime_error("cuda_darcy_brinkman_0345: darcyChiFile has trailing bytes");
+        }
+        for (float& v : chi) {
+            const double d = std::isfinite(static_cast<double>(v)) ? static_cast<double>(v) : 1.0;
+            v = static_cast<float>(std::min(1.0, std::max(0.0, d)));
+        }
+    }
+    return chi;
+}
+
+bool ensure_darcy_fields_0345(DarcyWorkspace0343& w, const SimulationParams& p, int threads) {
+    const int nx = p.Nx;
+    const int ny = p.Ny;
+    const int ncell = nx * ny;
+    if (nx <= 0 || ny <= 0 || ncell <= 0) return false;
+    const std::string sig = darcy_field_signature_0345(p);
+    if (w.fieldSignature == sig && w.d_chi && w.d_alpha && w.d_lambda) return true;
+    const int blocks = (ncell + threads - 1) / threads;
+    const int chiMode = chi_mode_code_0343(p.darcyChiMode);
+    if (chiMode == 3) {
+        const auto chi = load_chi_file_host_0345(p, static_cast<std::size_t>(ncell));
+        check_cuda_0343(cudaMemcpy(w.d_chi, chi.data(), chi.size() * sizeof(float), cudaMemcpyHostToDevice), "upload chi file");
+        precompute_alpha_lambda_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda, ncell,
+                                                                         p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt);
+    } else {
+        precompute_darcy_fields_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda,
+                                                                 nx, ny, p.Lx, p.Ly,
+                                                                 chiMode, p.darcyUniformChi,
+                                                                 p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt,
+                                                                 p.darcyCircleCx, p.darcyCircleCy, p.darcyCircleR,
+                                                                 p.darcyBoxXMin, p.darcyBoxXMax,
+                                                                 p.darcyBoxYMin, p.darcyBoxYMax,
+                                                                 p.darcyInterfaceWidth);
+    }
+    check_cuda_0343(cudaDeviceSynchronize(), "precompute darcy chi/alpha/lambda");
+    w.fieldSignature = sig;
+    return true;
+}
+
 __global__ void reset_darcy_cells_kernel_0343(double* mass, double* mx, double* my, double* sums, int ncell) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < ncell) {
@@ -175,31 +324,15 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
                                                     const double* myGrid,
                                                     double* sums,
                                                     int nx, int ny,
-                                                    double Lx, double Ly,
-                                                    int chiMode,
-                                                    double uniformChi,
-                                                    double alphaMin,
-                                                    double alphaMax,
-                                                    double q,
+                                                    const float* chiField,
+                                                    const float* alphaField,
                                                     double uSolidX,
-                                                    double uSolidY,
-                                                    double circleCx,
-                                                    double circleCy,
-                                                    double circleR,
-                                                    double boxXMin,
-                                                    double boxXMax,
-                                                    double boxYMin,
-                                                    double boxYMax,
-                                                    double interfaceWidth) {
+                                                    double uSolidY) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     const int ncell = nx * ny;
     if (c >= ncell) return;
-    const int ix = c % nx;
-    const int iy = c / nx;
-    const double chi = chi_at_cell_dev_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
-                                            circleCx, circleCy, circleR,
-                                            boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
-    const double alpha = alpha_from_chi_dev_0343(chi, alphaMin, alphaMax, q);
+    const double chi = chiField ? static_cast<double>(chiField[c]) : 1.0;
+    const double alpha = alphaField ? static_cast<double>(alphaField[c]) : 0.0;
     const double m = massGrid[c];
     double rel2 = 0.0;
     if (m > 0.0) {
@@ -225,22 +358,9 @@ __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
                                              const double* myGrid,
                                              int nx, int ny,
                                              double Lx, double Ly,
-                                             int chiMode,
-                                             double uniformChi,
-                                             double alphaMin,
-                                             double alphaMax,
-                                             double q,
+                                             const float* lambdaField,
                                              double uSolidX,
                                              double uSolidY,
-                                             double dt,
-                                             double circleCx,
-                                             double circleCy,
-                                             double circleR,
-                                             double boxXMin,
-                                             double boxXMax,
-                                             double boxYMin,
-                                             double boxYMax,
-                                             double interfaceWidth,
                                              unsigned char fluidRole) {
     const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= pv.n) return;
@@ -261,11 +381,7 @@ __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
     if (!(m > 0.0)) return;
     const double ux = mxGrid[c] / m;
     const double uy = myGrid[c] / m;
-    const double chi = chi_at_cell_dev_0343(ix, iy, nx, ny, Lx, Ly, chiMode, uniformChi,
-                                            circleCx, circleCy, circleR,
-                                            boxXMin, boxXMax, boxYMin, boxYMax, interfaceWidth);
-    const double alpha = alpha_from_chi_dev_0343(chi, alphaMin, alphaMax, q);
-    const double lambda = 1.0 - exp(-fmax(0.0, alpha) * fmax(0.0, dt));
+    const double lambda = lambdaField ? static_cast<double>(lambdaField[c]) : 0.0;
     const double dvx = -lambda * (ux - uSolidX);
     const double dvy = -lambda * (uy - uSolidY);
     pv.vx[i] += dvx;
@@ -343,6 +459,7 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     auto& w = workspace_0343();
     if (!ensure_workspace_0343(w, nx, ny)) return d;
     const int threads = std::max(32, params.darcyThreadsPerBlock);
+    if (!ensure_darcy_fields_0345(w, params, threads)) return d;
     const int cellBlocks = (ncell + threads - 1) / threads;
     const int particleBlocks = static_cast<int>((pv.n + static_cast<unsigned>(threads) - 1u) / static_cast<unsigned>(threads));
     const auto total0 = Clock0343::now();
@@ -361,14 +478,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
 
     t0 = Clock0343::now();
     diagnostics_darcy_cells_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_mx, w.d_my, w.d_sums,
-                                                                 nx, ny, params.Lx, params.Ly,
-                                                                 chiMode, params.darcyUniformChi,
-                                                                 params.darcyAlphaMin, params.darcyAlphaMax, params.darcyQ,
-                                                                 params.darcyUSolidX, params.darcyUSolidY,
-                                                                 params.darcyCircleCx, params.darcyCircleCy, params.darcyCircleR,
-                                                                 params.darcyBoxXMin, params.darcyBoxXMax,
-                                                                 params.darcyBoxYMin, params.darcyBoxYMax,
-                                                                 params.darcyInterfaceWidth);
+                                                                 nx, ny, w.d_chi, w.d_alpha,
+                                                                 params.darcyUSolidX, params.darcyUSolidY);
     check_cuda_0343(cudaDeviceSynchronize(), "diagnostics cells");
     double hSums[8]{};
     check_cuda_0343(cudaMemcpy(hSums, w.d_sums, sizeof(hSums), cudaMemcpyDeviceToHost), "copy diagnostics sums");
@@ -377,13 +488,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     t0 = Clock0343::now();
     apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
                                                               nx, ny, params.Lx, params.Ly,
-                                                              chiMode, params.darcyUniformChi,
-                                                              params.darcyAlphaMin, params.darcyAlphaMax, params.darcyQ,
-                                                              params.darcyUSolidX, params.darcyUSolidY, params.dt,
-                                                              params.darcyCircleCx, params.darcyCircleCy, params.darcyCircleR,
-                                                              params.darcyBoxXMin, params.darcyBoxXMax,
-                                                              params.darcyBoxYMin, params.darcyBoxYMax,
-                                                              params.darcyInterfaceWidth,
+                                                              w.d_lambda,
+                                                              params.darcyUSolidX, params.darcyUSolidY,
                                                               static_cast<unsigned char>(kParticleRoleFluid));
     check_cuda_0343(cudaDeviceSynchronize(), "apply kick");
     d.applySeconds = seconds_since_0343(t0);

@@ -397,8 +397,12 @@ struct SimulationParams {
     // This first topo branch intentionally keeps full Brinkman population and
     // does not couple to chi-aware resampling or Q6 CUDA yet.
     bool darcyBrinkmanEnable = false;
-    std::string darcyChiMode = "uniform"; // uniform, circle/cylinder, box/rectangle
+    std::string darcyChiMode = "uniform"; // uniform, circle/cylinder, box/rectangle, file
     double darcyUniformChi = 1.0;
+    std::string darcyChiFile;
+    int darcyChiNx = 0;
+    int darcyChiNy = 0;
+    std::string darcyChiFileFormat = "float32"; // float32 or float64, row-major iy*Nx+ix
     double darcyAlphaMin = 0.0;
     double darcyAlphaMax = 0.0;
     double darcyQ = 0.1;
