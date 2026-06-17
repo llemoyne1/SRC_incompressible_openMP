@@ -68,7 +68,8 @@ LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-thermal}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
 LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
-LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$RUN_ROOT/livevis_control.kv}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-livevis_control.kv}"
+LIVE_VIS_CONTROL_RESET="${LIVE_VIS_CONTROL_RESET:-0}"
 
 build_if_needed_0343() {
   if [[ -x "$BIN" && "$FORCE_REBUILD" != "1" && "$FORCE_REBUILD" != "true" && "$FORCE_REBUILD" != "TRUE" ]]; then
@@ -227,9 +228,16 @@ STATE="$RUN_ROOT/init/topo_darcy_0343_${NX}x${NY}_g${GAMMA}.smpcd"
 PARAMS="$RUN_ROOT/params/topo_darcy_0343.kv"
 generate_state_0343 "$STATE"
 write_params_0343 "$PARAMS" "$STATE" "$RUN_ROOT/output"
-mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE")"
-cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
-# 0343 live visualization runtime controls. Edit while running.
+control_dir="$(dirname "$LIVE_VIS_CONTROL_FILE")"
+if [[ "$control_dir" != "." ]]; then
+  mkdir -p "$control_dir"
+fi
+if [[ ! -f "$LIVE_VIS_CONTROL_FILE" || "$LIVE_VIS_CONTROL_RESET" == "1" || "$LIVE_VIS_CONTROL_RESET" == "true" || "$LIVE_VIS_CONTROL_RESET" == "TRUE" ]]; then
+  cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
+# 0344/topo persistent live visualization controls.
+# Default location is repository root: livevis_control.kv.
+# Edit this file while running; the runner no longer overwrites it unless
+# LIVE_VIS_CONTROL_RESET=1 or the file does not exist.
 # Supported topo fields: chi, alpha, darcy_power, ux, uy, speed, vorticity, mass.
 field = ${LIVE_VIS_FIELD}
 clip = ${LIVE_VIS_CLIP}
@@ -237,6 +245,10 @@ gain = ${LIVE_VIS_GAIN}
 smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
 colormap = ${LIVE_VIS_COLORMAP}
 CONTROL
+  echo "[0344-topo] wrote live control=$LIVE_VIS_CONTROL_FILE"
+else
+  echo "[0344-topo] reusing live control=$LIVE_VIS_CONTROL_FILE"
+fi
 cuda_env_0343
 env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|OMP_)' | sort > "$RUN_ROOT/logs/environment_0343.env"
 
