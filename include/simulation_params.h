@@ -420,6 +420,19 @@ struct SimulationParams {
     std::string darcyCostFilename = "darcy_cost_0343.csv";
     int darcyThreadsPerBlock = 256;
 
+    // 0348/topo: optional benchmark observables.  These are disabled by
+    // default to preserve the CUDA resident path.  The 0348a implementation is
+    // cell-based only: no extra particle pass and no section/profile binning.
+    bool topoBenchmarkEnable = false;
+    int topoBenchmarkEvery = 0; // <=0: use darcyCostEvery
+    std::string topoBenchmarkFilename = "topo_benchmark_0348.csv";
+    bool topoBenchmarkForceEnable = true;
+    bool topoBenchmarkDragLiftEnable = true;
+    double topoBenchmarkFlowDirX = 1.0;
+    double topoBenchmarkFlowDirY = 0.0;
+    double topoBenchmarkLiftDirX = 0.0;
+    double topoBenchmarkLiftDirY = 1.0;
+
     int summaryEvery = 10;
     int dumpStateEvery = 0;
 

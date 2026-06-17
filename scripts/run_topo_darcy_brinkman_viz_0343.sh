@@ -45,6 +45,19 @@ DARCY_R="${DARCY_R:-0.055}"
 DARCY_INTERFACE_WIDTH="${DARCY_INTERFACE_WIDTH:-0.01}"
 DARCY_COST_EVERY="${DARCY_COST_EVERY:-20}"
 
+# 0348a/topo benchmark observables: disabled by default to preserve the
+# historical CUDA-VIZ path.  When enabled, the first implementation only adds
+# cell-based Darcy force/drag/lift reductions at topoBenchmarkEvery cadence.
+TOPO_BENCHMARK_ENABLE="${TOPO_BENCHMARK_ENABLE:-0}"
+TOPO_BENCHMARK_EVERY="${TOPO_BENCHMARK_EVERY:-$DARCY_COST_EVERY}"
+TOPO_BENCHMARK_FILENAME="${TOPO_BENCHMARK_FILENAME:-topo_benchmark_0348.csv}"
+TOPO_BENCHMARK_FORCE_ENABLE="${TOPO_BENCHMARK_FORCE_ENABLE:-1}"
+TOPO_BENCHMARK_DRAG_LIFT_ENABLE="${TOPO_BENCHMARK_DRAG_LIFT_ENABLE:-1}"
+TOPO_BENCHMARK_FLOW_DIR_X="${TOPO_BENCHMARK_FLOW_DIR_X:-1.0}"
+TOPO_BENCHMARK_FLOW_DIR_Y="${TOPO_BENCHMARK_FLOW_DIR_Y:-0.0}"
+TOPO_BENCHMARK_LIFT_DIR_X="${TOPO_BENCHMARK_LIFT_DIR_X:-0.0}"
+TOPO_BENCHMARK_LIFT_DIR_Y="${TOPO_BENCHMARK_LIFT_DIR_Y:-1.0}"
+
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
 export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
 export OMP_PLACES="${OMP_PLACES:-cores}"
@@ -169,6 +182,16 @@ darcyInterfaceWidth = ${DARCY_INTERFACE_WIDTH}
 darcyCostEvery = ${DARCY_COST_EVERY}
 darcyCostFilename = darcy_cost_0343.csv
 
+topoBenchmarkEnable = $(if bool_true_0343 "$TOPO_BENCHMARK_ENABLE"; then echo true; else echo false; fi)
+topoBenchmarkEvery = ${TOPO_BENCHMARK_EVERY}
+topoBenchmarkFilename = ${TOPO_BENCHMARK_FILENAME}
+topoBenchmarkForceEnable = $(if bool_true_0343 "$TOPO_BENCHMARK_FORCE_ENABLE"; then echo true; else echo false; fi)
+topoBenchmarkDragLiftEnable = $(if bool_true_0343 "$TOPO_BENCHMARK_DRAG_LIFT_ENABLE"; then echo true; else echo false; fi)
+topoBenchmarkFlowDirX = ${TOPO_BENCHMARK_FLOW_DIR_X}
+topoBenchmarkFlowDirY = ${TOPO_BENCHMARK_FLOW_DIR_Y}
+topoBenchmarkLiftDirX = ${TOPO_BENCHMARK_LIFT_DIR_X}
+topoBenchmarkLiftDirY = ${TOPO_BENCHMARK_LIFT_DIR_Y}
+
 summaryEvery = ${DARCY_COST_EVERY}
 dumpStateEvery = 0
 summaryRoleFilter = fluid
@@ -272,3 +295,4 @@ echo "[0343-topo] params=$PARAMS"
 echo "[0343-topo] run_root=$RUN_ROOT"
 echo "[0343-topo] live control=$LIVE_VIS_CONTROL_FILE"
 "$BIN" "$PARAMS" 2>&1 | tee "$RUN_ROOT/logs/run_0343.log"
+

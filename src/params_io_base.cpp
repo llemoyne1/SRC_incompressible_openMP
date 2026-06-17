@@ -442,6 +442,15 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "darcyCostEvery") p.darcyCostEvery = parse_int(value, key);
         else if (key == "darcyCostFilename") p.darcyCostFilename = value;
         else if (key == "darcyThreadsPerBlock") p.darcyThreadsPerBlock = parse_int(value, key);
+        else if (key == "topoBenchmarkEnable") p.topoBenchmarkEnable = parse_bool(value, key);
+        else if (key == "topoBenchmarkEvery") p.topoBenchmarkEvery = parse_int(value, key);
+        else if (key == "topoBenchmarkFilename") p.topoBenchmarkFilename = value;
+        else if (key == "topoBenchmarkForceEnable") p.topoBenchmarkForceEnable = parse_bool(value, key);
+        else if (key == "topoBenchmarkDragLiftEnable") p.topoBenchmarkDragLiftEnable = parse_bool(value, key);
+        else if (key == "topoBenchmarkFlowDirX") p.topoBenchmarkFlowDirX = parse_double(value, key);
+        else if (key == "topoBenchmarkFlowDirY") p.topoBenchmarkFlowDirY = parse_double(value, key);
+        else if (key == "topoBenchmarkLiftDirX") p.topoBenchmarkLiftDirX = parse_double(value, key);
+        else if (key == "topoBenchmarkLiftDirY") p.topoBenchmarkLiftDirY = parse_double(value, key);
         else if (key == "resamplingExtractionEnable") p.resamplingExtractionEnable = parse_bool(value, key);
         else if (key == "resamplingInsertionEnable") p.resamplingInsertionEnable = parse_bool(value, key);
         else if (key == "resamplingRemapEnable") p.resamplingRemapEnable = parse_bool(value, key);
@@ -1176,6 +1185,17 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (p.darcyThreadsPerBlock <= 0) {
             throw std::runtime_error("darcyThreadsPerBlock must be positive");
+        }
+        if (p.topoBenchmarkEvery < 0) {
+            throw std::runtime_error("topoBenchmarkEvery must be non-negative");
+        }
+        if (!std::isfinite(p.topoBenchmarkFlowDirX) || !std::isfinite(p.topoBenchmarkFlowDirY) ||
+            std::hypot(p.topoBenchmarkFlowDirX, p.topoBenchmarkFlowDirY) <= 0.0) {
+            throw std::runtime_error("topoBenchmark flow direction must be finite and non-zero");
+        }
+        if (!std::isfinite(p.topoBenchmarkLiftDirX) || !std::isfinite(p.topoBenchmarkLiftDirY) ||
+            std::hypot(p.topoBenchmarkLiftDirX, p.topoBenchmarkLiftDirY) <= 0.0) {
+            throw std::runtime_error("topoBenchmark lift direction must be finite and non-zero");
         }
     }
     if (p.summaryEvery <= 0) {

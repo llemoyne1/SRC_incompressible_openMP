@@ -31,7 +31,7 @@ struct DarcyWorkspace0343 {
     double* d_mass = nullptr;
     double* d_mx = nullptr;
     double* d_my = nullptr;
-    double* d_sums = nullptr; // 8 doubles
+    double* d_sums = nullptr; // 10 doubles: legacy 0..7 plus force 8..9
     float* d_chi = nullptr;
     float* d_alpha = nullptr;
     float* d_lambda = nullptr;
@@ -71,7 +71,7 @@ bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_mass, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_mx, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_my, ncell * sizeof(double)) == cudaSuccess;
-    ok = ok && cudaMalloc(&w.d_sums, 8u * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_sums, 10u * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_chi, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_alpha, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_lambda, ncell * sizeof(float)) == cudaSuccess;
@@ -288,7 +288,7 @@ __global__ void reset_darcy_cells_kernel_0343(double* mass, double* mx, double* 
         mx[i] = 0.0;
         my[i] = 0.0;
     }
-    if (i < 8) sums[i] = 0.0;
+    if (i < 10) sums[i] = 0.0;
 }
 
 __global__ void deposit_darcy_moments_kernel_0343(CudaParticleDeviceView pv,
@@ -327,7 +327,8 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
                                                     const float* chiField,
                                                     const float* alphaField,
                                                     double uSolidX,
-                                                    double uSolidY) {
+                                                    double uSolidY,
+                                                    int forceEnable) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     const int ncell = nx * ny;
     if (c >= ncell) return;
@@ -347,6 +348,13 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
         atomicAdd(&sums[3], m * alpha * rel2);
         atomicAdd(&sums[4], m * rel2);
         atomicAdd(&sums[5], m * (1.0 - chi) * (1.0 - chi) * rel2);
+        if (forceEnable) {
+            // Reaction proxy of the penalized material on the flow/geometry:
+            // the Brinkman term on fluid is -m*alpha*(u-us); the opposite sign
+            // is the integrated load proxy on the obstacle/material.
+            atomicAdd(&sums[8], m * alpha * rx);
+            atomicAdd(&sums[9], m * alpha * ry);
+        }
     }
     atomicAdd(&sums[6], chi);
     atomicAdd(&sums[7], alpha);
@@ -395,6 +403,49 @@ std::string darcy_csv_path_0343(const SimulationParams& params) {
     }
     return (std::filesystem::path(params.outputDir) / filename).string();
 }
+
+std::string topo_benchmark_csv_path_0348(const SimulationParams& params) {
+    const std::string filename = params.topoBenchmarkFilename.empty() ? std::string("topo_benchmark_0348.csv") : params.topoBenchmarkFilename;
+    if (filename.find('/') != std::string::npos || filename.find('\\') != std::string::npos) {
+        return filename;
+    }
+    return (std::filesystem::path(params.outputDir) / filename).string();
+}
+
+bool topo_benchmark_write_step_0348(const SimulationParams& params, std::uint64_t step) {
+    if (!params.topoBenchmarkEnable) return false;
+    int every = params.topoBenchmarkEvery > 0 ? params.topoBenchmarkEvery : params.darcyCostEvery;
+    if (every <= 0) return false;
+    return (step % static_cast<std::uint64_t>(every) == 0u) ||
+           (step == static_cast<std::uint64_t>(std::max(0, params.nSteps)));
+}
+
+void append_topo_benchmark_csv_0348(const SimulationParams& params,
+                                    std::uint64_t step,
+                                    double time,
+                                    const CudaDarcyBrinkman0343Diagnostics& d) {
+    if (!topo_benchmark_write_step_0348(params, step)) return;
+    const std::string path = topo_benchmark_csv_path_0348(params);
+    const std::filesystem::path p(path);
+    if (!p.parent_path().empty()) {
+        std::filesystem::create_directories(p.parent_path());
+    }
+    const bool writeHeader = !std::filesystem::exists(p) || std::filesystem::file_size(p) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) return;
+    out << std::setprecision(17);
+    if (writeHeader) {
+        out << "step,time,particles,activeFluid,numCells,mass,meanChi,meanAlpha,darcyPower,darcyPowerPerMass,meanSpeedRms,solidLeakRms,darcyForceX,darcyForceY,dragProxy,liftProxy,flowDirX,flowDirY,liftDirX,liftDirY,alphaMin,alphaMax,q,chiMode\n";
+    }
+    out << step << ',' << time << ',' << d.particles << ',' << d.activeFluid << ',' << d.numCells << ','
+        << d.mass << ',' << d.meanChi << ',' << d.meanAlpha << ','
+        << d.darcyPower << ',' << d.darcyPowerPerMass << ',' << d.meanSpeedRms << ',' << d.solidLeakRms << ','
+        << d.darcyForceX << ',' << d.darcyForceY << ',' << d.dragProxy << ',' << d.liftProxy << ','
+        << params.topoBenchmarkFlowDirX << ',' << params.topoBenchmarkFlowDirY << ','
+        << params.topoBenchmarkLiftDirX << ',' << params.topoBenchmarkLiftDirY << ','
+        << params.darcyAlphaMin << ',' << params.darcyAlphaMax << ',' << params.darcyQ << ',' << params.darcyChiMode << '\n';
+}
+
 
 void append_darcy_csv_0343(const SimulationParams& params,
                            std::uint64_t step,
@@ -476,12 +527,16 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     check_cuda_0343(cudaDeviceSynchronize(), "deposit moments");
     d.depositSeconds = seconds_since_0343(t0);
 
+    const bool topoBenchThisStep = topo_benchmark_write_step_0348(params, step);
+    const bool topoBenchForceThisStep = topoBenchThisStep && params.topoBenchmarkForceEnable;
+
     t0 = Clock0343::now();
     diagnostics_darcy_cells_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_mx, w.d_my, w.d_sums,
                                                                  nx, ny, w.d_chi, w.d_alpha,
-                                                                 params.darcyUSolidX, params.darcyUSolidY);
+                                                                 params.darcyUSolidX, params.darcyUSolidY,
+                                                                 topoBenchForceThisStep ? 1 : 0);
     check_cuda_0343(cudaDeviceSynchronize(), "diagnostics cells");
-    double hSums[8]{};
+    double hSums[10]{};
     check_cuda_0343(cudaMemcpy(hSums, w.d_sums, sizeof(hSums), cudaMemcpyDeviceToHost), "copy diagnostics sums");
     d.diagnosticsSeconds = seconds_since_0343(t0);
 
@@ -503,11 +558,26 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.meanSpeedRms = hSums[0] > 0.0 ? std::sqrt(std::max(0.0, hSums[4] / hSums[0])) : 0.0;
     d.solidLeakRms = hSums[0] > 0.0 ? std::sqrt(std::max(0.0, hSums[5] / hSums[0])) : 0.0;
     d.meanChi = ncell > 0 ? hSums[6] / static_cast<double>(ncell) : 0.0;
+    if (topoBenchForceThisStep) {
+        d.darcyForceX = hSums[8];
+        d.darcyForceY = hSums[9];
+        if (params.topoBenchmarkDragLiftEnable) {
+            const double dn = std::hypot(params.topoBenchmarkFlowDirX, params.topoBenchmarkFlowDirY);
+            const double ln = std::hypot(params.topoBenchmarkLiftDirX, params.topoBenchmarkLiftDirY);
+            const double dx = dn > 0.0 ? params.topoBenchmarkFlowDirX / dn : 1.0;
+            const double dy = dn > 0.0 ? params.topoBenchmarkFlowDirY / dn : 0.0;
+            const double lx = ln > 0.0 ? params.topoBenchmarkLiftDirX / ln : 0.0;
+            const double ly = ln > 0.0 ? params.topoBenchmarkLiftDirY / ln : 1.0;
+            d.dragProxy = d.darcyForceX * dx + d.darcyForceY * dy;
+            d.liftProxy = d.darcyForceX * lx + d.darcyForceY * ly;
+        }
+    }
     d.totalSeconds = seconds_since_0343(total0);
     d.handled = true;
     d.applied = true;
     d.csvPath = darcy_csv_path_0343(params);
     append_darcy_csv_0343(params, step, time, d);
+    append_topo_benchmark_csv_0348(params, step, time, d);
     if (env_truthy_0343("MPCD_CUDA_DARCY_BRINKMAN_LOG_0343") &&
         (params.darcyCostEvery <= 0 || step % static_cast<std::uint64_t>(std::max(1, params.darcyCostEvery)) == 0u)) {
         std::cerr << "\n[darcy0343] step=" << step

@@ -26,6 +26,10 @@ struct CudaDarcyBrinkman0343Diagnostics {
     double darcyPowerPerMass = 0.0;
     double meanSpeedRms = 0.0;
     double solidLeakRms = 0.0;
+    double darcyForceX = 0.0;
+    double darcyForceY = 0.0;
+    double dragProxy = 0.0;
+    double liftProxy = 0.0;
     double resetSeconds = 0.0;
     double depositSeconds = 0.0;
     double diagnosticsSeconds = 0.0;
