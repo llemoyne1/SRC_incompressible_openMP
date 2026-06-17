@@ -7,13 +7,14 @@ cd "$ROOT_DIR"
 RUN_ROOT=${RUN_ROOT:-runs/injection_fill_resampling_0139_0140}
 INIT_ROOT=${INIT_ROOT:-init/injection_fill_resampling_0139}
 STATE=${FILL_INITIAL_STATE:-$INIT_ROOT/initial_state_injection_fill_0139.smpcd}
+RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare
 
 FILL_LX=${FILL_LX:-4.0}
 FILL_LY=${FILL_LY:-1.0}
 FILL_NX=${FILL_NX:-192}
 FILL_NY=${FILL_NY:-48}
 FILL_GAMMA=${FILL_GAMMA:-20}
-FILL_STEPS=${FILL_STEPS:-3000}
+FILL_STEPS=${FILL_STEPS:-30000}
 FILL_DT=${FILL_DT:-0.001}
 FILL_KBT=${FILL_KBT:-0.001}
 FILL_SEED=${FILL_SEED:-1390139}
@@ -47,7 +48,72 @@ FILL_MASS_RENORM_PERIOD=${FILL_MASS_RENORM_PERIOD:-10}
 FILL_INLET_YMIN=${FILL_INLET_YMIN:-$(awk -v cy="$FILL_INLET_CENTER_Y" -v h="$FILL_INLET_HEIGHT_CELLS" -v ly="$FILL_LY" -v ny="$FILL_NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y}')}
 FILL_INLET_YMAX=${FILL_INLET_YMAX:-$(awk -v cy="$FILL_INLET_CENTER_Y" -v h="$FILL_INLET_HEIGHT_CELLS" -v ly="$FILL_LY" -v ny="$FILL_NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y}')}
 
-if [[ ! -x build/src_mpcd_base ]]; then
+
+# 0337 live visualization defaults. These are explicit so the demo scripts are
+# self-documenting and can be overridden from the environment.
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-25}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-96}"
+LIVE_VIS_NY="${LIVE_VIS_NY:-96}"
+LIVE_VIS_ALPHA="${LIVE_VIS_ALPHA:-0.08}"
+LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"
+LIVE_VIS_QUANTILE="${LIVE_VIS_QUANTILE:-0.995}"
+LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-blue_red}"
+LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-30}"
+LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-5}"
+LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
+LIVE_VIS_LOG_SOURCE="${LIVE_VIS_LOG_SOURCE:-0}"
+LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-10}"
+LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-0}"
+LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
+LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-}"
+LIVE_VIS_CONTROL_DIR="${LIVE_VIS_CONTROL_DIR:-.}"
+LIVE_VIS_CONTROL_BASENAME="${LIVE_VIS_CONTROL_BASENAME:-livevis_control.kv}"
+LIVE_VIS_CONTROL_FILE_EFFECTIVE=""
+LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-1}"
+export LIVE_VIS_COLORMAP
+export LIVE_VIS_CONTROL_ENABLE
+export LIVE_VIS_CONTROL_FILE
+export LIVE_VIS_CONTROL_DIR
+export LIVE_VIS_CONTROL_BASENAME
+export LIVE_VIS_CONTROL_EVERY
+export LIVE_VIS_CONTROL_LOG
+
+portable_livevis_env_0337() {
+  local mode=${1:-resampling}
+  export SRC_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+  export SRC_LIVE_VIS_FIELD="$LIVE_VIS_FIELD"
+  export SRC_LIVE_VIS_EVERY="$LIVE_VIS_EVERY"
+  export SRC_LIVE_VIS_NX="$LIVE_VIS_NX"
+  export SRC_LIVE_VIS_NY="$LIVE_VIS_NY"
+  export SRC_LIVE_VIS_ALPHA="$LIVE_VIS_ALPHA"
+  export SRC_LIVE_VIS_CLIP="$LIVE_VIS_CLIP"
+  export SRC_LIVE_VIS_QUANTILE="$LIVE_VIS_QUANTILE"
+  export SRC_LIVE_VIS_COLORMAP="$LIVE_VIS_COLORMAP"
+  export SRC_LIVE_VIS_GAIN="$LIVE_VIS_GAIN"
+  export SRC_LIVE_VIS_SMOOTH_PASSES="$LIVE_VIS_SMOOTH_PASSES"
+  export SRC_LIVE_VIS_WINDOW_SCALE="$LIVE_VIS_WINDOW_SCALE"
+  export SRC_LIVE_VIS_VSYNC="$LIVE_VIS_VSYNC"
+  export SRC_LIVE_VIS_LOG_SOURCE="$LIVE_VIS_LOG_SOURCE"
+  export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
+  export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
+  export SRC_LIVE_VIS_FORCE_HOST_MIRROR="$LIVE_VIS_FORCE_HOST_MIRROR"
+  export SRC_LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE_EFFECTIVE:-${LIVE_VIS_CONTROL_FILE:-}}"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
+  if [[ "$mode" == "resampling" ]]; then
+    export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
+  else
+    export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR=0
+  fi
+}
+
+if [[ ! -x build/src_mpcd_base_cuda_livevis_0342a ]]; then
     ./scripts/build_src_mpcd_base.sh
 fi
 
@@ -217,7 +283,7 @@ run_case() {
     local params_file
     params_file=$(write_params "$label" "$projection" "$resampling")
     echo "[0139] Running $label (projection=$projection, resampling=$resampling)"
-    ./build/src_mpcd_base "$params_file"
+    ./build/src_mpcd_base_cuda_livevis_0342a "$params_file"
 }
 
 run_case classic false off

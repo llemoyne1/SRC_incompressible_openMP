@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0341a}"
+BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0342a}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-12}"
@@ -551,12 +551,12 @@ portable_mode_root_0315() {
 }
 
 CASE_NAME="von_karman_cylinder_0315"
-VK_MODE="${VK_MODE:-io}"   # io | periodic
+VK_MODE="${VK_MODE:-periodic}"   # io | periodic
 
-Lx="${Lx:-0.8}"; Ly="${Ly:-0.4}"; NX="${NX:-640}"; NY="${NY:-640}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-10000}"; DT="${DT:-0.0005}"; KBT="${KBT:-0.5}"
+Lx="${Lx:-0.8}"; Ly="${Ly:-0.4}"; NX="${NX:-1280}"; NY="${NY:-1280}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-10000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5}"
 SEED="${SEED:-1628505}"; SUMMARY_EVERY="${SUMMARY_EVERY:-1000}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000}"
-UIN="${UIN:-0.45}"; UINIT="${UINIT:-0.45}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
+UIN="${UIN:-0.9}"; UINIT="${UINIT:-0.9}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 CYLINDER_CX="${CYLINDER_CX:-0.1}"; CYLINDER_CY="${CYLINDER_CY:-0.205}"; CYLINDER_R="${CYLINDER_R:-0.04}"
 
 
