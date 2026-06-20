@@ -33,7 +33,10 @@ struct CudaResamplingMassRecondition0296Diagnostics {
     std::uint64_t wetCellsAfter = 0u;
     std::uint64_t appliedParticles = 0u;
     std::uint64_t appliedCells = 0u;
+    std::uint64_t chiSkippedParticles = 0u;
 
+    bool chiFilterEnable = false;
+    double chiMin = 0.0;
     double strength = 0.0;
     double totalMassBefore = 0.0;
     double totalMassAfter = 0.0;

@@ -47,7 +47,7 @@ function out = show_smpcd_dump_and_field_0337(dumpFile, varargin)
 p = inputParser;
 p.FunctionName = 'show_smpcd_dump_and_field_0337';
 addOptional(p, 'dumpFile', '', @(s) ischar(s) || isstring(s));
-addParameter(p, 'field', 'ux', @(s) ischar(s) || isstring(s));
+addParameter(p, 'field', 'N', @(s) ischar(s) || isstring(s));
 addParameter(p, 'paramsFile', '', @(s) ischar(s) || isstring(s));
 addParameter(p, 'Lx', [], @isnumeric);
 addParameter(p, 'Ly', [], @isnumeric);
@@ -56,7 +56,7 @@ addParameter(p, 'Ny', [], @isnumeric);
 addParameter(p, 'step', NaN, @isnumeric);
 addParameter(p, 'time', NaN, @isnumeric);
 addParameter(p, 'fieldRoleFilter', 'fluid', @(s) ischar(s) || isstring(s));
-addParameter(p, 'fieldFilterType', 'box', @(s) ischar(s) || isstring(s));
+addParameter(p, 'fieldFilterType', 'none', @(s) ischar(s) || isstring(s));
 addParameter(p, 'fieldFilterWidth', 10, @isnumeric);
 addParameter(p, 'figurePrefix', 'SRC/MPCD single dump', @(s) ischar(s) || isstring(s));
 addParameter(p, 'showParticlesOnField', false, @(x) islogical(x) || isnumeric(x));

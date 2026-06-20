@@ -66,6 +66,10 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     int solidAdjacentHaloCells0307 = 1;
     double tinyMassThreshold0307 = 0.25;
 
+    bool chiFilterEnable = false;
+    double chiMin = 0.0;
+    std::uint64_t excludedChiCells = 0u;
+
     std::uint64_t splitCandidatesSolidAdjacent0307 = 0u;
     std::uint64_t splitAppliedSolidAdjacent0307 = 0u;
     std::uint64_t splitSkippedDonorMass0307 = 0u;
@@ -77,6 +81,24 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     double minSplitDonorMass0307 = 0.0;
     double minSplitNewParticleMass0307 = 0.0;
     double minPostSplitDonorMass0307 = 0.0;
+
+    bool emptyRefillEnable0319 = false;
+    int emptyRefillTarget0319 = 0;
+    double emptyRefillTargetFraction0319 = 0.0;
+    std::string emptyRefillReference0319;
+    int emptyRefillMemoryMaxAge0319 = 0;
+    std::uint64_t emptyRefillMemoryUpdates0319 = 0u;
+    std::uint64_t emptyRefillCandidates0319 = 0u;
+    std::uint64_t emptyRefillCells0319 = 0u;
+    std::uint64_t emptyRefillParticles0319 = 0u;
+    std::uint64_t emptyRefillSkippedNoMemory0319 = 0u;
+    std::uint64_t emptyRefillSkippedNoCapacity0319 = 0u;
+    double emptyRefillAddedMass0319 = 0.0;
+    double emptyRefillAddedPx0319 = 0.0;
+    double emptyRefillAddedPy0319 = 0.0;
+    double emptyRefillMassScale0319 = 1.0;
+    double emptyRefillVelocityShiftX0319 = 0.0;
+    double emptyRefillVelocityShiftY0319 = 0.0;
 
     double totalMassBefore = 0.0;
     double totalMassAfter = 0.0;

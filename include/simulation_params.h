@@ -390,6 +390,24 @@ struct SimulationParams {
     int resamplingPopulationMaxExtractionsPerCell = 64;
     int resamplingPopulationMaxExtractionsPerStep = 200000;
 
+    // CUDA 0297 empty-cell refill. This CUDA-resident block is separate from
+    // the legacy CPU weighted-resampling switch: empty wet cells are reseeded
+    // from inactive slots using the last valid local cell moments kept on
+    // device. The refill target is round(fraction * reference), with reference
+    // in {nTarget,gamma}. A non-positive gamma falls back to
+    // resamplingTargetCellMass, then to nTarget.
+    bool cudaResamplingEmptyRefillEnable = false;
+    double cudaResamplingEmptyRefillTargetFraction = 0.5;
+    std::string cudaResamplingEmptyRefillReference = "nTarget";
+    int cudaResamplingEmptyRefillGamma = 0;
+    int cudaResamplingEmptyRefillMemoryMaxAge = 1000;
+
+    // Darcy/topology compatibility guard for CUDA 0296/0297/refill. When Darcy
+    // is enabled, cells with chi below cudaResamplingChiMin are excluded from
+    // mass reconditioning, split/merge and empty-refill memory/update/creation.
+    bool cudaResamplingChiFilterEnable = true;
+    double cudaResamplingChiMin = 0.5;
+
 
     // 0343/topo: pure Brinkman/Darcy penalization for SRC classic CUDA-VIZ.
     // The design variable convention is chi=1 fluid, chi=0 solid/porous.

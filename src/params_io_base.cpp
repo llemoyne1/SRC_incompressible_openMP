@@ -474,6 +474,16 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "resamplingPopulationMaxSplitsPerStep" || key == "resamplingNMaxSplitsPerStep") p.resamplingPopulationMaxSplitsPerStep = parse_int(value, key);
         else if (key == "resamplingPopulationMaxExtractionsPerCell" || key == "resamplingNMaxExtractionsPerCell") p.resamplingPopulationMaxExtractionsPerCell = parse_int(value, key);
         else if (key == "resamplingPopulationMaxExtractionsPerStep" || key == "resamplingNMaxExtractionsPerStep") p.resamplingPopulationMaxExtractionsPerStep = parse_int(value, key);
+        else if (key == "cudaResamplingEmptyRefillEnable") p.cudaResamplingEmptyRefillEnable = parse_bool(value, key);
+        else if (key == "cudaResamplingEmptyRefillTargetFraction") p.cudaResamplingEmptyRefillTargetFraction = parse_double(value, key);
+        else if (key == "cudaResamplingEmptyRefillReference") {
+            p.cudaResamplingEmptyRefillReference = get_lower(kv, key);
+            std::replace(p.cudaResamplingEmptyRefillReference.begin(), p.cudaResamplingEmptyRefillReference.end(), '-', '_');
+        }
+        else if (key == "cudaResamplingEmptyRefillGamma") p.cudaResamplingEmptyRefillGamma = parse_int(value, key);
+        else if (key == "cudaResamplingEmptyRefillMemoryMaxAge") p.cudaResamplingEmptyRefillMemoryMaxAge = parse_int(value, key);
+        else if (key == "cudaResamplingChiFilterEnable" || key == "cudaResamplingDarcyChiFilterEnable") p.cudaResamplingChiFilterEnable = parse_bool(value, key);
+        else if (key == "cudaResamplingChiMin" || key == "cudaResamplingDarcyChiMin") p.cudaResamplingChiMin = parse_double(value, key);
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "dumpRoleFilter" || key == "dumpParticleRoleFilter") p.dumpRoleFilter = get_lower(kv, key);
@@ -1132,12 +1142,29 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("resampling population guard per-cell/per-step limits must be non-negative");
         }
     }
+    if (!(p.cudaResamplingEmptyRefillTargetFraction > 0.0 && p.cudaResamplingEmptyRefillTargetFraction <= 1.0)) {
+        throw std::runtime_error("cudaResamplingEmptyRefillTargetFraction must lie in (0,1]");
+    }
+    if (p.cudaResamplingEmptyRefillReference != "ntarget" &&
+        p.cudaResamplingEmptyRefillReference != "n_target" &&
+        p.cudaResamplingEmptyRefillReference != "gamma") {
+        throw std::runtime_error("cudaResamplingEmptyRefillReference supports: nTarget, gamma");
+    }
+    if (p.cudaResamplingEmptyRefillGamma < 0) {
+        throw std::runtime_error("cudaResamplingEmptyRefillGamma must be non-negative; use 0 to infer");
+    }
+    if (p.cudaResamplingEmptyRefillMemoryMaxAge < 0) {
+        throw std::runtime_error("cudaResamplingEmptyRefillMemoryMaxAge must be non-negative; use 0 for unlimited age");
+    }
+    if (!(p.cudaResamplingChiMin >= 0.0 && p.cudaResamplingChiMin <= 1.0) || !std::isfinite(p.cudaResamplingChiMin)) {
+        throw std::runtime_error("cudaResamplingChiMin must lie in [0,1]");
+    }
     if (p.darcyBrinkmanEnable) {
         if (!p.srcClassicCudaModeEnable) {
             throw std::runtime_error("darcyBrinkmanEnable=true currently requires srcClassicCudaModeEnable=true on the topo CUDA-VIZ branch");
         }
-        if (p.resamplingEnable) {
-            throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep resamplingEnable=false until chi-aware resampling is implemented");
+        if (p.resamplingEnable && !p.cudaResamplingChiFilterEnable) {
+            throw std::runtime_error("darcyBrinkmanEnable=true with resamplingEnable=true requires cudaResamplingChiFilterEnable=true");
         }
         if (p.projectionEnable) {
             throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep projectionEnable=false until Q6/Darcy ordering is implemented");

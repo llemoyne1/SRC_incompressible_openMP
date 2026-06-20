@@ -46,12 +46,26 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     const FluidDomainBounds& domain,
     std::uint64_t step,
     double time);
+
+bool cuda_darcy_brinkman_0343_device_chi_field(
+    const SimulationParams& params,
+    const float** deviceChi,
+    int* nx,
+    int* ny);
 #else
 inline CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     ParticleState&, const SimulationParams& params, const CellGrid&, const FluidDomainBounds&, std::uint64_t, double) {
     CudaDarcyBrinkman0343Diagnostics d{};
     d.requested = params.darcyBrinkmanEnable;
     return d;
+}
+
+inline bool cuda_darcy_brinkman_0343_device_chi_field(
+    const SimulationParams&, const float** deviceChi, int* nx, int* ny) {
+    if (deviceChi) *deviceChi = nullptr;
+    if (nx) *nx = 0;
+    if (ny) *ny = 0;
+    return false;
 }
 #endif
 

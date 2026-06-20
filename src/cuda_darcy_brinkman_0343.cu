@@ -473,6 +473,31 @@ void append_darcy_csv_0343(const SimulationParams& params,
 
 } // namespace
 
+bool cuda_darcy_brinkman_0343_device_chi_field(
+    const SimulationParams& params,
+    const float** deviceChi,
+    int* nxOut,
+    int* nyOut) {
+    if (deviceChi) *deviceChi = nullptr;
+    if (nxOut) *nxOut = 0;
+    if (nyOut) *nyOut = 0;
+    if (!params.darcyBrinkmanEnable) return false;
+    const int nx = params.Nx;
+    const int ny = params.Ny;
+    if (nx <= 0 || ny <= 0) return false;
+    const int chiMode = chi_mode_code_0343(params.darcyChiMode);
+    if (chiMode < 0) return false;
+    auto& w = workspace_0343();
+    const int threads = std::max(32, params.darcyThreadsPerBlock);
+    if (!ensure_workspace_0343(w, nx, ny)) return false;
+    if (!ensure_darcy_fields_0345(w, params, threads)) return false;
+    if (!w.d_chi) return false;
+    if (deviceChi) *deviceChi = w.d_chi;
+    if (nxOut) *nxOut = nx;
+    if (nyOut) *nyOut = ny;
+    return true;
+}
+
 CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     ParticleState& state,
     const SimulationParams& params,

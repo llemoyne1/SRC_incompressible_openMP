@@ -39,6 +39,10 @@ portable_thermostat_kv_0315() {
   if portable_bool_true_0315 "${THERMOSTAT_ENABLE:-1}"; then printf 'true'; else printf 'false'; fi
 }
 
+portable_bool_kv_0315() {
+  if portable_bool_true_0315 "${1:-0}"; then printf 'true'; else printf 'false'; fi
+}
+
 portable_ensure_binary_0315() {
   if [[ -x "$BIN" && "$FORCE_REBUILD" != "1" && "$FORCE_REBUILD" != "true" && "$FORCE_REBUILD" != "TRUE" ]]; then
     return 0
@@ -197,6 +201,12 @@ rngSeed = ${seed}
 srcClassicCudaModeEnable = true
 projectionEnable = false
 resamplingEnable = false
+resamplingTargetCellMass = ${GAMMA}
+cudaResamplingEmptyRefillEnable = $(portable_bool_kv_0315 "${EMPTY_REFILL_ENABLE:-0}")
+cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION:-0.5}
+cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE:-nTarget}
+cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA:-${GAMMA}}
+cudaResamplingEmptyRefillMemoryMaxAge = ${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
 closedCapacityResponseEnable = false
 closedCapacityVirialKickEnable = false
 
@@ -406,7 +416,7 @@ portable_resampling_env_0315() {
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_OPEN_BOUNDARY_HALO_CELLS="${OPEN_BOUNDARY_HALO_CELLS:-1}"
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_HALO_CELLS="${BOUNDARY_HALO_CELLS:-0}"
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_SOLID_HALO_CELLS="${SOLID_HALO_CELLS:-0}"
-    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307="${MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307:-1}"
+    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307="${RESAMPLING_SPLIT_SAFETY_0307:-1}"
     export MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307="${MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307:-1}"
     export MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307="${MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307:-0.5}"
     export MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307="${MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307:-0.25}"
@@ -430,6 +440,11 @@ GUARD_EVERY=${GUARD_EVERY:-5}
 GUARD_NMIN=${GUARD_NMIN:-12}
 GUARD_NTARGET=${GUARD_NTARGET:-20}
 GUARD_NMAX=${GUARD_NMAX:-32}
+EMPTY_REFILL_ENABLE=${EMPTY_REFILL_ENABLE:-0}
+EMPTY_REFILL_TARGET_FRACTION=${EMPTY_REFILL_TARGET_FRACTION:-0.5}
+EMPTY_REFILL_REFERENCE=${EMPTY_REFILL_REFERENCE:-nTarget}
+EMPTY_REFILL_GAMMA=${EMPTY_REFILL_GAMMA:-${GAMMA:-unset}}
+EMPTY_REFILL_MEMORY_MAX_AGE=${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
 INACTIVE_SLOTS=${INACTIVE_SLOTS:-unset}
 META
 }

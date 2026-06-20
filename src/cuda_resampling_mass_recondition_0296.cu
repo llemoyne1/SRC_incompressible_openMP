@@ -7,6 +7,7 @@
 
 #include "cuda_cell_moments.h"
 #include "cuda_cell_workspace.h"
+#include "cuda_darcy_brinkman_0343.h"
 #include "cuda_shared_particle_state_0251.h"
 #include "immersed_solid.h"
 
@@ -54,13 +55,15 @@ struct DeviceMassReconditionConfig0296 {
     double rectYMax = 0.0;
 
     double strength = 1.0;
+    int chiFilterEnable = 0;
+    double chiMin = 0.0;
 };
 
 struct DeviceBuffers0296 {
     double* dDeltaPx = nullptr;
     double* dDeltaPy = nullptr;
     unsigned int* dCellChanged = nullptr;
-    unsigned long long* dCounters = nullptr; // [0] particles, [1] cells
+    unsigned long long* dCounters = nullptr; // [0] particles, [1] cells, [2] chi-skipped particles
     double* dMaxRelChange = nullptr;
     int cellCapacity = 0;
 
@@ -90,7 +93,7 @@ struct DeviceBuffers0296 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_mass_recondition_0296: malloc deltaPy: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dCellChanged), sizeof(unsigned int) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_mass_recondition_0296: malloc changed flags: ") + cudaGetErrorString(err));
-        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 2u);
+        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 4u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_mass_recondition_0296: malloc counters: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dMaxRelChange), sizeof(double));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_mass_recondition_0296: malloc max rel change: ") + cudaGetErrorString(err));
@@ -198,6 +201,13 @@ __device__ bool point_inside_active_domain_0296(double x, double y, DeviceMassRe
     return true;
 }
 
+__device__ bool chi_allows_resampling_0296(int c, const float* __restrict__ chiField, DeviceMassReconditionConfig0296 cfg) {
+    if (!cfg.chiFilterEnable || chiField == nullptr) return true;
+    if (c < 0 || c >= cfg.numCells) return false;
+    const double chi = static_cast<double>(chiField[c]);
+    return isfinite(chi) && chi >= cfg.chiMin;
+}
+
 __global__ void reset_mass_recondition_buffers_kernel_0296(
     int numCells,
     double* __restrict__ deltaPx,
@@ -212,8 +222,7 @@ __global__ void reset_mass_recondition_buffers_kernel_0296(
         cellChanged[c] = 0u;
     }
     if (c == 0) {
-        counters[0] = 0ull;
-        counters[1] = 0ull;
+        for (int i = 0; i < 4; ++i) counters[i] = 0ull;
         *maxRelChange = 0.0;
     }
 }
@@ -229,6 +238,7 @@ __global__ void recondition_particle_masses_kernel_0296(
     const int* __restrict__ cellId,
     const unsigned int* __restrict__ cellCount,
     const double* __restrict__ cellMass,
+    const float* __restrict__ chiField,
     DeviceMassReconditionConfig0296 cfg,
     double* __restrict__ deltaPx,
     double* __restrict__ deltaPy,
@@ -243,6 +253,10 @@ __global__ void recondition_particle_masses_kernel_0296(
     const unsigned int n = cellCount[c];
     if (n <= 1u) return;
     if (!point_inside_active_domain_0296(x[i], y[i], cfg)) return;
+    if (!chi_allows_resampling_0296(c, chiField, cfg)) {
+        atomicAdd(&counters[2], 1ull);
+        return;
+    }
     const double M = cellMass[c];
     if (!(M > 0.0)) return;
     const double oldMass = mass[i];
@@ -282,6 +296,7 @@ __global__ void restore_cell_momentum_kernel_0296(
     const unsigned char* __restrict__ role,
     const int* __restrict__ cellId,
     const double* __restrict__ cellMass,
+    const float* __restrict__ chiField,
     DeviceMassReconditionConfig0296 cfg,
     const double* __restrict__ deltaPx,
     const double* __restrict__ deltaPy) {
@@ -291,6 +306,7 @@ __global__ void restore_cell_momentum_kernel_0296(
     const int c = cellId[i];
     if (c < 0 || c >= cfg.numCells) return;
     if (!point_inside_active_domain_0296(x[i], y[i], cfg)) return;
+    if (!chi_allows_resampling_0296(c, chiField, cfg)) return;
     const double M = cellMass[c];
     if (!(M > 0.0) || !(mass[i] > 0.0)) return;
     vx[i] += -deltaPx[c] / M;
@@ -315,6 +331,8 @@ DeviceMassReconditionConfig0296 make_config_0296(const SimulationParams& params,
     cfg.domainYMin = domain.yMin;
     cfg.domainYMax = domain.yMax;
     cfg.strength = std::clamp(strength, 0.0, 1.0);
+    cfg.chiFilterEnable = (params.darcyBrinkmanEnable && params.cudaResamplingChiFilterEnable) ? 1 : 0;
+    cfg.chiMin = std::clamp(params.cudaResamplingChiMin, 0.0, 1.0);
 
     if (immersed_solid_enabled(params)) {
         const ImmersedSolidShape shape = immersed_solid_shape(params);
@@ -344,7 +362,7 @@ void write_csv_row_0296(const SimulationParams& params,
     if (needHeader) {
         out << "step,stage,handled,cudaAvailable,sharedStateFreshBefore,skippedBecauseStateNotFresh,"
                "particles,fluidParticlesBefore,fluidParticlesAfter,cells,wetCellsBefore,wetCellsAfter,"
-               "appliedParticles,appliedCells,strength,totalMassBefore,totalMassAfter,totalPxBefore,totalPxAfter,totalPyBefore,totalPyAfter,"
+               "appliedParticles,appliedCells,chiSkippedParticles,chiFilterEnable,chiMin,strength,totalMassBefore,totalMassAfter,totalPxBefore,totalPxAfter,totalPyBefore,totalPyAfter,"
                "maxAbsCellMassError,maxRelCellMassError,maxAbsCellMomentumError,maxRelCellMomentumError,maxParticleMassRelChange,"
                "depositBeforeSeconds,kernelSeconds,depositAfterSeconds,downloadSeconds,totalSeconds\n";
     }
@@ -357,7 +375,8 @@ void write_csv_row_0296(const SimulationParams& params,
         << (d.skippedBecauseStateNotFresh ? 1 : 0) << ','
         << d.particles << ',' << d.fluidParticlesBefore << ',' << d.fluidParticlesAfter << ','
         << d.cells << ',' << d.wetCellsBefore << ',' << d.wetCellsAfter << ','
-        << d.appliedParticles << ',' << d.appliedCells << ',' << d.strength << ','
+        << d.appliedParticles << ',' << d.appliedCells << ',' << d.chiSkippedParticles << ','
+        << (d.chiFilterEnable ? 1 : 0) << ',' << d.chiMin << ',' << d.strength << ','
         << d.totalMassBefore << ',' << d.totalMassAfter << ','
         << d.totalPxBefore << ',' << d.totalPxAfter << ','
         << d.totalPyBefore << ',' << d.totalPyAfter << ','
@@ -492,6 +511,17 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
     }
 
     const DeviceMassReconditionConfig0296 cfg = make_config_0296(params, grid, domain, time, d.strength);
+    d.chiFilterEnable = cfg.chiFilterEnable != 0;
+    d.chiMin = cfg.chiMin;
+    const float* dChi0296 = nullptr;
+    int chiNx0296 = 0;
+    int chiNy0296 = 0;
+    if (d.chiFilterEnable) {
+        if (!cuda_darcy_brinkman_0343_device_chi_field(params, &dChi0296, &chiNx0296, &chiNy0296) ||
+            chiNx0296 != grid.Nx || chiNy0296 != grid.Ny) {
+            throw std::runtime_error("cuda_resampling_mass_recondition_0296: requested chi filter but Darcy chi field is unavailable");
+        }
+    }
     const int block = options.threadsPerBlock;
     const int cellGrid = std::max(1, (grid.numCells + block - 1) / block);
     const int particleGrid = std::max(1, (static_cast<int>(hostMirror.Np) + block - 1) / block);
@@ -508,7 +538,7 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
     recondition_particle_masses_kernel_0296<<<particleGrid, block>>>(
         static_cast<int>(hostMirror.Np),
         pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role, cv.cellId, cv.count, cv.cellMass,
-        cfg,
+        dChi0296, cfg,
         g_massReconditionBuffers0296.dDeltaPx,
         g_massReconditionBuffers0296.dDeltaPy,
         g_massReconditionBuffers0296.dCellChanged,
@@ -518,7 +548,7 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
     restore_cell_momentum_kernel_0296<<<particleGrid, block>>>(
         static_cast<int>(hostMirror.Np),
         pv.x, pv.y, pv.vx, pv.vy, pv.mass, pv.role, cv.cellId, cv.cellMass,
-        cfg,
+        dChi0296, cfg,
         g_massReconditionBuffers0296.dDeltaPx,
         g_massReconditionBuffers0296.dDeltaPy);
     cuda_check_0296(cudaGetLastError(), "launch restore_cell_momentum_kernel_0296");
@@ -531,7 +561,7 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 
-    unsigned long long hCounters[2] = {0ull, 0ull};
+    unsigned long long hCounters[4] = {0ull, 0ull, 0ull, 0ull};
     double hMaxRelChange = 0.0;
     const Clock::time_point td0 = Clock::now();
     cuda_check_0296(cudaMemcpy(hCounters, g_massReconditionBuffers0296.dCounters,
@@ -544,6 +574,7 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
     d.downloadSeconds = seconds_between(td0, td1);
     d.appliedParticles = static_cast<std::uint64_t>(hCounters[0]);
     d.appliedCells = static_cast<std::uint64_t>(hCounters[1]);
+    d.chiSkippedParticles = static_cast<std::uint64_t>(hCounters[2]);
     d.maxParticleMassRelChange = hMaxRelChange;
 
     CudaCellMoments after{};

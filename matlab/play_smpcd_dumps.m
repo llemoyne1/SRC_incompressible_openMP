@@ -27,7 +27,7 @@ function out = play_smpcd_dumps(runDir, varargin)
 
     p = inputParser;
     addRequired(p, 'runDir', @(s) ischar(s) || isstring(s));
-    addParameter(p, 'field', 'Ux', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'field', 'N', @(s) ischar(s) || isstring(s));
     addParameter(p, 'Lx', [], @isnumeric);
     addParameter(p, 'Ly', [], @isnumeric);
     addParameter(p, 'Nx', [], @isnumeric);
@@ -35,7 +35,7 @@ function out = play_smpcd_dumps(runDir, varargin)
     addParameter(p, 'paramsFile', '', @(s) ischar(s) || isstring(s));
     addParameter(p, 'frameStride', 1, @isnumeric);
     addParameter(p, 'pauseTime', 0.05, @isnumeric);
-    addParameter(p, 'particleDecimation', 0, @isnumeric);
+    addParameter(p, 'particleDecimation', 50, @isnumeric);
     addParameter(p, 'particleMarkerSize', 3, @isnumeric);
     addParameter(p, 'showParticles', true, @islogical);
     addParameter(p, 'particleColorMode', 'role', @(s) ischar(s) || isstring(s));
@@ -50,7 +50,7 @@ function out = play_smpcd_dumps(runDir, varargin)
     addParameter(p, 'particleLabelFontSize', 8, @isnumeric);
     addParameter(p, 'particleClim', [], @isnumeric);
     addParameter(p, 'showParticleLegend', true, @islogical);
-    addParameter(p, 'showVelocityVectors', false, @islogical);
+    addParameter(p, 'showVelocityVectors', true, @islogical);
     addParameter(p, 'velocityDecimation', 10, @isnumeric);
     addParameter(p, 'clim', [], @isnumeric);
     parse(p, runDir, varargin{:});
