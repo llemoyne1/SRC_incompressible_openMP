@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_no_livevis_0337}"
+BIN="${BIN:-build/src_mpcd_base_cuda_topo_0343_fix0251}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-0}"
 THREADS="${THREADS:-8}"
@@ -19,13 +19,38 @@ export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
-RUN_MODES="${RUN_MODES:-classic resampling}"   # set to "classic resampling" to compare to resampling
+RUN_MODES="${RUN_MODES:-classic resampling}"   # default: classic witness, then resampling+empty-refill
 
 # Compact output defaults: fluid-only dumps are lighter and suitable for most
 # visual post-processing.  Set DUMP_ROLE_FILTER=all for restart-compatible dumps
 # or to inspect inactive slots explicitly.
 DUMP_ROLE_FILTER="${DUMP_ROLE_FILTER:-fluid}"
 SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
+
+# Live visualization modalities. Disabled by default for batch validation; set
+# LIVE_VIS_ENABLE=1 and use a binary built with MPCD_ENABLE_LIVE_VIS=1.
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-0}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-vorticity}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-25}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-600}"
+LIVE_VIS_NY="${LIVE_VIS_NY:-320}"
+LIVE_VIS_ALPHA="${LIVE_VIS_ALPHA:-0.08}"
+LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--20}"
+LIVE_VIS_QUANTILE="${LIVE_VIS_QUANTILE:-0.995}"
+LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-thermal}"
+LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-3}"
+LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
+LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
+LIVE_VIS_LOG_SOURCE="${LIVE_VIS_LOG_SOURCE:-0}"
+LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-1}"
+LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-0}"
+LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
+LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+LIVE_VIS_CONTROL_ENABLE="${LIVE_VIS_CONTROL_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
+LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-1}"
 
 portable_bool_true_0315() {
   case "${1:-0}" in
@@ -36,6 +61,63 @@ portable_bool_true_0315() {
 
 portable_thermostat_kv_0315() {
   if portable_bool_true_0315 "${THERMOSTAT_ENABLE:-1}"; then printf 'true'; else printf 'false'; fi
+}
+
+portable_bool_kv_0315() {
+  if portable_bool_true_0315 "${1:-0}"; then printf 'true'; else printf 'false'; fi
+}
+
+portable_empty_refill_kv_0315() {
+  if [[ "${mode:-}" == "resampling" ]]; then
+    portable_bool_kv_0315 "${EMPTY_REFILL_ENABLE:-1}"
+  else
+    printf 'false'
+  fi
+}
+
+portable_livevis_prepare_control_0337() {
+  if ! portable_bool_true_0315 "$LIVE_VIS_ENABLE" || ! portable_bool_true_0315 "$LIVE_VIS_CONTROL_ENABLE"; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE")"
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE" ]]; then
+    cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
+field = ${LIVE_VIS_FIELD}
+clip = ${LIVE_VIS_CLIP}
+gain = ${LIVE_VIS_GAIN}
+smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
+colormap = ${LIVE_VIS_COLORMAP}
+CONTROL
+  fi
+}
+
+portable_livevis_env_0337() {
+  local mode=${1:-resampling}
+  export SRC_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+  export SRC_LIVE_VIS_FIELD="$LIVE_VIS_FIELD"
+  export SRC_LIVE_VIS_EVERY="$LIVE_VIS_EVERY"
+  export SRC_LIVE_VIS_NX="$LIVE_VIS_NX"
+  export SRC_LIVE_VIS_NY="$LIVE_VIS_NY"
+  export SRC_LIVE_VIS_ALPHA="$LIVE_VIS_ALPHA"
+  export SRC_LIVE_VIS_CLIP="$LIVE_VIS_CLIP"
+  export SRC_LIVE_VIS_QUANTILE="$LIVE_VIS_QUANTILE"
+  export SRC_LIVE_VIS_COLORMAP="$LIVE_VIS_COLORMAP"
+  export SRC_LIVE_VIS_GAIN="$LIVE_VIS_GAIN"
+  export SRC_LIVE_VIS_SMOOTH_PASSES="$LIVE_VIS_SMOOTH_PASSES"
+  export SRC_LIVE_VIS_WINDOW_SCALE="$LIVE_VIS_WINDOW_SCALE"
+  export SRC_LIVE_VIS_VSYNC="$LIVE_VIS_VSYNC"
+  export SRC_LIVE_VIS_LOG_SOURCE="$LIVE_VIS_LOG_SOURCE"
+  export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
+  export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
+  export SRC_LIVE_VIS_FORCE_HOST_MIRROR="$LIVE_VIS_FORCE_HOST_MIRROR"
+  export SRC_LIVE_VIS_CONTROL_FILE="$LIVE_VIS_CONTROL_FILE"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
+  if [[ "$mode" == "resampling" ]]; then
+    export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
+  else
+    export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR=0
+  fi
 }
 
 portable_ensure_binary_0315() {
@@ -196,6 +278,12 @@ rngSeed = ${seed}
 srcClassicCudaModeEnable = true
 projectionEnable = false
 resamplingEnable = false
+resamplingTargetCellMass = ${GAMMA}
+cudaResamplingEmptyRefillEnable = $(portable_empty_refill_kv_0315)
+cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION:-0.1}
+cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE:-nTarget}
+cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA:-${GAMMA}}
+cudaResamplingEmptyRefillMemoryMaxAge = ${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
 closedCapacityResponseEnable = false
 closedCapacityVirialKickEnable = false
 
@@ -353,6 +441,7 @@ portable_cuda_io_fullface_circle_0315() {
   export MPCD_CUDA_IMMERSED_CIRCLE_0284_DOWNLOAD_ALL=0
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284=1
   portable_cuda_enable_thermostat_0315 1
@@ -367,11 +456,14 @@ portable_cuda_periodic_circle_0315() {
   export MPCD_CUDA_IMMERSED_CIRCLE_0284_DOWNLOAD_ALL=0
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_CIRCLE_0284=1
-  portable_cuda_enable_thermostat_0315 0
+  portable_cuda_enable_thermostat_0315 1
   portable_cuda_classic_fast_flags_0330b
   export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318="${SRC_GPU_WALL_CIRCLE_RESIDENT_0318:-1}"
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318_UNSAFE_ENABLE="${SRC_GPU_WALL_CIRCLE_RESIDENT_0318_UNSAFE_ENABLE:-1}"
+  export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_MINIMAL_DOWNLOAD_0338="${SRC_GPU_WALL_CIRCLE_RESIDENT_MINIMAL_DOWNLOAD_0338:-1}"
 }
 
 portable_resampling_env_0315() {
@@ -422,13 +514,21 @@ portable_resampling_env_0315() {
 portable_write_env_file_0315() {
   local file=$1 mode=$2
   mkdir -p "$(dirname "$file")"
-  env | grep -E '^(MPCD_CUDA_|SRC_GPU_|OMP_|BIN=|THREADS=|RUN_MODES=|DUMP_ROLE_FILTER=|SUMMARY_ROLE_FILTER=)' | sort > "$file"
+  env | grep -E '^(MPCD_CUDA_|SRC_GPU_|SRC_LIVE_VIS_|MPCD_ENABLE_LIVE_VIS=|LIVE_VIS_|EMPTY_REFILL_|OMP_|BIN=|THREADS=|RUN_MODES=|DUMP_ROLE_FILTER=|SUMMARY_ROLE_FILTER=)' | sort > "$file"
   cat >> "$file" <<META
 mode=${mode}
 GUARD_EVERY=${GUARD_EVERY:-5}
-GUARD_NMIN=${GUARD_NMIN:-12}
-GUARD_NTARGET=${GUARD_NTARGET:-20}
-GUARD_NMAX=${GUARD_NMAX:-32}
+GUARD_NMIN=${GUARD_NMIN:-3}
+GUARD_NTARGET=${GUARD_NTARGET:-6}
+GUARD_NMAX=${GUARD_NMAX:-9}
+EMPTY_REFILL_ENABLE=${EMPTY_REFILL_ENABLE:-1}
+EMPTY_REFILL_TARGET_FRACTION=${EMPTY_REFILL_TARGET_FRACTION:-0.1}
+EMPTY_REFILL_REFERENCE=${EMPTY_REFILL_REFERENCE:-nTarget}
+EMPTY_REFILL_GAMMA=${EMPTY_REFILL_GAMMA:-${GAMMA:-unset}}
+EMPTY_REFILL_MEMORY_MAX_AGE=${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
+LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-0}
+LIVE_VIS_FIELD=${LIVE_VIS_FIELD}
+LIVE_VIS_CONTROL_FILE=${LIVE_VIS_CONTROL_FILE}
 INACTIVE_SLOTS=${INACTIVE_SLOTS:-unset}
 META
 }
@@ -577,17 +677,36 @@ PARAMS
     portable_cuda_io_fullface_circle_0315
   fi
   portable_resampling_env_0315 "$mode"
+  portable_livevis_prepare_control_0337
+  portable_livevis_env_0337 "$mode"
   portable_write_env_file_0315 "$run_root/logs/environment_0315.env" "$mode"
   portable_run_binary_0315 "$params" "$log" "$time" "$out"
 }
 for mode in $RUN_MODES; do run_mode_0315 "$mode"; done
-cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<'MATLAB'
-root = 'runs/portable_von_karman_resampling_0315';
-mode = 'io'; % change to 'periodic' if VK_MODE=periodic was used
-resamp = fullfile(root, mode, 'resampling_split_safe', 'output');
-play_smpcd_dumps(resamp, 'field', 'speed', 'frameStride', 2, 'pauseTime', 0.03, ...
-    'showParticles', true, 'particleRoleFilter', 'fluid', 'particleColorMode', 'masslog', ...
-    'particleMassMax', 0.5, 'particleSpeedMin', 1.0, 'particleThresholdLogic', 'or', ...
-    'particleLabelMode', 'mass_speed', 'particleLabelMax', 30, 'particleMarkerSize', 12);
+cat > "$BASE_RUN_ROOT/visualize_von_karman_0315.m" <<MATLAB
+% Visualization modalities for the Von Karman validation.
+% Select vkMode='periodic' or 'io'.
+% Select runMode='classic' or 'resampling_split_safe'.
+% Select fieldMode among: N, speed, Ux, Uy, mass.
+root = '${BASE_RUN_ROOT}';
+vkMode = '${VK_MODE}';
+runMode = 'resampling_split_safe';
+fieldMode = 'speed';
+outputDir = fullfile(root, vkMode, runMode, 'output');
+
+play_smpcd_dumps(outputDir, ...
+    'field', fieldMode, ...
+    'frameStride', 2, ...
+    'pauseTime', 0.03, ...
+    'showParticles', true, ...
+    'particleRoleFilter', 'fluid', ...
+    'particleColorMode', 'masslog', ...
+    'particleMassMax', 0.5, ...
+    'particleSpeedMin', 1.0, ...
+    'particleThresholdLogic', 'or', ...
+    'particleLabelMode', 'mass_speed', ...
+    'particleLabelMax', 30, ...
+    'particleMarkerSize', 12);
 MATLAB
 echo "[0315-portable] MATLAB helper: $BASE_RUN_ROOT/visualize_von_karman_0315.m"
+echo "[0315-portable] visualization: edit vkMode={periodic,io}, runMode={classic,resampling_split_safe}, fieldMode={N,speed,Ux,Uy,mass}"

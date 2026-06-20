@@ -343,6 +343,12 @@ bool cuda_wall_mode_supported_0261(const std::string& bc) {
 }
 
 bool cuda_classic_src_wall_resident_0261_supported(const SimulationParams& params) {
+    const bool thermostatHandledOnShared0251 =
+        !params.thermostatEnable ||
+        (params.thermostatEvery > 0 &&
+         params.thermostatMode == "cell_relative_rescale" &&
+         env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE") &&
+         env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260"));
     return params.srcClassicCudaModeEnable &&
            params.bcLeft == "periodic" && params.bcRight == "periodic" &&
            cuda_wall_mode_supported_0261(params.bcBottom) &&
@@ -352,7 +358,7 @@ bool cuda_classic_src_wall_resident_0261_supported(const SimulationParams& param
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
            !params.resamplingEnable &&
-           !params.thermostatEnable &&
+           thermostatHandledOnShared0251 &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
 }
