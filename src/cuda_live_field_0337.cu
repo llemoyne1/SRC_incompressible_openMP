@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cfloat>
 #include <cstdlib>
 #include <cctype>
 #include <cmath>
@@ -27,10 +28,19 @@ struct LiveFieldWorkspace0337 {
     int nx = 0;
     int ny = 0;
     double* d_mass = nullptr;
+    double* d_count = nullptr;
     double* d_ux = nullptr;
     double* d_uy = nullptr;
     double* d_scalar = nullptr;
     double* d_tmp = nullptr;
+    double* d_blockMin = nullptr;
+    double* d_blockMax = nullptr;
+    int reduceBlocks = 0;
+    std::vector<double> h_blockMin;
+    std::vector<double> h_blockMax;
+    float* d_quiverUx = nullptr;
+    float* d_quiverUy = nullptr;
+    int quiverCapacity = 0;
     unsigned char* d_rgba = nullptr;
     float* d_chi = nullptr;
     float* d_alpha = nullptr;
@@ -43,32 +53,73 @@ LiveFieldWorkspace0337& workspace_0337() {
 }
 
 void free_workspace_0337(LiveFieldWorkspace0337& w) {
-    cudaFree(w.d_mass); cudaFree(w.d_ux); cudaFree(w.d_uy);
-    cudaFree(w.d_scalar); cudaFree(w.d_tmp); cudaFree(w.d_rgba);
+    cudaFree(w.d_mass); cudaFree(w.d_count); cudaFree(w.d_ux); cudaFree(w.d_uy);
+    cudaFree(w.d_scalar); cudaFree(w.d_tmp); cudaFree(w.d_blockMin); cudaFree(w.d_blockMax);
+    cudaFree(w.d_quiverUx); cudaFree(w.d_quiverUy); cudaFree(w.d_rgba);
     cudaFree(w.d_chi); cudaFree(w.d_alpha);
     w = LiveFieldWorkspace0337{};
 }
 
 bool ensure_workspace_0337(LiveFieldWorkspace0337& w, int nx, int ny) {
     if (nx <= 0 || ny <= 0) return false;
-    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_ux && w.d_uy && w.d_scalar && w.d_tmp && w.d_rgba && w.d_chi && w.d_alpha) return true;
+    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_count && w.d_ux && w.d_uy && w.d_scalar && w.d_tmp && w.d_blockMin && w.d_blockMax && w.d_rgba && w.d_chi && w.d_alpha) return true;
     free_workspace_0337(w);
     w.nx = nx; w.ny = ny;
     const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+    constexpr int reduceThreads0363 = 256;
+    const int reduceBlocks = (static_cast<int>(n) + reduceThreads0363 - 1) / reduceThreads0363;
+    w.reduceBlocks = reduceBlocks;
     bool ok = true;
     ok = ok && cudaMalloc(&w.d_mass, n * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_count, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_ux, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_uy, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_scalar, n * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_tmp, n * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_blockMin, static_cast<std::size_t>(reduceBlocks) * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_blockMax, static_cast<std::size_t>(reduceBlocks) * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_rgba, 4u * n * sizeof(unsigned char)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_chi, n * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_alpha, n * sizeof(float)) == cudaSuccess;
     if (!ok) { free_workspace_0337(w); return false; }
+    w.h_blockMin.assign(static_cast<std::size_t>(reduceBlocks), 0.0);
+    w.h_blockMax.assign(static_cast<std::size_t>(reduceBlocks), 0.0);
     return true;
 }
 
-int field_code_0337(const std::string& f) {
+bool ensure_quiver_workspace_0364(LiveFieldWorkspace0337& w, int count) {
+    if (count <= 0) return false;
+    if (w.quiverCapacity >= count && w.d_quiverUx && w.d_quiverUy) return true;
+    cudaFree(w.d_quiverUx);
+    cudaFree(w.d_quiverUy);
+    w.d_quiverUx = nullptr;
+    w.d_quiverUy = nullptr;
+    w.quiverCapacity = 0;
+    bool ok = true;
+    ok = ok && cudaMalloc(&w.d_quiverUx, static_cast<std::size_t>(count) * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_quiverUy, static_cast<std::size_t>(count) * sizeof(float)) == cudaSuccess;
+    if (!ok) {
+        cudaFree(w.d_quiverUx);
+        cudaFree(w.d_quiverUy);
+        w.d_quiverUx = nullptr;
+        w.d_quiverUy = nullptr;
+        w.quiverCapacity = 0;
+        return false;
+    }
+    w.quiverCapacity = count;
+    return true;
+}
+
+std::string normalize_field_0361(std::string f) {
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    f.erase(f.begin(), std::find_if(f.begin(), f.end(), notSpace));
+    f.erase(std::find_if(f.rbegin(), f.rend(), notSpace).base(), f.end());
+    std::transform(f.begin(), f.end(), f.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return f;
+}
+
+int field_code_0337(const std::string& rawField) {
+    const std::string f = normalize_field_0361(rawField);
     if (f == "ux" || f == "vx") return 0;
     if (f == "uy" || f == "vy") return 1;
     if (f == "speed") return 2;
@@ -77,6 +128,7 @@ int field_code_0337(const std::string& f) {
     if (f == "chi" || f == "topo_chi") return 5;
     if (f == "alpha" || f == "darcy_alpha") return 6;
     if (f == "darcy_power" || f == "darcy" || f == "brinkman_power") return 7;
+    if (f == "n" || f == "count" || f == "population" || f == "particle_count" || f == "cell_count") return 8;
     return 0;
 }
 
@@ -99,15 +151,15 @@ int colormap_code_0342() {
     return 0;
 }
 
-__global__ void reset_field_kernel_0337(double* mass, double* ux, double* uy, double* scalar, int n) {
+__global__ void reset_field_kernel_0337(double* mass, double* count, double* ux, double* uy, double* scalar, int n) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
-    mass[i] = 0.0; ux[i] = 0.0; uy[i] = 0.0; scalar[i] = 0.0;
+    mass[i] = 0.0; count[i] = 0.0; ux[i] = 0.0; uy[i] = 0.0; scalar[i] = 0.0;
 }
 
 __global__ void deposit_field_kernel_0337(CudaParticleDeviceView pv, int nx, int ny,
                                           double Lx, double Ly,
-                                          double* massGrid, double* uxGrid, double* uyGrid,
+                                          double* massGrid, double* countGrid, double* uxGrid, double* uyGrid,
                                           unsigned char fluidRole) {
     const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= pv.n) return;
@@ -125,11 +177,13 @@ __global__ void deposit_field_kernel_0337(CudaParticleDeviceView pv, int nx, int
     const int c = iy * nx + ix;
     const double m = pv.mass ? pv.mass[i] : 1.0;
     atomicAdd(&massGrid[c], m);
+    atomicAdd(&countGrid[c], 1.0);
     atomicAdd(&uxGrid[c], m * pv.vx[i]);
     atomicAdd(&uyGrid[c], m * pv.vy[i]);
 }
 
-__global__ void finalize_scalar_kernel_0337(const double* mass, const double* ux, const double* uy,
+__global__ void finalize_scalar_kernel_0337(const double* mass, const double* count,
+                                            const double* ux, const double* uy,
                                             double* scalar, int nx, int ny, int fieldCode) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     const int n = nx * ny;
@@ -141,6 +195,7 @@ __global__ void finalize_scalar_kernel_0337(const double* mass, const double* ux
     else if (fieldCode == 1) scalar[c] = v;
     else if (fieldCode == 2) scalar[c] = sqrt(u*u + v*v);
     else if (fieldCode == 4) scalar[c] = m;
+    else if (fieldCode == 8) scalar[c] = count[c];
     else scalar[c] = 0.0;
 }
 
@@ -328,6 +383,59 @@ __global__ void smooth_scalar_kernel_0337(const double* in, double* out, int nx,
     out[c] = cnt > 0 ? acc / static_cast<double>(cnt) : 0.0;
 }
 
+__global__ void sample_quiver_kernel_0364(const double* mass, const double* ux, const double* uy,
+                                           float* qUx, float* qUy,
+                                           int liveNx, int liveNy, int qNx, int qNy) {
+    const int k = blockIdx.x * blockDim.x + threadIdx.x;
+    const int qN = qNx * qNy;
+    if (k >= qN) return;
+    const int qx = k % qNx;
+    const int qy = k / qNx;
+    int ix = static_cast<int>(floor((static_cast<double>(qx) + 0.5) * static_cast<double>(liveNx) / static_cast<double>(qNx)));
+    int iy = static_cast<int>(floor((static_cast<double>(qy) + 0.5) * static_cast<double>(liveNy) / static_cast<double>(qNy)));
+    ix = max(0, min(liveNx - 1, ix));
+    iy = max(0, min(liveNy - 1, iy));
+    const int c = iy * liveNx + ix;
+    const double m = mass[c];
+    if (m > 0.0 && isfinite(m)) {
+        qUx[k] = static_cast<float>(ux[c] / m);
+        qUy[k] = static_cast<float>(uy[c] / m);
+    } else {
+        qUx[k] = 0.0f;
+        qUy[k] = 0.0f;
+    }
+}
+
+__global__ void reduce_minmax_scalar_kernel_0363(const double* scalar,
+                                                        double* blockMin,
+                                                        double* blockMax,
+                                                        int n) {
+    __shared__ double smin[256];
+    __shared__ double smax[256];
+    const int tid = threadIdx.x;
+    const int i = blockIdx.x * blockDim.x + tid;
+    double vmin = DBL_MAX;
+    double vmax = -DBL_MAX;
+    if (i < n) {
+        const double v = scalar[i];
+        if (isfinite(v)) { vmin = v; vmax = v; }
+    }
+    smin[tid] = vmin;
+    smax[tid] = vmax;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            smin[tid] = fmin(smin[tid], smin[tid + stride]);
+            smax[tid] = fmax(smax[tid], smax[tid + stride]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        blockMin[blockIdx.x] = smin[0];
+        blockMax[blockIdx.x] = smax[0];
+    }
+}
+
 __device__ unsigned char clamp_u8_dev_0337(double x) {
     x = fmin(255.0, fmax(0.0, x));
     return static_cast<unsigned char>(llrint(x));
@@ -409,7 +517,8 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         double clip,
                                         double gain,
                                         int smoothPasses,
-                                        CudaLiveField0337Diagnostics* diag) {
+                                        CudaLiveField0337Diagnostics* diag,
+                                        CudaLiveQuiver0337* quiver) {
     CudaLiveField0337Diagnostics local{};
     local.attempted = 1;
     local.nx = nx; local.ny = ny;
@@ -427,14 +536,15 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     const int cellBlocks = (ncell + threads - 1) / threads;
     const int particleBlocks = static_cast<int>((pv.n + threads - 1u) / threads);
     auto ta = std::chrono::steady_clock::now();
-    reset_field_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, ncell);
+    reset_field_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_count, w.d_ux, w.d_uy, w.d_scalar, ncell);
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
     local.resetSeconds = seconds_since_0337(ta);
     ta = std::chrono::steady_clock::now();
-    deposit_field_kernel_0337<<<particleBlocks, threads>>>(pv, nx, ny, params.Lx, params.Ly, w.d_mass, w.d_ux, w.d_uy, static_cast<unsigned char>(kParticleRoleFluid));
+    deposit_field_kernel_0337<<<particleBlocks, threads>>>(pv, nx, ny, params.Lx, params.Ly, w.d_mass, w.d_count, w.d_ux, w.d_uy, static_cast<unsigned char>(kParticleRoleFluid));
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
     local.depositSeconds = seconds_since_0337(ta);
     ta = std::chrono::steady_clock::now();
+    const auto finalizeStart0337 = ta;
     const int fcode = field_code_0337(field);
     if (fcode == 3) {
         vorticity_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, params.Lx, params.Ly);
@@ -451,7 +561,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                                                params.darcyBoxYMin, params.darcyBoxYMax,
                                                                params.darcyInterfaceWidth);
     } else {
-        finalize_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy, w.d_scalar, nx, ny, fcode);
+        finalize_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_mass, w.d_count, w.d_ux, w.d_uy, w.d_scalar, nx, ny, fcode);
     }
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
     for (int pass = 0; pass < std::max(0, smoothPasses); ++pass) {
@@ -459,10 +569,53 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
         if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
         std::swap(w.d_scalar, w.d_tmp);
     }
-    const double scale = clip > 0.0 ? clip : default_clip_0337(fcode);
+    if (quiver) {
+        quiver->rendered = 0;
+        if (quiver->enabled && quiver->nx > 0 && quiver->ny > 0) {
+            const int qCount = quiver->nx * quiver->ny;
+            if (!ensure_quiver_workspace_0364(w, qCount)) { if (diag) *diag = local; return false; }
+            const int qBlocks = (qCount + threads - 1) / threads;
+            sample_quiver_kernel_0364<<<qBlocks, threads>>>(w.d_mass, w.d_ux, w.d_uy,
+                                                            w.d_quiverUx, w.d_quiverUy,
+                                                            nx, ny, quiver->nx, quiver->ny);
+            if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
+            quiver->ux.resize(static_cast<std::size_t>(qCount));
+            quiver->uy.resize(static_cast<std::size_t>(qCount));
+            if (cudaMemcpy(quiver->ux.data(), w.d_quiverUx, static_cast<std::size_t>(qCount) * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) { if (diag) *diag = local; return false; }
+            if (cudaMemcpy(quiver->uy.data(), w.d_quiverUy, static_cast<std::size_t>(qCount) * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) { if (diag) *diag = local; return false; }
+            quiver->rendered = 1;
+        }
+    }
+
+    const auto minMaxStart0363 = std::chrono::steady_clock::now();
+    if (w.reduceBlocks > 0 && w.d_blockMin && w.d_blockMax) {
+        reduce_minmax_scalar_kernel_0363<<<w.reduceBlocks, threads>>>(w.d_scalar, w.d_blockMin, w.d_blockMax, ncell);
+        if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
+        if (cudaMemcpy(w.h_blockMin.data(), w.d_blockMin, static_cast<std::size_t>(w.reduceBlocks) * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess) { if (diag) *diag = local; return false; }
+        if (cudaMemcpy(w.h_blockMax.data(), w.d_blockMax, static_cast<std::size_t>(w.reduceBlocks) * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess) { if (diag) *diag = local; return false; }
+        double hmin = DBL_MAX;
+        double hmax = -DBL_MAX;
+        for (int b = 0; b < w.reduceBlocks; ++b) {
+            hmin = std::min(hmin, w.h_blockMin[static_cast<std::size_t>(b)]);
+            hmax = std::max(hmax, w.h_blockMax[static_cast<std::size_t>(b)]);
+        }
+        if (hmin != DBL_MAX && hmax != -DBL_MAX) {
+            local.minMaxComputed = 1;
+            local.fieldMin = hmin;
+            local.fieldMax = hmax;
+        }
+    }
+    local.minMaxSeconds = seconds_since_0337(minMaxStart0363);
+
+    double scale = clip > 0.0 ? clip : default_clip_0337(fcode);
+    if (clip <= 0.0 && fcode == 8) {
+        const double meanLiveN = ncell > 0 ? static_cast<double>(local.activeFluid) / static_cast<double>(ncell) : 1.0;
+        scale = std::max(1.0, 2.0 * meanLiveN);
+    }
+    local.fieldScale = scale;
     rgba_kernel_0337<<<cellBlocks, threads>>>(w.d_scalar, w.d_rgba, nx, ny, signed_field_0337(fcode) ? 1 : 0, colormap_code_0342(), scale, std::max(1.0e-12, gain), params.immersedSolidEnable ? 1 : 0, params.Lx, params.Ly, params.immersedSolidCx, params.immersedSolidCy, params.immersedSolidR);
     if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
-    local.finalizeSeconds = seconds_since_0337(ta);
+    local.finalizeSeconds = seconds_since_0337(finalizeStart0337);
     ta = std::chrono::steady_clock::now();
     rgba.resize(4u * static_cast<std::size_t>(ncell));
     if (cudaMemcpy(rgba.data(), w.d_rgba, rgba.size() * sizeof(unsigned char), cudaMemcpyDeviceToHost) != cudaSuccess) { if (diag) *diag = local; return false; }
@@ -475,7 +628,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
 
 #else
 
-bool cuda_live_field_render_shared_0337(std::vector<unsigned char>&, int, int, const SimulationParams&, const std::string&, double, double, int, CudaLiveField0337Diagnostics* diag) {
+bool cuda_live_field_render_shared_0337(std::vector<unsigned char>&, int, int, const SimulationParams&, const std::string&, double, double, int, CudaLiveField0337Diagnostics* diag, CudaLiveQuiver0337*) {
     if (diag) diag->attempted = 1;
     return false;
 }

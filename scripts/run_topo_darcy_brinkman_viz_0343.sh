@@ -369,7 +369,7 @@ if [[ ! -f "$LIVE_VIS_CONTROL_FILE" || "$LIVE_VIS_CONTROL_RESET" == "1" || "$LIV
 # Default location is repository root: livevis_control.kv.
 # Edit this file while running; the runner no longer overwrites it unless
 # LIVE_VIS_CONTROL_RESET=1 or the file does not exist.
-# Supported topo fields: chi, alpha, darcy_power, ux, uy, speed, vorticity, mass.
+# Supported topo fields: chi, alpha, darcy_power, ux, uy, speed, vorticity, mass, N/count.
 field = ${LIVE_VIS_FIELD}
 clip = ${LIVE_VIS_CLIP}
 gain = ${LIVE_VIS_GAIN}

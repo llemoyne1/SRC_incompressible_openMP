@@ -557,16 +557,65 @@ int main(int argc, char** argv) {
                     const int liveSmooth0337 = std::max(0, liveControls0337.smoothPasses);
                     std::vector<unsigned char> liveRgba0337;
                     mpcd::CudaLiveField0337Diagnostics liveDiag0337{};
-                    drawnByCudaField0337 = mpcd::cuda_live_field_render_shared_0337(liveRgba0337, liveNx0337, liveNy0337, params, liveField0337, liveClip0337, liveGain0337, liveSmooth0337, &liveDiag0337);
+                    mpcd::CudaLiveQuiver0337 cudaQuiver0337{};
+                    const bool liveQuiverEnabled0337 = (liveControls0337.quiverScale >= 0.0);
+                    if (liveQuiverEnabled0337) {
+                        cudaQuiver0337.enabled = 1;
+                        cudaQuiver0337.nx = std::max(1, liveControls0337.quiverNx);
+                        cudaQuiver0337.ny = std::max(1, liveControls0337.quiverNy);
+                    }
+                    drawnByCudaField0337 = mpcd::cuda_live_field_render_shared_0337(
+                        liveRgba0337, liveNx0337, liveNy0337, params, liveField0337, liveClip0337,
+                        liveGain0337, liveSmooth0337, &liveDiag0337,
+                        liveQuiverEnabled0337 ? &cudaQuiver0337 : nullptr);
                     if (drawnByCudaField0337) {
-                        liveVisualization0335.draw_rgba_frame(params, static_cast<std::uint64_t>(step), static_cast<double>(step) * params.dt, liveRgba0337, liveNx0337, liveNy0337, "cuda_field_0337");
+                        std::ostringstream liveSourceLabel0337;
+                        liveSourceLabel0337 << "cuda_field_0337";
+                        if (liveDiag0337.minMaxComputed) {
+                            liveSourceLabel0337 << " min=" << std::setprecision(3) << liveDiag0337.fieldMin
+                                                << " max=" << std::setprecision(3) << liveDiag0337.fieldMax
+                                                << " scale=" << std::setprecision(3) << liveDiag0337.fieldScale;
+                        }
+                        mpcd::LiveVisualization0335QuiverFrame liveQuiverFrame0337{};
+                        const mpcd::LiveVisualization0335QuiverFrame* liveQuiverPtr0337 = nullptr;
+                        if (cudaQuiver0337.rendered) {
+                            liveQuiverFrame0337.nx = cudaQuiver0337.nx;
+                            liveQuiverFrame0337.ny = cudaQuiver0337.ny;
+                            liveQuiverFrame0337.scale = liveControls0337.quiverScale;
+                            liveQuiverFrame0337.minSpeed = liveControls0337.quiverMinSpeed;
+                            liveQuiverFrame0337.ux = cudaQuiver0337.ux;
+                            liveQuiverFrame0337.uy = cudaQuiver0337.uy;
+                            liveQuiverPtr0337 = &liveQuiverFrame0337;
+                            const int liveQuiverSmooth0337 = (liveControls0337.quiverSmoothPasses >= 0) ?
+                                liveControls0337.quiverSmoothPasses : liveControls0337.smoothPasses;
+                            liveSourceLabel0337 << " quiver=" << cudaQuiver0337.nx << "x" << cudaQuiver0337.ny
+                                                << " qscale=" << std::setprecision(3) << liveControls0337.quiverScale
+                                                << " qsmooth=" << liveQuiverSmooth0337;
+                        }
+                        liveVisualization0335.draw_rgba_frame(params, static_cast<std::uint64_t>(step),
+                                                              static_cast<double>(step) * params.dt,
+                                                              liveRgba0337, liveNx0337, liveNy0337,
+                                                              liveSourceLabel0337.str(), liveQuiverPtr0337);
                     }
                     if (env_truthy_0260("SRC_LIVE_VIS_LOG_SOURCE")) {
                         std::cerr << "\r\033[K[livevis0335] step=" << step
                                   << " source=" << (drawnByCudaField0337 ? "cuda_field_0337" : "cuda_field_failed_fallback")
                                   << " particles=" << liveDiag0337.particles
-                                  << " activeFluid=" << liveDiag0337.activeFluid
-                                  << " total_s=" << liveDiag0337.totalSeconds
+                                  << " activeFluid=" << liveDiag0337.activeFluid;
+                        if (liveDiag0337.minMaxComputed) {
+                            std::cerr << " min=" << liveDiag0337.fieldMin
+                                      << " max=" << liveDiag0337.fieldMax
+                                      << " scale=" << liveDiag0337.fieldScale
+                                      << " minmax_s=" << liveDiag0337.minMaxSeconds;
+                        }
+                        if (cudaQuiver0337.rendered) {
+                            const int liveQuiverSmooth0337 = (liveControls0337.quiverSmoothPasses >= 0) ?
+                                liveControls0337.quiverSmoothPasses : liveControls0337.smoothPasses;
+                            std::cerr << " quiver=" << cudaQuiver0337.nx << "x" << cudaQuiver0337.ny
+                                      << " qscale=" << liveControls0337.quiverScale
+                                      << " qsmooth=" << liveQuiverSmooth0337;
+                        }
+                        std::cerr << " total_s=" << liveDiag0337.totalSeconds
                                   << std::flush;
                     }
                 }

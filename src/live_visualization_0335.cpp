@@ -50,7 +50,8 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
 void LiveVisualization0335::update(const ParticleState&, const SimulationParams&, std::uint64_t, double) {}
 void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64_t, double,
                                             const std::vector<unsigned char>&, int, int,
-                                            const std::string&) {}
+                                            const std::string&,
+                                            const LiveVisualization0335QuiverFrame*) {}
 
 } // namespace mpcd
 
@@ -131,7 +132,8 @@ unsigned char clamp_u8_0335(double x) {
     return static_cast<unsigned char>(v);
 }
 
-bool signed_field_0335(const std::string& field) {
+bool signed_field_0335(const std::string& rawField) {
+    const std::string field = lower_0335(trim_0335(rawField));
     return field == "ux" || field == "uy" || field == "vx" || field == "vy" ||
            field == "vorticity" || field == "omega" || field == "curl";
 }
@@ -179,6 +181,79 @@ void map_color_0342(double q, bool signedField, const std::string& colormap,
     }
 }
 
+void smooth_quiver_vectors_0365(std::vector<float>& qUx, std::vector<float>& qUy,
+                                int qNx, int qNy, int passes) {
+    if (qNx <= 0 || qNy <= 0 || passes <= 0) return;
+    const std::size_t n = static_cast<std::size_t>(qNx) * static_cast<std::size_t>(qNy);
+    if (qUx.size() < n || qUy.size() < n) return;
+    std::vector<float> tmpUx(n, 0.0f);
+    std::vector<float> tmpUy(n, 0.0f);
+    for (int pass = 0; pass < passes; ++pass) {
+        for (int iy = 0; iy < qNy; ++iy) {
+            for (int ix = 0; ix < qNx; ++ix) {
+                double sx = 0.0;
+                double sy = 0.0;
+                int cnt = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const int yy = iy + dy;
+                    if (yy < 0 || yy >= qNy) continue;
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int xx = ix + dx;
+                        if (xx < 0 || xx >= qNx) continue;
+                        const std::size_t kk = static_cast<std::size_t>(yy) * static_cast<std::size_t>(qNx) + static_cast<std::size_t>(xx);
+                        const double ux = static_cast<double>(qUx[kk]);
+                        const double uy = static_cast<double>(qUy[kk]);
+                        if (!std::isfinite(ux) || !std::isfinite(uy)) continue;
+                        sx += ux;
+                        sy += uy;
+                        ++cnt;
+                    }
+                }
+                const std::size_t k = static_cast<std::size_t>(iy) * static_cast<std::size_t>(qNx) + static_cast<std::size_t>(ix);
+                if (cnt > 0) {
+                    tmpUx[k] = static_cast<float>(sx / static_cast<double>(cnt));
+                    tmpUy[k] = static_cast<float>(sy / static_cast<double>(cnt));
+                } else {
+                    tmpUx[k] = 0.0f;
+                    tmpUy[k] = 0.0f;
+                }
+            }
+        }
+        qUx.swap(tmpUx);
+        qUy.swap(tmpUy);
+    }
+}
+
+void draw_quiver_lines_0364(int fbw, int fbh,
+                            int qNx, int qNy,
+                            const float* qUx, const float* qUy,
+                            double quiverScale,
+                            double quiverMinSpeed) {
+    if (fbw <= 0 || fbh <= 0 || qNx <= 0 || qNy <= 0 || qUx == nullptr || qUy == nullptr) return;
+    if (!(quiverScale >= 0.0) || !std::isfinite(quiverScale)) return;
+    const double minSpeed2 = std::max(0.0, quiverMinSpeed) * std::max(0.0, quiverMinSpeed);
+    glLineWidth(1.0f);
+    glColor3f(0.0f, 0.0f, 0.0f);
+    glBegin(GL_LINES);
+    for (int iy = 0; iy < qNy; ++iy) {
+        const double y = (static_cast<double>(iy) + 0.5) * static_cast<double>(fbh) / static_cast<double>(qNy);
+        for (int ix = 0; ix < qNx; ++ix) {
+            const int k = iy * qNx + ix;
+            const double ux = static_cast<double>(qUx[k]);
+            const double uy = static_cast<double>(qUy[k]);
+            if (!std::isfinite(ux) || !std::isfinite(uy)) continue;
+            const double speed2 = ux * ux + uy * uy;
+            if (speed2 <= minSpeed2) continue;
+            const double x = (static_cast<double>(ix) + 0.5) * static_cast<double>(fbw) / static_cast<double>(qNx);
+            const double dx = quiverScale * ux;
+            const double dy = quiverScale * uy;
+            glVertex2d(x - 0.5 * dx, y - 0.5 * dy);
+            glVertex2d(x + 0.5 * dx, y + 0.5 * dy);
+        }
+    }
+    glEnd();
+}
+
 } // namespace
 
 namespace mpcd {
@@ -193,6 +268,11 @@ struct LiveVisualization0335::Impl {
     int every = 10;
     int smoothPasses = 0;
     int windowScale = 1;
+    int quiverNx = 60;
+    int quiverNy = 32;
+    double quiverScale = -1.0;
+    double quiverMinSpeed = 0.0;
+    int quiverSmoothPasses = -1;
     double alpha = 0.08;
     double clip = -1.0;
     double quantile = 0.995;
@@ -207,6 +287,7 @@ struct LiveVisualization0335::Impl {
     std::vector<double> sumUx;
     std::vector<double> sumUy;
     std::vector<double> sumMass;
+    std::vector<double> sumCount;
     std::vector<double> scalar;
     std::vector<double> scalarTmp;
     std::vector<double> displayScalar;
@@ -217,6 +298,7 @@ struct LiveVisualization0335::Impl {
         sumUx.assign(n, 0.0);
         sumUy.assign(n, 0.0);
         sumMass.assign(n, 0.0);
+        sumCount.assign(n, 0.0);
         scalar.assign(n, 0.0);
         scalarTmp.assign(n, 0.0);
         displayScalar.assign(n, 0.0);
@@ -262,6 +344,11 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
     v.quantile = std::clamp(env_double_0335("SRC_LIVE_VIS_QUANTILE", env_double_0335("MPCD_LIVE_VIS_QUANTILE", 0.995)), 0.50, 1.0);
     v.gain = std::max(1.0e-12, env_double_0335("SRC_LIVE_VIS_GAIN", env_double_0335("MPCD_LIVE_VIS_GAIN", 1.0)));
     v.smoothPasses = std::max(0, env_int_0335("SRC_LIVE_VIS_SMOOTH_PASSES", env_int_0335("MPCD_LIVE_VIS_SMOOTH_PASSES", 1)));
+    v.quiverNx = std::max(1, env_int_0335("SRC_LIVE_VIS_QUIVER_NX", env_int_0335("MPCD_LIVE_VIS_QUIVER_NX", 60)));
+    v.quiverNy = std::max(1, env_int_0335("SRC_LIVE_VIS_QUIVER_NY", env_int_0335("MPCD_LIVE_VIS_QUIVER_NY", 32)));
+    v.quiverScale = env_double_0335("SRC_LIVE_VIS_QUIVER_SCALE", env_double_0335("MPCD_LIVE_VIS_QUIVER_SCALE", -1.0));
+    v.quiverMinSpeed = std::max(0.0, env_double_0335("SRC_LIVE_VIS_QUIVER_MIN_SPEED", env_double_0335("MPCD_LIVE_VIS_QUIVER_MIN_SPEED", 0.0)));
+    v.quiverSmoothPasses = env_int_0335("SRC_LIVE_VIS_QUIVER_SMOOTH_PASSES", env_int_0335("MPCD_LIVE_VIS_QUIVER_SMOOTH_PASSES", -1));
     v.controlFile = env_string_0335("SRC_LIVE_VIS_CONTROL_FILE", env_string_0335("MPCD_LIVE_VIS_CONTROL_FILE", ""));
     v.controlReloadEvery = std::max(1, env_int_0335("SRC_LIVE_VIS_CONTROL_EVERY", env_int_0335("MPCD_LIVE_VIS_CONTROL_EVERY", 1)));
     v.controlLog = env_truthy_0335("SRC_LIVE_VIS_CONTROL_LOG") || env_truthy_0335("MPCD_LIVE_VIS_CONTROL_LOG");
@@ -296,6 +383,11 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
               << " clip=" << v.clip
               << " quantile=" << v.quantile
               << " gain=" << v.gain
+              << " quiver=" << ((v.quiverScale >= 0.0) ? 1 : 0)
+              << " quiverGrid=" << v.quiverNx << "x" << v.quiverNy
+              << " quiverScale=" << v.quiverScale
+              << " quiverMinSpeed=" << v.quiverMinSpeed
+              << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
               << " controlFile=" << (v.controlFile.empty() ? "none" : v.controlFile) << '\n';
 }
 
@@ -319,6 +411,11 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     const double oldClip = v.clip;
     const double oldGain = v.gain;
     const int oldSmooth = v.smoothPasses;
+    const int oldQuiverNx = v.quiverNx;
+    const int oldQuiverNy = v.quiverNy;
+    const double oldQuiverScale = v.quiverScale;
+    const double oldQuiverMinSpeed = v.quiverMinSpeed;
+    const int oldQuiverSmoothPasses = v.quiverSmoothPasses;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -345,16 +442,42 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
                    key == "live_vis_smooth_passes" || key == "src_live_vis_smooth_passes") {
             int parsed = v.smoothPasses;
             if (parse_int_0335(value, parsed)) v.smoothPasses = std::max(0, parsed);
+        } else if (key == "quivernx" || key == "quiver_nx" || key == "live_vis_quiver_nx" || key == "src_live_vis_quiver_nx") {
+            int parsed = v.quiverNx;
+            if (parse_int_0335(value, parsed)) v.quiverNx = std::max(1, parsed);
+        } else if (key == "quiverny" || key == "quiver_ny" || key == "live_vis_quiver_ny" || key == "src_live_vis_quiver_ny") {
+            int parsed = v.quiverNy;
+            if (parse_int_0335(value, parsed)) v.quiverNy = std::max(1, parsed);
+        } else if (key == "quiverscale" || key == "quiver_scale" || key == "quivergain" || key == "quiver_gain" ||
+                   key == "live_vis_quiver_scale" || key == "src_live_vis_quiver_scale") {
+            double parsed = v.quiverScale;
+            if (parse_double_0335(value, parsed)) v.quiverScale = parsed;
+        } else if (key == "quiverminspeed" || key == "quiver_min_speed" ||
+                   key == "live_vis_quiver_min_speed" || key == "src_live_vis_quiver_min_speed") {
+            double parsed = v.quiverMinSpeed;
+            if (parse_double_0335(value, parsed)) v.quiverMinSpeed = std::max(0.0, parsed);
+        } else if (key == "quiversmoothpasses" || key == "quiver_smooth_passes" ||
+                   key == "live_vis_quiver_smooth_passes" || key == "src_live_vis_quiver_smooth_passes") {
+            int parsed = v.quiverSmoothPasses;
+            if (parse_int_0335(value, parsed)) v.quiverSmoothPasses = parsed;
         }
     }
 
-    if (v.controlLog && (v.field != oldField || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain || v.smoothPasses != oldSmooth)) {
+    if (v.controlLog && (v.field != oldField || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain ||
+                         v.smoothPasses != oldSmooth || v.quiverNx != oldQuiverNx || v.quiverNy != oldQuiverNy ||
+                         v.quiverScale != oldQuiverScale || v.quiverMinSpeed != oldQuiverMinSpeed ||
+                         v.quiverSmoothPasses != oldQuiverSmoothPasses)) {
         std::cerr << "\n[livevis0335] control reload step=" << step
                   << " field=" << v.field
                   << " colormap=" << v.colormap
                   << " clip=" << v.clip
                   << " gain=" << v.gain
                   << " smoothPasses=" << v.smoothPasses
+                  << " quiver=" << ((v.quiverScale >= 0.0) ? 1 : 0)
+                  << " quiverGrid=" << v.quiverNx << "x" << v.quiverNy
+                  << " quiverScale=" << v.quiverScale
+                  << " quiverMinSpeed=" << v.quiverMinSpeed
+                  << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
                   << " file=" << v.controlFile << '\n';
     }
 }
@@ -367,6 +490,11 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
         c.clip = impl_->clip;
         c.gain = impl_->gain;
         c.smoothPasses = impl_->smoothPasses;
+        c.quiverNx = impl_->quiverNx;
+        c.quiverNy = impl_->quiverNy;
+        c.quiverScale = impl_->quiverScale;
+        c.quiverMinSpeed = impl_->quiverMinSpeed;
+        c.quiverSmoothPasses = impl_->quiverSmoothPasses;
     }
     return c;
 }
@@ -384,6 +512,7 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     std::fill(v.sumUx.begin(), v.sumUx.end(), 0.0);
     std::fill(v.sumUy.begin(), v.sumUy.end(), 0.0);
     std::fill(v.sumMass.begin(), v.sumMass.end(), 0.0);
+    std::fill(v.sumCount.begin(), v.sumCount.end(), 0.0);
     std::fill(v.scalar.begin(), v.scalar.end(), 0.0);
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
@@ -404,22 +533,26 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(v.nx) + static_cast<std::size_t>(ix);
         const double m = state.mass.empty() ? 1.0 : state.mass[i];
         v.sumMass[c] += m;
+        v.sumCount[c] += 1.0;
         v.sumUx[c] += m * state.vx[i];
         v.sumUy[c] += m * state.vy[i];
     }
 
+    const std::string field = lower_0335(trim_0335(v.field));
     for (std::size_t c = 0; c < v.scalar.size(); ++c) {
         const double m = v.sumMass[c];
         const double ux = m > 0.0 ? v.sumUx[c] / m : 0.0;
         const double uy = m > 0.0 ? v.sumUy[c] / m : 0.0;
-        if (v.field == "ux" || v.field == "vx") v.scalar[c] = ux;
-        else if (v.field == "uy" || v.field == "vy") v.scalar[c] = uy;
-        else if (v.field == "speed") v.scalar[c] = std::sqrt(ux * ux + uy * uy);
-        else if (v.field == "mass" || v.field == "density") v.scalar[c] = m;
+        if (field == "ux" || field == "vx") v.scalar[c] = ux;
+        else if (field == "uy" || field == "vy") v.scalar[c] = uy;
+        else if (field == "speed") v.scalar[c] = std::sqrt(ux * ux + uy * uy);
+        else if (field == "n" || field == "count" || field == "population" ||
+                 field == "particle_count" || field == "cell_count") v.scalar[c] = v.sumCount[c];
+        else if (field == "mass" || field == "density") v.scalar[c] = m;
         else v.scalar[c] = m;
     }
 
-    if (v.field == "vorticity" || v.field == "omega" || v.field == "curl") {
+    if (field == "vorticity" || field == "omega" || field == "curl") {
         const double dx = params.Lx / static_cast<double>(std::max(1, v.nx));
         const double dy = params.Ly / static_cast<double>(std::max(1, v.ny));
         for (int iy = 0; iy < v.ny; ++iy) {
@@ -469,6 +602,17 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     for (std::size_t c = 0; c < v.scalar.size(); ++c) {
         v.displayScalar[c] = (v.alpha >= 1.0) ? v.scalar[c]
                            : (v.alpha * v.scalar[c] + (1.0 - v.alpha) * v.displayScalar[c]);
+    }
+
+    double fieldMin0363 = std::numeric_limits<double>::infinity();
+    double fieldMax0363 = -std::numeric_limits<double>::infinity();
+    bool haveMinMax0363 = false;
+    for (double x : v.displayScalar) {
+        if (std::isfinite(x)) {
+            fieldMin0363 = std::min(fieldMin0363, x);
+            fieldMax0363 = std::max(fieldMax0363, x);
+            haveMinMax0363 = true;
+        }
     }
 
     const bool signedField = signed_field_0335(v.field);
@@ -521,8 +665,13 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     }
 
     std::ostringstream title;
-    title << "SRC/MPCD live 0335a | " << v.field << " | cmap=" << v.colormap
-          << " | step " << step << " | scale=" << std::setprecision(3) << denom << " | t=" << std::fixed << std::setprecision(3) << time;
+    title << "SRC/MPCD live 0335a | " << v.field << " | cmap=" << v.colormap;
+    if (haveMinMax0363) {
+        title << " | min=" << std::setprecision(3) << fieldMin0363
+              << " max=" << std::setprecision(3) << fieldMax0363;
+    }
+    title << " | step " << step << " | scale=" << std::setprecision(3) << denom
+          << " | t=" << std::fixed << std::setprecision(3) << time;
     glfwSetWindowTitle(v.window, title.str().c_str());
 
     glfwMakeContextCurrent(v.window);
@@ -540,6 +689,29 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
                 static_cast<float>(fbh) / static_cast<float>(v.ny));
     glDrawPixels(v.nx, v.ny, GL_RGBA, GL_UNSIGNED_BYTE, v.rgba.data());
     glPixelZoom(1.0f, 1.0f);
+    if (v.quiverScale >= 0.0 && v.quiverNx > 0 && v.quiverNy > 0) {
+        const int qCount = v.quiverNx * v.quiverNy;
+        std::vector<float> qUx(static_cast<std::size_t>(qCount), 0.0f);
+        std::vector<float> qUy(static_cast<std::size_t>(qCount), 0.0f);
+        for (int qy = 0; qy < v.quiverNy; ++qy) {
+            int iy = static_cast<int>(std::floor((static_cast<double>(qy) + 0.5) * static_cast<double>(v.ny) / static_cast<double>(v.quiverNy)));
+            iy = std::clamp(iy, 0, v.ny - 1);
+            for (int qx = 0; qx < v.quiverNx; ++qx) {
+                int ix = static_cast<int>(std::floor((static_cast<double>(qx) + 0.5) * static_cast<double>(v.nx) / static_cast<double>(v.quiverNx)));
+                ix = std::clamp(ix, 0, v.nx - 1);
+                const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(v.nx) + static_cast<std::size_t>(ix);
+                const std::size_t k = static_cast<std::size_t>(qy) * static_cast<std::size_t>(v.quiverNx) + static_cast<std::size_t>(qx);
+                const double m = v.sumMass[c];
+                if (m > 0.0) {
+                    qUx[k] = static_cast<float>(v.sumUx[c] / m);
+                    qUy[k] = static_cast<float>(v.sumUy[c] / m);
+                }
+            }
+        }
+        const int qSmooth = (v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses;
+        smooth_quiver_vectors_0365(qUx, qUy, v.quiverNx, v.quiverNy, qSmooth);
+        draw_quiver_lines_0364(fbw, fbh, v.quiverNx, v.quiverNy, qUx.data(), qUy.data(), v.quiverScale, v.quiverMinSpeed);
+    }
 
     glfwSwapBuffers(v.window);
     glfwPollEvents();
@@ -549,7 +721,8 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
                                             const std::vector<unsigned char>& frame,
                                             int frameNx,
                                             int frameNy,
-                                            const std::string& sourceLabel) {
+                                            const std::string& sourceLabel,
+                                            const LiveVisualization0335QuiverFrame* quiver) {
     maybe_reload_controls(step);
     auto& v = *impl_;
     if (!v.enabled) return;
@@ -576,6 +749,19 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
     glPixelZoom(static_cast<float>(fbw) / static_cast<float>(frameNx), static_cast<float>(fbh) / static_cast<float>(frameNy));
     glDrawPixels(frameNx, frameNy, GL_RGBA, GL_UNSIGNED_BYTE, frame.data());
     glPixelZoom(1.0f, 1.0f);
+    if (quiver != nullptr && quiver->scale >= 0.0 && quiver->nx > 0 && quiver->ny > 0 &&
+        quiver->ux.size() >= static_cast<std::size_t>(quiver->nx * quiver->ny) &&
+        quiver->uy.size() >= static_cast<std::size_t>(quiver->nx * quiver->ny)) {
+        const int qSmooth = (v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses;
+        if (qSmooth > 0) {
+            std::vector<float> qUx = quiver->ux;
+            std::vector<float> qUy = quiver->uy;
+            smooth_quiver_vectors_0365(qUx, qUy, quiver->nx, quiver->ny, qSmooth);
+            draw_quiver_lines_0364(fbw, fbh, quiver->nx, quiver->ny, qUx.data(), qUy.data(), quiver->scale, quiver->minSpeed);
+        } else {
+            draw_quiver_lines_0364(fbw, fbh, quiver->nx, quiver->ny, quiver->ux.data(), quiver->uy.data(), quiver->scale, quiver->minSpeed);
+        }
+    }
     glfwSwapBuffers(v.window);
     glfwPollEvents();
 }

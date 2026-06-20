@@ -16,6 +16,20 @@ struct LiveVisualization0335RuntimeControls {
     double clip = -1.0;
     double gain = 1.0;
     int smoothPasses = 1;
+    int quiverNx = 60;
+    int quiverNy = 32;
+    double quiverScale = -1.0; // <0 disables quiver overlay
+    double quiverMinSpeed = 0.0;
+    int quiverSmoothPasses = -1; // <0 reuses smoothPasses
+};
+
+struct LiveVisualization0335QuiverFrame {
+    int nx = 0;
+    int ny = 0;
+    double scale = -1.0; // pixels per velocity unit; <0 disables overlay
+    double minSpeed = 0.0;
+    std::vector<float> ux;
+    std::vector<float> uy;
 };
 
 class LiveVisualization0335 {
@@ -39,7 +53,8 @@ public:
                          const std::vector<unsigned char>& rgba,
                          int nx,
                          int ny,
-                         const std::string& sourceLabel);
+                         const std::string& sourceLabel,
+                         const LiveVisualization0335QuiverFrame* quiver = nullptr);
 
 private:
     struct Impl;
