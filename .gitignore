@@ -64,3 +64,33 @@ dev_history/artifacts/
 
 # Timing files produced by /usr/bin/time wrappers.
 *.time
+
+# Local run/build artifacts
+runs/
+build/
+cmake-build-*/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+*.smpcd
+*.bin
+*.dat
+*.vtk
+*.vtu
+*.mp4
+*.avi
+*.gif
+*.log
+core
+core.*
