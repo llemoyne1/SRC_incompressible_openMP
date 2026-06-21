@@ -398,7 +398,7 @@ struct SimulationParams {
     // resamplingTargetCellMass, then to nTarget.
     bool cudaResamplingEmptyRefillEnable = false;
     double cudaResamplingEmptyRefillTargetFraction = 0.5;
-    std::string cudaResamplingEmptyRefillReference = "nTarget";
+    std::string cudaResamplingEmptyRefillReference = "ntarget";
     int cudaResamplingEmptyRefillGamma = 0;
     int cudaResamplingEmptyRefillMemoryMaxAge = 1000;
 

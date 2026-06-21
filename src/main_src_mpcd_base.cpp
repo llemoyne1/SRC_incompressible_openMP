@@ -686,6 +686,7 @@ int main(int argc, char** argv) {
             }
 
             if (params.dumpStateEvery > 0 && (step % params.dumpStateEvery == 0 || step == params.nSteps)) {
+                sync_cuda_resident_state_for_host_0260(state);
                 write_state_dump_0314(state_dump_name(params.outputDir, step), state, params);
             }
         }

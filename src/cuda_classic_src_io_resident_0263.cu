@@ -2463,6 +2463,10 @@ bool fused_src_thermostat_resident_io_0280c_requested() {
     return env_truthy_0263("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE");
 }
 
+bool q6_resident_io_fullface_0404_requested() {
+    return env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404");
+}
+
 bool thermostat_allowed_for_resident_io_0280c(const SimulationParams& params) {
     if (!params.thermostatEnable) return true;
     // 0280c: the original classic resident inlet/outlet gates were deliberately
@@ -2481,12 +2485,21 @@ bool thermostat_allowed_for_resident_io_0280c(const SimulationParams& params) {
 }
 
 bool supported_common_0263(const SimulationParams& params) {
-    if (!params.srcClassicCudaModeEnable) return false;
+    const bool q6ResidentIo0404 = q6_resident_io_fullface_0404_requested();
+    if (!params.srcClassicCudaModeEnable && !q6ResidentIo0404) return false;
     if (!hard_inlet_reservoir_enabled_0263(params)) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
-    if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
+    if (params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (q6ResidentIo0404) {
+        if (!params.projectionEnable || params.projectionBackend != "cuda") return false;
+        if (!env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_0400")) return false;
+        if (params.inletVelocitySpatialProfile != "uniform") return false;
+        if (!(params.openBoundaryOutletMode == "balanced_flux" || params.openBoundaryOutletMode == "balanced")) return false;
+    } else {
+        if (params.projectionEnable) return false;
+        if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
+    }
     if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||

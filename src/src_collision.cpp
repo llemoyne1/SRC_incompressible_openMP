@@ -741,6 +741,39 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
         return true;
     }
 
+    if (persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263", false) &&
+        !immersed_solid_enabled(params)) {
+        if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) {
+            return fail("fullface resident 0263 collision subset requires no open-boundary segments");
+        }
+        if (!fullDomainBounds) return fail("fullface resident 0263 requires full domain bounds");
+        const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
+        const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
+        const bool leftOutlet = is_outlet_boundary_mode(params.bcLeft);
+        const bool rightOutlet = is_outlet_boundary_mode(params.bcRight);
+        if (!((leftInlet && rightOutlet) || (leftOutlet && rightInlet))) {
+            return fail("fullface resident 0263 requires an inlet/outlet pair on left/right faces");
+        }
+        if (!face_has_wall_coupling(params.bcBottom, params) ||
+            !face_has_wall_coupling(params.bcTop, params)) {
+            return fail("fullface resident 0263 requires static wall coupling on bottom/top faces");
+        }
+        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params)) {
+            return fail("fullface resident 0263 does not support wall coupling on open left/right faces");
+        }
+        if (immersed_solid_enabled(params)) {
+            return fail("fullface resident 0263 collision subset without immersed collision is obstacle-free only");
+        }
+        if (std::abs(params.wallThermalNoise) > 1.0e-15) {
+            return fail("fullface resident 0263 requires wallThermalNoise=0 for deterministic equivalence");
+        }
+        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+            return fail("fullface resident 0263 invalid wall accommodation/mass");
+        }
+        if (reason != nullptr) *reason = "supported_fullface_io_0263";
+        return true;
+    }
+
     if (persistent_env_flag_enabled("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264", false)) {
         if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) {
             return fail("segmented resident 0264 requires open-boundary segments");
