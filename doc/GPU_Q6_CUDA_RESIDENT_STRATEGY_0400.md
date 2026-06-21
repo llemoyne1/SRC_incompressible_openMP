@@ -291,3 +291,78 @@ diagnostics: `q6Iterations=231`, `q6DivBeforeRms=0.37259930046569706`,
 Next box step: introduce the obstacle/mask part of `open_rect_obstacle_full`
 without changing the already validated full-face inlet/outlet flux treatment.
 
+## Update 0407: small-grid single-block CUDA CG
+
+Profiling confirmed that the resident CUDA Q6 slowdown on TG/Poiseuille-size
+grids was not a numerical convergence issue. CPU-Q6 and CUDA-Q6 used the same
+iteration count and produced matching residuals, but the CUDA CG loop was
+host-driven: every iteration copied scalar reductions such as `pAp` and `rrNew`
+from device to host. For a `128x64` grid, the useful work per kernel is too
+small to amortize hundreds of kernel launches and device-host synchronizations
+per Q6 step.
+
+A guarded small-grid path now keeps the CG iteration loop inside one CUDA block:
+`q6_cg_single_block_0407`. It performs the operator application, dot products,
+residual update, beta update, and the existing 25-iteration mean recentering in
+one resident kernel using shared-memory reductions. The CPU receives only the
+final iteration count, residual and status after the solve. This preserves the
+current finite-volume elliptic logic; it is not an FFT rewrite and does not alter
+the boundary-condition structure.
+
+Activation:
+
+- automatic for `grid.numCells <= 65536`;
+- override threshold with `MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_MAX_CELLS_0407`;
+- force on/off with `MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_0407=1` or `0`.
+
+The old host-driven CG remains available above the threshold or when forced off,
+because a single block is not the right execution model for very large grids.
+
+Validation/performance smoke on Poiseuille `128x64`, `GAMMA=20`, `STEPS=100`:
+
+- CPU-Q6 vs CUDA-Q6 with single-block CG: strict comparison PASS, 490 metrics,
+  0 failures; `q6Iterations=268`, `q6DivAfterProjectedFluxRms=5.9270266508e-11`.
+- CUDA-Q6 host-driven forced off/on comparison: CUDA-Q6 wall time decreased from
+  `5.756216527 s` to `2.446397867 s` for the 100-step run.
+- CPU-Q6 wall time for the same run was `1.253638774 s`; the CUDA path is still
+  slower than CPU on this grid, but the main host-synchronization bottleneck is
+  reduced by about `2.35x`.
+
+Regression smoke: TG `16x16/3` and box full-face inlet/outlet `32x16/20` both
+pass strict CPU-Q6 versus CUDA-Q6 comparison after this change.
+## Update 0408: Q6 warm-start test
+
+A guarded warm-start experiment was added for the small-grid single-block CUDA
+CG path. With `MPCD_CUDA_Q6_RESIDENT_WARM_START_0408=1`, the resident workspace
+keeps the previous Q6 potential `phi` and uses it as the initial CG guess on the
+next projection, provided the grid size and periodicity flags are unchanged. The
+first projection remains a zero-start solve, and the warm state is retained only
+after a converged single-block CUDA solve. The thermostat cell-moment pass no
+longer clears `phi`, because it does not use that array and doing so made the
+warm-start flag ineffective.
+
+The initialization computes the residual as `rhs - A phi_previous`, recenters
+`phi` after this residual construction to avoid an intra-block race, and uses
+`||rhs||` rather than `||r0||` as the relative-residual denominator. This keeps
+the convergence criterion comparable with the zero-start path.
+
+Validation result on Poiseuille `128x64`, `GAMMA=20`, `STEPS=100`, current script
+body force `(0.1,0.0)`:
+
+- zero-start single-block CUDA-Q6 remains the accepted reference: strict CPU-Q6
+  versus CUDA-Q6 comparison PASS, `q6Iterations=268`,
+  `q6DivAfterProjectedFluxRms≈5.927e-11`, CUDA-Q6 wall time about `2.4 s`;
+- warm-start CUDA-Q6 is not beneficial on this stochastic MPCD case: strict
+  CPU-Q6 versus CUDA-Q6 comparison FAIL on 4 Q6 diagnostics, `q6Iterations=271`,
+  `q6DivAfterProjectedFluxRms≈6.741e-11`, CUDA-Q6 wall time about `2.5 s`;
+- bulk physical metrics remain essentially unchanged (`meanVx` delta versus
+  CPU-Q6 about `2.6e-15`, `q6CorrectionVelocityRms` delta about `1.5e-14`), so
+  the issue is not a macroscopic field drift but an ineffective initial guess for
+  the elliptic solve.
+
+Conclusion: keep `MPCD_CUDA_Q6_RESIDENT_WARM_START_0408` disabled by default. On
+this validation case, the previous-step potential is not a useful CG initial
+guess, likely because the stochastic collision/thermostat step changes the RHS
+enough between projections that the warm residual does not move closer to the
+solution in the CG sense.
+

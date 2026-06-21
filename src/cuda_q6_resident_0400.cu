@@ -32,6 +32,26 @@ bool truthy_0400(const char* value) {
              s == "off" || s == "OFF" || s == "no" || s == "NO");
 }
 
+int env_int_0400(const char* name, int fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') return fallback;
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value) return fallback;
+    return static_cast<int>(parsed);
+}
+
+bool cuda_q6_single_block_cg_0407_enabled(int numCells) {
+    const char* forced = std::getenv("MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_0407");
+    if (forced != nullptr && *forced != '\0') return truthy_0400(forced);
+    const int threshold = env_int_0400("MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_MAX_CELLS_0407", 65536);
+    return threshold > 0 && numCells <= threshold;
+}
+
+bool cuda_q6_warm_start_0408_requested() {
+    return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_WARM_START_0408"));
+}
+
 void check_cuda_0400(cudaError_t err, const char* where) {
     if (err != cudaSuccess) {
         throw std::runtime_error(std::string("cuda_q6_resident_0400 ") + where + ": " +
@@ -135,6 +155,11 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> partial1;
     DeviceBuffer0400<double> partial2;
     DeviceBuffer0400<unsigned long long> counter;
+    bool warmPhiValid = false;
+    int warmNx = 0;
+    int warmNy = 0;
+    int warmPeriodicX = 0;
+    int warmPeriodicY = 0;
 
     void ensure(std::uint64_t particles, int numCells, int blocks) {
         cells.ensure_capacity(particles, numCells);
@@ -182,7 +207,8 @@ __global__ void q6_zero_cells_0400(CudaCellWorkspaceDeviceView cells,
                                    double* p,
                                    double* Ap,
                                    double* dux,
-                                   double* duy) {
+                                   double* duy,
+                                   int resetPhi) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int c = idx; c < cells.numCells; c += stride) {
@@ -193,7 +219,7 @@ __global__ void q6_zero_cells_0400(CudaCellWorkspaceDeviceView cells,
         cells.cellUx[c] = 0.0;
         cells.cellUy[c] = 0.0;
         rhs[c] = 0.0;
-        phi[c] = 0.0;
+        if (resetPhi) phi[c] = 0.0;
         r[c] = 0.0;
         p[c] = 0.0;
         Ap[c] = 0.0;
@@ -786,6 +812,241 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
     }
 }
 
+
+__global__ void q6_cg_single_block_0407(double* rhs,
+                                        double* phi,
+                                        double* r,
+                                        double* p,
+                                        double* Ap,
+                                        double* outIterations,
+                                        double* outResidualRel,
+                                        double* outStatus,
+                                        int nx,
+                                        int ny,
+                                        int n,
+                                        int maxIterations,
+                                        double tolerance,
+                                        double rhsMean,
+                                        double invDx2,
+                                        double invDy2,
+                                        int periodicX,
+                                        int periodicY,
+                                        int warmStart) {
+    extern __shared__ double sh[];
+    __shared__ double rr;
+    __shared__ double rrNew;
+    __shared__ double rhsNormSafe;
+    __shared__ double pAp;
+    __shared__ double residualRel;
+    __shared__ double phiMean;
+    __shared__ double rMean;
+    __shared__ int iterations;
+    __shared__ int status;
+    __shared__ int done;
+
+    const int tid = threadIdx.x;
+    double local = 0.0;
+    if (warmStart) {
+        for (int c = tid; c < n; c += blockDim.x) local += phi[c];
+        sh[tid] = local;
+        __syncthreads();
+        for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+            if (tid < offset) sh[tid] += sh[tid + offset];
+            __syncthreads();
+        }
+        if (tid == 0) phiMean = sh[0] / static_cast<double>(n);
+        __syncthreads();
+    } else if (tid == 0) {
+        phiMean = 0.0;
+    }
+    __syncthreads();
+
+    local = 0.0;
+    double localRhsNorm = 0.0;
+    for (int c = tid; c < n; c += blockDim.x) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double phiOld = warmStart ? phi[c] : 0.0;
+        double aPhi = 0.0;
+        if (warmStart) {
+            if (periodicX || ix > 0) {
+                const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1));
+                aPhi += (phiOld - phi[west]) * invDx2;
+            }
+            if (periodicX || ix < nx - 1) {
+                const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : (ix + 1));
+                aPhi += (phiOld - phi[east]) * invDx2;
+            }
+            if (periodicY || iy > 0) {
+                const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix;
+                aPhi += (phiOld - phi[south]) * invDy2;
+            }
+            if (periodicY || iy < ny - 1) {
+                const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : (iy + 1)) * nx + ix;
+                aPhi += (phiOld - phi[north]) * invDy2;
+            }
+        } else {
+            phi[c] = 0.0;
+        }
+        const double v = rhs[c] - rhsMean;
+        rhs[c] = v;
+        const double rv = warmStart ? (v - aPhi) : v;
+        r[c] = rv;
+        p[c] = rv;
+        local += rv * rv;
+        localRhsNorm += v * v;
+    }
+    sh[tid] = local;
+    sh[blockDim.x + tid] = localRhsNorm;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            sh[tid] += sh[tid + offset];
+            sh[blockDim.x + tid] += sh[blockDim.x + tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        rr = sh[0];
+        const double rhsNorm = sqrt(fmax(0.0, sh[blockDim.x]));
+        rhsNormSafe = fmax(rhsNorm, 1.0e-300);
+        residualRel = 0.0;
+        iterations = 0;
+        status = (rhsNorm <= tolerance) ? 1 : 0;
+        done = (status == 1 || maxIterations <= 0) ? 1 : 0;
+    }
+    __syncthreads();
+    if (warmStart) {
+        for (int c = tid; c < n; c += blockDim.x) {
+            phi[c] -= phiMean;
+        }
+    }
+    __syncthreads();
+
+    for (int it = 0; it < maxIterations; ++it) {
+        if (done) break;
+        local = 0.0;
+        for (int c = tid; c < n; c += blockDim.x) {
+            const int ix = c % nx;
+            const int iy = c / nx;
+            const double center = p[c];
+            double value = 0.0;
+            if (periodicX || ix > 0) {
+                const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1));
+                value += (center - p[west]) * invDx2;
+            }
+            if (periodicX || ix < nx - 1) {
+                const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : (ix + 1));
+                value += (center - p[east]) * invDx2;
+            }
+            if (periodicY || iy > 0) {
+                const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix;
+                value += (center - p[south]) * invDy2;
+            }
+            if (periodicY || iy < ny - 1) {
+                const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : (iy + 1)) * nx + ix;
+                value += (center - p[north]) * invDy2;
+            }
+            Ap[c] = value;
+            local += center * value;
+        }
+        sh[tid] = local;
+        __syncthreads();
+        for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+            if (tid < offset) sh[tid] += sh[tid + offset];
+            __syncthreads();
+        }
+        if (tid == 0) {
+            pAp = sh[0];
+            if (!(pAp > 0.0) || !isfinite(pAp)) {
+                status = -1;
+                done = 1;
+            }
+        }
+        __syncthreads();
+        if (done) break;
+
+        const double alpha = rr / pAp;
+        local = 0.0;
+        for (int c = tid; c < n; c += blockDim.x) {
+            phi[c] += alpha * p[c];
+            const double rv = r[c] - alpha * Ap[c];
+            r[c] = rv;
+            local += rv * rv;
+        }
+        sh[tid] = local;
+        __syncthreads();
+        for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+            if (tid < offset) sh[tid] += sh[tid + offset];
+            __syncthreads();
+        }
+        if (tid == 0) {
+            rrNew = sh[0];
+            iterations = it + 1;
+            residualRel = sqrt(fmax(0.0, rrNew)) / rhsNormSafe;
+            if (residualRel <= tolerance) {
+                rr = rrNew;
+                status = 1;
+                done = 1;
+            }
+        }
+        __syncthreads();
+        if (done) break;
+
+        if (((it + 1) % 25) == 0) {
+            double sumPhi = 0.0;
+            double sumR = 0.0;
+            for (int c = tid; c < n; c += blockDim.x) {
+                sumPhi += phi[c];
+                sumR += r[c];
+            }
+            sh[tid] = sumPhi;
+            sh[blockDim.x + tid] = sumR;
+            __syncthreads();
+            for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+                if (tid < offset) {
+                    sh[tid] += sh[tid + offset];
+                    sh[blockDim.x + tid] += sh[blockDim.x + tid + offset];
+                }
+                __syncthreads();
+            }
+            if (tid == 0) {
+                phiMean = sh[0] / static_cast<double>(n);
+                rMean = sh[blockDim.x] / static_cast<double>(n);
+            }
+            __syncthreads();
+            local = 0.0;
+            for (int c = tid; c < n; c += blockDim.x) {
+                phi[c] -= phiMean;
+                const double rv = r[c] - rMean;
+                r[c] = rv;
+                local += rv * rv;
+            }
+            sh[tid] = local;
+            __syncthreads();
+            for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+                if (tid < offset) sh[tid] += sh[tid + offset];
+                __syncthreads();
+            }
+            if (tid == 0) rrNew = sh[0];
+            __syncthreads();
+        }
+
+        const double beta = rrNew / fmax(rr, 1.0e-300);
+        for (int c = tid; c < n; c += blockDim.x) {
+            p[c] = r[c] + beta * p[c];
+        }
+        if (tid == 0) rr = rrNew;
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        outIterations[0] = static_cast<double>(iterations);
+        outResidualRel[0] = residualRel;
+        outStatus[0] = static_cast<double>(status);
+    }
+}
+
 double reduce_host_sum_0400(double* devicePartials, int blocks) {
     std::vector<double> host(static_cast<std::size_t>(blocks), 0.0);
     check_cuda_0400(cudaMemcpy(host.data(), devicePartials,
@@ -931,10 +1192,18 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryFluxBalance / area : 0.0;
     }
 
+    const bool singleBlockCg0407 = cuda_q6_single_block_cg_0407_enabled(grid.numCells);
+    const bool warmRequested0408 = cuda_q6_warm_start_0408_requested();
+    const bool warmUsable0408 = warmRequested0408 && singleBlockCg0407 && ws.warmPhiValid &&
+                                ws.warmNx == grid.Nx && ws.warmNy == grid.Ny &&
+                                ws.warmPeriodicX == periodicX && ws.warmPeriodicY == periodicY;
+    const int resetPhi0408 = warmUsable0408 ? 0 : 1;
+
     check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)), "counter zero");
     const auto tDeposit = Clock0400::now();
     q6_zero_cells_0400<<<cellBlocks, threads>>>(cells, ws.rhs.data(), ws.phi.data(), ws.r.data(),
-                                                ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data());
+                                                ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data(),
+                                                resetPhi0408);
     check_cuda_0400(cudaGetLastError(), "zero cells launch");
     q6_zero_particle_cell_ids_0400<<<particleBlocks, threads>>>(cells, nParticles);
     check_cuda_0400(cudaGetLastError(), "zero particle cell ids launch");
@@ -961,6 +1230,35 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     diag.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
     diag.divBeforeRms = std::sqrt(divSq / static_cast<double>(grid.numCells));
     const double rhsMean = rhsSum / static_cast<double>(grid.numCells);
+    const double tol = std::max(0.0, params.projectionTolerance);
+    const double invDx2 = 1.0 / (dx * dx);
+    const double invDy2 = 1.0 / (dy * dy);
+
+    if (singleBlockCg0407) {
+        constexpr int cgThreads0407 = 256;
+        const std::size_t cgShared0407 = 2u * static_cast<std::size_t>(cgThreads0407) * sizeof(double);
+        q6_cg_single_block_0407<<<1, cgThreads0407, cgShared0407>>>(
+            ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(), ws.Ap.data(),
+            ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+            grid.Nx, grid.Ny, grid.numCells, params.projectionMaxIterations, tol, rhsMean,
+            invDx2, invDy2, periodicX, periodicY, warmUsable0408 ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(), "single-block cg launch");
+        double cgIterations = 0.0;
+        double cgResidualRel = 0.0;
+        double cgStatus = 0.0;
+        check_cuda_0400(cudaMemcpy(&cgIterations, ws.partial0.data(), sizeof(double), cudaMemcpyDeviceToHost),
+                        "copy single-block cg iterations");
+        check_cuda_0400(cudaMemcpy(&cgResidualRel, ws.partial1.data(), sizeof(double), cudaMemcpyDeviceToHost),
+                        "copy single-block cg residual");
+        check_cuda_0400(cudaMemcpy(&cgStatus, ws.partial2.data(), sizeof(double), cudaMemcpyDeviceToHost),
+                        "copy single-block cg status");
+        diag.iterations = static_cast<int>(std::llround(cgIterations));
+        diag.residualRel = cgResidualRel;
+        diag.converged = cgStatus > 0.5;
+        if (cgStatus < -0.5) {
+            diag.reason = "non-positive CG pAp";
+        }
+    } else {
     q6_init_cg_0400<<<cellBlocks, threads>>>(ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
                                              rhsMean, grid.numCells);
     check_cuda_0400(cudaGetLastError(), "init cg launch");
@@ -1022,6 +1320,16 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         q6_update_p_0400<<<cellBlocks, threads>>>(ws.p.data(), ws.r.data(), beta, grid.numCells);
         check_cuda_0400(cudaGetLastError(), "update p launch");
         rr = rrNew;
+    }
+    }
+    if (warmRequested0408 && singleBlockCg0407 && diag.converged) {
+        ws.warmPhiValid = true;
+        ws.warmNx = grid.Nx;
+        ws.warmNy = grid.Ny;
+        ws.warmPeriodicX = periodicX;
+        ws.warmPeriodicY = periodicY;
+    } else {
+        ws.warmPhiValid = false;
     }
     diag.solveSeconds = seconds_since_0400(tSolve);
     if (!diag.converged && params.projectionMaxIterations <= 0) {
@@ -1146,7 +1454,8 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
                                cudaMemcpyHostToDevice),
                     "thermostat collision cellId upload");
     q6_zero_cells_0400<<<cellBlocks, threads>>>(cells, ws.rhs.data(), ws.phi.data(), ws.r.data(),
-                                                ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data());
+                                                ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data(),
+                                                0);
     check_cuda_0400(cudaGetLastError(), "thermostat zero cell moments launch");
     check_cuda_0400(cudaMemset(cells.cellKinetic, 0, static_cast<std::size_t>(grid.numCells) * sizeof(double)),
                     "thermostat kinetic zero");
