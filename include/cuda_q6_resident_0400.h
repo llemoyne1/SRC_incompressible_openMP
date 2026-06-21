@@ -123,9 +123,10 @@ inline Q6ProjectionDiagnostics q6_projection_diagnostics_from_cuda_resident_0400
     q6.openBoundaryFluxYHigh = cudaDiag.openBoundaryFluxYHigh;
     q6.openBoundaryFluxBalance = cudaDiag.openBoundaryFluxBalance;
     q6.openBoundaryMeanDivergence = cudaDiag.openBoundaryMeanDivergence;
-    q6.profile.seconds[0] = cudaDiag.depositSeconds;
-    q6.profile.seconds[1] = cudaDiag.solveSeconds;
-    q6.profile.seconds[2] = cudaDiag.applySeconds;
+    // Map CUDA resident timing buckets onto the generic Q6 profile phase names.
+    q6.profile.seconds[1] = cudaDiag.depositSeconds;   // q6_deposit_cell_velocity
+    q6.profile.seconds[8] = cudaDiag.solveSeconds;     // q6_project_face_field / CG solve
+    q6.profile.seconds[17] = cudaDiag.applySeconds;    // q6_apply_particle_velocity_correction
     return q6;
 }
 

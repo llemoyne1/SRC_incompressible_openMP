@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 0405 -- autonomous TG comparison with explicit simulation parameters.
-# Runs CPU-Q6 reference, resident SRC classic, and resident SRC/Q6 CUDA.
+# Runs SRC CUDA classic, SRC+Q6 CPU, and SRC+Q6 CUDA.
 # Parameters can be changed by environment variables; PARAM_OVERRIDES_FILE or
 # PARAM_OVERRIDES_TEXT can append arbitrary .kv keys at the end of each params file.
 
@@ -61,7 +61,7 @@ THERMOSTAT_MIN_PARTICLES=${THERMOSTAT_MIN_PARTICLES:-3}
 FORCE_BUILD=${FORCE_BUILD:-0}
 BUILD_IF_STALE=${BUILD_IF_STALE:-1}
 LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-${SRC_LIVE_VIS_ENABLE:-1}}
-LIVE_VIS_RUN=${LIVE_VIS_RUN:-cuda_q6}
+LIVE_VIS_RUN=${LIVE_VIS_RUN:-all}
 RESAMPLING_ENABLE=${RESAMPLING_ENABLE:-false}
 PARAM_OVERRIDES_FILE=${PARAM_OVERRIDES_FILE:-}
 PARAM_OVERRIDES_TEXT=${PARAM_OVERRIDES_TEXT:-}
@@ -233,30 +233,31 @@ run_case_0405() {
   write_validation_summary_0405 "$out_dir" "$name"
 }
 
-run_case_0405 cpu_q6 true cpu false cpu
-run_case_0405 src false cpu true src
-run_case_0405 cuda_q6 true cuda false cuda_q6
+run_case_0405 src_cuda_classic false cpu true src_cuda_classic
+run_case_0405 src_q6_cpu true cpu false src_q6_cpu
+run_case_0405 src_q6_cuda true cuda false src_q6_cuda
 
-python3 scripts/compare_validation_mono_config_0162.py --origin "$RUN_ROOT/cpu_q6" --optimized "$RUN_ROOT/cuda_q6" --out "$ART_DIR/cpu_q6_vs_cuda_q6.csv" --summary-out "$ART_DIR/cpu_q6_vs_cuda_q6_summary.csv"
 set +e
-python3 scripts/compare_validation_mono_config_0162.py --origin "$RUN_ROOT/src" --optimized "$RUN_ROOT/cuda_q6" --out "$ART_DIR/src_vs_cuda_q6.csv" --summary-out "$ART_DIR/src_vs_cuda_q6_summary.csv"
+python3 scripts/compare_validation_mono_config_0162.py --origin "$RUN_ROOT/src_q6_cpu" --optimized "$RUN_ROOT/src_q6_cuda" --out "$ART_DIR/src_q6_cpu_vs_src_q6_cuda.csv" --summary-out "$ART_DIR/src_q6_cpu_vs_src_q6_cuda_summary.csv"
+cpu_cmp_rc=$?
+python3 scripts/compare_validation_mono_config_0162.py --origin "$RUN_ROOT/src_cuda_classic" --optimized "$RUN_ROOT/src_q6_cuda" --out "$ART_DIR/src_cuda_classic_vs_src_q6_cuda.csv" --summary-out "$ART_DIR/src_cuda_classic_vs_src_q6_cuda_summary.csv"
 src_cmp_rc=$?
 set -e
-python3 - "$RUN_ROOT/cuda_q6/summary_runtime.csv" "$ART_DIR/cuda_q6_metrics.txt" <<'METRICPY'
+python3 - "$RUN_ROOT/src_q6_cuda/summary_runtime.csv" "$ART_DIR/src_q6_cuda_metrics.txt" <<'METRICPY'
 import csv, math, sys
 summary, out = sys.argv[1:3]
 with open(summary, newline="") as f: rows = list(csv.DictReader(f))
-if not rows: raise SystemExit("empty CUDA Q6 summary")
+if not rows: raise SystemExit("empty SRC+Q6 CUDA summary")
 r = rows[-1]
-if int(float(r.get("q6Applied", "0"))) != 1 or int(float(r.get("q6Converged", "0"))) != 1: raise SystemExit("CUDA Q6 did not apply and converge")
+if int(float(r.get("q6Applied", "0"))) != 1 or int(float(r.get("q6Converged", "0"))) != 1: raise SystemExit("SRC+Q6 CUDA did not apply and converge")
 div = float(r.get("q6DivAfterProjectedFluxRms", "nan"))
-if not math.isfinite(div) or div > 1.0e-8: raise SystemExit(f"CUDA Q6 projected divergence too large: {div}")
+if not math.isfinite(div) or div > 1.0e-8: raise SystemExit(f"SRC+Q6 CUDA projected divergence too large: {div}")
 lines = [f"q6Iterations={r.get('q6Iterations')}", f"q6DivBeforeRms={r.get('q6DivBeforeRms')}", f"q6DivAfterProjectedFluxRms={div:.17g}", f"Np={r.get('Np')}", f"meanN={r.get('meanN')}", f"stdN={r.get('stdN')}"]
 open(out, "w").write("\n".join(lines) + "\n")
 print("[0405-tg-autonomous] " + " ".join(lines[:3]))
 METRICPY
 
-echo "[0405-tg-autonomous] strict CPU-Q6 vs CUDA-Q6 summary: $ART_DIR/cpu_q6_vs_cuda_q6_summary.csv"
-echo "[0405-tg-autonomous] physical SRC vs CUDA-Q6 summary: $ART_DIR/src_vs_cuda_q6_summary.csv (rc=$src_cmp_rc, differences expected)"
-echo "[0405-tg-autonomous] metrics: $ART_DIR/cuda_q6_metrics.txt"
+echo "[0405-tg-autonomous] SRC+Q6 CPU vs SRC+Q6 CUDA summary: $ART_DIR/src_q6_cpu_vs_src_q6_cuda_summary.csv (rc=$cpu_cmp_rc)"
+echo "[0405-tg-autonomous] SRC CUDA classic vs SRC+Q6 CUDA summary: $ART_DIR/src_cuda_classic_vs_src_q6_cuda_summary.csv (rc=$src_cmp_rc, differences expected)"
+echo "[0405-tg-autonomous] metrics: $ART_DIR/src_q6_cuda_metrics.txt"
 echo "[0405-tg-autonomous] dumps/root: $RUN_ROOT"
