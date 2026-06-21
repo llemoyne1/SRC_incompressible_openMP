@@ -4,6 +4,7 @@
 
 #include "cuda_cell_workspace.h"
 #include "cuda_shared_particle_state_0251.h"
+#include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
 
@@ -51,6 +52,19 @@ bool cuda_q6_single_block_cg_0407_enabled(int numCells) {
 bool cuda_q6_warm_start_0408_requested() {
     return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_WARM_START_0408"));
 }
+
+bool cuda_q6_segmented_io_0409_requested() {
+    return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409"));
+}
+
+struct Q6SegmentedIo0409 {
+    int enabled = 0;
+    int count = 0;
+    double sMin[kOpenBoundaryMaxSegments]{};
+    double sMax[kOpenBoundaryMaxSegments]{};
+    double xLowFlux[kOpenBoundaryMaxSegments]{};
+};
+
 
 void check_cuda_0400(cudaError_t err, const char* where) {
     if (err != cudaSuccess) {
@@ -107,6 +121,59 @@ void q6_open_x_fullface_flux_0404(const SimulationParams& params,
         xLowFlux = 0.0;
         xHighFlux = 0.0;
     }
+}
+
+bool q6_wall_like_0409(const std::string& mode) {
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
+}
+
+bool q6_open_x_segmented_left_0409_supported(const SimulationParams& params) {
+    if (!cuda_q6_segmented_io_0409_requested()) return false;
+    if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) return false;
+    if (static_cast<int>(params.openBoundarySegments.size()) != params.openBoundarySegmentCount) return false;
+    if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
+    if (!q6_wall_like_0409(params.bcLeft) || !q6_wall_like_0409(params.bcRight) ||
+        !q6_wall_like_0409(params.bcBottom) || !q6_wall_like_0409(params.bcTop)) return false;
+    if (params.inletVelocitySpatialProfile != "uniform") return false;
+    if (!(params.openBoundaryOutletMode == "neumann" ||
+          params.openBoundaryOutletMode == "balanced_flux" ||
+          params.openBoundaryOutletMode == "balanced")) return false;
+    bool hasInlet = false;
+    bool hasOutlet = false;
+    for (const OpenBoundarySegment& seg : params.openBoundarySegments) {
+        if (seg.face != "left") return false;
+        if (!(seg.sMin >= 0.0 && seg.sMax <= 1.0 && seg.sMax >= seg.sMin)) return false;
+        if (open_boundary_segment_is_inlet(seg)) hasInlet = true;
+        else if (open_boundary_segment_is_outlet(seg)) hasOutlet = true;
+        else return false;
+        if (!(std::isfinite(seg.ux) && std::isfinite(seg.uy))) return false;
+        if (std::abs(seg.uy) > 1.0e-15) return false;
+    }
+    return hasInlet && hasOutlet;
+}
+
+Q6SegmentedIo0409 q6_make_segmented_left_0409(const SimulationParams& params, double time) {
+    Q6SegmentedIo0409 cfg{};
+    if (!q6_open_x_segmented_left_0409_supported(params)) return cfg;
+    const double ramp = inlet_velocity_ramp_factor_0400(params, time);
+    cfg.enabled = 1;
+    cfg.count = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
+    for (int k = 0; k < cfg.count; ++k) {
+        const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
+        cfg.sMin[k] = seg.sMin;
+        cfg.sMax[k] = seg.sMax;
+        cfg.xLowFlux[k] = ramp * seg.ux;
+    }
+    return cfg;
+}
+
+double q6_segmented_xlow_flux_integral_0409(const Q6SegmentedIo0409& cfg, double ly) {
+    if (!cfg.enabled || !(ly > 0.0)) return 0.0;
+    double flux = 0.0;
+    for (int k = 0; k < cfg.count; ++k) {
+        flux += cfg.xLowFlux[k] * std::max(0.0, cfg.sMax[k] - cfg.sMin[k]) * ly;
+    }
+    return flux;
 }
 
 template <typename T>
@@ -317,6 +384,17 @@ __global__ void q6_finalize_cells_0400(CudaCellWorkspaceDeviceView cells,
     }
 }
 
+__device__ double q6_xlow_flux_for_y_0409(const Q6SegmentedIo0409& cfg, int iy, int ny, double fallback) {
+    if (!cfg.enabled || ny <= 0) return fallback;
+    const double yS = (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+    for (int k = 0; k < cfg.count; ++k) {
+        if (yS >= cfg.sMin[k] && yS <= cfg.sMax[k]) {
+            return cfg.xLowFlux[k];
+        }
+    }
+    return 0.0;
+}
+
 __global__ void q6_build_rhs_and_stats_0400(CudaCellWorkspaceDeviceView cells,
                                            double* rhs,
                                            double* partialSum,
@@ -329,7 +407,8 @@ __global__ void q6_build_rhs_and_stats_0400(CudaCellWorkspaceDeviceView cells,
                                            int periodicX,
                                            int periodicY,
                                            double xLowFlux,
-                                           double xHighFlux) {
+                                           double xHighFlux,
+                                           Q6SegmentedIo0409 segmentedIo) {
     extern __shared__ double sh[];
     double* sh0 = sh;
     double* sh1 = sh + blockDim.x;
@@ -345,7 +424,8 @@ __global__ void q6_build_rhs_and_stats_0400(CudaCellWorkspaceDeviceView cells,
         const int iy = c / nx;
         const int west = (periodicX || ix > 0) ? (iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1))) : c;
         const int south = (periodicY || iy > 0) ? ((periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix) : c;
-        const double fxWest = (periodicX || ix > 0) ? cells.cellUx[west] : xLowFlux;
+        const double localXLowFlux = q6_xlow_flux_for_y_0409(segmentedIo, iy, ny, xLowFlux);
+        const double fxWest = (periodicX || ix > 0) ? cells.cellUx[west] : localXLowFlux;
         const double fxEastBefore = cells.cellUx[c];
         const double fxEastSolve = (periodicX || ix < nx - 1) ? cells.cellUx[c] : xHighFlux;
         const double fySouth = (periodicY || iy > 0) ? cells.cellUy[south] : 0.0;
@@ -773,7 +853,8 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
                                                    double dy,
                                                    int periodicX,
                                                    int periodicY,
-                                                   double xLowFlux) {
+                                                   double xLowFlux,
+                                                   Q6SegmentedIo0409 segmentedIo) {
     extern __shared__ double sh[];
     double* shSq = sh;
     double* shMax = sh + blockDim.x;
@@ -789,7 +870,8 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
         const int west = (periodicX || ix > 0) ? (iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1))) : c;
         const int south = (periodicY || iy > 0) ? ((periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix) : c;
         const double fx = cells.cellUx[c] + dux[c];
-        const double fxW = (periodicX || ix > 0) ? (cells.cellUx[west] + dux[west]) : xLowFlux;
+        const double localXLowFlux = q6_xlow_flux_for_y_0409(segmentedIo, iy, ny, xLowFlux);
+        const double fxW = (periodicX || ix > 0) ? (cells.cellUx[west] + dux[west]) : localXLowFlux;
         const double fy = cells.cellUy[c] + duy[c];
         const double fyS = (periodicY || iy > 0) ? (cells.cellUy[south] + duy[south]) : 0.0;
         const double div = (fx - fxW) / dx + (fy - fyS) / dy;
@@ -1092,7 +1174,8 @@ bool supported_subset_0400(const SimulationParams& params,
         (params.bcBottom == "solid" || params.bcBottom == "specular" || params.bcBottom == "bounceback") &&
         (params.bcTop == "solid" || params.bcTop == "specular" || params.bcTop == "bounceback");
     const bool openXFullface = q6_open_x_fullface_0404_supported(params);
-    if (!periodicXY && !channelXY && !openXFullface) {
+    const bool openXSegmented0409 = q6_open_x_segmented_left_0409_supported(params);
+    if (!periodicXY && !channelXY && !openXFullface && !openXSegmented0409) {
         *reason = "unsupported boundary condition";
         return false;
     }
@@ -1100,9 +1183,9 @@ bool supported_subset_0400(const SimulationParams& params,
         *reason = "immersed solid or projection mask requested";
         return false;
     }
-    if (params.openBoundarySegmentsEnable || params.closedCapacityResponseEnable ||
-        params.closedCapacityVirialKickEnable) {
-        *reason = "segmented open boundary or closed-capacity coupling requested";
+    if ((params.openBoundarySegmentsEnable && !openXSegmented0409) ||
+        params.closedCapacityResponseEnable || params.closedCapacityVirialKickEnable) {
+        *reason = "unsupported segmented open boundary or closed-capacity coupling requested";
         return false;
     }
     if (grid.Nx <= 0 || grid.Ny <= 0 || grid.numCells != grid.Nx * grid.Ny) {
@@ -1182,12 +1265,21 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     const int periodicY = is_y_periodic(params) ? 1 : 0;
     double xLowFlux = 0.0;
     double xHighFlux = 0.0;
+    Q6SegmentedIo0409 segmentedIo0409 = q6_make_segmented_left_0409(params, time);
     if (!periodicX && q6_open_x_fullface_0404_supported(params)) {
         q6_open_x_fullface_flux_0404(params, time, xLowFlux, xHighFlux);
         diag.openBoundaryEnabled = true;
         diag.openBoundaryFluxXLow = xLowFlux;
         diag.openBoundaryFluxXHigh = xHighFlux;
         diag.openBoundaryFluxBalance = (xHighFlux - xLowFlux) * params.Ly;
+        const double area = params.Lx * params.Ly;
+        diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryFluxBalance / area : 0.0;
+    } else if (!periodicX && segmentedIo0409.enabled) {
+        const double xLowIntegratedFlux = q6_segmented_xlow_flux_integral_0409(segmentedIo0409, params.Ly);
+        diag.openBoundaryEnabled = true;
+        diag.openBoundaryFluxXLow = params.Ly > 0.0 ? xLowIntegratedFlux / params.Ly : 0.0;
+        diag.openBoundaryFluxXHigh = 0.0;
+        diag.openBoundaryFluxBalance = -xLowIntegratedFlux;
         const double area = params.Lx * params.Ly;
         diag.openBoundaryMeanDivergence = area > 0.0 ? diag.openBoundaryFluxBalance / area : 0.0;
     }
@@ -1223,7 +1315,7 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     const std::size_t tripleShared = 3u * static_cast<std::size_t>(threads) * sizeof(double);
     q6_build_rhs_and_stats_0400<<<cellBlocks, threads, tripleShared>>>(
         cells, ws.rhs.data(), ws.partial0.data(), ws.partial1.data(), ws.partial2.data(), grid.Nx, grid.Ny, dx, dy,
-        periodicX, periodicY, xLowFlux, xHighFlux);
+        periodicX, periodicY, xLowFlux, xHighFlux, segmentedIo0409);
     check_cuda_0400(cudaGetLastError(), "build rhs launch");
     const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
     const double divSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
@@ -1347,7 +1439,7 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
 
     q6_projected_divergence_stats_0400<<<cellBlocks, threads, pairShared>>>(
         cells, ws.dux.data(), ws.duy.data(), ws.partial0.data(), ws.partial1.data(),
-        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY, xLowFlux);
+        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY, xLowFlux, segmentedIo0409);
     check_cuda_0400(cudaGetLastError(), "projected divergence stats launch");
     const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
     diag.divAfterProjectedFluxMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);

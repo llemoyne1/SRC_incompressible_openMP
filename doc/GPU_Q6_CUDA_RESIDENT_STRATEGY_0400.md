@@ -365,4 +365,42 @@ this validation case, the previous-step potential is not a useful CG initial
 guess, likely because the stochastic collision/thermostat step changes the RHS
 enough between projections that the warm residual does not move closer to the
 solution in the CG sense.
+## Update 0409: first segmented inlet/outlet path for resident SRC/Q6
+
+A first guarded segmented inlet/outlet continuation was added for the resident
+CUDA SRC/Q6 path. It is enabled explicitly with
+`MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=1` together with the existing
+resident Q6 and segmented resident SRC flags. The implementation deliberately
+keeps the same conservative topology as the existing classic segmented CUDA
+path: wall-like box boundaries, open segments only on the left face, at least one
+inlet and one outlet segment, uniform segment velocities, no immersed solid, no
+resampling and no capacity coupling.
+
+The SRC side now allows the segmented resident stream/boundary path to remain
+active when this Q6 continuation is explicitly requested. The Q6 side no longer
+rejects this supported segmented subset. It builds a small host-side segment
+configuration and passes it by value to the CUDA RHS and projected-divergence
+diagnostic kernels. The elliptic operator itself is unchanged; only the imposed
+Neumann flux on the x-low boundary is made piecewise in the segment coordinate.
+This preserves the current finite-volume CG logic and avoids changing the
+already validated full-face path.
+
+Smoke validation: left-face box segmented case, `32x32`, `GAMMA=10`, `STEPS=20`,
+segments `left inlet 0.10..0.35 ux=0.08` and
+`left outlet 0.65..0.90 ux=-0.08`, resident SRC segmented + resident CUDA Q6:
+
+- run completes with `q6Applied=1`, `q6Converged=1`;
+- `q6Iterations=140`, `q6ResidualRel≈6.998e-11`;
+- `q6DivBeforeRms≈4.940e-1`, `q6DivAfterProjectedFluxRms≈3.466e-11`;
+- `q6OpenBoundaryEnabled=1`, integrated x-low flux balance is zero to roundoff
+  (`≈3.47e-18`) for the symmetric inlet/outlet segments;
+- internal profile on this smoke gives `q6_projection≈2.78 ms/step`.
+
+The CPU-Q6 path is not a useful reference for this segmented case yet: with the
+same physical setup it leaves a projected divergence around `1.6e-2`, indicating
+that the CPU projection does not currently impose the compact open segments in
+the same way. The current 0409 status is therefore an implementation smoke, not
+a full CPU/CUDA parity validation. Next validation should compare against a
+longer physical segmented-box run and then extend the segment flux treatment to
+right/bottom/top faces if that topology is needed.
 

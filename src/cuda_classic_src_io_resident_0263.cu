@@ -2467,6 +2467,10 @@ bool q6_resident_io_fullface_0404_requested() {
     return env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404");
 }
 
+bool q6_resident_io_segmented_0409_requested() {
+    return env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409");
+}
+
 bool thermostat_allowed_for_resident_io_0280c(const SimulationParams& params) {
     if (!params.thermostatEnable) return true;
     // 0280c: the original classic resident inlet/outlet gates were deliberately
@@ -2516,19 +2520,24 @@ bool supported_common_0263(const SimulationParams& params) {
 }
 
 bool supported_segmented_0264(const SimulationParams& params) {
-    if (!params.srcClassicCudaModeEnable) return false;
+    const bool q6ResidentIo0409 = q6_resident_io_segmented_0409_requested();
+    if (!params.srcClassicCudaModeEnable && !q6ResidentIo0409) return false;
     if (!hard_inlet_reservoir_enabled_0263(params)) return false;
     if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) return false;
     if (static_cast<int>(params.openBoundarySegments.size()) != params.openBoundarySegmentCount) return false;
     if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    // 0264 is still restricted to the classic SRC resident subset: Q6,
-    // resampling and virial/capacity continuations remain disabled.  Since
-    // 0280c, thermostatEnable=true is accepted only for the fused persistent
-    // SRC+thermostat CUDA consumer, so no CPU stage is inserted between
-    // collision and thermostat.
-    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
-    if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
+    if (params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (q6ResidentIo0409) {
+        if (!params.projectionEnable || params.projectionBackend != "cuda") return false;
+        if (!env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_0400")) return false;
+        if (params.inletVelocitySpatialProfile != "uniform") return false;
+    } else {
+        // 0264 is still restricted to the classic SRC resident subset when the
+        // explicit Q6 continuation is not requested.
+        if (params.projectionEnable) return false;
+        if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
+    }
     if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||
@@ -2621,7 +2630,8 @@ bool cuda_classic_src_io_fullface_resident_0263_supported(const SimulationParams
 }
 
 bool cuda_classic_src_io_segmented_resident_0264_requested() {
-    return env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264");
+    return env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264") ||
+           q6_resident_io_segmented_0409_requested();
 }
 
 bool cuda_classic_src_io_segmented_resident_0264_supported(const SimulationParams& params) {

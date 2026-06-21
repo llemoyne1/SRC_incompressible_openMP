@@ -4,7 +4,7 @@
 # LIVE_VIS_CONTROL_RESET=1 or the file does not exist.
 # Supported topo fields: chi, alpha, darcy_power, ux, uy, speed, vorticity, mass, N/count.
 field = ux
-clip = 0.1
+clip = 0.08
 gain = 1
 smoothPasses = 10
 colormap = thermal
@@ -12,7 +12,7 @@ colormap = thermal
 # Quiver overlay: quiverScale < 0 disables it.  Positive quiverScale is pixels per velocity unit.
 quiverNx = 60
 quiverNy = 48
-quiverScale = 100
+quiverScale = 1000
 quiverMinSpeed = -10
 # quiverSmoothPasses < 0 reuses smoothPasses; set e.g. 2 to smooth vectors while keeping field smoothing unchanged.
 quiverSmoothPasses = 5
