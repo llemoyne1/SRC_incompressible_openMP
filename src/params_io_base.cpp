@@ -446,6 +446,21 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "darcyCostEvery") p.darcyCostEvery = parse_int(value, key);
         else if (key == "darcyCostFilename") p.darcyCostFilename = value;
         else if (key == "darcyThreadsPerBlock") p.darcyThreadsPerBlock = parse_int(value, key);
+        else if (key == "darcyInitialDeactivateBelowChi" || key == "darcyDeactivateInitialBelowChi") p.darcyInitialDeactivateBelowChi = parse_double(value, key);
+        else if (key == "darcyBrinkmanForcingMode" || key == "darcyForcingMode") {
+            p.darcyBrinkmanForcingMode = lower(trim(value));
+            std::replace(p.darcyBrinkmanForcingMode.begin(), p.darcyBrinkmanForcingMode.end(), '-', '_');
+        }
+        else if (key == "darcyChiCollisionVpEnable" || key == "darcyCollisionVpEnable" || key == "topoChiCollisionVpEnable") p.darcyChiCollisionVpEnable = parse_bool(value, key);
+        else if (key == "darcyChiCollisionVpMode" || key == "darcyCollisionVpMode" || key == "topoChiCollisionVpMode") {
+            p.darcyChiCollisionVpMode = lower(trim(value));
+            std::replace(p.darcyChiCollisionVpMode.begin(), p.darcyChiCollisionVpMode.end(), '-', '_');
+        }
+        else if (key == "darcyChiCollisionVpGamma" || key == "darcyCollisionVpGamma" || key == "topoChiCollisionVpGamma") p.darcyChiCollisionVpGamma = parse_double(value, key);
+        else if (key == "darcyChiCollisionVpMass" || key == "darcyCollisionVpMass" || key == "topoChiCollisionVpMass") p.darcyChiCollisionVpMass = parse_double(value, key);
+        else if (key == "darcyChiCollisionVpLayers" || key == "darcyCollisionVpLayers" || key == "topoChiCollisionVpLayers") p.darcyChiCollisionVpLayers = parse_int(value, key);
+        else if (key == "darcyChiCollisionVpThreshold" || key == "darcyCollisionVpThreshold" || key == "topoChiCollisionVpThreshold") p.darcyChiCollisionVpThreshold = parse_double(value, key);
+        else if (key == "darcyChiCollisionVpStrength" || key == "darcyCollisionVpStrength" || key == "topoChiCollisionVpStrength") p.darcyChiCollisionVpStrength = parse_double(value, key);
         else if (key == "topoBenchmarkEnable") p.topoBenchmarkEnable = parse_bool(value, key);
         else if (key == "topoBenchmarkEvery") p.topoBenchmarkEvery = parse_int(value, key);
         else if (key == "topoBenchmarkFilename") p.topoBenchmarkFilename = value;
@@ -1216,6 +1231,58 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (p.darcyThreadsPerBlock <= 0) {
             throw std::runtime_error("darcyThreadsPerBlock must be positive");
+        }
+        if (!(p.darcyInitialDeactivateBelowChi < 0.0 ||
+              (p.darcyInitialDeactivateBelowChi >= 0.0 && p.darcyInitialDeactivateBelowChi <= 1.0)) ||
+            !std::isfinite(p.darcyInitialDeactivateBelowChi)) {
+            throw std::runtime_error("darcyInitialDeactivateBelowChi must be negative to disable or lie in [0,1]");
+        }
+        {
+            std::string mode = p.darcyBrinkmanForcingMode;
+            std::replace(mode.begin(), mode.end(), '-', '_');
+            if (!(mode == "mean" || mode == "classic" || mode == "cell_mean" ||
+                  mode == "thermal_bath" || mode == "thermalbath" || mode == "langevin" || mode == "ou" ||
+                  mode == "outward_bath" || mode == "oriented_bath" || mode == "oriented_thermal_bath" ||
+                  mode == "diffuse_reflection" ||
+                  mode == "mean_outward_bath" || mode == "mean_oriented_bath" || mode == "brinkman_outward_bath")) {
+                throw std::runtime_error("darcyBrinkmanForcingMode supports: mean/classic/cell_mean, thermal_bath/langevin/ou, outward_bath/oriented_bath, or mean_outward_bath");
+            }
+            const bool thermalBath = (mode == "thermal_bath" || mode == "thermalbath" || mode == "langevin" || mode == "ou" ||
+                                      mode == "outward_bath" || mode == "oriented_bath" || mode == "oriented_thermal_bath" ||
+                                      mode == "diffuse_reflection" ||
+                                      mode == "mean_outward_bath" || mode == "mean_oriented_bath" || mode == "brinkman_outward_bath");
+            if (thermalBath) {
+                const double effectiveWallKBT = p.wallKBT > 0.0 ? p.wallKBT : (p.wallVpKBT > 0.0 ? p.wallVpKBT : p.kBT);
+                if (!(effectiveWallKBT > 0.0) || !std::isfinite(effectiveWallKBT)) {
+                    throw std::runtime_error("darcyBrinkmanForcingMode=thermal_bath requires positive wallKBT/wallVpKBT or positive kBT");
+                }
+            }
+        }
+        if (p.darcyChiCollisionVpEnable) {
+            if (!p.darcyBrinkmanEnable) {
+                throw std::runtime_error("darcyChiCollisionVpEnable=true requires darcyBrinkmanEnable=true so that the chi field is available");
+            }
+            std::string vpMode = p.darcyChiCollisionVpMode;
+            std::replace(vpMode.begin(), vpMode.end(), '-', '_');
+            if (!(vpMode == "interface_band" || vpMode == "interface" || vpMode == "band")) {
+                throw std::runtime_error("darcyChiCollisionVpMode supports interface_band only in patch 0422");
+            }
+            if (!std::isfinite(p.darcyChiCollisionVpGamma)) {
+                throw std::runtime_error("darcyChiCollisionVpGamma must be finite; use <=0 for wallVpGamma/inferred fallback");
+            }
+            if (!(p.darcyChiCollisionVpMass > 0.0) || !std::isfinite(p.darcyChiCollisionVpMass)) {
+                throw std::runtime_error("darcyChiCollisionVpMass must be positive and finite");
+            }
+            if (p.darcyChiCollisionVpLayers < 0 || p.darcyChiCollisionVpLayers > 4) {
+                throw std::runtime_error("darcyChiCollisionVpLayers must be in [0,4] for the lightweight 0422 kernel");
+            }
+            if (!(p.darcyChiCollisionVpThreshold >= 0.0 && p.darcyChiCollisionVpThreshold <= 1.0) ||
+                !std::isfinite(p.darcyChiCollisionVpThreshold)) {
+                throw std::runtime_error("darcyChiCollisionVpThreshold must lie in [0,1]");
+            }
+            if (!(p.darcyChiCollisionVpStrength >= 0.0) || !std::isfinite(p.darcyChiCollisionVpStrength)) {
+                throw std::runtime_error("darcyChiCollisionVpStrength must be non-negative and finite");
+            }
         }
         if (p.topoBenchmarkEvery < 0) {
             throw std::runtime_error("topoBenchmarkEvery must be non-negative");

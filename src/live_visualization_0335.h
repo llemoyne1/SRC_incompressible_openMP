@@ -56,6 +56,10 @@ public:
                          const std::string& sourceLabel,
                          const LiveVisualization0335QuiverFrame* quiver = nullptr);
 
+    // Optional run-end hold controlled by SRC_LIVE_VIS_HOLD_ON_EXIT=1 or
+    // MPCD_LIVE_VIS_HOLD_ON_EXIT=1.  Default behavior remains unchanged.
+    void hold_until_closed_on_exit();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

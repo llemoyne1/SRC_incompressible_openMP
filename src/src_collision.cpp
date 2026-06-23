@@ -15,6 +15,7 @@
 
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
 #include "cuda_persistent_mpcd_step.h"
+#include "cuda_darcy_brinkman_0343.h"
 #include "cuda_particle_state.h"
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 #include "cuda_shared_particle_state_0251.h"
@@ -1093,6 +1094,34 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         immersed_solid_wall_velocity(params, cfg.immersedCircleCx, cfg.immersedCircleCy, immersedTime,
                                      cfg.immersedWallUx, cfg.immersedWallUy);
     }
+    if (params.darcyChiCollisionVpEnable) {
+        const float* dChiCollisionVp0422 = nullptr;
+        int chiNx0422 = 0;
+        int chiNy0422 = 0;
+        const bool chiReady0422 = cuda_darcy_brinkman_0343_device_chi_field(
+            params, &dChiCollisionVp0422, &chiNx0422, &chiNy0422);
+        if (!chiReady0422 || dChiCollisionVp0422 == nullptr || chiNx0422 != grid.Nx || chiNy0422 != grid.Ny) {
+            const bool strict0422 = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT", true);
+            if (strict0422) {
+                throw std::runtime_error("darcyChiCollisionVpEnable=true requires an already supported Darcy chi field with dimensions matching the collision grid");
+            }
+        } else {
+            cfg.chiCollisionVpEnabled = 1;
+            cfg.chiCollisionVpField = dChiCollisionVp0422;
+            cfg.chiCollisionVpNx = chiNx0422;
+            cfg.chiCollisionVpNy = chiNy0422;
+            cfg.chiCollisionVpGamma = params.darcyChiCollisionVpGamma > 0.0
+                ? params.darcyChiCollisionVpGamma
+                : (params.wallVpGamma > 0.0 ? params.wallVpGamma :
+                   static_cast<double>(active_fluid_count(state)) / static_cast<double>(std::max(1, grid.numCells)));
+            cfg.chiCollisionVpMass = params.darcyChiCollisionVpMass;
+            cfg.chiCollisionVpLayers = std::max(0, std::min(4, params.darcyChiCollisionVpLayers));
+            cfg.chiCollisionVpThreshold = params.darcyChiCollisionVpThreshold;
+            cfg.chiCollisionVpStrength = params.darcyChiCollisionVpStrength;
+            cfg.chiCollisionVpWallUx = params.darcyUSolidX;
+            cfg.chiCollisionVpWallUy = params.darcyUSolidY;
+        }
+    }
     cfg.targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
     cfg.thermostatMinParticles = params.thermostatMinParticles;
     cfg.thermostatEpsilon = params.thermostatEpsilon;
@@ -1675,6 +1704,9 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
         return diag;
     }
 #endif
+    if (params.darcyChiCollisionVpEnable) {
+        throw std::runtime_error("darcyChiCollisionVpEnable=true is implemented only in the CUDA persistent SRC collision path in patch 0422");
+    }
 
 #ifdef MPCD_ENABLE_CUDA_CELL_MOMENTS
     CudaCellMoments cudaCellMomentsActive{};

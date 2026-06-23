@@ -63,6 +63,21 @@ struct CudaPersistentMpcdStepConfig {
     double immersedWallUx = 0.0;
     double immersedWallUy = 0.0;
 
+    // 0422: effective chi-derived virtual-particle moment contribution for
+    // the SRC collision. chi=1 is fluid and chi=0 is solid. The device pointer
+    // is owned by the Darcy/Brinkman workspace; this backend only reads it.
+    int chiCollisionVpEnabled = 0;
+    const float* chiCollisionVpField = nullptr;
+    int chiCollisionVpNx = 0;
+    int chiCollisionVpNy = 0;
+    double chiCollisionVpGamma = 0.0;
+    double chiCollisionVpMass = 1.0;
+    int chiCollisionVpLayers = 1;
+    double chiCollisionVpThreshold = 0.5;
+    double chiCollisionVpStrength = 1.0;
+    double chiCollisionVpWallUx = 0.0;
+    double chiCollisionVpWallUy = 0.0;
+
     // Absolute SRC/MPCD step used for random rotation signs.
     std::uint64_t step = 0u;
     double rotationAngle = 2.0943951023931954923; // 120 degrees

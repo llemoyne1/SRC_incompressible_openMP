@@ -11,10 +11,12 @@
 #include "state_smpcd_io.h"
 #include "weighted_resampling.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -377,6 +379,130 @@ int openmp_active_threads() {
     return active;
 }
 
+double smoothstep_0418(double t) {
+    t = std::min(1.0, std::max(0.0, t));
+    return t * t * (3.0 - 2.0 * t);
+}
+
+double darcy_chi_at_cell_0418(int ix, int iy,
+                              const mpcd::SimulationParams& params,
+                              const std::vector<float>* chiFile) {
+    const int nx = params.Nx;
+    const int ny = params.Ny;
+    if (nx <= 0 || ny <= 0) return 1.0;
+    ix = std::max(0, std::min(nx - 1, ix));
+    iy = std::max(0, std::min(ny - 1, iy));
+    if (chiFile != nullptr) {
+        const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(nx) + static_cast<std::size_t>(ix);
+        if (c < chiFile->size()) {
+            return std::min(1.0, std::max(0.0, static_cast<double>((*chiFile)[c])));
+        }
+        return 1.0;
+    }
+
+    const double x = (static_cast<double>(ix) + 0.5) * params.Lx / static_cast<double>(std::max(1, nx));
+    const double y = (static_cast<double>(iy) + 0.5) * params.Ly / static_cast<double>(std::max(1, ny));
+    double chi = params.darcyUniformChi;
+    const std::string mode = params.darcyChiMode;
+    if (mode == "circle" || mode == "cylinder") {
+        const double d = std::hypot(x - params.darcyCircleCx, y - params.darcyCircleCy);
+        if (params.darcyInterfaceWidth > 0.0) {
+            chi = smoothstep_0418((d - params.darcyCircleR) / params.darcyInterfaceWidth);
+        } else {
+            chi = d <= params.darcyCircleR ? 0.0 : 1.0;
+        }
+    } else if (mode == "box" || mode == "rectangle") {
+        const double dx = std::max(std::max(params.darcyBoxXMin - x, x - params.darcyBoxXMax), 0.0);
+        const double dy = std::max(std::max(params.darcyBoxYMin - y, y - params.darcyBoxYMax), 0.0);
+        const double outsideDist = std::hypot(dx, dy);
+        const bool inside = (x >= params.darcyBoxXMin && x <= params.darcyBoxXMax &&
+                             y >= params.darcyBoxYMin && y <= params.darcyBoxYMax);
+        if (params.darcyInterfaceWidth > 0.0) {
+            chi = inside ? smoothstep_0418(outsideDist / params.darcyInterfaceWidth) : 1.0;
+        } else {
+            chi = inside ? 0.0 : 1.0;
+        }
+    }
+    return std::min(1.0, std::max(0.0, chi));
+}
+
+std::vector<float> load_darcy_chi_file_for_initial_deactivation_0418(const mpcd::SimulationParams& params) {
+    const std::size_t ncell = static_cast<std::size_t>(params.Nx) * static_cast<std::size_t>(params.Ny);
+    std::vector<float> chi(ncell, 1.0f);
+    if (params.darcyChiMode != "file") return chi;
+    std::ifstream in(params.darcyChiFile, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("darcy initial chi deactivation 0418: cannot open darcyChiFile=" + params.darcyChiFile);
+    }
+    const std::string fmt = params.darcyChiFileFormat;
+    if (fmt == "float64" || fmt == "f64" || fmt == "double") {
+        std::vector<double> tmp(ncell, 1.0);
+        in.read(reinterpret_cast<char*>(tmp.data()), static_cast<std::streamsize>(tmp.size() * sizeof(double)));
+        if (in.gcount() != static_cast<std::streamsize>(tmp.size() * sizeof(double))) {
+            throw std::runtime_error("darcy initial chi deactivation 0418: darcyChiFile float64 size mismatch");
+        }
+        for (std::size_t i = 0; i < ncell; ++i) {
+            const double v = std::isfinite(tmp[i]) ? tmp[i] : 1.0;
+            chi[i] = static_cast<float>(std::min(1.0, std::max(0.0, v)));
+        }
+    } else {
+        in.read(reinterpret_cast<char*>(chi.data()), static_cast<std::streamsize>(chi.size() * sizeof(float)));
+        if (in.gcount() != static_cast<std::streamsize>(chi.size() * sizeof(float))) {
+            throw std::runtime_error("darcy initial chi deactivation 0418: darcyChiFile float32 size mismatch");
+        }
+        for (float& v : chi) {
+            const double d = std::isfinite(static_cast<double>(v)) ? static_cast<double>(v) : 1.0;
+            v = static_cast<float>(std::min(1.0, std::max(0.0, d)));
+        }
+    }
+    return chi;
+}
+
+std::uint64_t deactivate_initial_particles_below_chi_0418(mpcd::ParticleState& state,
+                                                          const mpcd::SimulationParams& params) {
+    if (!params.darcyBrinkmanEnable || params.darcyInitialDeactivateBelowChi < 0.0) return 0u;
+    mpcd::ensure_particle_roles(state, mpcd::ParticleRole::Fluid);
+    const std::uint64_t activeBefore = mpcd::active_fluid_count(state);
+    if (activeBefore == 0u) return 0u;
+    const double invLx = params.Lx > 0.0 ? 1.0 / params.Lx : 1.0;
+    const double invLy = params.Ly > 0.0 ? 1.0 / params.Ly : 1.0;
+    const int nx = std::max(1, params.Nx);
+    const int ny = std::max(1, params.Ny);
+    std::vector<float> chiFile;
+    const std::vector<float>* chiPtr = nullptr;
+    if (params.darcyChiMode == "file") {
+        chiFile = load_darcy_chi_file_for_initial_deactivation_0418(params);
+        chiPtr = &chiFile;
+    }
+
+    std::uint64_t deactivated = 0u;
+    const std::size_t active = static_cast<std::size_t>(std::min<std::uint64_t>(activeBefore, state.Np));
+    for (std::size_t i = 0; i < active; ++i) {
+        if (state.role[i] != mpcd::kParticleRoleFluid) continue;
+        double x = state.x[i];
+        double y = state.y[i];
+        if (!std::isfinite(x) || !std::isfinite(y)) continue;
+        x -= std::floor(x * invLx) * params.Lx;
+        y -= std::floor(y * invLy) * params.Ly;
+        int ix = static_cast<int>(std::floor(x * invLx * static_cast<double>(nx)));
+        int iy = static_cast<int>(std::floor(y * invLy * static_cast<double>(ny)));
+        const double chi = darcy_chi_at_cell_0418(ix, iy, params, chiPtr);
+        if (chi < params.darcyInitialDeactivateBelowChi) {
+            state.role[i] = mpcd::kParticleRoleInactive;
+            ++deactivated;
+        }
+    }
+    if (deactivated > 0u) {
+        mpcd::compact_active_fluid_prefix(state);
+    }
+    const std::uint64_t activeAfter = mpcd::active_fluid_count(state);
+    std::cerr << "[darcy0418] initial chi deactivation threshold=" << params.darcyInitialDeactivateBelowChi
+              << " deactivated=" << deactivated
+              << " activeBefore=" << activeBefore
+              << " activeAfter=" << activeAfter << '\n';
+    return deactivated;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -408,6 +534,7 @@ int main(int argc, char** argv) {
         mpcd::ParticleState state = mpcd::read_smpcd_state(params.inputState);
         mpcd::ensure_inactive_slots(state, params.initialInactiveSlots);
         mpcd::ensure_particle_roles(state, mpcd::ParticleRole::Fluid);
+        deactivate_initial_particles_below_chi_0418(state, params);
         const mpcd::ParticleRoleCounts initialRoleCounts = mpcd::count_particle_roles(state);
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);
         const mpcd::FluidDomainBounds initialDomain = mpcd::make_fluid_domain_bounds(params, 0.0);
@@ -720,6 +847,7 @@ int main(int argc, char** argv) {
                       << " (set MPCD_INTERNAL_PROFILES=1 to enable)";
         }
         std::cout << "\n[src_mpcd_base] done\n";
+        liveVisualization0335.hold_until_closed_on_exit();
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << '\n';

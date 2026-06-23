@@ -135,6 +135,13 @@ struct DeviceConfig {
     int immersedCircleEnabled;
     double immersedCircleCx, immersedCircleCy, immersedCircleR;
     double immersedWallUx, immersedWallUy;
+    int chiCollisionVpEnabled;
+    const float* chiCollisionVpField;
+    int chiCollisionVpNx, chiCollisionVpNy;
+    double chiCollisionVpGamma, chiCollisionVpMass;
+    int chiCollisionVpLayers;
+    double chiCollisionVpThreshold, chiCollisionVpStrength;
+    double chiCollisionVpWallUx, chiCollisionVpWallUy;
     int fusedStreamDeposit0274;
     int fusedStreamMode0274;
     double streamDt0274;
@@ -350,6 +357,64 @@ __device__ double immersed_circle_fraction_device(int ix, int iy, DeviceConfig c
     return static_cast<double>(inside) / static_cast<double>(denom);
 }
 
+__device__ double chi_collision_vp_weight_0422(int ix, int iy, DeviceConfig cfg) {
+    if (!cfg.chiCollisionVpEnabled || cfg.chiCollisionVpField == nullptr) return 0.0;
+    if (cfg.chiCollisionVpNx != cfg.Nx || cfg.chiCollisionVpNy != cfg.Ny) return 0.0;
+    const int nx = cfg.Nx;
+    const int ny = cfg.Ny;
+    if (nx <= 0 || ny <= 0) return 0.0;
+    const int c = iy * nx + ix;
+    const double threshold = fmin(1.0, fmax(0.0, cfg.chiCollisionVpThreshold));
+    const double chi = fmin(1.0, fmax(0.0, static_cast<double>(cfg.chiCollisionVpField[c])));
+
+    double w = 0.0;
+    // Smooth chi fields: a cut/mixed cell carries its own solid fraction.
+    if (chi > threshold && chi < 1.0) {
+        w = fmax(w, 1.0 - chi);
+    }
+    // Leaked particles in nominally solid cells should also collide with a
+    // wall-like virtual population, but these virtual moments do not create
+    // persistent particles or affect streaming.
+    if (chi <= threshold) {
+        w = fmax(w, 1.0);
+    }
+
+    // Binary chi fields: add virtual moments in the first fluid layer adjacent
+    // to solid cells.  This approximates wallVP support for an external mask.
+    const int layers = max(0, min(4, cfg.chiCollisionVpLayers));
+    if (layers > 0 && chi > threshold) {
+        for (int oy = -layers; oy <= layers; ++oy) {
+            const int jy = iy + oy;
+            if (jy < 0 || jy >= ny) continue;
+            for (int ox = -layers; ox <= layers; ++ox) {
+                const int jx = ix + ox;
+                if (jx < 0 || jx >= nx) continue;
+                if (ox == 0 && oy == 0) continue;
+                const double nb = fmin(1.0, fmax(0.0, static_cast<double>(cfg.chiCollisionVpField[jy * nx + jx])));
+                if (nb <= threshold) {
+                    w = fmax(w, 1.0);
+                }
+            }
+        }
+    }
+    return fmin(1.0, fmax(0.0, w)) * fmax(0.0, cfg.chiCollisionVpStrength);
+}
+
+__device__ void add_chi_collision_vp_moments_0422(int ix, int iy,
+                                                  DeviceConfig cfg,
+                                                  double& mass,
+                                                  double& px,
+                                                  double& py) {
+    const double w = chi_collision_vp_weight_0422(ix, iy, cfg);
+    if (!(w > 0.0)) return;
+    const double gamma = cfg.chiCollisionVpGamma;
+    const double mvp = gamma * cfg.chiCollisionVpMass * w;
+    if (!(mvp > 0.0)) return;
+    mass += mvp;
+    px += mvp * cfg.chiCollisionVpWallUx;
+    py += mvp * cfg.chiCollisionVpWallUy;
+}
+
 __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
                                                          DeviceConfig cfg,
                                                          double* cellMass,
@@ -357,7 +422,11 @@ __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
                                                          double* cellPy) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nc) return;
-    if (cfg.wallAccommodation <= 0.0 || cfg.wallGamma <= 0.0 || cfg.wallVpMass <= 0.0) return;
+    const bool wallVpActive = (cfg.wallAccommodation > 0.0 && cfg.wallGamma > 0.0 && cfg.wallVpMass > 0.0);
+    const bool chiVpActive = (cfg.chiCollisionVpEnabled && cfg.chiCollisionVpField != nullptr &&
+                              cfg.chiCollisionVpGamma > 0.0 && cfg.chiCollisionVpMass > 0.0 &&
+                              cfg.chiCollisionVpStrength > 0.0);
+    if (!wallVpActive && !chiVpActive) return;
 
     const int ix = c % cfg.Nx;
     const int iy = c / cfg.Nx;
@@ -371,35 +440,38 @@ __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
     double px = cellPx[c];
     double py = cellPy[c];
 
-    if (cfg.wallLeftEnabled) {
+    if (wallVpActive && cfg.wallLeftEnabled) {
         const double outsideX = overlap_length_device(x0, x1, cfg.domainXMin - cfg.dx, cfg.domainXMin);
         const double insideY = cfg.periodicY ? cfg.dy : overlap_length_device(y0, y1, cfg.domainYMin, cfg.domainYMax);
         add_virtual_wall_mass_momentum_device(outsideX * insideY, fullCellArea, cfg.wallUxLeft, cfg.wallUyLeft, cfg, mass, px, py);
     }
-    if (cfg.wallRightEnabled) {
+    if (wallVpActive && cfg.wallRightEnabled) {
         const double outsideX = overlap_length_device(x0, x1, cfg.domainXMax, cfg.domainXMax + cfg.dx);
         const double insideY = cfg.periodicY ? cfg.dy : overlap_length_device(y0, y1, cfg.domainYMin, cfg.domainYMax);
         add_virtual_wall_mass_momentum_device(outsideX * insideY, fullCellArea, cfg.wallUxRight, cfg.wallUyRight, cfg, mass, px, py);
     }
-    if (cfg.wallBottomEnabled) {
+    if (wallVpActive && cfg.wallBottomEnabled) {
         const double insideX = cfg.periodicX ? cfg.dx : overlap_length_device(x0, x1, cfg.domainXMin, cfg.domainXMax);
         const double outsideY = overlap_length_device(y0, y1, cfg.domainYMin - cfg.dy, cfg.domainYMin);
         add_virtual_wall_mass_momentum_device(insideX * outsideY, fullCellArea, cfg.wallUxBottom, cfg.wallUyBottom, cfg, mass, px, py);
     }
-    if (cfg.wallTopEnabled) {
+    if (wallVpActive && cfg.wallTopEnabled) {
         const double insideX = cfg.periodicX ? cfg.dx : overlap_length_device(x0, x1, cfg.domainXMin, cfg.domainXMax);
         const double outsideY = overlap_length_device(y0, y1, cfg.domainYMax, cfg.domainYMax + cfg.dy);
         add_virtual_wall_mass_momentum_device(insideX * outsideY, fullCellArea, cfg.wallUxTop, cfg.wallUyTop, cfg, mass, px, py);
     }
-    if (cfg.immersedRectangleEnabled) {
+    if (wallVpActive && cfg.immersedRectangleEnabled) {
         const double solidFraction = immersed_rectangle_fraction_device(ix, iy, cfg);
         add_virtual_wall_mass_momentum_device(solidFraction * fullCellArea, fullCellArea,
                                               cfg.immersedWallUx, cfg.immersedWallUy, cfg, mass, px, py);
     }
-    if (cfg.immersedCircleEnabled) {
+    if (wallVpActive && cfg.immersedCircleEnabled) {
         const double solidFraction = immersed_circle_fraction_device(ix, iy, cfg);
         add_virtual_wall_mass_momentum_device(solidFraction * fullCellArea, fullCellArea,
                                               cfg.immersedWallUx, cfg.immersedWallUy, cfg, mass, px, py);
+    }
+    if (cfg.chiCollisionVpEnabled) {
+        add_chi_collision_vp_moments_0422(ix, iy, cfg, mass, px, py);
     }
 
     cellMass[c] = mass;
@@ -814,6 +886,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
     cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
     cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
+    cfg.chiCollisionVpEnabled = config.chiCollisionVpEnabled;
+    cfg.chiCollisionVpField = config.chiCollisionVpField;
+    cfg.chiCollisionVpNx = config.chiCollisionVpNx;
+    cfg.chiCollisionVpNy = config.chiCollisionVpNy;
+    cfg.chiCollisionVpGamma = config.chiCollisionVpGamma;
+    cfg.chiCollisionVpMass = config.chiCollisionVpMass;
+    cfg.chiCollisionVpLayers = config.chiCollisionVpLayers;
+    cfg.chiCollisionVpThreshold = config.chiCollisionVpThreshold;
+    cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
+    cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
+    cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -826,7 +909,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled || cfg.chiCollisionVpEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
@@ -1141,6 +1224,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
     cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
     cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
+    cfg.chiCollisionVpEnabled = config.chiCollisionVpEnabled;
+    cfg.chiCollisionVpField = config.chiCollisionVpField;
+    cfg.chiCollisionVpNx = config.chiCollisionVpNx;
+    cfg.chiCollisionVpNy = config.chiCollisionVpNy;
+    cfg.chiCollisionVpGamma = config.chiCollisionVpGamma;
+    cfg.chiCollisionVpMass = config.chiCollisionVpMass;
+    cfg.chiCollisionVpLayers = config.chiCollisionVpLayers;
+    cfg.chiCollisionVpThreshold = config.chiCollisionVpThreshold;
+    cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
+    cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
+    cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1153,7 +1247,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, b.cellId, b.count, b.cellMass, b.cellPx,
                                                                b.cellPy, b.fluidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled || cfg.chiCollisionVpEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, b.cellMass, b.cellPx, b.cellPy);
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
@@ -1532,6 +1626,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
     cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
     cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
+    cfg.chiCollisionVpEnabled = config.chiCollisionVpEnabled;
+    cfg.chiCollisionVpField = config.chiCollisionVpField;
+    cfg.chiCollisionVpNx = config.chiCollisionVpNx;
+    cfg.chiCollisionVpNy = config.chiCollisionVpNy;
+    cfg.chiCollisionVpGamma = config.chiCollisionVpGamma;
+    cfg.chiCollisionVpMass = config.chiCollisionVpMass;
+    cfg.chiCollisionVpLayers = config.chiCollisionVpLayers;
+    cfg.chiCollisionVpThreshold = config.chiCollisionVpThreshold;
+    cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
+    cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
+    cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1546,7 +1651,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         MPCD_PROFILE_END_0324("deposit_persistent");
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled || cfg.chiCollisionVpEnabled) {
             MPCD_PROFILE_BEGIN_0324();
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
             MPCD_PROFILE_END_0324("add_wall_virtual_faces_persistent");
@@ -1952,6 +2057,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.streamWallUyBottom0274 = config.streamWallUyBottom0274;
     cfg.streamWallUxTop0274 = config.streamWallUxTop0274;
     cfg.streamWallUyTop0274 = config.streamWallUyTop0274;
+    cfg.chiCollisionVpEnabled = config.chiCollisionVpEnabled;
+    cfg.chiCollisionVpField = config.chiCollisionVpField;
+    cfg.chiCollisionVpNx = config.chiCollisionVpNx;
+    cfg.chiCollisionVpNy = config.chiCollisionVpNy;
+    cfg.chiCollisionVpGamma = config.chiCollisionVpGamma;
+    cfg.chiCollisionVpMass = config.chiCollisionVpMass;
+    cfg.chiCollisionVpLayers = config.chiCollisionVpLayers;
+    cfg.chiCollisionVpThreshold = config.chiCollisionVpThreshold;
+    cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
+    cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
+    cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
 
     t0 = Clock::now();
@@ -1964,7 +2080,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                cfg, cv.cellId, cv.count, cv.cellMass, cv.cellPx,
                                                                cv.cellPy, cv.fluidCounter);
         checkKernelLaunch0273();
-        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled) {
+        if (cfg.wallLeftEnabled || cfg.wallRightEnabled || cfg.wallBottomEnabled || cfg.wallTopEnabled || cfg.immersedRectangleEnabled || cfg.immersedCircleEnabled || cfg.chiCollisionVpEnabled) {
             add_wall_virtual_faces_persistent_kernel<<<cellBlocks, threads>>>(nc, cfg, cv.cellMass, cv.cellPx, cv.cellPy);
             checkKernelLaunch0273();
         }

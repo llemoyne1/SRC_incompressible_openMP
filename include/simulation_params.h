@@ -445,6 +445,24 @@ struct SimulationParams {
     std::string darcyCostFilename = "darcy_cost_0343.csv";
     int darcyThreadsPerBlock = 256;
 
+    // 0418/topo: optional chi-solid cleanup at load time and an alternative
+    // Brinkman forcing mode that mimics a thermal wall bath without explicit
+    // persistent wall virtual particles.  The default keeps the historical
+    // mean-velocity Darcy kick unchanged.
+    double darcyInitialDeactivateBelowChi = -1.0; // <0 disabled; otherwise Fluid->Inactive for chi<threshold at load/restart
+    std::string darcyBrinkmanForcingMode = "mean"; // mean/classic, thermal_bath/langevin, outward_bath, or mean_outward_bath
+
+    // 0422/topo: lightweight chi-derived virtual particle contribution for the
+    // SRC collision center of mass. This is an effective cell-moment model: no
+    // persistent virtual particles are created, streamed, compacted or dumped.
+    bool darcyChiCollisionVpEnable = false;
+    std::string darcyChiCollisionVpMode = "interface_band"; // interface_band only in 0422
+    double darcyChiCollisionVpGamma = -1.0; // <=0: wallVpGamma, then inferred active-fluid gamma
+    double darcyChiCollisionVpMass = 1.0;
+    int darcyChiCollisionVpLayers = 1;
+    double darcyChiCollisionVpThreshold = 0.5;
+    double darcyChiCollisionVpStrength = 1.0;
+
     // 0348/topo: optional benchmark observables.  These are disabled by
     // default to preserve the CUDA resident path.  The 0348a implementation is
     // cell-based only: no extra particle pass and no section/profile binning.

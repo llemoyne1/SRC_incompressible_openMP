@@ -35,6 +35,8 @@ struct DarcyWorkspace0343 {
     float* d_chi = nullptr;
     float* d_alpha = nullptr;
     float* d_lambda = nullptr;
+    float* d_normalX = nullptr;
+    float* d_normalY = nullptr;
     std::string fieldSignature;
 };
 
@@ -51,6 +53,8 @@ void free_workspace_0343(DarcyWorkspace0343& w) {
     cudaFree(w.d_chi);
     cudaFree(w.d_alpha);
     cudaFree(w.d_lambda);
+    cudaFree(w.d_normalX);
+    cudaFree(w.d_normalY);
     w = DarcyWorkspace0343{};
 }
 
@@ -62,7 +66,8 @@ void check_cuda_0343(cudaError_t err, const char* what) {
 
 bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     if (nx <= 0 || ny <= 0) return false;
-    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_mx && w.d_my && w.d_sums && w.d_chi && w.d_alpha && w.d_lambda) return true;
+    if (w.nx == nx && w.ny == ny && w.d_mass && w.d_mx && w.d_my && w.d_sums &&
+        w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY) return true;
     free_workspace_0343(w);
     w.nx = nx;
     w.ny = ny;
@@ -75,6 +80,8 @@ bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_chi, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_alpha, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_lambda, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_normalX, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_normalY, ncell * sizeof(float)) == cudaSuccess;
     if (!ok) {
         free_workspace_0343(w);
         return false;
@@ -198,6 +205,38 @@ __global__ void precompute_alpha_lambda_from_chi_kernel_0345(float* chiField,
     lambdaField[c] = static_cast<float>(lambda);
 }
 
+__global__ void precompute_darcy_normals_kernel_0419(const float* chiField,
+                                                  float* normalX,
+                                                  float* normalY,
+                                                  int nx, int ny,
+                                                  double Lx, double Ly) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    const int ncell = nx * ny;
+    if (c >= ncell) return;
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const int ixm = max(0, ix - 1);
+    const int ixp = min(nx - 1, ix + 1);
+    const int iym = max(0, iy - 1);
+    const int iyp = min(ny - 1, iy + 1);
+    const double dx = Lx > 0.0 ? Lx / static_cast<double>(max(1, nx)) : 1.0;
+    const double dy = Ly > 0.0 ? Ly / static_cast<double>(max(1, ny)) : 1.0;
+    const double denomX = static_cast<double>(max(1, ixp - ixm)) * dx;
+    const double denomY = static_cast<double>(max(1, iyp - iym)) * dy;
+    const double gx = (static_cast<double>(chiField[iy * nx + ixp]) -
+                       static_cast<double>(chiField[iy * nx + ixm])) / denomX;
+    const double gy = (static_cast<double>(chiField[iyp * nx + ix]) -
+                       static_cast<double>(chiField[iym * nx + ix])) / denomY;
+    const double n = sqrt(gx * gx + gy * gy);
+    if (n > 1.0e-30) {
+        normalX[c] = static_cast<float>(gx / n); // grad chi points from solid chi=0 to fluid chi=1.
+        normalY[c] = static_cast<float>(gy / n);
+    } else {
+        normalX[c] = 0.0f;
+        normalY[c] = 0.0f;
+    }
+}
+
 std::string darcy_field_signature_0345(const SimulationParams& p) {
     std::ostringstream ss;
     ss << std::setprecision(17)
@@ -258,7 +297,7 @@ bool ensure_darcy_fields_0345(DarcyWorkspace0343& w, const SimulationParams& p, 
     const int ncell = nx * ny;
     if (nx <= 0 || ny <= 0 || ncell <= 0) return false;
     const std::string sig = darcy_field_signature_0345(p);
-    if (w.fieldSignature == sig && w.d_chi && w.d_alpha && w.d_lambda) return true;
+    if (w.fieldSignature == sig && w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY) return true;
     const int blocks = (ncell + threads - 1) / threads;
     const int chiMode = chi_mode_code_0343(p.darcyChiMode);
     if (chiMode == 3) {
@@ -276,7 +315,9 @@ bool ensure_darcy_fields_0345(DarcyWorkspace0343& w, const SimulationParams& p, 
                                                                  p.darcyBoxYMin, p.darcyBoxYMax,
                                                                  p.darcyInterfaceWidth);
     }
-    check_cuda_0343(cudaDeviceSynchronize(), "precompute darcy chi/alpha/lambda");
+    precompute_darcy_normals_kernel_0419<<<blocks, threads>>>(w.d_chi, w.d_normalX, w.d_normalY,
+                                                              nx, ny, p.Lx, p.Ly);
+    check_cuda_0343(cudaDeviceSynchronize(), "precompute darcy chi/alpha/lambda/normals");
     w.fieldSignature = sig;
     return true;
 }
@@ -394,6 +435,132 @@ __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
     const double dvy = -lambda * (uy - uSolidY);
     pv.vx[i] += dvx;
     pv.vy[i] += dvy;
+}
+
+__device__ unsigned long long splitmix64_0418(unsigned long long x) {
+    x += 0x9E3779B97F4A7C15ull;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    return x ^ (x >> 31);
+}
+
+__device__ double uniform01_0418(unsigned long long seed) {
+    const unsigned long long z = splitmix64_0418(seed);
+    return (static_cast<double>(z >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+}
+
+__device__ double normal01_0418(unsigned long long seed0, unsigned long long seed1) {
+    const double u1 = fmax(1.0e-300, uniform01_0418(seed0));
+    const double u2 = uniform01_0418(seed1);
+    const double pi = 3.141592653589793238462643383279502884;
+    return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2);
+}
+
+__global__ void apply_darcy_thermal_bath_kernel_0418(CudaParticleDeviceView pv,
+                                                     int nx, int ny,
+                                                     double Lx, double Ly,
+                                                     const float* lambdaField,
+                                                     double uSolidX,
+                                                     double uSolidY,
+                                                     double wallKBT,
+                                                     unsigned long long step,
+                                                     unsigned long long rngSeed,
+                                                     unsigned char fluidRole) {
+    const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= pv.n) return;
+    if (pv.role && pv.role[i] != fluidRole) return;
+    const double invLx = Lx > 0.0 ? 1.0 / Lx : 1.0;
+    const double invLy = Ly > 0.0 ? 1.0 / Ly : 1.0;
+    double x = pv.x[i];
+    double y = pv.y[i];
+    if (!isfinite(x) || !isfinite(y)) return;
+    x -= floor(x * invLx) * Lx;
+    y -= floor(y * invLy) * Ly;
+    int ix = static_cast<int>(floor(x * invLx * nx));
+    int iy = static_cast<int>(floor(y * invLy * ny));
+    ix = max(0, min(nx - 1, ix));
+    iy = max(0, min(ny - 1, iy));
+    const int c = iy * nx + ix;
+    const double strength = lambdaField ? fmin(1.0, fmax(0.0, static_cast<double>(lambdaField[c]))) : 0.0;
+    if (!(strength > 0.0)) return;
+    const double a = 1.0 - strength; // exp(-alpha dt), because lambdaField stores 1-exp(-alpha dt).
+    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+    const double thermalVariance = fmax(0.0, 1.0 - a * a) * fmax(0.0, wallKBT) / m;
+    const double sigma = sqrt(thermalVariance);
+    const unsigned long long base = (step + 1ull) * 0xD1B54A32D192ED03ull ^
+                                    (i + 1ull) * 0x9E3779B97F4A7C15ull ^
+                                    (rngSeed + 1ull) * 0xBF58476D1CE4E5B9ull;
+    const double nx0 = sigma > 0.0 ? normal01_0418(base ^ 0xA24BAED4963EE407ull, base ^ 0x9FB21C651E98DF25ull) : 0.0;
+    const double ny0 = sigma > 0.0 ? normal01_0418(base ^ 0xC2B2AE3D27D4EB4Full, base ^ 0x165667B19E3779F9ull) : 0.0;
+    pv.vx[i] = uSolidX + a * (pv.vx[i] - uSolidX) + sigma * nx0;
+    pv.vy[i] = uSolidY + a * (pv.vy[i] - uSolidY) + sigma * ny0;
+}
+
+__global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
+                                                     int nx, int ny,
+                                                     double Lx, double Ly,
+                                                     const float* lambdaField,
+                                                     const float* normalXField,
+                                                     const float* normalYField,
+                                                     double uSolidX,
+                                                     double uSolidY,
+                                                     double wallKBT,
+                                                     unsigned long long step,
+                                                     unsigned long long rngSeed,
+                                                     unsigned char fluidRole) {
+    const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= pv.n) return;
+    if (pv.role && pv.role[i] != fluidRole) return;
+    const double invLx = Lx > 0.0 ? 1.0 / Lx : 1.0;
+    const double invLy = Ly > 0.0 ? 1.0 / Ly : 1.0;
+    double x = pv.x[i];
+    double y = pv.y[i];
+    if (!isfinite(x) || !isfinite(y)) return;
+    x -= floor(x * invLx) * Lx;
+    y -= floor(y * invLy) * Ly;
+    int ix = static_cast<int>(floor(x * invLx * nx));
+    int iy = static_cast<int>(floor(y * invLy * ny));
+    ix = max(0, min(nx - 1, ix));
+    iy = max(0, min(ny - 1, iy));
+    const int c = iy * nx + ix;
+    const double strength = lambdaField ? fmin(1.0, fmax(0.0, static_cast<double>(lambdaField[c]))) : 0.0;
+    if (!(strength > 0.0)) return;
+    const double a = 1.0 - strength; // exp(-alpha dt), because lambdaField stores 1-exp(-alpha dt).
+    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+    const double thermalVariance = fmax(0.0, 1.0 - a * a) * fmax(0.0, wallKBT) / m;
+    const double sigma = sqrt(thermalVariance);
+    const unsigned long long base = (step + 1ull) * 0xA0761D6478BD642Full ^
+                                    (i + 1ull) * 0xE7037ED1A0B428DBull ^
+                                    (rngSeed + 1ull) * 0x8EBC6AF09C88C6E3ull;
+
+    double nxn = normalXField ? static_cast<double>(normalXField[c]) : 0.0;
+    double nyn = normalYField ? static_cast<double>(normalYField[c]) : 0.0;
+    const double nn = sqrt(nxn * nxn + nyn * nyn);
+    if (!(nn > 1.0e-12)) {
+        const double gx = sigma > 0.0 ? normal01_0418(base ^ 0xA24BAED4963EE407ull, base ^ 0x9FB21C651E98DF25ull) : 0.0;
+        const double gy = sigma > 0.0 ? normal01_0418(base ^ 0xC2B2AE3D27D4EB4Full, base ^ 0x165667B19E3779F9ull) : 0.0;
+        pv.vx[i] = uSolidX + a * (pv.vx[i] - uSolidX) + sigma * gx;
+        pv.vy[i] = uSolidY + a * (pv.vy[i] - uSolidY) + sigma * gy;
+        return;
+    }
+    nxn /= nn;
+    nyn /= nn;
+    const double tx = -nyn;
+    const double ty = nxn;
+    const double relx = pv.vx[i] - uSolidX;
+    const double rely = pv.vy[i] - uSolidY;
+    const double vn = relx * nxn + rely * nyn;
+    const double vt = relx * tx + rely * ty;
+    const double gn = sigma > 0.0 ? normal01_0418(base ^ 0xD6E8FEB86659FD93ull, base ^ 0xCA5A826395121157ull) : 0.0;
+    const double gt = sigma > 0.0 ? normal01_0418(base ^ 0x9E3779B97F4A7C15ull, base ^ 0xC6BC279692B5CC83ull) : 0.0;
+    // Diffuse outward bath: the normal component is mirrored/re-emitted toward
+    // increasing chi, i.e. from solid to fluid.  The tangential component is
+    // OU-thermalized as in thermal_bath.
+    const double vnTrial = a * vn + sigma * gn;
+    const double vnOut = fabs(vnTrial);
+    const double vtOut = a * vt + sigma * gt;
+    pv.vx[i] = uSolidX + vnOut * nxn + vtOut * tx;
+    pv.vy[i] = uSolidY + vnOut * nyn + vtOut * ty;
 }
 
 std::string darcy_csv_path_0343(const SimulationParams& params) {
@@ -566,12 +733,67 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.diagnosticsSeconds = seconds_since_0343(t0);
 
     t0 = Clock0343::now();
-    apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
-                                                              nx, ny, params.Lx, params.Ly,
-                                                              w.d_lambda,
-                                                              params.darcyUSolidX, params.darcyUSolidY,
-                                                              static_cast<unsigned char>(kParticleRoleFluid));
-    check_cuda_0343(cudaDeviceSynchronize(), "apply kick");
+    const bool thermalBath0418 = (params.darcyBrinkmanForcingMode == "thermal_bath" ||
+                                  params.darcyBrinkmanForcingMode == "thermalbath" ||
+                                  params.darcyBrinkmanForcingMode == "langevin" ||
+                                  params.darcyBrinkmanForcingMode == "ou");
+    const bool outwardBath0419 = (params.darcyBrinkmanForcingMode == "outward_bath" ||
+                                  params.darcyBrinkmanForcingMode == "oriented_bath" ||
+                                  params.darcyBrinkmanForcingMode == "oriented_thermal_bath" ||
+                                  params.darcyBrinkmanForcingMode == "diffuse_reflection");
+    const bool meanOutwardBath0420 = (params.darcyBrinkmanForcingMode == "mean_outward_bath" ||
+                                      params.darcyBrinkmanForcingMode == "mean_oriented_bath" ||
+                                      params.darcyBrinkmanForcingMode == "brinkman_outward_bath");
+    if (meanOutwardBath0420) {
+        const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
+                                   (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
+        apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
+                                                                  nx, ny, params.Lx, params.Ly,
+                                                                  w.d_lambda,
+                                                                  params.darcyUSolidX, params.darcyUSolidY,
+                                                                  static_cast<unsigned char>(kParticleRoleFluid));
+        check_cuda_0343(cudaDeviceSynchronize(), "apply mean kick before outward bath");
+        apply_darcy_outward_bath_kernel_0419<<<particleBlocks, threads>>>(pv,
+                                                                          nx, ny, params.Lx, params.Ly,
+                                                                          w.d_lambda, w.d_normalX, w.d_normalY,
+                                                                          params.darcyUSolidX, params.darcyUSolidY,
+                                                                          wallKBT0418,
+                                                                          static_cast<unsigned long long>(step),
+                                                                          static_cast<unsigned long long>(params.rngSeed),
+                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+        check_cuda_0343(cudaDeviceSynchronize(), "apply outward bath after mean kick");
+    } else if (outwardBath0419) {
+        const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
+                                   (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
+        apply_darcy_outward_bath_kernel_0419<<<particleBlocks, threads>>>(pv,
+                                                                          nx, ny, params.Lx, params.Ly,
+                                                                          w.d_lambda, w.d_normalX, w.d_normalY,
+                                                                          params.darcyUSolidX, params.darcyUSolidY,
+                                                                          wallKBT0418,
+                                                                          static_cast<unsigned long long>(step),
+                                                                          static_cast<unsigned long long>(params.rngSeed),
+                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+        check_cuda_0343(cudaDeviceSynchronize(), "apply outward bath");
+    } else if (thermalBath0418) {
+        const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
+                                   (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
+        apply_darcy_thermal_bath_kernel_0418<<<particleBlocks, threads>>>(pv,
+                                                                          nx, ny, params.Lx, params.Ly,
+                                                                          w.d_lambda,
+                                                                          params.darcyUSolidX, params.darcyUSolidY,
+                                                                          wallKBT0418,
+                                                                          static_cast<unsigned long long>(step),
+                                                                          static_cast<unsigned long long>(params.rngSeed),
+                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+        check_cuda_0343(cudaDeviceSynchronize(), "apply thermal bath");
+    } else {
+        apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
+                                                                  nx, ny, params.Lx, params.Ly,
+                                                                  w.d_lambda,
+                                                                  params.darcyUSolidX, params.darcyUSolidY,
+                                                                  static_cast<unsigned char>(kParticleRoleFluid));
+        check_cuda_0343(cudaDeviceSynchronize(), "apply kick");
+    }
     d.applySeconds = seconds_since_0343(t0);
 
     cuda_shared_particle_state_0251_mark_fresh("cuda_darcy_brinkman_0343");

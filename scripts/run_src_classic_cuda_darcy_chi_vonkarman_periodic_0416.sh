@@ -23,16 +23,16 @@ SUMMARY_EVERY=${SUMMARY_EVERY:-100}
 DUMP_STATE_EVERY=${DUMP_STATE_EVERY:-${DUMPS_EVERY:-100}}
 THREADS=${THREADS:-8}
 SEED=${SEED:-1628416}
-DT=${DT:-0.0002}
+DT=${DT:-0.0005}
 KBT=${KBT:-5.0}
 PARTICLE_MASS=${PARTICLE_MASS:-1.0}
 U0=${U0:-0.9}
-UINIT=${UINIT:-0.0}
+UINIT=${UINIT:-0.9}
 INACTIVE_SLOTS=${INACTIVE_SLOTS:-0}
 
 # Periodic x-channel around a Darcy/Brinkman circular chi obstacle.
 # No open boundary segments are used in this variant.
-AX=${AX:-0.0}
+AX=${AX:-0.000005}
 AY=${AY:-0.0}
 
 # Circle definition used to generate the bundled chi and initial state.
@@ -44,13 +44,27 @@ CIRCLE_RC=${CIRCLE_RC:-0.04}
 # Darcy/Brinkman chi file.  The file must be row-major iy*Nx+ix and match NX,NY.
 CHI_FILE=${CHI_FILE:-${DARCY_CHI_FILE:-./chi/chi_vonkarman_circle_xc0p2_yc0p205_rc0p04_1200x640_f32.f32}}
 CHI_FILE_FORMAT=${CHI_FILE_FORMAT:-${DARCY_CHI_FILE_FORMAT:-float32}}
-ALPHA=${ALPHA:-${DARCY_ALPHA_MAX:-80000.0}}
+ALPHA=${ALPHA:-${DARCY_ALPHA_MAX:-800000.0}}
 ALPHA_MIN=${ALPHA_MIN:-${DARCY_ALPHA_MIN:-0.0}}
 DARCY_Q=${DARCY_Q:-0.1}
 DARCY_USOLID_X=${DARCY_USOLID_X:-0.0}
 DARCY_USOLID_Y=${DARCY_USOLID_Y:-0.0}
 DARCY_COST_EVERY=${DARCY_COST_EVERY:-$SUMMARY_EVERY}
 DARCY_THREADS_PER_BLOCK=${DARCY_THREADS_PER_BLOCK:-256}
+DARCY_INITIAL_DEACTIVATE_BELOW_CHI=${DARCY_INITIAL_DEACTIVATE_BELOW_CHI:--1}
+DARCY_BRINKMAN_FORCING_MODE=${DARCY_BRINKMAN_FORCING_MODE:-mean}
+WALL_KBT=${WALL_KBT:--1.0}
+
+# 0422: optional lightweight chi-derived collision virtual-particle moments.
+# These are effective cell moments only; no persistent virtual particles are
+# created, streamed, compacted or dumped.
+DARCY_CHI_COLLISION_VP_ENABLE=${DARCY_CHI_COLLISION_VP_ENABLE:-false}
+DARCY_CHI_COLLISION_VP_MODE=${DARCY_CHI_COLLISION_VP_MODE:-interface_band}
+DARCY_CHI_COLLISION_VP_GAMMA=${DARCY_CHI_COLLISION_VP_GAMMA:--1}
+DARCY_CHI_COLLISION_VP_MASS=${DARCY_CHI_COLLISION_VP_MASS:-1.0}
+DARCY_CHI_COLLISION_VP_LAYERS=${DARCY_CHI_COLLISION_VP_LAYERS:-1}
+DARCY_CHI_COLLISION_VP_THRESHOLD=${DARCY_CHI_COLLISION_VP_THRESHOLD:-0.5}
+DARCY_CHI_COLLISION_VP_STRENGTH=${DARCY_CHI_COLLISION_VP_STRENGTH:-1.0}
 
 # Darcy/Brinkman benchmark observables: force, drag/lift proxies, and benchmark CSV.
 TOPO_BENCHMARK_ENABLE=${TOPO_BENCHMARK_ENABLE:-true}
@@ -81,7 +95,7 @@ LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-${SRC_LIVE_VIS_ENABLE:-1}}
 LIVE_VIS_FIELD=${LIVE_VIS_FIELD:-speed}
 LIVE_VIS_EVERY=${LIVE_VIS_EVERY:-10}
 LIVE_VIS_NX=${LIVE_VIS_NX:-1200}
-LIVE_VIS_NY=${LIVE_VIS_NY:-640}
+LIVE_VIS_NY=${LIVE_VIS_NY:-320}
 LIVE_VIS_CLIP=${LIVE_VIS_CLIP:--1}
 LIVE_VIS_GAIN=${LIVE_VIS_GAIN:-1.0}
 LIVE_VIS_SMOOTH_PASSES=${LIVE_VIS_SMOOTH_PASSES:-1}
@@ -94,6 +108,9 @@ LIVE_VIS_LOG_SOURCE=${LIVE_VIS_LOG_SOURCE:-0}
 LIVE_VIS_CONTROL_FILE=${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}
 LIVE_VIS_CONTROL_EVERY=${LIVE_VIS_CONTROL_EVERY:-1}
 LIVE_VIS_CONTROL_LOG=${LIVE_VIS_CONTROL_LOG:-0}
+LIVE_VIS_HOLD_ON_EXIT=${LIVE_VIS_HOLD_ON_EXIT:-1}
+export SRC_LIVE_VIS_HOLD_ON_EXIT="$LIVE_VIS_HOLD_ON_EXIT"
+
 
 TAG=${TAG:-src_classic_cuda_darcy_chi_vonkarman_periodic_0416_${NX}x${NY}_u${U0}_kBT${KBT}_alpha${ALPHA}}
 RUN_ROOT=${RUN_ROOT:-runs/${TAG}}
@@ -207,6 +224,17 @@ darcyUSolidY = $DARCY_USOLID_Y
 darcyCostEvery = $DARCY_COST_EVERY
 darcyCostFilename = darcy_cost_0343.csv
 darcyThreadsPerBlock = $DARCY_THREADS_PER_BLOCK
+darcyInitialDeactivateBelowChi = $DARCY_INITIAL_DEACTIVATE_BELOW_CHI
+darcyBrinkmanForcingMode = $DARCY_BRINKMAN_FORCING_MODE
+wallKBT = $WALL_KBT
+
+darcyChiCollisionVpEnable = $DARCY_CHI_COLLISION_VP_ENABLE
+darcyChiCollisionVpMode = $DARCY_CHI_COLLISION_VP_MODE
+darcyChiCollisionVpGamma = $DARCY_CHI_COLLISION_VP_GAMMA
+darcyChiCollisionVpMass = $DARCY_CHI_COLLISION_VP_MASS
+darcyChiCollisionVpLayers = $DARCY_CHI_COLLISION_VP_LAYERS
+darcyChiCollisionVpThreshold = $DARCY_CHI_COLLISION_VP_THRESHOLD
+darcyChiCollisionVpStrength = $DARCY_CHI_COLLISION_VP_STRENGTH
 
 topoBenchmarkEnable = $TOPO_BENCHMARK_ENABLE
 topoBenchmarkEvery = $TOPO_BENCHMARK_EVERY
@@ -288,6 +316,7 @@ echo "[0416-darcy-vk] binary=$BIN"
 echo "[0416-darcy-vk] params=$PARAMS"
 echo "[0416-darcy-vk] output=$OUT_DIR"
 echo "[0416-darcy-vk] chi=$CHI_FILE format=$CHI_FILE_FORMAT alpha=$ALPHA U0=$U0 kBT=$KBT dt=$DT circle=($CIRCLE_XC,$CIRCLE_YC,$CIRCLE_RC)"
+echo "[0416-darcy-vk] forcing=$DARCY_BRINKMAN_FORCING_MODE initialDeactivateChi=$DARCY_INITIAL_DEACTIVATE_BELOW_CHI chiVP=$DARCY_CHI_COLLISION_VP_ENABLE gamma=$DARCY_CHI_COLLISION_VP_GAMMA layers=$DARCY_CHI_COLLISION_VP_LAYERS threshold=$DARCY_CHI_COLLISION_VP_THRESHOLD strength=$DARCY_CHI_COLLISION_VP_STRENGTH"
 echo "[0416-darcy-vk] stateSource=$STATE_SOURCE"
 echo "[0416-darcy-vk] topoBenchmark=$TOPO_BENCHMARK_ENABLE file=$TOPO_BENCHMARK_FILENAME every=$TOPO_BENCHMARK_EVERY force=$TOPO_BENCHMARK_FORCE_ENABLE dragLift=$TOPO_BENCHMARK_DRAG_LIFT_ENABLE"
 echo "[0416-darcy-vk] periodic x-channel with Darcy circle: bcLeft/right=periodic, bcBottom/top=solid, U0 initial=$U0, no particles inside circle"

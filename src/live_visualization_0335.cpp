@@ -52,6 +52,7 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
                                             const std::vector<unsigned char>&, int, int,
                                             const std::string&,
                                             const LiveVisualization0335QuiverFrame*) {}
+void LiveVisualization0335::hold_until_closed_on_exit() {}
 
 } // namespace mpcd
 
@@ -764,6 +765,26 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
     }
     glfwSwapBuffers(v.window);
     glfwPollEvents();
+}
+
+void LiveVisualization0335::hold_until_closed_on_exit() {
+    if (!(env_truthy_0335("SRC_LIVE_VIS_HOLD_ON_EXIT") ||
+          env_truthy_0335("MPCD_LIVE_VIS_HOLD_ON_EXIT"))) {
+        return;
+    }
+    auto& v = *impl_;
+    if (!v.enabled || v.window == nullptr) return;
+    if (glfwWindowShouldClose(v.window)) return;
+    std::cerr << "[livevis0335] hold-on-exit active: close the window or press Esc/Q to exit\n";
+    glfwMakeContextCurrent(v.window);
+    glfwSetWindowTitle(v.window, "SRC/MPCD live 0335a | run complete | close window or press Esc/Q");
+    while (!glfwWindowShouldClose(v.window)) {
+        glfwWaitEventsTimeout(0.05);
+        if (glfwGetKey(v.window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
+            glfwGetKey(v.window, GLFW_KEY_Q) == GLFW_PRESS) {
+            break;
+        }
+    }
 }
 
 } // namespace mpcd
