@@ -21,6 +21,13 @@ struct SimulationParams {
     std::string inputState;
     std::string outputDir = "run_base";
 
+    // 0417: restart-friendly inactive reservoir.
+    // After reading inputState, ensure that at least this many Inactive slots
+    // exist in the storage tail.  This lets compact fluid-only dumps be used
+    // as restart states for inlet/outlet or resampling paths that need a free
+    // particle pool, without storing the inactive tail in every .smpcd file.
+    std::uint64_t initialInactiveSlots = 0u;
+
     // Fixed numerical box and collision grid. Lx/Ly remain the numerical
     // extents used by periodic wrapping and fixed-size cell arrays. The active
     // fluid domain can be a sub-domain of this box; see fluid* parameters below.

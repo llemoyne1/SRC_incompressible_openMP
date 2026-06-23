@@ -64,3 +64,6 @@ dev_history/artifacts/
 
 # Timing files produced by /usr/bin/time wrappers.
 *.time
+
+# Local/generated Darcy chi fields
+/chi/

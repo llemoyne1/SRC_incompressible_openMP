@@ -234,24 +234,20 @@ bool cuda_inlet_outlet_segmented_0249b_supported(const SimulationParams& params)
 
     bool hasInlet = false;
     bool hasOutlet = false;
-    bool hasLeft = false;
     for (const OpenBoundarySegment& seg : params.openBoundarySegments) {
         const int face = segment_face_code_0249b(seg.face);
         const int mode = segment_mode_code_0249b(seg);
         if (face < 0 || mode == 0) return false;
-        // 0249b validation is deliberately same-face U-turn only: inlet and
-        // outlet segments on the left boundary x=0. Other segment topologies are
-        // left on the CPU until their own validation patch.
-        if (face != 0) return false;
+        // 0412: broaden the validated SRC-classic segmented IO subset beyond
+        // the original same-left U-turn case.  The kernels and compact segment
+        // representation already carry an explicit face id; keep the remaining
+        // safety guards (wall-like faces, no full-face IO, no immersed solid,
+        // hard reservoir, non-overlapping segments) but allow left/right/top/bottom.
         if (!(seg.sMin >= 0.0 && seg.sMax <= 1.0 && seg.sMax >= seg.sMin)) return false;
         if (mode == 1) hasInlet = true;
         if (mode == 2) hasOutlet = true;
-        if (face == 0) hasLeft = true;
     }
-    // The validation target is the U-turn flow with inlet and outlet segments on x=0.
-    // Keeping the guard explicit avoids accidentally claiming support for all segment
-    // topologies before dedicated tests exist.
-    return hasInlet && hasOutlet && hasLeft;
+    return hasInlet && hasOutlet;
 }
 
 CudaInletOutletSegmented0249bDiagnostics try_apply_cuda_inlet_outlet_segmented_0249b(

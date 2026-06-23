@@ -406,6 +406,7 @@ int main(int argc, char** argv) {
                                    std::filesystem::copy_options::overwrite_existing, ec);
 
         mpcd::ParticleState state = mpcd::read_smpcd_state(params.inputState);
+        mpcd::ensure_inactive_slots(state, params.initialInactiveSlots);
         mpcd::ensure_particle_roles(state, mpcd::ParticleRole::Fluid);
         const mpcd::ParticleRoleCounts initialRoleCounts = mpcd::count_particle_roles(state);
         mpcd::CellGrid grid = mpcd::make_cell_grid(params);

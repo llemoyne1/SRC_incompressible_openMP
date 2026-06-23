@@ -20,9 +20,9 @@ USER_BIN_SET=0
 if [[ -n "${BIN+x}" ]]; then USER_BIN_SET=1; fi
 
 NX=${NX:-64}
-NY=${NY:-32}
+NY=${NY:-64}
 GAMMA=${GAMMA:-20}
-STEPS=${STEPS:-100}
+STEPS=${STEPS:-2000}
 SUMMARY_EVERY=${SUMMARY_EVERY:-$STEPS}
 DUMP_STATE_EVERY=${DUMP_STATE_EVERY:-${DUMPS_EVERY:-$SUMMARY_EVERY}}
 THREADS=${THREADS:-8}
@@ -34,8 +34,8 @@ INLET_UX=${INLET_UX:-0.08}
 RAMP_END_TIME=${RAMP_END_TIME:-0.05}
 FORCE_BUILD=${FORCE_BUILD:-0}
 BUILD_IF_STALE=${BUILD_IF_STALE:-1}
-LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-${SRC_LIVE_VIS_ENABLE:-0}}
-LIVE_VIS_RUN=${LIVE_VIS_RUN:-cuda_q6}
+LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-${SRC_LIVE_VIS_ENABLE:-1}}
+LIVE_VIS_RUN=${LIVE_VIS_RUN:-all}
 RESAMPLING_ENABLE=${RESAMPLING_ENABLE:-false}
 INACTIVE_SLOTS=${INACTIVE_SLOTS:-$((4 * NY * GAMMA))}
 
@@ -187,7 +187,7 @@ if truthy_0404 "$LIVE_VIS_ENABLE"; then
   SRC_LIVE_VIS_FIELD=${SRC_LIVE_VIS_FIELD:-${LIVE_VIS_FIELD:-ux}}
   SRC_LIVE_VIS_EVERY=${SRC_LIVE_VIS_EVERY:-${LIVE_VIS_EVERY:-5}}
   SRC_LIVE_VIS_NX=${SRC_LIVE_VIS_NX:-${LIVE_VIS_NX:-768}}
-  SRC_LIVE_VIS_NY=${SRC_LIVE_VIS_NY:-${LIVE_VIS_NY:-384}}
+  SRC_LIVE_VIS_NY=${SRC_LIVE_VIS_NY:-${LIVE_VIS_NY:-768}}
   SRC_LIVE_VIS_CLIP=${SRC_LIVE_VIS_CLIP:-${LIVE_VIS_CLIP:--1}}
   SRC_LIVE_VIS_GAIN=${SRC_LIVE_VIS_GAIN:-${LIVE_VIS_GAIN:-1.0}}
   SRC_LIVE_VIS_SMOOTH_PASSES=${SRC_LIVE_VIS_SMOOTH_PASSES:-${LIVE_VIS_SMOOTH_PASSES:-1}}
@@ -196,10 +196,10 @@ if truthy_0404 "$LIVE_VIS_ENABLE"; then
   SRC_LIVE_VIS_VSYNC=${SRC_LIVE_VIS_VSYNC:-${LIVE_VIS_VSYNC:-0}}
   SRC_LIVE_VIS_CUDA_FIELD=${SRC_LIVE_VIS_CUDA_FIELD:-${LIVE_VIS_CUDA_FIELD:-1}}
   SRC_LIVE_VIS_CUDA_SNAPSHOT=${SRC_LIVE_VIS_CUDA_SNAPSHOT:-${LIVE_VIS_CUDA_SNAPSHOT:-1}}
-  SRC_LIVE_VIS_LOG_SOURCE=${SRC_LIVE_VIS_LOG_SOURCE:-${LIVE_VIS_LOG_SOURCE:-1}}
-  SRC_LIVE_VIS_CONTROL_FILE=${SRC_LIVE_VIS_CONTROL_FILE:-${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control_box_io_0404.kv}}
+  SRC_LIVE_VIS_LOG_SOURCE=${SRC_LIVE_VIS_LOG_SOURCE:-${LIVE_VIS_LOG_SOURCE:-0}}
+  SRC_LIVE_VIS_CONTROL_FILE=${SRC_LIVE_VIS_CONTROL_FILE:-${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}}
   SRC_LIVE_VIS_CONTROL_EVERY=${SRC_LIVE_VIS_CONTROL_EVERY:-${LIVE_VIS_CONTROL_EVERY:-1}}
-  SRC_LIVE_VIS_CONTROL_LOG=${SRC_LIVE_VIS_CONTROL_LOG:-${LIVE_VIS_CONTROL_LOG:-1}}
+  SRC_LIVE_VIS_CONTROL_LOG=${SRC_LIVE_VIS_CONTROL_LOG:-0}
   if [[ ! -f "$SRC_LIVE_VIS_CONTROL_FILE" ]]; then
     cat > "$SRC_LIVE_VIS_CONTROL_FILE" <<CONTROL
 field = ${SRC_LIVE_VIS_FIELD}
@@ -282,8 +282,7 @@ run_case() {
     MPCD_CUDA_Q6_RESIDENT_STRICT_0400="$cuda_q6" \
     MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400="$cuda_q6" \
     "${livevis_env[@]}" \
-    /usr/bin/time -f 'elapsed=%e user=%U sys=%S' "$BIN" "$params" \
-      > "$RUN_ROOT/${name}.log" 2> "$RUN_ROOT/${name}.time"
+    /usr/bin/time -o "$RUN_ROOT/${name}.time" -f 'elapsed=%e user=%U sys=%S' "$BIN" "$params"
   python3 - "$out_dir/summary_runtime.csv" "$RUN_ROOT/${name}.time" "$out_dir/validation_summary_0162.csv" "$name" <<'SUMMARYPY'
 import csv
 import re
@@ -309,26 +308,26 @@ with open(out_path, "w", newline="") as f:
 SUMMARYPY
 }
 
-run_case src false cpu true src
-run_case cpu_q6 true cpu false cpu_q6
-run_case cuda_q6 true cuda false cuda_q6
+run_case src_cuda_classic false cpu true src_cuda_classic
+run_case src_q6_cpu true cpu false src_q6_cpu
+run_case src_q6_cuda true cuda false src_q6_cuda
 
 python3 scripts/compare_validation_mono_config_0162.py \
-  --origin "$RUN_ROOT/cpu_q6" \
-  --optimized "$RUN_ROOT/cuda_q6" \
-  --out "$ART_DIR/cpu_q6_vs_cuda_q6.csv" \
-  --summary-out "$ART_DIR/cpu_q6_vs_cuda_q6_summary.csv"
+  --origin "$RUN_ROOT/src_q6_cpu" \
+  --optimized "$RUN_ROOT/src_q6_cuda" \
+  --out "$ART_DIR/src_q6_cpu_vs_src_q6_cuda.csv" \
+  --summary-out "$ART_DIR/src_q6_cpu_vs_src_q6_cuda_summary.csv"
 
 set +e
 python3 scripts/compare_validation_mono_config_0162.py \
-  --origin "$RUN_ROOT/src" \
-  --optimized "$RUN_ROOT/cuda_q6" \
-  --out "$ART_DIR/src_vs_cuda_q6.csv" \
-  --summary-out "$ART_DIR/src_vs_cuda_q6_summary.csv"
+  --origin "$RUN_ROOT/src_cuda_classic" \
+  --optimized "$RUN_ROOT/src_q6_cuda" \
+  --out "$ART_DIR/src_cuda_classic_vs_src_q6_cuda.csv" \
+  --summary-out "$ART_DIR/src_cuda_classic_vs_src_q6_cuda_summary.csv"
 src_cmp_rc=$?
 set -e
 
-python3 - "$RUN_ROOT/cuda_q6/summary_runtime.csv" "$ART_DIR/cuda_q6_metrics.txt" <<'PY'
+python3 - "$RUN_ROOT/src_q6_cuda/summary_runtime.csv" "$ART_DIR/src_q6_cuda_metrics.txt" <<'PY'
 import csv, math, sys
 summary, out = sys.argv[1:3]
 with open(summary, newline="") as f:
@@ -337,10 +336,10 @@ if not rows:
     raise SystemExit("empty CUDA Q6 summary")
 r = rows[-1]
 if int(float(r.get("q6Applied", "0"))) != 1 or int(float(r.get("q6Converged", "0"))) != 1:
-    raise SystemExit("CUDA Q6 did not apply and converge")
+    raise SystemExit("SRC+Q6 CUDA did not apply and converge")
 div = float(r.get("q6DivAfterProjectedFluxRms", "nan"))
 if not math.isfinite(div) or div > 1.0e-8:
-    raise SystemExit(f"CUDA Q6 projected divergence too large: {div}")
+    raise SystemExit(f"SRC+Q6 CUDA projected divergence too large: {div}")
 lines = [
     f"q6Iterations={r.get('q6Iterations')}",
     f"q6DivBeforeRms={r.get('q6DivBeforeRms')}",
@@ -356,7 +355,7 @@ with open(out, "w") as f:
 print("[0404-box-io] " + " ".join(lines[:5]))
 PY
 
-echo "[0404-box-io] strict CPU-Q6 vs CUDA-Q6 summary: $ART_DIR/cpu_q6_vs_cuda_q6_summary.csv"
-echo "[0404-box-io] physical SRC vs CUDA-Q6 summary: $ART_DIR/src_vs_cuda_q6_summary.csv (rc=$src_cmp_rc, differences expected)"
-echo "[0404-box-io] metrics: $ART_DIR/cuda_q6_metrics.txt"
+echo "[0404-box-io] SRC+Q6 CPU vs SRC+Q6 CUDA summary: $ART_DIR/src_q6_cpu_vs_src_q6_cuda_summary.csv"
+echo "[0404-box-io] SRC CUDA classic vs SRC+Q6 CUDA summary: $ART_DIR/src_cuda_classic_vs_src_q6_cuda_summary.csv (rc=$src_cmp_rc, differences expected)"
+echo "[0404-box-io] metrics: $ART_DIR/src_q6_cuda_metrics.txt"
 echo "[0404-box-io] dumps/root: $RUN_ROOT"

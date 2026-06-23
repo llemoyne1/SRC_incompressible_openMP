@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 0411 -- autonomous SRC classic CUDA + Darcy/Brinkman chi-file demo.
+# 0413 update: external .smpcd initial state and all Darcy topoBenchmark diagnostics enabled by default.
+# Requested geometry: 1x1 domain, 128x128 grid, solid walls, upper-left inlet
+# segment and lower-right outlet segment, no Q6, no resampling, livevis enabled.
+#
+# Important implementation note: after patch 0412, the SRC-classic resident segmented IO guard accepts multi-face segments.
+# This script writes the requested left-inlet/right-outlet segmented geometry and
+# uses strict resident segmented IO by default.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+truthy_0411() { case "${1:-0}" in 1|true|TRUE|yes|YES|on|ON|enable|enabled) return 0 ;; *) return 1 ;; esac; }
+
+Lx=${Lx:-${LX:-1.0}}
+Ly=${Ly:-${LY:-1.0}}
+NX=${NX:-128}
+NY=${NY:-128}
+GAMMA=${GAMMA:-20}
+STEPS=${STEPS:-5000}
+SUMMARY_EVERY=${SUMMARY_EVERY:-100}
+DUMP_STATE_EVERY=${DUMP_STATE_EVERY:-${DUMPS_EVERY:-100}}
+THREADS=${THREADS:-8}
+SEED=${SEED:-1628411}
+DT=${DT:-0.001}
+KBT=${KBT:-0.001}
+PARTICLE_MASS=${PARTICLE_MASS:-1.0}
+U0=${U0:-1.0}
+UINIT=${UINIT:-0.0}
+INACTIVE_SLOTS=${INACTIVE_SLOTS:-$((1*GAMMA * NX * NY))}
+
+# Segments use the compact relative convention: face mode sMin sMax ux uy type mass.
+# For vertical faces, s is the y-relative coordinate.  Top quarter is [0.75,1],
+# bottom quarter is [0,0.25].
+INLET_FACE=${INLET_FACE:-left}
+INLET_SMIN=${INLET_SMIN:-0.75}
+INLET_SMAX=${INLET_SMAX:-1.0}
+OUTLET_FACE=${OUTLET_FACE:-right}
+OUTLET_SMIN=${OUTLET_SMIN:-0.0}
+OUTLET_SMAX=${OUTLET_SMAX:-0.25}
+OUTLET_MODE=${OUTLET_MODE:-neumann}
+
+# Darcy/Brinkman chi file.  The file must be row-major iy*Nx+ix and match NX,NY.
+CHI_FILE=${CHI_FILE:-${DARCY_CHI_FILE:-./chi/chi_bend_pipe_left_top_to_right_bottom_128x128_f32.f32}}
+CHI_FILE_FORMAT=${CHI_FILE_FORMAT:-${DARCY_CHI_FILE_FORMAT:-float32}}
+ALPHA=${ALPHA:-${DARCY_ALPHA_MAX:-8000.0}}
+ALPHA_MIN=${ALPHA_MIN:-${DARCY_ALPHA_MIN:-0.0}}
+DARCY_Q=${DARCY_Q:-0.1}
+DARCY_USOLID_X=${DARCY_USOLID_X:-0.0}
+DARCY_USOLID_Y=${DARCY_USOLID_Y:-0.0}
+DARCY_COST_EVERY=${DARCY_COST_EVERY:-$SUMMARY_EVERY}
+DARCY_THREADS_PER_BLOCK=${DARCY_THREADS_PER_BLOCK:-256}
+
+# Darcy/Brinkman benchmark observables: force, drag/lift proxies, and benchmark CSV.
+TOPO_BENCHMARK_ENABLE=${TOPO_BENCHMARK_ENABLE:-true}
+TOPO_BENCHMARK_EVERY=${TOPO_BENCHMARK_EVERY:-$DARCY_COST_EVERY}
+TOPO_BENCHMARK_FILENAME=${TOPO_BENCHMARK_FILENAME:-topo_benchmark_0348.csv}
+TOPO_BENCHMARK_FORCE_ENABLE=${TOPO_BENCHMARK_FORCE_ENABLE:-true}
+TOPO_BENCHMARK_DRAG_LIFT_ENABLE=${TOPO_BENCHMARK_DRAG_LIFT_ENABLE:-true}
+TOPO_BENCHMARK_FLOW_DIR_X=${TOPO_BENCHMARK_FLOW_DIR_X:-1.0}
+TOPO_BENCHMARK_FLOW_DIR_Y=${TOPO_BENCHMARK_FLOW_DIR_Y:-0.0}
+TOPO_BENCHMARK_LIFT_DIR_X=${TOPO_BENCHMARK_LIFT_DIR_X:-0.0}
+TOPO_BENCHMARK_LIFT_DIR_Y=${TOPO_BENCHMARK_LIFT_DIR_Y:-1.0}
+
+ROTATION_ANGLE=${ROTATION_ANGLE:-1.5707963267948966}
+RANDOM_ROTATION_SIGN=${RANDOM_ROTATION_SIGN:-true}
+GRID_SHIFT_ENABLE=${GRID_SHIFT_ENABLE:-true}
+THERMOSTAT_ENABLE=${THERMOSTAT_ENABLE:-true}
+THERMOSTAT_MODE=${THERMOSTAT_MODE:-cell_relative_rescale}
+THERMOSTAT_EVERY=${THERMOSTAT_EVERY:-1}
+THERMOSTAT_TARGET_KBT=${THERMOSTAT_TARGET_KBT:--1.0}
+THERMOSTAT_MIN_PARTICLES=${THERMOSTAT_MIN_PARTICLES:-3}
+DUMP_ROLE_FILTER=${DUMP_ROLE_FILTER:-fluid}
+SUMMARY_ROLE_FILTER=${SUMMARY_ROLE_FILTER:-fluid}
+
+FORCE_BUILD=${FORCE_BUILD:-0}
+BUILD_IF_STALE=${BUILD_IF_STALE:-1}
+LIVE_PROGRESS=${LIVE_PROGRESS:-1}
+LIVE_VIS_ENABLE=${LIVE_VIS_ENABLE:-${SRC_LIVE_VIS_ENABLE:-1}}
+LIVE_VIS_FIELD=${LIVE_VIS_FIELD:-chi}
+LIVE_VIS_EVERY=${LIVE_VIS_EVERY:-10}
+LIVE_VIS_NX=${LIVE_VIS_NX:-768}
+LIVE_VIS_NY=${LIVE_VIS_NY:-768}
+LIVE_VIS_CLIP=${LIVE_VIS_CLIP:--1}
+LIVE_VIS_GAIN=${LIVE_VIS_GAIN:-1.0}
+LIVE_VIS_SMOOTH_PASSES=${LIVE_VIS_SMOOTH_PASSES:-1}
+LIVE_VIS_COLORMAP=${LIVE_VIS_COLORMAP:-thermal}
+LIVE_VIS_WINDOW_SCALE=${LIVE_VIS_WINDOW_SCALE:-1}
+LIVE_VIS_VSYNC=${LIVE_VIS_VSYNC:-0}
+LIVE_VIS_CUDA_FIELD=${LIVE_VIS_CUDA_FIELD:-1}
+LIVE_VIS_CUDA_SNAPSHOT=${LIVE_VIS_CUDA_SNAPSHOT:-1}
+LIVE_VIS_LOG_SOURCE=${LIVE_VIS_LOG_SOURCE:-0}
+LIVE_VIS_CONTROL_FILE=${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}
+LIVE_VIS_CONTROL_EVERY=${LIVE_VIS_CONTROL_EVERY:-1}
+LIVE_VIS_CONTROL_LOG=${LIVE_VIS_CONTROL_LOG:-0}
+
+REQUIRE_VALIDATED_SEGMENTED_RESIDENT=${REQUIRE_VALIDATED_SEGMENTED_RESIDENT:-1}
+TAG=${TAG:-src_classic_cuda_darcy_chi_lrseg_0411_${NX}x${NY}_u${U0}_alpha${ALPHA}}
+RUN_ROOT=${RUN_ROOT:-runs/${TAG}}
+STATE_SOURCE=${STATE_SOURCE:-${INPUT_STATE:-./init/src_classic_darcy_homogeneous_128x128_g20.smpcd}}
+STATE=${STATE:-$RUN_ROOT/init/$(basename "$STATE_SOURCE")}
+PARAMS=${PARAMS:-$RUN_ROOT/params/src_classic_darcy_chi.kv}
+OUT_DIR=${OUT_DIR:-$RUN_ROOT/output}
+TIME_FILE=${TIME_FILE:-$RUN_ROOT/logs/src_classic_darcy_chi.time}
+ENV_FILE=${ENV_FILE:-$RUN_ROOT/logs/environment_0411.env}
+
+if [[ -z "$CHI_FILE" ]]; then
+  echo "[0411-darcy-chi] ERROR: provide CHI_FILE=/path/to/chi.f32 or DARCY_CHI_FILE=/path/to/chi.f32" >&2
+  exit 2
+fi
+if [[ ! -f "$CHI_FILE" ]]; then
+  echo "[0411-darcy-chi] ERROR: chi file not found: $CHI_FILE" >&2
+  exit 2
+fi
+if [[ -z "$STATE_SOURCE" ]]; then
+  echo "[0411-darcy-chi] ERROR: provide STATE_SOURCE=/path/to/state.smpcd or INPUT_STATE=/path/to/state.smpcd" >&2
+  exit 2
+fi
+if [[ ! -f "$STATE_SOURCE" ]]; then
+  echo "[0411-darcy-chi] ERROR: initial state file not found: $STATE_SOURCE" >&2
+  exit 2
+fi
+
+USER_BIN_SET=0
+if [[ -n "${BIN+x}" ]]; then USER_BIN_SET=1; fi
+if truthy_0411 "$LIVE_VIS_ENABLE" && [[ "$USER_BIN_SET" == "0" ]]; then
+  BIN=build/src_mpcd_base_cuda_q6_resident_0400_livevis
+else
+  BIN=${BIN:-build/src_mpcd_base_cuda_q6_resident_0400}
+fi
+
+needs_build=0
+if truthy_0411 "$FORCE_BUILD" || [[ ! -x "$BIN" ]]; then
+  needs_build=1
+elif truthy_0411 "$BUILD_IF_STALE"; then
+  if find src include scripts/build_src_mpcd_cuda_q6_resident_0400.sh -type f -newer "$BIN" -print -quit | grep -q .; then needs_build=1; fi
+fi
+if [[ "$needs_build" == "1" ]]; then
+  if truthy_0411 "$LIVE_VIS_ENABLE"; then MPCD_ENABLE_LIVE_VIS=1 OUT="$BIN" bash scripts/build_src_mpcd_cuda_q6_resident_0400.sh; else OUT="$BIN" bash scripts/build_src_mpcd_cuda_q6_resident_0400.sh; fi
+fi
+if [[ ! -x "$BIN" ]]; then echo "[0411-darcy-chi] ERROR missing binary: $BIN" >&2; exit 127; fi
+
+mkdir -p "$RUN_ROOT/init" "$RUN_ROOT/params" "$RUN_ROOT/logs" "$OUT_DIR"
+
+cp "$STATE_SOURCE" "$STATE"
+echo "[0411-state] input=$STATE_SOURCE copied=$STATE"
+
+cat > "$PARAMS" <<PARAMS
+inputState = $STATE
+outputDir = $OUT_DIR
+Lx = $Lx
+Ly = $Ly
+Nx = $NX
+Ny = $NY
+
+dt = $DT
+nSteps = $STEPS
+
+bcLeft = solid
+bcRight = solid
+bcBottom = solid
+bcTop = solid
+bcX = solid
+bcY = solid
+
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 2
+openBoundarySegment0 = $INLET_FACE inlet $INLET_SMIN $INLET_SMAX $U0 0.0 0 $PARTICLE_MASS
+openBoundarySegment1 = $OUTLET_FACE outlet $OUTLET_SMIN $OUTLET_SMAX $U0 0.0 0 $PARTICLE_MASS
+
+inletVelocityRampEnable = true
+inletVelocityRampStartTime = 0.0
+inletVelocityRampEndTime = 0.25
+inletVelocityRampInitialFactor = 0.2
+inletVelocityRampFinalFactor = 1.0
+inletVelocityRampProfile = smoothstep
+inletVelocitySpatialProfile = uniform
+inletKBT = -1.0
+inletThermalNoise = 0.0
+inletInjectionMode = hard_cell_density
+inletReservoirMode = hard_cell_density
+inletReservoirCells = 3
+inletTargetOccupancy = $GAMMA
+inletHardCellVelocityMean = true
+inletHardCellThermalRescale = true
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+
+openBoundaryOutletMode = $OUTLET_MODE
+openBoundaryOutletHybridBlend = 0.0
+openBoundaryOutletFeedbackGain = 0.0
+
+wallAccommodation = 1.0
+wallVpGamma = $GAMMA
+wallVpMass = $PARTICLE_MASS
+wallKBT = -1.0
+wallThermalNoise = 0.0
+
+srcClassicCudaModeEnable = true
+projectionEnable = false
+resamplingEnable = false
+closedCapacityResponseEnable = false
+closedCapacityVirialKickEnable = false
+
+rotationAngle = $ROTATION_ANGLE
+randomRotationSign = $RANDOM_ROTATION_SIGN
+gridShiftEnable = $GRID_SHIFT_ENABLE
+rngSeed = $SEED
+
+thermostatEnable = $THERMOSTAT_ENABLE
+thermostatMode = $THERMOSTAT_MODE
+thermostatEvery = $THERMOSTAT_EVERY
+thermostatTargetKBT = $THERMOSTAT_TARGET_KBT
+thermostatMinParticles = $THERMOSTAT_MIN_PARTICLES
+kBT = $KBT
+
+darcyBrinkmanEnable = true
+darcyChiMode = file
+darcyChiFile = $CHI_FILE
+darcyChiNx = $NX
+darcyChiNy = $NY
+darcyChiFileFormat = $CHI_FILE_FORMAT
+darcyAlphaMin = $ALPHA_MIN
+darcyAlphaMax = $ALPHA
+darcyQ = $DARCY_Q
+darcyUSolidX = $DARCY_USOLID_X
+darcyUSolidY = $DARCY_USOLID_Y
+darcyCostEvery = $DARCY_COST_EVERY
+darcyCostFilename = darcy_cost_0343.csv
+darcyThreadsPerBlock = $DARCY_THREADS_PER_BLOCK
+
+topoBenchmarkEnable = $TOPO_BENCHMARK_ENABLE
+topoBenchmarkEvery = $TOPO_BENCHMARK_EVERY
+topoBenchmarkFilename = $TOPO_BENCHMARK_FILENAME
+topoBenchmarkForceEnable = $TOPO_BENCHMARK_FORCE_ENABLE
+topoBenchmarkDragLiftEnable = $TOPO_BENCHMARK_DRAG_LIFT_ENABLE
+topoBenchmarkFlowDirX = $TOPO_BENCHMARK_FLOW_DIR_X
+topoBenchmarkFlowDirY = $TOPO_BENCHMARK_FLOW_DIR_Y
+topoBenchmarkLiftDirX = $TOPO_BENCHMARK_LIFT_DIR_X
+topoBenchmarkLiftDirY = $TOPO_BENCHMARK_LIFT_DIR_Y
+
+summaryEvery = $SUMMARY_EVERY
+dumpStateEvery = $DUMP_STATE_EVERY
+summaryRoleFilter = $SUMMARY_ROLE_FILTER
+dumpRoleFilter = $DUMP_ROLE_FILTER
+initialInactiveSlots = $INACTIVE_SLOTS
+numThreads = $THREADS
+PARAMS
+
+if truthy_0411 "$LIVE_VIS_ENABLE"; then
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE" ]]; then
+    cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
+field = ${LIVE_VIS_FIELD}
+clip = ${LIVE_VIS_CLIP}
+gain = ${LIVE_VIS_GAIN}
+smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
+colormap = ${LIVE_VIS_COLORMAP}
+quiverScale = ${SRC_LIVE_VIS_QUIVER_SCALE:--1}
+CONTROL
+  fi
+fi
+
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
+export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
+export OMP_PLACES="${OMP_PLACES:-cores}"
+export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
+
+# CUDA classic SRC / segmented boundary / persistent collision controls.
+# 0412: the 0264 resident segmented path accepts multi-face segments; keep strict on by default.
+export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264=1
+if truthy_0411 "$REQUIRE_VALIDATED_SEGMENTED_RESIDENT"; then
+  export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT=1
+else
+  export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT=0
+fi
+export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT=1
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1
+export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_STRICT=1
+export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT=1
+export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=1
+export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT=1
+
+export SRC_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+export MPCD_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+export SRC_LIVE_VIS_FIELD="$LIVE_VIS_FIELD"
+export SRC_LIVE_VIS_EVERY="$LIVE_VIS_EVERY"
+export SRC_LIVE_VIS_NX="$LIVE_VIS_NX"
+export SRC_LIVE_VIS_NY="$LIVE_VIS_NY"
+export SRC_LIVE_VIS_CLIP="$LIVE_VIS_CLIP"
+export SRC_LIVE_VIS_GAIN="$LIVE_VIS_GAIN"
+export SRC_LIVE_VIS_SMOOTH_PASSES="$LIVE_VIS_SMOOTH_PASSES"
+export SRC_LIVE_VIS_COLORMAP="$LIVE_VIS_COLORMAP"
+export SRC_LIVE_VIS_WINDOW_SCALE="$LIVE_VIS_WINDOW_SCALE"
+export SRC_LIVE_VIS_VSYNC="$LIVE_VIS_VSYNC"
+export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
+export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
+export SRC_LIVE_VIS_LOG_SOURCE="$LIVE_VIS_LOG_SOURCE"
+export SRC_LIVE_VIS_CONTROL_FILE="$LIVE_VIS_CONTROL_FILE"
+export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
+
+env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_ENABLE=|OMP_|BIN=|CHI_FILE=|STATE_SOURCE=|INPUT_STATE=|DARCY_|TOPO_BENCHMARK_|ALPHA=|U0=|DT=|KBT=|NX=|NY=)' | sort > "$ENV_FILE"
+
+echo "[0411-darcy-chi] binary=$BIN"
+echo "[0411-darcy-chi] params=$PARAMS"
+echo "[0411-darcy-chi] output=$OUT_DIR"
+echo "[0411-darcy-chi] chi=$CHI_FILE format=$CHI_FILE_FORMAT alpha=$ALPHA U0=$U0 kBT=$KBT dt=$DT"
+echo "[0411-darcy-chi] stateSource=$STATE_SOURCE"
+echo "[0411-darcy-chi] topoBenchmark=$TOPO_BENCHMARK_ENABLE file=$TOPO_BENCHMARK_FILENAME every=$TOPO_BENCHMARK_EVERY force=$TOPO_BENCHMARK_FORCE_ENABLE dragLift=$TOPO_BENCHMARK_DRAG_LIFT_ENABLE"
+echo "[0411-darcy-chi] segments: ${INLET_FACE}:in[$INLET_SMIN,$INLET_SMAX] -> ${OUTLET_FACE}:out[$OUTLET_SMIN,$OUTLET_SMAX]"
+echo "[0411-darcy-chi] livevis=$LIVE_VIS_ENABLE control=$LIVE_VIS_CONTROL_FILE field=$LIVE_VIS_FIELD"
+
+/usr/bin/time -o "$TIME_FILE" -f 'elapsed=%e user=%U sys=%S' "$BIN" "$PARAMS"
+
+echo "[0411-darcy-chi] time=$(cat "$TIME_FILE")"
+echo "[0411-darcy-chi] darcy csv=$OUT_DIR/darcy_cost_0343.csv"
+if [[ "$TOPO_BENCHMARK_ENABLE" == "true" || "$TOPO_BENCHMARK_ENABLE" == "1" || "$TOPO_BENCHMARK_ENABLE" == "TRUE" ]]; then
+  echo "[0411-darcy-chi] topo benchmark csv=$OUT_DIR/$TOPO_BENCHMARK_FILENAME"
+fi
+echo "[0411-darcy-chi] dumps/root=$RUN_ROOT"

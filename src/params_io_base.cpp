@@ -64,6 +64,9 @@ int parse_int(const std::string& value, const std::string& key) {
 std::uint64_t parse_u64(const std::string& value, const std::string& key) {
     std::size_t pos = 0u;
     const std::string v = trim(value);
+    if (!v.empty() && v.front() == '-') {
+        throw std::runtime_error("Invalid negative unsigned integer value for key '" + key + "': " + value);
+    }
     const unsigned long long out = std::stoull(v, &pos);
     if (pos != v.size()) {
         throw std::runtime_error("Invalid unsigned integer value for key '" + key + "': " + value);
@@ -218,6 +221,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
 
         if (key == "inputState") p.inputState = value;
         else if (key == "outputDir") p.outputDir = value;
+        else if (key == "initialInactiveSlots") p.initialInactiveSlots = parse_u64(value, key);
         else if (key == "Lx") p.Lx = parse_double(value, key);
         else if (key == "Ly") p.Ly = parse_double(value, key);
         else if (key == "Nx") p.Nx = parse_int(value, key);

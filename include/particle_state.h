@@ -90,6 +90,13 @@ inline std::size_t active_fluid_count_size(const ParticleState& state) {
     return static_cast<std::size_t>(active_fluid_count(state));
 }
 void refresh_active_fluid_count(ParticleState& state);
+
+// Ensure-mode reservoir creation used at restart/load time.  The function
+// guarantees at least targetInactiveSlots particles with role Inactive while
+// preserving the active-fluid prefix and NactiveFluid.  If the state already
+// contains enough inactive slots, it does nothing.
+void ensure_inactive_slots(ParticleState& state, std::uint64_t targetInactiveSlots);
+
 bool has_active_fluid_prefix(const ParticleState& state);
 void validate_active_fluid_prefix(const ParticleState& state, const std::string& context = "ParticleState");
 void compact_active_fluid_prefix(ParticleState& state);

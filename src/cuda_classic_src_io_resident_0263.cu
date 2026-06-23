@@ -2550,20 +2550,19 @@ bool supported_segmented_0264(const SimulationParams& params) {
 
     bool hasInlet = false;
     bool hasOutlet = false;
-    bool hasLeft = false;
     for (const OpenBoundarySegment& seg : params.openBoundarySegments) {
         const int face = segment_face_code_0264(seg.face);
         const int mode = segment_mode_code_0264(seg);
         if (face < 0 || mode == 0) return false;
-        // Same conservative validation scope as 0249b: U-turn inlet and outlet
-        // segments on the left face. Broader segment topologies remain CPU.
-        if (face != 0) return false;
+        // 0412: broaden SRC-classic resident segmented IO beyond the original
+        // same-left U-turn validation target.  The resident kernels already use
+        // segmentFace for crossing, reservoir insertion and outlet extraction;
+        // keep the structural safety guards but allow multi-face segmented IO.
         if (!(seg.sMin >= 0.0 && seg.sMax <= 1.0 && seg.sMax >= seg.sMin)) return false;
         if (mode == 1) hasInlet = true;
         if (mode == 2) hasOutlet = true;
-        hasLeft = true;
     }
-    return hasInlet && hasOutlet && hasLeft;
+    return hasInlet && hasOutlet;
 }
 
 void maybe_apply_forced_outlet_extraction_0291(

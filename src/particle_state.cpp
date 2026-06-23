@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -196,6 +197,55 @@ std::uint64_t active_fluid_count(const ParticleState& state) {
 
 void refresh_active_fluid_count(ParticleState& state) {
     state.NactiveFluid = compute_active_fluid_count(state);
+}
+
+void ensure_inactive_slots(ParticleState& state, std::uint64_t targetInactiveSlots) {
+    if (targetInactiveSlots == 0u) {
+        return;
+    }
+
+    // This is a load/restart utility, not a hot per-step path.  Pay the exact
+    // role count/compaction cost once so the rest of the code can rely on the
+    // active-prefix invariant.
+    ensure_particle_roles(state, ParticleRole::Fluid);
+    compact_active_fluid_prefix(state);
+    const ParticleRoleCounts counts = count_particle_roles(state);
+    if (counts.inactive >= targetInactiveSlots) {
+        return;
+    }
+
+    const std::uint64_t toAdd = targetInactiveSlots - counts.inactive;
+    if (toAdd > std::numeric_limits<std::uint64_t>::max() - state.Np) {
+        throw std::runtime_error("ensure_inactive_slots: particle capacity overflow");
+    }
+    const std::uint64_t newNp64 = state.Np + toAdd;
+    const std::size_t oldSize = static_cast<std::size_t>(state.Np);
+    const std::size_t newSize = static_cast<std::size_t>(newNp64);
+    if (static_cast<std::uint64_t>(newSize) != newNp64) {
+        throw std::runtime_error("ensure_inactive_slots: requested particle capacity does not fit std::size_t");
+    }
+
+    state.x.resize(newSize, 0.0);
+    state.y.resize(newSize, 0.0);
+    state.vx.resize(newSize, 0.0);
+    state.vy.resize(newSize, 0.0);
+    state.type.resize(newSize, 0u);
+    state.mass.resize(newSize, 1.0);
+    state.role.resize(newSize, kParticleRoleInactive);
+
+    for (std::size_t i = oldSize; i < newSize; ++i) {
+        state.x[i] = 0.0;
+        state.y[i] = 0.0;
+        state.vx[i] = 0.0;
+        state.vy[i] = 0.0;
+        state.type[i] = 0u;
+        state.mass[i] = 1.0;
+        state.role[i] = kParticleRoleInactive;
+    }
+
+    state.Np = newNp64;
+    // NactiveFluid intentionally unchanged: appended particles are storage-only.
+    validate_active_fluid_prefix(state, "ensure_inactive_slots(after)");
 }
 
 bool has_active_fluid_prefix(const ParticleState& state) {
