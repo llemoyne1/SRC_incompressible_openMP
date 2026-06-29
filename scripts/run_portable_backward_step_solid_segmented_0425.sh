@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Portable CUDA SRC/MPCD + split-safe post-SRC resampling demo (updated 0337 live-visualization checkpoint).
+# 0425b -- portable CUDA SRC/MPCD backward-step solid script, segmented IO ablation.
 # This script is self-contained: it does not source any repository demo helper.
 # It generates its own initial .smpcd state, writes its own .kv parameters, sets
 # CUDA/resampling environment flags explicitly, and launches the selected binary.
@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_0400_livevis}"
+BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0337d}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-8}"
@@ -62,8 +62,6 @@ export LIVE_VIS_CONTROL_DIR
 export LIVE_VIS_CONTROL_BASENAME
 export LIVE_VIS_CONTROL_EVERY
 export LIVE_VIS_CONTROL_LOG
-
-INACTIVE_SLOTS=${INACTIVE_SLOTS:-1200000}
 
 portable_bool_true_0315() {
   case "${1:-0}" in
@@ -415,7 +413,7 @@ portable_cuda_wall_0315() {
   portable_cuda_classic_fast_flags_0330b
 }
 
-portable_cuda_io_fullface_rect_0315() {
+portable_cuda_io_segmented_rect_0425() {
   portable_cuda_clear_0315
   export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=1
   export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_STRICT=1
@@ -437,6 +435,23 @@ portable_cuda_io_segmented_0315() {
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
+  portable_cuda_enable_thermostat_0315 1
+  portable_cuda_classic_fast_flags_0330b
+}
+
+
+portable_cuda_io_segmented_rect_0425() {
+  portable_cuda_clear_0315
+  export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264=1
+  export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT=1
+  export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=1
+  export MPCD_CUDA_IMMERSED_RECTANGLE_0247=1
+  export MPCD_CUDA_IMMERSED_RECTANGLE_0247_DOWNLOAD_ALL=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_IMMERSED_RECT_0254=1
   portable_cuda_enable_thermostat_0315 1
   portable_cuda_classic_fast_flags_0330b
 }
@@ -525,7 +540,7 @@ GUARD_EVERY=${GUARD_EVERY:-5}
 GUARD_NMIN=${GUARD_NMIN:-12}
 GUARD_NTARGET=${GUARD_NTARGET:-20}
 GUARD_NMAX=${GUARD_NMAX:-32}
-INACTIVE_SLOTS=${INACTIVE_SLOTS:-120000}
+INACTIVE_SLOTS=${INACTIVE_SLOTS:-unset}
 META
 }
 
@@ -563,8 +578,17 @@ SEED="${SEED:-1628304}"; SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY
 UIN="${UIN:-0.25}"; UINIT="${UINIT:-0.25}"; THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-1}"
 STEP_XMIN="${STEP_XMIN:-0.0}"; STEP_XMAX="${STEP_XMAX:-1.0}"; STEP_YMIN="${STEP_YMIN:-0.0}"; STEP_YMAX="${STEP_YMAX:-0.52}"
 OUTLET_MODE="${OUTLET_MODE:-hybrid}"
+INLET_FACE="${INLET_FACE:-left}"
+INLET_SMIN="${INLET_SMIN:-$(python3 - <<PY
+print(float("$STEP_YMAX")/float("$Ly"))
+PY
+)}"
+INLET_SMAX="${INLET_SMAX:-1.0}"
+OUTLET_FACE="${OUTLET_FACE:-right}"
+OUTLET_SMIN="${OUTLET_SMIN:-0.0}"
+OUTLET_SMAX="${OUTLET_SMAX:-1.0}"
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-120000}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_backward_step_resampling_0315}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_backward_step_solid_segmented_0425}"
 run_mode_0315() {
   local mode=$1 run_root; run_root=$(portable_mode_root_0315 "$BASE_RUN_ROOT" "$mode")
   portable_prepare_dirs_0315 "$run_root"
@@ -577,10 +601,14 @@ Lx = ${Lx}
 Ly = ${Ly}
 Nx = ${NX}
 Ny = ${NY}
-bcLeft = inlet
-bcRight = outlet
+bcLeft = solid
+bcRight = solid
 bcBottom = solid
 bcTop = solid
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 2
+openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${UIN} 0.0 0 1.0
+openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${UIN} 0.0 0 1.0
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
 taylorGreenForcingEnable = false
@@ -592,8 +620,7 @@ inletVelocityRampEndTime = 0.25
 inletVelocityRampInitialFactor = 0.2
 inletVelocityRampFinalFactor = 1.0
 inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = flat_taper_y
-inletVelocityWallTaperCells = 2.0
+inletVelocitySpatialProfile = uniform
 inletKBT = -1.0
 inletThermalNoise = 0.0
 inletInjectionMode = hard_cell_density
@@ -626,7 +653,7 @@ wallKBT = -1.0
 wallThermalNoise = 0.0
 $(portable_write_common_params_0315 "$STEPS" "$DT" "$KBT" "$SEED" "$SUMMARY_EVERY" "$DUMP_STATE_EVERY" "$THREADS" 1.5)
 PARAMS
-  portable_cuda_io_fullface_rect_0315
+  portable_cuda_io_segmented_rect_0425
   portable_resampling_env_0315 "$mode"
   portable_livevis_prepare_control_0341a "$run_root"
   portable_livevis_env_0337 "$mode"
