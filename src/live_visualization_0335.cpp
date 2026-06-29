@@ -6,6 +6,8 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -52,7 +54,9 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
                                             const std::vector<unsigned char>&, int, int,
                                             const std::string&,
                                             const LiveVisualization0335QuiverFrame*) {}
+
 void LiveVisualization0335::hold_until_closed_on_exit() {}
+
 
 } // namespace mpcd
 
@@ -102,6 +106,12 @@ std::string trim_0335(const std::string& input) {
 std::string lower_0335(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
+}
+
+bool truthy_value_0335(const std::string& raw) {
+    const std::string s = lower_0335(trim_0335(raw));
+    return s == "1" || s == "true" || s == "yes" || s == "on" ||
+           s == "enable" || s == "enabled";
 }
 
 bool parse_double_0335(const std::string& text, double& value) {
@@ -284,6 +294,7 @@ struct LiveVisualization0335::Impl {
     std::string controlFile;
     int controlReloadEvery = 1;
     bool controlLog = false;
+    bool lastRecordEnableInControl0432 = false;
 
     std::vector<double> sumUx;
     std::vector<double> sumUy;
@@ -306,6 +317,19 @@ struct LiveVisualization0335::Impl {
         rgba.assign(4u * n, 255u);
     }
 
+    void resize_grid(int newNx, int newNy) {
+        newNx = std::max(16, newNx);
+        newNy = std::max(16, newNy);
+        if (newNx == nx && newNy == ny) return;
+        nx = newNx;
+        ny = newNy;
+        allocate();
+        if (window != nullptr) {
+            glfwSetWindowSize(window, nx * windowScale, ny * windowScale);
+        }
+        std::cerr << "\n[livevis0335] resized live grid=" << nx << "x" << ny << " (filter reset)\n";
+    }
+
     void disable(const std::string& reason) {
         if (enabled) {
             std::cerr << "[livevis0335] disabled: " << reason << '\n';
@@ -324,6 +348,18 @@ LiveVisualization0335::~LiveVisualization0335() {
     if (impl_ && impl_->glfwReady) {
         glfwTerminate();
         impl_->glfwReady = false;
+    }
+}
+
+void LiveVisualization0335::hold_until_closed_on_exit() {
+    if (!impl_ || !impl_->enabled || impl_->window == nullptr) return;
+    const bool hold = env_truthy_0335("SRC_LIVE_VIS_HOLD_ON_EXIT") ||
+                      env_truthy_0335("MPCD_LIVE_VIS_HOLD_ON_EXIT");
+    if (!hold) return;
+    std::cerr << "[livevis0335] hold-on-exit enabled; close the livevis window to exit\n";
+    while (impl_->window != nullptr && !glfwWindowShouldClose(impl_->window)) {
+        glfwPollEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
 
@@ -408,6 +444,11 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     if (!in) return;
 
     const std::string oldField = v.field;
+    const int oldNx = v.nx;
+    const int oldNy = v.ny;
+    const bool wasRecordEnableInControl0432 = v.lastRecordEnableInControl0432;
+    bool recordEnableInControl0432 = false;
+    bool recordEnableKeySeen0432 = false;
     const std::string oldColormap = v.colormap;
     const double oldClip = v.clip;
     const double oldGain = v.gain;
@@ -430,6 +471,15 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
 
         if (key == "field" || key == "live_vis_field" || key == "src_live_vis_field") {
             v.field = value;
+        } else if (key == "livegridnx" || key == "live_grid_nx" || key == "live_vis_nx" || key == "src_live_vis_nx") {
+            int parsed = v.nx;
+            if (parse_int_0335(value, parsed)) v.nx = std::max(16, parsed);
+        } else if (key == "livegridny" || key == "live_grid_ny" || key == "live_vis_ny" || key == "src_live_vis_ny") {
+            int parsed = v.ny;
+            if (parse_int_0335(value, parsed)) v.ny = std::max(16, parsed);
+        } else if (key == "recordenable" || key == "record_enable" || key == "filteredrecordenable" || key == "filtered_record_enable") {
+            recordEnableKeySeen0432 = true;
+            recordEnableInControl0432 = truthy_value_0335(value);
         } else if (key == "colormap" || key == "cmap" || key == "live_vis_colormap" || key == "src_live_vis_colormap") {
             v.colormap = normalize_colormap_0342(value);
             export_colormap_env_0342(v.colormap);
@@ -464,12 +514,32 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
         }
     }
 
-    if (v.controlLog && (v.field != oldField || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain ||
+    const bool gridChanged0432 = (v.nx != oldNx || v.ny != oldNy);
+    if (gridChanged0432) {
+        const int requestedNx0432 = v.nx;
+        const int requestedNy0432 = v.ny;
+        v.nx = oldNx;
+        v.ny = oldNy;
+        if (wasRecordEnableInControl0432 && recordEnableInControl0432) {
+            if (v.controlLog) {
+                std::cerr << "\n[livevis0335] liveGrid change ignored while recordEnable=true; stop recording first"
+                          << " requested=" << requestedNx0432 << "x" << requestedNy0432
+                          << " current=" << oldNx << "x" << oldNy << '\n';
+            }
+        } else {
+            v.resize_grid(requestedNx0432, requestedNy0432);
+        }
+    }
+
+    v.lastRecordEnableInControl0432 = recordEnableKeySeen0432 ? recordEnableInControl0432 : false;
+
+    if (v.controlLog && (v.field != oldField || v.nx != oldNx || v.ny != oldNy || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain ||
                          v.smoothPasses != oldSmooth || v.quiverNx != oldQuiverNx || v.quiverNy != oldQuiverNy ||
                          v.quiverScale != oldQuiverScale || v.quiverMinSpeed != oldQuiverMinSpeed ||
                          v.quiverSmoothPasses != oldQuiverSmoothPasses)) {
         std::cerr << "\n[livevis0335] control reload step=" << step
                   << " field=" << v.field
+                  << " grid=" << v.nx << "x" << v.ny
                   << " colormap=" << v.colormap
                   << " clip=" << v.clip
                   << " gain=" << v.gain
@@ -487,6 +557,8 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
     LiveVisualization0335RuntimeControls c{};
     if (impl_) {
         c.field = impl_->field;
+        c.nx = impl_->nx;
+        c.ny = impl_->ny;
         c.colormap = impl_->colormap;
         c.clip = impl_->clip;
         c.gain = impl_->gain;
@@ -765,26 +837,6 @@ void LiveVisualization0335::draw_rgba_frame(const SimulationParams&, std::uint64
     }
     glfwSwapBuffers(v.window);
     glfwPollEvents();
-}
-
-void LiveVisualization0335::hold_until_closed_on_exit() {
-    if (!(env_truthy_0335("SRC_LIVE_VIS_HOLD_ON_EXIT") ||
-          env_truthy_0335("MPCD_LIVE_VIS_HOLD_ON_EXIT"))) {
-        return;
-    }
-    auto& v = *impl_;
-    if (!v.enabled || v.window == nullptr) return;
-    if (glfwWindowShouldClose(v.window)) return;
-    std::cerr << "[livevis0335] hold-on-exit active: close the window or press Esc/Q to exit\n";
-    glfwMakeContextCurrent(v.window);
-    glfwSetWindowTitle(v.window, "SRC/MPCD live 0335a | run complete | close window or press Esc/Q");
-    while (!glfwWindowShouldClose(v.window)) {
-        glfwWaitEventsTimeout(0.05);
-        if (glfwGetKey(v.window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
-            glfwGetKey(v.window, GLFW_KEY_Q) == GLFW_PRESS) {
-            break;
-        }
-    }
 }
 
 } // namespace mpcd

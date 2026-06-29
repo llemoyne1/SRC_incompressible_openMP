@@ -1,5 +1,6 @@
 #include "boundary_base.h"
 #include "cell_grid.h"
+#include "filtered_field_recorder_0432.h"
 #include "params_io_base.h"
 #include "runtime_summary.h"
 #include "cuda_shared_particle_state_0251.h"
@@ -544,6 +545,8 @@ int main(int argc, char** argv) {
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
         mpcd::LiveVisualization0335 liveVisualization0335;
         liveVisualization0335.maybe_initialize(params);
+        mpcd::FilteredFieldRecorder0432 filteredFieldRecorder0432;
+        filteredFieldRecorder0432.maybe_initialize(params);
         mpcd::SrcMpcdBaseWorkspace workspace;
         std::array<double, mpcd::StepProfilePhaseCount> phaseProfileSeconds{};
         std::array<double, mpcd::Q6ProjectionProfilePhaseCount> q6ProfileSeconds{};
@@ -770,6 +773,29 @@ int main(int argc, char** argv) {
                 }
             }
 
+            if (filteredFieldRecorder0432.enabled()) {
+                const double recordTime0432 = static_cast<double>(step) * params.dt;
+                const mpcd::LiveVisualization0335RuntimeControls recordControls0432 =
+                    liveVisualization0335.current_controls();
+                filteredFieldRecorder0432.poll_controls(static_cast<std::uint64_t>(step),
+                                                         recordTime0432,
+                                                         recordControls0432);
+                if (filteredFieldRecorder0432.needs_host_state(static_cast<std::uint64_t>(step))) {
+                    mpcd::ParticleState recordState0432;
+                    mpcd::ParticleRoleCounts recordRoleCounts0432{};
+                    const bool compactRecord0432 =
+                        mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(
+                            recordState0432, mpcd::kParticleRoleFluid, &recordRoleCounts0432);
+                    if (!compactRecord0432) {
+                        sync_cuda_resident_state_for_host_0260(state);
+                        recordState0432 = state;
+                    }
+                    filteredFieldRecorder0432.sample_and_maybe_write(recordState0432, params,
+                                                                      static_cast<std::uint64_t>(step),
+                                                                      recordTime0432);
+                }
+            }
+
             if (step % params.summaryEvery == 0 || step == params.nSteps) {
                 mpcd::ParticleState summaryState;
                 mpcd::ParticleRoleCounts compactRoleCounts{};
@@ -818,6 +844,9 @@ int main(int argc, char** argv) {
                 write_state_dump_0314(state_dump_name(params.outputDir, step), state, params);
             }
         }
+
+        filteredFieldRecorder0432.finalize(static_cast<std::uint64_t>(params.nSteps),
+                                           static_cast<double>(params.nSteps) * params.dt);
 
         if (collectInternalProfiles) {
             write_phase_profile_0163(params.outputDir, phaseProfileSeconds, phaseProfileSteps);
