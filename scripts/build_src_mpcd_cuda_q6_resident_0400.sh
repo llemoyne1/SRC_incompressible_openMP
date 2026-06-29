@@ -73,6 +73,7 @@ set -x
   src/weighted_resampling.cpp \
   src/cuda_shared_particle_state_0251.cpp \
   src/live_visualization_0335.cpp \
+  src/filtered_field_recorder_0432.cpp \
   src/cuda_resampling_persistent_active_path_0240.cpp \
   src/cuda_q6_backend.cu \
   src/cuda_q6_resident_0400.cu \

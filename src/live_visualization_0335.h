@@ -12,6 +12,8 @@ struct SimulationParams;
 
 struct LiveVisualization0335RuntimeControls {
     std::string field;
+    int nx = 0;
+    int ny = 0;
     std::string colormap = "blue_red";
     double clip = -1.0;
     double gain = 1.0;
@@ -55,9 +57,6 @@ public:
                          int ny,
                          const std::string& sourceLabel,
                          const LiveVisualization0335QuiverFrame* quiver = nullptr);
-
-    // Optional run-end hold controlled by SRC_LIVE_VIS_HOLD_ON_EXIT=1 or
-    // MPCD_LIVE_VIS_HOLD_ON_EXIT=1.  Default behavior remains unchanged.
     void hold_until_closed_on_exit();
 
 private:
