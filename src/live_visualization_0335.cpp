@@ -452,6 +452,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     const std::string oldColormap = v.colormap;
     const double oldClip = v.clip;
     const double oldGain = v.gain;
+    const int oldEvery = v.every;
     const int oldSmooth = v.smoothPasses;
     const int oldQuiverNx = v.quiverNx;
     const int oldQuiverNy = v.quiverNy;
@@ -489,6 +490,10 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
         } else if (key == "gain" || key == "live_vis_gain" || key == "src_live_vis_gain") {
             double parsed = v.gain;
             if (parse_double_0335(value, parsed)) v.gain = std::max(1.0e-12, parsed);
+        } else if (key == "liveevery" || key == "every" || key == "visualevery" ||
+                   key == "live_vis_every" || key == "src_live_vis_every" || key == "mpcd_live_vis_every") {
+            int parsed = v.every;
+            if (parse_int_0335(value, parsed)) v.every = std::max(1, parsed);
         } else if (key == "smoothpasses" || key == "smooth_passes" || key == "smooth" ||
                    key == "live_vis_smooth_passes" || key == "src_live_vis_smooth_passes") {
             int parsed = v.smoothPasses;
@@ -534,7 +539,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     v.lastRecordEnableInControl0432 = recordEnableKeySeen0432 ? recordEnableInControl0432 : false;
 
     if (v.controlLog && (v.field != oldField || v.nx != oldNx || v.ny != oldNy || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain ||
-                         v.smoothPasses != oldSmooth || v.quiverNx != oldQuiverNx || v.quiverNy != oldQuiverNy ||
+                         v.every != oldEvery || v.smoothPasses != oldSmooth || v.quiverNx != oldQuiverNx || v.quiverNy != oldQuiverNy ||
                          v.quiverScale != oldQuiverScale || v.quiverMinSpeed != oldQuiverMinSpeed ||
                          v.quiverSmoothPasses != oldQuiverSmoothPasses)) {
         std::cerr << "\n[livevis0335] control reload step=" << step
@@ -562,6 +567,7 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
         c.colormap = impl_->colormap;
         c.clip = impl_->clip;
         c.gain = impl_->gain;
+        c.every = impl_->every;
         c.smoothPasses = impl_->smoothPasses;
         c.quiverNx = impl_->quiverNx;
         c.quiverNy = impl_->quiverNy;

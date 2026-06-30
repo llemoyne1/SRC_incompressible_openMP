@@ -186,7 +186,8 @@ struct FilteredFieldRecorder0432::Impl {
         bool recordEnable = false;
         std::string recordSession;
         std::string recordFieldsRaw = "current";
-        int recordEvery = 25;
+        int recordEvery = 0; // <=0 means follow livevis liveEvery.
+        bool recordEveryExplicit = false;
         std::string recordFormat = "f32";
         int liveGridNx = 300;
         int liveGridNy = 80;
@@ -254,6 +255,10 @@ struct FilteredFieldRecorder0432::Impl {
         if (liveControls.nx > 0) preview.liveGridNx = liveControls.nx;
         if (liveControls.ny > 0) preview.liveGridNy = liveControls.ny;
         preview.smoothPasses = std::max(0, liveControls.smoothPasses);
+        if (!preview.recordEveryExplicit || preview.recordEvery <= 0) {
+            preview.recordEvery = std::max(1, liveControls.every);
+            preview.recordEveryExplicit = false;
+        }
 
         if (controlFile.empty()) return;
         std::ifstream in(controlFile);
@@ -275,7 +280,21 @@ struct FilteredFieldRecorder0432::Impl {
                 preview.recordFieldsRaw = value;
             } else if (key == "recordevery" || key == "record_every") {
                 int parsed = preview.recordEvery;
-                if (parse_int_0432(value, parsed)) preview.recordEvery = std::max(1, parsed);
+                if (parse_int_0432(value, parsed)) {
+                    if (parsed > 0) {
+                        preview.recordEvery = parsed;
+                        preview.recordEveryExplicit = true;
+                    } else {
+                        preview.recordEvery = std::max(1, liveControls.every);
+                        preview.recordEveryExplicit = false;
+                    }
+                }
+            } else if (key == "recordstride" || key == "record_stride") {
+                int parsed = 1;
+                if (parse_int_0432(value, parsed)) {
+                    preview.recordEvery = std::max(1, liveControls.every) * std::max(1, parsed);
+                    preview.recordEveryExplicit = true;
+                }
             } else if (key == "recordformat" || key == "record_format") {
                 preview.recordFormat = lower_0432(value);
             } else if (key == "livegridnx" || key == "live_grid_nx" || key == "live_vis_nx" || key == "src_live_vis_nx") {
@@ -329,6 +348,7 @@ struct FilteredFieldRecorder0432::Impl {
                normalize_field_0432(preview.field) != normalize_field_0432(locked.field) ||
                preview.recordFieldsRaw != locked.recordFieldsRaw ||
                preview.recordEvery != locked.recordEvery ||
+               preview.recordEveryExplicit != locked.recordEveryExplicit ||
                lower_0432(preview.recordFormat) != lower_0432(locked.recordFormat) ||
                lower_0432(preview.filterMode) != lower_0432(locked.filterMode) ||
                std::abs(preview.filterTau - locked.filterTau) > 0.0 ||
@@ -373,6 +393,7 @@ struct FilteredFieldRecorder0432::Impl {
                   << " fields=" << join_fields_0432(lockedFields)
                   << " grid=" << locked.liveGridNx << "x" << locked.liveGridNy
                   << " every=" << locked.recordEvery
+                  << " recordEverySource=" << (locked.recordEveryExplicit ? "override" : "liveEvery")
                   << " filter=" << locked.filterMode << " tau=" << locked.filterTau
                   << " sampleEvery=" << locked.filterSampleEvery << '\n';
     }
@@ -403,6 +424,7 @@ struct FilteredFieldRecorder0432::Impl {
         out << "recordFields = " << join_fields_0432(lockedFields) << "\n";
         out << "currentFieldAtStart = " << normalize_field_0432(locked.field) << "\n";
         out << "recordEvery = " << locked.recordEvery << "\n";
+        out << "recordEverySource = " << (locked.recordEveryExplicit ? "override" : "liveEvery") << "\n";
         out << "recordFormat = f32\n";
         out << "filterMode = " << locked.filterMode << "\n";
         out << "filterTau = " << std::setprecision(17) << locked.filterTau << "\n";
@@ -541,7 +563,17 @@ void FilteredFieldRecorder0432::maybe_initialize(const SimulationParams& params)
     r.preview.smoothPasses = std::max(0, env_int_0432("SRC_LIVE_VIS_SMOOTH_PASSES", env_int_0432("MPCD_LIVE_VIS_SMOOTH_PASSES", 0)));
     r.preview.filterTau = std::max(0.0, env_double_0432("SRC_FILTERED_FIELD_TAU", env_double_0432("MPCD_FILTERED_FIELD_TAU", 0.0)));
     r.preview.filterSampleEvery = std::max(1, env_int_0432("SRC_FILTERED_FIELD_SAMPLE_EVERY", env_int_0432("MPCD_FILTERED_FIELD_SAMPLE_EVERY", 1)));
-    r.preview.recordEvery = std::max(1, env_int_0432("SRC_FILTERED_FIELD_RECORD_EVERY", env_int_0432("MPCD_FILTERED_FIELD_RECORD_EVERY", 25)));
+    r.preview.recordEvery = 0;
+    r.preview.recordEveryExplicit = false;
+    const char* recordEveryEnv0433 = std::getenv("SRC_FILTERED_FIELD_RECORD_EVERY");
+    if (!recordEveryEnv0433) recordEveryEnv0433 = std::getenv("MPCD_FILTERED_FIELD_RECORD_EVERY");
+    if (recordEveryEnv0433) {
+        int parsed = 0;
+        if (parse_int_0432(recordEveryEnv0433, parsed) && parsed > 0) {
+            r.preview.recordEvery = parsed;
+            r.preview.recordEveryExplicit = true;
+        }
+    }
     r.preview.recordFieldsRaw = env_string_0432("SRC_FILTERED_FIELD_RECORD_FIELDS", env_string_0432("MPCD_FILTERED_FIELD_RECORD_FIELDS", "current"));
     r.initialized = true;
     std::cerr << "[filtered-record0432] enabled controlFile=" << (r.controlFile.empty() ? "none" : r.controlFile)
