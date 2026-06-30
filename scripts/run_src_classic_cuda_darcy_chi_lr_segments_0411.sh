@@ -20,7 +20,7 @@ Ly=${Ly:-${LY:-1.0}}
 NX=${NX:-128}
 NY=${NY:-128}
 GAMMA=${GAMMA:-20}
-STEPS=${STEPS:-1000}
+STEPS=${STEPS:-10000}
 SUMMARY_EVERY=${SUMMARY_EVERY:-100}
 DUMP_STATE_EVERY=${DUMP_STATE_EVERY:-${DUMPS_EVERY:-100}}
 THREADS=${THREADS:-8}
@@ -30,7 +30,7 @@ KBT=${KBT:-0.001}
 PARTICLE_MASS=${PARTICLE_MASS:-1.0}
 U0=${U0:-1.0}
 UINIT=${UINIT:-0.0}
-INACTIVE_SLOTS=${INACTIVE_SLOTS:-$((1*GAMMA * NX * NY))}
+INACTIVE_SLOTS=${INACTIVE_SLOTS:-$((10*GAMMA * NX * NY))}
 
 # Segments use the compact relative convention: face mode sMin sMax ux uy type mass.
 # For vertical faces, s is the y-relative coordinate.  Top quarter is [0.75,1],
