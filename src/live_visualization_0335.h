@@ -18,6 +18,7 @@ struct LiveVisualization0335RuntimeControls {
     double clip = -1.0;
     double gain = 1.0;
     int smoothPasses = 1;
+    int every = 10;
     int quiverNx = 60;
     int quiverNy = 32;
     double quiverScale = -1.0; // <0 disables quiver overlay
