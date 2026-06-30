@@ -1179,14 +1179,8 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error("cudaResamplingChiMin must lie in [0,1]");
     }
     if (p.darcyBrinkmanEnable) {
-        if (!p.srcClassicCudaModeEnable) {
-            throw std::runtime_error("darcyBrinkmanEnable=true currently requires srcClassicCudaModeEnable=true on the topo CUDA-VIZ branch");
-        }
         if (p.resamplingEnable && !p.cudaResamplingChiFilterEnable) {
             throw std::runtime_error("darcyBrinkmanEnable=true with resamplingEnable=true requires cudaResamplingChiFilterEnable=true");
-        }
-        if (p.projectionEnable) {
-            throw std::runtime_error("darcyBrinkmanEnable=true in patch 0343 is SRC classic only; keep projectionEnable=false until Q6/Darcy ordering is implemented");
         }
         if (!(p.darcyChiMode == "uniform" || p.darcyChiMode == "circle" || p.darcyChiMode == "cylinder" ||
               p.darcyChiMode == "box" || p.darcyChiMode == "rectangle" || p.darcyChiMode == "file")) {

@@ -1452,8 +1452,10 @@ void compare_krel_vectors_0298(const std::vector<double>& target,
 
 } // namespace
 
-bool cuda_resampling_population_guard_0297_requested(std::uint64_t step) {
-    if (!env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297")) return false;
+bool cuda_resampling_population_guard_0297_requested(const SimulationParams& params, std::uint64_t step) {
+    const bool requestedByEnv = env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297");
+    const bool requestedByEmptyRefill = params.resamplingEnable && params.cudaResamplingEmptyRefillEnable;
+    if (!requestedByEnv && !requestedByEmptyRefill) return false;
     const int every = std::max(1, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_EVERY", 1));
     return (step % static_cast<std::uint64_t>(every)) == 0u;
 }

@@ -150,7 +150,7 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE) && \
     defined(MPCD_ENABLE_CUDA_CELL_MOMENTS)
 
-bool cuda_resampling_population_guard_0297_requested(std::uint64_t step);
+bool cuda_resampling_population_guard_0297_requested(const SimulationParams& params, std::uint64_t step);
 
 CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_population_guard_0297(
     ParticleState& hostMirror,
@@ -163,7 +163,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
 
 #else
 
-inline bool cuda_resampling_population_guard_0297_requested(std::uint64_t) {
+inline bool cuda_resampling_population_guard_0297_requested(const SimulationParams&, std::uint64_t) {
     return false;
 }
 

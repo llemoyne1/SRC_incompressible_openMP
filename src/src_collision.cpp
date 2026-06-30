@@ -750,17 +750,30 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
         if (!fullDomainBounds) return fail("fullface resident 0263 requires full domain bounds");
         const bool leftInlet = is_inlet_boundary_mode(params.bcLeft);
         const bool rightInlet = is_inlet_boundary_mode(params.bcRight);
+        const bool bottomInlet = is_inlet_boundary_mode(params.bcBottom);
+        const bool topInlet = is_inlet_boundary_mode(params.bcTop);
         const bool leftOutlet = is_outlet_boundary_mode(params.bcLeft);
         const bool rightOutlet = is_outlet_boundary_mode(params.bcRight);
-        if (!((leftInlet && rightOutlet) || (leftOutlet && rightInlet))) {
-            return fail("fullface resident 0263 requires an inlet/outlet pair on left/right faces");
+        const bool bottomOutlet = is_outlet_boundary_mode(params.bcBottom);
+        const bool topOutlet = is_outlet_boundary_mode(params.bcTop);
+        const bool xPair = (leftInlet && rightOutlet) || (leftOutlet && rightInlet);
+        const bool yPair = (bottomInlet && topOutlet) || (bottomOutlet && topInlet);
+        if (!xPair && !yPair) {
+            return fail("fullface resident 0263 requires one opposed inlet/outlet pair");
         }
-        if (!face_has_wall_coupling(params.bcBottom, params) ||
-            !face_has_wall_coupling(params.bcTop, params)) {
-            return fail("fullface resident 0263 requires static wall coupling on bottom/top faces");
+        if (xPair && (!face_has_wall_coupling(params.bcBottom, params) ||
+                      !face_has_wall_coupling(params.bcTop, params))) {
+            return fail("fullface resident 0263 x-pair requires static wall coupling on bottom/top faces");
         }
-        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params)) {
+        if (yPair && (!face_has_wall_coupling(params.bcLeft, params) ||
+                      !face_has_wall_coupling(params.bcRight, params))) {
+            return fail("fullface resident 0263 y-pair requires static wall coupling on left/right faces");
+        }
+        if (xPair && (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params))) {
             return fail("fullface resident 0263 does not support wall coupling on open left/right faces");
+        }
+        if (yPair && (face_has_wall_coupling(params.bcBottom, params) || face_has_wall_coupling(params.bcTop, params))) {
+            return fail("fullface resident 0263 does not support wall coupling on open bottom/top faces");
         }
         if (immersed_solid_enabled(params)) {
             return fail("fullface resident 0263 collision subset without immersed collision is obstacle-free only");

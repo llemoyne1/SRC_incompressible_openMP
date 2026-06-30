@@ -145,6 +145,10 @@ bool cuda_q6_resident_src_io_fullface_0404_requested() {
     return env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404");
 }
 
+bool cuda_q6_resident_src_io_segmented_0409_requested() {
+    return env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409");
+}
+
 bool cuda_q6_resident_src_common_0401_supported(const SimulationParams& params) {
     return !params.srcClassicCudaModeEnable &&
            params.projectionEnable && params.projectionBackend == "cuda" &&
@@ -152,7 +156,7 @@ bool cuda_q6_resident_src_common_0401_supported(const SimulationParams& params) 
            env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE") &&
            env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251") &&
            !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
-           !params.immersedSolidEnable && !params.resamplingEnable &&
+           !params.immersedSolidEnable &&
            !params.closedCapacityResponseEnable && !params.closedCapacityVirialKickEnable &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
@@ -179,18 +183,27 @@ bool cuda_q6_resident_src_wall_step_0402_supported(const SimulationParams& param
             params.projectionOperator == "elliptic_fv_cg");
 }
 
+bool cuda_q6_wall_like_0409(const std::string& bc) {
+    return bc == "solid" || bc == "specular" || bc == "bounceback";
+}
+
 bool cuda_q6_resident_src_io_fullface_0404_supported(const SimulationParams& params) {
     const bool leftInlet = params.bcLeft == "inlet";
     const bool rightInlet = params.bcRight == "inlet";
+    const bool bottomInlet = params.bcBottom == "inlet";
+    const bool topInlet = params.bcTop == "inlet";
     const bool leftOutlet = params.bcLeft == "outlet";
     const bool rightOutlet = params.bcRight == "outlet";
-    const bool xPair = ((leftInlet && rightOutlet) || (leftOutlet && rightInlet));
+    const bool bottomOutlet = params.bcBottom == "outlet";
+    const bool topOutlet = params.bcTop == "outlet";
+    const bool xPair = ((leftInlet && rightOutlet) || (leftOutlet && rightInlet)) &&
+                       cuda_q6_wall_like_0409(params.bcBottom) && cuda_q6_wall_like_0409(params.bcTop);
+    const bool yPair = ((bottomInlet && topOutlet) || (bottomOutlet && topInlet)) &&
+                       cuda_q6_wall_like_0409(params.bcLeft) && cuda_q6_wall_like_0409(params.bcRight);
     return cuda_q6_resident_src_io_fullface_0404_requested() &&
            cuda_q6_resident_src_common_0401_supported(params) &&
            env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263") &&
-           xPair &&
-           (params.bcBottom == "solid" || params.bcBottom == "specular" || params.bcBottom == "bounceback") &&
-           (params.bcTop == "solid" || params.bcTop == "specular" || params.bcTop == "bounceback") &&
+           (xPair || yPair) &&
            params.inletReservoirMode == "hard_cell_density" &&
            params.inletInjectionMode == "hard_cell_density" &&
            params.inletVelocitySpatialProfile == "uniform" &&
@@ -198,10 +211,34 @@ bool cuda_q6_resident_src_io_fullface_0404_supported(const SimulationParams& par
            (params.projectionOperator == "elliptic_fv_cg" || params.projectionOperator == "auto_fv_cg");
 }
 
+bool cuda_q6_resident_src_io_segmented_0409_supported(const SimulationParams& params) {
+    const bool base = !params.srcClassicCudaModeEnable &&
+        params.projectionEnable && params.projectionBackend == "cuda" &&
+        env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_0400") &&
+        env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE") &&
+        env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251") &&
+        !params.immersedSolidEnable &&
+        !params.closedCapacityResponseEnable && !params.closedCapacityVirialKickEnable &&
+        params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
+        params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
+    return cuda_q6_resident_src_io_segmented_0409_requested() && base &&
+           env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264") &&
+           params.openBoundarySegmentsEnable && params.openBoundarySegmentCount > 0 &&
+           cuda_q6_wall_like_0409(params.bcLeft) && cuda_q6_wall_like_0409(params.bcRight) &&
+           cuda_q6_wall_like_0409(params.bcBottom) && cuda_q6_wall_like_0409(params.bcTop) &&
+           params.inletReservoirMode == "hard_cell_density" &&
+           params.inletInjectionMode == "hard_cell_density" &&
+           params.inletVelocitySpatialProfile == "uniform" &&
+           (params.openBoundaryOutletMode == "neumann" || params.openBoundaryOutletMode == "balanced_flux" ||
+            params.openBoundaryOutletMode == "balanced" || params.openBoundaryOutletMode == "hybrid") &&
+           (params.projectionOperator == "elliptic_fv_cg" || params.projectionOperator == "auto_fv_cg");
+}
+
 bool cuda_q6_resident_src_any_step_0401_supported(const SimulationParams& params) {
     return cuda_q6_resident_src_step_0401_supported(params) ||
            cuda_q6_resident_src_wall_step_0402_supported(params) ||
-           cuda_q6_resident_src_io_fullface_0404_supported(params);
+           cuda_q6_resident_src_io_fullface_0404_supported(params) ||
+           cuda_q6_resident_src_io_segmented_0409_supported(params);
 }
 
 // 0315e: after CUDA inlet/outlet active-prefix compaction, the shared GPU
@@ -220,7 +257,7 @@ bool cuda_src_classic_shared_collision_thermostat_pipeline_0315e(const Simulatio
     if (!params.srcClassicCudaModeEnable) {
         return false;
     }
-    if (params.projectionEnable || params.resamplingEnable ||
+    if (params.projectionEnable ||
         params.closedCapacityResponseEnable || params.closedCapacityVirialKickEnable) {
         return false;
     }
@@ -291,11 +328,10 @@ bool cuda_io_boundary_requires_active_host_prefix_sync_0315e(const SimulationPar
         return true;
     }
 
-    // Q6/capacity/resampling are host particle consumers in the current mixed
-    // pipeline.  They are normally disabled in srcClassicCudaMode validation,
-    // but keep the guard here so the active-prefix invariant stays global.
+    // Q6/capacity are immediate host particle consumers in the current mixed
+    // pipeline. Resampling is synchronized later at its own insertion point.
     if (params.projectionEnable || params.closedCapacityResponseEnable ||
-        params.closedCapacityVirialKickEnable || params.resamplingEnable) {
+        params.closedCapacityVirialKickEnable) {
         return true;
     }
 
@@ -395,8 +431,7 @@ bool cuda_classic_src_periodic_resident_0260_supported(const SimulationParams& p
            !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
            immersedOk &&
            !params.projectionEnable &&
-           !params.closedCapacityResponseEnable &&
-           !params.resamplingEnable;
+           !params.closedCapacityResponseEnable;
 }
 
 bool cuda_classic_src_periodic_resident_0260_active(const SimulationParams& params) {
@@ -434,7 +469,6 @@ bool cuda_classic_src_wall_resident_0261_supported(const SimulationParams& param
            !params.immersedSolidEnable &&
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
-           !params.resamplingEnable &&
            thermostatHandledOnShared0251 &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
@@ -465,7 +499,6 @@ bool cuda_classic_src_wall_circle_resident_0318_supported(const SimulationParams
            params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 && params.immersedSolidOmega == 0.0 &&
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
-           !params.resamplingEnable &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
 }
@@ -496,7 +529,6 @@ bool cuda_classic_src_solid_resident_0262_supported(const SimulationParams& para
            params.immersedSolidVx == 0.0 && params.immersedSolidVy == 0.0 && params.immersedSolidOmega == 0.0 &&
            !params.projectionEnable &&
            !params.closedCapacityResponseEnable &&
-           !params.resamplingEnable &&
            !params.thermostatEnable &&
            params.fluidXMinVelocity == 0.0 && params.fluidXMaxVelocity == 0.0 &&
            params.fluidYMinVelocity == 0.0 && params.fluidYMaxVelocity == 0.0;
@@ -514,8 +546,9 @@ bool cuda_classic_src_io_fullface_resident_0263_active(const SimulationParams& p
 }
 
 bool cuda_classic_src_io_segmented_resident_0264_active(const SimulationParams& params) {
-    return cuda_classic_src_io_segmented_resident_0264_requested() &&
-           cuda_classic_src_io_segmented_resident_0264_supported(params);
+    return (cuda_classic_src_io_segmented_resident_0264_requested() &&
+            cuda_classic_src_io_segmented_resident_0264_supported(params)) ||
+           cuda_q6_resident_src_io_segmented_0409_supported(params);
 }
 
 
@@ -1040,6 +1073,23 @@ bool boundary_cpu_may_have_edited_particles_0251(const BoundaryDiagnostics& b) {
            b.inletNetParticleDelta != 0;
 }
 
+void rebuild_active_cell_ids_0431(const ParticleState& state,
+                                  const SimulationParams& params,
+                                  const CellGrid& grid,
+                                  const GridShift& shift,
+                                  std::vector<int>& cellId) {
+    const std::size_t n = active_fluid_count_size(state);
+    cellId.assign(n, -1);
+#pragma omp parallel for if(n > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t i = static_cast<std::size_t>(ii);
+        if (!is_fluid_particle(state, i)) {
+            continue;
+        }
+        cellId[i] = cell_index_from_position(state.x[i], state.y[i], grid, shift, params);
+    }
+}
+
 } // namespace
 
 const char* step_profile_phase_name(const std::size_t phaseIndex) {
@@ -1436,6 +1486,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 }
                 q6ResidentHandled0400 = false;
             }
+            if (workspace.collision.cellId.size() != active_fluid_count_size(state)) {
+                rebuild_active_cell_ids_0431(state, params, grid, result.collision.shift, workspace.collision.cellId);
+            }
             result.thermostat = apply_cell_relative_rescale_thermostat(
                 state, params, grid, workspace.collision.cellId, step, workspace.thermostat);
             if (!residentClassicCuda && !cuda_shared_particle_state_0251_is_fresh()) {
@@ -1502,7 +1555,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // support by one local merge per rich cell and one local split per poor cell,
     // preserving local mass and momentum up to roundoff.  It remains independent
     // of Q6 CUDA and does not build long-distance transfer plans.
-    if (cuda_resampling_population_guard_0297_requested(step)) {
+    if (cuda_resampling_population_guard_0297_requested(params, step)) {
         (void)try_apply_cuda_resampling_population_guard_0297(
             state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
     }

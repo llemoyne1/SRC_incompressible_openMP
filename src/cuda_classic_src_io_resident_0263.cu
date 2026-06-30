@@ -94,6 +94,8 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double yMax = 1.0;
     int leftMode = 0;   // 0 none/wall, 1 inlet, 2 outlet
     int rightMode = 0;
+    int bottomMode = 0;
+    int topMode = 0;
     int leftWallMode = 0;
     int rightWallMode = 0;
     int bottomWallMode = 0; // 1 specular/solid, 2 bounceback
@@ -765,12 +767,24 @@ __global__ void io_fullface_hard_reservoir_kernel_0263(
             while (y[i] < cfg.yMin || y[i] > cfg.yMax) {
                 if (++guard > 64) { local.failureFlag = 2; break; }
                 if (y[i] < cfg.yMin) {
-                    y[i] = 2.0 * cfg.yMin - y[i];
                     local.hitsBottom += 1ULL;
+                    int mode = cfg.bottomMode;
+                    if (cfg.segmentedEnable) {
+                        const double s = segment_s_device_0263(2, x[i], y[i], cfg);
+                        mode = segment_mode_at_device_0263(cfg, 2, s);
+                    }
+                    if (mode != 0) { remove = true; removeMode = mode; break; }
+                    y[i] = 2.0 * cfg.yMin - y[i];
                     apply_y_wall_reflection_device_0263(cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx[i], vy[i]);
                 } else if (y[i] > cfg.yMax) {
-                    y[i] = 2.0 * cfg.yMax - y[i];
                     local.hitsTop += 1ULL;
+                    int mode = cfg.topMode;
+                    if (cfg.segmentedEnable) {
+                        const double s = segment_s_device_0263(3, x[i], y[i], cfg);
+                        mode = segment_mode_at_device_0263(cfg, 3, s);
+                    }
+                    if (mode != 0) { remove = true; removeMode = mode; break; }
+                    y[i] = 2.0 * cfg.yMax - y[i];
                     apply_y_wall_reflection_device_0263(cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx[i], vy[i]);
                 }
             }
@@ -1018,12 +1032,24 @@ __global__ void io_fullface_boundary_particles_kernel_0267(
         while (y[i] < cfg.yMin || y[i] > cfg.yMax) {
             if (++guard > 64) { local.failureFlag = 2; break; }
             if (y[i] < cfg.yMin) {
-                y[i] = 2.0 * cfg.yMin - y[i];
                 local.hitsBottom += 1ULL;
+                int mode = cfg.bottomMode;
+                if (cfg.segmentedEnable) {
+                    const double sseg = segment_s_device_0263(2, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 2, sseg);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                y[i] = 2.0 * cfg.yMin - y[i];
                 apply_y_wall_reflection_device_0263(cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx[i], vy[i]);
             } else if (y[i] > cfg.yMax) {
-                y[i] = 2.0 * cfg.yMax - y[i];
                 local.hitsTop += 1ULL;
+                int mode = cfg.topMode;
+                if (cfg.segmentedEnable) {
+                    const double sseg = segment_s_device_0263(3, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 3, sseg);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                y[i] = 2.0 * cfg.yMax - y[i];
                 apply_y_wall_reflection_device_0263(cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx[i], vy[i]);
             }
         }
@@ -2379,6 +2405,8 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     cfg.yMax = domain.yMax;
     cfg.leftMode = io_mode_code_0263(params.bcLeft);
     cfg.rightMode = io_mode_code_0263(params.bcRight);
+    cfg.bottomMode = io_mode_code_0263(params.bcBottom);
+    cfg.topMode = io_mode_code_0263(params.bcTop);
     cfg.leftWallMode = wall_mode_code_0263(params.bcLeft);
     cfg.rightWallMode = wall_mode_code_0263(params.bcRight);
     cfg.bottomWallMode = wall_mode_code_0263(params.bcBottom);
@@ -2482,7 +2510,7 @@ bool thermostat_allowed_for_resident_io_0280c(const SimulationParams& params) {
     // CPU continuation (Q6, resampling, virial/capacity) can intervene between
     // collision and thermostat.
     if (!fused_src_thermostat_resident_io_0280c_requested()) return false;
-    if (params.projectionEnable || params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (params.projectionEnable || params.closedCapacityResponseEnable) return false;
     if (params.thermostatEvery <= 0) return false;
     if (params.thermostatMode != "cell_relative_rescale") return false;
     return true;
@@ -2494,7 +2522,7 @@ bool supported_common_0263(const SimulationParams& params) {
     if (!hard_inlet_reservoir_enabled_0263(params)) return false;
     if (params.openBoundarySegmentsEnable || params.openBoundarySegmentCount != 0) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    if (params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (params.closedCapacityResponseEnable) return false;
     if (q6ResidentIo0404) {
         if (!params.projectionEnable || params.projectionBackend != "cuda") return false;
         if (!env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_0400")) return false;
@@ -2514,9 +2542,9 @@ bool supported_common_0263(const SimulationParams& params) {
     const int top = io_mode_code_0263(params.bcTop);
     const bool xPair = left != 0 && right != 0 && left != right && bottom == 0 && top == 0 &&
                        wall_mode_code_0263(params.bcBottom) != 0 && wall_mode_code_0263(params.bcTop) != 0;
-    // 0263 is intentionally full-face x-inlet/outlet first. Same-face and y-axis
-    // inlet/outlet are kept for the segmented follow-up.
-    return xPair;
+    const bool yPair = bottom != 0 && top != 0 && bottom != top && left == 0 && right == 0 &&
+                       wall_mode_code_0263(params.bcLeft) != 0 && wall_mode_code_0263(params.bcRight) != 0;
+    return xPair || yPair;
 }
 
 bool supported_segmented_0264(const SimulationParams& params) {
@@ -2527,7 +2555,7 @@ bool supported_segmented_0264(const SimulationParams& params) {
     if (static_cast<int>(params.openBoundarySegments.size()) != params.openBoundarySegmentCount) return false;
     if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
     if (!(params.Lx > 0.0) || !(params.Ly > 0.0) || !(params.dt >= 0.0)) return false;
-    if (params.closedCapacityResponseEnable || params.resamplingEnable) return false;
+    if (params.closedCapacityResponseEnable) return false;
     if (q6ResidentIo0409) {
         if (!params.projectionEnable || params.projectionBackend != "cuda") return false;
         if (!env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_0400")) return false;

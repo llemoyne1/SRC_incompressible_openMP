@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/src_mpcd_base_cuda_livevis_0342a}"
+BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_0400_livevis}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 THREADS="${THREADS:-8}"
@@ -19,7 +19,7 @@ export OMP_PLACES="${OMP_PLACES:-cores}"
 export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
-RUN_MODES="${RUN_MODES:-resampling}"   # set to "classic resampling" to compare
+RUN_MODES="${RUN_MODES:-src src-resampling src-q6-resampling}"
 
 # Compact output defaults: fluid-only dumps are lighter and suitable for most
 # visual post-processing.  Set DUMP_ROLE_FILTER=all for restart-compatible dumps
@@ -74,6 +74,18 @@ portable_thermostat_kv_0315() {
   if portable_bool_true_0315 "${THERMOSTAT_ENABLE:-1}"; then printf 'true'; else printf 'false'; fi
 }
 
+integ_path_has_q6_0432() {
+  case "${1:-src}" in src-q6|q6|src-q6-resampling|q6-resampling) return 0 ;; *) return 1 ;; esac
+}
+
+integ_path_has_resampling_0432() {
+  case "${1:-src}" in src-resampling|resampling|src-q6-resampling|q6-resampling) return 0 ;; *) return 1 ;; esac
+}
+
+integ_src_classic_kv_0432() { if integ_path_has_q6_0432 "${1:-src}"; then printf 'false'; else printf 'true'; fi; }
+integ_projection_kv_0432() { if integ_path_has_q6_0432 "${1:-src}"; then printf 'true'; else printf 'false'; fi; }
+integ_resampling_kv_0432() { if integ_path_has_resampling_0432 "${1:-src}"; then printf 'true'; else printf 'false'; fi; }
+
 portable_livevis_env_0337() {
   local mode=${1:-resampling}
   export SRC_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
@@ -96,7 +108,7 @@ portable_livevis_env_0337() {
   export SRC_LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE_EFFECTIVE:-${LIVE_VIS_CONTROL_FILE:-}}"
   export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
   export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
-  if [[ "$mode" == "resampling" ]]; then
+  if integ_path_has_resampling_0432 "$mode"; then
     export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR="$LIVE_VIS_RESAMPLING_HOST_MIRROR"
   else
     export SRC_LIVE_VIS_RESAMPLING_HOST_MIRROR=0
@@ -141,7 +153,7 @@ portable_ensure_binary_0315() {
     exit 127
   fi
   local helper=""
-  for h in scripts/build_src_mpcd_cuda_0315b.sh scripts/build_src_mpcd_cuda_0314.sh scripts/build_src_mpcd_cuda_0308.sh scripts/build_src_mpcd_cuda_0313.sh scripts/build_src_mpcd_cuda_0307.sh scripts/build_src_mpcd_cuda_0306.sh scripts/build_src_mpcd_cuda_0305.sh scripts/build_src_mpcd_cuda_0303.sh; do
+  for h in scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh scripts/build_src_mpcd_cuda_0314.sh scripts/build_src_mpcd_cuda_0308.sh scripts/build_src_mpcd_cuda_0313.sh scripts/build_src_mpcd_cuda_0307.sh scripts/build_src_mpcd_cuda_0306.sh scripts/build_src_mpcd_cuda_0305.sh scripts/build_src_mpcd_cuda_0303.sh; do
     if [[ -f "$h" ]]; then helper="$h"; break; fi
   done
   if [[ -z "$helper" ]]; then
@@ -287,9 +299,19 @@ randomRotationSign = true
 gridShiftEnable = true
 rngSeed = ${seed}
 
-srcClassicCudaModeEnable = true
-projectionEnable = false
-resamplingEnable = false
+srcClassicCudaModeEnable = $(integ_src_classic_kv_0432 "${CURRENT_INTEG_PATH_0432:-src}")
+projectionEnable = $(integ_projection_kv_0432 "${CURRENT_INTEG_PATH_0432:-src}")
+projectionBackend = ${PROJECTION_BACKEND:-cuda}
+projectionOperator = ${PROJECTION_OPERATOR:-auto_fv_cg}
+projectionMaxIterations = ${PROJECTION_MAX_ITERATIONS:-200}
+projectionTolerance = ${PROJECTION_TOLERANCE:-1e-10}
+q6ProjectionStrength = ${Q6_PROJECTION_STRENGTH:-1.0}
+resamplingEnable = $(integ_resampling_kv_0432 "${CURRENT_INTEG_PATH_0432:-src}")
+cudaResamplingEmptyRefillEnable = $(integ_resampling_kv_0432 "${CURRENT_INTEG_PATH_0432:-src}")
+cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE:-gamma}
+cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA:-${GAMMA:-0}}
+cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION:-0.1}
+cudaResamplingEmptyRefillMemoryMaxAge = ${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
 closedCapacityResponseEnable = false
 closedCapacityVirialKickEnable = false
 
@@ -468,6 +490,32 @@ portable_cuda_periodic_circle_0315() {
   export MPCD_CUDA_CLASSIC_SRC_WALL_CIRCLE_RESIDENT_0318="${SRC_GPU_WALL_CIRCLE_RESIDENT_0318:-1}"
 }
 
+integ_apply_segmented_env_0432() {
+  local mode=$1
+  if integ_path_has_q6_0432 "$mode"; then
+    export MPCD_CUDA_Q6_RESIDENT_0400=1
+    export MPCD_CUDA_Q6_RESIDENT_STRICT_0400="${Q6_STRICT:-1}"
+    export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=1
+    export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=1
+    export MPCD_CUDA_Q6_RESIDENT_SRC_STEP_0401=0
+    export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=0
+    export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
+    export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+    export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
+    export MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1
+    export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT=1
+    export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=0
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=0
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT=0
+  else
+    export MPCD_CUDA_Q6_RESIDENT_0400=0
+    export MPCD_CUDA_Q6_RESIDENT_STRICT_0400=0
+    export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+    export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=0
+  fi
+}
+
 portable_resampling_env_0315() {
   local mode=$1
   local survey="${RESAMPLING_SURVEY_ENABLE:-1}"
@@ -481,10 +529,11 @@ portable_resampling_env_0315() {
   export MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U="${MPCD_CUDA_RESAMPLING_GEOMETRY_DIAG_0305_HIGH_U:-1.0}"
   export MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD="${MPCD_CUDA_RESAMPLING_OUTLIER_0306_U_THRESHOLD:-1.0}"
 
-  if [[ "$mode" == "resampling" ]]; then
+  if integ_path_has_resampling_0432 "$mode"; then
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296="${MASS_RECONDITION_ENABLE:-1}"
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_EVERY="${MASS_RECONDITION_EVERY:-${GUARD_EVERY:-5}}"
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_STRENGTH="${MASS_RECONDITION_STRENGTH:-1.0}"
+    export MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=1
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297=1
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_EVERY="${GUARD_EVERY:-5}"
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NMIN="${GUARD_NMIN:-12}"
@@ -499,13 +548,14 @@ portable_resampling_env_0315() {
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_OPEN_BOUNDARY_HALO_CELLS="${OPEN_BOUNDARY_HALO_CELLS:-1}"
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_HALO_CELLS="${BOUNDARY_HALO_CELLS:-0}"
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_SOLID_HALO_CELLS="${SOLID_HALO_CELLS:-0}"
-    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307="${MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307:-1}"
-    export MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307="${MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307:-1}"
+    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307=1
+    export MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307=1
     export MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307="${MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307:-0.5}"
     export MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307="${MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307:-0.25}"
     export MPCD_CUDA_RESAMPLING_SOLID_ADJACENT_SPLIT_MODE_0307="${MPCD_CUDA_RESAMPLING_SOLID_ADJACENT_SPLIT_MODE_0307:-0}"
   else
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296=0
+    export MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=0
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297=0
     export MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298=0
     export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE=0
@@ -524,6 +574,9 @@ GUARD_NMIN=${GUARD_NMIN:-12}
 GUARD_NTARGET=${GUARD_NTARGET:-20}
 GUARD_NMAX=${GUARD_NMAX:-32}
 INACTIVE_SLOTS=${INACTIVE_SLOTS:-unset}
+EMPTY_REFILL_REFERENCE=${EMPTY_REFILL_REFERENCE:-gamma}
+EMPTY_REFILL_TARGET_FRACTION=${EMPTY_REFILL_TARGET_FRACTION:-0.1}
+EMPTY_REFILL_MEMORY_MAX_AGE=${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}
 META
 }
 
@@ -551,7 +604,7 @@ portable_run_binary_0315() {
 
 portable_mode_root_0315() {
   local base=$1 mode=$2
-  if [[ "$mode" == "classic" ]]; then printf '%s/classic' "$base"; else printf '%s/resampling_split_safe' "$base"; fi
+  printf '%s/%s' "$base" "$mode"
 }
 
 CASE_NAME="box_segmented_x0_0315"
@@ -565,6 +618,7 @@ BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/portable_box_segmented_x0_resampling_0315}"
 run_mode_0315() {
   local mode=$1 run_root; run_root=$(portable_mode_root_0315 "$BASE_RUN_ROOT" "$mode")
   portable_prepare_dirs_0315 "$run_root"
+  CURRENT_INTEG_PATH_0432="$mode"
   local state="$run_root/init/${CASE_NAME}_${NX}x${NY}_g${GAMMA}.smpcd" params="$run_root/params/${CASE_NAME}.kv" out="$run_root/output" log="$run_root/logs/${CASE_NAME}.log" time="$run_root/logs/${CASE_NAME}.time"
   portable_generate_state_0315 "$state" "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$KBT" "$SEED" zero 0.0 0.0 0.0 0.0 -1.0 0.0 -1.0 "$INACTIVE_SLOTS" none none
   cat > "$params" <<PARAMS
@@ -626,6 +680,7 @@ wallUyTop = 0.0
 $(portable_write_common_params_0315 "$STEPS" "$DT" "$KBT" "$SEED" "$SUMMARY_EVERY" "$DUMP_STATE_EVERY" "$THREADS")
 PARAMS
   portable_cuda_io_segmented_0315
+  integ_apply_segmented_env_0432 "$mode"
   portable_resampling_env_0315 "$mode"
   portable_livevis_prepare_control_0341a "$run_root"
   portable_livevis_env_0337 "$mode"

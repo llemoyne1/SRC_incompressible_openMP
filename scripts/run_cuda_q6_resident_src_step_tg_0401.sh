@@ -55,9 +55,8 @@ if truthy_0401 "$LIVE_VIS_ENABLE" && [[ "$USER_BIN_SET" == "1" ]]; then
 fi
 
 RESAMPLING_ENABLE=${RESAMPLING_ENABLE:-false}
-if [[ "$RESAMPLING_ENABLE" == "1" || "$RESAMPLING_ENABLE" == "true" || "$RESAMPLING_ENABLE" == "TRUE" || "$RESAMPLING_ENABLE" == "yes" || "$RESAMPLING_ENABLE" == "YES" ]]; then
-  echo "[0401-srcq6] ERROR: 0401 is intentionally disabled when RESAMPLING_ENABLE=true; use scripts/run_cuda_q6_resident_tg_0400.sh for SRC/Q6/resampling mixed validation." >&2
-  exit 2
+if truthy_0401 "$RESAMPLING_ENABLE"; then
+  echo "[0401-srcq6] resampling enabled: resident SRC/Q6 is used before the existing resampling stage" >&2
 fi
 TAG="${NX}x${NY}_${STEPS}"
 RUN_ROOT_CPU=${RUN_ROOT_CPU:-runs/q6_resident_0401_srcq6_cpu_${TAG}}
