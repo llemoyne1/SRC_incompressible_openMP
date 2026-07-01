@@ -1,18 +1,18 @@
-field = density
-colormap = gray
+# 0434b livevis + filtered recorder runtime controls.
+# 0433a WYSIWYR: if recordEvery is absent or <=0, recording follows liveEvery.
+field = Ux
+colormap = blue_red
 clip = -1
 gain = 1.0
-smoothPasses = 0
-
-liveGridNx = 128
-liveGridNy = 32
-liveEvery = 7
-
+smoothPasses = 30
+liveGridNx = 96
+liveGridNy = 96
+liveEvery = 25
 filterMode = none
+filterTau = 0.0
 filterSampleEvery = 1
-
 recordEnable = true
-recordSession = integ_0433a_override_recordEvery
-recordFields = current
+recordSession = io_box_same_face_0434_src-resampling
+recordFields = rho,ux,uy
 recordFormat = f32
-recordEvery = 5
+recordStride = 1
