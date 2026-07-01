@@ -1356,11 +1356,30 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 cudaIo0249a = try_apply_cuda_inlet_outlet_fullface_0249a(
                     state, params, result.domain, step, time);
             }
-            result.boundary = apply_boundary_conditions(state, params, result.domain, step, time);
-            merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
-            merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
-            if (boundary_cpu_may_have_edited_particles_0251(result.boundary)) {
-                cuda_shared_particle_state_0251_invalidate("cpu_boundary_conditions_edited_particles");
+
+            // 0435c: decide CPU-boundary execution after actual CUDA IO handling.
+            // The segmented/full-face CUDA IO paths may edit particles and then
+            // mark shared_0251 fresh.  Re-running apply_boundary_conditions()
+            // afterwards can edit a stale host ParticleState and invalidate the
+            // fresh CUDA shared state needed by persistent collision/thermostat.
+            if (cudaIo0249b.handled || cudaIo0249a.handled) {
+                result.boundary = BoundaryDiagnostics{};
+                merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
+                merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
+                handledByCudaBoundary = true;
+            } else {
+                BoundaryDiagnostics cpuBoundary0251 =
+                    apply_boundary_conditions(state, params, result.domain, step, time);
+                const bool cpuBoundaryEditedParticles0251 =
+                    boundary_cpu_may_have_edited_particles_0251(cpuBoundary0251);
+
+                result.boundary = cpuBoundary0251;
+                merge_cuda_inlet_outlet_segmented_0249b_diagnostics(result.boundary, cudaIo0249b);
+                merge_cuda_inlet_outlet_fullface_0249a_diagnostics(result.boundary, cudaIo0249a);
+
+                if (cpuBoundaryEditedParticles0251) {
+                    cuda_shared_particle_state_0251_invalidate("cpu_boundary_conditions_edited_particles");
+                }
             }
         }
     }
