@@ -284,6 +284,7 @@ struct LiveVisualization0335::Impl {
     double quiverScale = -1.0;
     double quiverMinSpeed = 0.0;
     int quiverSmoothPasses = -1;
+    int particleTypeFilter = -1;
     double alpha = 0.08;
     double clip = -1.0;
     double quantile = 0.995;
@@ -386,6 +387,7 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
     v.quiverScale = env_double_0335("SRC_LIVE_VIS_QUIVER_SCALE", env_double_0335("MPCD_LIVE_VIS_QUIVER_SCALE", -1.0));
     v.quiverMinSpeed = std::max(0.0, env_double_0335("SRC_LIVE_VIS_QUIVER_MIN_SPEED", env_double_0335("MPCD_LIVE_VIS_QUIVER_MIN_SPEED", 0.0)));
     v.quiverSmoothPasses = env_int_0335("SRC_LIVE_VIS_QUIVER_SMOOTH_PASSES", env_int_0335("MPCD_LIVE_VIS_QUIVER_SMOOTH_PASSES", -1));
+    v.particleTypeFilter = env_int_0335("SRC_LIVE_VIS_PARTICLE_TYPE_FILTER", env_int_0335("MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER", -1));
     v.controlFile = env_string_0335("SRC_LIVE_VIS_CONTROL_FILE", env_string_0335("MPCD_LIVE_VIS_CONTROL_FILE", ""));
     v.controlReloadEvery = std::max(1, env_int_0335("SRC_LIVE_VIS_CONTROL_EVERY", env_int_0335("MPCD_LIVE_VIS_CONTROL_EVERY", 1)));
     v.controlLog = env_truthy_0335("SRC_LIVE_VIS_CONTROL_LOG") || env_truthy_0335("MPCD_LIVE_VIS_CONTROL_LOG");
@@ -425,6 +427,7 @@ void LiveVisualization0335::maybe_initialize(const SimulationParams& params) {
               << " quiverScale=" << v.quiverScale
               << " quiverMinSpeed=" << v.quiverMinSpeed
               << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
+              << " particleTypeFilter=" << v.particleTypeFilter
               << " controlFile=" << (v.controlFile.empty() ? "none" : v.controlFile) << '\n';
 }
 
@@ -459,6 +462,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     const double oldQuiverScale = v.quiverScale;
     const double oldQuiverMinSpeed = v.quiverMinSpeed;
     const int oldQuiverSmoothPasses = v.quiverSmoothPasses;
+    const int oldParticleTypeFilter = v.particleTypeFilter;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -516,6 +520,10 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
                    key == "live_vis_quiver_smooth_passes" || key == "src_live_vis_quiver_smooth_passes") {
             int parsed = v.quiverSmoothPasses;
             if (parse_int_0335(value, parsed)) v.quiverSmoothPasses = parsed;
+        } else if (key == "particletypefilter" || key == "particle_type_filter" ||
+                   key == "live_vis_particle_type_filter" || key == "src_live_vis_particle_type_filter") {
+            int parsed = v.particleTypeFilter;
+            if (parse_int_0335(value, parsed)) v.particleTypeFilter = parsed;
         }
     }
 
@@ -541,7 +549,8 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     if (v.controlLog && (v.field != oldField || v.nx != oldNx || v.ny != oldNy || v.colormap != oldColormap || v.clip != oldClip || v.gain != oldGain ||
                          v.every != oldEvery || v.smoothPasses != oldSmooth || v.quiverNx != oldQuiverNx || v.quiverNy != oldQuiverNy ||
                          v.quiverScale != oldQuiverScale || v.quiverMinSpeed != oldQuiverMinSpeed ||
-                         v.quiverSmoothPasses != oldQuiverSmoothPasses)) {
+                         v.quiverSmoothPasses != oldQuiverSmoothPasses ||
+                         v.particleTypeFilter != oldParticleTypeFilter)) {
         std::cerr << "\n[livevis0335] control reload step=" << step
                   << " field=" << v.field
                   << " grid=" << v.nx << "x" << v.ny
@@ -554,6 +563,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
                   << " quiverScale=" << v.quiverScale
                   << " quiverMinSpeed=" << v.quiverMinSpeed
                   << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
+                  << " particleTypeFilter=" << v.particleTypeFilter
                   << " file=" << v.controlFile << '\n';
     }
 }
@@ -574,6 +584,7 @@ LiveVisualization0335RuntimeControls LiveVisualization0335::current_controls() c
         c.quiverScale = impl_->quiverScale;
         c.quiverMinSpeed = impl_->quiverMinSpeed;
         c.quiverSmoothPasses = impl_->quiverSmoothPasses;
+        c.particleTypeFilter = impl_->particleTypeFilter;
     }
     return c;
 }
@@ -610,6 +621,10 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         const int ix = std::clamp(static_cast<int>(std::floor(x * invLx * v.nx)), 0, v.nx - 1);
         const int iy = std::clamp(static_cast<int>(std::floor(y * invLy * v.ny)), 0, v.ny - 1);
         const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(v.nx) + static_cast<std::size_t>(ix);
+        // 0436: visualization-only particle type filter; -1 keeps all types.
+        if (v.particleTypeFilter >= 0) {
+            if (i >= state.type.size() || static_cast<int>(state.type[i]) != v.particleTypeFilter) continue;
+        }
         const double m = state.mass.empty() ? 1.0 : state.mass[i];
         v.sumMass[c] += m;
         v.sumCount[c] += 1.0;

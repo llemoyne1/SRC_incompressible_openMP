@@ -525,3 +525,177 @@ Interpretation:
 This validates activation and CUDA-resident plumbing of the full resampling
 block. It does not resolve the physical validation questions already observed
 for Q6+resampling on segmented Darcy and segmented box IO.
+
+## Update 0435d - Thermal hard-reservoir CUDA segmented IO
+
+Scope: local integration branch only. Nothing from this change has been ported
+to the STRICT tree.
+
+Root cause confirmed:
+
+- `try_apply_cuda_classic_src_io_segmented_boundary_0264()` was already called
+  before the generic segmented handler 0249b.
+- `supported_segmented_0264()` nevertheless rejected every nonzero
+  `inletThermalNoise`. The incomplete 0249b handler then reported `handled` and
+  0435c correctly skipped the stale CPU boundary pass, but no hard-reservoir
+  refill was performed.
+- Removing that guard alone would have produced a zero-temperature inlet:
+  kernels 0268/0269 previously assigned only the prescribed mean velocity and
+  never accumulated `inletKbtNumerator`.
+
+Implementation in `src/cuda_classic_src_io_resident_0263.cu`:
+
+- The internal resident-IO configuration now carries effective inlet kBT,
+  thermal-noise amplitude, cell-mean enforcement and thermal-rescale choices.
+- Each CUDA reservoir-cell thread uses two deterministic passes over its local
+  `mt19937_64`. The first computes fluctuation means and thermal energy; the
+  second replays the sequence, writes particles and accumulates inlet thermal
+  diagnostics. No per-particle temporary allocation or new global atomic was
+  added.
+- The normal generator reproduces the polar algorithm and saved-value order of
+  libstdc++ `std::normal_distribution`, using the existing matching
+  `mt19937_64`/uniform implementation.
+- When requested, fluctuations are recentered to preserve the prescribed cell
+  mean and rescaled to `2*N*kBT`, matching `boundary_base.cpp`.
+- A segmented cell intersecting an inlet interval keeps the full target
+  occupancy and samples positions over the complete intersected grid cell.
+  This matches the cell-based CPU hard-reservoir rule and the existing CUDA
+  0293 target predictor. The previous area-weighted occupation gave 40 instead
+  of the CPU target 48 in the reference 12-cell, gamma=4 case; clipping particle
+  positions to the exact segment also differed from the CPU cell rule.
+- The obsolete thermal-noise support guards were removed for resident full-face
+  and segmented hard reservoirs. No simulation parameter or environment flag
+  was added.
+
+Build validation:
+
+- `build/src_mpcd_base_cuda_q6_resident_0400_livevis_0435d` builds successfully
+  with the existing 0400 build script.
+- Only pre-existing unused-function warnings are emitted.
+
+Targeted left-inlet/right-outlet validation, 120x30, gamma=4, 100 steps:
+
+| observable at step 100 | pre-0435c CPU boundary reference | 0435d CUDA 0264 |
+| --- | ---: | ---: |
+| inlet reservoir cells | 12 | 12 |
+| inlet target particles | 48 | 48 |
+| inlet particles inserted | 48 | 48 |
+| inlet mean ux | 1 | 1 |
+| inlet mean uy | ~4.6e-18 | ~4.3e-18 |
+| inlet kBT | 0.05 | 0.05 |
+| inlet backflow deleted | 0 | 0 |
+| outlet particles deleted | 0 | 0 |
+| fluid particles | 887 | 353 |
+
+The boundary thermodynamics and hard-reservoir insertion are therefore
+validated at the recorded step, and the stale shared-state crash is absent.
+Global trajectory equivalence is not yet validated: the current comparison
+runner forces persistent CUDA collision, while the pre-0435c reference binary
+reports that this backend is unavailable under the same environment. The
+remaining population difference must be isolated with matched collision and
+thermostat backends before 0435d can be declared physically equivalent or
+ported to STRICT.
+
+### Update 0435d validation ablation and completeness routing
+
+The injection/fill validation runner now preserves explicit values of the
+existing 0264, 0249b and persistent collision/thermostat environment controls
+across its environment reset. Defaults are unchanged. This enables controlled
+backend ablations without adding a simulation option.
+
+A matched ablation used the same 0435d binary, initial state, CPU collision and
+disabled thermostat. Only the boundary backend changed:
+
+- CPU: generic streaming and `apply_boundary_conditions()`.
+- CUDA: resident segmented stream/boundary 0264.
+
+At step 1 both paths report exactly:
+
+- 12 inlet reservoir cells and target 48 particles;
+- 37 reservoir deletions and 48 insertions;
+- inlet net delta 10 and 58 active fluid particles.
+
+The 100-step individual trajectories diverge (`887` versus `353` active fluid
+particles for the tested realization). Particle dumps show that the stochastic
+particle ordering/RNG consumption diverges after the first generated particle,
+so trajectory identity is not an appropriate validation criterion. An ensemble
+comparison over matched seeds remains required before claiming statistical
+equivalence. The requested multi-seed GPU run could not be completed in this
+stage because external GPU execution became unavailable.
+
+The authoritative routing was nevertheless corrected independently of that
+statistical validation:
+
+- 0249a/0249b are not complete hard-cell-density reservoir implementations.
+- `src_mpcd_base.cpp` now excludes them whenever a hard inlet reservoir is
+  requested.
+- A hard-reservoir CPU boundary skip can therefore only be authorized by the
+  complete resident 0263/0264 path. If that path is unsupported, execution uses
+  the complete CPU boundary instead of accepting partial CUDA physics.
+
+This adds no user switch. The final 0435d binary compiles successfully after
+the routing change. STRICT remains unchanged.
+
+### Final 0435d integrated left/right smoke matrix
+
+A final autonomous matrix used a 48x16 grid, gamma=4, 20 steps, a four-cell
+high left inlet, a full-height right outlet, hard-cell-density refill and
+`kBT=0.05`. All four integrated paths completed without stale shared state,
+fatal error, unsupported path or logged CPU fallback:
+
+| path | fluid particles | inlet target/inserted | inlet kBT | global kBT | Q6 residual |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SRC | 33 | 32/32 | 0.05 | 0.04916 | n/a |
+| SRC+resampling | 33 | 32/32 | 0.05 | 0.04916 | n/a |
+| SRC+Q6 | 32 | 32/32 | 0.05 | 0.04690 | 8.24e-11 |
+| SRC+Q6+resampling | 41 | 32/32 | 0.05 | 0.03708 | 8.21e-11 |
+
+For both resampling paths the environment audit confirms:
+
+- `MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296=1`;
+- `MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297=1`;
+- `MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=1`.
+
+The runtime summary also reports `resampPopulationGuardApplied=1` and a mass
+relative residual of approximately `1.1e-16`. The injection/fill runner had
+previously retained zero values established by its environment reset for the
+first two controls; it now activates the complete resident resampling block
+unconditionally whenever the selected path includes resampling.
+
+Runner autonomy was corrected as well: `RUN_ROOT` cleanup now occurs before
+initial-state generation. An `INIT_ROOT` located below `RUN_ROOT` is therefore
+no longer generated and then accidentally deleted.
+
+Conclusion for access restrictions: complete resident hard-reservoir
+left/right CUDA is available through 0264 for the four integrated selectors,
+including thermal injection and the complete resampling block. Incomplete
+0249a/b handlers cannot mask an unsupported hard-reservoir case. This smoke
+matrix validates plumbing, conservation diagnostics and short-run numerical
+finiteness; long-run/ensemble physical equivalence remains a separate
+validation requirement and is not claimed here.
+
+## Update 0435e - 8x4 algorithmic access campaign
+
+The eight 0434 autonomous runners were exercised for 300 steps on all four
+integrated paths. After correcting only the inactive-pool sizing of the two
+net-injection campaign cases, the final matrix passes 32/32 with no stale state,
+unsupported path, explicit CPU fallback, non-finite value or fatal error.
+
+All 16 Darcy combinations use `mean_outward_bath` with interface-band collision
+VP. All resampling combinations activate mass recondition, population guard and
+empty-refill. Full method, audit criteria, results and physical caveats are in
+`doc/ALGORITHMIC_VALIDATION_0435E.md`.
+
+## Update 0435f - Injection-fill SRC+resampling baseline
+
+A matched 1000-step injection-fill comparison shows no numerical explosion in
+SRC+resampling and a lower global kinetic-temperature estimate than SRC. The
+mean population over occupied cells converges from about 28 toward the target
+20 while the occupied support grows from 5 to 207 cells.
+
+The run also exposed that the injection-fill runner kept shared thermostat
+consumption disabled: CUDA guards 0296/0297 were skipped as stale and CPU
+resampling generated particle masses outside the requested bounds. The runner
+now uses the existing shared resident thermostat configuration and one-cell
+open/solid boundary halos. Full evidence and the remaining validation gate are
+documented in `doc/INJECTION_FILL_RESAMPLING_0435F.md`.

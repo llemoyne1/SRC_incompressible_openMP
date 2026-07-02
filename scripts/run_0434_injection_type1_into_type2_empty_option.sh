@@ -12,7 +12,7 @@ CASE_LABEL="injection_type1_into_type2"
 GEN_CASE="injection"
 TOPOLOGY="segmented"
 Lx="${Lx:-4.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1200}"; NY="${NY:-300}"
-GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.005}"; KBT="${KBT:-0.05}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.005}"; KBT="${KBT:-0.005}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-1.0}"
@@ -21,7 +21,7 @@ SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100
 # Path choice: set either RUN_MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path (src). To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-resampling}}}"
+RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
@@ -34,9 +34,6 @@ RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
 FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
 LIVE_PROGRESS=${LIVE_PROGRESS:-1}
-# 0436: visualization/recording-only particle type filter.
-# -1 = all types; 0/1/2 = only that particle type. Does not affect solver physics.
-PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:-${SRC_LIVE_VIS_PARTICLE_TYPE_FILTER:-${MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER:--1}}}"
 
 # Gamma-relative resampling thresholds. Actual integer thresholds are derived in common.
 RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coef))
@@ -44,14 +41,25 @@ RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coe
 GUARD_EVERY="${GUARD_EVERY:-5}"
 
 BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"
-INJECT_TYPE="${INJECT_TYPE:-1}"; INJECT_MASS="${INJECT_MASS:-1.0}"
-UIN="${UIN:-1.0}"
+INJECT_TYPE="${INJECT_TYPE:-1}"; INJECT_MASS="${INJECT_MASS:-10.0}"
+UIN="${UIN:-0.1}"
 INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-5.0}"
 INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y/ly}')}"
 INLET_SMAX="${INLET_SMAX:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y/ly}')}"
 OUTLET_SMIN="${OUTLET_SMIN:-0.0}"; OUTLET_SMAX="${OUTLET_SMAX:-1.0}"
 OUTLET_MODE="${OUTLET_MODE:-hybrid}"; OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GAIN:-0.0}"
 INLET_THERMAL_NOISE="${INLET_THERMAL_NOISE:-1.0}"; INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-2}"
+
+# Initial state selector.
+#   INITIAL_DOMAIN_MODE=full  : current 0434 behavior, domain initially filled at gamma.
+#   INITIAL_DOMAIN_MODE=empty : no initial fluid particles; inactive pool sized for refill.
+#
+# EMPTY_INITIAL_SLOTS defaults to one full-domain target occupancy GAMMA*Nx*Ny,
+# so the same script can be used for empty-refill / advancing-front tests.
+INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"
+EMPTY_INITIAL_SLOTS="${EMPTY_INITIAL_SLOTS:-}"
+EMPTY_INITIAL_TYPE="${EMPTY_INITIAL_TYPE:-$BACKGROUND_TYPE}"
+EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-}"
 # -----------------------------------------------------------------------------
 
 suite_defaults_common_0434
@@ -110,52 +118,60 @@ PARAMS
   :
 }
 
+generate_empty_initial_state_0434() {
+  local state=$1
+  local empty_slots="$EMPTY_INITIAL_SLOTS"
+  local empty_type="$EMPTY_INITIAL_TYPE"
+  local empty_mass="${EMPTY_INITIAL_MASS:-$PARTICLE_MASS}"
 
-suite_patch_livevis_particle_type_filter_0436() {
-  local run_root=$1
-  local value="${PARTICLE_TYPE_FILTER:-${SRC_LIVE_VIS_PARTICLE_TYPE_FILTER:-${MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER:--1}}}"
-
-  export SRC_LIVE_VIS_PARTICLE_TYPE_FILTER="$value"
-  export MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER="$value"
-
-  # The 0434 common helper may generate/copy a livevis control file. Make the
-  # control file agree with the env value so WYSIWYR recording locks the same
-  # particle-type filter as the live display.
-  local candidates=()
-  if [[ -n "${LIVE_VIS_CONTROL_FILE:-}" ]]; then
-    candidates+=("$LIVE_VIS_CONTROL_FILE")
+  if [[ -z "$empty_slots" ]]; then
+    empty_slots="$(python3 - "$NX" "$NY" "$GAMMA" <<'PYSLOTS'
+import sys
+Nx, Ny, gamma = map(int, sys.argv[1:4])
+print(Nx * Ny * gamma)
+PYSLOTS
+)"
   fi
-  candidates+=(
-    "$run_root/livevis_control.kv"
-    "$run_root/livevis_control_${mode:-src}.kv"
-    "$ROOT/livevis_control.kv"
-    "./livevis_control.kv"
-  )
 
-  local f seen=":"
-  for f in "${candidates[@]}"; do
-    [[ -n "$f" ]] || continue
-    [[ "$seen" == *":$f:"* ]] && continue
-    seen="${seen}${f}:"
-    [[ -f "$f" ]] || continue
-
-    python3 - "$f" "$value" <<'PY'
-from pathlib import Path
-import re
+  python3 - "$state" "$empty_slots" "$empty_type" "$empty_mass" <<'PYGEN'
+import os
+import struct
 import sys
 
-p = Path(sys.argv[1])
-value = sys.argv[2]
-data = p.read_bytes()
-text = data.decode("latin1")
-line = f"particleTypeFilter = {value}"
-if re.search(r"(?m)^particleTypeFilter\s*=", text):
-    text = re.sub(r"(?m)^particleTypeFilter\s*=.*$", line, text)
-else:
-    text = text.rstrip() + "\n" + line + "\n"
-p.write_bytes(text.encode("latin1"))
-PY
-  done
+out, nslot, typ0, mass0 = sys.argv[1:]
+nslot = int(nslot)
+typ0 = int(typ0)
+mass0 = float(mass0)
+if nslot < 0:
+    raise SystemExit(f"EMPTY_INITIAL_SLOTS must be non-negative, got {nslot}")
+if mass0 <= 0.0:
+    raise SystemExit(f"EMPTY_INITIAL_MASS/PARTICLE_MASS must be positive, got {mass0}")
+
+x = [0.0] * nslot
+y = [0.0] * nslot
+vx = [0.0] * nslot
+vy = [0.0] * nslot
+typ = [typ0] * nslot
+mass = [mass0] * nslot
+role = [0] * nslot  # inactive
+
+os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+magic = b"SRCMPCD_STATE" + b"\0" * (16 - len("SRCMPCD_STATE"))
+reserved = [0] * 8
+reserved[0] = 1
+reserved[1] = 1
+n = len(x)
+with open(out, "wb") as f:
+    f.write(magic)
+    f.write(struct.pack("<IIIIQIIII", 2, 0x01020304, 2, 1, n, 1, 1, 8, 4))
+    f.write(struct.pack("<8Q", *reserved))
+    for arr, fmt in [
+        (x, "d"), (y, "d"), (vx, "d"), (vy, "d"),
+        (typ, "I"), (mass, "d"), (role, "B"),
+    ]:
+        f.write(struct.pack("<%d%s" % (n, fmt), *arr))
+print(f"[0434-generate-empty] state={out} fluid=0 inactive={nslot} total={nslot} type={typ0} mass={mass0}")
+PYGEN
 }
 
 run_one_mode_0434() {
@@ -163,23 +179,44 @@ run_one_mode_0434() {
   suite_validate_path_0434 "$mode"
   local run_root="$BASE_RUN_ROOT/$mode"
   suite_prepare_dirs_0434 "$run_root"
-  local state="$run_root/init/${CASE_LABEL}_${NX}x${NY}_g${GAMMA}.smpcd"
+  local state_suffix="${CASE_LABEL}_${NX}x${NY}_g${GAMMA}"
   local chi=""
+  case "$INITIAL_DOMAIN_MODE" in
+    full)
+      ;;
+    empty|empty_refill|empty-refill)
+      state_suffix="${state_suffix}_empty"
+      ;;
+    *)
+      echo "[0434-suite] unknown INITIAL_DOMAIN_MODE='$INITIAL_DOMAIN_MODE'. Expected full or empty." >&2
+      return 2
+      ;;
+  esac
+
+  local state="$run_root/init/${state_suffix}.smpcd"
   local params="$run_root/params/${CASE_LABEL}.kv"
   local out="$run_root/output"
   local log="$run_root/logs/${CASE_LABEL}.log"
   local time="$run_root/logs/${CASE_LABEL}.time"
   mkdir -p "$out"
-  suite_generate_case_0434 "$state" "$chi"
+
+  case "$INITIAL_DOMAIN_MODE" in
+    full)
+      suite_generate_case_0434 "$state" "$chi"
+      ;;
+    empty|empty_refill|empty-refill)
+      generate_empty_initial_state_0434 "$state"
+      ;;
+  esac
+
   write_params_0434 "$mode" "$state" "$out" "$chi" "$params"
   suite_export_cuda_flags_0434 "$mode" "$TOPOLOGY"
   suite_prepare_livevis_control_0434 "$run_root" "$mode"
-  suite_patch_livevis_particle_type_filter_0436 "$run_root"
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
   echo "[0434-suite] case=$CASE_LABEL mode=$mode root=$run_root"
+  echo "[0434-suite] initialDomainMode=$INITIAL_DOMAIN_MODE state=$state"
   echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA"
-  echo "[0434-suite] particleTypeFilter=$PARTICLE_TYPE_FILTER (-1 means all types)"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }
 

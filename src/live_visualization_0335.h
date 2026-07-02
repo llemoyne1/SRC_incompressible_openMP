@@ -24,6 +24,7 @@ struct LiveVisualization0335RuntimeControls {
     double quiverScale = -1.0; // <0 disables quiver overlay
     double quiverMinSpeed = 0.0;
     int quiverSmoothPasses = -1; // <0 reuses smoothPasses
+    int particleTypeFilter = -1; // <0 shows all particle types
 };
 
 struct LiveVisualization0335QuiverFrame {

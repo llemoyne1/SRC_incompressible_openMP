@@ -517,9 +517,14 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         double clip,
                                         double gain,
                                         int smoothPasses,
+                                        int particleTypeFilter,
                                         CudaLiveField0337Diagnostics* diag,
                                         CudaLiveQuiver0337* quiver) {
     CudaLiveField0337Diagnostics local{};
+    if (particleTypeFilter >= 0) {
+        if (diag) *diag = local;
+        return false;
+    }
     local.attempted = 1;
     local.nx = nx; local.ny = ny;
     const auto t0 = std::chrono::steady_clock::now();
@@ -628,7 +633,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
 
 #else
 
-bool cuda_live_field_render_shared_0337(std::vector<unsigned char>&, int, int, const SimulationParams&, const std::string&, double, double, int, CudaLiveField0337Diagnostics* diag, CudaLiveQuiver0337*) {
+bool cuda_live_field_render_shared_0337(std::vector<unsigned char>&, int, int, const SimulationParams&, const std::string&, double, double, int, int, CudaLiveField0337Diagnostics* diag, CudaLiveQuiver0337*) {
     if (diag) diag->attempted = 1;
     return false;
 }

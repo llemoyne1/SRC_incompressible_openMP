@@ -187,6 +187,17 @@ bool cuda_q6_wall_like_0409(const std::string& bc) {
     return bc == "solid" || bc == "specular" || bc == "bounceback";
 }
 
+bool hard_inlet_reservoir_requested_0435d(const SimulationParams& params) {
+    std::string mode = params.inletReservoirMode;
+    std::replace(mode.begin(), mode.end(), '-', '_');
+    if (mode.empty() || mode == "default") {
+        mode = params.inletInjectionMode;
+        std::replace(mode.begin(), mode.end(), '-', '_');
+    }
+    return mode == "hard_cell_density" || mode == "hard_density" ||
+           mode == "hard" || mode == "cell_density";
+}
+
 bool cuda_q6_resident_src_io_fullface_0404_supported(const SimulationParams& params) {
     const bool leftInlet = params.bcLeft == "inlet";
     const bool rightInlet = params.bcRight == "inlet";
@@ -1346,13 +1357,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             handledByCudaBoundary = true;
         }
         if (!handledByCudaBoundary) {
+            const bool hardReservoir0435d = hard_inlet_reservoir_requested_0435d(params);
             CudaInletOutletSegmented0249bDiagnostics cudaIo0249b{};
-            if (cuda_inlet_outlet_segmented_0249b_requested()) {
+            if (!hardReservoir0435d && cuda_inlet_outlet_segmented_0249b_requested()) {
                 cudaIo0249b = try_apply_cuda_inlet_outlet_segmented_0249b(
                     state, params, result.domain, step, time);
             }
             CudaInletOutletFullface0249aDiagnostics cudaIo0249a{};
-            if (cuda_inlet_outlet_fullface_0249a_requested()) {
+            if (!hardReservoir0435d && cuda_inlet_outlet_fullface_0249a_requested()) {
                 cudaIo0249a = try_apply_cuda_inlet_outlet_fullface_0249a(
                     state, params, result.domain, step, time);
             }

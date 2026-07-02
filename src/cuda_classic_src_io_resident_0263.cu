@@ -131,6 +131,10 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double wallTaperCells = 0.0;
     double refMass = 1.0;
     std::uint32_t refType = 0u;
+    double inletKBT = 0.0;
+    double inletThermalNoise = 0.0;
+    int inletHardCellVelocityMean = 0;
+    int inletHardCellThermalRescale = 0;
     std::uint64_t rngSeed = 1u;
     std::uint64_t step = 0u;
     int immersedRectangleEnabled = 0;
@@ -248,6 +252,81 @@ __device__ double uniform01_device_0263(Mt19937_64_Device_0263& r) {
     double out = static_cast<double>(mt_next_device_0263(r)) / denom;
     if (out >= 1.0) out = nextafter(1.0, 0.0);
     return out;
+}
+
+struct NormalDeviceState0263 {
+    double spare = 0.0;
+    int hasSpare = 0;
+};
+
+__device__ double normal01_device_0263(Mt19937_64_Device_0263& r,
+                                       NormalDeviceState0263& normal) {
+    if (normal.hasSpare) {
+        normal.hasSpare = 0;
+        return normal.spare;
+    }
+    double x = 0.0;
+    double y = 0.0;
+    double r2 = 0.0;
+    do {
+        x = 2.0 * uniform01_device_0263(r) - 1.0;
+        y = 2.0 * uniform01_device_0263(r) - 1.0;
+        r2 = x * x + y * y;
+    } while (r2 > 1.0 || r2 == 0.0);
+    const double multiplier = sqrt(-2.0 * log(r2) / r2);
+    normal.spare = x * multiplier;
+    normal.hasSpare = 1;
+    return y * multiplier;
+}
+
+struct InletThermalCell0263 {
+    double meanFx = 0.0;
+    double meanFy = 0.0;
+    double scale = 1.0;
+};
+
+__device__ InletThermalCell0263 prepare_inlet_thermal_cell_0435d(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    std::uint64_t seed,
+    int particleCount,
+    double particleMass)
+{
+    InletThermalCell0263 thermal{};
+    if (particleCount <= 0 || !(cfg.inletThermalNoise > 0.0) ||
+        !(cfg.inletKBT > 0.0) || !(particleMass > 0.0)) {
+        return thermal;
+    }
+    const double sigma = cfg.inletThermalNoise * sqrt(cfg.inletKBT / particleMass);
+    Mt19937_64_Device_0263 rng{};
+    mt_seed_device_0263(rng, seed);
+    NormalDeviceState0263 normal{};
+    double sumFx = 0.0;
+    double sumFy = 0.0;
+    double sumSquares = 0.0;
+    for (int k = 0; k < particleCount; ++k) {
+        (void)uniform01_device_0263(rng);
+        (void)uniform01_device_0263(rng);
+        const double fx = sigma * normal01_device_0263(rng, normal);
+        const double fy = sigma * normal01_device_0263(rng, normal);
+        sumFx += fx;
+        sumFy += fy;
+        sumSquares += fx * fx + fy * fy;
+    }
+    if (cfg.inletHardCellVelocityMean) {
+        thermal.meanFx = sumFx / static_cast<double>(particleCount);
+        thermal.meanFy = sumFy / static_cast<double>(particleCount);
+    }
+    if (cfg.inletHardCellThermalRescale && particleCount > 1) {
+        const double centeredSquares = sumSquares
+            - 2.0 * thermal.meanFx * sumFx
+            - 2.0 * thermal.meanFy * sumFy
+            + static_cast<double>(particleCount) *
+                (thermal.meanFx * thermal.meanFx + thermal.meanFy * thermal.meanFy);
+        const double measured = particleMass * fmax(0.0, centeredSquares);
+        const double desired = 2.0 * static_cast<double>(particleCount) * cfg.inletKBT;
+        if (measured > 0.0 && desired > 0.0) thermal.scale = sqrt(desired / measured);
+    }
+    return thermal;
 }
 
 __device__ inline int imin_device_0263(int a, int b) { return a < b ? a : b; }
@@ -667,13 +746,12 @@ __device__ void insert_reservoir_cell_device_0263(
     double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
     double y0 = cfg.yMin + static_cast<double>(iy) * dy;
     double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
-    double areaFraction = 1.0;
-    if (!clip_reservoir_cell_to_segment_device_0288(cfg, inletFace, segmentIndex, x0, x1, y0, y1, areaFraction)) return;
-    int effectiveTargetN = targetN;
-    if (segmentIndex >= 0) {
-        effectiveTargetN = static_cast<int>(floor(static_cast<double>(targetN) * areaFraction + 0.5));
-        if (effectiveTargetN <= 0) return;
-    }
+    double clippedX0 = x0, clippedX1 = x1, clippedY0 = y0, clippedY1 = y1;
+    double clippedAreaFraction = 1.0;
+    if (!clip_reservoir_cell_to_segment_device_0288(
+            cfg, inletFace, segmentIndex,
+            clippedX0, clippedX1, clippedY0, clippedY1, clippedAreaFraction)) return;
+    const int effectiveTargetN = targetN;
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
@@ -683,28 +761,40 @@ __device__ void insert_reservoir_cell_device_0263(
                                                       (ordinal * 0xbf58476d1ce4e5b9ULL) ^
                                                       face_tag_0263(inletFace));
     ++ordinal;
+    double particleMass = cfg.refMass;
+    if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
+        particleMass = cfg.segmentMass[segmentIndex];
+    }
+    const InletThermalCell0263 thermal = prepare_inlet_thermal_cell_0435d(
+        cfg, seed, effectiveTargetN, particleMass);
+    const double sigma = (cfg.inletThermalNoise > 0.0 && cfg.inletKBT > 0.0 && particleMass > 0.0)
+        ? cfg.inletThermalNoise * sqrt(cfg.inletKBT / particleMass) : 0.0;
     Mt19937_64_Device_0263 rng{};
     mt_seed_device_0263(rng, seed);
+    NormalDeviceState0263 normal{};
     for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
         const double ry = uniform01_device_0263(rng);
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
         const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
         double ux = 0.0, uy = 0.0;
-        double particleMass = cfg.refMass;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
             const double fRamp = ramp_factor_device_0263(cfg, time);
             ux = fRamp * cfg.segmentUx[segmentIndex];
             uy = fRamp * cfg.segmentUy[segmentIndex];
-            particleMass = cfg.segmentMass[segmentIndex];
             particleType = cfg.segmentType[segmentIndex];
         } else {
             inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
         }
+        const double fx = sigma > 0.0 ? sigma * normal01_device_0263(rng, normal) : 0.0;
+        const double fy = sigma > 0.0 ? sigma * normal01_device_0263(rng, normal) : 0.0;
+        const double dvx = thermal.scale * (fx - thermal.meanFx);
+        const double dvy = thermal.scale * (fy - thermal.meanFy);
         activate_reservoir_slot_device_0263(n, x, y, vx, vy, mass, type, role,
                                             fluidRole, inactiveRole, cfg, inactiveCursor,
-                                            xp, yp, ux, uy, particleMass, particleType, local);
+                                            xp, yp, ux + dvx, uy + dvy, particleMass, particleType, local);
+        local.inletKbtNumerator += particleMass * (dvx * dvx + dvy * dvy);
         if (local.overflowFlag) return;
     }
 }
@@ -1979,13 +2069,12 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
     double y0 = cfg.yMin + static_cast<double>(iy) * dy;
     double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
-    double areaFraction = 1.0;
-    if (!clip_reservoir_cell_to_segment_device_0288(cfg, inletFace, segmentIndex, x0, x1, y0, y1, areaFraction)) return;
-    int effectiveTargetN = targetN;
-    if (segmentIndex >= 0) {
-        effectiveTargetN = static_cast<int>(floor(static_cast<double>(targetN) * areaFraction + 0.5));
-        if (effectiveTargetN <= 0) return;
-    }
+    double clippedX0 = x0, clippedX1 = x1, clippedY0 = y0, clippedY1 = y1;
+    double clippedAreaFraction = 1.0;
+    if (!clip_reservoir_cell_to_segment_device_0288(
+            cfg, inletFace, segmentIndex,
+            clippedX0, clippedX1, clippedY0, clippedY1, clippedAreaFraction)) return;
+    const int effectiveTargetN = targetN;
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
@@ -1994,8 +2083,17 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     const std::uint64_t seed = splitmix64_device_0263(cfg.rngSeed ^ (cfg.step * 0x9e3779b97f4a7c15ULL) ^
                                                       (cellOrdinal * 0xbf58476d1ce4e5b9ULL) ^
                                                       face_tag_0263(inletFace));
+    double particleMass = cfg.refMass;
+    if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
+        particleMass = cfg.segmentMass[segmentIndex];
+    }
+    const InletThermalCell0263 thermal = prepare_inlet_thermal_cell_0435d(
+        cfg, seed, effectiveTargetN, particleMass);
+    const double sigma = (cfg.inletThermalNoise > 0.0 && cfg.inletKBT > 0.0 && particleMass > 0.0)
+        ? cfg.inletThermalNoise * sqrt(cfg.inletKBT / particleMass) : 0.0;
     Mt19937_64_Device_0263 rng{};
     mt_seed_device_0263(rng, seed);
+    NormalDeviceState0263 normal{};
     const std::uint64_t baseSlot = cellOrdinal * static_cast<std::uint64_t>(targetN);
     for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
@@ -2003,22 +2101,25 @@ __device__ void insert_reservoir_cell_pool_device_0268(
         const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
         const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
         double ux = 0.0, uy = 0.0;
-        double particleMass = cfg.refMass;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
             const double fRamp = ramp_factor_device_0263(cfg, time);
             ux = fRamp * cfg.segmentUx[segmentIndex];
             uy = fRamp * cfg.segmentUy[segmentIndex];
-            particleMass = cfg.segmentMass[segmentIndex];
             particleType = cfg.segmentType[segmentIndex];
         } else {
             inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
         }
+        const double fx = sigma > 0.0 ? sigma * normal01_device_0263(rng, normal) : 0.0;
+        const double fy = sigma > 0.0 ? sigma * normal01_device_0263(rng, normal) : 0.0;
+        const double dvx = thermal.scale * (fx - thermal.meanFx);
+        const double dvy = thermal.scale * (fy - thermal.meanFy);
         activate_reservoir_pool_slot_device_0268(x, y, vx, vy, mass, type, role,
                                                  fluidRole, inactiveRole,
                                                  inactiveIndices, inactiveCount,
                                                  baseSlot + static_cast<std::uint64_t>(k),
-                                                 xp, yp, ux, uy, particleMass, particleType, local);
+                                                 xp, yp, ux + dvx, uy + dvy, particleMass, particleType, local);
+        local.inletKbtNumerator += particleMass * (dvx * dvx + dvy * dvy);
         if (local.overflowFlag) return;
     }
 }
@@ -2444,6 +2545,10 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     cfg.step = step;
     cfg.refMass = 1.0;
     cfg.refType = 0u;
+    cfg.inletKBT = params.inletKBT > 0.0 ? params.inletKBT : params.kBT;
+    cfg.inletThermalNoise = params.inletThermalNoise;
+    cfg.inletHardCellVelocityMean = params.inletHardCellVelocityMean ? 1 : 0;
+    cfg.inletHardCellThermalRescale = params.inletHardCellThermalRescale ? 1 : 0;
     cfg.outletRegimeCode = outlet_regime_code_0291(params);
     cfg.outletForcedMassPerStep = std::max(0.0, params.openBoundaryOutletForcedMassPerStep);
     if (params.openBoundaryOutletForcedMassFlux > 0.0) {
@@ -2532,7 +2637,6 @@ bool supported_common_0263(const SimulationParams& params) {
         if (params.projectionEnable) return false;
         if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
     }
-    if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||
         params.fluidYMinVelocity != 0.0 || params.fluidYMaxVelocity != 0.0) return false;
@@ -2566,7 +2670,6 @@ bool supported_segmented_0264(const SimulationParams& params) {
         if (params.projectionEnable) return false;
         if (!thermostat_allowed_for_resident_io_0280c(params)) return false;
     }
-    if (std::abs(params.inletThermalNoise) > 1.0e-15) return false;
     if (params.closedCapacityInletMassFluxEnable) return false;
     if (params.fluidXMinVelocity != 0.0 || params.fluidXMaxVelocity != 0.0 ||
         params.fluidYMinVelocity != 0.0 || params.fluidYMaxVelocity != 0.0) return false;

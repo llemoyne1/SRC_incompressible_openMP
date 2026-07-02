@@ -45,6 +45,7 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         double clip,
                                         double gain,
                                         int smoothPasses,
+                                        int particleTypeFilter,
                                         CudaLiveField0337Diagnostics* diag = nullptr,
                                         CudaLiveQuiver0337* quiver = nullptr);
 

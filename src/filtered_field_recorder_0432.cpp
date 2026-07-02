@@ -196,6 +196,7 @@ struct FilteredFieldRecorder0432::Impl {
         double filterTau = 0.0;
         int filterSampleEvery = 1;
         int smoothPasses = 0;
+        int particleTypeFilter = -1;
     };
 
     struct ConservedFields {
@@ -255,6 +256,7 @@ struct FilteredFieldRecorder0432::Impl {
         if (liveControls.nx > 0) preview.liveGridNx = liveControls.nx;
         if (liveControls.ny > 0) preview.liveGridNy = liveControls.ny;
         preview.smoothPasses = std::max(0, liveControls.smoothPasses);
+        preview.particleTypeFilter = liveControls.particleTypeFilter;
         if (!preview.recordEveryExplicit || preview.recordEvery <= 0) {
             preview.recordEvery = std::max(1, liveControls.every);
             preview.recordEveryExplicit = false;
@@ -316,6 +318,10 @@ struct FilteredFieldRecorder0432::Impl {
             } else if (key == "smoothpasses" || key == "smooth_passes" || key == "smooth") {
                 int parsed = preview.smoothPasses;
                 if (parse_int_0432(value, parsed)) preview.smoothPasses = std::max(0, parsed);
+            } else if (key == "particletypefilter" || key == "particle_type_filter" ||
+                       key == "live_vis_particle_type_filter" || key == "src_live_vis_particle_type_filter") {
+                int parsed = preview.particleTypeFilter;
+                if (parse_int_0432(value, parsed)) preview.particleTypeFilter = parsed;
             }
         }
     }
@@ -353,7 +359,8 @@ struct FilteredFieldRecorder0432::Impl {
                lower_0432(preview.filterMode) != lower_0432(locked.filterMode) ||
                std::abs(preview.filterTau - locked.filterTau) > 0.0 ||
                preview.filterSampleEvery != locked.filterSampleEvery ||
-               preview.smoothPasses != locked.smoothPasses;
+               preview.smoothPasses != locked.smoothPasses ||
+               preview.particleTypeFilter != locked.particleTypeFilter;
     }
 
     void start_session(std::uint64_t step, double time, const SimulationParams& params) {
@@ -430,6 +437,7 @@ struct FilteredFieldRecorder0432::Impl {
         out << "filterTau = " << std::setprecision(17) << locked.filterTau << "\n";
         out << "filterSampleEvery = " << locked.filterSampleEvery << "\n";
         out << "smoothPasses = " << locked.smoothPasses << "\n";
+        out << "particleTypeFilter = " << locked.particleTypeFilter << "\n";
         out << "layout = row_major\n";
         out << "filePattern = step_<step>_field_<field>.f32\n";
         out << "observationOnly = true\n";
@@ -460,6 +468,10 @@ struct FilteredFieldRecorder0432::Impl {
             const int ix = std::clamp(static_cast<int>(std::floor(x * invLx * locked.liveGridNx)), 0, locked.liveGridNx - 1);
             const int iy = std::clamp(static_cast<int>(std::floor(y * invLy * locked.liveGridNy)), 0, locked.liveGridNy - 1);
             const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(locked.liveGridNx) + static_cast<std::size_t>(ix);
+            // 0436: filtered recorder particle type filter; -1 keeps all types.
+            if (locked.particleTypeFilter >= 0) {
+                if (i >= state.type.size() || static_cast<int>(state.type[i]) != locked.particleTypeFilter) continue;
+            }
             const double m = state.mass.empty() ? 1.0 : state.mass[i];
             const std::uint32_t typ = state.type.empty() ? 0u : state.type[i];
             instant.rho[c] += m;
@@ -575,6 +587,7 @@ void FilteredFieldRecorder0432::maybe_initialize(const SimulationParams& params)
         }
     }
     r.preview.recordFieldsRaw = env_string_0432("SRC_FILTERED_FIELD_RECORD_FIELDS", env_string_0432("MPCD_FILTERED_FIELD_RECORD_FIELDS", "current"));
+    r.preview.particleTypeFilter = env_int_0432("SRC_LIVE_VIS_PARTICLE_TYPE_FILTER", env_int_0432("MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER", -1));
     r.initialized = true;
     std::cerr << "[filtered-record0432] enabled controlFile=" << (r.controlFile.empty() ? "none" : r.controlFile)
               << " outputRoot=" << r.outputRoot << '\n';

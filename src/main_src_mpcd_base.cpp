@@ -697,7 +697,9 @@ int main(int argc, char** argv) {
                     }
                     drawnByCudaField0337 = mpcd::cuda_live_field_render_shared_0337(
                         liveRgba0337, liveNx0337, liveNy0337, params, liveField0337, liveClip0337,
-                        liveGain0337, liveSmooth0337, &liveDiag0337,
+                        liveGain0337, liveSmooth0337,
+                            liveControls0337.particleTypeFilter,
+                            &liveDiag0337,
                         liveQuiverEnabled0337 ? &cudaQuiver0337 : nullptr);
                     if (drawnByCudaField0337) {
                         std::ostringstream liveSourceLabel0337;
@@ -721,6 +723,7 @@ int main(int argc, char** argv) {
                                 liveControls0337.quiverSmoothPasses : liveControls0337.smoothPasses;
                             liveSourceLabel0337 << " quiver=" << cudaQuiver0337.nx << "x" << cudaQuiver0337.ny
                                                 << " qscale=" << std::setprecision(3) << liveControls0337.quiverScale
+                                                << " typeFilter=" << liveControls0337.particleTypeFilter
                                                 << " qsmooth=" << liveQuiverSmooth0337;
                         }
                         liveVisualization0335.draw_rgba_frame(params, static_cast<std::uint64_t>(step),
@@ -744,6 +747,7 @@ int main(int argc, char** argv) {
                                 liveControls0337.quiverSmoothPasses : liveControls0337.smoothPasses;
                             std::cerr << " quiver=" << cudaQuiver0337.nx << "x" << cudaQuiver0337.ny
                                       << " qscale=" << liveControls0337.quiverScale
+                                      << " typeFilter=" << liveControls0337.particleTypeFilter
                                       << " qsmooth=" << liveQuiverSmooth0337;
                         }
                         std::cerr << " total_s=" << liveDiag0337.totalSeconds
