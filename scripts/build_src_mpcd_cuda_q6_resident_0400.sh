@@ -89,6 +89,7 @@ set -x
   src/cuda_resampling_mass_recondition_0296.cu \
   src/cuda_resampling_population_guard_0297.cu \
   src/cuda_resampling_adaptive_flag_0304.cu \
+  src/cuda_resampling_pipeline_shadow_0445.cu \
   src/cuda_streaming_periodic_0245.cu \
   src/cuda_streaming_wall_simple_0246.cu \
   src/cuda_immersed_rectangle_0247.cu \

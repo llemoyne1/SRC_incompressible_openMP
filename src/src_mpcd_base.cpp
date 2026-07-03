@@ -14,6 +14,7 @@
 #include "cuda_resampling_adaptive_flag_0304.h"
 #include "cuda_resampling_mass_recondition_0296.h"
 #include "cuda_resampling_population_guard_0297.h"
+#include "cuda_resampling_pipeline_shadow_0445.h"
 #include "cuda_darcy_brinkman_0343.h"
 #include "cuda_q6_resident_0400.h"
 
@@ -1775,6 +1776,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ResamplingThermalRenormalizationDiagnostics thermalApply{};
     ResamplingMassGuardDiagnostics massGuardApply{};
 
+    const bool cudaResamplingPipelineShadow0445Requested =
+        cuda_resampling_pipeline_shadow_0445_requested(step);
+    ParticleState cudaResamplingPipelineShadowInput0445{};
+    WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowWorkspace0445{};
+    WeightedResamplingDiagnostics cudaResamplingPipelineShadowDeposit0445{};
+    if (cudaResamplingPipelineShadow0445Requested) {
+        cudaResamplingPipelineShadowInput0445 = state;
+        cudaResamplingPipelineShadowWorkspace0445 = workspace.resampling;
+        cudaResamplingPipelineShadowDeposit0445 = result.resampling;
+    }
+
     if (params.resamplingRemapEnable && massRenormalizationStep) {
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
@@ -1863,6 +1875,22 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         if (populationGuard.attempted) {
             attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
         }
+    }
+
+    if (cudaResamplingPipelineShadow0445Requested) {
+        (void)try_run_cuda_resampling_pipeline_shadow_0445(
+            cudaResamplingPipelineShadowInput0445,
+            state,
+            params,
+            grid,
+            result.domain,
+            time,
+            step,
+            "post_cpu_resampling_remap_thermal_shadow_0445",
+            cudaResamplingPipelineShadowWorkspace0445,
+            cudaResamplingPipelineShadowDeposit0445,
+            remapApply,
+            thermalApply);
     }
     return result;
 }
