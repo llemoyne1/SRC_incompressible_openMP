@@ -96,7 +96,7 @@ void prepare_extraction_ops_0241(
     d = ResamplingExtractionApplyDiagnostics{};
     d.attempted = true;
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
-    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsBefore = resampling_pool_free_slot_count(pool);
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
     std::vector<std::uint8_t> seen(n, 0u);
@@ -151,7 +151,7 @@ void prepare_extraction_ops_0241(
         d.lastAppliedParticle = pi64;
     }
 
-    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
     d.poolFreeSlotDelta = d.poolFreeSlotsAfter >= d.poolFreeSlotsBefore
         ? d.poolFreeSlotsAfter - d.poolFreeSlotsBefore : 0u;
     d.massResidualVsPlan = d.appliedMass - d.plannedExtractionMass;
@@ -173,7 +173,7 @@ void prepare_insertion_ops_0241(
     d = ResamplingInsertionApplyDiagnostics{};
     d.attempted = true;
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
-    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsBefore = resampling_pool_free_slot_count(pool);
 
     ops.insertionParticle.reserve(depositWorkspace.passiveExtractionOperations.size());
     ops.insertionReceiver.reserve(depositWorkspace.passiveExtractionOperations.size());
@@ -208,14 +208,12 @@ void prepare_insertion_ops_0241(
             d.skippedInvalidMass += 1u;
             continue;
         }
-        auto freeIt = std::find(pool.freeInactiveSlots.begin(), pool.freeInactiveSlots.end(), op.particleIndex);
-        if (freeIt == pool.freeInactiveSlots.end()) {
+        if (!resampling_pool_remove_free_slot(pool, op.particleIndex)) {
             d.skippedNoFreeSlots += 1u;
             continue;
         }
 
         const std::uint64_t slot64 = op.particleIndex;
-        pool.freeInactiveSlots.erase(freeIt);
         const std::size_t slot = static_cast<std::size_t>(slot64);
 
         const std::uint32_t ordinal = static_cast<std::uint32_t>(d.operationsApplied);
@@ -256,7 +254,7 @@ void prepare_insertion_ops_0241(
         d.lastInsertionReceiverCell = op.receiverCell;
     }
 
-    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
     d.poolFreeSlotDelta = d.poolFreeSlotsBefore >= d.poolFreeSlotsAfter
         ? d.poolFreeSlotsBefore - d.poolFreeSlotsAfter : 0u;
     d.massResidualVsPlan = d.insertedMass - d.plannedInsertionMass;

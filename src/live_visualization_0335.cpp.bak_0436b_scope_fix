@@ -566,7 +566,7 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
                   << " quiverMinSpeed=" << v.quiverMinSpeed
                   << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
                   << " particleTypeFilter=" << v.particleTypeFilter
-                  << " hardReset=" << (v.forceDisplayScalarReset0436b ? 1 : 0)
+                  << " hardReset=" << (hardResetDisplay0436b ? 1 : 0)
                   << " file=" << v.controlFile << '\n';
     }
 }

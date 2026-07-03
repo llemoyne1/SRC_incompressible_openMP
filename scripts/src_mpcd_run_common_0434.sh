@@ -298,6 +298,8 @@ suite_export_livevis_0434() {
 
 suite_write_common_params_0434() {
   local mode=$1
+  local path_resampling
+  path_resampling="$(suite_path_resampling_kv_0434 "$mode")"
   cat <<PARAMS
 srcClassicCudaModeEnable = $(suite_path_src_classic_kv_0434 "$mode")
 projectionEnable = $(suite_path_projection_kv_0434 "$mode")
@@ -307,10 +309,10 @@ projectionMaxIterations = ${PROJECTION_MAX_ITERATIONS}
 projectionTolerance = ${PROJECTION_TOLERANCE}
 projectionMomentumCorrectionEnable = ${PROJECTION_MOMENTUM_CORRECTION_ENABLE}
 q6ProjectionStrength = ${Q6_PROJECTION_STRENGTH}
-resamplingEnable = $(suite_path_resampling_kv_0434 "$mode")
+resamplingEnable = ${WEIGHTED_RESAMPLING_ENABLE_OVERRIDE:-$path_resampling}
 cudaResamplingChiFilterEnable = ${CUDA_RESAMPLING_CHI_FILTER_ENABLE}
 cudaResamplingChiMin = ${CUDA_RESAMPLING_CHI_MIN}
-cudaResamplingEmptyRefillEnable = $(suite_path_resampling_kv_0434 "$mode")
+cudaResamplingEmptyRefillEnable = ${CUDA_EMPTY_REFILL_ENABLE_OVERRIDE:-$path_resampling}
 cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE}
 cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA}
 cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION}
@@ -321,11 +323,11 @@ resamplingPopulationNMax = ${GUARD_NMAX}
 resamplingTargetCellMass = ${GAMMA}
 resamplingWetMaskMode = occupied
 resamplingWetCellMassThreshold = 0.0
-resamplingExtractionEnable = true
-resamplingInsertionEnable = true
-resamplingRemapEnable = true
-resamplingThermalRenormalizationEnable = true
-resamplingMassGuardEnable = true
+resamplingExtractionEnable = ${RESAMPLING_EXTRACTION_ENABLE:-true}
+resamplingInsertionEnable = ${RESAMPLING_INSERTION_ENABLE:-true}
+resamplingRemapEnable = ${RESAMPLING_REMAP_ENABLE:-true}
+resamplingThermalRenormalizationEnable = ${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-true}
+resamplingMassGuardEnable = ${RESAMPLING_MASS_GUARD_ENABLE:-true}
 resamplingParticleMassMin = ${RESAMPLING_PARTICLE_MASS_MIN:-0.5}
 resamplingParticleMassMax = ${RESAMPLING_PARTICLE_MASS_MAX:-2.0}
 resamplingLatentActivationEnable = false

@@ -296,7 +296,6 @@ struct LiveVisualization0335::Impl {
     int controlReloadEvery = 1;
     bool controlLog = false;
     bool lastRecordEnableInControl0432 = false;
-    bool forceDisplayScalarReset0436b = true;
 
     std::vector<double> sumUx;
     std::vector<double> sumUy;
@@ -464,7 +463,6 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
     const double oldQuiverMinSpeed = v.quiverMinSpeed;
     const int oldQuiverSmoothPasses = v.quiverSmoothPasses;
     const int oldParticleTypeFilter = v.particleTypeFilter;
-    const bool oldForceDisplayScalarReset0436b = v.forceDisplayScalarReset0436b;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -566,7 +564,6 @@ void LiveVisualization0335::maybe_reload_controls(std::uint64_t step) {
                   << " quiverMinSpeed=" << v.quiverMinSpeed
                   << " quiverSmoothPasses=" << ((v.quiverSmoothPasses >= 0) ? v.quiverSmoothPasses : v.smoothPasses)
                   << " particleTypeFilter=" << v.particleTypeFilter
-                  << " hardReset=" << (v.forceDisplayScalarReset0436b ? 1 : 0)
                   << " file=" << v.controlFile << '\n';
     }
 }
@@ -696,14 +693,9 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         }
     }
 
-    if (v.forceDisplayScalarReset0436b || v.displayScalar.size() != v.scalar.size()) {
-        v.displayScalar = v.scalar;
-        v.forceDisplayScalarReset0436b = false;
-    } else {
-        for (std::size_t c = 0; c < v.scalar.size(); ++c) {
-            v.displayScalar[c] = (v.alpha >= 1.0) ? v.scalar[c]
-                               : (v.alpha * v.scalar[c] + (1.0 - v.alpha) * v.displayScalar[c]);
-        }
+    for (std::size_t c = 0; c < v.scalar.size(); ++c) {
+        v.displayScalar[c] = (v.alpha >= 1.0) ? v.scalar[c]
+                           : (v.alpha * v.scalar[c] + (1.0 - v.alpha) * v.displayScalar[c]);
     }
 
     double fieldMin0363 = std::numeric_limits<double>::infinity();

@@ -8,28 +8,28 @@ suite_root_cd_0434
 # -----------------------------------------------------------------------------
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
-CASE_LABEL="io_box_same_face"
-GEN_CASE="io_box"
-TOPOLOGY="segmented"
-Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-300}"; NY="${NY:-300}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-30000}"; DT="${DT:-0.001}"; KBT="${KBT:-1.0}"
-SEED="${SEED:-1628607}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
+CASE_LABEL="poiseuille"
+GEN_CASE="poiseuille"
+TOPOLOGY="wall"
+Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-192}"; NY="${NY:-96}"
+GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-10000}"; DT="${DT:-0.001}"; KBT="${KBT:-0.001}"
+SEED="${SEED:-1628606}"; U0="${U0:-0.2}"; VELOCITY_MODE="${VELOCITY_MODE:-poiseuille_x}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
-INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-8.68}"
+INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.03}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-10000}"
 
 # Path choice: set either RUN_MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path (src). To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}"
+RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
-LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-25}"
-LIVE_VIS_NX="${LIVE_VIS_NX:-96}"; LIVE_VIS_NY="${LIVE_VIS_NY:-96}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-ux}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-20}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-600}"; LIVE_VIS_NY="${LIVE_VIS_NY:-300}"
 LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-blue_red}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
-LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-30}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-10}"
 RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
 FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
@@ -39,8 +39,7 @@ RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coe
 RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coef))
 GUARD_EVERY="${GUARD_EVERY:-5}"
 
-UIN="${UIN:-0.8}"; UOUT="${UOUT:--0.8}"
-OUTLET_MODE="${OUTLET_MODE:-neumann}"
+BODY_AX="${BODY_AX:-0.1}"
 # -----------------------------------------------------------------------------
 
 suite_defaults_common_0434
@@ -57,43 +56,24 @@ Nx = $NX
 Ny = $NY
 dt = $DT
 nSteps = $STEPS
-bcLeft = solid
-bcRight = solid
+bcLeft = periodic
+bcRight = periodic
 bcBottom = solid
 bcTop = solid
-bcX = solid
+bcX = periodic
 bcY = solid
-openBoundarySegmentsEnable = true
-openBoundarySegmentCount = 2
-openBoundarySegment0 = left inlet 0.10 0.35 ${UIN} 0.0 0 ${PARTICLE_MASS}
-openBoundarySegment1 = left outlet 0.65 0.90 ${UOUT} 0.0 0 ${PARTICLE_MASS}
-inletVelocityRampEnable = true
-inletVelocityRampStartTime = 0.0
-inletVelocityRampEndTime = 0.25
-inletVelocityRampInitialFactor = 0.2
-inletVelocityRampFinalFactor = 1.0
-inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = uniform
-inletKBT = -1.0
-inletThermalNoise = 0.0
-inletInjectionMode = hard_cell_density
-inletReservoirMode = hard_cell_density
-inletReservoirCells = 3
-inletTargetOccupancy = ${GAMMA}
-inletHardCellVelocityMean = true
-inletHardCellThermalRescale = true
-inletRandomizeTangential = true
-inletReinjectBackflow = true
-openBoundaryOutletMode = ${OUTLET_MODE}
-openBoundaryOutletHybridBlend = 0.0
-openBoundaryOutletFeedbackGain = 0.0
-bodyAccelerationX = 0.0
+bodyAccelerationX = ${BODY_AX}
 bodyAccelerationY = 0.0
+taylorGreenForcingEnable = false
 wallAccommodation = 1.0
 wallVpGamma = ${GAMMA}
 wallVpMass = ${PARTICLE_MASS}
 wallKBT = -1.0
 wallThermalNoise = 0.0
+wallUxBottom = 0.0
+wallUyBottom = 0.0
+wallUxTop = 0.0
+wallUyTop = 0.0
 PARAMS
   suite_write_common_params_0434 "$mode" >> "$params"
   :

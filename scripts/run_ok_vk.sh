@@ -8,25 +8,32 @@ suite_root_cd_0434
 # -----------------------------------------------------------------------------
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
-CASE_LABEL="bend_pipe_darcy"
-GEN_CASE="bend_pipe"
-TOPOLOGY="segmented"
-Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-128}"; NY="${NY:-128}"
-GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0005}"; KBT="${KBT:-1.}"
-SEED="${SEED:-1628411}"; U0="${U0:-5.0}"; VELOCITY_MODE="${VELOCITY_MODE:-uniform_x}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
-INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-50.0}"
-SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
+# 0434b VK follows the validated 0416 Darcy/Brinkman periodic-x cylinder case:
+#   Lx=1.5, Ly=0.4, Nx=1200, Ny=640, gamma=6
+#   periodic left/right, solid top/bottom
+#   circular chi obstacle: xc=0.2, yc=0.205, r=0.04
+#   initial state homogeneous at U0=0.9, no active particles inside the circle
+CASE_LABEL="vk_darcy_chi_periodic"
+GEN_CASE="vk"
+TOPOLOGY="wall"
+Lx="${Lx:-1.5}"; Ly="${Ly:-0.4}"; NX="${NX:-1200}"; NY="${NY:-480}"
+GAMMA="${GAMMA:-6}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0005}"; KBT="${KBT:-5.0}"
+SEED="${SEED:-1628416}"; U0="${U0:-0.9}"; VELOCITY_MODE="${VELOCITY_MODE:-uniform_x}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}_u${U0}_kBT${KBT}}"
+# 0416 used no inactive slots. 0434b keeps a small pool by default so the same
+# script can run resampling / empty-refill paths without editing the state.
+INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.25}"
+SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 
-# Path choice: set either RUN_MODES="src" or INTEG_PATH=src-q6-resampling.
-# Default runs one robust path (src). To compare all paths, set:
+# Path choice. Default is one robust path. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}"
+RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}"
 
-# Livevis + 0433a WYSIWYR filtered recording.
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-chi}"
+# Livevis + 0433a WYSIWYR filtered recording. LIVE_VIS_CONTROL_FILE defaults to
+# ./livevis_control.kv in common code so every script uses the same runtime file.
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-speed}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-10}"
-LIVE_VIS_NX="${LIVE_VIS_NX:-768}"; LIVE_VIS_NY="${LIVE_VIS_NY:-768}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-1200}"; LIVE_VIS_NY="${LIVE_VIS_NY:-320}"
 LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-thermal}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
 LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-1}"
@@ -39,13 +46,21 @@ RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coe
 RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coef))
 GUARD_EVERY="${GUARD_EVERY:-5}"
 CUDA_RESAMPLING_CHI_FILTER_ENABLE="${CUDA_RESAMPLING_CHI_FILTER_ENABLE:-true}"
-CUDA_RESAMPLING_CHI_MIN="${CUDA_RESAMPLING_CHI_MIN:-0.05}"
+CUDA_RESAMPLING_CHI_MIN="${CUDA_RESAMPLING_CHI_MIN:-0.5}"
 
-INLET_FACE="${INLET_FACE:-left}"; INLET_SMIN="${INLET_SMIN:-0.75}"; INLET_SMAX="${INLET_SMAX:-1.0}"
-OUTLET_FACE="${OUTLET_FACE:-right}"; OUTLET_SMIN="${OUTLET_SMIN:-0.0}"; OUTLET_SMAX="${OUTLET_SMAX:-0.25}"
-OUTLET_MODE="${OUTLET_MODE:-neumann}"
+# 0416 VK physical/numerical characteristics.
+AX="${AX:-0.000005}"; AY="${AY:-0.0}"
+CYLINDER_CX="${CYLINDER_CX:-0.2}"; CYLINDER_CY="${CYLINDER_CY:-0.205}"; CYLINDER_R="${CYLINDER_R:-0.04}"
+ALPHA="${ALPHA:-800000.0}"; ALPHA_MIN="${ALPHA_MIN:-0.0}"
+DARCY_Q="${DARCY_Q:-0.1}"
+DARCY_INITIAL_DEACTIVATE_BELOW_CHI="${DARCY_INITIAL_DEACTIVATE_BELOW_CHI:--1}"
 DARCY_BRINKMAN_FORCING_MODE="${DARCY_BRINKMAN_FORCING_MODE:-mean}"
-DARCY_INITIAL_DEACTIVATE_BELOW_CHI="${DARCY_INITIAL_DEACTIVATE_BELOW_CHI:-0.01}"
+DARCY_CHI_COLLISION_VP_ENABLE="${DARCY_CHI_COLLISION_VP_ENABLE:-false}"
+DARCY_CHI_COLLISION_VP_STRENGTH="${DARCY_CHI_COLLISION_VP_STRENGTH:-1.0}"
+ROTATION_ANGLE="${ROTATION_ANGLE:-1.5707963267948966}"
+TOPO_BENCHMARK_ENABLE="${TOPO_BENCHMARK_ENABLE:-true}"
+TOPO_BENCHMARK_EVERY="${TOPO_BENCHMARK_EVERY:-$SUMMARY_EVERY}"
+TOPO_BENCHMARK_FILENAME="${TOPO_BENCHMARK_FILENAME:-topo_benchmark_0348.csv}"
 # -----------------------------------------------------------------------------
 
 suite_defaults_common_0434
@@ -62,38 +77,16 @@ Nx = $NX
 Ny = $NY
 dt = $DT
 nSteps = $STEPS
-bcLeft = solid
-bcRight = solid
+bcLeft = periodic
+bcRight = periodic
 bcBottom = solid
 bcTop = solid
-bcX = solid
+bcX = periodic
 bcY = solid
-openBoundarySegmentsEnable = true
-openBoundarySegmentCount = 2
-openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
-openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
-inletVelocityRampEnable = true
-inletVelocityRampStartTime = 0.0
-inletVelocityRampEndTime = 0.25
-inletVelocityRampInitialFactor = 0.2
-inletVelocityRampFinalFactor = 1.0
-inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = uniform
-inletKBT = -1.0
-inletThermalNoise = 0.0
-inletInjectionMode = hard_cell_density
-inletReservoirMode = hard_cell_density
-inletReservoirCells = 3
-inletTargetOccupancy = ${GAMMA}
-inletHardCellVelocityMean = true
-inletHardCellThermalRescale = true
-inletRandomizeTangential = true
-inletReinjectBackflow = true
-openBoundaryOutletMode = ${OUTLET_MODE}
-openBoundaryOutletHybridBlend = 0.0
-openBoundaryOutletFeedbackGain = 0.0
-bodyAccelerationX = 0.0
-bodyAccelerationY = 0.0
+openBoundarySegmentsEnable = false
+openBoundarySegmentCount = 0
+bodyAccelerationX = ${AX}
+bodyAccelerationY = ${AY}
 wallAccommodation = 1.0
 wallVpGamma = ${GAMMA}
 wallVpMass = ${PARTICLE_MASS}
@@ -110,7 +103,7 @@ run_one_mode_0434() {
   local run_root="$BASE_RUN_ROOT/$mode"
   suite_prepare_dirs_0434 "$run_root"
   local state="$run_root/init/${CASE_LABEL}_${NX}x${NY}_g${GAMMA}.smpcd"
-  local chi="${run_root}/chi/${CASE_LABEL}_${NX}x${NY}.f32"
+  local chi="${run_root}/chi/${CASE_LABEL}_circle_xc${CYLINDER_CX}_yc${CYLINDER_CY}_r${CYLINDER_R}_${NX}x${NY}.f32"
   local params="$run_root/params/${CASE_LABEL}.kv"
   local out="$run_root/output"
   local log="$run_root/logs/${CASE_LABEL}.log"
@@ -123,6 +116,7 @@ run_one_mode_0434() {
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
   echo "[0434-suite] case=$CASE_LABEL mode=$mode root=$run_root"
+  echo "[0434-suite] VK 0416-like: periodic-x channel, circle=($CYLINDER_CX,$CYLINDER_CY,$CYLINDER_R), U0=$U0, kBT=$KBT, AX=$AX"
   echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }

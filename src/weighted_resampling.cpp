@@ -882,6 +882,106 @@ double passive_cell_distance(std::int32_t a,
     return std::sqrt(static_cast<double>(dx * dx + dy * dy));
 }
 
+bool resampling_spatial_donor_search_0437_enabled() {
+    const char* value = std::getenv("MPCD_RESAMPLING_SPATIAL_DONOR_SEARCH_0437");
+    // Opt-in until the global-reference shadow validation has completed on all
+    // supported boundary topologies.
+    if (value == nullptr || *value == '\0') return false;
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" ||
+             text == "off" || text == "OFF" || text == "no" || text == "NO");
+}
+
+bool resampling_spatial_donor_shadow_0437_enabled() {
+    const char* value = std::getenv("MPCD_RESAMPLING_SPATIAL_DONOR_SEARCH_0437_SHADOW");
+    if (value == nullptr || *value == '\0') return false;
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" ||
+             text == "off" || text == "OFF" || text == "no" || text == "NO");
+}
+
+std::size_t nearest_active_donor_global_0437(
+    std::int32_t receiverCell,
+    const std::vector<std::int32_t>& donorCells,
+    const std::vector<double>& donorRemaining,
+    const CellGrid& grid,
+    const SimulationParams& params,
+    double eps) {
+    std::size_t bestDonor = donorCells.size();
+    double bestDistance = std::numeric_limits<double>::infinity();
+    std::int32_t bestCell = kInvalidCellIndex;
+    for (std::size_t id = 0; id < donorCells.size(); ++id) {
+        if (donorRemaining[id] <= eps) continue;
+        const std::int32_t donorCell = donorCells[id];
+        const double distance = passive_cell_distance(donorCell, receiverCell, grid, params);
+        if (distance < bestDistance || (distance == bestDistance && donorCell < bestCell)) {
+            bestDistance = distance;
+            bestDonor = id;
+            bestCell = donorCell;
+        }
+    }
+    return bestDonor;
+}
+
+std::size_t nearest_active_donor_spatial_0437(
+    std::int32_t receiverCell,
+    const std::vector<std::int32_t>& donorCells,
+    const std::vector<double>& donorRemaining,
+    const std::vector<std::int32_t>& donorIndexByCell,
+    const CellGrid& grid,
+    double eps) {
+    if (receiverCell < 0 || receiverCell >= grid.numCells) return donorCells.size();
+    const int rx = receiverCell % grid.Nx;
+    const int ry = receiverCell / grid.Nx;
+    const int maxRadius = std::max(grid.Nx, grid.Ny);
+    std::size_t bestDonor = donorCells.size();
+    double bestDistance = std::numeric_limits<double>::infinity();
+    std::int32_t bestCell = kInvalidCellIndex;
+
+    auto consider = [&](int x, int y) {
+        if (x < 0 || x >= grid.Nx || y < 0 || y >= grid.Ny) return;
+        const std::int32_t cell = static_cast<std::int32_t>(y * grid.Nx + x);
+        const std::int32_t donorIndex = donorIndexByCell[static_cast<std::size_t>(cell)];
+        if (donorIndex < 0) return;
+        const std::size_t id = static_cast<std::size_t>(donorIndex);
+        if (id >= donorRemaining.size() || donorRemaining[id] <= eps) return;
+        const int dx = std::abs(x - rx);
+        const int dy = std::abs(y - ry);
+        const double distance = std::sqrt(static_cast<double>(dx * dx + dy * dy));
+        if (distance < bestDistance || (distance == bestDistance && cell < bestCell)) {
+            bestDistance = distance;
+            bestDonor = id;
+            bestCell = cell;
+        }
+    };
+
+    for (int radius = 0; radius <= maxRadius; ++radius) {
+        if (radius == 0) {
+            consider(rx, ry);
+        } else {
+            const int yBottom = ry - radius;
+            const int yTop = ry + radius;
+            for (int dx = -radius; dx <= radius; ++dx) {
+                consider(rx + dx, yBottom);
+                if (yTop != yBottom) consider(rx + dx, yTop);
+            }
+            const int xLeft = rx - radius;
+            const int xRight = rx + radius;
+            for (int dy = -radius + 1; dy <= radius - 1; ++dy) {
+                consider(xLeft, ry + dy);
+                if (xRight != xLeft) consider(xRight, ry + dy);
+            }
+        }
+        // Every unvisited cell has Chebyshev distance >= radius+1 and hence
+        // Euclidean distance >= radius+1. Strict inequality preserves ties.
+        if (bestDonor != donorCells.size() &&
+            bestDistance < static_cast<double>(radius + 1)) {
+            return bestDonor;
+        }
+    }
+    return bestDonor;
+}
+
 void deterministic_receiver_position(std::int32_t cell,
                                      std::uint64_t ordinal,
                                      const CellGrid& grid,
@@ -988,6 +1088,9 @@ ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
 
     pool.allocatedParticles = state.Np;
     pool.freeInactiveSlots.clear();
+    pool.freeInactiveSlotPosition.assign(n, kInvalidParticleIndex);
+    pool.freeInactiveCount = 0u;
+    pool.freeInactiveFirstPosition = 0u;
     pool.latentSlots.clear();
     pool.fluidSlots.clear();
     pool.freeInactiveSlots.reserve(n);
@@ -1006,7 +1109,10 @@ ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
         } else if (is_latent_role(r)) {
             pool.latentSlots.push_back(index);
         } else if (is_inactive_role(r)) {
+            pool.freeInactiveSlotPosition[i] =
+                static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
             pool.freeInactiveSlots.push_back(index);
+            pool.freeInactiveCount += 1u;
         } else {
             throw std::runtime_error("rebuild_resampling_particle_pool: invalid particle role");
         }
@@ -1014,7 +1120,7 @@ ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
 
     d.fluidSlots = static_cast<std::uint64_t>(pool.fluidSlots.size());
     d.latentSlots = static_cast<std::uint64_t>(pool.latentSlots.size());
-    d.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.freeSlots = pool.freeInactiveCount;
     d.nFluid = d.fluidSlots;
     d.nLatent = d.latentSlots;
     d.nInactive = d.freeSlots;
@@ -1034,21 +1140,45 @@ ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
 }
 
 bool resampling_pool_has_free_slot(const ResamplingParticlePoolWorkspace& pool) {
-    return !pool.freeInactiveSlots.empty();
+    return pool.freeInactiveCount > 0u;
 }
 
-std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& pool) {
-    if (pool.freeInactiveSlots.empty()) {
-        throw std::runtime_error("resampling_pool_pop_free_slot: no inactive slot available");
+std::uint64_t resampling_pool_free_slot_count(const ResamplingParticlePoolWorkspace& pool) {
+    return pool.freeInactiveCount;
+}
+
+namespace {
+
+void refresh_resampling_pool_free_diagnostics(ResamplingParticlePoolWorkspace& pool) {
+    while (!pool.freeInactiveSlots.empty()) {
+        const std::size_t lastPosition = pool.freeInactiveSlots.size() - 1u;
+        const std::uint64_t lastIndex = pool.freeInactiveSlots[lastPosition];
+        if (lastIndex < pool.freeInactiveSlotPosition.size() &&
+            pool.freeInactiveSlotPosition[static_cast<std::size_t>(lastIndex)] == lastPosition) {
+            break;
+        }
+        pool.freeInactiveSlots.pop_back();
     }
-    const std::uint64_t index = pool.freeInactiveSlots.back();
-    pool.freeInactiveSlots.pop_back();
-    pool.diagnostics.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
-    if (pool.freeInactiveSlots.empty()) {
+    while (pool.freeInactiveFirstPosition < pool.freeInactiveSlots.size()) {
+        const std::uint64_t index =
+            pool.freeInactiveSlots[static_cast<std::size_t>(pool.freeInactiveFirstPosition)];
+        if (index < pool.freeInactiveSlotPosition.size() &&
+            pool.freeInactiveSlotPosition[static_cast<std::size_t>(index)] == pool.freeInactiveFirstPosition) {
+            break;
+        }
+        pool.freeInactiveFirstPosition += 1u;
+    }
+
+    pool.diagnostics.freeSlots = pool.freeInactiveCount;
+    if (pool.freeInactiveCount == 0u) {
         pool.diagnostics.firstFreeIndex = kInvalidParticleIndex;
         pool.diagnostics.lastFreeIndex = kInvalidParticleIndex;
     } else {
-        pool.diagnostics.firstFreeIndex = pool.freeInactiveSlots.front();
+        if (pool.freeInactiveFirstPosition >= pool.freeInactiveSlots.size() || pool.freeInactiveSlots.empty()) {
+            throw std::runtime_error("refresh_resampling_pool_free_diagnostics: free-list endpoints are inconsistent");
+        }
+        pool.diagnostics.firstFreeIndex =
+            pool.freeInactiveSlots[static_cast<std::size_t>(pool.freeInactiveFirstPosition)];
         pool.diagnostics.lastFreeIndex = pool.freeInactiveSlots.back();
     }
     if (pool.diagnostics.storageSlots > 0u) {
@@ -1058,24 +1188,62 @@ std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& poo
             static_cast<double>(pool.diagnostics.freeSlots + pool.diagnostics.latentSlots) /
             static_cast<double>(pool.diagnostics.storageSlots);
     }
+}
+
+} // namespace
+
+std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& pool) {
+    if (pool.freeInactiveCount == 0u) {
+        throw std::runtime_error("resampling_pool_pop_free_slot: no inactive slot available");
+    }
+    refresh_resampling_pool_free_diagnostics(pool);
+    const std::uint64_t index = pool.freeInactiveSlots.back();
+    pool.freeInactiveSlots.pop_back();
+    if (index >= pool.freeInactiveSlotPosition.size() ||
+        pool.freeInactiveSlotPosition[static_cast<std::size_t>(index)] == kInvalidParticleIndex) {
+        throw std::runtime_error("resampling_pool_pop_free_slot: inverse index is inconsistent");
+    }
+    pool.freeInactiveSlotPosition[static_cast<std::size_t>(index)] = kInvalidParticleIndex;
+    pool.freeInactiveCount -= 1u;
+    refresh_resampling_pool_free_diagnostics(pool);
     return index;
 }
 
 void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index) {
-    if (index == kInvalidParticleIndex) {
+    if (index == kInvalidParticleIndex || index >= pool.freeInactiveSlotPosition.size()) {
         throw std::runtime_error("resampling_pool_push_free_slot: invalid index");
     }
-    pool.freeInactiveSlots.push_back(index);
-    pool.diagnostics.freeSlots = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
-    pool.diagnostics.firstFreeIndex = pool.freeInactiveSlots.front();
-    pool.diagnostics.lastFreeIndex = pool.freeInactiveSlots.back();
-    if (pool.diagnostics.storageSlots > 0u) {
-        pool.diagnostics.freeSlotFraction =
-            static_cast<double>(pool.diagnostics.freeSlots) / static_cast<double>(pool.diagnostics.storageSlots);
-        pool.diagnostics.dormantSlotFraction =
-            static_cast<double>(pool.diagnostics.freeSlots + pool.diagnostics.latentSlots) /
-            static_cast<double>(pool.diagnostics.storageSlots);
+    if (pool.freeInactiveSlotPosition[static_cast<std::size_t>(index)] != kInvalidParticleIndex) {
+        throw std::runtime_error("resampling_pool_push_free_slot: slot is already free");
     }
+    pool.freeInactiveSlotPosition[static_cast<std::size_t>(index)] =
+        static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    if (pool.freeInactiveCount == 0u) {
+        pool.freeInactiveFirstPosition = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    }
+    pool.freeInactiveSlots.push_back(index);
+    pool.freeInactiveCount += 1u;
+    refresh_resampling_pool_free_diagnostics(pool);
+}
+
+bool resampling_pool_remove_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index) {
+    if (index == kInvalidParticleIndex || index >= pool.freeInactiveSlotPosition.size()) {
+        return false;
+    }
+    const std::size_t slot = static_cast<std::size_t>(index);
+    const std::uint64_t position64 = pool.freeInactiveSlotPosition[slot];
+    if (position64 == kInvalidParticleIndex || position64 >= pool.freeInactiveSlots.size()) {
+        return false;
+    }
+    const std::size_t position = static_cast<std::size_t>(position64);
+    if (pool.freeInactiveSlots[position] != index) {
+        throw std::runtime_error("resampling_pool_remove_free_slot: inverse index is inconsistent");
+    }
+
+    pool.freeInactiveSlotPosition[slot] = kInvalidParticleIndex;
+    pool.freeInactiveCount -= 1u;
+    refresh_resampling_pool_free_diagnostics(pool);
+    return true;
 }
 
 void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
@@ -1268,7 +1436,7 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
     ResamplingExtractionApplyDiagnostics d{};
     d.attempted = true;
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
-    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsBefore = resampling_pool_free_slot_count(pool);
 
     const std::size_t n = static_cast<std::size_t>(state.Np);
     std::vector<std::uint8_t> seen(n, 0u);
@@ -1349,7 +1517,7 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
             }
         }
 
-        d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+        d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
         d.poolFreeSlotDelta = d.poolFreeSlotsAfter >= d.poolFreeSlotsBefore
             ? d.poolFreeSlotsAfter - d.poolFreeSlotsBefore : 0u;
         d.massResidualVsPlan = d.appliedMass - d.plannedExtractionMass;
@@ -1405,7 +1573,7 @@ ResamplingExtractionApplyDiagnostics apply_resampling_extraction_operations(
         d.lastAppliedParticle = pi64;
     }
 
-    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
     d.poolFreeSlotDelta = d.poolFreeSlotsAfter >= d.poolFreeSlotsBefore
         ? d.poolFreeSlotsAfter - d.poolFreeSlotsBefore : 0u;
     d.massResidualVsPlan = d.appliedMass - d.plannedExtractionMass;
@@ -1451,7 +1619,7 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
     ResamplingInsertionApplyDiagnostics d{};
     d.attempted = true;
     d.operationsConsidered = static_cast<std::uint64_t>(depositWorkspace.passiveExtractionOperations.size());
-    d.poolFreeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsBefore = resampling_pool_free_slot_count(pool);
 
 #ifdef MPCD_ENABLE_CUDA_RESAMPLING
     const bool useCudaInsertion = cuda_resampling_insertion_use_0236();
@@ -1501,16 +1669,12 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
                 d.skippedInvalidMass += 1u;
                 continue;
             }
-            auto freeIt = std::find(pool.freeInactiveSlots.begin(),
-                                    pool.freeInactiveSlots.end(),
-                                    op.particleIndex);
-            if (freeIt == pool.freeInactiveSlots.end()) {
+            if (!resampling_pool_remove_free_slot(pool, op.particleIndex)) {
                 d.skippedNoFreeSlots += 1u;
                 continue;
             }
 
             const std::uint64_t slot64 = op.particleIndex;
-            pool.freeInactiveSlots.erase(freeIt);
             opParticle.push_back(static_cast<std::uint32_t>(slot64));
             opReceiver.push_back(static_cast<std::uint32_t>(op.receiverCell));
             opType.push_back(op.particleType);
@@ -1551,7 +1715,7 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
             }
         }
 
-        d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+        d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
         d.poolFreeSlotDelta = d.poolFreeSlotsBefore >= d.poolFreeSlotsAfter
             ? d.poolFreeSlotsBefore - d.poolFreeSlotsAfter : 0u;
         d.massResidualVsPlan = d.insertedMass - d.plannedInsertionMass;
@@ -1590,16 +1754,12 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
             d.skippedInvalidMass += 1u;
             continue;
         }
-        auto freeIt = std::find(pool.freeInactiveSlots.begin(),
-                                pool.freeInactiveSlots.end(),
-                                op.particleIndex);
-        if (freeIt == pool.freeInactiveSlots.end()) {
+        if (!resampling_pool_remove_free_slot(pool, op.particleIndex)) {
             d.skippedNoFreeSlots += 1u;
             continue;
         }
 
         const std::uint64_t slot64 = op.particleIndex;
-        pool.freeInactiveSlots.erase(freeIt);
         const std::size_t slot = static_cast<std::size_t>(slot64);
 
         double newX = 0.0;
@@ -1629,7 +1789,7 @@ ResamplingInsertionApplyDiagnostics apply_resampling_insertion_operations(
         d.lastInsertionReceiverCell = op.receiverCell;
     }
 
-    d.poolFreeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.poolFreeSlotsAfter = resampling_pool_free_slot_count(pool);
     d.poolFreeSlotDelta = d.poolFreeSlotsBefore >= d.poolFreeSlotsAfter
         ? d.poolFreeSlotsBefore - d.poolFreeSlotsAfter : 0u;
     d.massResidualVsPlan = d.insertedMass - d.plannedInsertionMass;
@@ -1763,7 +1923,7 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     const int nc = depositWorkspace.allocatedCells;
     {
         MPCD_POP_GUARD_PROFILE(d.profile, InitThresholds);
-        d.freeSlotsBefore = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+        d.freeSlotsBefore = resampling_pool_free_slot_count(pool);
 
         if (nc <= 0 || depositWorkspace.count.size() != static_cast<std::size_t>(nc) ||
             depositWorkspace.wetCell.size() != static_cast<std::size_t>(nc)) {
@@ -2095,7 +2255,7 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
     accumulate_wet_population_stats(depositWorkspace, countAfter, d.nMin,
                                     wetAfter, d.wetNMinAfter, d.wetNMeanAfter,
                                     d.wetNStdAfter, d.wetLowNFractionAfter);
-    d.freeSlotsAfter = static_cast<std::uint64_t>(pool.freeInactiveSlots.size());
+    d.freeSlotsAfter = resampling_pool_free_slot_count(pool);
     d.activeParticleDelta = static_cast<std::int64_t>(d.splitParticlesCreated) -
                             static_cast<std::int64_t>(d.extractedParticles);
     d.applied = d.splitParticlesCreated > 0u || d.extractedParticles > 0u;
@@ -3440,6 +3600,13 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                 const double excess = ws.mass[static_cast<std::size_t>(dc)] - d.targetCellMass;
                 donorRemaining[id] = excess > 0.0 ? excess : 0.0;
             }
+            std::vector<std::int32_t> donorIndexByCell(static_cast<std::size_t>(nc), -1);
+            for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
+                const std::int32_t cell = ws.donorRichCells[id];
+                if (cell >= 0 && cell < nc) {
+                    donorIndexByCell[static_cast<std::size_t>(cell)] = static_cast<std::int32_t>(id);
+                }
+            }
 
             double plannedMass = 0.0;
             double massWeightedDistance = 0.0;
@@ -3455,25 +3622,27 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
                 const std::int32_t rc = ws.receiverPoorCells[ir];
                 while (receiverRemaining[ir] > eps) {
-                    std::size_t bestDonor = ws.donorRichCells.size();
-                    double bestDistance = std::numeric_limits<double>::infinity();
-                    std::int32_t bestCell = kInvalidCellIndex;
-                    for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
-                        if (donorRemaining[id] <= eps) {
-                            continue;
-                        }
-                        const std::int32_t dc = ws.donorRichCells[id];
-                        const double dist = passive_cell_distance(dc, rc, grid, params);
-                        if (dist < bestDistance ||
-                            (dist == bestDistance && dc < bestCell)) {
-                            bestDistance = dist;
-                            bestDonor = id;
-                            bestCell = dc;
+                    const bool useSpatialSearch =
+                        resampling_spatial_donor_search_0437_enabled() &&
+                        !is_x_periodic(params) && !is_y_periodic(params);
+                    const std::size_t bestDonor = useSpatialSearch
+                        ? nearest_active_donor_spatial_0437(
+                              rc, ws.donorRichCells, donorRemaining, donorIndexByCell, grid, eps)
+                        : nearest_active_donor_global_0437(
+                              rc, ws.donorRichCells, donorRemaining, grid, params, eps);
+                    if (useSpatialSearch && resampling_spatial_donor_shadow_0437_enabled()) {
+                        const std::size_t referenceDonor = nearest_active_donor_global_0437(
+                            rc, ws.donorRichCells, donorRemaining, grid, params, eps);
+                        if (bestDonor != referenceDonor) {
+                            throw std::runtime_error(
+                                "resampling spatial donor search 0437 disagrees with global reference");
                         }
                     }
                     if (bestDonor == ws.donorRichCells.size()) {
                         break;
                     }
+                    const std::int32_t bestCell = ws.donorRichCells[bestDonor];
+                    const double bestDistance = passive_cell_distance(bestCell, rc, grid, params);
                     const double transfer = std::min(donorRemaining[bestDonor], receiverRemaining[ir]);
                     if (transfer <= eps) {
                         break;

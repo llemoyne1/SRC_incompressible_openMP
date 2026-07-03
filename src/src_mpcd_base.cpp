@@ -1619,8 +1619,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         MPCD_PROFILE_PHASE(result.profile, ResamplingPoolInitial);
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
     }
-    const bool buildInitialResamplingPlan =
-        params.resamplingEnable && params.resamplingExtractionEnable;
+    // 0437: the population guard may change particle support before any
+    // extraction plan is consumed. Building the expensive global transfer plan
+    // here made edited steps discard it and rebuild the same structure from the
+    // post-guard state. Deposit moments/classification first, then build exactly
+    // one mutation plan from the state that will actually feed extraction.
+    const bool buildInitialResamplingPlan = false;
     {
         MPCD_PROFILE_PHASE(result.profile, ResamplingDepositInitial);
         result.resampling = deposit_weighted_real_fluid(
@@ -1675,6 +1679,15 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
             attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
         }
+    } else if (params.resamplingExtractionEnable) {
+        // No support edit occurred, so no post-guard rebuild is needed. Build
+        // the deferred mutation plan from the unchanged initial state.
+        MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
+        result.resampling = deposit_weighted_real_fluid(
+            state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+            true, ResamplingDepositProfileContext::PostGuard, true);
+        attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
+        attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
     }
 
     ResamplingLatentActivationDiagnostics latentActivation{};

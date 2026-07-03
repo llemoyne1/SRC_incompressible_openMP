@@ -73,9 +73,15 @@ struct ResamplingParticlePoolDiagnostics {
 struct ResamplingParticlePoolWorkspace {
     std::uint64_t allocatedParticles = 0;
 
-    // Stack of slots immediately available for future insertion.  The list is
-    // rebuilt from role=Inactive and is not yet consumed by this passive patch.
+    // Stack of slots immediately available for future insertion.
     std::vector<std::uint64_t> freeInactiveSlots;
+
+    // Inverse index for O(1) membership checks and removal of an explicitly
+    // selected inactive slot. kInvalidParticleIndex means that the slot is not
+    // currently present in freeInactiveSlots.
+    std::vector<std::uint64_t> freeInactiveSlotPosition;
+    std::uint64_t freeInactiveCount = 0;
+    std::uint64_t freeInactiveFirstPosition = 0;
 
     // Auxiliary role-index lists used by smoke tests and future wet/dry logic.
     std::vector<std::uint64_t> latentSlots;
@@ -880,8 +886,10 @@ ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(
     ResamplingParticlePoolWorkspace& pool);
 
 bool resampling_pool_has_free_slot(const ResamplingParticlePoolWorkspace& pool);
+std::uint64_t resampling_pool_free_slot_count(const ResamplingParticlePoolWorkspace& pool);
 std::uint64_t resampling_pool_pop_free_slot(ResamplingParticlePoolWorkspace& pool);
 void resampling_pool_push_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index);
+bool resampling_pool_remove_free_slot(ResamplingParticlePoolWorkspace& pool, std::uint64_t index);
 
 void attach_resampling_pool_diagnostics(WeightedResamplingDiagnostics& diagnostics,
                                         const ResamplingParticlePoolDiagnostics& poolDiagnostics);

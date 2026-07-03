@@ -8,15 +8,15 @@ suite_root_cd_0434
 # -----------------------------------------------------------------------------
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
-CASE_LABEL="io_box_same_face"
-GEN_CASE="io_box"
+CASE_LABEL="bend_pipe_darcy"
+GEN_CASE="bend_pipe"
 TOPOLOGY="segmented"
-Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-300}"; NY="${NY:-300}"
-GAMMA="${GAMMA:-20}"; STEPS="${STEPS:-30000}"; DT="${DT:-0.001}"; KBT="${KBT:-1.0}"
-SEED="${SEED:-1628607}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
+Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-128}"; NY="${NY:-128}"
+GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0005}"; KBT="${KBT:-1.}"
+SEED="${SEED:-1628411}"; U0="${U0:-5.0}"; VELOCITY_MODE="${VELOCITY_MODE:-uniform_x}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
-INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-8.68}"
-SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-10000}"
+INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-50.0}"
+SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
 
 # Path choice: set either RUN_MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path (src). To compare all paths, set:
@@ -24,23 +24,30 @@ SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100
 RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
-LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"
-LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-25}"
-LIVE_VIS_NX="${LIVE_VIS_NX:-96}"; LIVE_VIS_NY="${LIVE_VIS_NY:-96}"
-LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-blue_red}"
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-chi}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-10}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-768}"; LIVE_VIS_NY="${LIVE_VIS_NY:-768}"
+LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-thermal}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
-LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-30}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-1}"
 RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
 FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
+LIVE_PROGRESS=${LIVE_PROGRESS:-1}
+LIVE_VIS_HOLD_ON_EXIT=${LIVE_VIS_HOLD_ON_EXIT:-1}
 
 # Gamma-relative resampling thresholds. Actual integer thresholds are derived in common.
 RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coef))
 RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coef))
 GUARD_EVERY="${GUARD_EVERY:-5}"
+CUDA_RESAMPLING_CHI_FILTER_ENABLE="${CUDA_RESAMPLING_CHI_FILTER_ENABLE:-true}"
+CUDA_RESAMPLING_CHI_MIN="${CUDA_RESAMPLING_CHI_MIN:-0.05}"
 
-UIN="${UIN:-0.8}"; UOUT="${UOUT:--0.8}"
+INLET_FACE="${INLET_FACE:-left}"; INLET_SMIN="${INLET_SMIN:-0.75}"; INLET_SMAX="${INLET_SMAX:-1.0}"
+OUTLET_FACE="${OUTLET_FACE:-right}"; OUTLET_SMIN="${OUTLET_SMIN:-0.0}"; OUTLET_SMAX="${OUTLET_SMAX:-0.25}"
 OUTLET_MODE="${OUTLET_MODE:-neumann}"
+DARCY_BRINKMAN_FORCING_MODE="${DARCY_BRINKMAN_FORCING_MODE:-mean}"
+DARCY_INITIAL_DEACTIVATE_BELOW_CHI="${DARCY_INITIAL_DEACTIVATE_BELOW_CHI:-0.01}"
 # -----------------------------------------------------------------------------
 
 suite_defaults_common_0434
@@ -65,8 +72,8 @@ bcX = solid
 bcY = solid
 openBoundarySegmentsEnable = true
 openBoundarySegmentCount = 2
-openBoundarySegment0 = left inlet 0.10 0.35 ${UIN} 0.0 0 ${PARTICLE_MASS}
-openBoundarySegment1 = left outlet 0.65 0.90 ${UOUT} 0.0 0 ${PARTICLE_MASS}
+openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
+openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
 inletVelocityRampEnable = true
 inletVelocityRampStartTime = 0.0
 inletVelocityRampEndTime = 0.25
@@ -96,7 +103,7 @@ wallKBT = -1.0
 wallThermalNoise = 0.0
 PARAMS
   suite_write_common_params_0434 "$mode" >> "$params"
-  :
+  suite_write_darcy_params_0434 "$chi" >> "$params"
 }
 
 run_one_mode_0434() {
@@ -105,7 +112,7 @@ run_one_mode_0434() {
   local run_root="$BASE_RUN_ROOT/$mode"
   suite_prepare_dirs_0434 "$run_root"
   local state="$run_root/init/${CASE_LABEL}_${NX}x${NY}_g${GAMMA}.smpcd"
-  local chi=""
+  local chi="${run_root}/chi/${CASE_LABEL}_${NX}x${NY}.f32"
   local params="$run_root/params/${CASE_LABEL}.kv"
   local out="$run_root/output"
   local log="$run_root/logs/${CASE_LABEL}.log"
