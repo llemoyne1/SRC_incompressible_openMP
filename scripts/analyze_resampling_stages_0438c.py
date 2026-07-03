@@ -26,6 +26,7 @@ STAGE_COLS = {
     "computed": "resampComputed",
     "candidateLists": "resampCandidateListsBuilt",
     "transferPlan": "resampTransferPlanBuilt",
+    "transferPairs": "resampTransferPairs",
     "donorSelection": "resampDonorParticleSelectionBuilt",
     "extractionPlan": "resampExtractionPlanBuilt",
     "extractionApply": "resampExtractionApplyApplied",
@@ -149,7 +150,7 @@ def write_md(path: Path, root: Path, summaries: List[Dict[str, object]], modes: 
     lines.append("")
     lines.append("This audit distinguishes resampling being computed from sub-stages that actually mutate or recondition the state.")
     lines.append("")
-    header = ["Mode", "rows", "ΔnFluid", "Δmass", "computedRows", "nonTrivialRows", "remapRows", "thermalRows", "massGuardRows", "popGuardRows", "latentRows", "transferRows"]
+    header = ["Mode", "rows", "ΔnFluid", "Δmass", "computedRows", "nonTrivialRows", "remapRows", "thermalRows", "massGuardRows", "popGuardRows", "latentRows", "transferPairRows"]
     lines.append("| " + " | ".join(header) + " |")
     lines.append("| " + " | ".join(["---"] + ["---:"] * (len(header) - 1)) + " |")
     for s in summaries:
@@ -165,7 +166,7 @@ def write_md(path: Path, root: Path, summaries: List[Dict[str, object]], modes: 
             s.get("massGuardRows", ""),
             s.get("populationGuardRows", ""),
             s.get("latentActivationRows", ""),
-            s.get("transferPlanRows", ""),
+            s.get("transferPairsRows", ""),
         ]
         lines.append("| " + " | ".join(fmt(x) for x in row) + " |")
     lines.append("")
