@@ -63,9 +63,59 @@ struct CudaResamplingPipelineShadow0445Diagnostics {
     double totalSeconds = 0.0;
 };
 
+
+// 0448: experimental production apply backend for the clean resampling
+// pipeline.  Unlike the 0445/0446 hook, this mutates the supplied ParticleState
+// after validating the CUDA operation on a temporary copy.  It is intentionally
+// limited to extraction/insertion + remap + thermal; mass/population guards and
+// CUDA-local auxiliaries remain outside this backend.
+struct CudaResamplingPipelineApply0448Diagnostics {
+    bool attempted = false;
+    bool handled = false;
+    bool applied = false;
+    bool skipped = false;
+    std::string skipReason;
+
+    std::uint64_t step = 0u;
+    std::string stage;
+
+    std::uint64_t nActive = 0u;
+    std::uint64_t passiveOps = 0u;
+    std::uint64_t gpuExtractionApplied = 0u;
+    std::uint64_t gpuInsertionApplied = 0u;
+    std::uint64_t gpuInvalidOperations = 0u;
+    std::uint64_t gpuRemapCells = 0u;
+    std::uint64_t gpuThermalCells = 0u;
+    double applyKernelSeconds = 0.0;
+    double remapKernelSeconds = 0.0;
+    double thermalKernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
 bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t step);
+bool cuda_resampling_pipeline_apply_0448_requested();
+
+CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    const WeightedRealFluidDepositWorkspace& editWorkspace,
+    ResamplingExtractionApplyDiagnostics& extractionApply,
+    ResamplingInsertionApplyDiagnostics& insertionApply);
+
+CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_remap_thermal_0448(
+    ParticleState& state,
+    const SimulationParams& params,
+    const WeightedRealFluidDepositWorkspace& remapWorkspace,
+    const WeightedResamplingDiagnostics& remapDepositDiagnostics,
+    double massCorrectionStrength,
+    double targetCellMassOverride,
+    std::uint64_t step,
+    ResamplingRemapApplyDiagnostics& remapApply,
+    ResamplingThermalRenormalizationDiagnostics& thermalApply);
 
 CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_shadow_0445(
     const ParticleState& shadowInputState,
@@ -87,6 +137,19 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
 #else
 
 inline bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t) { return false; }
+inline bool cuda_resampling_pipeline_apply_0448_requested() { return false; }
+
+inline CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
+    ParticleState&, const SimulationParams&, const CellGrid&, std::uint64_t, const WeightedRealFluidDepositWorkspace&,
+    ResamplingExtractionApplyDiagnostics&, ResamplingInsertionApplyDiagnostics&) {
+    return CudaResamplingPipelineApply0448Diagnostics{};
+}
+
+inline CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_remap_thermal_0448(
+    ParticleState&, const SimulationParams&, const WeightedRealFluidDepositWorkspace&, const WeightedResamplingDiagnostics&,
+    double, double, std::uint64_t, ResamplingRemapApplyDiagnostics&, ResamplingThermalRenormalizationDiagnostics&) {
+    return CudaResamplingPipelineApply0448Diagnostics{};
+}
 
 inline CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_shadow_0445(
     const ParticleState&, const ParticleState&, const SimulationParams&, const CellGrid&, const FluidDomainBounds&,

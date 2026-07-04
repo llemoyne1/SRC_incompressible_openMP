@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mpcd {
@@ -461,6 +462,220 @@ bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t step) {
     if (!env_truthy_0445("MPCD_CUDA_RESAMPLING_PIPELINE_SHADOW_0445")) return false;
     const std::uint64_t every = env_u64_0445("MPCD_CUDA_RESAMPLING_PIPELINE_SHADOW_EVERY_0445", 1u);
     return every == 0u || (step % every == 0u);
+}
+
+bool cuda_resampling_pipeline_apply_0448_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_PIPELINE_APPLY_0448");
+}
+
+namespace {
+
+void append_apply_csv_0448(const SimulationParams& params,
+                           const CudaResamplingPipelineApply0448Diagnostics& d) {
+    if (params.outputDir.empty()) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::string path = params.outputDir + "/cuda_resampling_pipeline_apply_0448.csv";
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,stage,attempted,handled,applied,skipped,skipReason,nActive,passiveOps,"
+               "gpuExtractionApplied,gpuInsertionApplied,gpuInvalidOperations,gpuRemapCells,gpuThermalCells,"
+               "applyKernelSeconds,remapKernelSeconds,thermalKernelSeconds,totalSeconds\n";
+    }
+    out << d.step << ',' << csv_escape_0445(d.stage) << ','
+        << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ',' << (d.applied ? 1 : 0) << ','
+        << (d.skipped ? 1 : 0) << ',' << csv_escape_0445(d.skipReason) << ','
+        << d.nActive << ',' << d.passiveOps << ','
+        << d.gpuExtractionApplied << ',' << d.gpuInsertionApplied << ',' << d.gpuInvalidOperations << ','
+        << d.gpuRemapCells << ',' << d.gpuThermalCells << ','
+        << d.applyKernelSeconds << ',' << d.remapKernelSeconds << ',' << d.thermalKernelSeconds << ',' << d.totalSeconds << '\n';
+}
+
+void fill_extraction_insertion_diagnostics_0448(const WeightedRealFluidDepositWorkspace& ws,
+                                                const GpuParticleApply0446& pa,
+                                                ResamplingExtractionApplyDiagnostics& ext,
+                                                ResamplingInsertionApplyDiagnostics& ins) {
+    const std::uint64_t ops = static_cast<std::uint64_t>(ws.passiveExtractionOperations.size());
+    double mass = 0.0, px = 0.0, py = 0.0, ke = 0.0;
+    std::uint64_t first = kInvalidParticleIndex, last = kInvalidParticleIndex;
+    std::int32_t firstReceiver = kInvalidCellIndex, lastReceiver = kInvalidCellIndex;
+    for (const auto& op : ws.passiveExtractionOperations) {
+        mass += op.particleMass;
+        px += op.momentumX;
+        py += op.momentumY;
+        if (op.particleMass > 0.0) {
+            const double vx = op.momentumX / op.particleMass;
+            const double vy = op.momentumY / op.particleMass;
+            ke += 0.5 * op.particleMass * (vx * vx + vy * vy);
+        }
+        if (first == kInvalidParticleIndex) first = op.particleIndex;
+        last = op.particleIndex;
+        if (firstReceiver == kInvalidCellIndex) firstReceiver = op.receiverCell;
+        lastReceiver = op.receiverCell;
+    }
+    ext.attempted = true;
+    ext.applied = pa.extractionApplied > 0u;
+    ext.operationsConsidered = ops;
+    ext.operationsApplied = pa.extractionApplied;
+    ext.roleChanges = pa.extractionApplied;
+    ext.appliedMass = mass;
+    ext.appliedMomentumX = px;
+    ext.appliedMomentumY = py;
+    ext.appliedKineticEnergy = ke;
+    ext.plannedExtractionMass = mass;
+    ext.massResidualVsPlan = 0.0;
+    ext.firstAppliedParticle = first;
+    ext.lastAppliedParticle = last;
+    ext.noDuplicateParticles = true;
+    ext.allAppliedWereFluid = true;
+
+    ins.attempted = true;
+    ins.applied = pa.insertionApplied > 0u;
+    ins.operationsConsidered = ops;
+    ins.operationsApplied = pa.insertionApplied;
+    ins.roleChanges = pa.insertionApplied;
+    ins.insertedMass = mass;
+    ins.insertedMomentumX = px;
+    ins.insertedMomentumY = py;
+    ins.insertedKineticEnergy = ke;
+    ins.plannedInsertionMass = mass;
+    ins.massResidualVsPlan = 0.0;
+    ins.firstInsertedParticle = first;
+    ins.lastInsertedParticle = last;
+    ins.firstInsertionReceiverCell = firstReceiver;
+    ins.lastInsertionReceiverCell = lastReceiver;
+    ins.noInvalidReceiverCells = true;
+    ins.allSourcesWereInactive = true;
+}
+
+} // namespace
+
+CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    const WeightedRealFluidDepositWorkspace& editWorkspace,
+    ResamplingExtractionApplyDiagnostics& extractionApply,
+    ResamplingInsertionApplyDiagnostics& insertionApply) {
+    CudaResamplingPipelineApply0448Diagnostics d{};
+    d.attempted = true;
+    d.stage = "particle_edits_0448";
+    d.step = step;
+    d.nActive = state.NactiveFluid;
+    d.passiveOps = editWorkspace.passiveExtractionOperations.size();
+    try {
+        if (!cuda_resampling_pipeline_apply_0448_requested()) {
+            d.skipped = true;
+            d.skipReason = "apply flag disabled";
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        if (editWorkspace.passiveExtractionOperations.empty()) {
+            d.handled = true;
+            d.applied = false;
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        ParticleState tmp = state;
+        const GpuParticleApply0446 pa = apply_gpu_particle_edits_0446(tmp, editWorkspace, grid);
+        d.gpuExtractionApplied = pa.extractionApplied;
+        d.gpuInsertionApplied = pa.insertionApplied;
+        d.gpuInvalidOperations = pa.invalidOperations;
+        d.applyKernelSeconds = pa.kernelSeconds;
+        d.totalSeconds = pa.totalSeconds;
+        const bool ok = (pa.invalidOperations == 0u &&
+                         pa.extractionApplied == d.passiveOps &&
+                         pa.insertionApplied == d.passiveOps);
+        if (!ok) {
+            d.skipped = true;
+            d.skipReason = "CUDA particle edit counts do not match passive operation list";
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        state = std::move(tmp);
+        fill_extraction_insertion_diagnostics_0448(editWorkspace, pa, extractionApply, insertionApply);
+        d.handled = true;
+        d.applied = true;
+        append_apply_csv_0448(params, d);
+        return d;
+    } catch (const std::exception& e) {
+        d.skipped = true;
+        d.skipReason = std::string("exception: ") + e.what();
+        append_apply_csv_0448(params, d);
+        return d;
+    }
+}
+
+CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_remap_thermal_0448(
+    ParticleState& state,
+    const SimulationParams& params,
+    const WeightedRealFluidDepositWorkspace& remapWorkspace,
+    const WeightedResamplingDiagnostics& remapDepositDiagnostics,
+    double massCorrectionStrength,
+    double targetCellMassOverride,
+    std::uint64_t step,
+    ResamplingRemapApplyDiagnostics& remapApply,
+    ResamplingThermalRenormalizationDiagnostics& thermalApply) {
+    CudaResamplingPipelineApply0448Diagnostics d{};
+    d.attempted = true;
+    d.stage = "remap_thermal_0448";
+    d.step = step;
+    d.nActive = state.NactiveFluid;
+    try {
+        if (!cuda_resampling_pipeline_apply_0448_requested()) {
+            d.skipped = true;
+            d.skipReason = "apply flag disabled";
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        if (!params.resamplingThermalRenormalizationEnable) {
+            d.skipped = true;
+            d.skipReason = "0448 clean backend requires thermal renormalization enabled";
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        if (params.resamplingMassGuardEnable) {
+            d.skipped = true;
+            d.skipReason = "0448 clean backend does not cover mass guard";
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+        ParticleState tmp = state;
+        const double targetOverride = (targetCellMassOverride > 0.0) ? targetCellMassOverride : -1.0;
+        const GpuRemapThermal0445 gd = apply_gpu_remap_thermal_0445(
+            tmp, remapWorkspace, remapDepositDiagnostics, massCorrectionStrength, targetOverride);
+        state = std::move(tmp);
+        d.gpuRemapCells = gd.remapCells;
+        d.gpuThermalCells = gd.thermalCells;
+        d.remapKernelSeconds = gd.remapSeconds;
+        d.thermalKernelSeconds = gd.thermalSeconds;
+        d.totalSeconds = gd.remapSeconds + gd.thermalSeconds;
+
+        remapApply.attempted = true;
+        remapApply.applied = true;
+        remapApply.cellsConsidered = static_cast<std::uint64_t>(std::max(0, remapWorkspace.allocatedCells));
+        remapApply.cellsRemapped = gd.remapCells;
+        remapApply.particlesRemapped = state.NactiveFluid;
+        remapApply.targetCellMass = (targetOverride > 0.0) ? targetOverride : remapDepositDiagnostics.targetCellMass;
+        remapApply.massCorrectionStrength = massCorrectionStrength;
+        thermalApply.attempted = true;
+        thermalApply.applied = true;
+        thermalApply.cellsConsidered = static_cast<std::uint64_t>(std::max(0, remapWorkspace.allocatedCells));
+        thermalApply.cellsRenormalized = gd.thermalCells;
+        thermalApply.particlesRenormalized = state.NactiveFluid;
+
+        d.handled = true;
+        d.applied = true;
+        append_apply_csv_0448(params, d);
+        return d;
+    } catch (const std::exception& e) {
+        d.skipped = true;
+        d.skipReason = std::string("exception: ") + e.what();
+        append_apply_csv_0448(params, d);
+        return d;
+    }
 }
 
 CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_shadow_0445(

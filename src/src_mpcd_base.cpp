@@ -1704,6 +1704,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     const bool cudaResamplingPipelineShadow0445Requested =
         cuda_resampling_pipeline_shadow_0445_requested(step);
+    const bool cudaResamplingPipelineApply0448Requested =
+        cuda_resampling_pipeline_apply_0448_requested();
     ParticleState cudaResamplingPipelineShadowInput0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
@@ -1718,8 +1720,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
+        bool handledByCudaResampling0448 = false;
+        if (cudaResamplingPipelineApply0448Requested) {
+            const CudaResamplingPipelineApply0448Diagnostics cudaApply0448 =
+                try_apply_cuda_resampling_pipeline_particle_edits_0448(
+                    state, params, grid, step, workspace.resampling, extractionApply, insertionApply);
+            handledByCudaResampling0448 = cudaApply0448.handled;
+            planOrTransferEdited = planOrTransferEdited || cudaApply0448.applied;
+        }
+
         bool handledByCudaResampling0240 = false;
-        if (cuda_resampling_persistent_active_path_0240_requested(state)) {
+        if (!handledByCudaResampling0448 && cuda_resampling_persistent_active_path_0240_requested(state)) {
             const CudaResamplingPersistentActivePath0240Diagnostics cudaEdit0240 =
                 try_apply_cuda_resampling_persistent_active_path_0240(
                     state,
@@ -1734,7 +1745,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             planOrTransferEdited = planOrTransferEdited || cudaEdit0240.applied;
         }
 
-        if (!handledByCudaResampling0240) {
+        if (!handledByCudaResampling0448 && !handledByCudaResampling0240) {
             {
                 MPCD_PROFILE_PHASE(result.profile, ResamplingExtraction);
                 extractionApply =
@@ -1797,22 +1808,34 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
-        {
+        bool handledByCudaResamplingApply0448 = false;
+        if (cudaResamplingPipelineApply0448Requested) {
             MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
-            remapApply = apply_resampling_local_mass_momentum_remap(
-                state, workspace.resampling, result.resampling,
-                resamplingMassCorrectionStrength, capacityRemapTargetCellMass);
+            const CudaResamplingPipelineApply0448Diagnostics cudaApply0448 =
+                try_apply_cuda_resampling_pipeline_remap_thermal_0448(
+                    state, params, workspace.resampling, result.resampling,
+                    resamplingMassCorrectionStrength, capacityRemapTargetCellMass,
+                    step, remapApply, thermalApply);
+            handledByCudaResamplingApply0448 = cudaApply0448.handled;
         }
-        if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
-            MPCD_PROFILE_PHASE(result.profile, ResamplingThermalAfterRemap);
-            thermalApply = apply_resampling_local_thermal_renormalization(
-                state, workspace.resampling, remapApply);
-        }
-        if (params.resamplingMassGuardEnable && massGuardAllowedByCapacity && remapApply.applied) {
-            MPCD_PROFILE_PHASE(result.profile, ResamplingMassGuard);
-            massGuardApply = apply_resampling_particle_mass_guards(
-                state, params, workspace.resampling, result.resampling,
-                capacityRemapTargetCellMass);
+        if (!handledByCudaResamplingApply0448) {
+            {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
+                remapApply = apply_resampling_local_mass_momentum_remap(
+                    state, workspace.resampling, result.resampling,
+                    resamplingMassCorrectionStrength, capacityRemapTargetCellMass);
+            }
+            if (params.resamplingThermalRenormalizationEnable && remapApply.applied) {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingThermalAfterRemap);
+                thermalApply = apply_resampling_local_thermal_renormalization(
+                    state, workspace.resampling, remapApply);
+            }
+            if (params.resamplingMassGuardEnable && massGuardAllowedByCapacity && remapApply.applied) {
+                MPCD_PROFILE_PHASE(result.profile, ResamplingMassGuard);
+                massGuardApply = apply_resampling_particle_mass_guards(
+                    state, params, workspace.resampling, result.resampling,
+                    capacityRemapTargetCellMass);
+            }
         }
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
