@@ -706,6 +706,7 @@ struct GpuDeviceCarrier0455 {
     std::uint64_t thrustCellListMaterializer0460 = 0u;
     std::uint64_t residentCore0467 = 0u;
     std::uint64_t residentExternal0467B = 0u;
+    std::uint64_t residentDeferredDownload0468 = 0u;
     std::uint64_t sparseGate0461 = 0u;
     std::uint64_t fullGate0461 = 1u;
     double gateDownloadSeconds = 0.0;
@@ -1395,7 +1396,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,residentCore0467,residentExternal0467B,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,residentCore0467,residentExternal0467B,residentDeferredDownload0468,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1405,7 +1406,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.residentCore0467 << ',' << d.residentExternal0467B << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.residentCore0467 << ',' << d.residentExternal0467B << ',' << d.residentDeferredDownload0468 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
@@ -1851,6 +1852,10 @@ bool cuda_resampling_device_carrier_0455_requested() {
 
 bool cuda_resampling_resident_external_carrier_0467b_requested() {
     return env_truthy_0445("MPCD_CUDA_RESAMPLING_RESIDENT_EXTERNAL_CARRIER_0467B");
+}
+
+bool cuda_resampling_defer_resident_download_0468_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_DEFER_RESIDENT_DOWNLOAD_0468");
 }
 
 CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
@@ -2346,13 +2351,12 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
             const auto txCarrier0 = std::chrono::steady_clock::now();
             GpuDeviceCarrier0455 dc{};
             if (cuda_resampling_resident_external_carrier_0467b_requested()) {
-                // 0467B: ownership of the CUDA particle state is lifted out of the
-                // legacy 0455 carrier wrapper. This is still a transaction-safe path:
-                // tmp remains the CPU rollback/commit object and downloadState=true
-                // preserves the host state after the resident core applies edits.
-                // The point is architectural: the resident core is now called from
-                // a caller-owned CudaParticleState, preparing a later multi-step
-                // resident path that can suppress upload/download at this level.
+                // 0467B/0468: ownership of the CUDA particle state is lifted out of
+                // the legacy 0455 carrier wrapper. 0468 can call the resident core
+                // with downloadState=false and perform the final state download in
+                // this caller after the gate/apply status is known. This still keeps
+                // transaction safety: tmp is committed to state only after success.
+                const bool deferResidentDownload0468 = cuda_resampling_defer_resident_download_0468_requested();
                 const auto txUpload0 = std::chrono::steady_clock::now();
                 CudaParticleState gpuState{};
                 CudaParticleStateDiagnostics uploadDiag{};
@@ -2360,9 +2364,24 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
                 const double externalUploadSeconds =
                     std::chrono::duration<double>(std::chrono::steady_clock::now() - txUpload0).count() + uploadDiag.uploadSeconds;
                 dc = apply_gpu_particle_edits_device_carrier_resident_0467(
-                    gpuState, tmp, editWorkspace, grid, params, true);
+                    gpuState, tmp, editWorkspace, grid, params, !deferResidentDownload0468);
                 dc.uploadSeconds += externalUploadSeconds;
                 dc.residentExternal0467B = 1u;
+                if (deferResidentDownload0468) {
+                    dc.residentDeferredDownload0468 = 1u;
+                    const bool residentOk0468 =
+                        (dc.pass && dc.invalidMaterializeOps == 0u && dc.invalidApplyOps == 0u &&
+                         dc.extractionApplied == d.passiveOps && dc.insertionApplied == d.passiveOps);
+                    if (residentOk0468) {
+                        const auto txDownload0 = std::chrono::steady_clock::now();
+                        CudaParticleStateDiagnostics downloadDiag{};
+                        gpuState.download_all(tmp, &downloadDiag);
+                        const double externalStateDownloadSeconds =
+                            std::chrono::duration<double>(std::chrono::steady_clock::now() - txDownload0).count() + downloadDiag.downloadSeconds;
+                        dc.stateDownloadSeconds += externalStateDownloadSeconds;
+                        dc.totalSeconds += externalStateDownloadSeconds;
+                    }
+                }
             } else {
                 dc = apply_gpu_particle_edits_device_carrier_0455(tmp, editWorkspace, grid, params);
             }
