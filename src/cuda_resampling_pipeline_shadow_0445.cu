@@ -2236,6 +2236,35 @@ void fill_extraction_insertion_diagnostics_0448(const WeightedRealFluidDepositWo
     ins.allSourcesWereInactive = true;
 }
 
+
+void append_transaction_csv_0466(
+    const SimulationParams& params,
+    std::uint64_t step,
+    std::uint64_t nActive,
+    std::uint64_t passiveOps,
+    double tmpCopySeconds,
+    double deviceCarrierSeconds,
+    double stateCommitSeconds,
+    double wrapperTotalSeconds,
+    const GpuDeviceCarrier0455& dc,
+    bool accepted) {
+    if (params.outputDir.empty()) return;
+    const std::string path = params.outputDir + "/cuda_resampling_transaction_0466.csv";
+    const bool exists = static_cast<bool>(std::ifstream(path).good());
+    std::ofstream f(path, std::ios::app);
+    if (!exists) {
+        f << "step,nActive,passiveOps,tmpCopySeconds,deviceCarrierSeconds,stateCommitSeconds,wrapperTotalSeconds,"
+             "deviceUploadSeconds,deviceGateDownloadSeconds,deviceStateDownloadSeconds,deviceMaterializeSeconds,deviceApplySeconds,"
+             "deviceTotalSeconds,accepted,cpuOps,gpuOps,invalidMaterializeOps,invalidApplyOps\n";
+    }
+    f << step << ',' << nActive << ',' << passiveOps << ','
+      << tmpCopySeconds << ',' << deviceCarrierSeconds << ',' << stateCommitSeconds << ',' << wrapperTotalSeconds << ','
+      << dc.uploadSeconds << ',' << dc.gateDownloadSeconds << ',' << dc.stateDownloadSeconds << ','
+      << dc.materializeKernelSeconds << ',' << dc.applyKernelSeconds << ',' << dc.totalSeconds << ','
+      << (accepted ? 1 : 0) << ',' << dc.cpuOps << ',' << dc.gpuOps << ','
+      << dc.invalidMaterializeOps << ',' << dc.invalidApplyOps << '\n';
+}
+
 } // namespace
 
 CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
@@ -2266,9 +2295,14 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
             return d;
         }
         if (cuda_resampling_device_carrier_0455_requested()) {
+            const auto txWrapper0 = std::chrono::steady_clock::now();
+            const auto txCopy0 = std::chrono::steady_clock::now();
             ParticleState tmp = state;
+            const double txTmpCopySeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - txCopy0).count();
+            const auto txCarrier0 = std::chrono::steady_clock::now();
             const GpuDeviceCarrier0455 dc =
                 apply_gpu_particle_edits_device_carrier_0455(tmp, editWorkspace, grid, params);
+            const double txDeviceCarrierSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - txCarrier0).count();
             d.gpuExtractionApplied = dc.extractionApplied;
             d.gpuInsertionApplied = dc.insertionApplied;
             d.gpuInvalidOperations = dc.invalidMaterializeOps + dc.invalidApplyOps;
@@ -2276,6 +2310,14 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
             d.totalSeconds = dc.totalSeconds;
             const bool ok = (dc.pass && dc.invalidMaterializeOps == 0u && dc.invalidApplyOps == 0u &&
                              dc.extractionApplied == d.passiveOps && dc.insertionApplied == d.passiveOps);
+            if (!ok) {
+                const bool txFailureLogged0466 = true;
+                (void)txFailureLogged0466;
+                append_transaction_csv_0466(params, step, d.nActive, d.passiveOps,
+                                            txTmpCopySeconds, txDeviceCarrierSeconds, 0.0,
+                                            std::chrono::duration<double>(std::chrono::steady_clock::now() - txWrapper0).count(),
+                                            dc, false);
+            }
             append_device_carrier_csv_0455(params, step, dc, true, ok, ok, ok, !ok,
                                            ok ? std::string{} : std::string("0455 device carrier gate/apply failed"));
             if (!ok) {
@@ -2284,7 +2326,13 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
                 append_apply_csv_0448(params, d);
                 return d;
             }
+            const auto txCommit0 = std::chrono::steady_clock::now();
             state = std::move(tmp);
+            const double txStateCommitSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - txCommit0).count();
+            const double txWrapperTotalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - txWrapper0).count();
+            append_transaction_csv_0466(params, step, d.nActive, d.passiveOps,
+                                        txTmpCopySeconds, txDeviceCarrierSeconds, txStateCommitSeconds,
+                                        txWrapperTotalSeconds, dc, true);
             GpuParticleApply0446 pa{};
             pa.extractionApplied = dc.extractionApplied;
             pa.insertionApplied = dc.insertionApplied;
