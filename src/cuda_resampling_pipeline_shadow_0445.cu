@@ -7,6 +7,10 @@
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
 #include <cuda_runtime.h>
+#include <thrust/device_ptr.h>
+#include <thrust/execution_policy.h>
+#include <thrust/sort.h>
+#include <thrust/binary_search.h>
 
 #include <algorithm>
 #include <cmath>
@@ -645,6 +649,14 @@ bool cuda_resampling_donor_slice_materializer_0459_requested()
     return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
 }
 
+bool cuda_resampling_thrust_cell_list_materializer_0460_requested()
+{
+    const char* env = std::getenv("MPCD_CUDA_RESAMPLING_THRUST_CELL_LIST_MATERIALIZER_0460");
+    if (!env) return false;
+    const std::string v(env);
+    return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
+}
+
 struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOps = 0u;
     std::uint64_t gpuOps = 0u;
@@ -669,6 +681,7 @@ struct GpuDeviceCarrier0455 {
     double materializeKernelSeconds = 0.0;
     std::uint64_t cpuOpCarrier0458 = 0u;
     std::uint64_t donorSliceMaterializer0459 = 0u;
+    std::uint64_t thrustCellListMaterializer0460 = 0u;
     double gateDownloadSeconds = 0.0;
     double applyKernelSeconds = 0.0;
     double stateDownloadSeconds = 0.0;
@@ -764,6 +777,42 @@ int cell_id_from_position_host_0459(double x, double y,
     }
     if (ix < 0 || ix >= nx || iy < 0 || iy >= ny) return -1;
     return iy * nx + ix;
+}
+
+__global__ void fill_cell_ids_and_particles_kernel_0460b(
+    std::size_t nActive,
+    const double* x,
+    const double* y,
+    const std::uint8_t* role,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int xPeriodic,
+    int yPeriodic,
+    std::uint8_t fluidRole,
+    int invalidCell,
+    int* outCellId,
+    unsigned int* outParticle) {
+    const std::size_t i = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= nActive) return;
+    outParticle[i] = static_cast<unsigned int>(i);
+    int cid = invalidCell;
+    if (role[i] == fluidRole) {
+        const int c = cell_id_from_position_device_0453(x[i], y[i], nx, ny, dx, dy, xPeriodic, yPeriodic);
+        if (c >= 0) cid = c;
+    }
+    outCellId[i] = cid;
+}
+
+__global__ void compute_donor_counts_from_bounds_kernel_0460b(
+    int donorCount,
+    const unsigned int* lower,
+    const unsigned int* upper,
+    unsigned int* counts) {
+    const int d = blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= donorCount) return;
+    counts[d] = (upper[d] >= lower[d]) ? (upper[d] - lower[d]) : 0u;
 }
 
 __global__ void materialize_passive_ops_donor_slices_kernel_0459(
@@ -897,9 +946,11 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
 
     cudaEvent_t start{}, stop{};
     const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
-    const bool donorSliceMaterializer0459 = (!cpuOpCarrier0458 && cuda_resampling_donor_slice_materializer_0459_requested());
+    const bool thrustCellListMaterializer0460 = (!cpuOpCarrier0458 && cuda_resampling_thrust_cell_list_materializer_0460_requested());
+    const bool donorSliceMaterializer0459 = (!cpuOpCarrier0458 && !thrustCellListMaterializer0460 && cuda_resampling_donor_slice_materializer_0459_requested());
     out.cpuOpCarrier0458 = cpuOpCarrier0458 ? 1u : 0u;
     out.donorSliceMaterializer0459 = donorSliceMaterializer0459 ? 1u : 0u;
+    out.thrustCellListMaterializer0460 = thrustCellListMaterializer0460 ? 1u : 0u;
     if (cpuOpCarrier0458) {
         // 0458A diagnostic/performance bridge: bypass the validated but serial
         // donor-particle materializer and upload the already-built CPU passive
@@ -946,6 +997,90 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
             dOutRole.copy_from_host(hRole);
         }
         out.materializeKernelSeconds = 0.0;
+    } else if (thrustCellListMaterializer0460) {
+        // 0460B Thrust cell-list materializer. Build a stable GPU cell list by
+        // computing (cellId, particleIndex) for every active fluid particle, then
+        // stable-sort by cellId. Because particleIndex is initialized in ascending
+        // order and stable_sort_by_key preserves relative order inside equal-cell
+        // groups, each donor-cell slice has the same ascending particle order as
+        // the CPU donor selection. The strict CPU operation gate remains active.
+        std::vector<int> donorCells0460;
+        donorCells0460.reserve(planDonor.size());
+        constexpr double eps0460 = 1.0e-14;
+        for (std::size_t e = 0; e < planDonor.size(); ++e) {
+            if (planDonor[e] < 0 || planReceiver[e] < 0 || !(planMass[e] > eps0460)) continue;
+            bool seenDonor = false;
+            for (int c : donorCells0460) {
+                if (c == planDonor[e]) { seenDonor = true; break; }
+            }
+            if (!seenDonor) donorCells0460.push_back(planDonor[e]);
+        }
+        if (donorCells0460.empty()) donorCells0460.push_back(-1);
+
+        const std::uint8_t fluidRole0460 = static_cast<std::uint8_t>(ParticleRole::Fluid);
+        const int invalidCell0460 = 2147483647;
+        const std::size_t nActive0460 = static_cast<std::size_t>(state.NactiveFluid);
+        DeviceBuffer0445<int> dCellId0460(nActive0460);
+        DeviceBuffer0445<unsigned int> dParticleSorted0460(nActive0460);
+        const int threadsBuild0460 = 256;
+        const int blocksBuild0460 = static_cast<int>((nActive0460 + static_cast<std::size_t>(threadsBuild0460) - 1u) / static_cast<std::size_t>(threadsBuild0460));
+
+        DeviceBuffer0445<int> dDonorCells0460(donorCells0460.size()); dDonorCells0460.copy_from_host(donorCells0460);
+        DeviceBuffer0445<unsigned int> dDonorOffsets0460(donorCells0460.size()); dDonorOffsets0460.memset_zero();
+        DeviceBuffer0445<unsigned int> dDonorUpper0460(donorCells0460.size()); dDonorUpper0460.memset_zero();
+        DeviceBuffer0445<unsigned int> dDonorCounts0460(donorCells0460.size()); dDonorCounts0460.memset_zero();
+
+        CUDA_CHECK_0445(cudaEventCreate(&start));
+        CUDA_CHECK_0445(cudaEventCreate(&stop));
+        CUDA_CHECK_0445(cudaEventRecord(start));
+        fill_cell_ids_and_particles_kernel_0460b<<<blocksBuild0460, threadsBuild0460>>>(
+            nActive0460, view.x, view.y, view.role,
+            grid.Nx, grid.Ny, grid.dx, grid.dy,
+            is_x_periodic(params) ? 1 : 0, is_y_periodic(params) ? 1 : 0,
+            fluidRole0460, invalidCell0460, dCellId0460.ptr, dParticleSorted0460.ptr);
+        CUDA_CHECK_0445(cudaGetLastError());
+
+        thrust::stable_sort_by_key(thrust::device,
+            thrust::device_pointer_cast(dCellId0460.ptr),
+            thrust::device_pointer_cast(dCellId0460.ptr + nActive0460),
+            thrust::device_pointer_cast(dParticleSorted0460.ptr));
+        CUDA_CHECK_0445(cudaGetLastError());
+
+        thrust::lower_bound(thrust::device,
+            thrust::device_pointer_cast(dCellId0460.ptr),
+            thrust::device_pointer_cast(dCellId0460.ptr + nActive0460),
+            thrust::device_pointer_cast(dDonorCells0460.ptr),
+            thrust::device_pointer_cast(dDonorCells0460.ptr + donorCells0460.size()),
+            thrust::device_pointer_cast(dDonorOffsets0460.ptr));
+        thrust::upper_bound(thrust::device,
+            thrust::device_pointer_cast(dCellId0460.ptr),
+            thrust::device_pointer_cast(dCellId0460.ptr + nActive0460),
+            thrust::device_pointer_cast(dDonorCells0460.ptr),
+            thrust::device_pointer_cast(dDonorCells0460.ptr + donorCells0460.size()),
+            thrust::device_pointer_cast(dDonorUpper0460.ptr));
+        CUDA_CHECK_0445(cudaGetLastError());
+
+        const int threadsCount0460 = 128;
+        const int blocksCount0460 = static_cast<int>((donorCells0460.size() + static_cast<std::size_t>(threadsCount0460) - 1u) / static_cast<std::size_t>(threadsCount0460));
+        compute_donor_counts_from_bounds_kernel_0460b<<<blocksCount0460, threadsCount0460>>>(
+            static_cast<int>(donorCells0460.size()), dDonorOffsets0460.ptr, dDonorUpper0460.ptr, dDonorCounts0460.ptr);
+        CUDA_CHECK_0445(cudaGetLastError());
+
+        materialize_passive_ops_donor_slices_kernel_0459<<<1,1>>>(
+            static_cast<int>(planDonor.size()), dPlanDonor.ptr, dPlanReceiver.ptr, dPlanMass.ptr,
+            static_cast<int>(donorCells0460.size()), dDonorCells0460.ptr, dDonorOffsets0460.ptr, dDonorCounts0460.ptr,
+            dParticleSorted0460.ptr, view.mass, view.vx, view.vy, view.type, view.role, fluidRole0460, view.n,
+            dSelected.ptr, static_cast<int>(maxOps), dOutCount.ptr, dInvalid.ptr,
+            dOutParticle.ptr, dOutDonor.ptr, dOutReceiver.ptr, dOutType.ptr,
+            dOutMass.ptr, dOutPx.ptr, dOutPy.ptr, dOutKe.ptr, dOutRole.ptr);
+        CUDA_CHECK_0445(cudaEventRecord(stop));
+        CUDA_CHECK_0445(cudaEventSynchronize(stop));
+        CUDA_CHECK_0445(cudaGetLastError());
+        float materializeMs = 0.0f;
+        CUDA_CHECK_0445(cudaEventElapsedTime(&materializeMs, start, stop));
+        CUDA_CHECK_0445(cudaEventDestroy(start));
+        CUDA_CHECK_0445(cudaEventDestroy(stop));
+        out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
     } else if (donorSliceMaterializer0459) {
         // 0459B donor-slice materializer: build a compact, deterministic host-side
         // list of candidate particles for the donor cells only, then let CUDA
@@ -1176,7 +1311,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1186,7 +1321,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
