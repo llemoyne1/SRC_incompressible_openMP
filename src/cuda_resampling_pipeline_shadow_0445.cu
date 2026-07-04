@@ -657,6 +657,28 @@ bool cuda_resampling_thrust_cell_list_materializer_0460_requested()
     return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
 }
 
+
+
+bool cuda_resampling_sparse_device_carrier_gate_0461_requested()
+{
+    const char* env = std::getenv("MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461");
+    if (!env) return false;
+    const std::string v(env);
+    return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
+}
+
+std::uint64_t cuda_resampling_sparse_device_carrier_gate_every_0461()
+{
+    const char* env = std::getenv("MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_GATE_EVERY_0461");
+    if (!env) return 1u;
+    try {
+        const unsigned long long v = std::stoull(std::string(env));
+        return v > 0ull ? static_cast<std::uint64_t>(v) : 1u;
+    } catch (...) {
+        return 1u;
+    }
+}
+
 struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOps = 0u;
     std::uint64_t gpuOps = 0u;
@@ -682,6 +704,8 @@ struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOpCarrier0458 = 0u;
     std::uint64_t donorSliceMaterializer0459 = 0u;
     std::uint64_t thrustCellListMaterializer0460 = 0u;
+    std::uint64_t sparseGate0461 = 0u;
+    std::uint64_t fullGate0461 = 1u;
     double gateDownloadSeconds = 0.0;
     double applyKernelSeconds = 0.0;
     double stateDownloadSeconds = 0.0;
@@ -1171,6 +1195,16 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
         out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
     }
 
+    const bool sparseGate0461 = cuda_resampling_sparse_device_carrier_gate_0461_requested();
+    const std::uint64_t gateEvery0461 = cuda_resampling_sparse_device_carrier_gate_every_0461();
+    static std::uint64_t deviceCarrierCall0461 = 0u;
+    ++deviceCarrierCall0461;
+    const bool fullGate0461 = (!sparseGate0461 || gateEvery0461 <= 1u ||
+                               deviceCarrierCall0461 == 1u ||
+                               (deviceCarrierCall0461 % gateEvery0461) == 0u);
+    out.sparseGate0461 = sparseGate0461 ? 1u : 0u;
+    out.fullGate0461 = fullGate0461 ? 1u : 0u;
+
     const auto gate0 = std::chrono::steady_clock::now();
     std::vector<unsigned int> hCount, hInvalid;
     dOutCount.copy_to_host(hCount);
@@ -1179,65 +1213,74 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
     out.gpuOps = static_cast<std::uint64_t>(nOps);
     out.invalidMaterializeOps = hInvalid.empty() ? 0u : static_cast<std::uint64_t>(hInvalid[0]);
     if (nOps > maxOps) throw std::runtime_error("0455 device carrier op count overflow");
-    std::vector<unsigned int> hParticle;
-    std::vector<int> hDonor, hReceiver;
-    std::vector<std::uint32_t> hType;
-    std::vector<double> hMass, hPx, hPy, hKe;
-    std::vector<std::uint8_t> hRole;
-    dOutParticle.copy_to_host(hParticle);
-    dOutDonor.copy_to_host(hDonor);
-    dOutReceiver.copy_to_host(hReceiver);
-    dOutType.copy_to_host(hType);
-    dOutMass.copy_to_host(hMass);
-    dOutPx.copy_to_host(hPx);
-    dOutPy.copy_to_host(hPy);
-    dOutKe.copy_to_host(hKe);
-    dOutRole.copy_to_host(hRole);
-    out.gateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - gate0).count();
 
-    const auto& cpuOps = ws.passiveExtractionOperations;
-    const std::size_t cmp = std::min(cpuOps.size(), nOps);
-    out.opMismatch = static_cast<std::uint64_t>(std::max(cpuOps.size(), nOps) - cmp);
-    for (std::size_t i = 0; i < cmp; ++i) {
-        const auto& a = cpuOps[i];
-        if (a.particleIndex != static_cast<std::uint64_t>(hParticle[i]) ||
-            a.donorCell != hDonor[i] || a.receiverCell != hReceiver[i] ||
-            a.particleType != hType[i] || a.currentRole != hRole[i] ||
-            a.plannedRoleAfterExtraction != static_cast<std::uint8_t>(ParticleRole::Inactive)) {
-            ++out.opMismatch;
+    bool gatePass = false;
+    if (fullGate0461) {
+        std::vector<unsigned int> hParticle;
+        std::vector<int> hDonor, hReceiver;
+        std::vector<std::uint32_t> hType;
+        std::vector<double> hMass, hPx, hPy, hKe;
+        std::vector<std::uint8_t> hRole;
+        dOutParticle.copy_to_host(hParticle);
+        dOutDonor.copy_to_host(hDonor);
+        dOutReceiver.copy_to_host(hReceiver);
+        dOutType.copy_to_host(hType);
+        dOutMass.copy_to_host(hMass);
+        dOutPx.copy_to_host(hPx);
+        dOutPy.copy_to_host(hPy);
+        dOutKe.copy_to_host(hKe);
+        dOutRole.copy_to_host(hRole);
+
+        const auto& cpuOps = ws.passiveExtractionOperations;
+        const std::size_t cmp = std::min(cpuOps.size(), nOps);
+        out.opMismatch = static_cast<std::uint64_t>(std::max(cpuOps.size(), nOps) - cmp);
+        for (std::size_t i = 0; i < cmp; ++i) {
+            const auto& a = cpuOps[i];
+            if (a.particleIndex != static_cast<std::uint64_t>(hParticle[i]) ||
+                a.donorCell != hDonor[i] || a.receiverCell != hReceiver[i] ||
+                a.particleType != hType[i] || a.currentRole != hRole[i] ||
+                a.plannedRoleAfterExtraction != static_cast<std::uint8_t>(ParticleRole::Inactive)) {
+                ++out.opMismatch;
+            }
+            out.maxMassAbs = std::max(out.maxMassAbs, std::abs(a.particleMass - hMass[i]));
+            out.maxPxAbs = std::max(out.maxPxAbs, std::abs(a.momentumX - hPx[i]));
+            out.maxPyAbs = std::max(out.maxPyAbs, std::abs(a.momentumY - hPy[i]));
+            out.cpuMass += a.particleMass;
+            out.cpuPx += a.momentumX;
+            out.cpuPy += a.momentumY;
+            out.cpuKe += a.kineticEnergy;
+            out.gpuMass += hMass[i];
+            out.gpuPx += hPx[i];
+            out.gpuPy += hPy[i];
+            out.gpuKe += hKe[i];
         }
-        out.maxMassAbs = std::max(out.maxMassAbs, std::abs(a.particleMass - hMass[i]));
-        out.maxPxAbs = std::max(out.maxPxAbs, std::abs(a.momentumX - hPx[i]));
-        out.maxPyAbs = std::max(out.maxPyAbs, std::abs(a.momentumY - hPy[i]));
-        out.cpuMass += a.particleMass;
-        out.cpuPx += a.momentumX;
-        out.cpuPy += a.momentumY;
-        out.cpuKe += a.kineticEnergy;
-        out.gpuMass += hMass[i];
-        out.gpuPx += hPx[i];
-        out.gpuPy += hPy[i];
-        out.gpuKe += hKe[i];
-    }
-    std::vector<std::uint8_t> seen(static_cast<std::size_t>(state.Np), 0u);
-    for (std::size_t i = 0; i < nOps; ++i) {
-        if (static_cast<std::uint64_t>(hParticle[i]) >= state.Np) {
-            ++out.duplicateParticleMismatch;
-            continue;
+        std::vector<std::uint8_t> seen(static_cast<std::size_t>(state.Np), 0u);
+        for (std::size_t i = 0; i < nOps; ++i) {
+            if (static_cast<std::uint64_t>(hParticle[i]) >= state.Np) {
+                ++out.duplicateParticleMismatch;
+                continue;
+            }
+            const std::size_t idx = static_cast<std::size_t>(hParticle[i]);
+            if (seen[idx]) ++out.duplicateParticleMismatch;
+            seen[idx] = 1u;
         }
-        const std::size_t idx = static_cast<std::size_t>(hParticle[i]);
-        if (seen[idx]) ++out.duplicateParticleMismatch;
-        seen[idx] = 1u;
+        constexpr double tol = 2.0e-10;
+        const auto close = [tol](double a, double b) {
+            const double scale = std::max({1.0, std::abs(a), std::abs(b)});
+            return std::abs(a - b) <= tol * scale;
+        };
+        gatePass = (out.invalidMaterializeOps == 0u && out.opMismatch == 0u &&
+                    out.duplicateParticleMismatch == 0u && out.cpuOps == out.gpuOps &&
+                    out.maxMassAbs <= tol && out.maxPxAbs <= tol && out.maxPyAbs <= tol &&
+                    close(out.cpuMass, out.gpuMass) && close(out.cpuPx, out.gpuPx) &&
+                    close(out.cpuPy, out.gpuPy) && close(out.cpuKe, out.gpuKe));
+    } else {
+        // Sparse-gate step: keep the mutant CUDA path active, but avoid the heavy
+        // operation-buffer downloads. We retain the cheap materializer count and
+        // invalid-op checks every step, and still perform apply-result checks below.
+        gatePass = (out.invalidMaterializeOps == 0u && out.cpuOps == out.gpuOps);
     }
-    constexpr double tol = 2.0e-10;
-    const auto close = [tol](double a, double b) {
-        const double scale = std::max({1.0, std::abs(a), std::abs(b)});
-        return std::abs(a - b) <= tol * scale;
-    };
-    const bool gatePass = (out.invalidMaterializeOps == 0u && out.opMismatch == 0u &&
-                           out.duplicateParticleMismatch == 0u && out.cpuOps == out.gpuOps &&
-                           out.maxMassAbs <= tol && out.maxPxAbs <= tol && out.maxPyAbs <= tol &&
-                           close(out.cpuMass, out.gpuMass) && close(out.cpuPx, out.gpuPx) &&
-                           close(out.cpuPy, out.gpuPy) && close(out.cpuKe, out.gpuKe));
+    out.gateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - gate0).count();
     if (!gatePass) {
         out.pass = false;
         out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -1301,6 +1344,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                                     bool skipped,
                                     const std::string& skipReason) {
     if (params.outputDir.empty()) return;
+    if (d.sparseGate0461 != 0u && d.fullGate0461 == 0u && pass && !skipped) return;
     std::filesystem::create_directories(params.outputDir);
     const std::string path = params.outputDir + "/cuda_resampling_device_carrier_0455.csv";
     const bool exists = std::filesystem::exists(path);
@@ -1311,7 +1355,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1321,7 +1365,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
