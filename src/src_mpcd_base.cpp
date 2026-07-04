@@ -1710,6 +1710,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cuda_resampling_upstream_shadow_0450_requested(step);
     const bool cudaResamplingUpstreamApply0451Requested =
         cuda_resampling_upstream_apply_0451_requested(step);
+    const bool cudaResamplingOperationMaterialize0453Requested =
+        cuda_resampling_operation_materialize_0453_requested(step);
     ParticleState cudaResamplingPipelineShadowInput0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
@@ -1737,6 +1739,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         // apply path mutates extraction/insertion state. CPU remains authoritative.
         (void)try_run_cuda_resampling_upstream_shadow_0450(
             state, params, grid, step, workspace.resampling, result.resampling);
+    }
+
+    if (cudaResamplingOperationMaterialize0453Requested) {
+        // 0453: CUDA donor-particle operation materializer.  CUDA scans the
+        // accepted transfer plan and active particles to rebuild the passive
+        // extraction/insertion operation vector.  A strict CPU/GPU operation
+        // gate is kept; on PASS, the downstream 0448 apply backend consumes the
+        // CUDA-materialized compact operation list.
+        (void)try_apply_cuda_resampling_operation_materializer_0453(
+            state, params, grid, step, workspace.resampling);
     }
 
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
