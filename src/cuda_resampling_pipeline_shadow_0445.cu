@@ -626,6 +626,329 @@ GpuMaterializedOps0453 materialize_ops_gpu_0453(const ParticleState& state,
     return out;
 }
 
+
+struct GpuDeviceCarrier0455 {
+    std::uint64_t cpuOps = 0u;
+    std::uint64_t gpuOps = 0u;
+    std::uint64_t invalidMaterializeOps = 0u;
+    std::uint64_t opMismatch = 0u;
+    std::uint64_t duplicateParticleMismatch = 0u;
+    std::uint64_t extractionApplied = 0u;
+    std::uint64_t insertionApplied = 0u;
+    std::uint64_t invalidApplyOps = 0u;
+    double maxMassAbs = 0.0;
+    double maxPxAbs = 0.0;
+    double maxPyAbs = 0.0;
+    double cpuMass = 0.0;
+    double gpuMass = 0.0;
+    double cpuPx = 0.0;
+    double gpuPx = 0.0;
+    double cpuPy = 0.0;
+    double gpuPy = 0.0;
+    double cpuKe = 0.0;
+    double gpuKe = 0.0;
+    double uploadSeconds = 0.0;
+    double materializeKernelSeconds = 0.0;
+    double gateDownloadSeconds = 0.0;
+    double applyKernelSeconds = 0.0;
+    double stateDownloadSeconds = 0.0;
+    double totalSeconds = 0.0;
+    bool pass = false;
+};
+
+__global__ void apply_device_carrier_extraction_kernel_0455(
+    int nOps,
+    const unsigned int* particleIndex,
+    std::uint64_t nParticles,
+    std::uint8_t fluidRole,
+    std::uint8_t inactiveRole,
+    unsigned int invalidParticle,
+    unsigned int* applied,
+    std::uint8_t* role) {
+    const int op = blockIdx.x * blockDim.x + threadIdx.x;
+    if (op >= nOps) return;
+    const unsigned int p = particleIndex[op];
+    unsigned int ok = 0u;
+    if (p != invalidParticle && static_cast<std::uint64_t>(p) < nParticles && role[p] == fluidRole) {
+        role[p] = inactiveRole;
+        ok = 1u;
+    }
+    applied[op] = ok;
+}
+
+__global__ void apply_device_carrier_insertion_kernel_0455(
+    int nOps,
+    const unsigned int* particleIndex,
+    const int* receiverCell,
+    const std::uint32_t* particleType,
+    const double* particleMass,
+    const double* momentumX,
+    const double* momentumY,
+    std::uint32_t Nx,
+    std::uint32_t Ny,
+    double dx,
+    double dy,
+    std::uint64_t nParticles,
+    std::uint8_t inactiveRole,
+    std::uint8_t fluidRole,
+    unsigned int invalidParticle,
+    unsigned int* applied,
+    double* x,
+    double* y,
+    double* vx,
+    double* vy,
+    double* mass,
+    std::uint32_t* type,
+    std::uint8_t* role) {
+    const int op = blockIdx.x * blockDim.x + threadIdx.x;
+    if (op >= nOps) return;
+    const unsigned int p = particleIndex[op];
+    unsigned int ok = 0u;
+    if (p != invalidParticle && static_cast<std::uint64_t>(p) < nParticles && role[p] == inactiveRole) {
+        const std::uint32_t c = static_cast<std::uint32_t>(receiverCell[op]);
+        const std::uint32_t nCells = Nx * Ny;
+        const double m = particleMass[op];
+        if (c < nCells && m > 0.0) {
+            const std::uint32_t ix = c % Nx;
+            const std::uint32_t iy = c / Nx;
+            const std::uint32_t q = static_cast<std::uint32_t>(op) & 15u;
+            const double fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
+            const double fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
+            x[p] = (static_cast<double>(ix) + fx) * dx;
+            y[p] = (static_cast<double>(iy) + fy) * dy;
+            mass[p] = m;
+            type[p] = particleType[op];
+            vx[p] = momentumX[op] / m;
+            vy[p] = momentumY[op] / m;
+            role[p] = fluidRole;
+            ok = 1u;
+        }
+    }
+    applied[op] = ok;
+}
+
+GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& ws,
+    const CellGrid& grid,
+    const SimulationParams& params) {
+    GpuDeviceCarrier0455 out{};
+    out.cpuOps = static_cast<std::uint64_t>(ws.passiveExtractionOperations.size());
+    if (ws.transferPlan.empty() || ws.passiveExtractionOperations.empty()) {
+        out.pass = ws.passiveExtractionOperations.empty();
+        return out;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto upload0 = std::chrono::steady_clock::now();
+    CudaParticleState gpuState{};
+    CudaParticleStateDiagnostics uploadDiag{};
+    gpuState.upload_all(state, &uploadDiag);
+    auto view = gpuState.device_view();
+
+    std::vector<int> planDonor, planReceiver;
+    std::vector<double> planMass;
+    planDonor.reserve(ws.transferPlan.size());
+    planReceiver.reserve(ws.transferPlan.size());
+    planMass.reserve(ws.transferPlan.size());
+    for (const auto& e : ws.transferPlan) {
+        planDonor.push_back(e.donorCell);
+        planReceiver.push_back(e.receiverCell);
+        planMass.push_back(e.plannedMass);
+    }
+    DeviceBuffer0445<int> dPlanDonor(planDonor.size()); dPlanDonor.copy_from_host(planDonor);
+    DeviceBuffer0445<int> dPlanReceiver(planReceiver.size()); dPlanReceiver.copy_from_host(planReceiver);
+    DeviceBuffer0445<double> dPlanMass(planMass.size()); dPlanMass.copy_from_host(planMass);
+    DeviceBuffer0445<std::uint8_t> dSelected(static_cast<std::size_t>(state.NactiveFluid)); dSelected.memset_zero();
+
+    const std::size_t maxOps = static_cast<std::size_t>(state.NactiveFluid);
+    DeviceBuffer0445<unsigned int> dOutCount(1u); dOutCount.memset_zero();
+    DeviceBuffer0445<unsigned int> dInvalid(1u); dInvalid.memset_zero();
+    DeviceBuffer0445<unsigned int> dOutParticle(maxOps);
+    DeviceBuffer0445<int> dOutDonor(maxOps);
+    DeviceBuffer0445<int> dOutReceiver(maxOps);
+    DeviceBuffer0445<std::uint32_t> dOutType(maxOps);
+    DeviceBuffer0445<double> dOutMass(maxOps);
+    DeviceBuffer0445<double> dOutPx(maxOps);
+    DeviceBuffer0445<double> dOutPy(maxOps);
+    DeviceBuffer0445<double> dOutKe(maxOps);
+    DeviceBuffer0445<std::uint8_t> dOutRole(maxOps);
+    out.uploadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - upload0).count() + uploadDiag.uploadSeconds;
+
+    cudaEvent_t start{}, stop{};
+    CUDA_CHECK_0445(cudaEventCreate(&start));
+    CUDA_CHECK_0445(cudaEventCreate(&stop));
+    CUDA_CHECK_0445(cudaEventRecord(start));
+    materialize_passive_ops_serial_kernel_0453<<<1,1>>>(
+        static_cast<std::size_t>(state.NactiveFluid), view.x, view.y, view.mass, view.vx, view.vy, view.type, view.role,
+        grid.Nx, grid.Ny, grid.dx, grid.dy,
+        is_x_periodic(params) ? 1 : 0, is_y_periodic(params) ? 1 : 0,
+        static_cast<int>(planDonor.size()), dPlanDonor.ptr, dPlanReceiver.ptr, dPlanMass.ptr,
+        dSelected.ptr, static_cast<int>(maxOps), dOutCount.ptr, dInvalid.ptr,
+        dOutParticle.ptr, dOutDonor.ptr, dOutReceiver.ptr, dOutType.ptr,
+        dOutMass.ptr, dOutPx.ptr, dOutPy.ptr, dOutKe.ptr, dOutRole.ptr);
+    CUDA_CHECK_0445(cudaEventRecord(stop));
+    CUDA_CHECK_0445(cudaEventSynchronize(stop));
+    CUDA_CHECK_0445(cudaGetLastError());
+    float materializeMs = 0.0f;
+    CUDA_CHECK_0445(cudaEventElapsedTime(&materializeMs, start, stop));
+    CUDA_CHECK_0445(cudaEventDestroy(start));
+    CUDA_CHECK_0445(cudaEventDestroy(stop));
+    out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
+
+    const auto gate0 = std::chrono::steady_clock::now();
+    std::vector<unsigned int> hCount, hInvalid;
+    dOutCount.copy_to_host(hCount);
+    dInvalid.copy_to_host(hInvalid);
+    const std::size_t nOps = hCount.empty() ? 0u : static_cast<std::size_t>(hCount[0]);
+    out.gpuOps = static_cast<std::uint64_t>(nOps);
+    out.invalidMaterializeOps = hInvalid.empty() ? 0u : static_cast<std::uint64_t>(hInvalid[0]);
+    if (nOps > maxOps) throw std::runtime_error("0455 device carrier op count overflow");
+    std::vector<unsigned int> hParticle;
+    std::vector<int> hDonor, hReceiver;
+    std::vector<std::uint32_t> hType;
+    std::vector<double> hMass, hPx, hPy, hKe;
+    std::vector<std::uint8_t> hRole;
+    dOutParticle.copy_to_host(hParticle);
+    dOutDonor.copy_to_host(hDonor);
+    dOutReceiver.copy_to_host(hReceiver);
+    dOutType.copy_to_host(hType);
+    dOutMass.copy_to_host(hMass);
+    dOutPx.copy_to_host(hPx);
+    dOutPy.copy_to_host(hPy);
+    dOutKe.copy_to_host(hKe);
+    dOutRole.copy_to_host(hRole);
+    out.gateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - gate0).count();
+
+    const auto& cpuOps = ws.passiveExtractionOperations;
+    const std::size_t cmp = std::min(cpuOps.size(), nOps);
+    out.opMismatch = static_cast<std::uint64_t>(std::max(cpuOps.size(), nOps) - cmp);
+    for (std::size_t i = 0; i < cmp; ++i) {
+        const auto& a = cpuOps[i];
+        if (a.particleIndex != static_cast<std::uint64_t>(hParticle[i]) ||
+            a.donorCell != hDonor[i] || a.receiverCell != hReceiver[i] ||
+            a.particleType != hType[i] || a.currentRole != hRole[i] ||
+            a.plannedRoleAfterExtraction != static_cast<std::uint8_t>(ParticleRole::Inactive)) {
+            ++out.opMismatch;
+        }
+        out.maxMassAbs = std::max(out.maxMassAbs, std::abs(a.particleMass - hMass[i]));
+        out.maxPxAbs = std::max(out.maxPxAbs, std::abs(a.momentumX - hPx[i]));
+        out.maxPyAbs = std::max(out.maxPyAbs, std::abs(a.momentumY - hPy[i]));
+        out.cpuMass += a.particleMass;
+        out.cpuPx += a.momentumX;
+        out.cpuPy += a.momentumY;
+        out.cpuKe += a.kineticEnergy;
+        out.gpuMass += hMass[i];
+        out.gpuPx += hPx[i];
+        out.gpuPy += hPy[i];
+        out.gpuKe += hKe[i];
+    }
+    std::vector<std::uint8_t> seen(static_cast<std::size_t>(state.Np), 0u);
+    for (std::size_t i = 0; i < nOps; ++i) {
+        if (static_cast<std::uint64_t>(hParticle[i]) >= state.Np) {
+            ++out.duplicateParticleMismatch;
+            continue;
+        }
+        const std::size_t idx = static_cast<std::size_t>(hParticle[i]);
+        if (seen[idx]) ++out.duplicateParticleMismatch;
+        seen[idx] = 1u;
+    }
+    constexpr double tol = 2.0e-10;
+    const auto close = [tol](double a, double b) {
+        const double scale = std::max({1.0, std::abs(a), std::abs(b)});
+        return std::abs(a - b) <= tol * scale;
+    };
+    const bool gatePass = (out.invalidMaterializeOps == 0u && out.opMismatch == 0u &&
+                           out.duplicateParticleMismatch == 0u && out.cpuOps == out.gpuOps &&
+                           out.maxMassAbs <= tol && out.maxPxAbs <= tol && out.maxPyAbs <= tol &&
+                           close(out.cpuMass, out.gpuMass) && close(out.cpuPx, out.gpuPx) &&
+                           close(out.cpuPy, out.gpuPy) && close(out.cpuKe, out.gpuKe));
+    if (!gatePass) {
+        out.pass = false;
+        out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        return out;
+    }
+
+    CUDA_CHECK_0445(cudaEventCreate(&start));
+    CUDA_CHECK_0445(cudaEventCreate(&stop));
+    CUDA_CHECK_0445(cudaEventRecord(start));
+    const int threads = 256;
+    const int blocks = (static_cast<int>(nOps) + threads - 1) / threads;
+    DeviceBuffer0445<unsigned int> dExtApplied(nOps); dExtApplied.memset_zero();
+    DeviceBuffer0445<unsigned int> dInsApplied(nOps); dInsApplied.memset_zero();
+    apply_device_carrier_extraction_kernel_0455<<<blocks, threads>>>(
+        static_cast<int>(nOps), dOutParticle.ptr, view.n,
+        static_cast<std::uint8_t>(ParticleRole::Fluid), static_cast<std::uint8_t>(ParticleRole::Inactive),
+        0xffffffffu, dExtApplied.ptr, view.role);
+    CUDA_CHECK_0445(cudaGetLastError());
+    apply_device_carrier_insertion_kernel_0455<<<blocks, threads>>>(
+        static_cast<int>(nOps), dOutParticle.ptr, dOutReceiver.ptr, dOutType.ptr,
+        dOutMass.ptr, dOutPx.ptr, dOutPy.ptr,
+        static_cast<std::uint32_t>(grid.Nx), static_cast<std::uint32_t>(grid.Ny), grid.dx, grid.dy,
+        view.n, static_cast<std::uint8_t>(ParticleRole::Inactive), static_cast<std::uint8_t>(ParticleRole::Fluid),
+        0xffffffffu, dInsApplied.ptr, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
+    CUDA_CHECK_0445(cudaGetLastError());
+    CUDA_CHECK_0445(cudaEventRecord(stop));
+    CUDA_CHECK_0445(cudaEventSynchronize(stop));
+    float applyMs = 0.0f;
+    CUDA_CHECK_0445(cudaEventElapsedTime(&applyMs, start, stop));
+    CUDA_CHECK_0445(cudaEventDestroy(start));
+    CUDA_CHECK_0445(cudaEventDestroy(stop));
+    out.applyKernelSeconds = static_cast<double>(applyMs) * 1.0e-3;
+
+    std::vector<unsigned int> hExtApplied, hInsApplied;
+    dExtApplied.copy_to_host(hExtApplied);
+    dInsApplied.copy_to_host(hInsApplied);
+    for (std::size_t i = 0; i < nOps; ++i) {
+        out.extractionApplied += (i < hExtApplied.size() && hExtApplied[i]) ? 1u : 0u;
+        out.insertionApplied += (i < hInsApplied.size() && hInsApplied[i]) ? 1u : 0u;
+    }
+    out.invalidApplyOps = (static_cast<std::uint64_t>(nOps) - out.extractionApplied) +
+                          (static_cast<std::uint64_t>(nOps) - out.insertionApplied);
+    if (out.invalidApplyOps == 0u) {
+        const auto dl0 = std::chrono::steady_clock::now();
+        CudaParticleStateDiagnostics downloadDiag{};
+        gpuState.download_all(state, &downloadDiag);
+        out.stateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - dl0).count() + downloadDiag.downloadSeconds;
+        out.pass = true;
+    }
+    out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return out;
+}
+
+void append_device_carrier_csv_0455(const SimulationParams& params,
+                                    std::uint64_t step,
+                                    const GpuDeviceCarrier0455& d,
+                                    bool attempted,
+                                    bool handled,
+                                    bool applied,
+                                    bool pass,
+                                    bool skipped,
+                                    const std::string& skipReason) {
+    if (params.outputDir.empty()) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::string path = params.outputDir + "/cuda_resampling_device_carrier_0455.csv";
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,attempted,handled,applied,pass,skipped,skipReason,"
+               "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
+               "extractionApplied,insertionApplied,invalidApplyOps,"
+               "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
+               "uploadSeconds,materializeKernelSeconds,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+    }
+    out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
+        << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
+        << csv_escape_0445(skipReason) << ','
+        << d.cpuOps << ',' << d.gpuOps << ',' << d.invalidMaterializeOps << ',' << d.opMismatch << ','
+        << d.duplicateParticleMismatch << ',' << d.extractionApplied << ',' << d.insertionApplied << ','
+        << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
+        << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
+        << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.gateDownloadSeconds << ','
+        << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
+}
+
 struct GpuCompactLists0450 {
     std::vector<int> poor;
     std::vector<int> rich;
@@ -1060,6 +1383,10 @@ bool cuda_resampling_operation_materialize_0453_requested(std::uint64_t step) {
     if (!env_truthy_0445("MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453")) return false;
     const std::uint64_t every = env_u64_0445("MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453", 1u);
     return every == 0u || (step % every == 0u);
+}
+
+bool cuda_resampling_device_carrier_0455_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_0455");
 }
 
 CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
@@ -1518,6 +1845,39 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
             append_apply_csv_0448(params, d);
             return d;
         }
+        if (cuda_resampling_device_carrier_0455_requested()) {
+            ParticleState tmp = state;
+            const GpuDeviceCarrier0455 dc =
+                apply_gpu_particle_edits_device_carrier_0455(tmp, editWorkspace, grid, params);
+            d.gpuExtractionApplied = dc.extractionApplied;
+            d.gpuInsertionApplied = dc.insertionApplied;
+            d.gpuInvalidOperations = dc.invalidMaterializeOps + dc.invalidApplyOps;
+            d.applyKernelSeconds = dc.applyKernelSeconds;
+            d.totalSeconds = dc.totalSeconds;
+            const bool ok = (dc.pass && dc.invalidMaterializeOps == 0u && dc.invalidApplyOps == 0u &&
+                             dc.extractionApplied == d.passiveOps && dc.insertionApplied == d.passiveOps);
+            append_device_carrier_csv_0455(params, step, dc, true, ok, ok, ok, !ok,
+                                           ok ? std::string{} : std::string("0455 device carrier gate/apply failed"));
+            if (!ok) {
+                d.skipped = true;
+                d.skipReason = "0455 device carrier gate/apply failed; keeping non-mutated state";
+                append_apply_csv_0448(params, d);
+                return d;
+            }
+            state = std::move(tmp);
+            GpuParticleApply0446 pa{};
+            pa.extractionApplied = dc.extractionApplied;
+            pa.insertionApplied = dc.insertionApplied;
+            pa.invalidOperations = dc.invalidMaterializeOps + dc.invalidApplyOps;
+            pa.kernelSeconds = dc.applyKernelSeconds;
+            pa.totalSeconds = dc.totalSeconds;
+            fill_extraction_insertion_diagnostics_0448(editWorkspace, pa, extractionApply, insertionApply);
+            d.handled = true;
+            d.applied = true;
+            append_apply_csv_0448(params, d);
+            return d;
+        }
+
         ParticleState tmp = state;
         const GpuParticleApply0446 pa = apply_gpu_particle_edits_0446(tmp, editWorkspace, grid);
         d.gpuExtractionApplied = pa.extractionApplied;
