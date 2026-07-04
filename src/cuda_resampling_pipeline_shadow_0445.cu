@@ -637,6 +637,14 @@ bool cuda_resampling_cpu_op_carrier_0458_requested()
     return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
 }
 
+bool cuda_resampling_donor_slice_materializer_0459_requested()
+{
+    const char* env = std::getenv("MPCD_CUDA_RESAMPLING_DONOR_SLICE_MATERIALIZER_0459");
+    if (!env) return false;
+    const std::string v(env);
+    return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
+}
+
 struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOps = 0u;
     std::uint64_t gpuOps = 0u;
@@ -660,6 +668,7 @@ struct GpuDeviceCarrier0455 {
     double uploadSeconds = 0.0;
     double materializeKernelSeconds = 0.0;
     std::uint64_t cpuOpCarrier0458 = 0u;
+    std::uint64_t donorSliceMaterializer0459 = 0u;
     double gateDownloadSeconds = 0.0;
     double applyKernelSeconds = 0.0;
     double stateDownloadSeconds = 0.0;
@@ -738,6 +747,107 @@ __global__ void apply_device_carrier_insertion_kernel_0455(
     applied[op] = ok;
 }
 
+int cell_id_from_position_host_0459(double x, double y,
+                                    int nx, int ny,
+                                    double dx, double dy,
+                                    bool xPeriodic, bool yPeriodic) {
+    if (nx <= 0 || ny <= 0 || !(dx > 0.0) || !(dy > 0.0)) return -1;
+    int ix = static_cast<int>(floor(x / dx));
+    int iy = static_cast<int>(floor(y / dy));
+    if (xPeriodic) {
+        while (ix < 0) ix += nx;
+        while (ix >= nx) ix -= nx;
+    }
+    if (yPeriodic) {
+        while (iy < 0) iy += ny;
+        while (iy >= ny) iy -= ny;
+    }
+    if (ix < 0 || ix >= nx || iy < 0 || iy >= ny) return -1;
+    return iy * nx + ix;
+}
+
+__global__ void materialize_passive_ops_donor_slices_kernel_0459(
+    int planCount,
+    const int* planDonor,
+    const int* planReceiver,
+    const double* planMass,
+    int donorSliceCount,
+    const int* donorCells,
+    const unsigned int* donorOffsets,
+    const unsigned int* donorCounts,
+    const unsigned int* compactParticles,
+    const double* mass,
+    const double* vx,
+    const double* vy,
+    const std::uint32_t* type,
+    const std::uint8_t* role,
+    std::uint8_t fluidRole,
+    std::uint64_t nParticles,
+    std::uint8_t* selected,
+    int maxOps,
+    unsigned int* outCount,
+    unsigned int* invalidOps,
+    unsigned int* outParticle,
+    int* outDonor,
+    int* outReceiver,
+    std::uint32_t* outType,
+    double* outMass,
+    double* outPx,
+    double* outPy,
+    double* outKe,
+    std::uint8_t* outCurrentRole) {
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    constexpr double eps = 1.0e-14;
+    unsigned int count = 0u;
+    unsigned int invalid = 0u;
+    for (int e = 0; e < planCount; ++e) {
+        const int donorCell = planDonor[e];
+        const int receiverCell = planReceiver[e];
+        const double wanted = planMass[e];
+        if (donorCell < 0 || receiverCell < 0 || !(wanted > eps)) continue;
+
+        int slice = -1;
+        for (int d = 0; d < donorSliceCount; ++d) {
+            if (donorCells[d] == donorCell) { slice = d; break; }
+        }
+        if (slice < 0) { ++invalid; continue; }
+
+        const unsigned int begin = donorOffsets[slice];
+        const unsigned int n = donorCounts[slice];
+        double selectedForEntry = 0.0;
+        for (unsigned int k = 0u; k < n; ++k) {
+            const unsigned int p = compactParticles[begin + k];
+            if (static_cast<std::uint64_t>(p) >= nParticles) continue;
+            if (selected[p]) continue;
+            if (role[p] != fluidRole) continue;
+            const double mp = mass[p];
+            if (!(mp > 0.0) || !isfinite(mp)) continue;
+            if (count >= static_cast<unsigned int>(maxOps)) {
+                ++invalid;
+                break;
+            }
+            selected[p] = 1u;
+            outParticle[count] = p;
+            outDonor[count] = donorCell;
+            outReceiver[count] = receiverCell;
+            outType[count] = type[p];
+            outMass[count] = mp;
+            outPx[count] = mp * vx[p];
+            outPy[count] = mp * vy[p];
+            outKe[count] = 0.5 * mp * (vx[p] * vx[p] + vy[p] * vy[p]);
+            outCurrentRole[count] = role[p];
+            ++count;
+            selectedForEntry += mp;
+            if (selectedForEntry + eps >= wanted) break;
+        }
+        if (selectedForEntry + eps < wanted) {
+            ++invalid;
+        }
+    }
+    *outCount = count;
+    *invalidOps = invalid;
+}
+
 GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
     ParticleState& state,
     const WeightedRealFluidDepositWorkspace& ws,
@@ -787,7 +897,9 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
 
     cudaEvent_t start{}, stop{};
     const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
+    const bool donorSliceMaterializer0459 = (!cpuOpCarrier0458 && cuda_resampling_donor_slice_materializer_0459_requested());
     out.cpuOpCarrier0458 = cpuOpCarrier0458 ? 1u : 0u;
+    out.donorSliceMaterializer0459 = donorSliceMaterializer0459 ? 1u : 0u;
     if (cpuOpCarrier0458) {
         // 0458A diagnostic/performance bridge: bypass the validated but serial
         // donor-particle materializer and upload the already-built CPU passive
@@ -834,6 +946,74 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
             dOutRole.copy_from_host(hRole);
         }
         out.materializeKernelSeconds = 0.0;
+    } else if (donorSliceMaterializer0459) {
+        // 0459B donor-slice materializer: build a compact, deterministic host-side
+        // list of candidate particles for the donor cells only, then let CUDA
+        // materialize the operation vector by scanning those short donor slices.
+        // This deliberately does not use the CPU passive operation vector as a
+        // carrier; it is a transitional step toward a fully GPU-built cell list.
+        std::vector<int> donorCells0459;
+        donorCells0459.reserve(planDonor.size());
+        constexpr double eps0459 = 1.0e-14;
+        for (std::size_t e = 0; e < planDonor.size(); ++e) {
+            if (planDonor[e] < 0 || planReceiver[e] < 0 || !(planMass[e] > eps0459)) continue;
+            bool seenDonor = false;
+            for (int c : donorCells0459) {
+                if (c == planDonor[e]) { seenDonor = true; break; }
+            }
+            if (!seenDonor) donorCells0459.push_back(planDonor[e]);
+        }
+        std::vector<std::vector<unsigned int>> perDonor0459(donorCells0459.size());
+        const bool xp0459 = is_x_periodic(params);
+        const bool yp0459 = is_y_periodic(params);
+        const std::uint8_t fluidRole0459 = static_cast<std::uint8_t>(ParticleRole::Fluid);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(state.NactiveFluid); ++i) {
+            if (i >= state.role.size() || state.role[i] != fluidRole0459) continue;
+            if (i >= state.x.size() || i >= state.y.size()) continue;
+            const int cid = cell_id_from_position_host_0459(state.x[i], state.y[i],
+                                                            grid.Nx, grid.Ny, grid.dx, grid.dy,
+                                                            xp0459, yp0459);
+            if (cid < 0) continue;
+            for (std::size_t d = 0; d < donorCells0459.size(); ++d) {
+                if (donorCells0459[d] == cid) {
+                    perDonor0459[d].push_back(static_cast<unsigned int>(i));
+                    break;
+                }
+            }
+        }
+        std::vector<unsigned int> donorOffsets0459(donorCells0459.size(), 0u);
+        std::vector<unsigned int> donorCounts0459(donorCells0459.size(), 0u);
+        std::vector<unsigned int> compactParticles0459;
+        for (std::size_t d = 0; d < donorCells0459.size(); ++d) {
+            donorOffsets0459[d] = static_cast<unsigned int>(compactParticles0459.size());
+            donorCounts0459[d] = static_cast<unsigned int>(perDonor0459[d].size());
+            compactParticles0459.insert(compactParticles0459.end(), perDonor0459[d].begin(), perDonor0459[d].end());
+        }
+        if (compactParticles0459.empty()) compactParticles0459.push_back(0u);
+
+        DeviceBuffer0445<int> dDonorCells0459(donorCells0459.size()); dDonorCells0459.copy_from_host(donorCells0459);
+        DeviceBuffer0445<unsigned int> dDonorOffsets0459(donorOffsets0459.size()); dDonorOffsets0459.copy_from_host(donorOffsets0459);
+        DeviceBuffer0445<unsigned int> dDonorCounts0459(donorCounts0459.size()); dDonorCounts0459.copy_from_host(donorCounts0459);
+        DeviceBuffer0445<unsigned int> dCompactParticles0459(compactParticles0459.size()); dCompactParticles0459.copy_from_host(compactParticles0459);
+
+        CUDA_CHECK_0445(cudaEventCreate(&start));
+        CUDA_CHECK_0445(cudaEventCreate(&stop));
+        CUDA_CHECK_0445(cudaEventRecord(start));
+        materialize_passive_ops_donor_slices_kernel_0459<<<1,1>>>(
+            static_cast<int>(planDonor.size()), dPlanDonor.ptr, dPlanReceiver.ptr, dPlanMass.ptr,
+            static_cast<int>(donorCells0459.size()), dDonorCells0459.ptr, dDonorOffsets0459.ptr, dDonorCounts0459.ptr,
+            dCompactParticles0459.ptr, view.mass, view.vx, view.vy, view.type, view.role, fluidRole0459, view.n,
+            dSelected.ptr, static_cast<int>(maxOps), dOutCount.ptr, dInvalid.ptr,
+            dOutParticle.ptr, dOutDonor.ptr, dOutReceiver.ptr, dOutType.ptr,
+            dOutMass.ptr, dOutPx.ptr, dOutPy.ptr, dOutKe.ptr, dOutRole.ptr);
+        CUDA_CHECK_0445(cudaEventRecord(stop));
+        CUDA_CHECK_0445(cudaEventSynchronize(stop));
+        CUDA_CHECK_0445(cudaGetLastError());
+        float materializeMs = 0.0f;
+        CUDA_CHECK_0445(cudaEventElapsedTime(&materializeMs, start, stop));
+        CUDA_CHECK_0445(cudaEventDestroy(start));
+        CUDA_CHECK_0445(cudaEventDestroy(stop));
+        out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
     } else {
         CUDA_CHECK_0445(cudaEventCreate(&start));
         CUDA_CHECK_0445(cudaEventCreate(&stop));
@@ -996,7 +1176,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1006,7 +1186,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
