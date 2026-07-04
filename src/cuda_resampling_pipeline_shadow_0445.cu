@@ -1,4 +1,6 @@
 #include "cuda_resampling_pipeline_shadow_0445.h"
+#include "cuda_particle_state.h"
+#include "cuda_resampling_particle_ops.h"
 
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
@@ -312,6 +314,93 @@ GpuRemapThermal0445 apply_gpu_remap_thermal_0445(ParticleState& gpuOut,
     return out;
 }
 
+
+struct OperationVectors0446 {
+    std::vector<std::uint32_t> particleIndex;
+    std::vector<std::uint32_t> receiverCell;
+    std::vector<std::uint32_t> particleType;
+    std::vector<double> particleMass;
+    std::vector<double> momentumX;
+    std::vector<double> momentumY;
+    std::vector<std::uint32_t> insertionOrdinal;
+};
+
+OperationVectors0446 make_operation_vectors_0446(const WeightedRealFluidDepositWorkspace& ws) {
+    OperationVectors0446 ops{};
+    ops.particleIndex.reserve(ws.passiveExtractionOperations.size());
+    ops.receiverCell.reserve(ws.passiveExtractionOperations.size());
+    ops.particleType.reserve(ws.passiveExtractionOperations.size());
+    ops.particleMass.reserve(ws.passiveExtractionOperations.size());
+    ops.momentumX.reserve(ws.passiveExtractionOperations.size());
+    ops.momentumY.reserve(ws.passiveExtractionOperations.size());
+    ops.insertionOrdinal.reserve(ws.passiveExtractionOperations.size());
+    std::uint32_t ordinal = 0u;
+    for (const auto& op : ws.passiveExtractionOperations) {
+        if (op.particleIndex == kInvalidParticleIndex || op.particleIndex > 0xffffffffull) {
+            throw std::runtime_error("0446 operation particle index does not fit uint32");
+        }
+        if (op.receiverCell < 0) throw std::runtime_error("0446 operation has invalid receiver cell");
+        ops.particleIndex.push_back(static_cast<std::uint32_t>(op.particleIndex));
+        ops.receiverCell.push_back(static_cast<std::uint32_t>(op.receiverCell));
+        ops.particleType.push_back(op.particleType);
+        ops.particleMass.push_back(op.particleMass);
+        ops.momentumX.push_back(op.momentumX);
+        ops.momentumY.push_back(op.momentumY);
+        ops.insertionOrdinal.push_back(ordinal++);
+    }
+    return ops;
+}
+
+struct GpuParticleApply0446 {
+    std::uint64_t extractionApplied = 0u;
+    std::uint64_t insertionApplied = 0u;
+    std::uint64_t invalidOperations = 0u;
+    double kernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+GpuParticleApply0446 apply_gpu_particle_edits_0446(ParticleState& gpuOut,
+                                                   const WeightedRealFluidDepositWorkspace& editWs,
+                                                   const CellGrid& grid) {
+    GpuParticleApply0446 out{};
+    if (editWs.passiveExtractionOperations.empty()) return out;
+    CudaParticleState gpuState{};
+    CudaParticleStateDiagnostics uploadDiag{};
+    gpuState.upload_all(gpuOut, &uploadDiag);
+    const OperationVectors0446 ops = make_operation_vectors_0446(editWs);
+
+    CudaResamplingExtractionApplyParams ep{};
+    ep.fluidRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+    ep.inactiveRole = static_cast<std::uint8_t>(ParticleRole::Inactive);
+    ep.invalidParticle = 0xffffffffu;
+    CudaResamplingPersistentOpsDiagnostics extDiag{};
+    const bool extOk = cuda_resampling_apply_extraction_operations_on_state_0239(
+        gpuState, ops.particleIndex, ops.particleMass, ops.momentumX, ops.momentumY, ep, &extDiag);
+    if (!extOk) throw std::runtime_error("0446 CUDA extraction apply failed");
+
+    CudaResamplingInsertionApplyParams ip{};
+    ip.inactiveRole = static_cast<std::uint8_t>(ParticleRole::Inactive);
+    ip.fluidRole = static_cast<std::uint8_t>(ParticleRole::Fluid);
+    ip.invalidParticle = 0xffffffffu;
+    ip.useHashPlacement = 0u; // production CPU-compatible deterministic receiver stencil
+    CudaResamplingPersistentOpsDiagnostics insDiag{};
+    const bool insOk = cuda_resampling_apply_insertion_operations_on_state_0239(
+        gpuState, ops.particleIndex, ops.receiverCell, ops.particleType,
+        ops.particleMass, ops.momentumX, ops.momentumY, ops.insertionOrdinal,
+        static_cast<std::uint32_t>(grid.Nx), static_cast<std::uint32_t>(grid.Ny),
+        grid.dx, grid.dy, ip, &insDiag);
+    if (!insOk) throw std::runtime_error("0446 CUDA insertion apply failed");
+
+    CudaParticleStateDiagnostics downloadDiag{};
+    gpuState.download_all(gpuOut, &downloadDiag);
+    out.extractionApplied = extDiag.operationsApplied;
+    out.insertionApplied = insDiag.operationsApplied;
+    out.invalidOperations = extDiag.invalidOperations + insDiag.invalidOperations;
+    out.kernelSeconds = extDiag.kernelSeconds + insDiag.kernelSeconds;
+    out.totalSeconds = extDiag.totalSeconds + insDiag.totalSeconds + uploadDiag.uploadSeconds + downloadDiag.downloadSeconds;
+    return out;
+}
+
 struct Totals0445 {
     double mass = 0.0, px = 0.0, py = 0.0, ke = 0.0;
 };
@@ -347,20 +436,23 @@ void append_csv_0445(const SimulationParams& params,
     out << std::setprecision(17);
     if (!exists) {
         out << "step,stage,attempted,handled,pass,skipped,skipReason,nActive,planEntries,passiveOps,"
-               "cpuRemapCells,gpuRemapCells,cpuThermalCells,gpuThermalCells,roleMismatch,badPrefixCpu,badPrefixGpu,"
-               "maxAbsMass,maxAbsVx,maxAbsVy,massCpu,massGpu,pxCpu,pxGpu,pyCpu,pyGpu,keCpu,keGpu,"
-               "remapKernelSeconds,thermalKernelSeconds,totalSeconds\n";
+               "cpuExtractionApplied,cpuInsertionApplied,gpuExtractionApplied,gpuInsertionApplied,gpuInvalidOperations,"
+               "cpuRemapCells,gpuRemapCells,cpuThermalCells,gpuThermalCells,roleMismatch,typeMismatch,badPrefixCpu,badPrefixGpu,"
+               "maxAbsX,maxAbsY,maxAbsMass,maxAbsVx,maxAbsVy,massCpu,massGpu,pxCpu,pxGpu,pyCpu,pyGpu,keCpu,keGpu,"
+               "applyKernelSeconds,remapKernelSeconds,thermalKernelSeconds,totalSeconds\n";
     }
     out << d.step << ',' << csv_escape_0445(d.stage) << ','
         << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ','
         << (d.skipped ? 1 : 0) << ',' << csv_escape_0445(d.skipReason) << ','
         << d.nActive << ',' << d.planEntries << ',' << d.passiveOps << ','
+        << d.cpuExtractionApplied << ',' << d.cpuInsertionApplied << ','
+        << d.gpuExtractionApplied << ',' << d.gpuInsertionApplied << ',' << d.gpuInvalidOperations << ','
         << d.cpuRemapCells << ',' << d.gpuRemapCells << ',' << d.cpuThermalCells << ',' << d.gpuThermalCells << ','
-        << d.roleMismatch << ',' << d.badPrefixCpu << ',' << d.badPrefixGpu << ','
-        << d.maxAbsMass << ',' << d.maxAbsVx << ',' << d.maxAbsVy << ','
+        << d.roleMismatch << ',' << d.typeMismatch << ',' << d.badPrefixCpu << ',' << d.badPrefixGpu << ','
+        << d.maxAbsX << ',' << d.maxAbsY << ',' << d.maxAbsMass << ',' << d.maxAbsVx << ',' << d.maxAbsVy << ','
         << d.massCpu << ',' << d.massGpu << ',' << d.pxCpu << ',' << d.pxGpu << ','
         << d.pyCpu << ',' << d.pyGpu << ',' << d.keCpu << ',' << d.keGpu << ','
-        << d.remapKernelSeconds << ',' << d.thermalKernelSeconds << ',' << d.totalSeconds << '\n';
+        << d.applyKernelSeconds << ',' << d.remapKernelSeconds << ',' << d.thermalKernelSeconds << ',' << d.totalSeconds << '\n';
 }
 
 } // namespace
@@ -375,13 +467,16 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
     const ParticleState& shadowInputState,
     const ParticleState& cpuFinalState,
     const SimulationParams& params,
-    const CellGrid&,
+    const CellGrid& grid,
     const FluidDomainBounds&,
     double,
     std::uint64_t step,
     const char* stage,
-    const WeightedRealFluidDepositWorkspace& depositWorkspace,
-    const WeightedResamplingDiagnostics& depositDiagnostics,
+    const WeightedRealFluidDepositWorkspace& editWorkspace,
+    const WeightedRealFluidDepositWorkspace& remapWorkspace,
+    const WeightedResamplingDiagnostics& remapDepositDiagnostics,
+    const ResamplingExtractionApplyDiagnostics& cpuExtraction,
+    const ResamplingInsertionApplyDiagnostics& cpuInsertion,
     const ResamplingRemapApplyDiagnostics& cpuRemap,
     const ResamplingThermalRenormalizationDiagnostics& cpuThermal) {
     CudaResamplingPipelineShadow0445Diagnostics d{};
@@ -390,8 +485,10 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
     d.stage = stage ? stage : "";
     d.outputCsv = params.outputDir.empty() ? std::string{} : (params.outputDir + "/cuda_resampling_pipeline_shadow_0445.csv");
     d.nActive = shadowInputState.NactiveFluid;
-    d.planEntries = depositWorkspace.transferPlan.size();
-    d.passiveOps = depositWorkspace.passiveExtractionOperations.size();
+    d.planEntries = editWorkspace.transferPlan.size();
+    d.passiveOps = editWorkspace.passiveExtractionOperations.size();
+    d.cpuExtractionApplied = cpuExtraction.operationsApplied;
+    d.cpuInsertionApplied = cpuInsertion.operationsApplied;
     d.cpuRemapCells = cpuRemap.cellsRemapped;
     d.cpuThermalCells = cpuThermal.cellsRenormalized;
 
@@ -399,12 +496,6 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
         if (!cpuRemap.applied || !cpuThermal.applied) {
             d.skipped = true;
             d.skipReason = "requires remap+thermal applied in 0445 initial hook";
-            append_csv_0445(params, d);
-            return d;
-        }
-        if (!depositWorkspace.passiveExtractionOperations.empty()) {
-            d.skipped = true;
-            d.skipReason = "extraction/insertion plans are covered by standalone 0442; in-solver 0445 hook is remap+thermal only";
             append_csv_0445(params, d);
             return d;
         }
@@ -416,19 +507,27 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
         }
 
         ParticleState gpuState = shadowInputState;
+        const GpuParticleApply0446 pa = apply_gpu_particle_edits_0446(gpuState, editWorkspace, grid);
+        d.gpuExtractionApplied = pa.extractionApplied;
+        d.gpuInsertionApplied = pa.insertionApplied;
+        d.gpuInvalidOperations = pa.invalidOperations;
+        d.applyKernelSeconds = pa.kernelSeconds;
         const double targetOverride = cpuRemap.targetCellMass > 0.0 ? cpuRemap.targetCellMass : -1.0;
         const GpuRemapThermal0445 gd = apply_gpu_remap_thermal_0445(
-            gpuState, depositWorkspace, depositDiagnostics, cpuRemap.massCorrectionStrength, targetOverride);
+            gpuState, remapWorkspace, remapDepositDiagnostics, cpuRemap.massCorrectionStrength, targetOverride);
         d.gpuRemapCells = gd.remapCells;
         d.gpuThermalCells = gd.thermalCells;
         d.remapKernelSeconds = gd.remapSeconds;
         d.thermalKernelSeconds = gd.thermalSeconds;
-        d.totalSeconds = gd.remapSeconds + gd.thermalSeconds;
+        d.totalSeconds = pa.totalSeconds + gd.remapSeconds + gd.thermalSeconds;
 
-        const std::size_t n = static_cast<std::size_t>(std::min(cpuFinalState.NactiveFluid, cpuFinalState.Np));
-        for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t nTotal = static_cast<std::size_t>(std::min(cpuFinalState.Np, gpuState.Np));
+        for (std::size_t i = 0; i < nTotal; ++i) {
             if (cpuFinalState.role[i] != gpuState.role[i]) ++d.roleMismatch;
-            if (cpuFinalState.role[i] != kParticleRoleFluid) continue;
+            if (cpuFinalState.type[i] != gpuState.type[i]) ++d.typeMismatch;
+            if (cpuFinalState.role[i] != kParticleRoleFluid || gpuState.role[i] != kParticleRoleFluid) continue;
+            d.maxAbsX = std::max(d.maxAbsX, std::abs(cpuFinalState.x[i] - gpuState.x[i]));
+            d.maxAbsY = std::max(d.maxAbsY, std::abs(cpuFinalState.y[i] - gpuState.y[i]));
             d.maxAbsMass = std::max(d.maxAbsMass, std::abs(cpuFinalState.mass[i] - gpuState.mass[i]));
             d.maxAbsVx = std::max(d.maxAbsVx, std::abs(cpuFinalState.vx[i] - gpuState.vx[i]));
             d.maxAbsVy = std::max(d.maxAbsVy, std::abs(cpuFinalState.vy[i] - gpuState.vy[i]));
@@ -444,9 +543,14 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
 
         const double tol = 2.0e-10;
         d.handled = true;
-        d.pass = d.roleMismatch == 0u && d.badPrefixCpu == 0u && d.badPrefixGpu == 0u &&
+        d.pass = d.roleMismatch == 0u && d.typeMismatch == 0u &&
+                 d.badPrefixCpu == 0u && d.badPrefixGpu == 0u &&
+                 d.cpuExtractionApplied == d.passiveOps && d.cpuInsertionApplied == d.passiveOps &&
+                 d.gpuExtractionApplied == d.passiveOps && d.gpuInsertionApplied == d.passiveOps &&
+                 d.gpuInvalidOperations == 0u &&
                  d.cpuRemapCells == d.gpuRemapCells && d.cpuThermalCells == d.gpuThermalCells &&
-                 d.maxAbsMass <= tol && d.maxAbsVx <= tol && d.maxAbsVy <= tol &&
+                 d.maxAbsX <= tol && d.maxAbsY <= tol && d.maxAbsMass <= tol &&
+                 d.maxAbsVx <= tol && d.maxAbsVy <= tol &&
                  std::abs(d.massCpu - d.massGpu) <= tol &&
                  std::abs(d.pxCpu - d.pxGpu) <= tol &&
                  std::abs(d.pyCpu - d.pyGpu) <= tol &&

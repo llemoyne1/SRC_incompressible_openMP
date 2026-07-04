@@ -1701,6 +1701,21 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     ResamplingExtractionApplyDiagnostics extractionApply{};
     ResamplingInsertionApplyDiagnostics insertionApply{};
+
+    const bool cudaResamplingPipelineShadow0445Requested =
+        cuda_resampling_pipeline_shadow_0445_requested(step);
+    ParticleState cudaResamplingPipelineShadowInput0445{};
+    WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
+    WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
+    WeightedResamplingDiagnostics cudaResamplingPipelineShadowRemapDeposit0445{};
+    if (cudaResamplingPipelineShadow0445Requested) {
+        // 0446: capture before CPU extraction/insertion so the CUDA shadow can
+        // replay the same passive operation list and then compare against the
+        // CPU-authoritative final state after remap+thermal.
+        cudaResamplingPipelineShadowInput0445 = state;
+        cudaResamplingPipelineShadowEditWorkspace0445 = workspace.resampling;
+    }
+
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
         !workspace.resampling.passiveExtractionOperations.empty()) {
         bool handledByCudaResampling0240 = false;
@@ -1776,15 +1791,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ResamplingThermalRenormalizationDiagnostics thermalApply{};
     ResamplingMassGuardDiagnostics massGuardApply{};
 
-    const bool cudaResamplingPipelineShadow0445Requested =
-        cuda_resampling_pipeline_shadow_0445_requested(step);
-    ParticleState cudaResamplingPipelineShadowInput0445{};
-    WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowWorkspace0445{};
-    WeightedResamplingDiagnostics cudaResamplingPipelineShadowDeposit0445{};
     if (cudaResamplingPipelineShadow0445Requested) {
-        cudaResamplingPipelineShadowInput0445 = state;
-        cudaResamplingPipelineShadowWorkspace0445 = workspace.resampling;
-        cudaResamplingPipelineShadowDeposit0445 = result.resampling;
+        cudaResamplingPipelineShadowRemapWorkspace0445 = workspace.resampling;
+        cudaResamplingPipelineShadowRemapDeposit0445 = result.resampling;
     }
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
@@ -1887,8 +1896,11 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             time,
             step,
             "post_cpu_resampling_remap_thermal_shadow_0445",
-            cudaResamplingPipelineShadowWorkspace0445,
-            cudaResamplingPipelineShadowDeposit0445,
+            cudaResamplingPipelineShadowEditWorkspace0445,
+            cudaResamplingPipelineShadowRemapWorkspace0445,
+            cudaResamplingPipelineShadowRemapDeposit0445,
+            extractionApply,
+            insertionApply,
             remapApply,
             thermalApply);
     }
