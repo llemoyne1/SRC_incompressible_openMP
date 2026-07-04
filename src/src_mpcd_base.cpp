@@ -1708,6 +1708,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cuda_resampling_pipeline_apply_0448_requested();
     const bool cudaResamplingUpstreamShadow0450Requested =
         cuda_resampling_upstream_shadow_0450_requested(step);
+    const bool cudaResamplingUpstreamApply0451Requested =
+        cuda_resampling_upstream_apply_0451_requested(step);
     ParticleState cudaResamplingPipelineShadowInput0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
@@ -1720,7 +1722,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cudaResamplingPipelineShadowEditWorkspace0445 = workspace.resampling;
     }
 
-    if (cudaResamplingUpstreamShadow0450Requested) {
+    if (cudaResamplingUpstreamApply0451Requested) {
+        // 0451: CUDA upstream apply gate.  CUDA recomputes and validates
+        // deposit/classification/poor-rich compaction/planner before the
+        // downstream mutating path.  The current legacy donor-particle
+        // materializer still consumes the host mirror workspace, so this stage
+        // is an accepted CUDA-authority gate rather than the final host-free
+        // upstream replacement.
+        (void)try_apply_cuda_resampling_upstream_plan_0451(
+            state, params, grid, step, workspace.resampling, result.resampling);
+    } else if (cudaResamplingUpstreamShadow0450Requested) {
         // 0450: validate CUDA deposit/classification/poor-rich compaction and
         // transfer planning inside the real solver before the CPU or CUDA
         // apply path mutates extraction/insertion state. CPU remains authoritative.

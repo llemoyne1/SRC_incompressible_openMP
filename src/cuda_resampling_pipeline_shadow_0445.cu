@@ -705,6 +705,33 @@ void append_upstream_csv_0450(const SimulationParams& params,
         << d.compactKernelSeconds << ',' << d.plannerKernelSeconds << ',' << d.totalSeconds << '\n';
 }
 
+void append_upstream_apply_csv_0451(const SimulationParams& params,
+                                    const CudaResamplingUpstreamApply0451Diagnostics& d) {
+    if (params.outputDir.empty()) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::string path = params.outputDir + "/cuda_resampling_upstream_apply_0451.csv";
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,attempted,handled,applied,pass,skipped,skipReason,nActive,nCells,"
+            << "cpuTransferPairs,gpuTransferPairs,cpuPassiveOps,"
+            << "cellIdMismatch,maxCountDiff,maxMassAbs,maxPxAbs,maxPyAbs,"
+            << "receiverListMismatch,donorListMismatch,planMismatch,maxPlanMassAbs,maxPlanDistanceAbs,"
+            << "cpuPlannedMass,gpuPlannedMass,upstreamShadowSeconds,totalSeconds\n";
+    }
+    out << d.step << ',' << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ','
+        << (d.applied ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ',' << (d.skipped ? 1 : 0) << ','
+        << csv_escape_0445(d.skipReason) << ','
+        << d.nActive << ',' << d.nCells << ','
+        << d.cpuTransferPairs << ',' << d.gpuTransferPairs << ',' << d.cpuPassiveOps << ','
+        << d.cellIdMismatch << ',' << d.maxCountDiff << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
+        << d.receiverListMismatch << ',' << d.donorListMismatch << ',' << d.planMismatch << ','
+        << d.maxPlanMassAbs << ',' << d.maxPlanDistanceAbs << ','
+        << d.cpuPlannedMass << ',' << d.gpuPlannedMass << ','
+        << d.upstreamShadowSeconds << ',' << d.totalSeconds << '\n';
+}
+
 struct Totals0445 {
     double mass = 0.0, px = 0.0, py = 0.0, ke = 0.0;
 };
@@ -774,6 +801,12 @@ bool cuda_resampling_pipeline_apply_0448_requested() {
 bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t step) {
     if (!env_truthy_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450")) return false;
     const std::uint64_t every = env_u64_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_EVERY_0450", 1u);
+    return every == 0u || (step % every == 0u);
+}
+
+bool cuda_resampling_upstream_apply_0451_requested(std::uint64_t step) {
+    if (!env_truthy_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451")) return false;
+    const std::uint64_t every = env_u64_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_EVERY_0451", 1u);
     return every == 0u || (step % every == 0u);
 }
 
@@ -917,6 +950,97 @@ CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_sha
         d.skipReason = std::string("exception: ") + e.what();
         d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         append_upstream_csv_0450(params, d);
+        return d;
+    }
+}
+
+
+CudaResamplingUpstreamApply0451Diagnostics try_apply_cuda_resampling_upstream_plan_0451(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    WeightedRealFluidDepositWorkspace& upstreamWorkspace,
+    WeightedResamplingDiagnostics& upstreamDiagnostics) {
+    CudaResamplingUpstreamApply0451Diagnostics d{};
+    d.attempted = true;
+    d.step = step;
+    d.outputCsv = params.outputDir.empty() ? std::string{} : (params.outputDir + "/cuda_resampling_upstream_apply_0451.csv");
+    d.nActive = state.NactiveFluid;
+    d.nCells = static_cast<std::uint64_t>(std::max(0, grid.numCells));
+    const auto t0 = std::chrono::steady_clock::now();
+    try {
+        if (!cuda_resampling_upstream_apply_0451_requested(step)) {
+            d.skipped = true;
+            d.skipReason = "upstream apply flag disabled";
+            append_upstream_apply_csv_0451(params, d);
+            return d;
+        }
+        if (!cuda_resampling_upstream_shadow_0450_requested(step)) {
+            d.skipped = true;
+            d.skipReason = "0451 requires MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450=1 for strict CPU/GPU gate";
+            append_upstream_apply_csv_0451(params, d);
+            return d;
+        }
+
+        const auto s0 = std::chrono::steady_clock::now();
+        const CudaResamplingUpstreamShadow0450Diagnostics shadow =
+            try_run_cuda_resampling_upstream_shadow_0450(
+                state, params, grid, step, upstreamWorkspace, upstreamDiagnostics);
+        d.upstreamShadowSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
+
+        d.nActive = shadow.nActive;
+        d.nCells = shadow.nCells;
+        d.cpuTransferPairs = shadow.cpuTransferPairs;
+        d.gpuTransferPairs = shadow.gpuTransferPairs;
+        d.cpuPassiveOps = shadow.cpuPassiveOps;
+        d.cellIdMismatch = shadow.cellIdMismatch;
+        d.maxCountDiff = shadow.maxCountDiff;
+        d.maxMassAbs = shadow.maxMassAbs;
+        d.maxPxAbs = shadow.maxPxAbs;
+        d.maxPyAbs = shadow.maxPyAbs;
+        d.receiverListMismatch = shadow.receiverListMismatch;
+        d.donorListMismatch = shadow.donorListMismatch;
+        d.planMismatch = shadow.planMismatch;
+        d.maxPlanMassAbs = shadow.maxPlanMassAbs;
+        d.maxPlanDistanceAbs = shadow.maxPlanDistanceAbs;
+        d.cpuPlannedMass = shadow.cpuPlannedMass;
+        d.gpuPlannedMass = shadow.gpuPlannedMass;
+
+        if (shadow.skipped || !shadow.handled) {
+            d.skipped = true;
+            d.skipReason = std::string("upstream shadow unavailable: ") + shadow.skipReason;
+            d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            append_upstream_apply_csv_0451(params, d);
+            return d;
+        }
+        if (!shadow.pass) {
+            d.handled = true;
+            d.pass = false;
+            d.skipped = true;
+            d.skipReason = "CUDA upstream did not match CPU gate; keeping CPU workspace authoritative";
+            d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            append_upstream_apply_csv_0451(params, d);
+            return d;
+        }
+
+        // 0451A is an authority gate: CUDA recomputes and validates the upstream
+        // deposit/classification/compaction/planner.  Because the current legacy
+        // donor-particle materializer still consumes host workspace vectors, the
+        // CPU workspace remains as the mirror representation after the strict
+        // gate has accepted the CUDA upstream as equivalent.  Downstream 0448 can
+        // then perform the mutating clean particle edits/remap/thermal on CUDA.
+        d.handled = true;
+        d.applied = true;
+        d.pass = true;
+        d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        append_upstream_apply_csv_0451(params, d);
+        return d;
+    } catch (const std::exception& e) {
+        d.skipped = true;
+        d.skipReason = std::string("exception: ") + e.what();
+        d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        append_upstream_apply_csv_0451(params, d);
         return d;
     }
 }

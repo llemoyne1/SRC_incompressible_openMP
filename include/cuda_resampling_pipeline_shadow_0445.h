@@ -146,11 +146,53 @@ struct CudaResamplingUpstreamShadow0450Diagnostics {
 };
 
 
+// 0451: experimental CUDA upstream apply gate.  CUDA recomputes the
+// deposit/classification/poor-rich compaction and planner and the solver accepts
+// the CUDA upstream only when it is bitwise/roundoff-equivalent to the CPU
+// workspace.  The legacy CPU workspace is kept as a mirror to feed the existing
+// deterministic donor-particle operation materialization; 0448 may then mutate
+// particle edits/remap/thermal on CUDA.
+struct CudaResamplingUpstreamApply0451Diagnostics {
+    bool attempted = false;
+    bool handled = false;
+    bool applied = false;
+    bool pass = false;
+    bool skipped = false;
+    std::string skipReason;
+
+    std::uint64_t step = 0u;
+    std::string outputCsv;
+
+    std::uint64_t nActive = 0u;
+    std::uint64_t nCells = 0u;
+    std::uint64_t cpuTransferPairs = 0u;
+    std::uint64_t gpuTransferPairs = 0u;
+    std::uint64_t cpuPassiveOps = 0u;
+
+    std::uint64_t cellIdMismatch = 0u;
+    double maxCountDiff = 0.0;
+    double maxMassAbs = 0.0;
+    double maxPxAbs = 0.0;
+    double maxPyAbs = 0.0;
+    std::uint64_t receiverListMismatch = 0u;
+    std::uint64_t donorListMismatch = 0u;
+    std::uint64_t planMismatch = 0u;
+    double maxPlanMassAbs = 0.0;
+    double maxPlanDistanceAbs = 0.0;
+    double cpuPlannedMass = 0.0;
+    double gpuPlannedMass = 0.0;
+
+    double upstreamShadowSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
 bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t step);
 bool cuda_resampling_pipeline_apply_0448_requested();
 bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t step);
+bool cuda_resampling_upstream_apply_0451_requested(std::uint64_t step);
 
 CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
     const ParticleState& state,
@@ -159,6 +201,14 @@ CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_sha
     std::uint64_t step,
     const WeightedRealFluidDepositWorkspace& cpuWorkspace,
     const WeightedResamplingDiagnostics& cpuDiagnostics);
+
+CudaResamplingUpstreamApply0451Diagnostics try_apply_cuda_resampling_upstream_plan_0451(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    WeightedRealFluidDepositWorkspace& upstreamWorkspace,
+    WeightedResamplingDiagnostics& upstreamDiagnostics);
 
 CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
     ParticleState& state,
@@ -202,11 +252,18 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
 inline bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t) { return false; }
 inline bool cuda_resampling_pipeline_apply_0448_requested() { return false; }
 inline bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t) { return false; }
+inline bool cuda_resampling_upstream_apply_0451_requested(std::uint64_t) { return false; }
 
 inline CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
     const ParticleState&, const SimulationParams&, const CellGrid&, std::uint64_t,
     const WeightedRealFluidDepositWorkspace&, const WeightedResamplingDiagnostics&) {
     return CudaResamplingUpstreamShadow0450Diagnostics{};
+}
+
+inline CudaResamplingUpstreamApply0451Diagnostics try_apply_cuda_resampling_upstream_plan_0451(
+    const ParticleState&, const SimulationParams&, const CellGrid&, std::uint64_t,
+    WeightedRealFluidDepositWorkspace&, WeightedResamplingDiagnostics&) {
+    return CudaResamplingUpstreamApply0451Diagnostics{};
 }
 
 inline CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
