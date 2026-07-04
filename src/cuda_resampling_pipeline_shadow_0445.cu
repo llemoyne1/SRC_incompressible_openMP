@@ -627,6 +627,16 @@ GpuMaterializedOps0453 materialize_ops_gpu_0453(const ParticleState& state,
 }
 
 
+
+
+bool cuda_resampling_cpu_op_carrier_0458_requested()
+{
+    const char* env = std::getenv("MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458");
+    if (!env) return false;
+    const std::string v(env);
+    return !v.empty() && v != "0" && v != "false" && v != "FALSE" && v != "off" && v != "OFF";
+}
+
 struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOps = 0u;
     std::uint64_t gpuOps = 0u;
@@ -649,6 +659,7 @@ struct GpuDeviceCarrier0455 {
     double gpuKe = 0.0;
     double uploadSeconds = 0.0;
     double materializeKernelSeconds = 0.0;
+    std::uint64_t cpuOpCarrier0458 = 0u;
     double gateDownloadSeconds = 0.0;
     double applyKernelSeconds = 0.0;
     double stateDownloadSeconds = 0.0;
@@ -775,25 +786,75 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
     out.uploadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - upload0).count() + uploadDiag.uploadSeconds;
 
     cudaEvent_t start{}, stop{};
-    CUDA_CHECK_0445(cudaEventCreate(&start));
-    CUDA_CHECK_0445(cudaEventCreate(&stop));
-    CUDA_CHECK_0445(cudaEventRecord(start));
-    materialize_passive_ops_serial_kernel_0453<<<1,1>>>(
-        static_cast<std::size_t>(state.NactiveFluid), view.x, view.y, view.mass, view.vx, view.vy, view.type, view.role,
-        grid.Nx, grid.Ny, grid.dx, grid.dy,
-        is_x_periodic(params) ? 1 : 0, is_y_periodic(params) ? 1 : 0,
-        static_cast<int>(planDonor.size()), dPlanDonor.ptr, dPlanReceiver.ptr, dPlanMass.ptr,
-        dSelected.ptr, static_cast<int>(maxOps), dOutCount.ptr, dInvalid.ptr,
-        dOutParticle.ptr, dOutDonor.ptr, dOutReceiver.ptr, dOutType.ptr,
-        dOutMass.ptr, dOutPx.ptr, dOutPy.ptr, dOutKe.ptr, dOutRole.ptr);
-    CUDA_CHECK_0445(cudaEventRecord(stop));
-    CUDA_CHECK_0445(cudaEventSynchronize(stop));
-    CUDA_CHECK_0445(cudaGetLastError());
-    float materializeMs = 0.0f;
-    CUDA_CHECK_0445(cudaEventElapsedTime(&materializeMs, start, stop));
-    CUDA_CHECK_0445(cudaEventDestroy(start));
-    CUDA_CHECK_0445(cudaEventDestroy(stop));
-    out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
+    const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
+    out.cpuOpCarrier0458 = cpuOpCarrier0458 ? 1u : 0u;
+    if (cpuOpCarrier0458) {
+        // 0458A diagnostic/performance bridge: bypass the validated but serial
+        // donor-particle materializer and upload the already-built CPU passive
+        // operation vector into the device-carrier buffers. This intentionally
+        // does NOT claim host-free materialization; it isolates the cost of the
+        // serial CUDA materializer so that the apply/remap/thermal path can be
+        // timed independently.
+        const auto& cpuOps0458 = ws.passiveExtractionOperations;
+        if (cpuOps0458.size() > maxOps) throw std::runtime_error("0458 CPU-op carrier op count overflow");
+        std::vector<unsigned int> hOutCount(1u, static_cast<unsigned int>(cpuOps0458.size()));
+        std::vector<unsigned int> hInvalid(1u, 0u);
+        std::vector<unsigned int> hParticle(maxOps, 0u);
+        std::vector<int> hDonor(maxOps, -1);
+        std::vector<int> hReceiver(maxOps, -1);
+        std::vector<std::uint32_t> hType(maxOps, 0u);
+        std::vector<double> hMass(maxOps, 0.0);
+        std::vector<double> hPx(maxOps, 0.0);
+        std::vector<double> hPy(maxOps, 0.0);
+        std::vector<double> hKe(maxOps, 0.0);
+        std::vector<std::uint8_t> hRole(maxOps, static_cast<std::uint8_t>(ParticleRole::Inactive));
+        for (std::size_t i = 0; i < cpuOps0458.size(); ++i) {
+            const auto& a = cpuOps0458[i];
+            hParticle[i] = static_cast<unsigned int>(a.particleIndex);
+            hDonor[i] = a.donorCell;
+            hReceiver[i] = a.receiverCell;
+            hType[i] = a.particleType;
+            hMass[i] = a.particleMass;
+            hPx[i] = a.momentumX;
+            hPy[i] = a.momentumY;
+            hKe[i] = a.kineticEnergy;
+            hRole[i] = a.currentRole;
+        }
+        dOutCount.copy_from_host(hOutCount);
+        dInvalid.copy_from_host(hInvalid);
+        if (!hParticle.empty()) {
+            dOutParticle.copy_from_host(hParticle);
+            dOutDonor.copy_from_host(hDonor);
+            dOutReceiver.copy_from_host(hReceiver);
+            dOutType.copy_from_host(hType);
+            dOutMass.copy_from_host(hMass);
+            dOutPx.copy_from_host(hPx);
+            dOutPy.copy_from_host(hPy);
+            dOutKe.copy_from_host(hKe);
+            dOutRole.copy_from_host(hRole);
+        }
+        out.materializeKernelSeconds = 0.0;
+    } else {
+        CUDA_CHECK_0445(cudaEventCreate(&start));
+        CUDA_CHECK_0445(cudaEventCreate(&stop));
+        CUDA_CHECK_0445(cudaEventRecord(start));
+        materialize_passive_ops_serial_kernel_0453<<<1,1>>>(
+            static_cast<std::size_t>(state.NactiveFluid), view.x, view.y, view.mass, view.vx, view.vy, view.type, view.role,
+            grid.Nx, grid.Ny, grid.dx, grid.dy,
+            is_x_periodic(params) ? 1 : 0, is_y_periodic(params) ? 1 : 0,
+            static_cast<int>(planDonor.size()), dPlanDonor.ptr, dPlanReceiver.ptr, dPlanMass.ptr,
+            dSelected.ptr, static_cast<int>(maxOps), dOutCount.ptr, dInvalid.ptr,
+            dOutParticle.ptr, dOutDonor.ptr, dOutReceiver.ptr, dOutType.ptr,
+            dOutMass.ptr, dOutPx.ptr, dOutPy.ptr, dOutKe.ptr, dOutRole.ptr);
+        CUDA_CHECK_0445(cudaEventRecord(stop));
+        CUDA_CHECK_0445(cudaEventSynchronize(stop));
+        CUDA_CHECK_0445(cudaGetLastError());
+        float materializeMs = 0.0f;
+        CUDA_CHECK_0445(cudaEventElapsedTime(&materializeMs, start, stop));
+        CUDA_CHECK_0445(cudaEventDestroy(start));
+        CUDA_CHECK_0445(cudaEventDestroy(stop));
+        out.materializeKernelSeconds = static_cast<double>(materializeMs) * 1.0e-3;
+    }
 
     const auto gate0 = std::chrono::steady_clock::now();
     std::vector<unsigned int> hCount, hInvalid;
@@ -935,7 +996,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -945,7 +1006,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
