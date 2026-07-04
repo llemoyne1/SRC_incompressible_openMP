@@ -704,6 +704,7 @@ struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOpCarrier0458 = 0u;
     std::uint64_t donorSliceMaterializer0459 = 0u;
     std::uint64_t thrustCellListMaterializer0460 = 0u;
+    std::uint64_t residentCore0467 = 0u;
     std::uint64_t sparseGate0461 = 0u;
     std::uint64_t fullGate0461 = 1u;
     double gateDownloadSeconds = 0.0;
@@ -921,11 +922,13 @@ __global__ void materialize_passive_ops_donor_slices_kernel_0459(
     *invalidOps = invalid;
 }
 
-GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
+GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_resident_0467(
+    CudaParticleState& gpuState,
     ParticleState& state,
     const WeightedRealFluidDepositWorkspace& ws,
     const CellGrid& grid,
-    const SimulationParams& params) {
+    const SimulationParams& params,
+    bool downloadState) {
     GpuDeviceCarrier0455 out{};
     out.cpuOps = static_cast<std::uint64_t>(ws.passiveExtractionOperations.size());
     if (ws.transferPlan.empty() || ws.passiveExtractionOperations.empty()) {
@@ -933,11 +936,13 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
         return out;
     }
     const auto t0 = std::chrono::steady_clock::now();
-    const auto upload0 = std::chrono::steady_clock::now();
-    CudaParticleState gpuState{};
-    CudaParticleStateDiagnostics uploadDiag{};
-    gpuState.upload_all(state, &uploadDiag);
     auto view = gpuState.device_view();
+    if (view.n != state.Np) {
+        throw std::runtime_error("0467 resident device carrier: device/host particle capacity mismatch");
+    }
+    if (view.nActiveFluid != state.NactiveFluid) {
+        throw std::runtime_error("0467 resident device carrier: device/host active-prefix mismatch");
+    }
 
     std::vector<int> planDonor, planReceiver;
     std::vector<double> planMass;
@@ -966,7 +971,8 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
     DeviceBuffer0445<double> dOutPy(maxOps);
     DeviceBuffer0445<double> dOutKe(maxOps);
     DeviceBuffer0445<std::uint8_t> dOutRole(maxOps);
-    out.uploadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - upload0).count() + uploadDiag.uploadSeconds;
+    out.uploadSeconds = 0.0;
+    out.residentCore0467 = 1u;
 
     cudaEvent_t start{}, stop{};
     const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
@@ -1324,12 +1330,45 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
     out.invalidApplyOps = (static_cast<std::uint64_t>(nOps) - out.extractionApplied) +
                           (static_cast<std::uint64_t>(nOps) - out.insertionApplied);
     if (out.invalidApplyOps == 0u) {
-        const auto dl0 = std::chrono::steady_clock::now();
-        CudaParticleStateDiagnostics downloadDiag{};
-        gpuState.download_all(state, &downloadDiag);
-        out.stateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - dl0).count() + downloadDiag.downloadSeconds;
+        if (downloadState) {
+            const auto dl0 = std::chrono::steady_clock::now();
+            CudaParticleStateDiagnostics downloadDiag{};
+            gpuState.download_all(state, &downloadDiag);
+            out.stateDownloadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - dl0).count() + downloadDiag.downloadSeconds;
+        } else {
+            out.stateDownloadSeconds = 0.0;
+        }
         out.pass = true;
     }
+    out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return out;
+}
+
+
+
+GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_0455(
+    ParticleState& state,
+    const WeightedRealFluidDepositWorkspace& ws,
+    const CellGrid& grid,
+    const SimulationParams& params) {
+    GpuDeviceCarrier0455 out{};
+    out.cpuOps = static_cast<std::uint64_t>(ws.passiveExtractionOperations.size());
+    if (ws.transferPlan.empty() || ws.passiveExtractionOperations.empty()) {
+        out.pass = ws.passiveExtractionOperations.empty();
+        return out;
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto upload0 = std::chrono::steady_clock::now();
+    CudaParticleState gpuState{};
+    CudaParticleStateDiagnostics uploadDiag{};
+    gpuState.upload_all(state, &uploadDiag);
+    const double wrapperUploadSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - upload0).count() + uploadDiag.uploadSeconds;
+
+    out = apply_gpu_particle_edits_device_carrier_resident_0467(
+        gpuState, state, ws, grid, params, true);
+    out.uploadSeconds += wrapperUploadSeconds;
     out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     return out;
 }
@@ -1355,7 +1394,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,residentCore0467,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1365,7 +1404,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.residentCore0467 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
