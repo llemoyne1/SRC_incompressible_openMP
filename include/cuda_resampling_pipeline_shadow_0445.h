@@ -92,10 +92,73 @@ struct CudaResamplingPipelineApply0448Diagnostics {
     double totalSeconds = 0.0;
 };
 
+// 0450: in-solver CUDA upstream shadow.  This validates the CUDA-derived
+// deposit/classification/poor-rich compaction and transfer planner against the
+// CPU workspace that still remains authoritative for 0448/0449 apply runs.
+struct CudaResamplingUpstreamShadow0450Diagnostics {
+    bool attempted = false;
+    bool handled = false;
+    bool pass = false;
+    bool skipped = false;
+    std::string skipReason;
+
+    std::uint64_t step = 0u;
+    std::string outputCsv;
+
+    std::uint64_t nActive = 0u;
+    std::uint64_t nCells = 0u;
+
+    std::uint64_t cellIdMismatch = 0u;
+    double maxCountDiff = 0.0;
+    double maxMassAbs = 0.0;
+    double maxPxAbs = 0.0;
+    double maxPyAbs = 0.0;
+    double maxUxAbs = 0.0;
+    double maxUyAbs = 0.0;
+    double cpuTotalMass = 0.0;
+    double gpuTotalMass = 0.0;
+    double cpuTotalPx = 0.0;
+    double gpuTotalPx = 0.0;
+    double cpuTotalPy = 0.0;
+    double gpuTotalPy = 0.0;
+
+    std::uint64_t cpuReceiverCells = 0u;
+    std::uint64_t gpuReceiverCells = 0u;
+    std::uint64_t cpuDonorCells = 0u;
+    std::uint64_t gpuDonorCells = 0u;
+    std::uint64_t receiverListMismatch = 0u;
+    std::uint64_t donorListMismatch = 0u;
+
+    std::uint64_t cpuTransferPairs = 0u;
+    std::uint64_t gpuTransferPairs = 0u;
+    std::uint64_t planMismatch = 0u;
+    double maxPlanMassAbs = 0.0;
+    double maxPlanDistanceAbs = 0.0;
+    double cpuPlannedMass = 0.0;
+    double gpuPlannedMass = 0.0;
+    std::uint64_t cpuPassiveOps = 0u;
+
+    double depositKernelSeconds = 0.0;
+    double depositDownloadSeconds = 0.0;
+    double compactKernelSeconds = 0.0;
+    double plannerKernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
 bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t step);
 bool cuda_resampling_pipeline_apply_0448_requested();
+bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t step);
+
+CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    const WeightedRealFluidDepositWorkspace& cpuWorkspace,
+    const WeightedResamplingDiagnostics& cpuDiagnostics);
 
 CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
     ParticleState& state,
@@ -138,6 +201,13 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
 
 inline bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t) { return false; }
 inline bool cuda_resampling_pipeline_apply_0448_requested() { return false; }
+inline bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t) { return false; }
+
+inline CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
+    const ParticleState&, const SimulationParams&, const CellGrid&, std::uint64_t,
+    const WeightedRealFluidDepositWorkspace&, const WeightedResamplingDiagnostics&) {
+    return CudaResamplingUpstreamShadow0450Diagnostics{};
+}
 
 inline CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_particle_edits_0448(
     ParticleState&, const SimulationParams&, const CellGrid&, std::uint64_t, const WeightedRealFluidDepositWorkspace&,

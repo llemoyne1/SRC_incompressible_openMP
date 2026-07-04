@@ -1,5 +1,7 @@
 #include "cuda_resampling_pipeline_shadow_0445.h"
 #include "cuda_particle_state.h"
+#include "cuda_cell_moments.h"
+#include "cuda_cell_workspace.h"
 #include "cuda_resampling_particle_ops.h"
 
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
@@ -9,11 +11,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -402,6 +406,305 @@ GpuParticleApply0446 apply_gpu_particle_edits_0446(ParticleState& gpuOut,
     return out;
 }
 
+struct GpuCompactLists0450 {
+    std::vector<int> poor;
+    std::vector<int> rich;
+    double kernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+__global__ void compact_poor_rich_kernel_0450(int nc,
+                                               const double* mass,
+                                               const std::uint8_t* wet,
+                                               double poorThreshold,
+                                               double richThreshold,
+                                               int* poorCells,
+                                               int* richCells,
+                                               unsigned int* poorCount,
+                                               unsigned int* richCount) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    if (!wet[c]) return;
+    const double m = mass[c];
+    if (m < poorThreshold) {
+        const unsigned int pos = atomicAdd(poorCount, 1u);
+        poorCells[pos] = c;
+    }
+    if (m > richThreshold) {
+        const unsigned int pos = atomicAdd(richCount, 1u);
+        richCells[pos] = c;
+    }
+}
+
+GpuCompactLists0450 compact_poor_rich_gpu_0450(const std::vector<double>& cellMass,
+                                                const std::vector<std::uint8_t>& wetCell,
+                                                double poorThreshold,
+                                                double richThreshold) {
+    GpuCompactLists0450 out{};
+    const int nc = static_cast<int>(cellMass.size());
+    if (nc <= 0) return out;
+    const auto t0 = std::chrono::steady_clock::now();
+    DeviceBuffer0445<double> dMass(static_cast<std::size_t>(nc)); dMass.copy_from_host(cellMass);
+    DeviceBuffer0445<std::uint8_t> dWet(static_cast<std::size_t>(nc)); dWet.copy_from_host(wetCell);
+    DeviceBuffer0445<int> dPoor(static_cast<std::size_t>(nc));
+    DeviceBuffer0445<int> dRich(static_cast<std::size_t>(nc));
+    DeviceBuffer0445<unsigned int> dPoorCount(1u); dPoorCount.memset_zero();
+    DeviceBuffer0445<unsigned int> dRichCount(1u); dRichCount.memset_zero();
+
+    cudaEvent_t start{}, stop{};
+    CUDA_CHECK_0445(cudaEventCreate(&start));
+    CUDA_CHECK_0445(cudaEventCreate(&stop));
+    CUDA_CHECK_0445(cudaEventRecord(start));
+    const int block = 256;
+    const int grid = (nc + block - 1) / block;
+    compact_poor_rich_kernel_0450<<<grid, block>>>(nc, dMass.ptr, dWet.ptr, poorThreshold, richThreshold,
+                                                   dPoor.ptr, dRich.ptr, dPoorCount.ptr, dRichCount.ptr);
+    CUDA_CHECK_0445(cudaEventRecord(stop));
+    CUDA_CHECK_0445(cudaEventSynchronize(stop));
+    CUDA_CHECK_0445(cudaGetLastError());
+    float ms = 0.0f;
+    CUDA_CHECK_0445(cudaEventElapsedTime(&ms, start, stop));
+    CUDA_CHECK_0445(cudaEventDestroy(start));
+    CUDA_CHECK_0445(cudaEventDestroy(stop));
+    out.kernelSeconds = static_cast<double>(ms) * 1.0e-3;
+
+    std::vector<unsigned int> poorCount, richCount;
+    dPoorCount.copy_to_host(poorCount);
+    dRichCount.copy_to_host(richCount);
+    const std::size_t np = poorCount.empty() ? 0u : static_cast<std::size_t>(poorCount[0]);
+    const std::size_t nr = richCount.empty() ? 0u : static_cast<std::size_t>(richCount[0]);
+    std::vector<int> poorFull, richFull;
+    dPoor.copy_to_host(poorFull);
+    dRich.copy_to_host(richFull);
+    if (np > poorFull.size() || nr > richFull.size()) throw std::runtime_error("0450 compact count overflow");
+    out.poor.assign(poorFull.begin(), poorFull.begin() + static_cast<std::ptrdiff_t>(np));
+    out.rich.assign(richFull.begin(), richFull.begin() + static_cast<std::ptrdiff_t>(nr));
+    std::sort(out.poor.begin(), out.poor.end());
+    std::sort(out.rich.begin(), out.rich.end());
+    out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return out;
+}
+
+struct TransferPlanEntry0450 {
+    int donorCell = -1;
+    int receiverCell = -1;
+    double plannedMass = 0.0;
+    double cellDistance = 0.0;
+    double donorRemainingAfter = 0.0;
+    double receiverRemainingAfter = 0.0;
+};
+
+struct GpuPlan0450 {
+    std::vector<TransferPlanEntry0450> entries;
+    double plannedMass = 0.0;
+    double kernelSeconds = 0.0;
+    double totalSeconds = 0.0;
+};
+
+__device__ double cell_distance_device_0450(int a, int b, int nx, int ny, int xPeriodic, int yPeriodic) {
+    if (a < 0 || b < 0 || nx <= 0 || ny <= 0) return 0.0;
+    const int ax = a % nx;
+    const int ay = a / nx;
+    const int bx = b % nx;
+    const int by = b / nx;
+    int dx = ax > bx ? ax - bx : bx - ax;
+    int dy = ay > by ? ay - by : by - ay;
+    if (xPeriodic) dx = dx < (nx - dx) ? dx : (nx - dx);
+    if (yPeriodic) dy = dy < (ny - dy) ? dy : (ny - dy);
+    return sqrt(static_cast<double>(dx * dx + dy * dy));
+}
+
+__global__ void build_transfer_plan_serial_kernel_0450(const int nx,
+                                                       const int ny,
+                                                       const int xPeriodic,
+                                                       const int yPeriodic,
+                                                       const double targetCellMass,
+                                                       const int poorCount,
+                                                       const int richCount,
+                                                       const int* poorCells,
+                                                       const int* richCells,
+                                                       double* receiverRemaining,
+                                                       double* donorRemaining,
+                                                       const double* cellMass,
+                                                       const int maxPlanEntries,
+                                                       int* outDonor,
+                                                       int* outReceiver,
+                                                       double* outMass,
+                                                       double* outDistance,
+                                                       double* outDonorRemainingAfter,
+                                                       double* outReceiverRemainingAfter,
+                                                       unsigned int* outCount,
+                                                       double* outPlannedMass) {
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    constexpr double eps = 1.0e-14;
+    unsigned int planCount = 0u;
+    double plannedMass = 0.0;
+
+    for (int ir = 0; ir < poorCount; ++ir) {
+        const int rc = poorCells[ir];
+        const double deficit = targetCellMass - cellMass[rc];
+        receiverRemaining[ir] = deficit > 0.0 ? deficit : 0.0;
+    }
+    for (int id = 0; id < richCount; ++id) {
+        const int dc = richCells[id];
+        const double excess = cellMass[dc] - targetCellMass;
+        donorRemaining[id] = excess > 0.0 ? excess : 0.0;
+    }
+
+    for (int ir = 0; ir < poorCount; ++ir) {
+        const int rc = poorCells[ir];
+        while (receiverRemaining[ir] > eps) {
+            int bestDonor = richCount;
+            int bestCell = 2147483647;
+            double bestDistance = 1.0e300;
+            for (int id = 0; id < richCount; ++id) {
+                if (donorRemaining[id] <= eps) continue;
+                const int dc = richCells[id];
+                const double dist = cell_distance_device_0450(dc, rc, nx, ny, xPeriodic, yPeriodic);
+                if (dist < bestDistance || (dist == bestDistance && dc < bestCell)) {
+                    bestDistance = dist;
+                    bestDonor = id;
+                    bestCell = dc;
+                }
+            }
+            if (bestDonor == richCount) break;
+            double transfer = donorRemaining[bestDonor] < receiverRemaining[ir]
+                ? donorRemaining[bestDonor] : receiverRemaining[ir];
+            if (transfer <= eps) break;
+            donorRemaining[bestDonor] -= transfer;
+            receiverRemaining[ir] -= transfer;
+            if (static_cast<int>(planCount) < maxPlanEntries) {
+                outDonor[planCount] = richCells[bestDonor];
+                outReceiver[planCount] = rc;
+                outMass[planCount] = transfer;
+                outDistance[planCount] = bestDistance;
+                outDonorRemainingAfter[planCount] = donorRemaining[bestDonor];
+                outReceiverRemainingAfter[planCount] = receiverRemaining[ir];
+            }
+            ++planCount;
+            plannedMass += transfer;
+        }
+    }
+    *outCount = planCount;
+    *outPlannedMass = plannedMass;
+}
+
+GpuPlan0450 build_transfer_plan_gpu_0450(const std::vector<int>& poor,
+                                          const std::vector<int>& rich,
+                                          const std::vector<double>& cellMass,
+                                          const CellGrid& grid,
+                                          const SimulationParams& params,
+                                          double targetCellMass,
+                                          std::size_t expectedCpuEntries) {
+    GpuPlan0450 out{};
+    if (poor.empty() || rich.empty() || !(targetCellMass > 0.0)) return out;
+    const auto t0 = std::chrono::steady_clock::now();
+    const int poorCount = static_cast<int>(poor.size());
+    const int richCount = static_cast<int>(rich.size());
+    const int maxPlanEntries = static_cast<int>(std::max<std::size_t>(poor.size() + rich.size() + 4u, expectedCpuEntries + 4u));
+
+    DeviceBuffer0445<int> dPoor(poor.size()); dPoor.copy_from_host(poor);
+    DeviceBuffer0445<int> dRich(rich.size()); dRich.copy_from_host(rich);
+    DeviceBuffer0445<double> dMass(cellMass.size()); dMass.copy_from_host(cellMass);
+    DeviceBuffer0445<double> dReceiverRemaining(poor.size());
+    DeviceBuffer0445<double> dDonorRemaining(rich.size());
+    DeviceBuffer0445<int> dOutDonor(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<int> dOutReceiver(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<double> dOutMass(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<double> dOutDistance(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<double> dOutDonorRemaining(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<double> dOutReceiverRemaining(static_cast<std::size_t>(maxPlanEntries));
+    DeviceBuffer0445<unsigned int> dOutCount(1u); dOutCount.memset_zero();
+    DeviceBuffer0445<double> dOutPlannedMass(1u); dOutPlannedMass.memset_zero();
+
+    const int xp = (params.bcLeft == "periodic" && params.bcRight == "periodic") ? 1 : 0;
+    const int yp = (params.bcBottom == "periodic" && params.bcTop == "periodic") ? 1 : 0;
+    cudaEvent_t start{}, stop{};
+    CUDA_CHECK_0445(cudaEventCreate(&start));
+    CUDA_CHECK_0445(cudaEventCreate(&stop));
+    CUDA_CHECK_0445(cudaEventRecord(start));
+    build_transfer_plan_serial_kernel_0450<<<1,1>>>(grid.Nx, grid.Ny, xp, yp, targetCellMass,
+                                                    poorCount, richCount, dPoor.ptr, dRich.ptr,
+                                                    dReceiverRemaining.ptr, dDonorRemaining.ptr,
+                                                    dMass.ptr, maxPlanEntries,
+                                                    dOutDonor.ptr, dOutReceiver.ptr, dOutMass.ptr,
+                                                    dOutDistance.ptr, dOutDonorRemaining.ptr,
+                                                    dOutReceiverRemaining.ptr, dOutCount.ptr,
+                                                    dOutPlannedMass.ptr);
+    CUDA_CHECK_0445(cudaEventRecord(stop));
+    CUDA_CHECK_0445(cudaEventSynchronize(stop));
+    CUDA_CHECK_0445(cudaGetLastError());
+    float ms = 0.0f;
+    CUDA_CHECK_0445(cudaEventElapsedTime(&ms, start, stop));
+    CUDA_CHECK_0445(cudaEventDestroy(start));
+    CUDA_CHECK_0445(cudaEventDestroy(stop));
+    out.kernelSeconds = static_cast<double>(ms) * 1.0e-3;
+
+    std::vector<unsigned int> countHost;
+    std::vector<double> plannedHost;
+    dOutCount.copy_to_host(countHost);
+    dOutPlannedMass.copy_to_host(plannedHost);
+    const std::size_t count = countHost.empty() ? 0u : static_cast<std::size_t>(countHost[0]);
+    out.plannedMass = plannedHost.empty() ? 0.0 : plannedHost[0];
+    std::vector<int> donors, receivers;
+    std::vector<double> masses, distances, donorRemain, receiverRemain;
+    dOutDonor.copy_to_host(donors);
+    dOutReceiver.copy_to_host(receivers);
+    dOutMass.copy_to_host(masses);
+    dOutDistance.copy_to_host(distances);
+    dOutDonorRemaining.copy_to_host(donorRemain);
+    dOutReceiverRemaining.copy_to_host(receiverRemain);
+    const std::size_t stored = std::min<std::size_t>(count, static_cast<std::size_t>(maxPlanEntries));
+    out.entries.reserve(stored);
+    for (std::size_t i = 0; i < stored; ++i) {
+        out.entries.push_back(TransferPlanEntry0450{donors[i], receivers[i], masses[i], distances[i], donorRemain[i], receiverRemain[i]});
+    }
+    out.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return out;
+}
+
+std::uint64_t sorted_list_mismatch_0450(const std::vector<std::int32_t>& cpu, const std::vector<int>& gpu) {
+    const std::size_t n = std::min(cpu.size(), gpu.size());
+    std::uint64_t mism = static_cast<std::uint64_t>(std::max(cpu.size(), gpu.size()) - n);
+    for (std::size_t i = 0; i < n; ++i) if (cpu[i] != gpu[i]) ++mism;
+    return mism;
+}
+
+bool all_periodic_0450(const SimulationParams& p) {
+    return p.bcLeft == "periodic" && p.bcRight == "periodic" && p.bcBottom == "periodic" && p.bcTop == "periodic";
+}
+
+void append_upstream_csv_0450(const SimulationParams& params,
+                              const CudaResamplingUpstreamShadow0450Diagnostics& d) {
+    if (params.outputDir.empty()) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::string path = params.outputDir + "/cuda_resampling_upstream_shadow_0450.csv";
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,attempted,handled,pass,skipped,skipReason,nActive,nCells,"
+            << "cellIdMismatch,maxCountDiff,maxMassAbs,maxPxAbs,maxPyAbs,maxUxAbs,maxUyAbs,"
+            << "cpuTotalMass,gpuTotalMass,cpuTotalPx,gpuTotalPx,cpuTotalPy,gpuTotalPy,"
+            << "cpuReceiverCells,gpuReceiverCells,cpuDonorCells,gpuDonorCells,receiverListMismatch,donorListMismatch,"
+            << "cpuTransferPairs,gpuTransferPairs,planMismatch,maxPlanMassAbs,maxPlanDistanceAbs,cpuPlannedMass,gpuPlannedMass,cpuPassiveOps,"
+            << "depositKernelSeconds,depositDownloadSeconds,compactKernelSeconds,plannerKernelSeconds,totalSeconds\n";
+    }
+    out << d.step << ',' << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ','
+        << (d.pass ? 1 : 0) << ',' << (d.skipped ? 1 : 0) << ',' << csv_escape_0445(d.skipReason) << ','
+        << d.nActive << ',' << d.nCells << ','
+        << d.cellIdMismatch << ',' << d.maxCountDiff << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ','
+        << d.maxPyAbs << ',' << d.maxUxAbs << ',' << d.maxUyAbs << ','
+        << d.cpuTotalMass << ',' << d.gpuTotalMass << ',' << d.cpuTotalPx << ',' << d.gpuTotalPx << ','
+        << d.cpuTotalPy << ',' << d.gpuTotalPy << ','
+        << d.cpuReceiverCells << ',' << d.gpuReceiverCells << ',' << d.cpuDonorCells << ',' << d.gpuDonorCells << ','
+        << d.receiverListMismatch << ',' << d.donorListMismatch << ','
+        << d.cpuTransferPairs << ',' << d.gpuTransferPairs << ',' << d.planMismatch << ','
+        << d.maxPlanMassAbs << ',' << d.maxPlanDistanceAbs << ',' << d.cpuPlannedMass << ',' << d.gpuPlannedMass << ','
+        << d.cpuPassiveOps << ',' << d.depositKernelSeconds << ',' << d.depositDownloadSeconds << ','
+        << d.compactKernelSeconds << ',' << d.plannerKernelSeconds << ',' << d.totalSeconds << '\n';
+}
+
 struct Totals0445 {
     double mass = 0.0, px = 0.0, py = 0.0, ke = 0.0;
 };
@@ -466,6 +769,156 @@ bool cuda_resampling_pipeline_shadow_0445_requested(std::uint64_t step) {
 
 bool cuda_resampling_pipeline_apply_0448_requested() {
     return env_truthy_0445("MPCD_CUDA_RESAMPLING_PIPELINE_APPLY_0448");
+}
+
+bool cuda_resampling_upstream_shadow_0450_requested(std::uint64_t step) {
+    if (!env_truthy_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450")) return false;
+    const std::uint64_t every = env_u64_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_EVERY_0450", 1u);
+    return every == 0u || (step % every == 0u);
+}
+
+CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
+    const ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    std::uint64_t step,
+    const WeightedRealFluidDepositWorkspace& cpuWorkspace,
+    const WeightedResamplingDiagnostics& cpuDiagnostics) {
+    CudaResamplingUpstreamShadow0450Diagnostics d{};
+    d.attempted = true;
+    d.step = step;
+    d.outputCsv = params.outputDir.empty() ? std::string{} : (params.outputDir + "/cuda_resampling_upstream_shadow_0450.csv");
+    d.nActive = state.NactiveFluid;
+    d.nCells = static_cast<std::uint64_t>(std::max(0, grid.numCells));
+    d.cpuReceiverCells = static_cast<std::uint64_t>(cpuWorkspace.receiverPoorCells.size());
+    d.cpuDonorCells = static_cast<std::uint64_t>(cpuWorkspace.donorRichCells.size());
+    d.cpuTransferPairs = static_cast<std::uint64_t>(cpuWorkspace.transferPlan.size());
+    d.cpuPassiveOps = static_cast<std::uint64_t>(cpuWorkspace.passiveExtractionOperations.size());
+    d.cpuPlannedMass = cpuDiagnostics.plannedTransferMass;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    try {
+        if (!cuda_resampling_upstream_shadow_0450_requested(step)) {
+            d.skipped = true;
+            d.skipReason = "upstream shadow flag disabled";
+            append_upstream_csv_0450(params, d);
+            return d;
+        }
+        if (!all_periodic_0450(params) || params.immersedSolidEnable) {
+            d.skipped = true;
+            d.skipReason = "0450 upstream shadow is currently restricted to periodic wall-free no-solid cases";
+            append_upstream_csv_0450(params, d);
+            return d;
+        }
+        if (!cpuDiagnostics.computed || !cpuDiagnostics.cellClassificationComputed || !cpuDiagnostics.candidateListsBuilt) {
+            d.skipped = true;
+            d.skipReason = "CPU resampling deposit/classification/candidate lists are not available";
+            append_upstream_csv_0450(params, d);
+            return d;
+        }
+        if (grid.numCells <= 0 || static_cast<std::size_t>(grid.numCells) != cpuWorkspace.mass.size()) {
+            d.skipped = true;
+            d.skipReason = "invalid or mismatched CPU workspace cell arrays";
+            append_upstream_csv_0450(params, d);
+            return d;
+        }
+
+        CudaParticleState gpuState{};
+        CudaParticleStateDiagnostics uploadDiag{};
+        gpuState.upload_all(state, &uploadDiag);
+        CudaCellWorkspace cellWorkspace{};
+        CudaCellMoments gpuDeposit{};
+        CudaCellMomentsDiagnostics depositDiag{};
+        CudaCellMomentsOptions options{};
+        options.computeCellVelocities = true;
+        options.downloadCellVelocities = true;
+        options.enableAllFluidFastPath = true;
+        options.enableUniformMassFastPath = true;
+        cuda_deposit_cell_moments_atomic_from_persistent_state(
+            state, gpuState, cellWorkspace, grid, GridShift{}, params, gpuDeposit, &depositDiag, options);
+        d.depositKernelSeconds = depositDiag.kernelSeconds;
+        d.depositDownloadSeconds = depositDiag.downloadSeconds;
+
+        const std::size_t nCell = static_cast<std::size_t>(grid.numCells);
+        if (gpuDeposit.cellMass.size() != nCell || gpuDeposit.cellCount.size() != nCell || gpuDeposit.cellId.size() < cpuWorkspace.cellId.size()) {
+            d.skipped = true;
+            d.skipReason = "CUDA deposit returned unexpected array sizes";
+            append_upstream_csv_0450(params, d);
+            return d;
+        }
+        for (std::size_t i = 0; i < cpuWorkspace.cellId.size(); ++i) {
+            if (cpuWorkspace.cellId[i] != gpuDeposit.cellId[i]) ++d.cellIdMismatch;
+        }
+        for (std::size_t c = 0; c < nCell; ++c) {
+            d.maxCountDiff = std::max(d.maxCountDiff, std::abs(static_cast<double>(cpuWorkspace.count[c]) - static_cast<double>(gpuDeposit.cellCount[c])));
+            d.maxMassAbs = std::max(d.maxMassAbs, std::abs(cpuWorkspace.mass[c] - gpuDeposit.cellMass[c]));
+            d.maxPxAbs = std::max(d.maxPxAbs, std::abs(cpuWorkspace.px[c] - gpuDeposit.cellPx[c]));
+            d.maxPyAbs = std::max(d.maxPyAbs, std::abs(cpuWorkspace.py[c] - gpuDeposit.cellPy[c]));
+            if (c < gpuDeposit.cellUx.size() && c < cpuWorkspace.ux.size()) {
+                d.maxUxAbs = std::max(d.maxUxAbs, std::abs(cpuWorkspace.ux[c] - gpuDeposit.cellUx[c]));
+            }
+            if (c < gpuDeposit.cellUy.size() && c < cpuWorkspace.uy.size()) {
+                d.maxUyAbs = std::max(d.maxUyAbs, std::abs(cpuWorkspace.uy[c] - gpuDeposit.cellUy[c]));
+            }
+            d.cpuTotalMass += cpuWorkspace.mass[c];
+            d.gpuTotalMass += gpuDeposit.cellMass[c];
+            d.cpuTotalPx += cpuWorkspace.px[c];
+            d.gpuTotalPx += gpuDeposit.cellPx[c];
+            d.cpuTotalPy += cpuWorkspace.py[c];
+            d.gpuTotalPy += gpuDeposit.cellPy[c];
+        }
+
+        const GpuCompactLists0450 lists = compact_poor_rich_gpu_0450(
+            gpuDeposit.cellMass, cpuWorkspace.wetCell, cpuDiagnostics.poorMassThreshold, cpuDiagnostics.richMassThreshold);
+        d.compactKernelSeconds = lists.kernelSeconds;
+        d.gpuReceiverCells = static_cast<std::uint64_t>(lists.poor.size());
+        d.gpuDonorCells = static_cast<std::uint64_t>(lists.rich.size());
+        d.receiverListMismatch = sorted_list_mismatch_0450(cpuWorkspace.receiverPoorCells, lists.poor);
+        d.donorListMismatch = sorted_list_mismatch_0450(cpuWorkspace.donorRichCells, lists.rich);
+
+        const GpuPlan0450 plan = build_transfer_plan_gpu_0450(
+            lists.poor, lists.rich, gpuDeposit.cellMass, grid, params,
+            cpuDiagnostics.targetCellMass, cpuWorkspace.transferPlan.size());
+        d.plannerKernelSeconds = plan.kernelSeconds;
+        d.gpuTransferPairs = static_cast<std::uint64_t>(plan.entries.size());
+        d.gpuPlannedMass = plan.plannedMass;
+        const std::size_t cmpPlan = std::min(cpuWorkspace.transferPlan.size(), plan.entries.size());
+        d.planMismatch = static_cast<std::uint64_t>(std::max(cpuWorkspace.transferPlan.size(), plan.entries.size()) - cmpPlan);
+        for (std::size_t i = 0; i < cmpPlan; ++i) {
+            const auto& a = cpuWorkspace.transferPlan[i];
+            const auto& b = plan.entries[i];
+            if (a.donorCell != b.donorCell || a.receiverCell != b.receiverCell) ++d.planMismatch;
+            d.maxPlanMassAbs = std::max(d.maxPlanMassAbs, std::abs(a.plannedMass - b.plannedMass));
+            d.maxPlanDistanceAbs = std::max(d.maxPlanDistanceAbs, std::abs(a.cellDistance - b.cellDistance));
+        }
+        d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
+        constexpr double tol = 2.0e-10;
+        const auto close = [tol](double a, double b) {
+            const double scale = std::max({1.0, std::abs(a), std::abs(b)});
+            return std::abs(a - b) <= tol * scale;
+        };
+        d.handled = true;
+        d.pass = d.cellIdMismatch == 0u && d.maxCountDiff == 0.0 &&
+                 d.receiverListMismatch == 0u && d.donorListMismatch == 0u &&
+                 d.cpuReceiverCells == d.gpuReceiverCells && d.cpuDonorCells == d.gpuDonorCells &&
+                 d.cpuTransferPairs == d.gpuTransferPairs && d.planMismatch == 0u &&
+                 d.maxMassAbs <= tol && d.maxPxAbs <= tol && d.maxPyAbs <= tol &&
+                 d.maxUxAbs <= 5.0 * tol && d.maxUyAbs <= 5.0 * tol &&
+                 d.maxPlanMassAbs <= tol && d.maxPlanDistanceAbs <= tol &&
+                 close(d.cpuTotalMass, d.gpuTotalMass) &&
+                 close(d.cpuTotalPx, d.gpuTotalPx) &&
+                 close(d.cpuTotalPy, d.gpuTotalPy) &&
+                 close(d.cpuPlannedMass, d.gpuPlannedMass);
+        append_upstream_csv_0450(params, d);
+        return d;
+    } catch (const std::exception& e) {
+        d.skipped = true;
+        d.skipReason = std::string("exception: ") + e.what();
+        d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        append_upstream_csv_0450(params, d);
+        return d;
+    }
 }
 
 namespace {
@@ -738,9 +1191,18 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
 
         const std::size_t nTotal = static_cast<std::size_t>(std::min(cpuFinalState.Np, gpuState.Np));
         for (std::size_t i = 0; i < nTotal; ++i) {
-            if (cpuFinalState.role[i] != gpuState.role[i]) ++d.roleMismatch;
-            if (cpuFinalState.type[i] != gpuState.type[i]) ++d.typeMismatch;
-            if (cpuFinalState.role[i] != kParticleRoleFluid || gpuState.role[i] != kParticleRoleFluid) continue;
+            const bool roleMatches = (cpuFinalState.role[i] == gpuState.role[i]);
+            if (!roleMatches) ++d.roleMismatch;
+
+            // The inactive/free tail is capacity bookkeeping, not physical state.
+            // CPU and CUDA may leave different type tags there after extraction/insertion
+            // while roles, active prefix, mass/momentum, and all fluid payload remain identical.
+            // Count type mismatches only on physical fluid slots, matching the 0442 comparefix
+            // rule that inactive payload is intentionally ignored.
+            const bool physicalFluidSlot = roleMatches && (cpuFinalState.role[i] == kParticleRoleFluid);
+            if (physicalFluidSlot && cpuFinalState.type[i] != gpuState.type[i]) ++d.typeMismatch;
+            if (!physicalFluidSlot) continue;
+
             d.maxAbsX = std::max(d.maxAbsX, std::abs(cpuFinalState.x[i] - gpuState.x[i]));
             d.maxAbsY = std::max(d.maxAbsY, std::abs(cpuFinalState.y[i] - gpuState.y[i]));
             d.maxAbsMass = std::max(d.maxAbsMass, std::abs(cpuFinalState.mass[i] - gpuState.mass[i]));

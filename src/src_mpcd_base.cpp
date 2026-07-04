@@ -1706,6 +1706,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cuda_resampling_pipeline_shadow_0445_requested(step);
     const bool cudaResamplingPipelineApply0448Requested =
         cuda_resampling_pipeline_apply_0448_requested();
+    const bool cudaResamplingUpstreamShadow0450Requested =
+        cuda_resampling_upstream_shadow_0450_requested(step);
     ParticleState cudaResamplingPipelineShadowInput0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
@@ -1716,6 +1718,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         // CPU-authoritative final state after remap+thermal.
         cudaResamplingPipelineShadowInput0445 = state;
         cudaResamplingPipelineShadowEditWorkspace0445 = workspace.resampling;
+    }
+
+    if (cudaResamplingUpstreamShadow0450Requested) {
+        // 0450: validate CUDA deposit/classification/poor-rich compaction and
+        // transfer planning inside the real solver before the CPU or CUDA
+        // apply path mutates extraction/insertion state. CPU remains authoritative.
+        (void)try_run_cuda_resampling_upstream_shadow_0450(
+            state, params, grid, step, workspace.resampling, result.resampling);
     }
 
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
