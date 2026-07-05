@@ -115,11 +115,13 @@ __global__ void compute_remap_scale_kernel_0445(int nc,
     remapCell[c] = 1u;
 }
 
-__global__ void accumulate_remap_target_energy_kernel_0445(std::size_t nActive,
+__global__ void accumulate_target_and_apply_remap_mass_kernel_0483(
+                                                           std::size_t nActive,
                                                            const std::uint8_t* role,
                                                            const int* cellId,
                                                            const std::uint8_t* remapCell,
-                                                           const double* mass,
+                                                           const double* scale,
+                                                           double* mass,
                                                            const double* vx,
                                                            const double* vy,
                                                            const double* ux,
@@ -130,23 +132,11 @@ __global__ void accumulate_remap_target_energy_kernel_0445(std::size_t nActive,
     if (role[i] != kParticleRoleFluid) return;
     const int c = cellId[i];
     if (c < 0 || !remapCell[c]) return;
+    const double massBefore = mass[i];
     const double dux = vx[i] - ux[c];
     const double duy = vy[i] - uy[c];
-    atomicAdd(&targetEnergy[c], 0.5 * mass[i] * (dux * dux + duy * duy));
-}
-
-__global__ void apply_remap_mass_kernel_0445(std::size_t nActive,
-                                             const std::uint8_t* role,
-                                             const int* cellId,
-                                             const std::uint8_t* remapCell,
-                                             const double* scale,
-                                             double* mass) {
-    const std::size_t i = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i >= nActive) return;
-    if (role[i] != kParticleRoleFluid) return;
-    const int c = cellId[i];
-    if (c < 0 || !remapCell[c]) return;
-    mass[i] *= scale[c];
+    atomicAdd(&targetEnergy[c], 0.5 * massBefore * (dux * dux + duy * duy));
+    mass[i] = massBefore * scale[c];
 }
 
 __global__ void accumulate_thermal_current_kernel_0445(std::size_t nActive,
@@ -285,8 +275,9 @@ GpuRemapThermal0445 apply_gpu_remap_thermal_0445(CudaParticleState& gpuState,
     GpuRemapThermal0445 out{};
     CUDA_CHECK_0445(cudaEventRecord(start));
     compute_remap_scale_kernel_0445<<<gridCells, block>>>(nc, targetCellMass, strength, dWet.ptr, dCount.ptr, dCellMass.ptr, dRemapScale.ptr, dRemapCell.ptr);
-    accumulate_remap_target_energy_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRemapCell.ptr, view.mass, view.vx, view.vy, dUx.ptr, dUy.ptr, dTargetEnergy.ptr);
-    apply_remap_mass_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRemapCell.ptr, dRemapScale.ptr, view.mass);
+    accumulate_target_and_apply_remap_mass_kernel_0483<<<gridParticles, block>>>(
+        nActive, view.role, dCellId.ptr, dRemapCell.ptr, dRemapScale.ptr,
+        view.mass, view.vx, view.vy, dUx.ptr, dUy.ptr, dTargetEnergy.ptr);
     CUDA_CHECK_0445(cudaEventRecord(stop));
     CUDA_CHECK_0445(cudaEventSynchronize(stop));
     CUDA_CHECK_0445(cudaGetLastError());
