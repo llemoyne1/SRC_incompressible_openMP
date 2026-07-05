@@ -1659,6 +1659,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
     }
     populationGuardEdited = populationGuard.applied;
+    if (populationGuardEdited) {
+        cuda_shared_particle_state_0251_invalidate("cpu_resampling_population_guard_edited_0472");
+    }
 
     if (populationGuardEdited) {
         {
@@ -1697,6 +1700,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         latentActivation = apply_resampling_latent_activation(
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
         planOrTransferEdited = planOrTransferEdited || latentActivation.applied;
+        if (latentActivation.applied) {
+            cuda_shared_particle_state_0251_invalidate("cpu_resampling_latent_activation_edited_0472");
+        }
     }
 
     ResamplingExtractionApplyDiagnostics extractionApply{};
@@ -1785,12 +1791,18 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                     apply_resampling_extraction_operations(state, workspace.resamplingPool, workspace.resampling);
             }
             planOrTransferEdited = planOrTransferEdited || extractionApply.applied;
+            if (extractionApply.applied) {
+                cuda_shared_particle_state_0251_invalidate("cpu_resampling_extraction_edited_0472");
+            }
 
             if (params.resamplingInsertionEnable && extractionApply.applied) {
                 MPCD_PROFILE_PHASE(result.profile, ResamplingInsertion);
                 insertionApply = apply_resampling_insertion_operations(
                     state, workspace.resamplingPool, workspace.resampling, grid);
                 planOrTransferEdited = planOrTransferEdited || insertionApply.applied;
+                if (insertionApply.applied) {
+                    cuda_shared_particle_state_0251_invalidate("cpu_resampling_insertion_edited_0472");
+                }
             }
         }
     }
@@ -1870,6 +1882,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                     capacityRemapTargetCellMass);
             }
         }
+        if (remapApply.applied || thermalApply.applied || massGuardApply.applied) {
+            cuda_shared_particle_state_0251_invalidate("resampling_remap_thermal_or_massguard_edited_0472");
+        }
         {
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
             result.resampling = deposit_weighted_real_fluid(
@@ -1896,6 +1911,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 state, workspace.resampling, thermalGate);
         }
         if (thermalApply.applied) {
+            cuda_shared_particle_state_0251_invalidate("resampling_late_thermal_edited_0472");
             {
                 MPCD_PROFILE_PHASE(result.profile, ResamplingPostThermalDeposit);
                 // 0172: thermal renormalization changes velocities only.

@@ -3,6 +3,7 @@
 #include "cuda_cell_moments.h"
 #include "cuda_cell_workspace.h"
 #include "cuda_resampling_particle_ops.h"
+#include "cuda_shared_particle_state_0251.h"
 
 #if defined(MPCD_ENABLE_CUDA_RESAMPLING) && defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
 
@@ -708,6 +709,9 @@ struct GpuDeviceCarrier0455 {
     std::uint64_t residentExternal0467B = 0u;
     std::uint64_t residentDeferredDownload0468 = 0u;
     std::uint64_t residentDirectCommit0471 = 0u;
+    std::uint64_t residentSharedState0472 = 0u;
+    std::uint64_t residentSharedUploadSkipped0472 = 0u;
+    std::uint64_t residentActivePrefixDownload0472 = 0u;
     std::uint64_t sparseGate0461 = 0u;
     std::uint64_t fullGate0461 = 1u;
     double gateDownloadSeconds = 0.0;
@@ -1397,7 +1401,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
                "cpuOps,gpuOps,invalidMaterializeOps,opMismatch,duplicateParticleMismatch,"
                "extractionApplied,insertionApplied,invalidApplyOps,"
                "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
-               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,residentCore0467,residentExternal0467B,residentDeferredDownload0468,residentDirectCommit0471,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
+               "uploadSeconds,materializeKernelSeconds,cpuOpCarrier0458,donorSliceMaterializer0459,thrustCellListMaterializer0460,residentCore0467,residentExternal0467B,residentDeferredDownload0468,residentDirectCommit0471,residentSharedState0472,residentSharedUploadSkipped0472,residentActivePrefixDownload0472,sparseGate0461,fullGate0461,gateDownloadSeconds,applyKernelSeconds,stateDownloadSeconds,totalSeconds\n";
     }
     out << step << ',' << (attempted ? 1 : 0) << ',' << (handled ? 1 : 0) << ','
         << (applied ? 1 : 0) << ',' << (pass ? 1 : 0) << ',' << (skipped ? 1 : 0) << ','
@@ -1407,7 +1411,7 @@ void append_device_carrier_csv_0455(const SimulationParams& params,
         << d.invalidApplyOps << ',' << d.maxMassAbs << ',' << d.maxPxAbs << ',' << d.maxPyAbs << ','
         << d.cpuMass << ',' << d.gpuMass << ',' << d.cpuPx << ',' << d.gpuPx << ','
         << d.cpuPy << ',' << d.gpuPy << ',' << d.cpuKe << ',' << d.gpuKe << ','
-        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.residentCore0467 << ',' << d.residentExternal0467B << ',' << d.residentDeferredDownload0468 << ',' << d.residentDirectCommit0471 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
+        << d.uploadSeconds << ',' << d.materializeKernelSeconds << ',' << d.cpuOpCarrier0458 << ',' << d.donorSliceMaterializer0459 << ',' << d.thrustCellListMaterializer0460 << ',' << d.residentCore0467 << ',' << d.residentExternal0467B << ',' << d.residentDeferredDownload0468 << ',' << d.residentDirectCommit0471 << ',' << d.residentSharedState0472 << ',' << d.residentSharedUploadSkipped0472 << ',' << d.residentActivePrefixDownload0472 << ',' << d.sparseGate0461 << ',' << d.fullGate0461 << ',' << d.gateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.stateDownloadSeconds << ',' << d.totalSeconds << '\n';
 }
 
@@ -1870,6 +1874,14 @@ bool cuda_resampling_resident_upstream_coupled_probe_0470_requested() {
 
 bool cuda_resampling_direct_state_commit_0471_requested() {
     return env_truthy_0445("MPCD_CUDA_RESAMPLING_DIRECT_STATE_COMMIT_0471");
+}
+
+bool cuda_resampling_shared_state_direct_commit_0472_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_SHARED_STATE_DIRECT_COMMIT_0472");
+}
+
+bool cuda_resampling_active_prefix_download_0472_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_ACTIVE_PREFIX_DOWNLOAD_0472");
 }
 
 CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_shadow_0450(
@@ -2439,31 +2451,62 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_pa
                 // occurs and the original host state is still intact.
                 const auto txWrapper0 = std::chrono::steady_clock::now();
                 const auto txCarrier0 = std::chrono::steady_clock::now();
-                const auto txUpload0 = std::chrono::steady_clock::now();
-                CudaParticleState gpuState{};
-                CudaParticleStateDiagnostics uploadDiag{};
-                gpuState.upload_all(state, &uploadDiag);
-                const double externalUploadSeconds =
-                    std::chrono::duration<double>(std::chrono::steady_clock::now() - txUpload0).count() + uploadDiag.uploadSeconds;
+                const bool useSharedState0472 = cuda_resampling_shared_state_direct_commit_0472_requested();
+                const bool activePrefixDownload0472 = cuda_resampling_active_prefix_download_0472_requested();
+
+                CudaParticleState localGpuState{};
+                CudaParticleState* gpuStatePtr = nullptr;
+                bool sharedWasFresh0472 = false;
+                double externalUploadSeconds = 0.0;
+                if (useSharedState0472) {
+                    gpuStatePtr = &cuda_shared_particle_state_0251();
+                    sharedWasFresh0472 = cuda_shared_particle_state_0251_is_fresh();
+                    if (!sharedWasFresh0472) {
+                        const auto txUpload0 = std::chrono::steady_clock::now();
+                        CudaParticleStateDiagnostics uploadDiag{};
+                        gpuStatePtr->upload_all(state, &uploadDiag);
+                        externalUploadSeconds =
+                            std::chrono::duration<double>(std::chrono::steady_clock::now() - txUpload0).count() + uploadDiag.uploadSeconds;
+                    }
+                } else {
+                    gpuStatePtr = &localGpuState;
+                    const auto txUpload0 = std::chrono::steady_clock::now();
+                    CudaParticleStateDiagnostics uploadDiag{};
+                    gpuStatePtr->upload_all(state, &uploadDiag);
+                    externalUploadSeconds =
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - txUpload0).count() + uploadDiag.uploadSeconds;
+                }
 
                 GpuDeviceCarrier0455 dc = apply_gpu_particle_edits_device_carrier_resident_0467(
-                    gpuState, state, editWorkspace, grid, params, false);
+                    *gpuStatePtr, state, editWorkspace, grid, params, false);
                 dc.uploadSeconds += externalUploadSeconds;
                 dc.totalSeconds += externalUploadSeconds;
                 dc.residentExternal0467B = 1u;
                 dc.residentDeferredDownload0468 = 1u;
                 dc.residentDirectCommit0471 = 1u;
+                dc.residentSharedState0472 = useSharedState0472 ? 1u : 0u;
+                dc.residentSharedUploadSkipped0472 = (useSharedState0472 && sharedWasFresh0472) ? 1u : 0u;
+                dc.residentActivePrefixDownload0472 = activePrefixDownload0472 ? 1u : 0u;
 
                 const bool ok = (dc.pass && dc.invalidMaterializeOps == 0u && dc.invalidApplyOps == 0u &&
                                  dc.extractionApplied == d.passiveOps && dc.insertionApplied == d.passiveOps);
                 if (ok) {
                     const auto txDownload0 = std::chrono::steady_clock::now();
                     CudaParticleStateDiagnostics downloadDiag{};
-                    gpuState.download_all(state, &downloadDiag);
+                    if (activePrefixDownload0472) {
+                        gpuStatePtr->download_active_prefix(state, &downloadDiag);
+                    } else {
+                        gpuStatePtr->download_all(state, &downloadDiag);
+                    }
                     const double externalStateDownloadSeconds =
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - txDownload0).count() + downloadDiag.downloadSeconds;
                     dc.stateDownloadSeconds += externalStateDownloadSeconds;
                     dc.totalSeconds += externalStateDownloadSeconds;
+                    if (useSharedState0472) {
+                        cuda_shared_particle_state_0251_mark_fresh("resampling_direct_commit_0472");
+                    }
+                } else if (useSharedState0472) {
+                    cuda_shared_particle_state_0251_invalidate("resampling_direct_commit_0472_failed");
                 }
 
                 const double txDeviceCarrierSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - txCarrier0).count();
