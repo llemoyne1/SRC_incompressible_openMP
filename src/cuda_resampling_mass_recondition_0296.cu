@@ -557,7 +557,6 @@ CudaResamplingMassRecondition0296Diagnostics try_apply_cuda_resampling_mass_reco
         g_massReconditionBuffers0296.dCellChanged,
         g_massReconditionBuffers0296.dCounters);
     cuda_check_0296(cudaGetLastError(), "launch count_changed_cells_kernel_0296");
-    cuda_check_0296(cudaDeviceSynchronize(), "synchronize mass recondition kernels");
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 

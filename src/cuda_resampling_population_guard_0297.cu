@@ -1421,7 +1421,6 @@ std::vector<double> compute_cell_krel_0298(int nParticles,
     accumulate_cell_relative_energy_kernel_0298<<<particleGrid, block>>>(
         nParticles, pv.vx, pv.vy, pv.mass, pv.role, cv.cellId, cv.cellUx, cv.cellUy, dKrel);
     cuda_check_0297(cudaGetLastError(), "launch accumulate_cell_relative_energy_kernel_0298");
-    cuda_check_0297(cudaDeviceSynchronize(), "synchronize 0298 krel accumulation");
     std::vector<double> out(static_cast<std::size_t>(numCells), 0.0);
     cuda_check_0297(cudaMemcpy(out.data(), dKrel, sizeof(double) * static_cast<std::size_t>(numCells),
                                cudaMemcpyDeviceToHost),
@@ -1694,8 +1693,6 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
                 g_populationGuardBuffers0297.dEmptyAdded0319,
                 g_populationGuardBuffers0297.dCounters);
             cuda_check_0297(cudaGetLastError(), "launch empty_refill_cells_kernel_0319");
-            cuda_check_0297(cudaDeviceSynchronize(), "synchronize 0319 empty refill");
-
             unsigned long long hRefillCounters0319[24] = {};
             double hEmptyAdded0319[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
             cuda_check_0297(cudaMemcpy(hRefillCounters0319, g_populationGuardBuffers0297.dCounters,
@@ -1754,8 +1751,6 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardBuffers0297.dCounters);
         cuda_check_0297(cudaGetLastError(), "launch merge_rich_cells_kernel_0297");
     }
-    cuda_check_0297(cudaDeviceSynchronize(), "synchronize after rich merge");
-
     const bool usedTailInactivePool0313 = !cfg.activePrefixSafe0315 && build_inactive_tail_list_0313(
         static_cast<int>(hostMirror.Np), hPoorCount, pv.role, block,
         g_populationGuardBuffers0297.dInactiveList,
@@ -1799,7 +1794,6 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardBuffers0297.dCounters);
         cuda_check_0297(cudaGetLastError(), "launch merge_rich_cells_prefix_safe_kernel_0315");
     }
-    cuda_check_0297(cudaDeviceSynchronize(), "synchronize population guard kernels");
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 
@@ -1898,7 +1892,6 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             restoreAbsTol0298, restoreRelTol0298,
             g_populationGuardBuffers0297.dEnergyRestoreCounters0298);
         cuda_check_0297(cudaGetLastError(), "launch restore_cell_relative_energy_kernel_0298");
-        cuda_check_0297(cudaDeviceSynchronize(), "synchronize 0298 energy restoration");
         unsigned long long hEnergyCounters0298[2] = {0ull, 0ull};
         cuda_check_0297(cudaMemcpy(hEnergyCounters0298,
                                    g_populationGuardBuffers0297.dEnergyRestoreCounters0298,
