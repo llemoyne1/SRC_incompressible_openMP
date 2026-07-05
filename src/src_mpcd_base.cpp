@@ -1910,7 +1910,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false,
-                ResamplingDepositProfileContext::PostRemap);
+                ResamplingDepositProfileContext::PostRemap, true);
         }
         {
             // Remap, thermal-after-remap and particle-mass guards only update

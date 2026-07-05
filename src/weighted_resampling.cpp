@@ -3228,9 +3228,13 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
         resize_weighted_real_fluid_deposit(ws, active_fluid_count(state), nc, nt);
     }
 
-    const bool useExistingCellIds =
-        reuseExistingCellIds && profileContext == ResamplingDepositProfileContext::PostGuard &&
-        ws.cellId.size() >= n;
+    // Guard and remap/thermal stages do not move particles. Reusing the
+    // already-validated cell map avoids another geometric lookup per active
+    // particle while preserving the exact cell reductions and classifications.
+    const bool reuseContext =
+        profileContext == ResamplingDepositProfileContext::PostGuard ||
+        profileContext == ResamplingDepositProfileContext::PostRemap;
+    const bool useExistingCellIds = reuseExistingCellIds && reuseContext && ws.cellId.size() >= n;
 
     {
         MPCD_DEPOSIT_PROFILE(depositProfileSeconds, ClearArrays);
