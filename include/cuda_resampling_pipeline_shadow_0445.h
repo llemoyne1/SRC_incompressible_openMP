@@ -138,6 +138,13 @@ struct CudaResamplingUpstreamShadow0450Diagnostics {
     double gpuPlannedMass = 0.0;
     std::uint64_t cpuPassiveOps = 0u;
 
+    // 0474: upstream CUDA gate may reuse the process-local shared CudaParticleState.
+    // This keeps 0450/0451 validation from reintroducing a full H2D upload
+    // when the resident/shared state is already authoritative.
+    std::uint64_t upstreamSharedState0474 = 0u;
+    std::uint64_t upstreamUploadSkipped0474 = 0u;
+    double uploadSeconds = 0.0;
+
     double depositKernelSeconds = 0.0;
     double depositDownloadSeconds = 0.0;
     double compactKernelSeconds = 0.0;

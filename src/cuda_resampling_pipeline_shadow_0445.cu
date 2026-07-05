@@ -690,6 +690,10 @@ bool cuda_resampling_host_patchback_0473_requested() {
     return env_truthy_0445("MPCD_CUDA_RESAMPLING_HOST_PATCHBACK_0473");
 }
 
+bool cuda_resampling_upstream_shared_state_0474_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_UPSTREAM_SHARED_STATE_0474");
+}
+
 struct GpuDeviceCarrier0455 {
     std::uint64_t cpuOps = 0u;
     std::uint64_t gpuOps = 0u;
@@ -1765,6 +1769,7 @@ void append_upstream_csv_0450(const SimulationParams& params,
             << "cpuTotalMass,gpuTotalMass,cpuTotalPx,gpuTotalPx,cpuTotalPy,gpuTotalPy,"
             << "cpuReceiverCells,gpuReceiverCells,cpuDonorCells,gpuDonorCells,receiverListMismatch,donorListMismatch,"
             << "cpuTransferPairs,gpuTransferPairs,planMismatch,maxPlanMassAbs,maxPlanDistanceAbs,cpuPlannedMass,gpuPlannedMass,cpuPassiveOps,"
+            << "upstreamSharedState0474,upstreamUploadSkipped0474,uploadSeconds,"
             << "depositKernelSeconds,depositDownloadSeconds,compactKernelSeconds,plannerKernelSeconds,totalSeconds\n";
     }
     out << d.step << ',' << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ','
@@ -1778,7 +1783,9 @@ void append_upstream_csv_0450(const SimulationParams& params,
         << d.receiverListMismatch << ',' << d.donorListMismatch << ','
         << d.cpuTransferPairs << ',' << d.gpuTransferPairs << ',' << d.planMismatch << ','
         << d.maxPlanMassAbs << ',' << d.maxPlanDistanceAbs << ',' << d.cpuPlannedMass << ',' << d.gpuPlannedMass << ','
-        << d.cpuPassiveOps << ',' << d.depositKernelSeconds << ',' << d.depositDownloadSeconds << ','
+        << d.cpuPassiveOps << ','
+        << d.upstreamSharedState0474 << ',' << d.upstreamUploadSkipped0474 << ',' << d.uploadSeconds << ','
+        << d.depositKernelSeconds << ',' << d.depositDownloadSeconds << ','
         << d.compactKernelSeconds << ',' << d.plannerKernelSeconds << ',' << d.totalSeconds << '\n';
 }
 
@@ -1998,9 +2005,22 @@ CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_sha
             return d;
         }
 
-        CudaParticleState gpuState{};
+        CudaParticleState localGpuState{};
+        CudaParticleState* gpuStatePtr = &localGpuState;
         CudaParticleStateDiagnostics uploadDiag{};
-        gpuState.upload_all(state, &uploadDiag);
+        if (cuda_resampling_upstream_shared_state_0474_requested()) {
+            d.upstreamSharedState0474 = 1u;
+            gpuStatePtr = &cuda_shared_particle_state_0251();
+            if (cuda_shared_particle_state_0251_is_fresh()) {
+                d.upstreamUploadSkipped0474 = 1u;
+            } else {
+                gpuStatePtr->upload_all(state, &uploadDiag);
+                cuda_shared_particle_state_0251_mark_fresh("resampling_upstream_shadow_0474");
+            }
+        } else {
+            gpuStatePtr->upload_all(state, &uploadDiag);
+        }
+        d.uploadSeconds = uploadDiag.uploadSeconds;
         CudaCellWorkspace cellWorkspace{};
         CudaCellMoments gpuDeposit{};
         CudaCellMomentsDiagnostics depositDiag{};
@@ -2010,7 +2030,7 @@ CudaResamplingUpstreamShadow0450Diagnostics try_run_cuda_resampling_upstream_sha
         options.enableAllFluidFastPath = true;
         options.enableUniformMassFastPath = true;
         cuda_deposit_cell_moments_atomic_from_persistent_state(
-            state, gpuState, cellWorkspace, grid, GridShift{}, params, gpuDeposit, &depositDiag, options);
+            state, *gpuStatePtr, cellWorkspace, grid, GridShift{}, params, gpuDeposit, &depositDiag, options);
         d.depositKernelSeconds = depositDiag.kernelSeconds;
         d.depositDownloadSeconds = depositDiag.downloadSeconds;
 
