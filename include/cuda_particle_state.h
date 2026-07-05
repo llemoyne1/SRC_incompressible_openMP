@@ -101,6 +101,10 @@ public:
     void upload_masses_and_roles(const ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr);
 
     void download_velocities(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
+    // Download only the active-prefix fields changed by resampling remap and
+    // thermal renormalization. Positions, types and roles remain unchanged.
+    void download_masses_and_velocities(ParticleState& state,
+                                        CudaParticleStateDiagnostics* diag = nullptr) const;
     void download_active_prefix(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
     void download_all(ParticleState& state, CudaParticleStateDiagnostics* diag = nullptr) const;
 

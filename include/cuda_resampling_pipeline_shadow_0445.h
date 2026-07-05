@@ -86,6 +86,10 @@ struct CudaResamplingPipelineApply0448Diagnostics {
     std::uint64_t gpuInvalidOperations = 0u;
     std::uint64_t gpuRemapCells = 0u;
     std::uint64_t gpuThermalCells = 0u;
+    std::uint64_t remapSharedState = 0u;
+    std::uint64_t remapUploadSkipped = 0u;
+    double remapStateUploadSeconds = 0.0;
+    double remapStateDownloadSeconds = 0.0;
     double applyKernelSeconds = 0.0;
     double remapKernelSeconds = 0.0;
     double thermalKernelSeconds = 0.0;

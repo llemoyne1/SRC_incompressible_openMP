@@ -1872,6 +1872,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 
     if (params.resamplingRemapEnable && massRenormalizationStep) {
         bool handledByCudaResamplingApply0448 = false;
+        bool sharedStatePreservedByCudaRemap = false;
         if (cudaResamplingPipelineApply0448Requested) {
             MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
             const CudaResamplingPipelineApply0448Diagnostics cudaApply0448 =
@@ -1880,6 +1881,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                     resamplingMassCorrectionStrength, capacityRemapTargetCellMass,
                     step, remapApply, thermalApply);
             handledByCudaResamplingApply0448 = cudaApply0448.handled;
+            sharedStatePreservedByCudaRemap = cudaApply0448.handled && cudaApply0448.remapSharedState != 0u;
         }
         if (!handledByCudaResamplingApply0448) {
             {
@@ -1900,7 +1902,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                     capacityRemapTargetCellMass);
             }
         }
-        if (remapApply.applied || thermalApply.applied || massGuardApply.applied) {
+        if ((remapApply.applied || thermalApply.applied || massGuardApply.applied) &&
+            !sharedStatePreservedByCudaRemap) {
             cuda_shared_particle_state_0251_invalidate("resampling_remap_thermal_or_massguard_edited_0472");
         }
         {

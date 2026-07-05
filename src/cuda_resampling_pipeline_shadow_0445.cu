@@ -92,30 +92,6 @@ void copy_device_prefix_to_host_0473(const T* ptr, std::size_t count, std::vecto
     if (count > 0u) CUDA_CHECK_0445(cudaMemcpy(out.data(), ptr, count * sizeof(T), cudaMemcpyDeviceToHost));
 }
 
-struct GpuState0445 {
-    DeviceBuffer0445<double> mass;
-    DeviceBuffer0445<double> vx;
-    DeviceBuffer0445<double> vy;
-    DeviceBuffer0445<std::uint8_t> role;
-    explicit GpuState0445(const ParticleState& s)
-        : mass(static_cast<std::size_t>(s.Np)),
-          vx(static_cast<std::size_t>(s.Np)),
-          vy(static_cast<std::size_t>(s.Np)),
-          role(static_cast<std::size_t>(s.Np)) {
-        std::vector<std::uint8_t> roles(static_cast<std::size_t>(s.Np), kParticleRoleInactive);
-        for (std::size_t i = 0; i < roles.size() && i < s.role.size(); ++i) roles[i] = s.role[i];
-        mass.copy_from_host(s.mass);
-        vx.copy_from_host(s.vx);
-        vy.copy_from_host(s.vy);
-        role.copy_from_host(roles);
-    }
-    void download_to(ParticleState& s) const {
-        mass.copy_to_host(s.mass);
-        vx.copy_to_host(s.vx);
-        vy.copy_to_host(s.vy);
-    }
-};
-
 __global__ void compute_remap_scale_kernel_0445(int nc,
                                                 double targetCellMass,
                                                 double strength,
@@ -253,20 +229,29 @@ std::uint64_t count_effective_scaled_cells_0445(const std::vector<std::uint8_t>&
 struct GpuRemapThermal0445 {
     std::uint64_t remapCells = 0u;
     std::uint64_t thermalCells = 0u;
+    std::uint64_t sharedState = 0u;
+    std::uint64_t uploadSkipped = 0u;
+    double stateUploadSeconds = 0.0;
+    double stateDownloadSeconds = 0.0;
     double remapSeconds = 0.0;
     double thermalSeconds = 0.0;
 };
 
-GpuRemapThermal0445 apply_gpu_remap_thermal_0445(ParticleState& gpuOut,
+GpuRemapThermal0445 apply_gpu_remap_thermal_0445(CudaParticleState& gpuState,
+                                                 ParticleState& hostState,
                                                  const WeightedRealFluidDepositWorkspace& ws,
                                                  const WeightedResamplingDiagnostics& dep,
                                                  double strength,
                                                  double targetCellMassOverride) {
-    const std::size_t nActive = static_cast<std::size_t>(gpuOut.NactiveFluid);
+    const std::size_t nActive = static_cast<std::size_t>(hostState.NactiveFluid);
     const int nc = ws.allocatedCells;
     if (nc <= 0) throw std::runtime_error("0445 invalid cell count");
-    GpuState0445 gs(gpuOut);
-    std::vector<int> cellIdFull(static_cast<std::size_t>(gpuOut.Np), -1);
+    const CudaParticleDeviceView view = gpuState.device_view();
+    if (view.n != hostState.Np || view.nActiveFluid != hostState.NactiveFluid ||
+        view.mass == nullptr || view.vx == nullptr || view.vy == nullptr || view.role == nullptr) {
+        throw std::runtime_error("0445 shared particle state shape mismatch");
+    }
+    std::vector<int> cellIdFull(static_cast<std::size_t>(hostState.Np), -1);
     for (std::size_t i = 0; i < ws.cellId.size() && i < cellIdFull.size(); ++i) cellIdFull[i] = ws.cellId[i];
 
     DeviceBuffer0445<int> dCellId(cellIdFull.size()); dCellId.copy_from_host(cellIdFull);
@@ -300,17 +285,17 @@ GpuRemapThermal0445 apply_gpu_remap_thermal_0445(ParticleState& gpuOut,
     GpuRemapThermal0445 out{};
     CUDA_CHECK_0445(cudaEventRecord(start));
     compute_remap_scale_kernel_0445<<<gridCells, block>>>(nc, targetCellMass, strength, dWet.ptr, dCount.ptr, dCellMass.ptr, dRemapScale.ptr, dRemapCell.ptr);
-    accumulate_remap_target_energy_kernel_0445<<<gridParticles, block>>>(nActive, gs.role.ptr, dCellId.ptr, dRemapCell.ptr, gs.mass.ptr, gs.vx.ptr, gs.vy.ptr, dUx.ptr, dUy.ptr, dTargetEnergy.ptr);
-    apply_remap_mass_kernel_0445<<<gridParticles, block>>>(nActive, gs.role.ptr, dCellId.ptr, dRemapCell.ptr, dRemapScale.ptr, gs.mass.ptr);
+    accumulate_remap_target_energy_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRemapCell.ptr, view.mass, view.vx, view.vy, dUx.ptr, dUy.ptr, dTargetEnergy.ptr);
+    apply_remap_mass_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRemapCell.ptr, dRemapScale.ptr, view.mass);
     CUDA_CHECK_0445(cudaEventRecord(stop));
     CUDA_CHECK_0445(cudaEventSynchronize(stop));
     CUDA_CHECK_0445(cudaGetLastError());
     out.remapSeconds = elapsed();
 
     CUDA_CHECK_0445(cudaEventRecord(start));
-    accumulate_thermal_current_kernel_0445<<<gridParticles, block>>>(nActive, gs.role.ptr, dCellId.ptr, dRemapCell.ptr, gs.mass.ptr, gs.vx.ptr, gs.vy.ptr, dUx.ptr, dUy.ptr, dCurrentEnergy.ptr);
+    accumulate_thermal_current_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRemapCell.ptr, view.mass, view.vx, view.vy, dUx.ptr, dUy.ptr, dCurrentEnergy.ptr);
     compute_thermal_scale_kernel_0445<<<gridCells, block>>>(nc, dWet.ptr, dCount.ptr, dRemapCell.ptr, dTargetEnergy.ptr, dCurrentEnergy.ptr, dThermalScale.ptr, dRenormCell.ptr);
-    apply_thermal_velocity_kernel_0445<<<gridParticles, block>>>(nActive, gs.role.ptr, dCellId.ptr, dRenormCell.ptr, dThermalScale.ptr, dUx.ptr, dUy.ptr, gs.vx.ptr, gs.vy.ptr);
+    apply_thermal_velocity_kernel_0445<<<gridParticles, block>>>(nActive, view.role, dCellId.ptr, dRenormCell.ptr, dThermalScale.ptr, dUx.ptr, dUy.ptr, view.vx, view.vy);
     CUDA_CHECK_0445(cudaEventRecord(stop));
     CUDA_CHECK_0445(cudaEventSynchronize(stop));
     CUDA_CHECK_0445(cudaGetLastError());
@@ -324,7 +309,6 @@ GpuRemapThermal0445 apply_gpu_remap_thermal_0445(ParticleState& gpuOut,
     dThermalScale.copy_to_host(thermalScaleHost);
     out.remapCells = count_effective_scaled_cells_0445(remapHost, remapScaleHost);
     out.thermalCells = count_effective_scaled_cells_0445(renormHost, thermalScaleHost);
-    gs.download_to(gpuOut);
     CUDA_CHECK_0445(cudaEventDestroy(start));
     CUDA_CHECK_0445(cudaEventDestroy(stop));
     return out;
@@ -2677,6 +2661,7 @@ void append_apply_csv_0448(const SimulationParams& params,
     if (!exists) {
         out << "step,stage,attempted,handled,applied,skipped,skipReason,nActive,passiveOps,"
                "gpuExtractionApplied,gpuInsertionApplied,gpuInvalidOperations,gpuRemapCells,gpuThermalCells,"
+               "remapSharedState,remapUploadSkipped,remapStateUploadSeconds,remapStateDownloadSeconds,"
                "applyKernelSeconds,remapKernelSeconds,thermalKernelSeconds,totalSeconds\n";
     }
     out << d.step << ',' << csv_escape_0445(d.stage) << ','
@@ -2685,6 +2670,8 @@ void append_apply_csv_0448(const SimulationParams& params,
         << d.nActive << ',' << d.passiveOps << ','
         << d.gpuExtractionApplied << ',' << d.gpuInsertionApplied << ',' << d.gpuInvalidOperations << ','
         << d.gpuRemapCells << ',' << d.gpuThermalCells << ','
+        << d.remapSharedState << ',' << d.remapUploadSkipped << ','
+        << d.remapStateUploadSeconds << ',' << d.remapStateDownloadSeconds << ','
         << d.applyKernelSeconds << ',' << d.remapKernelSeconds << ',' << d.thermalKernelSeconds << ',' << d.totalSeconds << '\n';
 }
 
@@ -3236,16 +3223,33 @@ CudaResamplingPipelineApply0448Diagnostics try_apply_cuda_resampling_pipeline_re
             append_apply_csv_0448(params, d);
             return d;
         }
-        ParticleState tmp = state;
         const double targetOverride = (targetCellMassOverride > 0.0) ? targetCellMassOverride : -1.0;
-        const GpuRemapThermal0445 gd = apply_gpu_remap_thermal_0445(
-            tmp, remapWorkspace, remapDepositDiagnostics, massCorrectionStrength, targetOverride);
-        state = std::move(tmp);
+        CudaParticleState& shared = cuda_shared_particle_state_0251();
+        const bool sharedFresh = cuda_shared_particle_state_0251_is_fresh() &&
+                                 shared.size() == state.Np &&
+                                 shared.active_fluid_size() == state.NactiveFluid;
+        CudaParticleStateDiagnostics uploadDiag{};
+        if (!sharedFresh) {
+            shared.upload_all(state, &uploadDiag);
+        }
+        GpuRemapThermal0445 gd = apply_gpu_remap_thermal_0445(
+            shared, state, remapWorkspace, remapDepositDiagnostics, massCorrectionStrength, targetOverride);
+        gd.sharedState = 1u;
+        gd.uploadSkipped = sharedFresh ? 1u : 0u;
+        gd.stateUploadSeconds = uploadDiag.uploadSeconds;
+        cuda_shared_particle_state_0251_mark_fresh("resampling_remap_thermal_0477");
+        CudaParticleStateDiagnostics downloadDiag{};
+        shared.download_masses_and_velocities(state, &downloadDiag);
+        gd.stateDownloadSeconds = downloadDiag.downloadSeconds;
         d.gpuRemapCells = gd.remapCells;
         d.gpuThermalCells = gd.thermalCells;
+        d.remapSharedState = gd.sharedState;
+        d.remapUploadSkipped = gd.uploadSkipped;
+        d.remapStateUploadSeconds = gd.stateUploadSeconds;
+        d.remapStateDownloadSeconds = gd.stateDownloadSeconds;
         d.remapKernelSeconds = gd.remapSeconds;
         d.thermalKernelSeconds = gd.thermalSeconds;
-        d.totalSeconds = gd.remapSeconds + gd.thermalSeconds;
+        d.totalSeconds = gd.stateUploadSeconds + gd.remapSeconds + gd.thermalSeconds + gd.stateDownloadSeconds;
 
         remapApply.attempted = true;
         remapApply.applied = true;
@@ -3322,8 +3326,11 @@ CudaResamplingPipelineShadow0445Diagnostics try_run_cuda_resampling_pipeline_sha
         d.gpuInvalidOperations = pa.invalidOperations;
         d.applyKernelSeconds = pa.kernelSeconds;
         const double targetOverride = cpuRemap.targetCellMass > 0.0 ? cpuRemap.targetCellMass : -1.0;
+        CudaParticleState shadowGpuState{};
+        shadowGpuState.upload_all(gpuState);
         const GpuRemapThermal0445 gd = apply_gpu_remap_thermal_0445(
-            gpuState, remapWorkspace, remapDepositDiagnostics, cpuRemap.massCorrectionStrength, targetOverride);
+            shadowGpuState, gpuState, remapWorkspace, remapDepositDiagnostics, cpuRemap.massCorrectionStrength, targetOverride);
+        shadowGpuState.download_masses_and_velocities(gpuState);
         d.gpuRemapCells = gd.remapCells;
         d.gpuThermalCells = gd.thermalCells;
         d.remapKernelSeconds = gd.remapSeconds;

@@ -10,6 +10,7 @@ LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-0}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-0}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 MAX_SUMMARY_DELTA_TOL="${MAX_SUMMARY_DELTA_TOL:-1e-9}"
+CPU_OP_CARRIER_0458="${CPU_OP_CARRIER_0458:-0}"
 rm -rf "$BASE_PROBE_ROOT"
 mkdir -p "$BASE_PROBE_ROOT"
 launch_csv="$BASE_PROBE_ROOT/launch_status.csv"
@@ -38,7 +39,7 @@ PY
     MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451=1 \
     MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_0455=1 \
     MPCD_CUDA_RESAMPLING_THRUST_CELL_LIST_MATERIALIZER_0460=1 \
-    MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0 \
+    MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458="$CPU_OP_CARRIER_0458" \
     MPCD_CUDA_RESAMPLING_DONOR_SLICE_MATERIALIZER_0459=0 \
     MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461=1 \
     MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_GATE_EVERY_0461="$DEVICE_GATE_EVERY" \
@@ -59,6 +60,7 @@ python3 - <<'PY'
 import csv, pathlib, os
 root=pathlib.Path(os.environ.get('BASE_PROBE_ROOT','runs/0461_sparse_gate_probe'))
 tol=float(os.environ.get('MAX_SUMMARY_DELTA_TOL','1e-9'))
+expect_cpu_op_carrier=os.environ.get('CPU_OP_CARRIER_0458','0') == '1'
 keys=['nFluidParticles','totalMass','Px','Py','meanKinetic','kBTEstimate','meanN','stdN']
 def rows(p):
     if not p.exists(): return []
@@ -83,15 +85,18 @@ for mode,meta in launch.items():
     full=[r for r in handled if int(num(r,'fullGate0461'))==1]
     sparse=[r for r in handled if int(num(r,'sparseGate0461'))==1]
     def mx(k): return max([abs(num(r,k)) for r in handled] or [0.0])
+    carrier_mode_ok=(mx('cpuOpCarrier0458')>0) if expect_cpu_op_carrier else (mx('thrustCellListMaterializer0460')>0)
     pass_like=(meta['rc']==0 and deltas.get(max_key,0.0)<=tol and len(handled)>0 and len(full)>0 and
                mx('invalidMaterializeOps')==0 and mx('invalidApplyOps')==0 and mx('opMismatch')==0 and mx('duplicateParticleMismatch')==0 and
-               mx('thrustCellListMaterializer0460')>0)
+               carrier_mode_ok)
     out.append({'mode':mode,'pass':int(pass_like),'smokeExit':meta['rc'],'pairWall':meta['elapsed'],
                 'maxSummaryDelta':deltas.get(max_key,0.0),'maxDeltaKey':max_key,'csvRows':len(dev),'handledRows':len(handled),
                 'fullGateRows':len(full),'sparseRows':len(sparse),'maxCpuOps':mx('cpuOps'),'maxGpuOps':mx('gpuOps'),
                 'invalidMat':mx('invalidMaterializeOps'),'invalidApply':mx('invalidApplyOps'),'opMismatch':mx('opMismatch'),
                 'dupMismatch':mx('duplicateParticleMismatch'),'maxMaterializeSeconds':mx('materializeKernelSeconds'),
-                'maxGateDownloadSeconds':mx('gateDownloadSeconds'),'maxDeviceTotalSeconds':mx('totalSeconds')})
+                'maxGateDownloadSeconds':mx('gateDownloadSeconds'),'maxDeviceTotalSeconds':mx('totalSeconds'),
+                'cpuOpCarrierRows':sum(1 for r in handled if num(r,'cpuOpCarrier0458')>0),
+                'thrustCarrierRows':sum(1 for r in handled if num(r,'thrustCellListMaterializer0460')>0)})
 summary=root/'sparse_gate_summary_0461.csv'
 with summary.open('w',newline='') as f:
     w=csv.DictWriter(f,fieldnames=list(out[0].keys()) if out else ['mode']); w.writeheader(); w.writerows(out)

@@ -691,6 +691,37 @@ void CudaParticleState::download_velocities(ParticleState& state, CudaParticleSt
 #endif
 }
 
+void CudaParticleState::download_masses_and_velocities(ParticleState& state,
+                                                       CudaParticleStateDiagnostics* diag) const {
+#ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
+    (void)state; (void)diag;
+    throw std::runtime_error("CudaParticleState::download_masses_and_velocities called without MPCD_ENABLE_CUDA_PARTICLE_STATE");
+#else
+    if (impl_ == nullptr) throw std::runtime_error("CudaParticleState::download_masses_and_velocities: null impl");
+    if (state.Np != impl_->n) throw std::runtime_error("CudaParticleState::download_masses_and_velocities: host particle count mismatch");
+    validate_particle_state_shape_only_0315j(state, "CudaParticleState::download_masses_and_velocities");
+    const std::uint64_t nActive64 = impl_->nActiveFluid;
+    if (nActive64 > impl_->n) throw std::runtime_error("CudaParticleState::download_masses_and_velocities: active count exceeds capacity");
+    const std::size_t n = static_cast<std::size_t>(nActive64);
+    const std::size_t bytesD = n * sizeof(double);
+    const auto t0 = Clock::now();
+    if (n > 0u) {
+        MPCD_CUDA_CHECK(cudaMemcpy(state.mass.data(), impl_->mass, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.vx.data(), impl_->vx, bytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(state.vy.data(), impl_->vy, bytesD, cudaMemcpyDeviceToHost));
+    }
+    state.NactiveFluid = impl_->nActiveFluid;
+    if (diag != nullptr) {
+        diag->downloadCalls += 1u;
+        diag->deviceToHostBytes += 3u * bytesD;
+        diag->downloadSeconds += elapsed_seconds(t0);
+        diag->particles = nActive64;
+        diag->capacity = impl_->capacity;
+        diag->allocatedBytes = impl_->allocatedBytes;
+    }
+#endif
+}
+
 
 void CudaParticleState::download_active_prefix(ParticleState& state, CudaParticleStateDiagnostics* diag) const {
 #ifndef MPCD_ENABLE_CUDA_PARTICLE_STATE
