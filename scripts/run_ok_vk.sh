@@ -24,13 +24,13 @@ BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}_u$
 # script can run resampling / empty-refill paths without editing the state.
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.25}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
-BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0477}"
+BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
 # Path choice. Default is one robust path. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}"
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording. LIVE_VIS_CONTROL_FILE defaults to
 # ./livevis_control.kv in common code so every script uses the same runtime file.
@@ -124,6 +124,7 @@ run_one_mode_0434() {
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }
 
-for mode in $RUN_MODES; do
+while IFS= read -r mode; do
+  [[ -n "$mode" ]] || continue
   run_one_mode_0434 "$mode"
-done
+done < <(suite_mode_list_0434)

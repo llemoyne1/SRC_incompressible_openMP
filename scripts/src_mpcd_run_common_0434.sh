@@ -83,8 +83,12 @@ suite_root_cd_0434() {
 }
 
 suite_mode_list_0434() {
+  # MODES is kept as a short alias for ad-hoc targeted runs.
+  # RUN_MODES remains the canonical variable used by the run_ok suite.
   if [[ -n "${RUN_MODES:-}" ]]; then
     printf '%s\n' $RUN_MODES
+  elif [[ -n "${MODES:-}" ]]; then
+    printf '%s\n' $MODES
   elif [[ -n "${INTEG_PATH:-${SRC_INTEG_PATH:-}}" ]]; then
     printf '%s\n' "${INTEG_PATH:-${SRC_INTEG_PATH:-src}}"
   else
@@ -99,7 +103,7 @@ suite_prepare_dirs_0434() {
 }
 
 suite_ensure_binary_0434() {
-  BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0477}"
+  BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
   FORCE_BUILD="${FORCE_BUILD:-0}"
   AUTO_BUILD="${AUTO_BUILD:-1}"
   BUILD_IF_STALE="${BUILD_IF_STALE:-1}"
@@ -476,7 +480,7 @@ suite_run_binary_0434() {
 suite_write_env_file_0434() {
   local file=$1 mode=$2
   mkdir -p "$(dirname "$file")"
-  env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
+  env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
   cat >> "$file" <<META
 mode=${mode}
 GUARD_NMIN=${GUARD_NMIN}
@@ -496,7 +500,7 @@ suite_defaults_common_0434() {
   export OMP_PLACES="${OMP_PLACES:-cores}"
   export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
 
-  BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0477}"
+  BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
   CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
   PARTICLE_MASS="${PARTICLE_MASS:-1.0}"
   BACKGROUND_TYPE="${BACKGROUND_TYPE:-0}"

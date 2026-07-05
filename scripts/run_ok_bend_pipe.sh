@@ -17,14 +17,14 @@ SEED="${SEED:-1628411}"; U0="${U0:-5.0}"; VELOCITY_MODE="${VELOCITY_MODE:-unifor
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-50.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
-BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0477}"
+BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
-# Path choice: set either RUN_MODES="src" or INTEG_PATH=src-q6-resampling.
-# Default runs one robust path (src). To compare all paths, set:
+# Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
+# Default runs one robust path selected below. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}"
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-chi}"
@@ -132,6 +132,7 @@ run_one_mode_0434() {
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }
 
-for mode in $RUN_MODES; do
+while IFS= read -r mode; do
+  [[ -n "$mode" ]] || continue
   run_one_mode_0434 "$mode"
-done
+done < <(suite_mode_list_0434)
