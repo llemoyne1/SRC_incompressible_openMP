@@ -1124,6 +1124,13 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_resident_0467(
         throw std::runtime_error("0467 resident device carrier: device/host active-prefix mismatch");
     }
 
+    const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
+    const bool thrustCellListMaterializer0460 =
+        !cpuOpCarrier0458 && cuda_resampling_thrust_cell_list_materializer_0460_requested();
+    const bool donorSliceMaterializer0459 =
+        !cpuOpCarrier0458 && !thrustCellListMaterializer0460 &&
+        cuda_resampling_donor_slice_materializer_0459_requested();
+
     std::vector<int> planDonor, planReceiver;
     std::vector<double> planMass;
     planDonor.reserve(ws.transferPlan.size());
@@ -1134,12 +1141,20 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_resident_0467(
         planReceiver.push_back(e.receiverCell);
         planMass.push_back(e.plannedMass);
     }
-    DeviceBuffer0445<int> dPlanDonor(planDonor.size()); dPlanDonor.copy_from_host(planDonor);
-    DeviceBuffer0445<int> dPlanReceiver(planReceiver.size()); dPlanReceiver.copy_from_host(planReceiver);
-    DeviceBuffer0445<double> dPlanMass(planMass.size()); dPlanMass.copy_from_host(planMass);
-    DeviceBuffer0445<std::uint8_t> dSelected(static_cast<std::size_t>(state.NactiveFluid)); dSelected.memset_zero();
+    DeviceBuffer0445<int> dPlanDonor;
+    DeviceBuffer0445<int> dPlanReceiver;
+    DeviceBuffer0445<double> dPlanMass;
+    DeviceBuffer0445<std::uint8_t> dSelected;
+    if (!cpuOpCarrier0458) {
+        dPlanDonor.allocate(planDonor.size()); dPlanDonor.copy_from_host(planDonor);
+        dPlanReceiver.allocate(planReceiver.size()); dPlanReceiver.copy_from_host(planReceiver);
+        dPlanMass.allocate(planMass.size()); dPlanMass.copy_from_host(planMass);
+        dSelected.allocate(static_cast<std::size_t>(state.NactiveFluid)); dSelected.memset_zero();
+    }
 
-    const std::size_t maxOps = static_cast<std::size_t>(state.NactiveFluid);
+    const std::size_t maxOps = cpuOpCarrier0458
+        ? ws.passiveExtractionOperations.size()
+        : static_cast<std::size_t>(state.NactiveFluid);
     DeviceBuffer0445<unsigned int> dOutCount(1u); dOutCount.memset_zero();
     DeviceBuffer0445<unsigned int> dInvalid(1u); dInvalid.memset_zero();
     DeviceBuffer0445<unsigned int> dOutParticle(maxOps);
@@ -1155,9 +1170,6 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_resident_0467(
     out.residentCore0467 = 1u;
 
     cudaEvent_t start{}, stop{};
-    const bool cpuOpCarrier0458 = cuda_resampling_cpu_op_carrier_0458_requested();
-    const bool thrustCellListMaterializer0460 = (!cpuOpCarrier0458 && cuda_resampling_thrust_cell_list_materializer_0460_requested());
-    const bool donorSliceMaterializer0459 = (!cpuOpCarrier0458 && !thrustCellListMaterializer0460 && cuda_resampling_donor_slice_materializer_0459_requested());
     out.cpuOpCarrier0458 = cpuOpCarrier0458 ? 1u : 0u;
     out.donorSliceMaterializer0459 = donorSliceMaterializer0459 ? 1u : 0u;
     out.thrustCellListMaterializer0460 = thrustCellListMaterializer0460 ? 1u : 0u;
