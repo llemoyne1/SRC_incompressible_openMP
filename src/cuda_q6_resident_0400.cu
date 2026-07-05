@@ -1522,7 +1522,6 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     q6_update_corrected_cell_means_0400<<<cellBlocks, threads>>>(
         cells, ws.dux.data(), ws.duy.data(), diag.momentumCorrectionVx, diag.momentumCorrectionVy);
     check_cuda_0400(cudaGetLastError(), "update corrected cell means launch");
-    check_cuda_0400(cudaDeviceSynchronize(), "final synchronize");
     diag.applySeconds = seconds_since_0400(tApply);
 
     cuda_shared_particle_state_0251_mark_fresh("cuda_q6_resident_0400");
@@ -1619,7 +1618,6 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     check_cuda_0400(cudaGetLastError(), "thermostat finalize moments launch");
     q6_thermostat_kinetic_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
     check_cuda_0400(cudaGetLastError(), "thermostat kinetic launch");
-    check_cuda_0400(cudaDeviceSynchronize(), "thermostat kinetic sync");
     diag.kineticSeconds = seconds_since_0400(t0);
 
     t0 = Clock0400::now();
@@ -1628,7 +1626,6 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     q6_thermostat_scale_0400<<<cellBlocks, threads, pairShared>>>(
         cells, targetKBT, minParticles, epsilon, ws.partial0.data(), ws.partial1.data());
     check_cuda_0400(cudaGetLastError(), "thermostat scale launch");
-    check_cuda_0400(cudaDeviceSynchronize(), "thermostat scale sync");
     const double totalKBefore = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
     const double targetKTotal = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
     diag.scaleSeconds = seconds_since_0400(t0);
@@ -1636,7 +1633,6 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     t0 = Clock0400::now();
     q6_thermostat_apply_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
     check_cuda_0400(cudaGetLastError(), "thermostat apply launch");
-    check_cuda_0400(cudaDeviceSynchronize(), "thermostat apply sync");
     diag.applySeconds = seconds_since_0400(t0);
 
     t0 = Clock0400::now();
