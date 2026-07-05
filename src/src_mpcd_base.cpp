@@ -36,6 +36,19 @@
 namespace mpcd {
 namespace {
 
+bool env_truthy_src_base_0475a(const char* name) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || v[0] == '\0') return false;
+    const char c0 = v[0];
+    if (c0 == '0' || c0 == 'f' || c0 == 'F' || c0 == 'n' || c0 == 'N') return false;
+    return true;
+}
+
+} // namespace
+
+
+namespace {
+
 using ProfileClock = std::chrono::steady_clock;
 
 struct StepProfilePhaseIndex {
@@ -1718,6 +1731,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cuda_resampling_upstream_apply_0451_requested(step);
     const bool cudaResamplingOperationMaterialize0453Requested =
         cuda_resampling_operation_materialize_0453_requested(step);
+    const bool cudaResamplingOperationMaterializeOnPlan0475ARequested =
+        env_truthy_src_base_0475a("MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A") &&
+        !workspace.resampling.transferPlan.empty() &&
+        !workspace.resampling.passiveExtractionOperations.empty();
     ParticleState cudaResamplingPipelineShadowInput0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowEditWorkspace0445{};
     WeightedRealFluidDepositWorkspace cudaResamplingPipelineShadowRemapWorkspace0445{};
@@ -1747,7 +1764,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, params, grid, step, workspace.resampling, result.resampling);
     }
 
-    if (cudaResamplingOperationMaterialize0453Requested) {
+    if (cudaResamplingOperationMaterialize0453Requested ||
+        cudaResamplingOperationMaterializeOnPlan0475ARequested) {
         // 0453: CUDA donor-particle operation materializer.  CUDA scans the
         // accepted transfer plan and active particles to rebuild the passive
         // extraction/insertion operation vector.  A strict CPU/GPU operation

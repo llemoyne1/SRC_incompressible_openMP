@@ -230,6 +230,15 @@ struct CudaResamplingOperationMaterialize0453Diagnostics {
     double cpuKe = 0.0;
     double gpuKe = 0.0;
 
+    // 0475: materializer can consume the process-local shared CudaParticleState.
+    // This removes the materializer-specific full particle H2D refresh when
+    // the shared resident state is already fresh, and uses compact nOps D2H.
+    std::uint64_t materializerSharedState0475 = 0u;
+    std::uint64_t materializerUploadSkipped0475 = 0u;
+    std::uint64_t materializerCompactDownload0475 = 0u;
+    double stateUploadSeconds0475 = 0.0;
+    double planUploadSeconds0475 = 0.0;
+
     double uploadSeconds = 0.0;
     double kernelSeconds = 0.0;
     double downloadSeconds = 0.0;
