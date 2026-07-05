@@ -24,6 +24,9 @@ BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}_u$
 # script can run resampling / empty-refill paths without editing the state.
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.25}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
+BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0477}"
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
+LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
 # Path choice. Default is one robust path. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
