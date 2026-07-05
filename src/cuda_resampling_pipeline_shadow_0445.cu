@@ -52,6 +52,47 @@ std::uint64_t env_u64_0445(const char* name, std::uint64_t fallback) {
     try { return static_cast<std::uint64_t>(std::stoull(v)); } catch (...) { return fallback; }
 }
 
+bool env_has_0445(const char* name) {
+    const char* v = std::getenv(name);
+    return v != nullptr && *v != '\0';
+}
+
+bool cuda_resampling_production_strip_0484_requested() {
+    return env_truthy_0445("MPCD_CUDA_RESAMPLING_PRODUCTION_STRIP_0484");
+}
+
+bool cuda_resampling_diag_csv_0484_requested() {
+    if (env_has_0445("MPCD_CUDA_RESAMPLING_DIAG_CSV_0484")) {
+        return env_truthy_0445("MPCD_CUDA_RESAMPLING_DIAG_CSV_0484");
+    }
+    return !cuda_resampling_production_strip_0484_requested();
+}
+
+bool cuda_resampling_success_diag_csv_0484_requested() {
+    if (env_has_0445("MPCD_CUDA_RESAMPLING_SUCCESS_CSV_0484")) {
+        return env_truthy_0445("MPCD_CUDA_RESAMPLING_SUCCESS_CSV_0484");
+    }
+    return cuda_resampling_diag_csv_0484_requested();
+}
+
+bool cuda_resampling_full_gate_0484_requested() {
+    if (env_has_0445("MPCD_CUDA_RESAMPLING_FULL_GATE_0484")) {
+        return env_truthy_0445("MPCD_CUDA_RESAMPLING_FULL_GATE_0484");
+    }
+    return !cuda_resampling_production_strip_0484_requested();
+}
+
+bool cuda_resampling_remap_cell_count_diag_0484_requested() {
+    if (env_has_0445("MPCD_CUDA_RESAMPLING_REMAP_CELL_COUNT_DIAG_0484")) {
+        return env_truthy_0445("MPCD_CUDA_RESAMPLING_REMAP_CELL_COUNT_DIAG_0484");
+    }
+    return !cuda_resampling_production_strip_0484_requested();
+}
+
+bool cuda_resampling_write_success_row_0484(bool success) {
+    return !success || cuda_resampling_success_diag_csv_0484_requested();
+}
+
 std::string csv_escape_0445(const std::string& s) {
     if (s.find_first_of(",\"\n\r") == std::string::npos) return s;
     std::string out = "\"";
@@ -292,14 +333,16 @@ GpuRemapThermal0445 apply_gpu_remap_thermal_0445(CudaParticleState& gpuState,
     CUDA_CHECK_0445(cudaGetLastError());
     out.thermalSeconds = elapsed();
 
-    std::vector<std::uint8_t> remapHost, renormHost;
-    std::vector<double> remapScaleHost, thermalScaleHost;
-    dRemapCell.copy_to_host(remapHost);
-    dRenormCell.copy_to_host(renormHost);
-    dRemapScale.copy_to_host(remapScaleHost);
-    dThermalScale.copy_to_host(thermalScaleHost);
-    out.remapCells = count_effective_scaled_cells_0445(remapHost, remapScaleHost);
-    out.thermalCells = count_effective_scaled_cells_0445(renormHost, thermalScaleHost);
+    if (cuda_resampling_remap_cell_count_diag_0484_requested()) {
+        std::vector<std::uint8_t> remapHost, renormHost;
+        std::vector<double> remapScaleHost, thermalScaleHost;
+        dRemapCell.copy_to_host(remapHost);
+        dRenormCell.copy_to_host(renormHost);
+        dRemapScale.copy_to_host(remapScaleHost);
+        dThermalScale.copy_to_host(thermalScaleHost);
+        out.remapCells = count_effective_scaled_cells_0445(remapHost, remapScaleHost);
+        out.thermalCells = count_effective_scaled_cells_0445(renormHost, thermalScaleHost);
+    }
     CUDA_CHECK_0445(cudaEventDestroy(start));
     CUDA_CHECK_0445(cudaEventDestroy(stop));
     return out;
@@ -1388,7 +1431,9 @@ GpuDeviceCarrier0455 apply_gpu_particle_edits_device_carrier_resident_0467(
     const std::uint64_t gateEvery0461 = cuda_resampling_sparse_device_carrier_gate_every_0461();
     static std::uint64_t deviceCarrierCall0461 = 0u;
     ++deviceCarrierCall0461;
-    const bool fullGate0461 = (!sparseGate0461 || gateEvery0461 <= 1u ||
+    const bool fullGateDiagnostics0484 = cuda_resampling_full_gate_0484_requested();
+    const bool fullGate0461 = fullGateDiagnostics0484 &&
+                              (!sparseGate0461 || gateEvery0461 <= 1u ||
                                deviceCarrierCall0461 == 1u ||
                                (deviceCarrierCall0461 % gateEvery0461) == 0u);
     out.sparseGate0461 = sparseGate0461 ? 1u : 0u;
@@ -1874,6 +1919,7 @@ bool all_periodic_0450(const SimulationParams& p) {
 void append_upstream_csv_0450(const SimulationParams& params,
                               const CudaResamplingUpstreamShadow0450Diagnostics& d) {
     if (params.outputDir.empty()) return;
+    if (!cuda_resampling_write_success_row_0484(d.pass && !d.skipped)) return;
     std::filesystem::create_directories(params.outputDir);
     const std::string path = params.outputDir + "/cuda_resampling_upstream_shadow_0450.csv";
     const bool exists = std::filesystem::exists(path);
@@ -1908,6 +1954,7 @@ void append_upstream_csv_0450(const SimulationParams& params,
 void append_upstream_apply_csv_0451(const SimulationParams& params,
                                     const CudaResamplingUpstreamApply0451Diagnostics& d) {
     if (params.outputDir.empty()) return;
+    if (!cuda_resampling_write_success_row_0484(d.pass && !d.skipped)) return;
     std::filesystem::create_directories(params.outputDir);
     const std::string path = params.outputDir + "/cuda_resampling_upstream_apply_0451.csv";
     const bool exists = std::filesystem::exists(path);
@@ -1936,6 +1983,7 @@ void append_upstream_apply_csv_0451(const SimulationParams& params,
 void append_operation_materialize_csv_0453(const SimulationParams& params,
                                            const CudaResamplingOperationMaterialize0453Diagnostics& d) {
     if (params.outputDir.empty()) return;
+    if (!cuda_resampling_write_success_row_0484(d.pass && !d.skipped)) return;
     std::filesystem::create_directories(params.outputDir);
     const std::string path = params.outputDir + "/cuda_resampling_operation_materialize_0453.csv";
     const bool exists = std::filesystem::exists(path);
@@ -2656,6 +2704,7 @@ namespace {
 void append_apply_csv_0448(const SimulationParams& params,
                            const CudaResamplingPipelineApply0448Diagnostics& d) {
     if (params.outputDir.empty()) return;
+    if (!cuda_resampling_write_success_row_0484(d.handled && !d.skipped)) return;
     std::filesystem::create_directories(params.outputDir);
     const std::string path = params.outputDir + "/cuda_resampling_pipeline_apply_0448.csv";
     const bool exists = std::filesystem::exists(path);
@@ -2820,6 +2869,7 @@ void append_transaction_csv_0466(
     const GpuDeviceCarrier0455& dc,
     bool accepted) {
     if (params.outputDir.empty()) return;
+    if (!cuda_resampling_write_success_row_0484(accepted)) return;
     const std::string path = params.outputDir + "/cuda_resampling_transaction_0466.csv";
     const bool exists = static_cast<bool>(std::ifstream(path).good());
     std::ofstream f(path, std::ios::app);

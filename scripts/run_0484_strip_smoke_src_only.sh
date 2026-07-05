@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "$ROOT"
+
+BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_periodic_equiv_0484}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0484_strip_smoke_src_128}"
+
+RUN_MODES="${RUN_MODES:-src-resampling}" \
+NX="${NX:-128}" NY="${NY:-128}" GAMMA="${GAMMA:-40}" \
+STEPS="${STEPS:-200}" SUMMARY_EVERY="${SUMMARY_EVERY:-100}" DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}" \
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-0}" FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-0}" \
+RESAMPLING_PRODUCTION_STRIP="${RESAMPLING_PRODUCTION_STRIP:-1}" \
+RESAMPLING_DIAG_CSV_ENABLE="${RESAMPLING_DIAG_CSV_ENABLE:-0}" \
+RESAMPLING_FULL_GATE_ENABLE="${RESAMPLING_FULL_GATE_ENABLE:-0}" \
+RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE="${RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE:-0}" \
+RESAMPLING_UPSTREAM_VALIDATE_ENABLE="${RESAMPLING_UPSTREAM_VALIDATE_ENABLE:-0}" \
+RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}" \
+AUTO_BUILD="${AUTO_BUILD:-0}" BUILD_IF_STALE="${BUILD_IF_STALE:-0}" FORCE_BUILD="${FORCE_BUILD:-0}" \
+BIN="$BIN" BASE_RUN_ROOT="$BASE_RUN_ROOT" \
+bash scripts/run_ok_tg.sh
+
+printf '\n[0484-strip-smoke] run root: %s\n' "$BASE_RUN_ROOT"
+printf '[0484-strip-smoke] expected solver runs: 1 when RUN_MODES=src-resampling\n'
+printf '[0484-strip-smoke] produced CUDA-resampling CSV files:\n'
+find "$BASE_RUN_ROOT" -path '*/output/cuda_resampling_*.csv' -print | sort || true
