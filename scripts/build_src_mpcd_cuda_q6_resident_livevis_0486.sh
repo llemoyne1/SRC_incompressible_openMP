@@ -93,6 +93,7 @@ set -x
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \
+  src/species_registry.cpp \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
   src/cuda_shared_particle_state_0251.cpp \

@@ -107,6 +107,43 @@ bool is_removed_open_aperture_key(const std::string& key) {
            key == "topOpenXMax" || key == "outletTopXMax";
 }
 
+bool is_species_definition_key(const std::string& key) {
+    const std::string prefix = "species";
+    if (key.rfind(prefix, 0) != 0) return false;
+    if (key == "speciesRegistryEnable" || key == "speciesCount" ||
+        key == "speciesRequireRegisteredTypes" || key == "speciesDiagnosticsEnable" ||
+        key == "speciesDiagnosticsFilename") {
+        return false;
+    }
+    const std::string suffix = key.substr(prefix.size());
+    if (suffix.empty()) return false;
+    return std::all_of(suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c); });
+}
+
+SpeciesDefinition parse_species_definition_value(const std::string& value,
+                                                 const std::string& key) {
+    std::istringstream iss(value);
+    long long typeValue = 0;
+    SpeciesDefinition d{};
+    std::string phase;
+    if (!(iss >> typeValue >> d.name >> phase >> d.q6StrengthDeclared >>
+          d.resamplingMassClosureStrengthDeclared)) {
+        throw std::runtime_error(
+            "Malformed " + key +
+            ": expected 'type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared'");
+    }
+    std::string extra;
+    if (iss >> extra) {
+        throw std::runtime_error("Malformed " + key + ": too many fields");
+    }
+    if (typeValue < 0 || typeValue > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
+        throw std::runtime_error(key + ": type must be a non-negative uint32 value");
+    }
+    d.type = static_cast<std::uint32_t>(typeValue);
+    d.phaseFamily = parse_species_phase_family(phase, key);
+    return d;
+}
+
 bool is_open_boundary_segment_key(const std::string& key) {
     const std::string prefix = "openBoundarySegment";
     if (key.rfind(prefix, 0) != 0) return false;
@@ -503,6 +540,14 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "cudaResamplingEmptyRefillMemoryMaxAge") p.cudaResamplingEmptyRefillMemoryMaxAge = parse_int(value, key);
         else if (key == "cudaResamplingChiFilterEnable" || key == "cudaResamplingDarcyChiFilterEnable") p.cudaResamplingChiFilterEnable = parse_bool(value, key);
         else if (key == "cudaResamplingChiMin" || key == "cudaResamplingDarcyChiMin") p.cudaResamplingChiMin = parse_double(value, key);
+        else if (key == "speciesRegistryEnable") p.speciesRegistryEnable = parse_bool(value, key);
+        else if (key == "speciesCount") p.speciesCount = parse_int(value, key);
+        else if (key == "speciesRequireRegisteredTypes") p.speciesRequireRegisteredTypes = parse_bool(value, key);
+        else if (key == "speciesDiagnosticsEnable") p.speciesDiagnosticsEnable = parse_bool(value, key);
+        else if (key == "speciesDiagnosticsFilename") p.speciesDiagnosticsFilename = trim(value);
+        else if (is_species_definition_key(key)) {
+            // Parsed after the generic loop, once speciesCount is known.
+        }
         else if (key == "summaryEvery") p.summaryEvery = parse_int(value, key);
         else if (key == "dumpStateEvery") p.dumpStateEvery = parse_int(value, key);
         else if (key == "dumpRoleFilter" || key == "dumpParticleRoleFilter") p.dumpRoleFilter = get_lower(kv, key);
@@ -554,6 +599,48 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             if (is_open_boundary_segment_key(item.first)) {
                 throw std::runtime_error("Found " + item.first + " but openBoundarySegmentsEnable=false; enable segments explicitly");
             }
+        }
+    }
+
+    p.speciesDefinitions.clear();
+    if (p.speciesRegistryEnable) {
+        if (p.speciesCount <= 0) {
+            throw std::runtime_error("speciesRegistryEnable=true requires speciesCount>0");
+        }
+        int speciesDeclarationKeyCount = 0;
+        for (const auto& item : kv) {
+            if (is_species_definition_key(item.first)) ++speciesDeclarationKeyCount;
+        }
+        if (speciesDeclarationKeyCount != p.speciesCount) {
+            throw std::runtime_error(
+                "speciesCount=" + std::to_string(p.speciesCount) +
+                " but found " + std::to_string(speciesDeclarationKeyCount) +
+                " speciesK declarations");
+        }
+        p.speciesDefinitions.reserve(static_cast<std::size_t>(p.speciesCount));
+        for (int k = 0; k < p.speciesCount; ++k) {
+            const std::string speciesKey = "species" + std::to_string(k);
+            if (!has_key(kv, speciesKey)) {
+                throw std::runtime_error("Missing required species declaration: " + speciesKey);
+            }
+            p.speciesDefinitions.push_back(
+                parse_species_definition_value(kv.at(speciesKey), speciesKey));
+        }
+        validate_species_definitions(p.speciesDefinitions, "simulation species registry");
+    } else {
+        if (p.speciesCount != 0) {
+            throw std::runtime_error(
+                "speciesCount is set but speciesRegistryEnable=false; enable the registry or remove species declarations");
+        }
+        for (const auto& item : kv) {
+            if (is_species_definition_key(item.first)) {
+                throw std::runtime_error("Found " + item.first +
+                                         " but speciesRegistryEnable=false");
+            }
+        }
+        if (p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesRequireRegisteredTypes=true requires speciesRegistryEnable=true");
         }
     }
 
@@ -1288,6 +1375,20 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!std::isfinite(p.topoBenchmarkLiftDirX) || !std::isfinite(p.topoBenchmarkLiftDirY) ||
             std::hypot(p.topoBenchmarkLiftDirX, p.topoBenchmarkLiftDirY) <= 0.0) {
             throw std::runtime_error("topoBenchmark lift direction must be finite and non-zero");
+        }
+    }
+    if (p.speciesDiagnosticsEnable && p.speciesDiagnosticsFilename.empty()) {
+        throw std::runtime_error(
+            "speciesDiagnosticsEnable=true requires a non-empty speciesDiagnosticsFilename");
+    }
+    if (p.speciesRegistryEnable) {
+        validate_species_definitions(p.speciesDefinitions, "validate_simulation_params species registry");
+        for (const OpenBoundarySegment& seg : p.openBoundarySegments) {
+            if (is_inlet_boundary_mode(seg.mode) &&
+                find_species_definition(p.speciesDefinitions, seg.type) == nullptr) {
+                throw std::runtime_error(
+                    "Inlet segment uses unregistered species type " + std::to_string(seg.type));
+            }
         }
     }
     if (p.summaryEvery <= 0) {

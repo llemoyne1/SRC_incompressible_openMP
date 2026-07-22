@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "species_registry.h"
+
 namespace mpcd {
 
 struct OpenBoundarySegment {
@@ -18,6 +20,18 @@ struct OpenBoundarySegment {
 };
 
 struct SimulationParams {
+    // 0490a multiphase scaffold. Disabled by default, so legacy parameter files
+    // and trajectories are unchanged. Each declaration uses:
+    //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared
+    // The two strengths are metadata only in 0490a; Q6 and resampling do not
+    // consume them until later SURF patches.
+    bool speciesRegistryEnable = false;
+    int speciesCount = 0;
+    std::vector<SpeciesDefinition> speciesDefinitions;
+    bool speciesRequireRegisteredTypes = false;
+    bool speciesDiagnosticsEnable = false;
+    std::string speciesDiagnosticsFilename = "species_runtime_0490a.csv";
+
     std::string inputState;
     std::string outputDir = "run_base";
 

@@ -10,6 +10,7 @@
 #include "live_visualization_0335.h"
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
+#include "species_registry.h"
 #include "weighted_resampling.h"
 
 #include <algorithm>
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -542,7 +544,20 @@ int main(int argc, char** argv) {
         mpcd::apply_boundary_conditions(state, params, initialDomain, 0u, 0.0);
         mpcd::apply_immersed_solid_reflection(state, params, initialDomain, 0.0);
 
+        if (params.speciesRegistryEnable || params.speciesRequireRegisteredTypes) {
+            mpcd::validate_state_species_registry(
+                state, params.speciesDefinitions, params.speciesRequireRegisteredTypes,
+                "initial state species registry");
+        }
+
         mpcd::RuntimeSummaryWriter summary(params.outputDir + "/summary_runtime.csv");
+        std::unique_ptr<mpcd::SpeciesDiagnosticsWriter0490a> speciesSummary0490a;
+        if (params.speciesDiagnosticsEnable) {
+            speciesSummary0490a = std::make_unique<mpcd::SpeciesDiagnosticsWriter0490a>(
+                params.outputDir + "/" + params.speciesDiagnosticsFilename);
+            speciesSummary0490a->append(
+                state, params.speciesDefinitions, params.speciesRequireRegisteredTypes, 0u, 0.0);
+        }
         mpcd::LiveVisualization0335 liveVisualization0335;
         liveVisualization0335.maybe_initialize(params);
         mpcd::FilteredFieldRecorder0432 filteredFieldRecorder0432;
@@ -616,7 +631,11 @@ int main(int argc, char** argv) {
                   << " threadsMax=" << ompMaxThreads
                   << " outputDir=" << params.outputDir
                   << " dumpRoleFilter=" << params.dumpRoleFilter
-                  << " summaryRoleFilter=" << params.summaryRoleFilter << '\n';
+                  << " summaryRoleFilter=" << params.summaryRoleFilter
+                  << " speciesRegistry=" << (params.speciesRegistryEnable ? "on" : "off")
+                  << " speciesCount=" << params.speciesDefinitions.size()
+                  << " speciesDiagnostics=" << (params.speciesDiagnosticsEnable ? params.speciesDiagnosticsFilename : std::string("off"))
+                  << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
             const bool summaryStep0315g =
@@ -832,6 +851,12 @@ int main(int argc, char** argv) {
                     s.nLatentParticles = compactRoleCounts.latent;
                 }
                 summary.append(s);
+                if (speciesSummary0490a) {
+                    sync_cuda_resident_state_for_host_0260(state);
+                    speciesSummary0490a->append(
+                        state, params.speciesDefinitions, params.speciesRequireRegisteredTypes,
+                        static_cast<std::uint64_t>(step), s.time);
+                }
     std::cout << "\r\033[K[src_mpcd_base] step=" << step
           << "/" << params.nSteps
           << " t=" << std::fixed << std::setprecision(3) << s.time
