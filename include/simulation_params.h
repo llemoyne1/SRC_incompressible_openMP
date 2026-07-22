@@ -57,6 +57,17 @@ struct SimulationParams {
     // the legacy particle-mass guard and closed-capacity override.
     bool speciesResamplingMassClosureEnable = false;
 
+    // 0490i opt-in resident CUDA implementation of the 0490d closure. The
+    // 0490h species-cell workspace provides M_{c,s} and occupancy weights;
+    // 0490i builds the local target/strength and scales particle masses entirely
+    // on device. The host download is retained only to keep the existing CPU
+    // diagnostics/post-deposit path coherent. Thermal renormalization remains a
+    // separate later CUDA milestone and is therefore excluded in 0490i.
+    bool speciesResamplingMassClosureCudaEnable = false;
+    std::string speciesMassClosureCudaDiagnosticsFilename =
+        "cuda_species_mass_closure_0490i.csv";
+    double speciesMassClosureCudaComparisonTolerance = 1.0e-11;
+
     // 0490e opt-in species-aware selection inside the CPU population support
     // guard. The total Nmin/Ntarget/Nmax policy is unchanged; only the species
     // selected for split/merge is chosen from a deterministic per-cell target

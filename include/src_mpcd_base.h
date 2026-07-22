@@ -15,6 +15,10 @@
 #include "src_collision.h"
 #include "thermostat.h"
 #include "weighted_resampling.h"
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+#include "cuda_species_cell_fields_0490h.h"
+#include "cuda_species_mass_closure_0490i.h"
+#endif
 
 namespace mpcd {
 
@@ -48,6 +52,10 @@ struct SrcMpcdBaseWorkspace {
     ClosedCapacityResponseWorkspace capacity;
     WeightedRealFluidDepositWorkspace resampling;
     ResamplingParticlePoolWorkspace resamplingPool;
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    CudaSpeciesCellWorkspace0490h speciesCellCuda0490h;
+    CudaSpeciesMassClosureWorkspace0490i speciesMassClosureCuda0490i;
+#endif
 };
 
 StepResult run_src_mpcd_base_step(ParticleState& state,

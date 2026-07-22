@@ -17,6 +17,7 @@
 #include "cuda_resampling_pipeline_shadow_0445.h"
 #include "cuda_darcy_brinkman_0343.h"
 #include "cuda_q6_resident_0400.h"
+#include "cuda_species_mass_closure_0490i.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1873,7 +1874,32 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (params.resamplingRemapEnable && massRenormalizationStep) {
         bool handledByCudaResamplingApply0448 = false;
         bool sharedStatePreservedByCudaRemap = false;
-        if (cudaResamplingPipelineApply0448Requested &&
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        if (params.speciesResamplingMassClosureCudaEnable) {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
+            const CudaSpeciesMassClosure0490iDiagnostics cudaSpeciesClosure0490i =
+                apply_cuda_species_mass_closure_0490i(
+                    state, params, grid, workspace.resampling, result.resampling,
+                    resamplingMassCorrectionStrength, capacityRemapTargetCellMass,
+                    step, workspace.speciesCellCuda0490h,
+                    workspace.speciesMassClosureCuda0490i, remapApply,
+                    params.speciesCellCudaThreadsPerBlock);
+            if (!cudaSpeciesClosure0490i.handled) {
+                throw std::runtime_error(
+                    "0490i resident CUDA species mass closure was requested but not handled");
+            }
+            handledByCudaResamplingApply0448 = true;
+            sharedStatePreservedByCudaRemap =
+                cudaSpeciesClosure0490i.sharedStatePreserved != 0;
+        }
+#else
+        if (params.speciesResamplingMassClosureCudaEnable) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureCudaEnable=true requires CUDA particle-state and cell-workspace support");
+        }
+#endif
+        if (!handledByCudaResamplingApply0448 &&
+            cudaResamplingPipelineApply0448Requested &&
             !params.speciesResamplingMassClosureEnable) {
             MPCD_PROFILE_PHASE(result.profile, ResamplingRemap);
             const CudaResamplingPipelineApply0448Diagnostics cudaApply0448 =

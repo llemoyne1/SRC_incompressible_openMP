@@ -13,6 +13,7 @@
 #include "species_registry.h"
 #include "species_cell_fields_0490b.h"
 #include "cuda_species_cell_fields_0490h.h"
+#include "cuda_species_mass_closure_0490i.h"
 #include "weighted_resampling.h"
 
 #include <algorithm>
@@ -573,6 +574,11 @@ int main(int argc, char** argv) {
         std::unique_ptr<mpcd::CudaParticleState> speciesCellCudaParticles0490h;
         std::unique_ptr<mpcd::CudaSpeciesCellWorkspace0490h> speciesCellCudaWorkspace0490h;
         std::unique_ptr<mpcd::SpeciesCellCudaEquivalenceWriter0490h> speciesCellCudaWriter0490h;
+        if (params.speciesResamplingMassClosureCudaEnable &&
+            !mpcd::cuda_species_mass_closure_available_0490i()) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureCudaEnable=true but no CUDA device is available");
+        }
         if (params.speciesCellCudaDepositEnable) {
             if (!mpcd::cuda_species_cell_fields_available_0490h()) {
                 throw std::runtime_error(
@@ -602,6 +608,10 @@ int main(int argc, char** argv) {
         if (params.speciesCellCudaDepositEnable) {
             throw std::runtime_error(
                 "speciesCellCudaDepositEnable=true requires CUDA particle-state and cell-workspace support");
+        }
+        if (params.speciesResamplingMassClosureCudaEnable) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureCudaEnable=true requires CUDA particle-state and cell-workspace support");
         }
 #endif
         mpcd::LiveVisualization0335 liveVisualization0335;
@@ -684,6 +694,7 @@ int main(int argc, char** argv) {
                   << " speciesCellDiagnostics=" << (params.speciesCellDiagnosticsEnable ? params.speciesCellDiagnosticsFilename : std::string("off"))
                   << " speciesCellCudaDeposit=" << (params.speciesCellCudaDepositEnable ? params.speciesCellCudaComparisonFilename : std::string("off"))
                   << " speciesMassClosure=" << (params.speciesResamplingMassClosureEnable ? "on" : "off")
+                  << " speciesMassClosureCuda=" << (params.speciesResamplingMassClosureCudaEnable ? "on" : "off")
                   << " speciesPopulationGuard=" << (params.speciesResamplingPopulationGuardEnable ? "on" : "off")
                   << " speciesMixedRefill=" << (params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? "on" : "off")
                   << " speciesTransfer=" << (params.speciesResamplingTransferEnable ? "on" : "off")

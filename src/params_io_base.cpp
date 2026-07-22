@@ -119,6 +119,9 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesCellCudaComparisonTolerance" ||
         key == "speciesCellCudaThreadsPerBlock" ||
         key == "speciesResamplingMassClosureEnable" ||
+        key == "speciesResamplingMassClosureCudaEnable" ||
+        key == "speciesMassClosureCudaDiagnosticsFilename" ||
+        key == "speciesMassClosureCudaComparisonTolerance" ||
         key == "speciesResamplingPopulationGuardEnable" ||
         key == "speciesResamplingTransferEnable" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
@@ -573,6 +576,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesCellCudaComparisonTolerance") p.speciesCellCudaComparisonTolerance = parse_double(value, key);
         else if (key == "speciesCellCudaThreadsPerBlock") p.speciesCellCudaThreadsPerBlock = parse_int(value, key);
         else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingMassClosureCudaEnable") p.speciesResamplingMassClosureCudaEnable = parse_bool(value, key);
+        else if (key == "speciesMassClosureCudaDiagnosticsFilename") p.speciesMassClosureCudaDiagnosticsFilename = trim(value);
+        else if (key == "speciesMassClosureCudaComparisonTolerance") p.speciesMassClosureCudaComparisonTolerance = parse_double(value, key);
         else if (key == "speciesResamplingPopulationGuardEnable") p.speciesResamplingPopulationGuardEnable = parse_bool(value, key);
         else if (key == "speciesResamplingTransferEnable") p.speciesResamplingTransferEnable = parse_bool(value, key);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
@@ -1506,6 +1512,25 @@ void validate_simulation_params(const SimulationParams& p) {
         if (p.closedCapacityResponseEnable) {
             throw std::runtime_error(
                 "0490d species-aware mass closure does not yet support closedCapacityResponseEnable=true");
+        }
+    }
+    if (p.speciesResamplingMassClosureCudaEnable) {
+        if (!p.speciesResamplingMassClosureEnable) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureCudaEnable=true requires speciesResamplingMassClosureEnable=true");
+        }
+        if (p.resamplingThermalRenormalizationEnable) {
+            throw std::runtime_error(
+                "0490i resident CUDA species mass closure does not yet support resamplingThermalRenormalizationEnable=true");
+        }
+        if (p.speciesMassClosureCudaDiagnosticsFilename.empty()) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureCudaEnable=true requires a non-empty speciesMassClosureCudaDiagnosticsFilename");
+        }
+        if (!(p.speciesMassClosureCudaComparisonTolerance >= 0.0) ||
+            !std::isfinite(p.speciesMassClosureCudaComparisonTolerance)) {
+            throw std::runtime_error(
+                "speciesMassClosureCudaComparisonTolerance must be finite and non-negative");
         }
     }
     if (p.speciesRegistryEnable) {
