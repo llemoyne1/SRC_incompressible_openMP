@@ -93,6 +93,9 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     std::uint64_t emptyRefillParticles0319 = 0u;
     std::uint64_t emptyRefillSkippedNoMemory0319 = 0u;
     std::uint64_t emptyRefillSkippedNoCapacity0319 = 0u;
+    // 0490c: mixed remembered cells are deliberately not refilled until a
+    // later per-species refill policy is available.
+    std::uint64_t emptyRefillSkippedMixedSpecies0490c = 0u;
     double emptyRefillAddedMass0319 = 0.0;
     double emptyRefillAddedPx0319 = 0.0;
     double emptyRefillAddedPy0319 = 0.0;

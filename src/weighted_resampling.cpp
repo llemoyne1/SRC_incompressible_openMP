@@ -2036,18 +2036,53 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
             {
                 MPCD_POP_GUARD_PROFILE(d.profile, OverfullParticleScan);
                 d.overfullScanPasses += 1u;
-                for (std::uint64_t pp = begin; pp < end; ++pp) {
-                    d.overfullParticleRefsScanned += 1u;
-                    if (pp >= depositWorkspace.cellParticleIndices.size()) break;
-                    const std::uint64_t pi64 = depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pp)];
-                    if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
-                    const std::size_t pi = static_cast<std::size_t>(pi64);
-                    if (!is_fluid_particle(state, pi)) continue;
-                    const double mp = state.mass[pi];
-                    if (!(mp > 0.0)) continue;
-                    d.overfullEligibleParticleRefs += 1u;
-                    if (mp < victimMass) { victimMass = mp; victim64 = pi64; }
-                    if (mp > survivorMass) { survivorMass = mp; survivor64 = pi64; }
+
+                // 0490c: a representative particle carries exactly one
+                // species. Merging different types would silently convert the
+                // victim mass into the survivor species. Select the largest
+                // survivor that has at least one same-type partner, then the
+                // lightest same-type victim. Mono-species behavior is unchanged.
+                for (std::uint64_t ps = begin; ps < end; ++ps) {
+                    if (ps >= depositWorkspace.cellParticleIndices.size()) break;
+                    const std::uint64_t survivorCandidate64 =
+                        depositWorkspace.cellParticleIndices[static_cast<std::size_t>(ps)];
+                    if (survivorCandidate64 == kInvalidParticleIndex ||
+                        survivorCandidate64 >= state.Np) continue;
+                    const std::size_t survivorCandidate =
+                        static_cast<std::size_t>(survivorCandidate64);
+                    if (!is_fluid_particle(state, survivorCandidate)) continue;
+                    const double msCandidate = state.mass[survivorCandidate];
+                    if (!(msCandidate > 0.0)) continue;
+
+                    std::uint64_t victimCandidate64 = kInvalidParticleIndex;
+                    double mvCandidate = std::numeric_limits<double>::infinity();
+                    for (std::uint64_t pv = begin; pv < end; ++pv) {
+                        d.overfullParticleRefsScanned += 1u;
+                        if (pv >= depositWorkspace.cellParticleIndices.size()) break;
+                        const std::uint64_t pi64 =
+                            depositWorkspace.cellParticleIndices[static_cast<std::size_t>(pv)];
+                        if (pi64 == kInvalidParticleIndex || pi64 >= state.Np ||
+                            pi64 == survivorCandidate64) continue;
+                        const std::size_t pi = static_cast<std::size_t>(pi64);
+                        if (!is_fluid_particle(state, pi)) continue;
+                        if (state.type[pi] != state.type[survivorCandidate]) continue;
+                        const double mp = state.mass[pi];
+                        if (!(mp > 0.0)) continue;
+                        d.overfullEligibleParticleRefs += 1u;
+                        if (mp < mvCandidate ||
+                            (mp == mvCandidate && pi64 < victimCandidate64)) {
+                            mvCandidate = mp;
+                            victimCandidate64 = pi64;
+                        }
+                    }
+                    if (victimCandidate64 == kInvalidParticleIndex) continue;
+                    if (msCandidate > survivorMass ||
+                        (msCandidate == survivorMass && survivorCandidate64 < survivor64)) {
+                        survivorMass = msCandidate;
+                        survivor64 = survivorCandidate64;
+                        victimMass = mvCandidate;
+                        victim64 = victimCandidate64;
+                    }
                 }
             }
             if (victim64 == kInvalidParticleIndex || survivor64 == kInvalidParticleIndex || victim64 == survivor64) {
