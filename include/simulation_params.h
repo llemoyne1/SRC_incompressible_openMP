@@ -58,6 +58,14 @@ struct SimulationParams {
     // Species-wise global mass/momentum correction is used after refill.
     bool cudaResamplingEmptyRefillSpeciesCompositionEnable = false;
 
+    // 0490g opt-in species-constrained donor/receiver transfer planning.
+    // Each non-empty poor receiver apportions its mass deficit over the species
+    // it already contains. Rich donors expose proportional excess per species,
+    // and transfer entries may only select particles of the matching type.
+    // The planner remains CPU-authoritative; CUDA extraction/insertion may apply
+    // the resulting explicit operations without changing their species.
+    bool speciesResamplingTransferEnable = false;
+
     std::string inputState;
     std::string outputDir = "run_base";
 

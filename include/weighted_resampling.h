@@ -93,6 +93,8 @@ struct ResamplingParticlePoolWorkspace {
 struct ResamplingTransferPlanEntry {
     std::int32_t donorCell = kInvalidCellIndex;
     std::int32_t receiverCell = kInvalidCellIndex;
+    std::uint32_t particleType = 0u;
+    bool speciesConstrained = false;
     double plannedMass = 0.0;
     double cellDistance = 0.0;
     double donorRemainingAfter = 0.0;

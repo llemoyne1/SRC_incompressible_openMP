@@ -3913,52 +3913,152 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             constexpr double eps = 1.0e-14;
             const double adjacentLimit = std::sqrt(2.0) + 1.0e-12;
 
-            // Greedy nearest-donor planner without materialising and sorting the
-            // complete donor x receiver Cartesian product.  It preserves the
-            // locality bias but avoids the O(R*D log(R*D)) allocation/sort and
-            // the additional O(R*D*(R+D)) std::find lookups of the prototype.
-            for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
-                const std::int32_t rc = ws.receiverPoorCells[ir];
-                while (receiverRemaining[ir] > eps) {
-                    const bool useSpatialSearch =
-                        resampling_spatial_donor_search_0437_enabled() &&
-                        !is_x_periodic(params) && !is_y_periodic(params);
-                    const std::size_t bestDonor = useSpatialSearch
-                        ? nearest_active_donor_spatial_0437(
-                              rc, ws.donorRichCells, donorRemaining, donorIndexByCell, grid, eps)
-                        : nearest_active_donor_global_0437(
-                              rc, ws.donorRichCells, donorRemaining, grid, params, eps);
-                    if (useSpatialSearch && resampling_spatial_donor_shadow_0437_enabled()) {
-                        const std::size_t referenceDonor = nearest_active_donor_global_0437(
-                            rc, ws.donorRichCells, donorRemaining, grid, params, eps);
-                        if (bestDonor != referenceDonor) {
-                            throw std::runtime_error(
-                                "resampling spatial donor search 0437 disagrees with global reference");
+            const auto recordTransfer = [&](std::size_t donorIndex,
+                                            std::size_t receiverIndex,
+                                            double transfer,
+                                            std::uint32_t particleType,
+                                            bool speciesConstrained) {
+                const std::int32_t donorCell = ws.donorRichCells[donorIndex];
+                const std::int32_t receiverCell = ws.receiverPoorCells[receiverIndex];
+                const double distance = passive_cell_distance(donorCell, receiverCell, grid, params);
+                donorRemaining[donorIndex] -= transfer;
+                receiverRemaining[receiverIndex] -= transfer;
+                ws.transferPlan.push_back(ResamplingTransferPlanEntry{
+                    donorCell,
+                    receiverCell,
+                    particleType,
+                    speciesConstrained,
+                    transfer,
+                    distance,
+                    donorRemaining[donorIndex],
+                    receiverRemaining[receiverIndex]});
+                plannedMass += transfer;
+                massWeightedDistance += transfer * distance;
+                maxDistance = std::max(maxDistance, distance);
+                if (distance <= adjacentLimit) adjacentPairs += 1u;
+            };
+
+            if (params.speciesResamplingTransferEnable) {
+                // 0490g CPU-authoritative reference planner. A receiver deficit
+                // is apportioned over the species already present in that
+                // non-empty receiver. Donor excess is apportioned over donor
+                // species in the same way. Pairing is then restricted to equal
+                // particle types. Empty-cell reconstruction remains the 0490f
+                // responsibility because an empty receiver has no local
+                // composition from which to infer a transfer species.
+                validate_species_definitions(
+                    params.speciesDefinitions,
+                    "deposit_weighted_real_fluid 0490g species transfer registry");
+                validate_state_species_registry(
+                    state, params.speciesDefinitions, true,
+                    "deposit_weighted_real_fluid 0490g species transfer state");
+
+                const std::size_t ns = params.speciesDefinitions.size();
+                std::unordered_map<std::uint32_t, std::size_t> speciesIndexByType;
+                speciesIndexByType.reserve(ns);
+                for (std::size_t q = 0; q < ns; ++q) {
+                    speciesIndexByType.emplace(params.speciesDefinitions[q].type, q);
+                }
+
+                std::vector<double> cellSpeciesMass(static_cast<std::size_t>(nc) * ns, 0.0);
+                const std::size_t nActive = active_fluid_count_size(state);
+                for (std::size_t i = 0; i < nActive; ++i) {
+                    if (!is_fluid_particle(state, i) || i >= ws.cellId.size()) continue;
+                    const int c = ws.cellId[i];
+                    if (c < 0 || c >= nc) continue;
+                    const auto it = speciesIndexByType.find(state.type[i]);
+                    if (it == speciesIndexByType.end()) {
+                        throw std::runtime_error(
+                            "0490g species transfer found unregistered fluid type " +
+                            std::to_string(state.type[i]));
+                    }
+                    cellSpeciesMass[static_cast<std::size_t>(c) * ns + it->second] += state.mass[i];
+                }
+
+                std::vector<double> receiverSpeciesRemaining(ws.receiverPoorCells.size() * ns, 0.0);
+                std::vector<double> donorSpeciesRemaining(ws.donorRichCells.size() * ns, 0.0);
+                for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
+                    const std::size_t rc = static_cast<std::size_t>(ws.receiverPoorCells[ir]);
+                    const double total = ws.mass[rc];
+                    if (!(total > eps)) continue;
+                    for (std::size_t q = 0; q < ns; ++q) {
+                        const double ms = cellSpeciesMass[rc * ns + q];
+                        if (ms > eps) {
+                            receiverSpeciesRemaining[ir * ns + q] =
+                                receiverRemaining[ir] * ms / total;
                         }
                     }
-                    if (bestDonor == ws.donorRichCells.size()) {
-                        break;
+                }
+                for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
+                    const std::size_t dc = static_cast<std::size_t>(ws.donorRichCells[id]);
+                    const double total = ws.mass[dc];
+                    if (!(total > eps)) continue;
+                    for (std::size_t q = 0; q < ns; ++q) {
+                        const double ms = cellSpeciesMass[dc * ns + q];
+                        if (ms > eps) {
+                            donorSpeciesRemaining[id * ns + q] =
+                                donorRemaining[id] * ms / total;
+                        }
                     }
-                    const std::int32_t bestCell = ws.donorRichCells[bestDonor];
-                    const double bestDistance = passive_cell_distance(bestCell, rc, grid, params);
-                    const double transfer = std::min(donorRemaining[bestDonor], receiverRemaining[ir]);
-                    if (transfer <= eps) {
-                        break;
+                }
+
+                for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
+                    const std::int32_t rc = ws.receiverPoorCells[ir];
+                    for (std::size_t q = 0; q < ns; ++q) {
+                        double& receiverSpecies = receiverSpeciesRemaining[ir * ns + q];
+                        while (receiverSpecies > eps) {
+                            std::size_t bestDonor = ws.donorRichCells.size();
+                            double bestDistance = std::numeric_limits<double>::infinity();
+                            std::int32_t bestCell = std::numeric_limits<std::int32_t>::max();
+                            for (std::size_t id = 0; id < ws.donorRichCells.size(); ++id) {
+                                const double available = donorSpeciesRemaining[id * ns + q];
+                                if (available <= eps) continue;
+                                const std::int32_t dc = ws.donorRichCells[id];
+                                const double distance = passive_cell_distance(dc, rc, grid, params);
+                                if (distance < bestDistance ||
+                                    (distance == bestDistance && dc < bestCell)) {
+                                    bestDonor = id;
+                                    bestDistance = distance;
+                                    bestCell = dc;
+                                }
+                            }
+                            if (bestDonor == ws.donorRichCells.size()) break;
+                            double& donorSpecies = donorSpeciesRemaining[bestDonor * ns + q];
+                            const double transfer = std::min(donorSpecies, receiverSpecies);
+                            if (transfer <= eps) break;
+                            donorSpecies -= transfer;
+                            receiverSpecies -= transfer;
+                            recordTransfer(bestDonor, ir, transfer,
+                                           params.speciesDefinitions[q].type, true);
+                        }
                     }
-                    donorRemaining[bestDonor] -= transfer;
-                    receiverRemaining[ir] -= transfer;
-                    ws.transferPlan.push_back(ResamplingTransferPlanEntry{
-                        bestCell,
-                        rc,
-                        transfer,
-                        bestDistance,
-                        donorRemaining[bestDonor],
-                        receiverRemaining[ir]});
-                    plannedMass += transfer;
-                    massWeightedDistance += transfer * bestDistance;
-                    maxDistance = std::max(maxDistance, bestDistance);
-                    if (bestDistance <= adjacentLimit) {
-                        adjacentPairs += 1u;
+                }
+            } else {
+                // Legacy nearest-donor planner without species constraints.
+                for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {
+                    const std::int32_t rc = ws.receiverPoorCells[ir];
+                    while (receiverRemaining[ir] > eps) {
+                        const bool useSpatialSearch =
+                            resampling_spatial_donor_search_0437_enabled() &&
+                            !is_x_periodic(params) && !is_y_periodic(params);
+                        const std::size_t bestDonor = useSpatialSearch
+                            ? nearest_active_donor_spatial_0437(
+                                  rc, ws.donorRichCells, donorRemaining, donorIndexByCell, grid, eps)
+                            : nearest_active_donor_global_0437(
+                                  rc, ws.donorRichCells, donorRemaining, grid, params, eps);
+                        if (useSpatialSearch && resampling_spatial_donor_shadow_0437_enabled()) {
+                            const std::size_t referenceDonor = nearest_active_donor_global_0437(
+                                rc, ws.donorRichCells, donorRemaining, grid, params, eps);
+                            if (bestDonor != referenceDonor) {
+                                throw std::runtime_error(
+                                    "resampling spatial donor search 0437 disagrees with global reference");
+                            }
+                        }
+                        if (bestDonor == ws.donorRichCells.size()) break;
+                        const double transfer = std::min(
+                            donorRemaining[bestDonor], receiverRemaining[ir]);
+                        if (transfer <= eps) break;
+                        recordTransfer(bestDonor, ir, transfer, 0u, false);
                     }
                 }
             }
@@ -4025,6 +4125,9 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                         }
                         const std::size_t i = static_cast<std::size_t>(pi64);
                         if (selected[i]) {
+                            continue;
+                        }
+                        if (entry.speciesConstrained && state.type[i] != entry.particleType) {
                             continue;
                         }
                         const double mp = state.mass[i];

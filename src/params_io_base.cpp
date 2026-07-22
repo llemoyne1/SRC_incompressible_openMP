@@ -116,6 +116,7 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesCellDiagnosticsFilename" ||
         key == "speciesResamplingMassClosureEnable" ||
         key == "speciesResamplingPopulationGuardEnable" ||
+        key == "speciesResamplingTransferEnable" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
     }
@@ -565,6 +566,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesCellDiagnosticsFilename") p.speciesCellDiagnosticsFilename = trim(value);
         else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
         else if (key == "speciesResamplingPopulationGuardEnable") p.speciesResamplingPopulationGuardEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingTransferEnable") p.speciesResamplingTransferEnable = parse_bool(value, key);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
@@ -1436,6 +1438,20 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!p.resamplingEnable) {
             throw std::runtime_error(
                 "speciesResamplingPopulationGuardEnable=true requires resamplingEnable=true");
+        }
+    }
+    if (p.speciesResamplingTransferEnable) {
+        if (!p.speciesRegistryEnable) {
+            throw std::runtime_error(
+                "speciesResamplingTransferEnable=true requires speciesRegistryEnable=true");
+        }
+        if (!p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesResamplingTransferEnable=true requires speciesRequireRegisteredTypes=true");
+        }
+        if (!p.resamplingEnable || !p.resamplingExtractionEnable || !p.resamplingInsertionEnable) {
+            throw std::runtime_error(
+                "speciesResamplingTransferEnable=true requires resampling, extraction and insertion");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {
