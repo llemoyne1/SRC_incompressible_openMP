@@ -38,6 +38,17 @@ struct SimulationParams {
     bool speciesCellDiagnosticsEnable = false;
     std::string speciesCellDiagnosticsFilename = "species_cell_runtime_0490b.csv";
 
+    // 0490h opt-in resident CUDA deposit of N_{c,s}, M_{c,s}, P_{c,s}
+    // and composition fractions. The resident workspace is the production
+    // foundation for later species-aware CUDA resampling and Q6. In 0490h,
+    // host download is diagnostic-only and compared against the 0490b CPU
+    // reference at summary steps.
+    bool speciesCellCudaDepositEnable = false;
+    std::string speciesCellCudaComparisonFilename =
+        "species_cell_cuda_equivalence_0490h.csv";
+    double speciesCellCudaComparisonTolerance = 1.0e-11;
+    int speciesCellCudaThreadsPerBlock = 256;
+
     // 0490d opt-in phase-aware mass closure. The local closure strength and
     // local target mass are reconstructed from the registered species using
     // occupancy proxies m_s / referenceCellMass_s. All particle masses in a

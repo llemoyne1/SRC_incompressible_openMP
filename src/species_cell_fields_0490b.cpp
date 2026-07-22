@@ -67,8 +67,8 @@ SpeciesCellFields0490b deposit_species_cell_fields_0490b(
         speciesIndex.emplace(definitions[s].type, s);
     }
 
-    // Deterministic CPU reference. The resident CUDA implementation will be
-    // introduced later and compared against this path.
+    // Deterministic CPU reference. Patch 0490h compares the resident CUDA
+    // species-cell deposit against this path at strict tolerance.
     const std::size_t n = active_fluid_count_size(state);
     for (std::size_t i = 0; i < n; ++i) {
         if (!is_fluid_particle(state, i)) continue;

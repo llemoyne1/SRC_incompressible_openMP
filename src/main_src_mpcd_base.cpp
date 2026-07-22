@@ -12,6 +12,7 @@
 #include "state_smpcd_io.h"
 #include "species_registry.h"
 #include "species_cell_fields_0490b.h"
+#include "cuda_species_cell_fields_0490h.h"
 #include "weighted_resampling.h"
 
 #include <algorithm>
@@ -568,6 +569,41 @@ int main(int argc, char** argv) {
                 state, params.speciesDefinitions, grid, params,
                 params.speciesRequireRegisteredTypes, 0u, 0.0);
         }
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+        std::unique_ptr<mpcd::CudaParticleState> speciesCellCudaParticles0490h;
+        std::unique_ptr<mpcd::CudaSpeciesCellWorkspace0490h> speciesCellCudaWorkspace0490h;
+        std::unique_ptr<mpcd::SpeciesCellCudaEquivalenceWriter0490h> speciesCellCudaWriter0490h;
+        if (params.speciesCellCudaDepositEnable) {
+            if (!mpcd::cuda_species_cell_fields_available_0490h()) {
+                throw std::runtime_error(
+                    "speciesCellCudaDepositEnable=true but no CUDA device is available");
+            }
+            speciesCellCudaParticles0490h = std::make_unique<mpcd::CudaParticleState>();
+            speciesCellCudaWorkspace0490h =
+                std::make_unique<mpcd::CudaSpeciesCellWorkspace0490h>();
+            speciesCellCudaWriter0490h =
+                std::make_unique<mpcd::SpeciesCellCudaEquivalenceWriter0490h>(
+                    params.outputDir + "/" + params.speciesCellCudaComparisonFilename);
+            speciesCellCudaParticles0490h->upload_all(state);
+            const mpcd::SpeciesCellCudaEquivalence0490h eq0490h =
+                speciesCellCudaWriter0490h->append(
+                    speciesCellCudaParticles0490h->device_view(), state,
+                    params.speciesDefinitions, grid, params,
+                    params.speciesRequireRegisteredTypes,
+                    params.speciesCellCudaComparisonTolerance,
+                    *speciesCellCudaWorkspace0490h, 0u, 0.0, 0,
+                    params.speciesCellCudaThreadsPerBlock);
+            if (!eq0490h.pass) {
+                throw std::runtime_error(
+                    "0490h initial CUDA/CPU species-cell deposit mismatch");
+            }
+        }
+#else
+        if (params.speciesCellCudaDepositEnable) {
+            throw std::runtime_error(
+                "speciesCellCudaDepositEnable=true requires CUDA particle-state and cell-workspace support");
+        }
+#endif
         mpcd::LiveVisualization0335 liveVisualization0335;
         liveVisualization0335.maybe_initialize(params);
         mpcd::FilteredFieldRecorder0432 filteredFieldRecorder0432;
@@ -646,6 +682,7 @@ int main(int argc, char** argv) {
                   << " speciesCount=" << params.speciesDefinitions.size()
                   << " speciesDiagnostics=" << (params.speciesDiagnosticsEnable ? params.speciesDiagnosticsFilename : std::string("off"))
                   << " speciesCellDiagnostics=" << (params.speciesCellDiagnosticsEnable ? params.speciesCellDiagnosticsFilename : std::string("off"))
+                  << " speciesCellCudaDeposit=" << (params.speciesCellCudaDepositEnable ? params.speciesCellCudaComparisonFilename : std::string("off"))
                   << " speciesMassClosure=" << (params.speciesResamplingMassClosureEnable ? "on" : "off")
                   << " speciesPopulationGuard=" << (params.speciesResamplingPopulationGuardEnable ? "on" : "off")
                   << " speciesMixedRefill=" << (params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? "on" : "off")
@@ -878,6 +915,34 @@ int main(int argc, char** argv) {
                         params.speciesRequireRegisteredTypes,
                         static_cast<std::uint64_t>(step), s.time);
                 }
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+                if (speciesCellCudaWriter0490h) {
+                    mpcd::CudaParticleState* cudaSource0490h = nullptr;
+                    int usedSharedResident0490h = 0;
+                    if (mpcd::cuda_shared_particle_state_0251_is_fresh()) {
+                        cudaSource0490h = &mpcd::cuda_shared_particle_state_0251();
+                        usedSharedResident0490h = 1;
+                    } else {
+                        speciesCellCudaParticles0490h->upload_all(summaryState);
+                        cudaSource0490h = speciesCellCudaParticles0490h.get();
+                    }
+                    const mpcd::SpeciesCellCudaEquivalence0490h eq0490h =
+                        speciesCellCudaWriter0490h->append(
+                            cudaSource0490h->device_view(), summaryState,
+                            params.speciesDefinitions, grid, params,
+                            params.speciesRequireRegisteredTypes,
+                            params.speciesCellCudaComparisonTolerance,
+                            *speciesCellCudaWorkspace0490h,
+                            static_cast<std::uint64_t>(step), s.time,
+                            usedSharedResident0490h,
+                            params.speciesCellCudaThreadsPerBlock);
+                    if (!eq0490h.pass) {
+                        throw std::runtime_error(
+                            "0490h CUDA/CPU species-cell deposit mismatch at step " +
+                            std::to_string(step));
+                    }
+                }
+#endif
     std::cout << "\r\033[K[src_mpcd_base] step=" << step
           << "/" << params.nSteps
           << " t=" << std::fixed << std::setprecision(3) << s.time

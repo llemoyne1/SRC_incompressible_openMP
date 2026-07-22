@@ -71,6 +71,7 @@ set -x
   src/particle_state.cpp \
   src/species_registry.cpp \
   src/species_cell_fields_0490b.cpp \
+  src/cuda_species_cell_fields_0490h.cu \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
   src/cuda_shared_particle_state_0251.cpp \
