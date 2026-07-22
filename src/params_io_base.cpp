@@ -114,7 +114,8 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesRequireRegisteredTypes" || key == "speciesDiagnosticsEnable" ||
         key == "speciesDiagnosticsFilename" || key == "speciesCellDiagnosticsEnable" ||
         key == "speciesCellDiagnosticsFilename" ||
-        key == "speciesResamplingMassClosureEnable") {
+        key == "speciesResamplingMassClosureEnable" ||
+        key == "speciesResamplingPopulationGuardEnable") {
         return false;
     }
     const std::string suffix = key.substr(prefix.size());
@@ -562,6 +563,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesCellDiagnosticsEnable") p.speciesCellDiagnosticsEnable = parse_bool(value, key);
         else if (key == "speciesCellDiagnosticsFilename") p.speciesCellDiagnosticsFilename = trim(value);
         else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingPopulationGuardEnable") p.speciesResamplingPopulationGuardEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
         }
@@ -1405,6 +1407,20 @@ void validate_simulation_params(const SimulationParams& p) {
     if (p.speciesCellDiagnosticsEnable && !p.speciesRegistryEnable) {
         throw std::runtime_error(
             "speciesCellDiagnosticsEnable=true requires speciesRegistryEnable=true");
+    }
+    if (p.speciesResamplingPopulationGuardEnable) {
+        if (!p.speciesRegistryEnable) {
+            throw std::runtime_error(
+                "speciesResamplingPopulationGuardEnable=true requires speciesRegistryEnable=true");
+        }
+        if (!p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesResamplingPopulationGuardEnable=true requires speciesRequireRegisteredTypes=true");
+        }
+        if (!p.resamplingEnable) {
+            throw std::runtime_error(
+                "speciesResamplingPopulationGuardEnable=true requires resamplingEnable=true");
+        }
     }
     if (p.speciesResamplingMassClosureEnable) {
         if (!p.speciesRegistryEnable) {

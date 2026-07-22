@@ -377,6 +377,15 @@ struct ResamplingPopulationGuardDiagnostics {
     std::uint32_t overfullCandidatePopulationMax = 0;
     std::uint32_t underfullCandidatePopulationMax = 0;
 
+    // 0490e species-directed selection diagnostics. The global support band
+    // remains total-population based; these counters report which edits were
+    // explicitly steered toward a per-species target composition.
+    bool speciesPopulationGuardActive = false;
+    std::uint64_t speciesPopulationCells = 0;
+    std::uint64_t speciesDirectedSplits = 0;
+    std::uint64_t speciesDirectedMerges = 0;
+    std::uint64_t speciesTargetInfeasibleCells = 0;
+
     std::uint64_t splitParticlesCreated = 0;
     std::uint64_t extractedParticles = 0;
     std::uint64_t skippedNoFreeSlots = 0;
@@ -850,6 +859,11 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t populationGuardUnderfullEligibleParticleRefs = 0;
     std::uint32_t populationGuardOverfullCandidatePopulationMax = 0;
     std::uint32_t populationGuardUnderfullCandidatePopulationMax = 0;
+    bool populationGuardSpeciesActive = false;
+    std::uint64_t populationGuardSpeciesCells = 0;
+    std::uint64_t populationGuardSpeciesDirectedSplits = 0;
+    std::uint64_t populationGuardSpeciesDirectedMerges = 0;
+    std::uint64_t populationGuardSpeciesTargetInfeasibleCells = 0;
     std::uint64_t populationGuardSplitParticlesCreated = 0;
     std::uint64_t populationGuardExtractedParticles = 0;
     std::uint64_t populationGuardSkippedNoFreeSlots = 0;

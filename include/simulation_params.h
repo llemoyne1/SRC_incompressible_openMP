@@ -46,6 +46,12 @@ struct SimulationParams {
     // the legacy particle-mass guard and closed-capacity override.
     bool speciesResamplingMassClosureEnable = false;
 
+    // 0490e opt-in species-aware selection inside the CPU population support
+    // guard. The total Nmin/Ntarget/Nmax policy is unchanged; only the species
+    // selected for split/merge is chosen from a deterministic per-cell target
+    // composition reconstructed from M_s/referenceCellMass_s.
+    bool speciesResamplingPopulationGuardEnable = false;
+
     std::string inputState;
     std::string outputDir = "run_base";
 

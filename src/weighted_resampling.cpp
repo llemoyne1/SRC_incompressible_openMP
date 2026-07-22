@@ -1994,6 +1994,115 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
         ensure_cell_particle_index(depositWorkspace, state, nc);
     }
 
+    // 0490e: build a deterministic per-cell species population target. The
+    // total support band remains Nmin/Ntarget/Nmax. Species only directs which
+    // parent is split and which same-type pair is merged.
+    const bool speciesPopulationPolicyActive =
+        params.speciesResamplingPopulationGuardEnable;
+    std::vector<std::uint32_t> speciesTypes;
+    std::unordered_map<std::uint32_t, std::size_t> speciesIndexByType;
+    std::vector<std::uint32_t> speciesCountByCell;
+    std::vector<double> speciesMassByCell;
+    std::vector<int> speciesTargetByCell;
+    if (speciesPopulationPolicyActive) {
+        validate_species_definitions(
+            params.speciesDefinitions,
+            "apply_resampling_population_support_guard 0490e registry");
+        validate_state_species_registry(
+            state, params.speciesDefinitions, true,
+            "apply_resampling_population_support_guard 0490e state");
+        d.speciesPopulationGuardActive = true;
+        speciesTypes.reserve(params.speciesDefinitions.size());
+        speciesIndexByType.reserve(params.speciesDefinitions.size());
+        for (std::size_t s = 0; s < params.speciesDefinitions.size(); ++s) {
+            speciesTypes.push_back(params.speciesDefinitions[s].type);
+            speciesIndexByType.emplace(params.speciesDefinitions[s].type, s);
+        }
+        const std::size_t ns = speciesTypes.size();
+        speciesCountByCell.assign(static_cast<std::size_t>(nc) * ns, 0u);
+        speciesMassByCell.assign(static_cast<std::size_t>(nc) * ns, 0.0);
+        speciesTargetByCell.assign(static_cast<std::size_t>(nc) * ns, 0);
+        const std::size_t nActive = active_fluid_count_size(state);
+        for (std::size_t i = 0; i < nActive; ++i) {
+            if (!is_fluid_particle(state, i) || i >= depositWorkspace.cellId.size()) continue;
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) continue;
+            const auto it = speciesIndexByType.find(state.type[i]);
+            if (it == speciesIndexByType.end()) {
+                throw std::runtime_error(
+                    "0490e species population guard found unregistered fluid type " +
+                    std::to_string(state.type[i]));
+            }
+            const std::size_t flat = static_cast<std::size_t>(c) * ns + it->second;
+            speciesCountByCell[flat] += 1u;
+            speciesMassByCell[flat] += state.mass[i];
+        }
+
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            if (!depositWorkspace.wetCell[kk]) continue;
+            std::vector<std::size_t> present;
+            std::vector<double> weights(ns, 0.0);
+            double weightSum = 0.0;
+            for (std::size_t s = 0; s < ns; ++s) {
+                const std::size_t flat = kk * ns + s;
+                if (speciesCountByCell[flat] == 0u) continue;
+                const double ref = params.speciesDefinitions[s].referenceCellMassDeclared;
+                const double w = speciesMassByCell[flat] / ref;
+                if (!(w > 0.0) || !std::isfinite(w)) continue;
+                present.push_back(s);
+                weights[s] = w;
+                weightSum += w;
+            }
+            if (present.empty() || !(weightSum > 0.0)) continue;
+            d.speciesPopulationCells += 1u;
+
+            // Preserve at least one representative for every present species
+            // whenever Ntarget makes that mathematically possible, then apportion
+            // the remaining slots by largest remainder.
+            int remaining = d.nTarget;
+            if (static_cast<int>(present.size()) <= d.nTarget) {
+                for (const std::size_t s : present) {
+                    speciesTargetByCell[kk * ns + s] = 1;
+                    remaining -= 1;
+                }
+            } else {
+                d.speciesTargetInfeasibleCells += 1u;
+                std::sort(present.begin(), present.end(), [&](std::size_t a, std::size_t b) {
+                    if (weights[a] != weights[b]) return weights[a] > weights[b];
+                    return speciesTypes[a] < speciesTypes[b];
+                });
+                for (int q = 0; q < d.nTarget; ++q) {
+                    speciesTargetByCell[kk * ns + present[static_cast<std::size_t>(q)]] = 1;
+                }
+                remaining = 0;
+            }
+            if (remaining > 0) {
+                struct RemainderEntry { std::size_t s; double remainder; };
+                std::vector<RemainderEntry> remainderEntries;
+                remainderEntries.reserve(present.size());
+                int assigned = 0;
+                for (const std::size_t s : present) {
+                    const double ideal = static_cast<double>(remaining) * weights[s] / weightSum;
+                    const int base = static_cast<int>(std::floor(ideal));
+                    speciesTargetByCell[kk * ns + s] += base;
+                    assigned += base;
+                    remainderEntries.push_back({s, ideal - static_cast<double>(base)});
+                }
+                int left = remaining - assigned;
+                std::sort(remainderEntries.begin(), remainderEntries.end(),
+                    [&](const RemainderEntry& a, const RemainderEntry& b) {
+                        if (a.remainder != b.remainder) return a.remainder > b.remainder;
+                        return speciesTypes[a.s] < speciesTypes[b.s];
+                    });
+                for (int q = 0; q < left; ++q) {
+                    speciesTargetByCell[kk * ns +
+                        remainderEntries[static_cast<std::size_t>(q)].s] += 1;
+                }
+            }
+        }
+    }
+
     std::uint64_t extractionBudget = params.resamplingPopulationMaxExtractionsPerStep > 0
         ? static_cast<std::uint64_t>(params.resamplingPopulationMaxExtractionsPerStep)
         : std::numeric_limits<std::uint64_t>::max();
@@ -2030,6 +2139,26 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                     span, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()))));
         }
         while (doneCell < allowed && extractionBudget > 0u && static_cast<int>(countAfter[kk]) > d.nTarget) {
+            std::uint32_t preferredMergeType = 0u;
+            bool preferredMergeTypeValid = false;
+            if (speciesPopulationPolicyActive) {
+                const std::size_t ns = speciesTypes.size();
+                int bestSurplus = std::numeric_limits<int>::min();
+                std::uint32_t bestType = 0u;
+                for (std::size_t s = 0; s < ns; ++s) {
+                    const std::size_t flat = kk * ns + s;
+                    const int count = static_cast<int>(speciesCountByCell[flat]);
+                    if (count < 2) continue;
+                    const int surplus = count - speciesTargetByCell[flat];
+                    if (!preferredMergeTypeValid || surplus > bestSurplus ||
+                        (surplus == bestSurplus && speciesTypes[s] < bestType)) {
+                        preferredMergeTypeValid = true;
+                        bestSurplus = surplus;
+                        bestType = speciesTypes[s];
+                    }
+                }
+                preferredMergeType = bestType;
+            }
             std::uint64_t victim64 = kInvalidParticleIndex;
             std::uint64_t survivor64 = kInvalidParticleIndex;
             double victimMass = std::numeric_limits<double>::infinity();
@@ -2052,6 +2181,8 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                     const std::size_t survivorCandidate =
                         static_cast<std::size_t>(survivorCandidate64);
                     if (!is_fluid_particle(state, survivorCandidate)) continue;
+                    if (preferredMergeTypeValid &&
+                        state.type[survivorCandidate] != preferredMergeType) continue;
                     const double msCandidate = state.mass[survivorCandidate];
                     if (!(msCandidate > 0.0)) continue;
 
@@ -2131,11 +2262,19 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                 {
                     MPCD_POP_GUARD_PROFILE(d.profile, OverfullMutationCountUpdate);
                     countAfter[kk] -= 1u;
+                    if (speciesPopulationPolicyActive) {
+                        const auto it = speciesIndexByType.find(state.type[survivor]);
+                        if (it != speciesIndexByType.end()) {
+                            const std::size_t flat = kk * speciesTypes.size() + it->second;
+                            if (speciesCountByCell[flat] > 0u) speciesCountByCell[flat] -= 1u;
+                        }
+                    }
                 }
             }
             {
                 MPCD_POP_GUARD_PROFILE(d.profile, OverfullDiagnostics);
                 d.extractedParticles += 1u;
+                if (preferredMergeTypeValid) d.speciesDirectedMerges += 1u;
                 doneCell += 1;
                 extractionBudget -= 1u;
             }
@@ -2202,6 +2341,25 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                 { MPCD_POP_GUARD_PROFILE(d.profile, UnderfullDiagnostics); d.skippedNoFreeSlots += static_cast<std::uint64_t>(allowed - doneCell); }
                 break;
             }
+            std::uint32_t preferredSplitType = 0u;
+            bool preferredSplitTypeValid = false;
+            if (speciesPopulationPolicyActive) {
+                const std::size_t ns = speciesTypes.size();
+                int bestDeficit = 0;
+                for (std::size_t s = 0; s < ns; ++s) {
+                    const std::size_t flat = kk * ns + s;
+                    const int count = static_cast<int>(speciesCountByCell[flat]);
+                    if (count <= 0) continue;
+                    const int deficit = speciesTargetByCell[flat] - count;
+                    if (deficit > bestDeficit ||
+                        (deficit == bestDeficit && deficit > 0 &&
+                         (!preferredSplitTypeValid || speciesTypes[s] < preferredSplitType))) {
+                        preferredSplitTypeValid = deficit > 0;
+                        bestDeficit = deficit;
+                        preferredSplitType = speciesTypes[s];
+                    }
+                }
+            }
             std::uint64_t parent64 = kInvalidParticleIndex;
             double parentMass = -1.0;
             {
@@ -2214,6 +2372,7 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                     if (pi64 == kInvalidParticleIndex || pi64 >= state.Np) continue;
                     const std::size_t pi = static_cast<std::size_t>(pi64);
                     if (!is_fluid_particle(state, pi)) continue;
+                    if (preferredSplitTypeValid && state.type[pi] != preferredSplitType) continue;
                     const double mp = state.mass[pi];
                     d.underfullEligibleParticleRefs += 1u;
                     if (mp > parentMass) { parentMass = mp; parent64 = pi64; }
@@ -2262,7 +2421,14 @@ ResamplingPopulationGuardDiagnostics apply_resampling_population_support_guard(
                 {
                     MPCD_POP_GUARD_PROFILE(d.profile, UnderfullMutationCountersUpdate);
                     countAfter[kk] += 1u;
+                    if (speciesPopulationPolicyActive) {
+                        const auto it = speciesIndexByType.find(state.type[child]);
+                        if (it != speciesIndexByType.end()) {
+                            speciesCountByCell[kk * speciesTypes.size() + it->second] += 1u;
+                        }
+                    }
                     d.splitParticlesCreated += 1u;
+                    if (preferredSplitTypeValid) d.speciesDirectedSplits += 1u;
                     d.splitMass += halfMass;
                     d.splitMomentumX += halfMass * state.vx[child];
                     d.splitMomentumY += halfMass * state.vy[child];
@@ -2327,6 +2493,11 @@ void attach_resampling_population_guard_diagnostics(
     diagnostics.populationGuardUnderfullEligibleParticleRefs = pop.underfullEligibleParticleRefs;
     diagnostics.populationGuardOverfullCandidatePopulationMax = pop.overfullCandidatePopulationMax;
     diagnostics.populationGuardUnderfullCandidatePopulationMax = pop.underfullCandidatePopulationMax;
+    diagnostics.populationGuardSpeciesActive = pop.speciesPopulationGuardActive;
+    diagnostics.populationGuardSpeciesCells = pop.speciesPopulationCells;
+    diagnostics.populationGuardSpeciesDirectedSplits = pop.speciesDirectedSplits;
+    diagnostics.populationGuardSpeciesDirectedMerges = pop.speciesDirectedMerges;
+    diagnostics.populationGuardSpeciesTargetInfeasibleCells = pop.speciesTargetInfeasibleCells;
     diagnostics.populationGuardSplitParticlesCreated = pop.splitParticlesCreated;
     diagnostics.populationGuardExtractedParticles = pop.extractedParticles;
     diagnostics.populationGuardSkippedNoFreeSlots = pop.skippedNoFreeSlots;

@@ -647,6 +647,7 @@ int main(int argc, char** argv) {
                   << " speciesDiagnostics=" << (params.speciesDiagnosticsEnable ? params.speciesDiagnosticsFilename : std::string("off"))
                   << " speciesCellDiagnostics=" << (params.speciesCellDiagnosticsEnable ? params.speciesCellDiagnosticsFilename : std::string("off"))
                   << " speciesMassClosure=" << (params.speciesResamplingMassClosureEnable ? "on" : "off")
+                  << " speciesPopulationGuard=" << (params.speciesResamplingPopulationGuardEnable ? "on" : "off")
                   << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
