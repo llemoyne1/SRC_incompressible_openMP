@@ -1,9 +1,0 @@
-area,status,notes
-Q6 CUDA,unchanged,0199 does not modify the Q6 backend
-particle_to_cell_deposit,added_standalone,CUDA atomic deposit computes cellId/count/mass/px/py/ux/uy
-collision_step,not_modified,no dynamics change in this patch
-resampling,not_modified,no GPU resampling in this patch
-thermostat,not_modified,no GPU thermostat in this patch
-supported_roles,fluid_only_deposit,latent and inactive slots are ignored in the deposit
-supported_boundaries,periodic_and_bounded_indexing,kernel implements both periodic and bounded index logic but smoke targets periodic TG-like states
-next_target,persistent_buffers_or_in_step_shadow_validation,do not switch simulation dynamics before CPU/CUDA moment comparison is validated

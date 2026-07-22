@@ -67,3 +67,121 @@ dev_history/artifacts/
 
 # Local/generated Darcy chi fields
 /chi/
+
+# ----------------------------------------------------------------------
+# SRC_GPU-SURF: generated files and local development artifacts
+# ----------------------------------------------------------------------
+
+# Archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Build trees and CMake-generated files
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+Testing/
+
+# Run and output directories
+run/
+runs/
+output/
+outputs/
+logs/
+
+# Local development history
+dev_history/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+
+# Runtime logs and crash dumps
+*.log
+core
+core.*
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ----------------------------------------------------------------------
+# End SRC_GPU-SURF exclusions
+# ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# SRC_GPU-SURF: generated files and local development artifacts
+# ----------------------------------------------------------------------
+
+# Archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Build trees and CMake-generated files
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+Testing/
+
+# Run and output directories
+run/
+runs/
+output/
+outputs/
+logs/
+
+# Local development history
+dev_history/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+
+# Runtime logs and crash dumps
+*.log
+core
+core.*
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ----------------------------------------------------------------------
+# End SRC_GPU-SURF exclusions
+# ----------------------------------------------------------------------

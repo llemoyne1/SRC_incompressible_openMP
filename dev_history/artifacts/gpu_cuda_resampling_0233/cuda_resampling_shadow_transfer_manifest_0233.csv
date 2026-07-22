@@ -1,7 +1,0 @@
-file,description
-include/cuda_resampling_particle_ops.h,Adds shadow transfer structs and CUDA mutation prototype declaration
-src/cuda_resampling_particle_ops.cu,Implements bounded donor split plus insertion mutation on CUDA copy
-src/main_validate_cuda_resampling_shadow_transfer_0233.cpp,Standalone CPU/CUDA validator for conservative shadow transfer
-scripts/build_cuda_resampling_shadow_transfer_0233.sh,Builds validator with nvcc
-scripts/run_cuda_resampling_shadow_transfer_smoke_0233.sh,Runs 64/128 smoke cases and writes CSV/log
-doc/README_0233_CUDA_RESAMPLING_SHADOW_TRANSFER.md,Documents scope and validation criteria

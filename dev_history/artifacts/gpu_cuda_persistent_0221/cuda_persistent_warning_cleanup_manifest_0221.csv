@@ -1,5 +1,0 @@
-patch,kind,file,description
-0221,modified,src/cuda_persistent_mpcd_step.cu,Remove unused nBytesD declaration from shared CudaParticleState path
-0221,added,doc/README_0221_CUDA_PERSISTENT_WARNING_CLEANUP.md,Document warning cleanup and validation
-0221,added,dev_history/artifacts/gpu_cuda_persistent_0221/cuda_persistent_warning_cleanup_manifest_0221.csv,Patch manifest
-0221,added,dev_history/artifacts/gpu_cuda_persistent_0221/cuda_persistent_warning_cleanup_scope_0221.csv,Patch scope

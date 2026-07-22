@@ -1,9 +1,0 @@
-item,value
-patch,0220
-branch,SRC_GPU
-purpose,connect CudaParticleState to the real persistent SRC collision plus thermostat substep
-runtime_flag,MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE=1
-required_flag,MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
-supported_case,Taylor-Green periodic full fluid domain
-projection_supported,false
-expected_default_behavior,CPU path unchanged

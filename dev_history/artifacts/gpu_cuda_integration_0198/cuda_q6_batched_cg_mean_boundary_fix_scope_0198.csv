@@ -1,7 +1,0 @@
-component,status,notes
-CUDA Q6 CG,bug fix,do not overwrite rrOld before post-mean-removal beta
-batchSize=1,restoration target,must return to 0196-equivalent behavior
-batchSize>1,experimental,still tested as ablation after batchSize=1 is restored
-CPU/OpenMP,unchanged,reference path remains projectionBackend=cpu
-projectionBackend=cuda,unchanged scope,still periodic unmasked TG-only subset
-unsupported Poiseuille,expected fail,guard remains required

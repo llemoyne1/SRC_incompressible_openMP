@@ -1,5 +1,0 @@
-item,status,notes
-classic_src_cuda,not_target,Existing standalone CUDA SRC code is useful as reference but not the main objective
-resampling_cell_classification,implemented,First safe CUDA primitive for poor/rich/active/wet/dry flags
-particle_mutation,not_implemented,Insertion/extraction/remap deliberately deferred
-integration_in_step,not_implemented,Standalone only; next patch should be real resampling shadow mode

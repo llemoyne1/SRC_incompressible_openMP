@@ -1,7 +1,0 @@
-artifact,kind,description
-include/cuda_particle_state.h,header,Shared persistent CUDA particle-state manager API
-src/cuda_particle_state.cu,cuda,CUDA ownership layer for particle SoA buffers and smoke helper kernel
-src/main_validate_cuda_particle_state_0218.cpp,validator,Standalone validator for upload-once device mutation final download
-scripts/build_cuda_particle_state_0218.sh,script,Builds the standalone validator with nvcc
-scripts/run_cuda_particle_state_smoke_0218.sh,script,Runs 64x64 and 128x128 smoke tests by default
-doc/README_0218_CUDA_PERSISTENT_PARTICLE_STATE.md,doc,Patch documentation and validation protocol

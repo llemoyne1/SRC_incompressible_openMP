@@ -1,7 +1,0 @@
-patch,file,kind,purpose
-190,src/cuda_q6_backend.cu,modified,Remove redundant CUDA synchronizations and reduction-buffer memsets in Q6 CG loop while keeping optional debug synchronization
-190,scripts/build_src_mpcd_cuda_0190.sh,added,Build CUDA-enabled SRC/MPCD executable for the 0190 launch-overhead cleanup
-190,scripts/run_cuda_q6_tg_regression_0190.sh,added,Run integrated TG CPU/CUDA regression after 0190 cleanup and keep unsupported-case guard
-190,doc/README_0190_CUDA_Q6_LAUNCH_OVERHEAD_CLEANUP.md,added,Document 0189 timing diagnosis and the limited 0190 overhead cleanup
-190,dev_history/artifacts/gpu_cuda_integration_0190/cuda_q6_launch_overhead_cleanup_manifest_0190.csv,added,Manifest for the 0190 differential archive
-190,dev_history/artifacts/gpu_cuda_integration_0190/cuda_q6_launch_overhead_cleanup_scope_0190.csv,added,Scope and non-goals for the 0190 CUDA Q6 cleanup

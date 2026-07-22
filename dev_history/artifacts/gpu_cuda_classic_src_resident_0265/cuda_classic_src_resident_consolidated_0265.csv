@@ -1,2 +1,0 @@
-suite,script,gridCases,outputCsv,exitCode,rows,passRows,failRows,verdict
-periodic_0260,scripts/run_cuda_classic_src_periodic_resident_0260.sh,64:64:180,dev_history/artifacts/gpu_cuda_classic_src_resident_0265/periodic_0260/cuda_classic_src_periodic_resident_0260.csv,0,4,2,2,FAIL

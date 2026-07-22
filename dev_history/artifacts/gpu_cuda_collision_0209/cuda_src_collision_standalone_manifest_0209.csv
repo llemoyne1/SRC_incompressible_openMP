@@ -1,9 +1,0 @@
-file,action,notes
-include/cuda_src_collision.h,add,CUDA SRC collision standalone API and diagnostics
-src/cuda_src_collision.cu,add,CUDA per-particle SRC rotation around supplied cell moments
-src/main_validate_cuda_src_collision_0209.cpp,add,CPU/CUDA standalone validator for SRC collision rotation
-scripts/build_cuda_src_collision_0209.sh,add,nvcc build helper for standalone validator
-scripts/run_cuda_src_collision_smoke_0209.sh,add,smoke sweep for 64x64 and 128x128 gamma=20 cases
-doc/README_0209_CUDA_SRC_COLLISION_STANDALONE.md,add,scope and validation documentation
-dev_history/artifacts/gpu_cuda_collision_0209/cuda_src_collision_standalone_manifest_0209.csv,add,this manifest
-dev_history/artifacts/gpu_cuda_collision_0209/cuda_src_collision_standalone_scope_0209.csv,add,scope summary

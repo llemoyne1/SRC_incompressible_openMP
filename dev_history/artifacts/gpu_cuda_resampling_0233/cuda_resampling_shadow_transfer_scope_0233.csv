@@ -1,9 +1,0 @@
-item,value
-patch,0233
-area,cuda_resampling
-mutation,shadow_copy_only
-changes_step,no
-validates,donor_mass_split_and_insertion_slot_activation
-conservation,mass_and_momentum_global
-restriction,unique_donor_and_unique_insertion_particles
-next_step,real_step_shadow_or_donor_budget

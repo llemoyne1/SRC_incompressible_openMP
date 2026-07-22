@@ -1,7 +1,0 @@
-file,role,notes
-include/cuda_resampling_guard.h,updated header from 0228,CUDA resampling guard/plan API reused by shadow mode
-src/cuda_resampling_guard.cu,updated CUDA primitive from 0228,classification/compaction/plan implementation
-src/weighted_resampling.cpp,modified,adds optional CUDA shadow call on real WeightedRealFluidDepositWorkspace
-scripts/build_src_mpcd_cuda_0229.sh,new,builds full CUDA executable with MPCD_ENABLE_CUDA_RESAMPLING
-scripts/run_cuda_resampling_shadow_0229.sh,new,runs baseline vs CUDA shadow and compares validation summaries
-doc/README_0229_CUDA_RESAMPLING_SHADOW_REAL_DEPOSIT.md,new,documents runtime flags and validation scope

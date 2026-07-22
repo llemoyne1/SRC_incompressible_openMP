@@ -1,3 +1,0 @@
-case,Nx,Ny,gamma,cells,activeCells,poorCells,richCells,transfers,totalDeficit,totalExcess,plannedMass,poorIndexMismatches,richIndexMismatches,deficitMaxAbs,excessMaxAbs,receiverMismatches,donorMismatches,transferMassMaxAbs,diagTotalDeficitDiff,diagTotalExcessDiff,diagPlannedMassDiff,verdict
-64x64_g20,64,64,20,4096,3866,1184,1165,2330,7120.5069543967293,7022.681989200395,7022.6819892003941,0,0,0,0,0,0,0,0,0,0,PASS
-128x128_g20,128,128,20,16384,15838,4996,4731,9453,30218.201091923402,28508.906271825836,28508.906271825959,0,0,0,0,0,0,0,0,0,0,PASS

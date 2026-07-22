@@ -1,2 +1,0 @@
-case,origin_wallTime,optimized_wallTime,wall_speedup_origin_over_optimized,origin_elapsed_s,optimized_elapsed_s,elapsed_speedup_origin_over_optimized,failed_metrics,compared_metrics,verdict
-poiseuille_wall_full,19.151599584,22.876564393,0.8371711440140985,19.29,23.06,0.8365134431916739,0,76,PASS

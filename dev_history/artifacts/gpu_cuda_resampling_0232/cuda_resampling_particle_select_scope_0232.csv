@@ -1,7 +1,0 @@
-item,value
-patch,0232
-area,cuda_resampling
-scope,standalone donor-particle selection for planned transfers
-mutates_particles,0
-requires_previous,0228 compact plan; 0231 real-deposit shadow policy optional
-next_step,shadow mutative extraction/insertion on copied state

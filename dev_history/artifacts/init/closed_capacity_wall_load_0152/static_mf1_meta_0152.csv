@@ -1,2 +1,0 @@
-output,Lx,Ly,Nx,Ny,gamma,mass,massFactor,particleMassFluid,capacityMultiplier,nCells,nSlots,nFluidInitial,nInactiveInitial,referenceMass,totalFluidMass,overfillRatio,populationMinInitial,populationMaxInitial,populationMeanInitial,kBT,velocityMode,Ux,Uy,removeMeanMomentum,seed
-..\init\closed_capacity_wall_load_0152\static_mf1.smpcd,1,1,48,48,20,1,1,1,1.1,2304,50688,46080,4608,46080,46080,0,20,20,20,0,zero,0,0,1,1520001

@@ -1,7 +1,0 @@
-item,path,description
-source,include/cuda_cell_moments.h,Adds persistent-buffer/fast-path options and diagnostics for CUDA cell moments.
-source,src/cuda_cell_moments.cu,Reuses device buffers and skips role/mass/velocity transfers when safe.
-source,src/src_collision.cpp,Uses optimized active CUDA deposit options and writes 0202 diagnostics.
-script,scripts/build_src_mpcd_cuda_0202.sh,Builds CUDA-enabled SRC/MPCD binary for 0202.
-script,scripts/run_cuda_cell_moments_fastpath_0202.sh,Runs CPU baseline vs active CUDA fast-path deposit comparisons.
-doc,doc/README_0202_CUDA_CELL_MOMENTS_FASTPATHS.md,Documents scope flags validation and interpretation.

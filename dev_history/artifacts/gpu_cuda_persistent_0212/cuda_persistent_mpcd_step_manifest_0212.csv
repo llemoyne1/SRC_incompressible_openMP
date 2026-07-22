@@ -1,9 +1,0 @@
-file,role
-include/cuda_persistent_mpcd_step.h,Public interface for persistent CUDA particle-state prototype
-src/cuda_persistent_mpcd_step.cu,CUDA implementation of upload-once deposit SRC thermostat chain
-src/main_validate_cuda_persistent_mpcd_step_0212.cpp,Standalone CPU/CUDA validator
-scripts/build_cuda_persistent_mpcd_step_0212.sh,NVCC build helper
-scripts/run_cuda_persistent_mpcd_step_smoke_0212.sh,Smoke and CSV harness
-doc/README_0212_CUDA_PERSISTENT_PARTICLE_STACK.md,Documentation for the persistent-particle transition
-dev_history/artifacts/gpu_cuda_persistent_0212/cuda_persistent_mpcd_step_manifest_0212.csv,Patch manifest
-dev_history/artifacts/gpu_cuda_persistent_0212/cuda_persistent_mpcd_step_scope_0212.csv,Scope and expected next steps

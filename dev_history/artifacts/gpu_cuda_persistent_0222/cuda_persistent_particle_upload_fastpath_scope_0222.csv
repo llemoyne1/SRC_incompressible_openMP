@@ -1,9 +1,0 @@
-item,value
-patch,0222
-scope,host-side upload optimization for CudaParticleState
-physics_change,no
-step_change,no
-new_kernel,no
-persistent_particle_state,yes
-main_validation,tg_periodic_full 64x64/128x128 projection disabled
-expected_effect,lower host-side upload overhead without changing dynamics

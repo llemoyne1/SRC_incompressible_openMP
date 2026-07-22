@@ -1,8 +1,0 @@
-item,status,detail
-backend,cuda_only,continues SRC_GPU CUDA-only decision
-simulation_dynamics,unchanged,CPU/OpenMP collision deposit still drives state update
-cuda_deposit,shadow_only,CUDA recomputes real-particle cell moments for validation/timing
-comparison_scope,pre_virtual_particles,wallVP and immersed-solid virtual contributions excluded intentionally
-strictness,default_strict,MPCD_CUDA_CELL_MOMENTS_SHADOW_STRICT defaults to true when shadow enabled
-runtime_output,per_case_csv,<outputDir>/cuda_cell_moments_shadow_0200.csv
-next_step,planned,persistent CUDA deposit context then optional replacement for periodic TG subset

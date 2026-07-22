@@ -1,6 +1,0 @@
-file,role
-include/cuda_particle_state.h,existing persistent particle-state API used by 0220
-src/src_collision.cpp,adds runtime shared CudaParticleState path in real src_collision_step
-scripts/build_src_mpcd_cuda_0220.sh,CUDA build with MPCD_ENABLE_CUDA_PARTICLE_STATE
-scripts/run_cuda_persistent_particle_state_active_0220.sh,validation harness comparing legacy and shared particle-state paths
-doc/README_0220_CUDA_PERSISTENT_PARTICLE_STATE_ACTIVE.md,documentation

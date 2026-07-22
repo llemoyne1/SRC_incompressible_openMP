@@ -1,5 +1,0 @@
-patch,kind,path,description
-0222,modified,src/cuda_particle_state.cu,Avoid temporary role/type host vectors during CudaParticleState uploads
-0222,added,scripts/build_src_mpcd_cuda_0222.sh,CUDA build harness for upload fast-path validation
-0222,added,scripts/run_cuda_persistent_particle_state_upload_fastpath_0222.sh,Validation harness for shared particle-state upload fast path
-0222,added,doc/README_0222_CUDA_PERSISTENT_PARTICLE_UPLOAD_FASTPATH.md,Documentation for patch 0222

@@ -1,2 +1,0 @@
-status,nx,ny,numCells,device,blocks,threadsPerBlock,pApCpu,pApCuda,relPApDiff,maxAbsAphiDiff,rmsAphiDiff,tolerance
-PASS,128,96,12288,0,48,256,311133.4967062925,311133.49670629285,1.1224955499101718e-15,1.4210854715202004e-13,7.2198649227535526e-15,1e-10

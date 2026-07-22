@@ -1,7 +1,0 @@
-backend,dependency_weight,portability,performance_potential,code_intrusion,first_kernel_suitability,recommendation
-OpenMP target,low_to_medium,medium,medium,low_to_medium,high_for_Q6_probe,Try first only if local smoke compile/run works
-CUDA,medium,low_NVIDIA_only,high,medium,high_for_Q6_and_particles,Use if NVIDIA is the primary target and performance matters
-HIP_ROCm,medium,low_AMD_oriented,high,medium,medium_for_Q6,Defer unless AMD hardware is a primary target
-Kokkos,high,high,high_if_well_written,high,medium_after_backend_boundary,Consider after Q6 interface is stable
-SYCL_oneAPI,medium_to_high,medium_to_high,medium_to_high,medium_to_high,medium,Keep as later portability option
-CPU_OpenMP_reference,none,high_CPU,baseline,none,essential,Keep as default reference path

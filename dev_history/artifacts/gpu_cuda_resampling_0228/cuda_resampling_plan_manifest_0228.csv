@@ -1,7 +1,0 @@
-file,kind,description
-include/cuda_resampling_guard.h,modified,Adds compaction and transfer-plan API after 0227 classification
-src/cuda_resampling_guard.cu,modified,Adds CUDA poor/rich compaction kernel and deterministic greedy planning
-src/main_validate_cuda_resampling_plan_0228.cpp,new,Standalone CPU/CUDA validator for poor/rich lists and transfer plan
-scripts/build_cuda_resampling_plan_0228.sh,new,NVCC build script for 0228 validator
-scripts/run_cuda_resampling_plan_smoke_0228.sh,new,Smoke runner for 0228 resampling plan primitive
-doc/README_0228_CUDA_RESAMPLING_COMPACTION_PLAN.md,new,Patch documentation

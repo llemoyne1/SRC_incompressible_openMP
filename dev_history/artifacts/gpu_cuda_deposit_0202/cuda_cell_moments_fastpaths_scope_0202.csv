@@ -1,9 +1,0 @@
-field,value
-patch,0202
-branch,SRC_GPU
-baseline,0201 active CUDA particle-to-cell deposit
-cuda_default,disabled unless MPCD_CUDA_CELL_MOMENTS_USE=1
-physical_scope,TG periodic/full-fluid validation first; no collision/resampling/Q6 migration
-main_change,persistent CUDA deposit buffers plus all-fluid/uniform-mass/no-cell-velocity active fast paths
-expected_effect,reduce allocation/upload/download overhead in active deposit path
-fallback,CPU/OpenMP default unchanged

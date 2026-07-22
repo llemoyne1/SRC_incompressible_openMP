@@ -1,6 +1,0 @@
-patch,branch,base,artifact,description
-0195,SRC_GPU,0194,include/cuda_q6_backend.h,Adds residualNormFromMeanRemovalShortcuts diagnostic counter.
-0195,SRC_GPU,0194,src/cuda_q6_backend.cu,Uses rrNew - sum(r)^2/n to avoid explicit post-mean-removal residual norm reduction in CUDA Q6 CG.
-0195,SRC_GPU,0194,scripts/build_src_mpcd_cuda_0195.sh,Builds CUDA-enabled SRC/MPCD executable for patch 0195.
-0195,SRC_GPU,0194,scripts/run_cuda_q6_tg_mean_removal_shortcut_0195.sh,Runs TG CPU/CUDA validation and shortcut-vs-legacy ablation.
-0195,SRC_GPU,0194,doc/README_0195_CUDA_Q6_MEAN_REMOVAL_RESIDUAL_NORM_SHORTCUT.md,Documents the algebraic residual-norm shortcut and validation procedure.
