@@ -22,15 +22,20 @@ struct OpenBoundarySegment {
 struct SimulationParams {
     // 0490a multiphase scaffold. Disabled by default, so legacy parameter files
     // and trajectories are unchanged. Each declaration uses:
-    //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared
-    // The two strengths are metadata only in 0490a; Q6 and resampling do not
-    // consume them until later SURF patches.
+    //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared [referenceCellMassDeclared]
+    // The strengths and optional reference mass are metadata only in 0490a/0490b;
+    // Q6 and resampling do not consume them until later SURF patches.
     bool speciesRegistryEnable = false;
     int speciesCount = 0;
     std::vector<SpeciesDefinition> speciesDefinitions;
     bool speciesRequireRegisteredTypes = false;
     bool speciesDiagnosticsEnable = false;
     std::string speciesDiagnosticsFilename = "species_runtime_0490a.csv";
+
+    // 0490b opt-in dense CPU reference deposit on the physical, unshifted
+    // grid. This is a diagnostic/scaffolding path only.
+    bool speciesCellDiagnosticsEnable = false;
+    std::string speciesCellDiagnosticsFilename = "species_cell_runtime_0490b.csv";
 
     std::string inputState;
     std::string outputDir = "run_base";

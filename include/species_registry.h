@@ -24,6 +24,11 @@ struct SpeciesDefinition {
     // but are deliberately not consumed by Q6 or resampling yet.
     double q6StrengthDeclared = 1.0;
     double resamplingMassClosureStrengthDeclared = 1.0;
+
+    // Reference mass of a fully occupied cell for this species. 0490b uses
+    // it only to construct an occupancy/volume-fraction proxy in diagnostics.
+    // It is not yet consumed by Q6 or resampling.
+    double referenceCellMassDeclared = 1.0;
 };
 
 const char* species_phase_family_name(SpeciesPhaseFamily family);

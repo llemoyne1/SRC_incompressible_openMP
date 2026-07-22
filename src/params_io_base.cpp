@@ -112,7 +112,8 @@ bool is_species_definition_key(const std::string& key) {
     if (key.rfind(prefix, 0) != 0) return false;
     if (key == "speciesRegistryEnable" || key == "speciesCount" ||
         key == "speciesRequireRegisteredTypes" || key == "speciesDiagnosticsEnable" ||
-        key == "speciesDiagnosticsFilename") {
+        key == "speciesDiagnosticsFilename" || key == "speciesCellDiagnosticsEnable" ||
+        key == "speciesCellDiagnosticsFilename") {
         return false;
     }
     const std::string suffix = key.substr(prefix.size());
@@ -130,11 +131,23 @@ SpeciesDefinition parse_species_definition_value(const std::string& value,
           d.resamplingMassClosureStrengthDeclared)) {
         throw std::runtime_error(
             "Malformed " + key +
-            ": expected 'type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared'");
+            ": expected 'type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared [referenceCellMassDeclared]'");
     }
-    std::string extra;
-    if (iss >> extra) {
-        throw std::runtime_error("Malformed " + key + ": too many fields");
+    std::string optionalReferenceMass;
+    if (iss >> optionalReferenceMass) {
+        std::size_t consumed = 0u;
+        try {
+            d.referenceCellMassDeclared = std::stod(optionalReferenceMass, &consumed);
+        } catch (const std::exception&) {
+            throw std::runtime_error("Malformed " + key + ": invalid referenceCellMassDeclared");
+        }
+        if (consumed != optionalReferenceMass.size()) {
+            throw std::runtime_error("Malformed " + key + ": invalid referenceCellMassDeclared");
+        }
+        std::string extra;
+        if (iss >> extra) {
+            throw std::runtime_error("Malformed " + key + ": too many fields");
+        }
     }
     if (typeValue < 0 || typeValue > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
         throw std::runtime_error(key + ": type must be a non-negative uint32 value");
@@ -545,6 +558,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesRequireRegisteredTypes") p.speciesRequireRegisteredTypes = parse_bool(value, key);
         else if (key == "speciesDiagnosticsEnable") p.speciesDiagnosticsEnable = parse_bool(value, key);
         else if (key == "speciesDiagnosticsFilename") p.speciesDiagnosticsFilename = trim(value);
+        else if (key == "speciesCellDiagnosticsEnable") p.speciesCellDiagnosticsEnable = parse_bool(value, key);
+        else if (key == "speciesCellDiagnosticsFilename") p.speciesCellDiagnosticsFilename = trim(value);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
         }
@@ -1380,6 +1395,14 @@ void validate_simulation_params(const SimulationParams& p) {
     if (p.speciesDiagnosticsEnable && p.speciesDiagnosticsFilename.empty()) {
         throw std::runtime_error(
             "speciesDiagnosticsEnable=true requires a non-empty speciesDiagnosticsFilename");
+    }
+    if (p.speciesCellDiagnosticsEnable && p.speciesCellDiagnosticsFilename.empty()) {
+        throw std::runtime_error(
+            "speciesCellDiagnosticsEnable=true requires a non-empty speciesCellDiagnosticsFilename");
+    }
+    if (p.speciesCellDiagnosticsEnable && !p.speciesRegistryEnable) {
+        throw std::runtime_error(
+            "speciesCellDiagnosticsEnable=true requires speciesRegistryEnable=true");
     }
     if (p.speciesRegistryEnable) {
         validate_species_definitions(p.speciesDefinitions, "validate_simulation_params species registry");

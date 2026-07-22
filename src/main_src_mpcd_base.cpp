@@ -11,6 +11,7 @@
 #include "src_mpcd_base.h"
 #include "state_smpcd_io.h"
 #include "species_registry.h"
+#include "species_cell_fields_0490b.h"
 #include "weighted_resampling.h"
 
 #include <algorithm>
@@ -558,6 +559,15 @@ int main(int argc, char** argv) {
             speciesSummary0490a->append(
                 state, params.speciesDefinitions, params.speciesRequireRegisteredTypes, 0u, 0.0);
         }
+        std::unique_ptr<mpcd::SpeciesCellDiagnosticsWriter0490b> speciesCellSummary0490b;
+        if (params.speciesCellDiagnosticsEnable) {
+            speciesCellSummary0490b =
+                std::make_unique<mpcd::SpeciesCellDiagnosticsWriter0490b>(
+                    params.outputDir + "/" + params.speciesCellDiagnosticsFilename, grid);
+            speciesCellSummary0490b->append(
+                state, params.speciesDefinitions, grid, params,
+                params.speciesRequireRegisteredTypes, 0u, 0.0);
+        }
         mpcd::LiveVisualization0335 liveVisualization0335;
         liveVisualization0335.maybe_initialize(params);
         mpcd::FilteredFieldRecorder0432 filteredFieldRecorder0432;
@@ -635,6 +645,7 @@ int main(int argc, char** argv) {
                   << " speciesRegistry=" << (params.speciesRegistryEnable ? "on" : "off")
                   << " speciesCount=" << params.speciesDefinitions.size()
                   << " speciesDiagnostics=" << (params.speciesDiagnosticsEnable ? params.speciesDiagnosticsFilename : std::string("off"))
+                  << " speciesCellDiagnostics=" << (params.speciesCellDiagnosticsEnable ? params.speciesCellDiagnosticsFilename : std::string("off"))
                   << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
@@ -855,6 +866,12 @@ int main(int argc, char** argv) {
                     sync_cuda_resident_state_for_host_0260(state);
                     speciesSummary0490a->append(
                         state, params.speciesDefinitions, params.speciesRequireRegisteredTypes,
+                        static_cast<std::uint64_t>(step), s.time);
+                }
+                if (speciesCellSummary0490b) {
+                    speciesCellSummary0490b->append(
+                        summaryState, params.speciesDefinitions, grid, params,
+                        params.speciesRequireRegisteredTypes,
                         static_cast<std::uint64_t>(step), s.time);
                 }
     std::cout << "\r\033[K[src_mpcd_base] step=" << step

@@ -87,6 +87,12 @@ void validate_species_definitions(const std::vector<SpeciesDefinition>& definiti
                                      ": resamplingMassClosureStrengthDeclared must lie in [0,1] for type " +
                                      std::to_string(d.type));
         }
+        if (!std::isfinite(d.referenceCellMassDeclared) ||
+            !(d.referenceCellMassDeclared > 0.0)) {
+            throw std::runtime_error(context +
+                                     ": referenceCellMassDeclared must be finite and positive for type " +
+                                     std::to_string(d.type));
+        }
     }
 }
 
@@ -124,7 +130,7 @@ SpeciesDiagnosticsWriter0490a::SpeciesDiagnosticsWriter0490a(const std::string& 
         throw std::runtime_error("Cannot open species diagnostics file for writing: " + filepath);
     }
     out_ << "step,time,type,name,phaseFamily,registered,q6StrengthDeclared,"
-            "resamplingMassClosureStrengthDeclared,nFluid,nLatent,totalMass,Px,Py,"
+            "resamplingMassClosureStrengthDeclared,referenceCellMassDeclared,nFluid,nLatent,totalMass,Px,Py,"
             "kineticEnergy,meanVx,meanVy,meanParticleMass,minParticleMass,maxParticleMass\n";
 }
 
@@ -158,6 +164,7 @@ void SpeciesDiagnosticsWriter0490a::append(
             acc.definition.phaseFamily = SpeciesPhaseFamily::Unspecified;
             acc.definition.q6StrengthDeclared = 0.0;
             acc.definition.resamplingMassClosureStrengthDeclared = 0.0;
+            acc.definition.referenceCellMassDeclared = 1.0;
             acc.registered = false;
         }
 
@@ -192,6 +199,7 @@ void SpeciesDiagnosticsWriter0490a::append(
              << (acc.registered ? 1 : 0) << ','
              << acc.definition.q6StrengthDeclared << ','
              << acc.definition.resamplingMassClosureStrengthDeclared << ','
+             << acc.definition.referenceCellMassDeclared << ','
              << acc.nFluid << ','
              << acc.nLatent << ','
              << acc.totalMass << ','
