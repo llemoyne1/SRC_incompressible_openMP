@@ -123,6 +123,7 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesMassClosureCudaDiagnosticsFilename" ||
         key == "speciesMassClosureCudaComparisonTolerance" ||
         key == "speciesResamplingPopulationGuardEnable" ||
+        key == "speciesResamplingPopulationGuardCudaEnable" ||
         key == "speciesResamplingTransferEnable" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
@@ -580,6 +581,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesMassClosureCudaDiagnosticsFilename") p.speciesMassClosureCudaDiagnosticsFilename = trim(value);
         else if (key == "speciesMassClosureCudaComparisonTolerance") p.speciesMassClosureCudaComparisonTolerance = parse_double(value, key);
         else if (key == "speciesResamplingPopulationGuardEnable") p.speciesResamplingPopulationGuardEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingPopulationGuardCudaEnable") p.speciesResamplingPopulationGuardCudaEnable = parse_bool(value, key);
         else if (key == "speciesResamplingTransferEnable") p.speciesResamplingTransferEnable = parse_bool(value, key);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
@@ -1476,6 +1478,17 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!p.resamplingEnable) {
             throw std::runtime_error(
                 "speciesResamplingPopulationGuardEnable=true requires resamplingEnable=true");
+        }
+    }
+    if (p.speciesResamplingPopulationGuardCudaEnable) {
+        if (!p.speciesResamplingPopulationGuardEnable) {
+            throw std::runtime_error(
+                "speciesResamplingPopulationGuardCudaEnable=true requires speciesResamplingPopulationGuardEnable=true");
+        }
+        if (p.resamplingPopulationNTarget <= 0 || p.resamplingPopulationNMin <= 0 ||
+            p.resamplingPopulationNMax <= 0) {
+            throw std::runtime_error(
+                "speciesResamplingPopulationGuardCudaEnable=true requires explicit positive resamplingPopulationNMin/NTarget/NMax");
         }
     }
     if (p.speciesResamplingTransferEnable) {

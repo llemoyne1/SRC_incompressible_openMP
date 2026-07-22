@@ -696,6 +696,7 @@ int main(int argc, char** argv) {
                   << " speciesMassClosure=" << (params.speciesResamplingMassClosureEnable ? "on" : "off")
                   << " speciesMassClosureCuda=" << (params.speciesResamplingMassClosureCudaEnable ? "on" : "off")
                   << " speciesPopulationGuard=" << (params.speciesResamplingPopulationGuardEnable ? "on" : "off")
+                  << " speciesPopulationGuardCuda=" << (params.speciesResamplingPopulationGuardCudaEnable ? "on" : "off")
                   << " speciesMixedRefill=" << (params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? "on" : "off")
                   << " speciesTransfer=" << (params.speciesResamplingTransferEnable ? "on" : "off")
                   << '\n';

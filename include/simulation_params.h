@@ -74,6 +74,12 @@ struct SimulationParams {
     // composition reconstructed from M_s/referenceCellMass_s.
     bool speciesResamplingPopulationGuardEnable = false;
 
+    // 0490j resident CUDA backend for the 0490e species-aware population
+    // policy. The legacy total Nmin/Ntarget/Nmax band remains authoritative;
+    // 0490j only selects the species used for each local split/merge. The
+    // existing 0297 active-prefix mutation path performs the conservative edit.
+    bool speciesResamplingPopulationGuardCudaEnable = false;
+
     // 0490f opt-in CUDA empty-cell composition memory. When enabled, the
     // resident refill stores M_{c,s} for every registered species and restores
     // a temporarily empty mixed cell with the remembered per-species masses.

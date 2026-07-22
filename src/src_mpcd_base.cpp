@@ -1596,14 +1596,22 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
     }
 
-    // 0297: minimal local CUDA population guard at the same post-SRC,
+    CudaResamplingPopulationGuard0297Diagnostics cudaPopulationGuard0490j{};
+
+    // 0297/0490j: minimal local CUDA population guard at the same post-SRC,
     // physical-grid insertion point.  Unlike 0296, this brick can change the
     // support by one local merge per rich cell and one local split per poor cell,
     // preserving local mass and momentum up to roundoff.  It remains independent
     // of Q6 CUDA and does not build long-distance transfer plans.
     if (cuda_resampling_population_guard_0297_requested(params, step)) {
-        (void)try_apply_cuda_resampling_population_guard_0297(
-            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
+        cudaPopulationGuard0490j = try_apply_cuda_resampling_population_guard_0297(
+            state, params, grid, result.domain, step, time,
+            "post_src_classic_post_thermostat_pre_cpu_resampling");
+        if (params.speciesResamplingPopulationGuardCudaEnable &&
+            !cudaPopulationGuard0490j.handled) {
+            throw std::runtime_error(
+                "0490j resident CUDA species population guard was requested but not handled");
+        }
     }
 
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
@@ -1667,7 +1675,25 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     bool populationGuardEdited = false;
     bool planOrTransferEdited = false;
     ResamplingPopulationGuardDiagnostics populationGuard{};
-    {
+    if (params.speciesResamplingPopulationGuardCudaEnable) {
+        populationGuard.attempted = true;
+        populationGuard.applied =
+            cudaPopulationGuard0490j.mergeApplied > 0u ||
+            cudaPopulationGuard0490j.splitApplied > 0u;
+        populationGuard.nMin = cudaPopulationGuard0490j.nMin;
+        populationGuard.nTarget = cudaPopulationGuard0490j.nTarget;
+        populationGuard.nMax = cudaPopulationGuard0490j.nMax;
+        populationGuard.speciesPopulationGuardActive = true;
+        populationGuard.speciesPopulationCells =
+            cudaPopulationGuard0490j.speciesPoorSelections0490j +
+            cudaPopulationGuard0490j.speciesRichSelections0490j;
+        populationGuard.speciesDirectedSplits =
+            cudaPopulationGuard0490j.speciesDirectedSplits0490j;
+        populationGuard.speciesDirectedMerges =
+            cudaPopulationGuard0490j.speciesDirectedMerges0490j;
+        populationGuard.speciesTargetInfeasibleCells =
+            cudaPopulationGuard0490j.speciesTargetInfeasibleCells0490j;
+    } else {
         MPCD_PROFILE_PHASE(result.profile, ResamplingPopulationGuard);
         populationGuard = apply_resampling_population_support_guard(
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);

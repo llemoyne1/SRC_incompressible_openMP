@@ -46,6 +46,18 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     std::uint64_t splitSkippedNoDonor = 0u;
     std::uint64_t mergeSkippedNoPair = 0u;
 
+    // 0490j: species-directed resident CUDA selection layered on the 0297
+    // conservative local split/merge implementation.
+    bool speciesPopulationGuardCuda0490j = false;
+    std::uint64_t speciesCount0490j = 0u;
+    std::uint64_t speciesPoorSelections0490j = 0u;
+    std::uint64_t speciesRichSelections0490j = 0u;
+    std::uint64_t speciesDirectedSplits0490j = 0u;
+    std::uint64_t speciesDirectedMerges0490j = 0u;
+    std::uint64_t speciesTargetInfeasibleCells0490j = 0u;
+    std::uint64_t speciesInvalidTypeCount0490j = 0u;
+    int speciesWorkspaceReused0490j = 0;
+
     int nMin = 0;
     int nTarget = 0;
     int nMax = 0;
