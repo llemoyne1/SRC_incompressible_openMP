@@ -200,6 +200,16 @@ struct ResamplingRemapApplyDiagnostics {
 
     double targetCellMass = 0.0;
     double massCorrectionStrength = 1.0;
+
+    // 0490d phase-aware local closure diagnostics. The legacy scalar fields
+    // above remain the nominal/global inputs; these ranges describe the actual
+    // cell-local targets and strengths used when the opt-in policy is active.
+    bool speciesMassClosureActive = false;
+    std::uint64_t speciesMassClosureCells = 0;
+    double speciesTargetCellMassMin = 0.0;
+    double speciesTargetCellMassMax = 0.0;
+    double speciesClosureStrengthMin = 0.0;
+    double speciesClosureStrengthMax = 0.0;
     double massBefore = 0.0;
     double massAfter = 0.0;
     double massTargetSum = 0.0;
@@ -942,7 +952,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
     double massCorrectionStrength = 1.0,
-    double targetCellMassOverride = -1.0);
+    double targetCellMassOverride = -1.0,
+    const SimulationParams* speciesPolicyParams = nullptr);
 
 void attach_resampling_remap_apply_diagnostics(
     WeightedResamplingDiagnostics& diagnostics,

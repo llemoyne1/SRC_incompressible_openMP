@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 #ifdef _OPENMP
@@ -2354,7 +2355,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
     WeightedRealFluidDepositWorkspace& depositWorkspace,
     const WeightedResamplingDiagnostics& depositDiagnostics,
     double massCorrectionStrength,
-    double targetCellMassOverride) {
+    double targetCellMassOverride,
+    const SimulationParams* speciesPolicyParams) {
     validate_particle_state(state, "apply_resampling_local_mass_momentum_remap");
     ensure_particle_roles(state, ParticleRole::Fluid);
 
@@ -2376,6 +2378,79 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
 
     std::vector<double> scaleByCell(static_cast<std::size_t>(nc), 1.0);
     std::vector<std::uint8_t> remapCell(static_cast<std::size_t>(nc), 0u);
+
+    std::vector<double> speciesTargetByCell;
+    std::vector<double> speciesStrengthByCell;
+    const bool speciesPolicyActive = speciesPolicyParams != nullptr &&
+        speciesPolicyParams->speciesResamplingMassClosureEnable;
+    if (speciesPolicyActive) {
+        if (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride)) {
+            throw std::runtime_error(
+                "0490d species-aware mass closure does not support a targetCellMassOverride");
+        }
+        validate_species_definitions(
+            speciesPolicyParams->speciesDefinitions,
+            "apply_resampling_local_mass_momentum_remap 0490d registry");
+        validate_state_species_registry(
+            state, speciesPolicyParams->speciesDefinitions, true,
+            "apply_resampling_local_mass_momentum_remap 0490d state");
+
+        speciesTargetByCell.assign(static_cast<std::size_t>(nc), 0.0);
+        speciesStrengthByCell.assign(static_cast<std::size_t>(nc), 0.0);
+        std::vector<double> occupancyWeight(static_cast<std::size_t>(nc), 0.0);
+        std::vector<double> closureWeight(static_cast<std::size_t>(nc), 0.0);
+        std::unordered_map<std::uint32_t, const SpeciesDefinition*> byType;
+        byType.reserve(speciesPolicyParams->speciesDefinitions.size());
+        for (const SpeciesDefinition& definition : speciesPolicyParams->speciesDefinitions) {
+            byType.emplace(definition.type, &definition);
+        }
+
+        const std::size_t nActiveSpeciesPolicy = active_fluid_count_size(state);
+        for (std::size_t i = 0; i < nActiveSpeciesPolicy; ++i) {
+            if (!is_fluid_particle(state, i) || i >= depositWorkspace.cellId.size()) continue;
+            const int c = depositWorkspace.cellId[i];
+            if (c < 0 || c >= nc) continue;
+            const auto it = byType.find(state.type[i]);
+            if (it == byType.end()) {
+                throw std::runtime_error(
+                    "0490d species-aware mass closure found an unregistered fluid type " +
+                    std::to_string(state.type[i]));
+            }
+            const SpeciesDefinition& definition = *it->second;
+            const double m = state.mass[i];
+            if (!(m > 0.0) || !std::isfinite(m)) continue;
+            const double w = m / definition.referenceCellMassDeclared;
+            occupancyWeight[static_cast<std::size_t>(c)] += w;
+            closureWeight[static_cast<std::size_t>(c)] +=
+                w * definition.resamplingMassClosureStrengthDeclared;
+        }
+
+        d.speciesMassClosureActive = true;
+        d.speciesTargetCellMassMin = std::numeric_limits<double>::infinity();
+        d.speciesClosureStrengthMin = std::numeric_limits<double>::infinity();
+        for (int c = 0; c < nc; ++c) {
+            const std::size_t kk = static_cast<std::size_t>(c);
+            const double w = occupancyWeight[kk];
+            if (!(w > 0.0) || !std::isfinite(w)) continue;
+            const double localTarget = depositWorkspace.mass[kk] / w;
+            const double localSpeciesStrength = closureWeight[kk] / w;
+            const double localStrength = std::clamp(
+                d.massCorrectionStrength * localSpeciesStrength, 0.0, 1.0);
+            if (!(localTarget > 0.0) || !std::isfinite(localTarget) ||
+                !std::isfinite(localStrength)) {
+                continue;
+            }
+            speciesTargetByCell[kk] = localTarget;
+            speciesStrengthByCell[kk] = localStrength;
+            d.speciesMassClosureCells += 1u;
+            d.speciesTargetCellMassMin = std::min(d.speciesTargetCellMassMin, localTarget);
+            d.speciesTargetCellMassMax = std::max(d.speciesTargetCellMassMax, localTarget);
+            d.speciesClosureStrengthMin = std::min(d.speciesClosureStrengthMin, localStrength);
+            d.speciesClosureStrengthMax = std::max(d.speciesClosureStrengthMax, localStrength);
+        }
+        if (!std::isfinite(d.speciesTargetCellMassMin)) d.speciesTargetCellMassMin = 0.0;
+        if (!std::isfinite(d.speciesClosureStrengthMin)) d.speciesClosureStrengthMin = 0.0;
+    }
 
     constexpr double eps = 1.0e-13;
     double residual2 = 0.0;
@@ -2404,7 +2479,19 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
             continue;
         }
 
-        const double effectiveTargetCellMass = mass + d.massCorrectionStrength * (d.targetCellMass - mass);
+        const double localTargetCellMass = speciesPolicyActive
+            ? speciesTargetByCell[kk]
+            : d.targetCellMass;
+        const double localMassCorrectionStrength = speciesPolicyActive
+            ? speciesStrengthByCell[kk]
+            : d.massCorrectionStrength;
+        if (!(localTargetCellMass > 0.0) || !std::isfinite(localTargetCellMass) ||
+            !std::isfinite(localMassCorrectionStrength)) {
+            d.skippedInvalidMassCells += 1u;
+            continue;
+        }
+        const double effectiveTargetCellMass =
+            mass + localMassCorrectionStrength * (localTargetCellMass - mass);
         const double scale = effectiveTargetCellMass / mass;
         if (!(scale > 0.0) || !std::isfinite(scale)) {
             d.skippedInvalidMassCells += 1u;
@@ -2415,7 +2502,7 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
 
         d.massBefore += mass;
         d.massAfter += effectiveTargetCellMass;
-        d.massTargetSum += d.targetCellMass;
+        d.massTargetSum += localTargetCellMass;
         d.momentumXBefore += px;
         d.momentumYBefore += py;
         const double targetPx = effectiveTargetCellMass * depositWorkspace.ux[kk];
@@ -2425,7 +2512,8 @@ ResamplingRemapApplyDiagnostics apply_resampling_local_mass_momentum_remap(
         d.momentumXAfter += scale * px;
         d.momentumYAfter += scale * py;
 
-        const double cellMassRelResidual = std::abs((effectiveTargetCellMass - scale * mass) / d.targetCellMass);
+        const double cellMassRelResidual =
+            std::abs((effectiveTargetCellMass - scale * mass) / localTargetCellMass);
         d.maxCellMassRelResidual = std::max(d.maxCellMassRelResidual, cellMassRelResidual);
         const double rx = scale * px - targetPx;
         const double ry = scale * py - targetPy;

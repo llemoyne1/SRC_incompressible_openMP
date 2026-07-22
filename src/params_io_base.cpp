@@ -113,7 +113,8 @@ bool is_species_definition_key(const std::string& key) {
     if (key == "speciesRegistryEnable" || key == "speciesCount" ||
         key == "speciesRequireRegisteredTypes" || key == "speciesDiagnosticsEnable" ||
         key == "speciesDiagnosticsFilename" || key == "speciesCellDiagnosticsEnable" ||
-        key == "speciesCellDiagnosticsFilename") {
+        key == "speciesCellDiagnosticsFilename" ||
+        key == "speciesResamplingMassClosureEnable") {
         return false;
     }
     const std::string suffix = key.substr(prefix.size());
@@ -560,6 +561,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesDiagnosticsFilename") p.speciesDiagnosticsFilename = trim(value);
         else if (key == "speciesCellDiagnosticsEnable") p.speciesCellDiagnosticsEnable = parse_bool(value, key);
         else if (key == "speciesCellDiagnosticsFilename") p.speciesCellDiagnosticsFilename = trim(value);
+        else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
         }
@@ -1403,6 +1405,28 @@ void validate_simulation_params(const SimulationParams& p) {
     if (p.speciesCellDiagnosticsEnable && !p.speciesRegistryEnable) {
         throw std::runtime_error(
             "speciesCellDiagnosticsEnable=true requires speciesRegistryEnable=true");
+    }
+    if (p.speciesResamplingMassClosureEnable) {
+        if (!p.speciesRegistryEnable) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureEnable=true requires speciesRegistryEnable=true");
+        }
+        if (!p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureEnable=true requires speciesRequireRegisteredTypes=true");
+        }
+        if (!p.resamplingEnable || !p.resamplingRemapEnable) {
+            throw std::runtime_error(
+                "speciesResamplingMassClosureEnable=true requires resamplingEnable=true and resamplingRemapEnable=true");
+        }
+        if (p.resamplingMassGuardEnable) {
+            throw std::runtime_error(
+                "0490d species-aware mass closure does not yet support resamplingMassGuardEnable=true");
+        }
+        if (p.closedCapacityResponseEnable) {
+            throw std::runtime_error(
+                "0490d species-aware mass closure does not yet support closedCapacityResponseEnable=true");
+        }
     }
     if (p.speciesRegistryEnable) {
         validate_species_definitions(p.speciesDefinitions, "validate_simulation_params species registry");

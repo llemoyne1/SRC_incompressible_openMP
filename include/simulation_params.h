@@ -23,8 +23,9 @@ struct SimulationParams {
     // 0490a multiphase scaffold. Disabled by default, so legacy parameter files
     // and trajectories are unchanged. Each declaration uses:
     //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared [referenceCellMassDeclared]
-    // The strengths and optional reference mass are metadata only in 0490a/0490b;
-    // Q6 and resampling do not consume them until later SURF patches.
+    // The Q6 strength remains declarative in 0490d. The mass-closure strength
+    // and reference cell mass become active only when
+    // speciesResamplingMassClosureEnable=true.
     bool speciesRegistryEnable = false;
     int speciesCount = 0;
     std::vector<SpeciesDefinition> speciesDefinitions;
@@ -36,6 +37,14 @@ struct SimulationParams {
     // grid. This is a diagnostic/scaffolding path only.
     bool speciesCellDiagnosticsEnable = false;
     std::string speciesCellDiagnosticsFilename = "species_cell_runtime_0490b.csv";
+
+    // 0490d opt-in phase-aware mass closure. The local closure strength and
+    // local target mass are reconstructed from the registered species using
+    // occupancy proxies m_s / referenceCellMass_s. All particle masses in a
+    // cell receive the same scale, so the local composition is preserved.
+    // The first implementation is CPU-authoritative and deliberately excludes
+    // the legacy particle-mass guard and closed-capacity override.
+    bool speciesResamplingMassClosureEnable = false;
 
     std::string inputState;
     std::string outputDir = "run_base";
