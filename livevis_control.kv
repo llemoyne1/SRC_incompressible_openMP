@@ -1,18 +1,18 @@
 # 0434b livevis + filtered recorder runtime controls.
 # 0433a WYSIWYR: if recordEvery is absent or <=0, recording follows liveEvery.
-field = density
-colormap = gray
+field = chi
+colormap = thermal
 clip = -1
 gain = 1.0
-smoothPasses = 0
-liveGridNx = 128
-liveGridNy = 128
-liveEvery = 25
+smoothPasses = 1
+liveGridNx = 768
+liveGridNy = 768
+liveEvery = 10
 filterMode = none
 filterTau = 0.0
 filterSampleEvery = 1
 recordEnable = true
-recordSession = periodic_nonzero_plan_0446_0434_src-resampling
+recordSession = naca0012_darcy_periodic_0434_src-q6
 recordFields = rho,ux,uy
 recordFormat = f32
 recordStride = 1

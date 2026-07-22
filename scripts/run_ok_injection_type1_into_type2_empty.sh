@@ -11,7 +11,7 @@ suite_root_cd_0434
 CASE_LABEL="injection_type1_into_type2"
 GEN_CASE="injection"
 TOPOLOGY="segmented"
-Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-100}"; NY="${NY:-100}"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
 GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.01}"; KBT="${KBT:-0.005}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
@@ -24,7 +24,7 @@ LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 # Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path selected below. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}}"
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
@@ -45,8 +45,8 @@ RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coe
 GUARD_EVERY="${GUARD_EVERY:-5}"
 
 BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"
-INJECT_TYPE="${INJECT_TYPE:-1}"; INJECT_MASS="${INJECT_MASS:-100.0}"
-UIN="${UIN:-0.3}"
+INJECT_TYPE="${INJECT_TYPE:-1}"; INJECT_MASS="${INJECT_MASS:-1.0}"
+UIN="${UIN:-0.5}"
 INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-15.0}"
 INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y/ly}')}"
 INLET_SMAX="${INLET_SMAX:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y/ly}')}"

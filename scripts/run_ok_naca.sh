@@ -10,10 +10,11 @@ suite_root_cd_0434
 # -----------------------------------------------------------------------------
 CASE_LABEL="naca0012_darcy_periodic"
 GEN_CASE="naca"
-TOPOLOGY="wall"
-Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1500}"; NY="${NY:-500}"
-GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.001}"; KBT="${KBT:-1.}"
-SEED="${SEED:-1628414}"; U0="${U0:-1.0}"; VELOCITY_MODE="${VELOCITY_MODE:-uniform_x}"
+# TOPOLOGY="wall"
+ TOPOLOGY="segmented"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-1200}"; NY="${NY:-400}"
+GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0006}"; KBT="${KBT:-1.}"
+SEED="${SEED:-1628414}"; U0="${U0:-1.}"; VELOCITY_MODE="${VELOCITY_MODE:-uniform_x}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-1.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
@@ -24,7 +25,7 @@ LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 # Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path selected below. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}}"
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-chi}"
@@ -36,6 +37,8 @@ LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-1}"
 RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
 FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
+LIVE_PROGRESS=${LIVE_PROGRESS:-1}
+LIVE_VIS_HOLD_ON_EXIT=${LIVE_VIS_HOLD_ON_EXIT:-1}
 
 # Gamma-relative resampling thresholds. Actual integer thresholds are derived in common.
 RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coef))
@@ -62,14 +65,48 @@ Nx = $NX
 Ny = $NY
 dt = $DT
 nSteps = $STEPS
-bcLeft = periodic
-bcRight = periodic
+# bcLeft = periodic
+# bcRight = periodic
+# bcBottom = solid
+# bcTop = solid
+# bcX = periodic
+# bcY = solid
+# openBoundarySegmentsEnable = false
+# openBoundarySegmentCount = 0
+
+bcLeft = solid
+bcRight = solid
 bcBottom = solid
 bcTop = solid
-bcX = periodic
+bcX = solid
 bcY = solid
-openBoundarySegmentsEnable = false
-openBoundarySegmentCount = 0
+openBoundarySegmentsEnable = true
+openBoundarySegmentCount = 2
+openBoundarySegment0 = left inlet 0.1 0.9 ${U0} 0.0 0 ${PARTICLE_MASS}
+openBoundarySegment1 = right outlet 0 1 ${U0} 0.0 0 ${PARTICLE_MASS}
+inletVelocityRampEnable = true
+inletVelocityRampStartTime = 0.0
+inletVelocityRampEndTime = 0.25
+inletVelocityRampInitialFactor = 0.2
+inletVelocityRampFinalFactor = 1.0
+inletVelocityRampProfile = smoothstep
+inletVelocitySpatialProfile = uniform
+inletKBT = -1.0
+inletThermalNoise = 0.0
+inletInjectionMode = hard_cell_density
+inletReservoirMode = hard_cell_density
+inletReservoirCells = 3
+inletTargetOccupancy = ${GAMMA}
+inletHardCellVelocityMean = true
+inletHardCellThermalRescale = true
+inletRandomizeTangential = true
+inletReinjectBackflow = true
+openBoundaryOutletMode = hybrid
+openBoundaryOutletHybridBlend = 0.0
+openBoundaryOutletFeedbackGain = 0.0
+
+
+
 bodyAccelerationX = ${AX}
 bodyAccelerationY = ${AY}
 wallAccommodation = 1.0

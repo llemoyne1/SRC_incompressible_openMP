@@ -1,0 +1,205 @@
+# 0436 livevis_control.kv -- complete runtime control template
+#
+# Edit this file during a run if LIVE_VIS_CONTROL_FILE points to it and the
+# binary reloads livevis controls. Keep the form "key = value"; avoid inline
+# comments on value lines for the most robust parsing.
+#
+# Scope:
+#   - live scalar field and colormap
+#   - live/recording cadence
+#   - quiver overlay
+#   - filtered field dumps
+#   - 0436 particle type filter
+#
+# These options are visualization / recording controls only, unless noted.
+# They do not change streaming, collision, thermostat, Q6, virial closure,
+# resampling, or boundary-condition physics.
+
+
+# =============================================================================
+# 1. Live scalar field
+# =============================================================================
+
+# field:
+#   ux, uy, vx, vy, speed
+#   rho, density, mass
+#   n, N, count, population, particle_count, cell_count
+#   vorticity, omega, curl
+#   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power
+field = ux
+
+# colormap:
+#   blue_red, gray, thermal
+# Aliases generally accepted by recent builds:
+#   grey/grayscale/greyscale -> gray
+#   heat/hot                 -> thermal
+colormap = blue_red
+
+# clip:
+#   >0 fixes color saturation scale.
+#   <=0 lets the renderer use its default/auto behavior.
+clip = 1.50
+
+# gain:
+#   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
+gain = 1.0
+
+# smoothPasses:
+#   spatial smoothing of the scalar field.
+#   0 = raw field; 1-3 = typical; large values cost more and smear details.
+smoothPasses = 30
+
+
+# =============================================================================
+# 2. Live grid and cadence
+# =============================================================================
+
+# liveGridNx/liveGridNy:
+#   live scalar grid resolution. Also used by filtered field dumps.
+#   If a recording session is already open, recorder dimensions are locked until
+#   that session is stopped and restarted.
+liveGridNx = 800
+liveGridNy = 200
+
+# liveEvery:
+#   live frame cadence in solver steps.
+#   Aliases in recent builds/scripts include: every, visualEvery.
+#   0433a WYSIWYR: if recordEvery is absent or <=0, dumps follow liveEvery.
+liveEvery = 1
+
+
+# =============================================================================
+# 3. Quiver overlay
+# =============================================================================
+
+# quiverScale:
+#   <0 disables quiver overlay.
+#   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
+quiverScale = -40.0
+
+# quiverNx/quiverNy:
+#   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.
+quiverNx = 60
+quiverNy = 32
+
+# quiverMinSpeed:
+#   do not draw vectors below this speed. 0.0 draws all nonzero vectors.
+quiverMinSpeed = 0.0
+
+# quiverSmoothPasses:
+#   -1 reuses smoothPasses.
+#    0 disables quiver smoothing.
+#   >0 smooths vectors independently from the scalar field.
+quiverSmoothPasses = -3
+
+
+# =============================================================================
+# 4. Filtered field recording / WYSIWYR dumps
+# =============================================================================
+
+# recordEnable:
+#   false/0/off stops or keeps recording disabled.
+#   true/1/on opens a recording session if the recorder is enabled by the run
+#   environment, e.g. FILTERED_RECORDING_ENABLE=1 or SRC/MPCD 0432 env flags.
+recordEnable = false
+
+# recordSession:
+#   subdirectory name under output/recordings/.
+#   Locked when recordEnable switches from false to true.
+recordSession = livevis_0436
+
+# recordFields:
+#   current
+#   or comma-separated list:
+#     rho,density,mass,rho1,rho2,y1,y2,ux,uy,speed,n,n1,n2
+#   For comparisons, rho,ux,uy is the robust default.
+recordFields = rho,ux,uy
+
+# recordFormat:
+#   f32 or float32. Current supported binary dump format is float32 raw field.
+recordFormat = f32
+
+# recordEvery:
+#   <=0 or absent: follow liveEvery, WYSIWYR default.
+#   >0: explicit absolute dump cadence in solver steps.
+recordEvery = 0
+
+# recordStride:
+#   relative WYSIWYR override.
+#   1 records every displayed frame.
+#   2 records one displayed frame out of two, etc.
+#   If recordEvery > 0, recordEvery is the explicit cadence.
+recordStride = 1
+
+
+# =============================================================================
+# 5. Temporal filtering of recorded conservative fields
+# =============================================================================
+
+# filterMode:
+#   none = no temporal EMA.
+#   ema  = exponential moving average of conservative fields, then derived
+#          fields such as ux/uy/speed are reconstructed.
+filterMode = none
+
+# filterTau:
+#   EMA time constant in simulation time units. 0 disables effective EMA.
+filterTau = 10.00
+
+# filterSampleEvery:
+#   internal sampling cadence for the recorder filter. Can be more frequent than
+#   recordEvery to smooth without dumping every sample.
+filterSampleEvery = 3
+
+
+# =============================================================================
+# 6. 0436 particle live filter / particle type filter
+# =============================================================================
+
+# particleTypeFilter:
+#   -1 = all particle types
+#    0 = only type 0
+#    1 = only type 1
+#    2 = only type 2
+#
+# Applied before accumulating:
+#   - live scalar field
+#   - quiver vectors, via the same filtered accumulations on CPU fallback
+#   - filtered field dumps
+#
+# For injection_type1_into_type2:
+#   -1 -> total field
+#    1 -> injected type-1 contribution
+#    2 -> background type-2 contribution
+#
+# Runner override in 0436 injection script:
+#   PARTICLE_TYPE_FILTER=-1|0|1|2
+particleTypeFilter = -2
+
+
+# =============================================================================
+# 7. Practical presets
+# =============================================================================
+
+# Dense total density view:
+#   field = rho
+#   colormap = thermal
+#   clip = 0.2
+#   smoothPasses = 0
+#   particleTypeFilter = -1
+#
+# Injected jet only:
+#   field = rho
+#   colormap = thermal
+#   particleTypeFilter = 1
+#
+# Background only:
+#   field = rho
+#   colormap = gray
+#   particleTypeFilter = 2
+#
+# Velocity with quiver:
+#   field = speed
+#   colormap = thermal
+#   quiverScale = 0.5
+#   quiverSmoothPasses = -1
