@@ -97,6 +97,7 @@ set -x
   src/species_cell_fields_0490b.cpp \
   src/cuda_species_cell_fields_0490h.cu \
   src/cuda_species_mass_closure_0490i.cu \
+  src/cuda_species_transfer_plan_0490k.cu \
   src/state_smpcd_io.cpp \
   src/weighted_resampling.cpp \
   src/cuda_shared_particle_state_0251.cpp \

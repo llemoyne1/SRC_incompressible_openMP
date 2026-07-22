@@ -94,6 +94,14 @@ struct SimulationParams {
     // the resulting explicit operations without changing their species.
     bool speciesResamplingTransferEnable = false;
 
+    // 0490k native CUDA species donor/receiver planner. The 0490g CPU plan is
+    // retained as a strict equivalence mirror during this gate patch; on PASS,
+    // the GPU-built plan becomes authoritative for downstream mutation.
+    bool speciesResamplingTransferCudaEnable = false;
+    std::string speciesTransferCudaDiagnosticsFilename =
+        "cuda_species_transfer_plan_0490k.csv";
+    double speciesTransferCudaComparisonTolerance = 1.0e-11;
+
     std::string inputState;
     std::string outputDir = "run_base";
 

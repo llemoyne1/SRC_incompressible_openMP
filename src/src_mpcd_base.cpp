@@ -1734,6 +1734,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
     }
 
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (params.speciesResamplingTransferCudaEnable) {
+        const CudaSpeciesTransferPlanDiagnostics0490k cudaTransferPlan0490k =
+            try_apply_cuda_species_transfer_plan_0490k(
+                state, params, grid, step,
+                workspace.speciesCellCuda0490h,
+                workspace.speciesTransferPlanCuda0490k,
+                workspace.resampling, result.resampling);
+        if (!cudaTransferPlan0490k.handled ||
+            !cudaTransferPlan0490k.pass ||
+            !cudaTransferPlan0490k.accepted) {
+            throw std::runtime_error(
+                "0490k native CUDA species transfer plan failed the CPU equivalence gate");
+        }
+    }
+#endif
+
     ResamplingLatentActivationDiagnostics latentActivation{};
     if (params.resamplingLatentActivationEnable && result.resampling.candidateListsBuilt) {
         MPCD_PROFILE_PHASE(result.profile, ResamplingLatentActivation);

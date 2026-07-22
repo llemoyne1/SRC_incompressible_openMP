@@ -125,6 +125,9 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesResamplingPopulationGuardEnable" ||
         key == "speciesResamplingPopulationGuardCudaEnable" ||
         key == "speciesResamplingTransferEnable" ||
+        key == "speciesResamplingTransferCudaEnable" ||
+        key == "speciesTransferCudaDiagnosticsFilename" ||
+        key == "speciesTransferCudaComparisonTolerance" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
     }
@@ -583,6 +586,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesResamplingPopulationGuardEnable") p.speciesResamplingPopulationGuardEnable = parse_bool(value, key);
         else if (key == "speciesResamplingPopulationGuardCudaEnable") p.speciesResamplingPopulationGuardCudaEnable = parse_bool(value, key);
         else if (key == "speciesResamplingTransferEnable") p.speciesResamplingTransferEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingTransferCudaEnable") p.speciesResamplingTransferCudaEnable = parse_bool(value, key);
+        else if (key == "speciesTransferCudaDiagnosticsFilename") p.speciesTransferCudaDiagnosticsFilename = trim(value);
+        else if (key == "speciesTransferCudaComparisonTolerance") p.speciesTransferCudaComparisonTolerance = parse_double(value, key);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
@@ -1503,6 +1509,21 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!p.resamplingEnable || !p.resamplingExtractionEnable || !p.resamplingInsertionEnable) {
             throw std::runtime_error(
                 "speciesResamplingTransferEnable=true requires resampling, extraction and insertion");
+        }
+    }
+    if (p.speciesResamplingTransferCudaEnable) {
+        if (!p.speciesResamplingTransferEnable) {
+            throw std::runtime_error(
+                "speciesResamplingTransferCudaEnable=true requires speciesResamplingTransferEnable=true");
+        }
+        if (!(p.speciesTransferCudaComparisonTolerance > 0.0) ||
+            !std::isfinite(p.speciesTransferCudaComparisonTolerance)) {
+            throw std::runtime_error(
+                "speciesTransferCudaComparisonTolerance must be finite and positive");
+        }
+        if (p.speciesTransferCudaDiagnosticsFilename.empty()) {
+            throw std::runtime_error(
+                "speciesTransferCudaDiagnosticsFilename must not be empty");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {

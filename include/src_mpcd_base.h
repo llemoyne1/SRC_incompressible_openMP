@@ -18,6 +18,7 @@
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
 #include "cuda_species_cell_fields_0490h.h"
 #include "cuda_species_mass_closure_0490i.h"
+#include "cuda_species_transfer_plan_0490k.h"
 #endif
 
 namespace mpcd {
@@ -55,6 +56,7 @@ struct SrcMpcdBaseWorkspace {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     CudaSpeciesCellWorkspace0490h speciesCellCuda0490h;
     CudaSpeciesMassClosureWorkspace0490i speciesMassClosureCuda0490i;
+    CudaSpeciesTransferPlanWorkspace0490k speciesTransferPlanCuda0490k;
 #endif
 };
 
