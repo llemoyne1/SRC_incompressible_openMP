@@ -648,6 +648,7 @@ int main(int argc, char** argv) {
                   << " speciesCellDiagnostics=" << (params.speciesCellDiagnosticsEnable ? params.speciesCellDiagnosticsFilename : std::string("off"))
                   << " speciesMassClosure=" << (params.speciesResamplingMassClosureEnable ? "on" : "off")
                   << " speciesPopulationGuard=" << (params.speciesResamplingPopulationGuardEnable ? "on" : "off")
+                  << " speciesMixedRefill=" << (params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? "on" : "off")
                   << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {

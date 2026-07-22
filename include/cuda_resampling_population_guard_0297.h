@@ -93,9 +93,18 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     std::uint64_t emptyRefillParticles0319 = 0u;
     std::uint64_t emptyRefillSkippedNoMemory0319 = 0u;
     std::uint64_t emptyRefillSkippedNoCapacity0319 = 0u;
-    // 0490c: mixed remembered cells are deliberately not refilled until a
-    // later per-species refill policy is available.
+    // 0490c legacy fallback: without the 0490f composition memory, mixed
+    // remembered cells remain deliberately excluded.
     std::uint64_t emptyRefillSkippedMixedSpecies0490c = 0u;
+
+    // 0490f dense registered-species composition memory for CUDA refill.
+    bool emptyRefillSpeciesCompositionEnable0490f = false;
+    std::uint64_t emptyRefillSpeciesCount0490f = 0u;
+    std::uint64_t emptyRefillMixedCells0490f = 0u;
+    std::uint64_t emptyRefillSkippedTargetTooSmall0490f = 0u;
+    double emptyRefillMaxAbsSpeciesMassError0490f = 0.0;
+    double emptyRefillMaxAbsSpeciesMomentumError0490f = 0.0;
+
     double emptyRefillAddedMass0319 = 0.0;
     double emptyRefillAddedPx0319 = 0.0;
     double emptyRefillAddedPy0319 = 0.0;

@@ -52,6 +52,12 @@ struct SimulationParams {
     // composition reconstructed from M_s/referenceCellMass_s.
     bool speciesResamplingPopulationGuardEnable = false;
 
+    // 0490f opt-in CUDA empty-cell composition memory. When enabled, the
+    // resident refill stores M_{c,s} for every registered species and restores
+    // a temporarily empty mixed cell with the remembered per-species masses.
+    // Species-wise global mass/momentum correction is used after refill.
+    bool cudaResamplingEmptyRefillSpeciesCompositionEnable = false;
+
     std::string inputState;
     std::string outputDir = "run_base";
 

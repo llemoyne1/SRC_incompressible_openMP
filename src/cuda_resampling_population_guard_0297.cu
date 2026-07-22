@@ -91,6 +91,8 @@ struct DevicePopulationGuardConfig0297 {
     int emptyRefillEnable0319 = 0;
     int emptyRefillTarget0319 = 0;
     int emptyRefillMemoryMaxAge0319 = 0;
+    int speciesCompositionEnable0490f = 0;
+    int speciesCount0490f = 0;
 
     int chiFilterEnable = 0;
     double chiMin = 0.0;
@@ -123,8 +125,16 @@ struct DeviceBuffers0297 {
     unsigned int* dLastCellMixed0490c = nullptr;
     unsigned long long* dLastCellStep0319 = nullptr;
     double* dEmptyAdded0319 = nullptr; // 0..2 added mass/px/py, 3..5 chi-allowed pre-refill mass/px/py
+    unsigned int* dSpeciesTypes0490f = nullptr;
+    double* dCurrentCellSpeciesMass0490f = nullptr;
+    double* dLastCellSpeciesMass0490f = nullptr;
+    double* dSpeciesMomentsBefore0490f = nullptr; // ns x {m,px,py}
+    double* dSpeciesMomentsAdded0490f = nullptr;  // ns x {m,px,py}
+    double* dSpeciesScaleShift0490f = nullptr;    // ns x {scale,dvx,dvy}
+    double* dSpeciesMomentsAfter0490f = nullptr;  // ns x {m,px,py}
     unsigned long long* dCounters = nullptr; // 0 merge, 1 split, 2 noInactive, 3 noDonor, 4 noPair, 5 boundary, 6 open, 7 solidHalo
     int cellCapacity = 0;
+    int speciesCapacity0490f = 0;
     std::uint64_t particleCapacity = 0u;
 
     ~DeviceBuffers0297() { release(); }
@@ -156,6 +166,13 @@ struct DeviceBuffers0297 {
         if (dLastCellMixed0490c) cudaFree(dLastCellMixed0490c);
         if (dLastCellStep0319) cudaFree(dLastCellStep0319);
         if (dEmptyAdded0319) cudaFree(dEmptyAdded0319);
+        if (dSpeciesTypes0490f) cudaFree(dSpeciesTypes0490f);
+        if (dCurrentCellSpeciesMass0490f) cudaFree(dCurrentCellSpeciesMass0490f);
+        if (dLastCellSpeciesMass0490f) cudaFree(dLastCellSpeciesMass0490f);
+        if (dSpeciesMomentsBefore0490f) cudaFree(dSpeciesMomentsBefore0490f);
+        if (dSpeciesMomentsAdded0490f) cudaFree(dSpeciesMomentsAdded0490f);
+        if (dSpeciesScaleShift0490f) cudaFree(dSpeciesScaleShift0490f);
+        if (dSpeciesMomentsAfter0490f) cudaFree(dSpeciesMomentsAfter0490f);
         if (dCounters) cudaFree(dCounters);
         dPoorCells = nullptr;
         dRichCells = nullptr;
@@ -183,13 +200,26 @@ struct DeviceBuffers0297 {
         dLastCellMixed0490c = nullptr;
         dLastCellStep0319 = nullptr;
         dEmptyAdded0319 = nullptr;
+        dSpeciesTypes0490f = nullptr;
+        dCurrentCellSpeciesMass0490f = nullptr;
+        dLastCellSpeciesMass0490f = nullptr;
+        dSpeciesMomentsBefore0490f = nullptr;
+        dSpeciesMomentsAdded0490f = nullptr;
+        dSpeciesScaleShift0490f = nullptr;
+        dSpeciesMomentsAfter0490f = nullptr;
         dCounters = nullptr;
         cellCapacity = 0;
+        speciesCapacity0490f = 0;
         particleCapacity = 0u;
     }
 
-    void ensure(int numCells, std::uint64_t nParticles) {
-        if (numCells <= cellCapacity && nParticles <= particleCapacity && dPoorCells && dRichCells &&
+    void ensure(int numCells, std::uint64_t nParticles, int speciesCount0490f) {
+        const bool speciesBuffersReady0490f = speciesCount0490f <= 0 ||
+            (speciesCount0490f <= speciesCapacity0490f && dSpeciesTypes0490f &&
+             dCurrentCellSpeciesMass0490f && dLastCellSpeciesMass0490f &&
+             dSpeciesMomentsBefore0490f && dSpeciesMomentsAdded0490f &&
+             dSpeciesScaleShift0490f && dSpeciesMomentsAfter0490f);
+        if (numCells <= cellCapacity && nParticles <= particleCapacity && speciesBuffersReady0490f && dPoorCells && dRichCells &&
             dPoorCount && dRichCount && dInactiveList && dInactiveCount && dInactiveCursor && dPoorDonor &&
             dPoorDonorMassBits0307 && dMinima0307 &&
             dRichKeep && dRichExtract && dKrelBefore0298 && dKrelAfter0298 &&
@@ -255,6 +285,26 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0319 last cell step: ") + cudaGetErrorString(err));
         err = cudaMalloc(reinterpret_cast<void**>(&dEmptyAdded0319), sizeof(double) * 6u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0319 added moments: ") + cudaGetErrorString(err));
+        if (speciesCount0490f > 0) {
+            const std::size_t ns = static_cast<std::size_t>(speciesCount0490f);
+            const std::size_t ncs = static_cast<std::size_t>(numCells) * ns;
+            err = cudaMalloc(reinterpret_cast<void**>(&dSpeciesTypes0490f), sizeof(unsigned int) * ns);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f species types: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dCurrentCellSpeciesMass0490f), sizeof(double) * ncs);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f current cell species mass: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dLastCellSpeciesMass0490f), sizeof(double) * ncs);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f last cell species mass: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dSpeciesMomentsBefore0490f), sizeof(double) * 3u * ns);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f before moments: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dSpeciesMomentsAdded0490f), sizeof(double) * 3u * ns);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f added moments: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dSpeciesScaleShift0490f), sizeof(double) * 3u * ns);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f scale/shift: ") + cudaGetErrorString(err));
+            err = cudaMalloc(reinterpret_cast<void**>(&dSpeciesMomentsAfter0490f), sizeof(double) * 3u * ns);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc 0490f after moments: ") + cudaGetErrorString(err));
+            err = cudaMemset(dLastCellSpeciesMass0490f, 0, sizeof(double) * ncs);
+            if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: memset 0490f last cell species mass: ") + cudaGetErrorString(err));
+        }
         err = cudaMemset(dLastCellMass0319, 0, sizeof(double) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: memset 0319 last cell mass: ") + cudaGetErrorString(err));
         err = cudaMemset(dLastCellUx0319, 0, sizeof(double) * static_cast<std::size_t>(numCells));
@@ -267,9 +317,10 @@ struct DeviceBuffers0297 {
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: memset 0490c last cell mixed flag: ") + cudaGetErrorString(err));
         err = cudaMemset(dLastCellStep0319, 0, sizeof(unsigned long long) * static_cast<std::size_t>(numCells));
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: memset 0319 last cell step: ") + cudaGetErrorString(err));
-        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 24u);
+        err = cudaMalloc(reinterpret_cast<void**>(&dCounters), sizeof(unsigned long long) * 32u);
         if (err != cudaSuccess) throw std::runtime_error(std::string("cuda_resampling_population_guard_0297: malloc counters: ") + cudaGetErrorString(err));
         cellCapacity = numCells;
+        speciesCapacity0490f = speciesCount0490f;
         particleCapacity = nParticles;
     }
 };
@@ -514,7 +565,7 @@ __global__ void reset_population_guard_buffers_kernel_0297(
         if (emptyAdded0319) {
             for (int i = 0; i < 6; ++i) emptyAdded0319[i] = 0.0;
         }
-        for (int i = 0; i < 24; ++i) counters[i] = 0ull;
+        for (int i = 0; i < 32; ++i) counters[i] = 0ull;
         if (minima0307) {
             minima0307[0] = 1.0e300;
             minima0307[1] = 1.0e300;
@@ -583,6 +634,125 @@ __global__ void accumulate_current_cell_types_kernel_0490c(
     }
 }
 
+
+__device__ inline int species_index_0490f(
+    unsigned int type,
+    const unsigned int* __restrict__ speciesTypes,
+    int speciesCount) {
+    for (int s = 0; s < speciesCount; ++s) {
+        if (speciesTypes[s] == type) return s;
+    }
+    return -1;
+}
+
+__global__ void accumulate_species_memory_and_moments_kernel_0490f(
+    int nParticles,
+    const unsigned char* __restrict__ role,
+    const int* __restrict__ cellId,
+    const unsigned int* __restrict__ type,
+    const double* __restrict__ mass,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const float* __restrict__ chiField,
+    DevicePopulationGuardConfig0297 cfg,
+    const unsigned int* __restrict__ speciesTypes,
+    double* __restrict__ currentCellSpeciesMass,
+    double* __restrict__ speciesMomentsBefore,
+    unsigned long long* __restrict__ counters) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nParticles) return;
+    if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
+    const int c = cellId[i];
+    if (c < 0 || c >= cfg.numCells) return;
+    if (!chi_allows_resampling_0297(c, chiField, cfg)) return;
+    const double m = mass[i];
+    if (!(m > 0.0) || !isfinite(m)) return;
+    const int si = species_index_0490f(type[i], speciesTypes, cfg.speciesCount0490f);
+    if (si < 0) {
+        atomicAdd(&counters[26], 1ull);
+        return;
+    }
+    atomic_add_double_compat_0297(
+        &currentCellSpeciesMass[static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.speciesCount0490f) + static_cast<std::size_t>(si)], m);
+    atomic_add_double_compat_0297(&speciesMomentsBefore[3 * si + 0], m);
+    atomic_add_double_compat_0297(&speciesMomentsBefore[3 * si + 1], m * vx[i]);
+    atomic_add_double_compat_0297(&speciesMomentsBefore[3 * si + 2], m * vy[i]);
+}
+
+__device__ inline int cell_from_position_0490f(
+    double x, double y, DevicePopulationGuardConfig0297 cfg) {
+    int ix = static_cast<int>(floor(x / cfg.dx));
+    int iy = static_cast<int>(floor(y / cfg.dy));
+    if (ix < 0) ix = 0;
+    if (ix >= cfg.nx) ix = cfg.nx - 1;
+    if (iy < 0) iy = 0;
+    if (iy >= cfg.ny) iy = cfg.ny - 1;
+    return iy * cfg.nx + ix;
+}
+
+__global__ void accumulate_species_moments_after_kernel_0490f(
+    int nParticles,
+    const unsigned char* __restrict__ role,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const unsigned int* __restrict__ type,
+    const double* __restrict__ mass,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const float* __restrict__ chiField,
+    DevicePopulationGuardConfig0297 cfg,
+    const unsigned int* __restrict__ speciesTypes,
+    double* __restrict__ speciesMomentsAfter) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nParticles) return;
+    if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
+    if (cfg.chiFilterEnable) {
+        // Newly refilled particles have not yet gone through a fresh cell-ID
+        // deposit. Use their current position for the chi inclusion test rather
+        // than trusting a potentially stale but numerically valid cellId slot.
+        const int c = cell_from_position_0490f(x[i], y[i], cfg);
+        if (!chi_allows_resampling_0297(c, chiField, cfg)) return;
+    }
+    const double m = mass[i];
+    if (!(m > 0.0) || !isfinite(m)) return;
+    const int si = species_index_0490f(type[i], speciesTypes, cfg.speciesCount0490f);
+    if (si < 0) return;
+    atomic_add_double_compat_0297(&speciesMomentsAfter[3 * si + 0], m);
+    atomic_add_double_compat_0297(&speciesMomentsAfter[3 * si + 1], m * vx[i]);
+    atomic_add_double_compat_0297(&speciesMomentsAfter[3 * si + 2], m * vy[i]);
+}
+
+__global__ void scale_and_shift_species_particles_kernel_0490f(
+    int nParticles,
+    const unsigned char* __restrict__ role,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const unsigned int* __restrict__ type,
+    const float* __restrict__ chiField,
+    DevicePopulationGuardConfig0297 cfg,
+    const unsigned int* __restrict__ speciesTypes,
+    const double* __restrict__ scaleShift,
+    double* __restrict__ mass,
+    double* __restrict__ vx,
+    double* __restrict__ vy) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nParticles) return;
+    if (role && role[i] != static_cast<unsigned char>(kParticleRoleFluid)) return;
+    if (cfg.chiFilterEnable) {
+        // Newly refilled particles have not yet gone through a fresh cell-ID
+        // deposit. Use their current position for the chi inclusion test rather
+        // than trusting a potentially stale but numerically valid cellId slot.
+        const int c = cell_from_position_0490f(x[i], y[i], cfg);
+        if (!chi_allows_resampling_0297(c, chiField, cfg)) return;
+    }
+    const int si = species_index_0490f(type[i], speciesTypes, cfg.speciesCount0490f);
+    if (si < 0) return;
+    const double scale = scaleShift[3 * si + 0];
+    if (mass[i] > 0.0 && isfinite(mass[i])) mass[i] *= scale;
+    vx[i] += scaleShift[3 * si + 1];
+    vy[i] += scaleShift[3 * si + 2];
+}
+
 __global__ void update_empty_refill_memory_kernel_0319(
     int numCells,
     const unsigned int* __restrict__ cellCount,
@@ -599,6 +769,8 @@ __global__ void update_empty_refill_memory_kernel_0319(
     double* __restrict__ lastUy,
     unsigned int* __restrict__ lastType,
     unsigned int* __restrict__ lastMixed,
+    const double* __restrict__ currentCellSpeciesMass,
+    double* __restrict__ lastCellSpeciesMass,
     unsigned long long* __restrict__ lastStep,
     unsigned long long* __restrict__ counters) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
@@ -613,6 +785,14 @@ __global__ void update_empty_refill_memory_kernel_0319(
     lastUy[c] = cellUy[c];
     lastType[c] = rememberedType;
     lastMixed[c] = currentMixed[c];
+    if (cfg.speciesCompositionEnable0490f && cfg.speciesCount0490f > 0 &&
+        currentCellSpeciesMass && lastCellSpeciesMass) {
+        const std::size_t base = static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.speciesCount0490f);
+        for (int si = 0; si < cfg.speciesCount0490f; ++si) {
+            lastCellSpeciesMass[base + static_cast<std::size_t>(si)] =
+                currentCellSpeciesMass[base + static_cast<std::size_t>(si)];
+        }
+    }
     lastStep[c] = step;
     atomicAdd(&counters[21], 1ull);
 }
@@ -624,6 +804,7 @@ __global__ void classify_empty_refill_cells_kernel_0319(
     unsigned long long step,
     const unsigned int* __restrict__ lastType,
     const unsigned int* __restrict__ lastMixed,
+    const double* __restrict__ lastCellSpeciesMass,
     const unsigned long long* __restrict__ lastStep,
     unsigned int* __restrict__ emptyCells,
     unsigned int* __restrict__ emptyCount,
@@ -650,11 +831,60 @@ __global__ void classify_empty_refill_cells_kernel_0319(
         return;
     }
     if (lastMixed[c] != 0u) {
-        atomicAdd(&counters[23], 1ull);
-        return;
+        if (!cfg.speciesCompositionEnable0490f || cfg.speciesCount0490f <= 0 || !lastCellSpeciesMass) {
+            atomicAdd(&counters[23], 1ull);
+            return;
+        }
+        const std::size_t base = static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.speciesCount0490f);
+        int present = 0;
+        for (int si = 0; si < cfg.speciesCount0490f; ++si) {
+            const double ms = lastCellSpeciesMass[base + static_cast<std::size_t>(si)];
+            if (ms > 0.0 && isfinite(ms)) ++present;
+        }
+        if (present <= 0 || present > cfg.emptyRefillTarget0319) {
+            atomicAdd(&counters[24], 1ull);
+            return;
+        }
     }
     const unsigned int k = atomicAdd(emptyCount, 1u);
     emptyCells[k] = static_cast<unsigned int>(c);
+}
+
+__device__ inline int refill_species_target_count_0490f(
+    int si,
+    int target,
+    int present,
+    double totalMass,
+    const double* __restrict__ speciesMass,
+    const unsigned int* __restrict__ speciesTypes,
+    int speciesCount) {
+    const double ms = speciesMass[si];
+    if (!(ms > 0.0) || !isfinite(ms)) return 0;
+    const int remaining = target - present;
+    if (remaining <= 0) return 1;
+    const double exact = static_cast<double>(remaining) * ms / totalMass;
+    const int floorPart = static_cast<int>(floor(exact));
+    int floorSum = 0;
+    for (int sj = 0; sj < speciesCount; ++sj) {
+        const double mj = speciesMass[sj];
+        if (!(mj > 0.0) || !isfinite(mj)) continue;
+        floorSum += static_cast<int>(floor(static_cast<double>(remaining) * mj / totalMass));
+    }
+    const int leftovers = remaining - floorSum;
+    const double remainder = exact - floor(exact);
+    int rank = 0;
+    for (int sj = 0; sj < speciesCount; ++sj) {
+        if (sj == si) continue;
+        const double mj = speciesMass[sj];
+        if (!(mj > 0.0) || !isfinite(mj)) continue;
+        const double exactJ = static_cast<double>(remaining) * mj / totalMass;
+        const double remainderJ = exactJ - floor(exactJ);
+        if (remainderJ > remainder ||
+            (remainderJ == remainder && speciesTypes[sj] < speciesTypes[si])) {
+            ++rank;
+        }
+    }
+    return 1 + floorPart + (rank < leftovers ? 1 : 0);
 }
 
 __global__ void empty_refill_cells_kernel_0319(
@@ -673,6 +903,10 @@ __global__ void empty_refill_cells_kernel_0319(
     const double* __restrict__ lastUx,
     const double* __restrict__ lastUy,
     const unsigned int* __restrict__ lastType,
+    const unsigned int* __restrict__ lastMixed,
+    const unsigned int* __restrict__ speciesTypes,
+    const double* __restrict__ lastCellSpeciesMass,
+    double* __restrict__ speciesMomentsAdded,
     double* __restrict__ emptyAdded,
     unsigned long long* __restrict__ counters) {
     const unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
@@ -684,6 +918,26 @@ __global__ void empty_refill_cells_kernel_0319(
         atomicAdd(&counters[19], 1ull);
         return;
     }
+
+    const bool composition = cfg.speciesCompositionEnable0490f &&
+        cfg.speciesCount0490f > 0 && speciesTypes && lastCellSpeciesMass && speciesMomentsAdded;
+    int present = 0;
+    double rememberedSpeciesMass = 0.0;
+    const std::size_t base = static_cast<std::size_t>(c) * static_cast<std::size_t>(cfg.speciesCount0490f);
+    if (composition) {
+        for (int si = 0; si < cfg.speciesCount0490f; ++si) {
+            const double ms = lastCellSpeciesMass[base + static_cast<std::size_t>(si)];
+            if (ms > 0.0 && isfinite(ms)) {
+                ++present;
+                rememberedSpeciesMass += ms;
+            }
+        }
+        if (present <= 0 || target < present || !(rememberedSpeciesMass > 0.0)) {
+            atomicAdd(&counters[24], 1ull);
+            return;
+        }
+    }
+
     const unsigned int first = atomicAdd(inactiveCursor, static_cast<unsigned int>(target));
     if (static_cast<unsigned long long>(first) + static_cast<unsigned long long>(target) > cfg.activeCapacity0315) {
         atomicAdd(&counters[20], 1ull);
@@ -693,38 +947,90 @@ __global__ void empty_refill_cells_kernel_0319(
     const int iy = static_cast<int>(c / static_cast<unsigned int>(cfg.nx));
     const double xmin = static_cast<double>(ix) * cfg.dx;
     const double ymin = static_cast<double>(iy) * cfg.dy;
-    const double mp = cellMass / static_cast<double>(target);
     const double ux = lastUx[c];
     const double uy = lastUy[c];
-    for (int j = 0; j < target; ++j) {
-        const unsigned long long slot64 = cfg.activeBase0315 + static_cast<unsigned long long>(first + static_cast<unsigned int>(j));
-        if (slot64 >= cfg.activeBase0315 + cfg.activeCapacity0315) {
-            atomicAdd(&counters[20], 1ull);
+
+    int jGlobal = 0;
+    if (composition) {
+        const double* cellSpeciesMass = lastCellSpeciesMass + base;
+        for (int si = 0; si < cfg.speciesCount0490f; ++si) {
+            const double ms = cellSpeciesMass[si];
+            if (!(ms > 0.0) || !isfinite(ms)) continue;
+            const int countSi = refill_species_target_count_0490f(
+                si, target, present, rememberedSpeciesMass,
+                cellSpeciesMass, speciesTypes, cfg.speciesCount0490f);
+            if (countSi <= 0) continue;
+            const double mp = ms / static_cast<double>(countSi);
+            for (int q = 0; q < countSi; ++q, ++jGlobal) {
+                const unsigned long long slot64 = cfg.activeBase0315 +
+                    static_cast<unsigned long long>(first + static_cast<unsigned int>(jGlobal));
+                if (slot64 >= cfg.activeBase0315 + cfg.activeCapacity0315) {
+                    atomicAdd(&counters[20], 1ull);
+                    return;
+                }
+                const unsigned int slot = static_cast<unsigned int>(slot64);
+                if (role[slot] != static_cast<unsigned char>(kParticleRoleInactive)) {
+                    atomicAdd(&counters[20], 1ull);
+                    return;
+                }
+                const double fx = (static_cast<double>((jGlobal * 37 + static_cast<int>(k) * 11) % 997) + 0.5) / 997.0;
+                const double fy = (static_cast<double>((jGlobal * 53 + static_cast<int>(k) * 17) % 991) + 0.5) / 991.0;
+                const double xlo = xmin + 1.0e-12 * cfg.dx;
+                const double xhi = xmin + cfg.dx - 1.0e-12 * cfg.dx;
+                const double ylo = ymin + 1.0e-12 * cfg.dy;
+                const double yhi = ymin + cfg.dy - 1.0e-12 * cfg.dy;
+                x[slot] = fmin(fmax(xmin + fx * cfg.dx, xlo), xhi);
+                y[slot] = fmin(fmax(ymin + fy * cfg.dy, ylo), yhi);
+                vx[slot] = ux;
+                vy[slot] = uy;
+                mass[slot] = mp;
+                type[slot] = speciesTypes[si];
+                role[slot] = static_cast<unsigned char>(kParticleRoleFluid);
+            }
+            atomic_add_double_compat_0297(&speciesMomentsAdded[3 * si + 0], ms);
+            atomic_add_double_compat_0297(&speciesMomentsAdded[3 * si + 1], ms * ux);
+            atomic_add_double_compat_0297(&speciesMomentsAdded[3 * si + 2], ms * uy);
+        }
+        if (jGlobal != target) {
+            atomicAdd(&counters[24], 1ull);
             return;
         }
-        const unsigned int slot = static_cast<unsigned int>(slot64);
-        if (role[slot] != static_cast<unsigned char>(kParticleRoleInactive)) {
-            atomicAdd(&counters[20], 1ull);
-            return;
+        if (lastMixed && lastMixed[c] != 0u) atomicAdd(&counters[25], 1ull);
+        atomic_add_double_compat_0297(&emptyAdded[0], rememberedSpeciesMass);
+        atomic_add_double_compat_0297(&emptyAdded[1], rememberedSpeciesMass * ux);
+        atomic_add_double_compat_0297(&emptyAdded[2], rememberedSpeciesMass * uy);
+    } else {
+        const double mp = cellMass / static_cast<double>(target);
+        for (int j = 0; j < target; ++j) {
+            const unsigned long long slot64 = cfg.activeBase0315 +
+                static_cast<unsigned long long>(first + static_cast<unsigned int>(j));
+            if (slot64 >= cfg.activeBase0315 + cfg.activeCapacity0315) {
+                atomicAdd(&counters[20], 1ull);
+                return;
+            }
+            const unsigned int slot = static_cast<unsigned int>(slot64);
+            if (role[slot] != static_cast<unsigned char>(kParticleRoleInactive)) {
+                atomicAdd(&counters[20], 1ull);
+                return;
+            }
+            const double fx = (static_cast<double>((j * 37 + static_cast<int>(k) * 11) % 997) + 0.5) / 997.0;
+            const double fy = (static_cast<double>((j * 53 + static_cast<int>(k) * 17) % 991) + 0.5) / 991.0;
+            const double xlo = xmin + 1.0e-12 * cfg.dx;
+            const double xhi = xmin + cfg.dx - 1.0e-12 * cfg.dx;
+            const double ylo = ymin + 1.0e-12 * cfg.dy;
+            const double yhi = ymin + cfg.dy - 1.0e-12 * cfg.dy;
+            x[slot] = fmin(fmax(xmin + fx * cfg.dx, xlo), xhi);
+            y[slot] = fmin(fmax(ymin + fy * cfg.dy, ylo), yhi);
+            vx[slot] = ux;
+            vy[slot] = uy;
+            mass[slot] = mp;
+            type[slot] = lastType[c];
+            role[slot] = static_cast<unsigned char>(kParticleRoleFluid);
         }
-        const double fx = (static_cast<double>((j * 37 + static_cast<int>(k) * 11) % 997) + 0.5) / 997.0;
-        const double fy = (static_cast<double>((j * 53 + static_cast<int>(k) * 17) % 991) + 0.5) / 991.0;
-        const double xlo = xmin + 1.0e-12 * cfg.dx;
-        const double xhi = xmin + cfg.dx - 1.0e-12 * cfg.dx;
-        const double ylo = ymin + 1.0e-12 * cfg.dy;
-        const double yhi = ymin + cfg.dy - 1.0e-12 * cfg.dy;
-        x[slot] = fmin(fmax(xmin + fx * cfg.dx, xlo), xhi);
-        y[slot] = fmin(fmax(ymin + fy * cfg.dy, ylo), yhi);
-        vx[slot] = ux;
-        vy[slot] = uy;
-        mass[slot] = mp;
-        type[slot] = lastType[c];
-        role[slot] = static_cast<unsigned char>(kParticleRoleFluid);
+        atomic_add_double_compat_0297(&emptyAdded[0], cellMass);
+        atomic_add_double_compat_0297(&emptyAdded[1], cellMass * ux);
+        atomic_add_double_compat_0297(&emptyAdded[2], cellMass * uy);
     }
-    const double addedMass = mp * static_cast<double>(target);
-    atomic_add_double_compat_0297(&emptyAdded[0], addedMass);
-    atomic_add_double_compat_0297(&emptyAdded[1], addedMass * ux);
-    atomic_add_double_compat_0297(&emptyAdded[2], addedMass * uy);
     atomicAdd(&counters[17], 1ull);
     atomicAdd(&counters[18], static_cast<unsigned long long>(target));
 }
@@ -1295,6 +1601,9 @@ DevicePopulationGuardConfig0297 make_config_0297(const SimulationParams& params,
     cfg.emptyRefillTarget0319 = std::max(1, static_cast<int>(std::llround(
         params.cudaResamplingEmptyRefillTargetFraction * static_cast<double>(std::max(1, emptyReference)))));
     cfg.emptyRefillMemoryMaxAge0319 = std::max(0, params.cudaResamplingEmptyRefillMemoryMaxAge);
+    cfg.speciesCompositionEnable0490f = params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? 1 : 0;
+    cfg.speciesCount0490f = cfg.speciesCompositionEnable0490f
+        ? static_cast<int>(params.speciesDefinitions.size()) : 0;
     cfg.chiFilterEnable = (params.darcyBrinkmanEnable && params.cudaResamplingChiFilterEnable) ? 1 : 0;
     cfg.chiMin = std::clamp(params.cudaResamplingChiMin, 0.0, 1.0);
     cfg.boundaryAware0299 = env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE") ? 1 : 0;
@@ -1364,7 +1673,11 @@ void write_csv_row_0297(const SimulationParams& params,
                "emptyRefillEnable0319,emptyRefillTarget0319,emptyRefillTargetFraction0319,emptyRefillReference0319,"
                "emptyRefillMemoryMaxAge0319,emptyRefillMemoryUpdates0319,emptyRefillCandidates0319,"
                "emptyRefillCells0319,emptyRefillParticles0319,emptyRefillSkippedNoMemory0319,"
-               "emptyRefillSkippedNoCapacity0319,emptyRefillSkippedMixedSpecies0490c,emptyRefillAddedMass0319,emptyRefillAddedPx0319,"
+               "emptyRefillSkippedNoCapacity0319,emptyRefillSkippedMixedSpecies0490c,"
+               "emptyRefillSpeciesCompositionEnable0490f,emptyRefillSpeciesCount0490f,"
+               "emptyRefillMixedCells0490f,emptyRefillSkippedTargetTooSmall0490f,"
+               "emptyRefillMaxAbsSpeciesMassError0490f,emptyRefillMaxAbsSpeciesMomentumError0490f,"
+               "emptyRefillAddedMass0319,emptyRefillAddedPx0319,"
                "emptyRefillAddedPy0319,emptyRefillMassScale0319,emptyRefillVelocityShiftX0319,emptyRefillVelocityShiftY0319,"
                "totalMassBefore,totalMassAfter,totalPxBefore,totalPxAfter,totalPyBefore,totalPyAfter,"
                "momentRestoreRequested0298,energyRestoreApplied0298,energyRestoreParticleUpdates0298,energyRestoreSkippedParticles0298,"
@@ -1410,6 +1723,12 @@ void write_csv_row_0297(const SimulationParams& params,
         << d.emptyRefillCandidates0319 << ',' << d.emptyRefillCells0319 << ','
         << d.emptyRefillParticles0319 << ',' << d.emptyRefillSkippedNoMemory0319 << ','
         << d.emptyRefillSkippedNoCapacity0319 << ',' << d.emptyRefillSkippedMixedSpecies0490c << ','
+        << (d.emptyRefillSpeciesCompositionEnable0490f ? 1 : 0) << ','
+        << d.emptyRefillSpeciesCount0490f << ','
+        << d.emptyRefillMixedCells0490f << ','
+        << d.emptyRefillSkippedTargetTooSmall0490f << ','
+        << d.emptyRefillMaxAbsSpeciesMassError0490f << ','
+        << d.emptyRefillMaxAbsSpeciesMomentumError0490f << ','
         << d.emptyRefillAddedMass0319 << ','
         << d.emptyRefillAddedPx0319 << ',' << d.emptyRefillAddedPy0319 << ','
         << d.emptyRefillMassScale0319 << ',' << d.emptyRefillVelocityShiftX0319 << ','
@@ -1561,6 +1880,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.emptyRefillTargetFraction0319 = params.cudaResamplingEmptyRefillTargetFraction;
     d.emptyRefillReference0319 = params.cudaResamplingEmptyRefillReference;
     d.emptyRefillMemoryMaxAge0319 = cfg.emptyRefillMemoryMaxAge0319;
+    d.emptyRefillSpeciesCompositionEnable0490f = cfg.speciesCompositionEnable0490f != 0;
+    d.emptyRefillSpeciesCount0490f = static_cast<std::uint64_t>(std::max(0, cfg.speciesCount0490f));
     d.boundaryAware0299 = cfg.boundaryAware0299 != 0;
     d.boundaryHaloCells0299 = cfg.boundaryHaloCells0299;
     d.openBoundaryHaloCells0299 = cfg.openBoundaryHaloCells0299;
@@ -1631,7 +1952,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         throw std::runtime_error("cuda_resampling_population_guard_0297: incomplete device views");
     }
 
-    g_populationGuardBuffers0297.ensure(grid.numCells, hostMirror.Np);
+    g_populationGuardBuffers0297.ensure(grid.numCells, hostMirror.Np, cfg.speciesCount0490f);
     const std::uint64_t activeBase0315 = gpuState.active_fluid_size();
     if (cfg.activePrefixSafe0315) {
         cfg.activeBase0315 = activeBase0315;
@@ -1648,6 +1969,19 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     }
     const int block = options.threadsPerBlock;
     const int cellGrid = std::max(1, (grid.numCells + block - 1) / block);
+    if (cfg.speciesCompositionEnable0490f) {
+        validate_species_definitions(
+            params.speciesDefinitions,
+            "cuda_resampling_population_guard_0297 0490f species registry");
+        std::vector<unsigned int> speciesTypes0490f;
+        speciesTypes0490f.reserve(params.speciesDefinitions.size());
+        for (const auto& def : params.speciesDefinitions) speciesTypes0490f.push_back(def.type);
+        cuda_check_0297(cudaMemcpy(
+            g_populationGuardBuffers0297.dSpeciesTypes0490f, speciesTypes0490f.data(),
+            sizeof(unsigned int) * speciesTypes0490f.size(), cudaMemcpyHostToDevice),
+            "copy 0490f species types H2D");
+    }
+
     const std::uint64_t particleCountBefore64 = cfg.activePrefixSafe0315 ? activeBase0315 : hostMirror.Np;
     const int particleCountBefore = static_cast<int>(particleCountBefore64);
     if (static_cast<std::uint64_t>(particleCountBefore) != particleCountBefore64) {
@@ -1677,6 +2011,30 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         g_populationGuardBuffers0297.dCounters);
     cuda_check_0297(cudaGetLastError(), "launch reset_population_guard_buffers_kernel_0297");
 
+    if (cfg.speciesCompositionEnable0490f) {
+        const std::size_t ns0490f = static_cast<std::size_t>(cfg.speciesCount0490f);
+        cuda_check_0297(cudaMemset(
+            g_populationGuardBuffers0297.dCurrentCellSpeciesMass0490f, 0,
+            sizeof(double) * static_cast<std::size_t>(grid.numCells) * ns0490f),
+            "reset 0490f current cell species mass");
+        cuda_check_0297(cudaMemset(
+            g_populationGuardBuffers0297.dSpeciesMomentsBefore0490f, 0,
+            sizeof(double) * 3u * ns0490f), "reset 0490f before moments");
+        cuda_check_0297(cudaMemset(
+            g_populationGuardBuffers0297.dSpeciesMomentsAdded0490f, 0,
+            sizeof(double) * 3u * ns0490f), "reset 0490f added moments");
+        cuda_check_0297(cudaMemset(
+            g_populationGuardBuffers0297.dSpeciesMomentsAfter0490f, 0,
+            sizeof(double) * 3u * ns0490f), "reset 0490f after moments");
+        accumulate_species_memory_and_moments_kernel_0490f<<<particleGrid, block>>>(
+            particleCountBefore, pv.role, cv.cellId, pv.type, pv.mass, pv.vx, pv.vy,
+            dChi0297, cfg, g_populationGuardBuffers0297.dSpeciesTypes0490f,
+            g_populationGuardBuffers0297.dCurrentCellSpeciesMass0490f,
+            g_populationGuardBuffers0297.dSpeciesMomentsBefore0490f,
+            g_populationGuardBuffers0297.dCounters);
+        cuda_check_0297(cudaGetLastError(), "launch accumulate_species_memory_and_moments_kernel_0490f");
+    }
+
     if (cfg.emptyRefillEnable0319 && cfg.activePrefixSafe0315) {
         cuda_check_0297(cudaMemset(g_populationGuardBuffers0297.dCurrentCellType0490c, 0xff,
                                    sizeof(unsigned int) * static_cast<std::size_t>(grid.numCells)),
@@ -1700,6 +2058,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardBuffers0297.dLastCellUy0319,
             g_populationGuardBuffers0297.dLastCellType0490c,
             g_populationGuardBuffers0297.dLastCellMixed0490c,
+            g_populationGuardBuffers0297.dCurrentCellSpeciesMass0490f,
+            g_populationGuardBuffers0297.dLastCellSpeciesMass0490f,
             g_populationGuardBuffers0297.dLastCellStep0319,
             g_populationGuardBuffers0297.dCounters);
         cuda_check_0297(cudaGetLastError(), "launch update_empty_refill_memory_kernel_0319");
@@ -1707,6 +2067,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             cv.count, dChi0297, cfg, static_cast<unsigned long long>(step),
             g_populationGuardBuffers0297.dLastCellType0490c,
             g_populationGuardBuffers0297.dLastCellMixed0490c,
+            g_populationGuardBuffers0297.dLastCellSpeciesMass0490f,
             g_populationGuardBuffers0297.dLastCellStep0319,
             g_populationGuardBuffers0297.dEmptyCells0319,
             g_populationGuardBuffers0297.dEmptyCount0319,
@@ -1776,10 +2137,14 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
                 g_populationGuardBuffers0297.dLastCellUx0319,
                 g_populationGuardBuffers0297.dLastCellUy0319,
                 g_populationGuardBuffers0297.dLastCellType0490c,
+                g_populationGuardBuffers0297.dLastCellMixed0490c,
+                g_populationGuardBuffers0297.dSpeciesTypes0490f,
+                g_populationGuardBuffers0297.dLastCellSpeciesMass0490f,
+                g_populationGuardBuffers0297.dSpeciesMomentsAdded0490f,
                 g_populationGuardBuffers0297.dEmptyAdded0319,
                 g_populationGuardBuffers0297.dCounters);
             cuda_check_0297(cudaGetLastError(), "launch empty_refill_cells_kernel_0319");
-            unsigned long long hRefillCounters0319[24] = {};
+            unsigned long long hRefillCounters0319[32] = {};
             double hEmptyAdded0319[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
             cuda_check_0297(cudaMemcpy(hRefillCounters0319, g_populationGuardBuffers0297.dCounters,
                                        sizeof(hRefillCounters0319), cudaMemcpyDeviceToHost),
@@ -1793,27 +2158,90 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
                 d.emptyRefillAddedMass0319 = hEmptyAdded0319[0];
                 d.emptyRefillAddedPx0319 = hEmptyAdded0319[1];
                 d.emptyRefillAddedPy0319 = hEmptyAdded0319[2];
-                const double scaleMassBase0319 = d.chiFilterEnable ? hEmptyAdded0319[3] : d.totalMassBefore;
-                const double scalePxBase0319 = d.chiFilterEnable ? hEmptyAdded0319[4] : d.totalPxBefore;
-                const double scalePyBase0319 = d.chiFilterEnable ? hEmptyAdded0319[5] : d.totalPyBefore;
-                if (scaleMassBase0319 > 0.0 && hEmptyAdded0319[0] > 0.0) {
-                    d.emptyRefillMassScale0319 = scaleMassBase0319 / (scaleMassBase0319 + hEmptyAdded0319[0]);
-                    const double pxAfterScale = d.emptyRefillMassScale0319 * (scalePxBase0319 + hEmptyAdded0319[1]);
-                    const double pyAfterScale = d.emptyRefillMassScale0319 * (scalePyBase0319 + hEmptyAdded0319[2]);
-                    d.emptyRefillVelocityShiftX0319 = (scalePxBase0319 - pxAfterScale) / scaleMassBase0319;
-                    d.emptyRefillVelocityShiftY0319 = (scalePyBase0319 - pyAfterScale) / scaleMassBase0319;
-                    const int activeAfterRefillInt0319 = static_cast<int>(activeBaseAfterRefill0319);
-                    if (static_cast<std::uint64_t>(activeAfterRefillInt0319) != activeBaseAfterRefill0319) {
-                        throw std::runtime_error("cuda_resampling_population_guard_0297: 0319 active count exceeds int range");
+                const int activeAfterRefillInt0319 = static_cast<int>(activeBaseAfterRefill0319);
+                if (static_cast<std::uint64_t>(activeAfterRefillInt0319) != activeBaseAfterRefill0319) {
+                    throw std::runtime_error("cuda_resampling_population_guard_0297: 0319 active count exceeds int range");
+                }
+                const int particleGridRefill0319 = std::max(1, (activeAfterRefillInt0319 + block - 1) / block);
+                if (cfg.speciesCompositionEnable0490f) {
+                    const std::size_t ns0490f = static_cast<std::size_t>(cfg.speciesCount0490f);
+                    std::vector<double> before0490f(3u * ns0490f, 0.0);
+                    std::vector<double> added0490f(3u * ns0490f, 0.0);
+                    std::vector<double> scaleShift0490f(3u * ns0490f, 0.0);
+                    cuda_check_0297(cudaMemcpy(
+                        before0490f.data(), g_populationGuardBuffers0297.dSpeciesMomentsBefore0490f,
+                        sizeof(double) * before0490f.size(), cudaMemcpyDeviceToHost),
+                        "copy 0490f before moments D2H");
+                    cuda_check_0297(cudaMemcpy(
+                        added0490f.data(), g_populationGuardBuffers0297.dSpeciesMomentsAdded0490f,
+                        sizeof(double) * added0490f.size(), cudaMemcpyDeviceToHost),
+                        "copy 0490f added moments D2H");
+                    for (std::size_t si = 0; si < ns0490f; ++si) {
+                        const double m0 = before0490f[3u * si + 0u];
+                        const double ma = added0490f[3u * si + 0u];
+                        if (ma > 0.0 && !(m0 > 0.0)) {
+                            throw std::runtime_error(
+                                "0490f mixed refill cannot conserve a species absent from the current active population");
+                        }
+                        const double scale = (m0 > 0.0 && ma > 0.0) ? m0 / (m0 + ma) : 1.0;
+                        const double pxScaled = scale * (before0490f[3u * si + 1u] + added0490f[3u * si + 1u]);
+                        const double pyScaled = scale * (before0490f[3u * si + 2u] + added0490f[3u * si + 2u]);
+                        scaleShift0490f[3u * si + 0u] = scale;
+                        scaleShift0490f[3u * si + 1u] = m0 > 0.0
+                            ? (before0490f[3u * si + 1u] - pxScaled) / m0 : 0.0;
+                        scaleShift0490f[3u * si + 2u] = m0 > 0.0
+                            ? (before0490f[3u * si + 2u] - pyScaled) / m0 : 0.0;
                     }
-                    const int particleGridRefill0319 = std::max(1, (activeAfterRefillInt0319 + block - 1) / block);
-                    scale_and_shift_active_particles_kernel_0319<<<particleGridRefill0319, block>>>(
-                        activeAfterRefillInt0319,
-                        d.emptyRefillMassScale0319,
-                        d.emptyRefillVelocityShiftX0319,
-                        d.emptyRefillVelocityShiftY0319,
-                        pv.role, cv.cellId, dChi0297, cfg, pv.mass, pv.vx, pv.vy);
-                    cuda_check_0297(cudaGetLastError(), "launch scale_and_shift_active_particles_kernel_0319");
+                    cuda_check_0297(cudaMemcpy(
+                        g_populationGuardBuffers0297.dSpeciesScaleShift0490f, scaleShift0490f.data(),
+                        sizeof(double) * scaleShift0490f.size(), cudaMemcpyHostToDevice),
+                        "copy 0490f species scale/shift H2D");
+                    scale_and_shift_species_particles_kernel_0490f<<<particleGridRefill0319, block>>>(
+                        activeAfterRefillInt0319, pv.role, pv.x, pv.y, pv.type, dChi0297, cfg,
+                        g_populationGuardBuffers0297.dSpeciesTypes0490f,
+                        g_populationGuardBuffers0297.dSpeciesScaleShift0490f,
+                        pv.mass, pv.vx, pv.vy);
+                    cuda_check_0297(cudaGetLastError(), "launch scale_and_shift_species_particles_kernel_0490f");
+                    cuda_check_0297(cudaMemset(
+                        g_populationGuardBuffers0297.dSpeciesMomentsAfter0490f, 0,
+                        sizeof(double) * 3u * ns0490f), "reset 0490f after moments post-correction");
+                    accumulate_species_moments_after_kernel_0490f<<<particleGridRefill0319, block>>>(
+                        activeAfterRefillInt0319, pv.role, pv.x, pv.y, pv.type, pv.mass, pv.vx, pv.vy,
+                        dChi0297, cfg, g_populationGuardBuffers0297.dSpeciesTypes0490f,
+                        g_populationGuardBuffers0297.dSpeciesMomentsAfter0490f);
+                    cuda_check_0297(cudaGetLastError(), "launch accumulate_species_moments_after_kernel_0490f");
+                    std::vector<double> after0490f(3u * ns0490f, 0.0);
+                    cuda_check_0297(cudaMemcpy(
+                        after0490f.data(), g_populationGuardBuffers0297.dSpeciesMomentsAfter0490f,
+                        sizeof(double) * after0490f.size(), cudaMemcpyDeviceToHost),
+                        "copy 0490f after moments D2H");
+                    for (std::size_t si = 0; si < ns0490f; ++si) {
+                        d.emptyRefillMaxAbsSpeciesMassError0490f = std::max(
+                            d.emptyRefillMaxAbsSpeciesMassError0490f,
+                            std::abs(after0490f[3u * si + 0u] - before0490f[3u * si + 0u]));
+                        const double dpx = after0490f[3u * si + 1u] - before0490f[3u * si + 1u];
+                        const double dpy = after0490f[3u * si + 2u] - before0490f[3u * si + 2u];
+                        d.emptyRefillMaxAbsSpeciesMomentumError0490f = std::max(
+                            d.emptyRefillMaxAbsSpeciesMomentumError0490f, std::hypot(dpx, dpy));
+                    }
+                } else {
+                    const double scaleMassBase0319 = d.chiFilterEnable ? hEmptyAdded0319[3] : d.totalMassBefore;
+                    const double scalePxBase0319 = d.chiFilterEnable ? hEmptyAdded0319[4] : d.totalPxBefore;
+                    const double scalePyBase0319 = d.chiFilterEnable ? hEmptyAdded0319[5] : d.totalPyBefore;
+                    if (scaleMassBase0319 > 0.0 && hEmptyAdded0319[0] > 0.0) {
+                        d.emptyRefillMassScale0319 = scaleMassBase0319 / (scaleMassBase0319 + hEmptyAdded0319[0]);
+                        const double pxAfterScale = d.emptyRefillMassScale0319 * (scalePxBase0319 + hEmptyAdded0319[1]);
+                        const double pyAfterScale = d.emptyRefillMassScale0319 * (scalePyBase0319 + hEmptyAdded0319[2]);
+                        d.emptyRefillVelocityShiftX0319 = (scalePxBase0319 - pxAfterScale) / scaleMassBase0319;
+                        d.emptyRefillVelocityShiftY0319 = (scalePyBase0319 - pyAfterScale) / scaleMassBase0319;
+                        scale_and_shift_active_particles_kernel_0319<<<particleGridRefill0319, block>>>(
+                            activeAfterRefillInt0319,
+                            d.emptyRefillMassScale0319,
+                            d.emptyRefillVelocityShiftX0319,
+                            d.emptyRefillVelocityShiftY0319,
+                            pv.role, cv.cellId, dChi0297, cfg, pv.mass, pv.vx, pv.vy);
+                        cuda_check_0297(cudaGetLastError(), "launch scale_and_shift_active_particles_kernel_0319");
+                    }
                 }
             }
         }
@@ -1883,7 +2311,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     const Clock::time_point tk1 = Clock::now();
     d.kernelSeconds = seconds_between(tk0, tk1);
 
-    unsigned long long hCounters[24] = {};
+    unsigned long long hCounters[32] = {};
     double hMinima0307[3] = {1.0e300, 1.0e300, 1.0e300};
     const Clock::time_point td0 = Clock::now();
     cuda_check_0297(cudaMemcpy(hCounters, g_populationGuardBuffers0297.dCounters,
@@ -1917,6 +2345,12 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.emptyRefillSkippedNoCapacity0319 = static_cast<std::uint64_t>(hCounters[20]);
     d.emptyRefillMemoryUpdates0319 = static_cast<std::uint64_t>(hCounters[21]);
     d.emptyRefillSkippedMixedSpecies0490c = static_cast<std::uint64_t>(hCounters[23]);
+    d.emptyRefillSkippedTargetTooSmall0490f = static_cast<std::uint64_t>(hCounters[24]);
+    d.emptyRefillMixedCells0490f = static_cast<std::uint64_t>(hCounters[25]);
+    if (hCounters[26] != 0ull) {
+        throw std::runtime_error(
+            "0490f CUDA species composition deposit encountered an unregistered fluid type");
+    }
     d.excludedChiCells = static_cast<std::uint64_t>(hCounters[22]);
     d.minSplitDonorMass0307 = hMinima0307[0] < 1.0e299 ? hMinima0307[0] : 0.0;
     d.minSplitNewParticleMass0307 = hMinima0307[1] < 1.0e299 ? hMinima0307[1] : 0.0;
