@@ -922,10 +922,28 @@ int main(int argc, char** argv) {
                 }
                 summary.append(s);
                 if (speciesSummary0490a) {
-                    sync_cuda_resident_state_for_host_0260(state);
-                    speciesSummary0490a->append(
-                        state, params.speciesDefinitions, params.speciesRequireRegisteredTypes,
-                        static_cast<std::uint64_t>(step), s.time);
+                    // 0490n-fix1: in strict resident maintenance mode the host
+                    // ParticleState intentionally remains stale after GPU pool
+                    // mutations.  Reuse the already-downloaded compact Fluid
+                    // snapshot used by the runtime summary instead of forcing a
+                    // full-state synchronization or scanning stale host slots.
+                    const bool residentSpeciesTelemetry0490n =
+                        params.speciesResamplingCudaResidentMaintenanceStrict &&
+                        params.speciesResamplingCudaResidentDepositsEnable &&
+                        params.speciesResamplingCudaResidentPoolEnable &&
+                        compactSummary0314;
+                    if (residentSpeciesTelemetry0490n) {
+                        speciesSummary0490a->append(
+                            summaryState, params.speciesDefinitions,
+                            params.speciesRequireRegisteredTypes,
+                            static_cast<std::uint64_t>(step), s.time);
+                    } else {
+                        sync_cuda_resident_state_for_host_0260(state);
+                        speciesSummary0490a->append(
+                            state, params.speciesDefinitions,
+                            params.speciesRequireRegisteredTypes,
+                            static_cast<std::uint64_t>(step), s.time);
+                    }
                 }
                 if (speciesCellSummary0490b) {
                     speciesCellSummary0490b->append(

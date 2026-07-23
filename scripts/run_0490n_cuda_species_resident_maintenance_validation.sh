@@ -410,6 +410,38 @@ for seed in seeds:
     if not any(int(r.get('speciesDirectedMerges0490j','0'))>0 for r in guard):
         raise SystemExit(f'[0490n] FAIL seed={seed} no CUDA species-directed merge')
     by={(int(r['step']),int(r['type'])):r for r in species}
+    expected_species_rows=2*(steps+1)
+    if len(species) != expected_species_rows:
+        raise SystemExit(
+            f'[0490n] FAIL seed={seed} resident species telemetry rows='
+            f'{len(species)} expected={expected_species_rows}')
+    maint_by_step={}
+    for r in maint:
+        step_i=int(r['step'])
+        # post_remap is the final authoritative resident deposit of a step.
+        # Fall back to the latest context for steps without a remap row.
+        if step_i not in maint_by_step or r['context']=='post_remap':
+            maint_by_step[step_i]=r
+    for step_i in range(1,steps+1):
+        rows=[by[(step_i,t)] for t in (1,2)]
+        nfluid=sum(int(r['nFluid']) for r in rows)
+        nlatent=sum(int(r['nLatent']) for r in rows)
+        species_mass=sum(float(r['totalMass']) for r in rows)
+        mr=maint_by_step.get(step_i)
+        if mr is None:
+            raise SystemExit(f'[0490n] FAIL seed={seed} missing maintenance telemetry step={step_i}')
+        if nfluid != int(mr['fluidSlots']):
+            raise SystemExit(
+                f'[0490n] FAIL seed={seed} stale species population telemetry step={step_i} '
+                f'nFluid={nfluid} residentFluidSlots={mr["fluidSlots"]}')
+        if nlatent != int(mr['latentSlots']):
+            raise SystemExit(
+                f'[0490n] FAIL seed={seed} stale latent telemetry step={step_i} '
+                f'nLatent={nlatent} residentLatentSlots={mr["latentSlots"]}')
+        if not math.isclose(species_mass,float(mr['totalMass']),rel_tol=0.0,abs_tol=2e-8):
+            raise SystemExit(
+                f'[0490n] FAIL seed={seed} stale species mass telemetry step={step_i} '
+                f'speciesMass={species_mass} residentMass={mr["totalMass"]}')
     for t in (1,2):
         m0=float(by[(0,t)]['totalMass']); mf=float(by[(steps,t)]['totalMass'])
         if not math.isclose(m0,48.0,abs_tol=1e-10) or not math.isclose(mf,m0,rel_tol=0.0,abs_tol=2e-8):
@@ -439,9 +471,11 @@ print('[0490n] cpu_weighted_deposit_calls=0')
 print('[0490n] cpu_pool_rebuild_calls=0')
 print('[0490n] cpu_post_edit_deposit_calls=0')
 print('[0490n] cpu_post_remap_deposit_calls=0')
+print('[0490n] resident_species_telemetry=compact_fluid_summary_snapshot')
+print('[0490n] resident_species_telemetry_extra_d2h=0')
 print('[0490n] remaining_cpu_scope=compact_cell_policy_mirror')
 PY_CHECK_LONG_0490N
 
 echo "[0490n] PASS"
-echo "[0490n] validated=0490m_nonregression,resident_cell_deposit,resident_pool_free_list,strict_zero_cpu_maintenance,long_multispecies_resampling"
+echo "[0490n] validated=0490m_nonregression,resident_cell_deposit,resident_pool_free_list,strict_zero_cpu_maintenance,resident_species_telemetry,long_multispecies_resampling"
 echo "[0490n] RUN_ROOT=$RUN_ROOT"
