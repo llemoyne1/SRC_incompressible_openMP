@@ -206,7 +206,8 @@ void append_csv_0490k(
     std::ofstream out(path, std::ios::app);
     if (!out) throw std::runtime_error("0490k failed to open diagnostics CSV: " + path.string());
     if (writeHeader) {
-        out << "step,handled,pass,accepted,strictResidentMode,cpuReferenceSkipped,particlesScanned,receiverCells,donorCells,"
+        out << "step,handled,pass,accepted,strictResidentMode,productionFastPath,cpuReferenceSkipped,"
+               "planArrayDownloadSkipped,directDeviceHandoffReady,particlesScanned,receiverCells,donorCells,"
                "cpuPlanEntries,gpuPlanEntries,planMismatch,typeMismatch,overflowCount,"
                "usedSharedResidentState,particleUploadSkipped,speciesWorkspaceReused,planWorkspaceReused,"
                "cpuPlannedMass,gpuPlannedMass,maxPlanMassError,maxPlanDistanceError,"
@@ -217,7 +218,9 @@ void append_csv_0490k(
     }
     out << d.step << ',' << (d.handled ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ','
         << (d.accepted ? 1 : 0) << ',' << (d.strictResidentMode ? 1 : 0) << ','
-        << (d.cpuReferenceSkipped ? 1 : 0) << ',' << d.particlesScanned << ',' << d.receiverCells << ','
+        << (d.productionFastPath ? 1 : 0) << ',' << (d.cpuReferenceSkipped ? 1 : 0) << ','
+        << (d.planArrayDownloadSkipped ? 1 : 0) << ',' << (d.directDeviceHandoffReady ? 1 : 0) << ','
+        << d.particlesScanned << ',' << d.receiverCells << ','
         << d.donorCells << ',' << d.cpuPlanEntries << ',' << d.gpuPlanEntries << ','
         << d.planMismatch << ',' << d.typeMismatch << ',' << d.overflowCount << ','
         << d.usedSharedResidentState << ',' << d.particleUploadSkipped << ','
@@ -386,6 +389,23 @@ std::uint64_t CudaSpeciesTransferPlanWorkspace0490k::allocated_bytes() const {
     return impl_ ? impl_->allocatedBytes : 0u;
 }
 
+CudaSpeciesTransferPlanDeviceView0490m
+CudaSpeciesTransferPlanWorkspace0490k::device_view_0490m() const {
+    CudaSpeciesTransferPlanDeviceView0490m view{};
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (impl_ != nullptr) {
+        view.capacity = impl_->planCapacity;
+        view.donorCell = impl_->outDonor;
+        view.receiverCell = impl_->outReceiver;
+        view.particleType = impl_->outType;
+        view.plannedMass = impl_->outMass;
+        view.count = impl_->outCount;
+        view.overflow = impl_->outOverflow;
+    }
+#endif
+    return view;
+}
+
 bool cuda_species_transfer_plan_available_0490k() {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     int count = 0;
@@ -417,8 +437,11 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         : (std::filesystem::path(params.outputDir) /
            params.speciesTransferCudaDiagnosticsFilename).string();
     d.particlesScanned = state.NactiveFluid;
-    d.strictResidentMode = params.speciesResamplingCudaResidentValidationEnable;
+    d.productionFastPath = params.speciesResamplingCudaResidentFastPathEnable;
+    d.strictResidentMode = params.speciesResamplingCudaResidentValidationEnable ||
+                           d.productionFastPath;
     d.cpuReferenceSkipped = d.strictResidentMode;
+    d.planArrayDownloadSkipped = d.productionFastPath;
     d.cpuPlanEntries = d.strictResidentMode
         ? 0u
         : static_cast<std::uint64_t>(resamplingWorkspace.transferPlan.size());
@@ -569,34 +592,46 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         throw std::runtime_error("0490k native GPU plan capacity overflow");
     }
 
-    std::vector<int> donor(count);
-    std::vector<int> receiver(count);
-    std::vector<std::uint32_t> type(count);
-    std::vector<double> mass(count);
-    std::vector<double> distance(count);
-    std::vector<double> donorAfter(count);
-    std::vector<double> receiverAfter(count);
-    if (count > 0u) {
-        const std::size_t bytesInt = static_cast<std::size_t>(count) * sizeof(int);
-        const std::size_t bytesType = static_cast<std::size_t>(count) * sizeof(std::uint32_t);
-        const std::size_t bytesDouble = static_cast<std::size_t>(count) * sizeof(double);
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(donor.data(), impl->outDonor, bytesInt, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(receiver.data(), impl->outReceiver, bytesInt, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(type.data(), impl->outType, bytesType, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(mass.data(), impl->outMass, bytesDouble, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(distance.data(), impl->outDistance, bytesDouble, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(donorAfter.data(), impl->outDonorRemainingAfter, bytesDouble, cudaMemcpyDeviceToHost));
-        MPCD_CUDA_0490K_CHECK(cudaMemcpy(receiverAfter.data(), impl->outReceiverRemainingAfter, bytesDouble, cudaMemcpyDeviceToHost));
+    std::vector<ResamplingTransferPlanEntry> gpuPlan;
+    if (!d.productionFastPath) {
+        std::vector<int> donor(count);
+        std::vector<int> receiver(count);
+        std::vector<std::uint32_t> type(count);
+        std::vector<double> mass(count);
+        std::vector<double> distance(count);
+        std::vector<double> donorAfter(count);
+        std::vector<double> receiverAfter(count);
+        if (count > 0u) {
+            const std::size_t bytesInt = static_cast<std::size_t>(count) * sizeof(int);
+            const std::size_t bytesType = static_cast<std::size_t>(count) * sizeof(std::uint32_t);
+            const std::size_t bytesDouble = static_cast<std::size_t>(count) * sizeof(double);
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(donor.data(), impl->outDonor, bytesInt, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(receiver.data(), impl->outReceiver, bytesInt, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(type.data(), impl->outType, bytesType, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(mass.data(), impl->outMass, bytesDouble, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(distance.data(), impl->outDistance, bytesDouble, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(donorAfter.data(), impl->outDonorRemainingAfter, bytesDouble, cudaMemcpyDeviceToHost));
+            MPCD_CUDA_0490K_CHECK(cudaMemcpy(receiverAfter.data(), impl->outReceiverRemainingAfter, bytesDouble, cudaMemcpyDeviceToHost));
+        }
+        gpuPlan.reserve(count);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i) {
+            gpuPlan.push_back(ResamplingTransferPlanEntry{
+                donor[i], receiver[i], type[i], true, mass[i], distance[i],
+                donorAfter[i], receiverAfter[i]});
+        }
+    } else if (count > 0u) {
+        // 0490m: keep all plan arrays resident. Download only the first/last
+        // entry metadata used by diagnostics; the direct device consumer reads
+        // the authoritative arrays through device_view_0490m().
+        const unsigned int last = count - 1u;
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.firstDonorCell, impl->outDonor, sizeof(int), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.firstReceiverCell, impl->outReceiver, sizeof(int), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.firstParticleType, impl->outType, sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.lastDonorCell, impl->outDonor + last, sizeof(int), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.lastReceiverCell, impl->outReceiver + last, sizeof(int), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(&d.lastParticleType, impl->outType + last, sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
     }
     d.compactDownloadSeconds = seconds_since_0490k(download0);
-
-    std::vector<ResamplingTransferPlanEntry> gpuPlan;
-    gpuPlan.reserve(count);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i) {
-        gpuPlan.push_back(ResamplingTransferPlanEntry{
-            donor[i], receiver[i], type[i], true, mass[i], distance[i],
-            donorAfter[i], receiverAfter[i]});
-    }
 
     if (d.strictResidentMode) {
         d.handled = true;
@@ -639,23 +674,30 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
                  close(d.cpuPlannedMass, d.gpuPlannedMass);
     }
     if (d.pass) {
-        resamplingWorkspace.transferPlan = gpuPlan;
+        if (!d.productionFastPath) {
+            resamplingWorkspace.transferPlan = gpuPlan;
+        } else {
+            resamplingWorkspace.transferPlan.clear();
+        }
         resamplingDiagnostics.transferPlanBuilt = true;
-        resamplingDiagnostics.extractionPlanBuilt = !gpuPlan.empty();
-        resamplingDiagnostics.nTransferPairs = static_cast<std::uint64_t>(gpuPlan.size());
+        resamplingDiagnostics.extractionPlanBuilt = count > 0u;
+        resamplingDiagnostics.nTransferPairs = static_cast<std::uint64_t>(count);
         resamplingDiagnostics.plannedTransferMass = d.gpuPlannedMass;
         resamplingDiagnostics.transferMassCoverageFraction =
             resamplingDiagnostics.receiverMassDeficitToTarget > 0.0
                 ? d.gpuPlannedMass / resamplingDiagnostics.receiverMassDeficitToTarget
                 : 0.0;
         d.accepted = true;
-        if (!gpuPlan.empty()) {
+        d.directDeviceHandoffReady = d.productionFastPath;
+        if (!d.productionFastPath && !gpuPlan.empty()) {
             d.firstDonorCell = gpuPlan.front().donorCell;
             d.firstReceiverCell = gpuPlan.front().receiverCell;
             d.firstParticleType = gpuPlan.front().particleType;
             d.lastDonorCell = gpuPlan.back().donorCell;
             d.lastReceiverCell = gpuPlan.back().receiverCell;
             d.lastParticleType = gpuPlan.back().particleType;
+        }
+        if (count > 0u) {
             resamplingDiagnostics.firstTransferDonorCell = d.firstDonorCell;
             resamplingDiagnostics.firstTransferReceiverCell = d.firstReceiverCell;
             resamplingDiagnostics.lastTransferDonorCell = d.lastDonorCell;

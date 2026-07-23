@@ -3939,7 +3939,8 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
             };
 
             if (params.speciesResamplingTransferEnable &&
-                !params.speciesResamplingCudaResidentValidationEnable) {
+                !params.speciesResamplingCudaResidentValidationEnable &&
+                !params.speciesResamplingCudaResidentFastPathEnable) {
                 // 0490g CPU-authoritative reference planner. A receiver deficit
                 // is apportioned over the species already present in that
                 // non-empty receiver. Donor excess is apportioned over donor
@@ -4035,10 +4036,11 @@ WeightedResamplingDiagnostics deposit_weighted_real_fluid(const ParticleState& s
                     }
                 }
             } else if (params.speciesResamplingTransferEnable) {
-                // 0490l strict resident gate: deliberately leave the CPU
-                // transfer plan empty. Candidate lists, wet-cell metadata and
-                // mass thresholds remain available to the native 0490k CUDA
-                // planner. The CUDA plan becomes authoritative downstream.
+                // 0490l/0490m resident gate: deliberately leave the CPU
+                // transfer plan and donor-particle/passive-operation builders
+                // empty. Candidate lists, wet-cell metadata and mass thresholds
+                // remain available to the native 0490k CUDA planner. In 0490m
+                // the device plan is consumed directly without a host mirror.
             } else {
                 // Legacy nearest-donor planner without species constraints.
                 for (std::size_t ir = 0; ir < ws.receiverPoorCells.size(); ++ir) {

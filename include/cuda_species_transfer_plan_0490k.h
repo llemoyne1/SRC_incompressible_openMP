@@ -17,7 +17,10 @@ struct CudaSpeciesTransferPlanDiagnostics0490k {
     bool pass = false;
     bool accepted = false;
     bool strictResidentMode = false;
+    bool productionFastPath = false;
     bool cpuReferenceSkipped = false;
+    bool planArrayDownloadSkipped = false;
+    bool directDeviceHandoffReady = false;
 
     std::uint64_t step = 0u;
     std::string outputCsv;
@@ -60,6 +63,17 @@ struct CudaSpeciesTransferPlanDiagnostics0490k {
     double totalSeconds = 0.0;
 };
 
+
+struct CudaSpeciesTransferPlanDeviceView0490m {
+    int capacity = 0;
+    const int* donorCell = nullptr;
+    const int* receiverCell = nullptr;
+    const std::uint32_t* particleType = nullptr;
+    const double* plannedMass = nullptr;
+    const unsigned int* count = nullptr;
+    const unsigned int* overflow = nullptr;
+};
+
 class CudaSpeciesTransferPlanWorkspace0490k {
 public:
     CudaSpeciesTransferPlanWorkspace0490k();
@@ -80,6 +94,7 @@ public:
     int species_capacity() const;
     int plan_capacity() const;
     std::uint64_t allocated_bytes() const;
+    CudaSpeciesTransferPlanDeviceView0490m device_view_0490m() const;
 
 private:
     struct Impl;
@@ -101,9 +116,10 @@ bool cuda_species_transfer_plan_available_0490k();
 
 // 0490k correctness-first native CUDA planner. The GPU constructs the complete
 // species-constrained donor/receiver plan from the resident 0490h composition
-// fields. During this gate patch the CPU 0490g plan remains available only as a
-// strict reference. On PASS, the host mirror is replaced by the GPU-built plan
-// and downstream extraction/insertion consumes that accepted plan.
+// fields. In 0490l validation mode the CPU reference is skipped but a compact
+// host mirror remains available to the legacy CUDA materializer. In 0490m fast
+// mode, plan arrays remain device-resident and device_view_0490m() is consumed
+// directly by the production materialize+apply backend.
 CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_0490k(
     const ParticleState& state,
     const SimulationParams& params,

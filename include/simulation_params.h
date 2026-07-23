@@ -106,9 +106,20 @@ struct SimulationParams {
     // transfer plan and the CPU passive-operation mirror are deliberately
     // skipped. The native 0490k CUDA plan, the 0453 CUDA materializer and the
     // 0448 CUDA particle-edit backend become authoritative. Any required CPU
-    // fallback is a fatal error. This is an opt-in validation mode, not a
-    // legacy-default change.
+    // fallback is a fatal error. This remains the detailed equivalence/audit
+    // mode and may retain compact host diagnostics.
     bool speciesResamplingCudaResidentValidationEnable = false;
+
+    // 0490m production resident fast path. The native 0490k plan remains on
+    // device and is consumed directly by the 0490m species-aware CUDA
+    // materialize+apply backend. No CPU transfer plan, CPU passive operation
+    // vector, plan-array D2H/H2D round trip, full particle-state rollback copy,
+    // or full-state download is permitted. Only a compact patchback for the
+    // particles actually moved is downloaded so legacy host diagnostics and
+    // the remaining CPU orchestration stay coherent during this transition.
+    bool speciesResamplingCudaResidentFastPathEnable = false;
+    std::string speciesCudaResidentFastPathDiagnosticsFilename =
+        "cuda_species_resident_fast_path_0490m.csv";
 
     std::string inputState;
     std::string outputDir = "run_base";

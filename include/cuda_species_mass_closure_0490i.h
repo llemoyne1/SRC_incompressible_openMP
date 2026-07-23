@@ -21,6 +21,11 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     int speciesWorkspaceReused = 0;
     int closureWorkspaceReused = 0;
     int sharedStatePreserved = 0;
+    int productionFastPath = 0;
+    int diagnosticCellDownloadSkipped = 0;
+    int cpuDepositComparisonSkipped = 0;
+    int speciesConservativeBalance = 0;
+    int balanceIterations = 0;
     std::uint64_t step = 0u;
     std::uint64_t particlesScanned = 0u;
     std::uint64_t particlesScaled = 0u;
@@ -38,6 +43,9 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     double massBefore = 0.0;
     double massAfter = 0.0;
     double massDelta = 0.0;
+    double maxSpeciesMassRelResidual = 0.0;
+    double maxCellMassRelResidual = 0.0;
+    double maxVelocityShift = 0.0;
     double particleUploadSeconds = 0.0;
     double speciesDepositSeconds = 0.0;
     double metadataUploadSeconds = 0.0;
@@ -57,6 +65,15 @@ struct CudaSpeciesMassClosureDeviceView0490i {
     double* localClosureStrength = nullptr;
     double* scale = nullptr;
     unsigned char* remapCell = nullptr;
+    double* speciesCellScale = nullptr;
+    double* targetSpeciesMass = nullptr;
+    double* currentSpeciesMass = nullptr;
+    double* currentCellMass = nullptr;
+    double* velocityShiftX = nullptr;
+    double* velocityShiftY = nullptr;
+    double* maxSpeciesMassRelResidual = nullptr;
+    double* maxCellMassRelResidual = nullptr;
+    double* maxVelocityShift = nullptr;
     unsigned long long* particlesScaled = nullptr;
 };
 
@@ -88,9 +105,13 @@ private:
 bool cuda_species_mass_closure_available_0490i();
 
 // 0490i production path. The physical closure is computed and applied on the
-// resident GPU particle state. Small cell arrays and the active mass prefix are
-// downloaded afterwards only to keep the existing CPU diagnostics/post-deposit
-// path coherent; the shared GPU state remains authoritative and fresh.
+// resident GPU particle state. In 0490m production-fast mode, a resident
+// species-conservative matrix balance preserves every global species mass while
+// approaching the requested cell-mass closure and restoring each cell mean
+// velocity. Dense per-cell diagnostic downloads and the CPU deposit equivalence
+// loop are skipped. The active mass/velocity prefix is still downloaded
+// temporarily because the legacy post-remap CPU deposit remains the next
+// migration target.
 CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     ParticleState& state,
     const SimulationParams& params,

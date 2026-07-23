@@ -1734,6 +1734,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
     }
 
+    bool cudaSpeciesTransferPlanReady0490m = false;
+    std::uint64_t cudaSpeciesTransferPlanEntries0490m = 0u;
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     if (params.speciesResamplingTransferCudaEnable) {
         const CudaSpeciesTransferPlanDiagnostics0490k cudaTransferPlan0490k =
@@ -1746,8 +1748,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             !cudaTransferPlan0490k.pass ||
             !cudaTransferPlan0490k.accepted) {
             throw std::runtime_error(
-                "0490k native CUDA species transfer plan failed the CPU equivalence gate");
+                params.speciesResamplingCudaResidentFastPathEnable
+                    ? "0490m native CUDA species transfer plan failed the resident handoff gate"
+                    : "0490k native CUDA species transfer plan failed the CPU equivalence gate");
         }
+        cudaSpeciesTransferPlanReady0490m =
+            !params.speciesResamplingCudaResidentFastPathEnable ||
+            cudaTransferPlan0490k.directDeviceHandoffReady;
+        cudaSpeciesTransferPlanEntries0490m = cudaTransferPlan0490k.gpuPlanEntries;
     }
 #endif
 
@@ -1765,17 +1773,51 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     ResamplingExtractionApplyDiagnostics extractionApply{};
     ResamplingInsertionApplyDiagnostics insertionApply{};
 
+    bool handledByCudaSpeciesFastPath0490m = false;
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (params.speciesResamplingCudaResidentFastPathEnable) {
+        if (!cudaSpeciesTransferPlanReady0490m) {
+            throw std::runtime_error(
+                "0490m resident fast path did not receive an accepted device transfer plan");
+        }
+        const CudaSpeciesResamplingFastPathDiagnostics0490m fast0490m =
+            try_apply_cuda_species_resampling_fast_path_0490m(
+                state, params, grid, step,
+                workspace.speciesTransferPlanCuda0490k,
+                workspace.speciesResamplingFastPathCuda0490m,
+                extractionApply, insertionApply);
+        if (!fast0490m.handled || !fast0490m.pass || fast0490m.skipped ||
+            fast0490m.planEntries != cudaSpeciesTransferPlanEntries0490m) {
+            throw std::runtime_error(
+                "0490m direct resident species materialize/apply path failed");
+        }
+        handledByCudaSpeciesFastPath0490m = true;
+        planOrTransferEdited = planOrTransferEdited || fast0490m.applied;
+    }
+#else
+    if (params.speciesResamplingCudaResidentFastPathEnable) {
+        throw std::runtime_error(
+            "speciesResamplingCudaResidentFastPathEnable=true requires CUDA particle/cell support");
+    }
+#endif
+
     const bool cudaResamplingPipelineShadow0445Requested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         cuda_resampling_pipeline_shadow_0445_requested(step);
     const bool cudaResamplingPipelineApply0448Requested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         cuda_resampling_pipeline_apply_0448_requested();
     const bool cudaResamplingUpstreamShadow0450Requested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         cuda_resampling_upstream_shadow_0450_requested(step);
     const bool cudaResamplingUpstreamApply0451Requested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         cuda_resampling_upstream_apply_0451_requested(step);
     const bool cudaResamplingOperationMaterialize0453Requested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         cuda_resampling_operation_materialize_0453_requested(step);
     const bool cudaResamplingOperationMaterializeOnPlan0475ARequested =
+        !params.speciesResamplingCudaResidentFastPathEnable &&
         env_truthy_src_base_0475a("MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A") &&
         !workspace.resampling.transferPlan.empty() &&
         !workspace.resampling.passiveExtractionOperations.empty();
@@ -1818,7 +1860,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         const CudaResamplingOperationMaterialize0453Diagnostics materialize0490l =
             try_apply_cuda_resampling_operation_materializer_0453(
                 state, params, grid, step, workspace.resampling);
-        if (params.speciesResamplingCudaResidentValidationEnable &&
+        if ((params.speciesResamplingCudaResidentValidationEnable ||
+             params.speciesResamplingCudaResidentFastPathEnable) &&
             !workspace.resampling.transferPlan.empty() &&
             (!materialize0490l.handled || !materialize0490l.pass ||
              !materialize0490l.applied || materialize0490l.skipped)) {
@@ -1854,8 +1897,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             planOrTransferEdited = planOrTransferEdited || cudaEdit0240.applied;
         }
 
-        if (params.speciesResamplingCudaResidentValidationEnable &&
-            !handledByCudaResampling0448 && !handledByCudaResampling0240) {
+        if ((params.speciesResamplingCudaResidentValidationEnable ||
+             params.speciesResamplingCudaResidentFastPathEnable) &&
+            !handledByCudaResampling0448 && !handledByCudaResampling0240 &&
+            !handledByCudaSpeciesFastPath0490m) {
             throw std::runtime_error(
                 "0490l strict resident path would require CPU extraction/insertion fallback");
         }

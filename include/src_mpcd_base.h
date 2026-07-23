@@ -19,6 +19,7 @@
 #include "cuda_species_cell_fields_0490h.h"
 #include "cuda_species_mass_closure_0490i.h"
 #include "cuda_species_transfer_plan_0490k.h"
+#include "cuda_species_resampling_fast_path_0490m.h"
 #endif
 
 namespace mpcd {
@@ -57,6 +58,7 @@ struct SrcMpcdBaseWorkspace {
     CudaSpeciesCellWorkspace0490h speciesCellCuda0490h;
     CudaSpeciesMassClosureWorkspace0490i speciesMassClosureCuda0490i;
     CudaSpeciesTransferPlanWorkspace0490k speciesTransferPlanCuda0490k;
+    CudaSpeciesResamplingFastPathWorkspace0490m speciesResamplingFastPathCuda0490m;
 #endif
 };
 

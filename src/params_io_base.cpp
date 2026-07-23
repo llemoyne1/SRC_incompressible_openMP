@@ -129,6 +129,8 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesTransferCudaDiagnosticsFilename" ||
         key == "speciesTransferCudaComparisonTolerance" ||
         key == "speciesResamplingCudaResidentValidationEnable" ||
+        key == "speciesResamplingCudaResidentFastPathEnable" ||
+        key == "speciesCudaResidentFastPathDiagnosticsFilename" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
     }
@@ -591,6 +593,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesTransferCudaDiagnosticsFilename") p.speciesTransferCudaDiagnosticsFilename = trim(value);
         else if (key == "speciesTransferCudaComparisonTolerance") p.speciesTransferCudaComparisonTolerance = parse_double(value, key);
         else if (key == "speciesResamplingCudaResidentValidationEnable") p.speciesResamplingCudaResidentValidationEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingCudaResidentFastPathEnable") p.speciesResamplingCudaResidentFastPathEnable = parse_bool(value, key);
+        else if (key == "speciesCudaResidentFastPathDiagnosticsFilename") p.speciesCudaResidentFastPathDiagnosticsFilename = trim(value);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
@@ -1528,18 +1532,59 @@ void validate_simulation_params(const SimulationParams& p) {
                 "speciesTransferCudaDiagnosticsFilename must not be empty");
         }
     }
-    if (p.speciesResamplingCudaResidentValidationEnable) {
+    if (p.speciesResamplingCudaResidentValidationEnable ||
+        p.speciesResamplingCudaResidentFastPathEnable) {
+        const char* mode = p.speciesResamplingCudaResidentFastPathEnable
+            ? "speciesResamplingCudaResidentFastPathEnable"
+            : "speciesResamplingCudaResidentValidationEnable";
         if (!p.speciesResamplingTransferCudaEnable) {
             throw std::runtime_error(
-                "speciesResamplingCudaResidentValidationEnable=true requires speciesResamplingTransferCudaEnable=true");
+                std::string(mode) + "=true requires speciesResamplingTransferCudaEnable=true");
         }
         if (!p.speciesRegistryEnable || !p.speciesRequireRegisteredTypes) {
             throw std::runtime_error(
-                "speciesResamplingCudaResidentValidationEnable=true requires a strict registered species registry");
+                std::string(mode) + "=true requires a strict registered species registry");
         }
         if (!p.resamplingEnable || !p.resamplingExtractionEnable || !p.resamplingInsertionEnable) {
             throw std::runtime_error(
-                "speciesResamplingCudaResidentValidationEnable=true requires resampling extraction/insertion");
+                std::string(mode) + "=true requires resampling extraction/insertion");
+        }
+    }
+    if (p.speciesResamplingCudaResidentFastPathEnable) {
+        if (p.speciesResamplingCudaResidentValidationEnable) {
+            throw std::runtime_error(
+                "speciesResamplingCudaResidentFastPathEnable and speciesResamplingCudaResidentValidationEnable are mutually exclusive");
+        }
+        if (!(p.bcLeft == "periodic" && p.bcRight == "periodic" &&
+              p.bcBottom == "periodic" && p.bcTop == "periodic")) {
+            throw std::runtime_error(
+                "0490m resident fast path is currently restricted to fully periodic boundaries");
+        }
+        if (p.immersedSolidEnable) {
+            throw std::runtime_error(
+                "0490m resident fast path is currently restricted to no immersed solid");
+        }
+        if (p.speciesCudaResidentFastPathDiagnosticsFilename.empty()) {
+            throw std::runtime_error(
+                "speciesCudaResidentFastPathDiagnosticsFilename must not be empty");
+        }
+        if (p.resamplingLatentActivationEnable) {
+            throw std::runtime_error(
+                "0490m resident fast path currently requires resamplingLatentActivationEnable=false");
+        }
+        if (p.speciesResamplingPopulationGuardEnable &&
+            !p.speciesResamplingPopulationGuardCudaEnable) {
+            throw std::runtime_error(
+                "0490m resident fast path requires the CUDA species population guard when the guard is enabled");
+        }
+        if (p.speciesResamplingMassClosureEnable &&
+            !p.speciesResamplingMassClosureCudaEnable) {
+            throw std::runtime_error(
+                "0490m resident fast path requires the CUDA species mass closure when mass closure is enabled");
+        }
+        if (p.resamplingThermalRenormalizationEnable) {
+            throw std::runtime_error(
+                "0490m resident fast path currently requires resamplingThermalRenormalizationEnable=false");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {
