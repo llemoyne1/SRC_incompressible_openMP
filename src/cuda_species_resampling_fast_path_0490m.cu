@@ -45,7 +45,8 @@ void append_csv_0490m(const SimulationParams& params,
                "directDevicePlanHandoff,planArrayDownloadSkipped,planArrayUploadSkipped,operationRoundTripSkipped,"
                "fullStateCopySkipped,fullStateDownloadSkipped,allocatedBytes,allocationCalls,compactPatchbackBytes,"
                "movedMass,movedMomentumX,movedMomentumY,stateUploadSeconds,kernelSeconds,scalarDownloadSeconds,"
-               "patchbackDownloadSeconds,hostPatchbackSeconds,totalSeconds\n";
+               "patchbackDownloadSeconds,hostPatchbackSeconds,totalSeconds,entryMassShortfalls,"
+               "donorTypeGroupUnderfills,plannedMass,selectedMass,selectedMassCoverageFraction\n";
     }
     out << std::setprecision(17)
         << d.step << ',' << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ','
@@ -60,7 +61,10 @@ void append_csv_0490m(const SimulationParams& params,
         << d.allocatedBytes << ',' << d.allocationCalls << ',' << d.compactPatchbackBytes << ','
         << d.movedMass << ',' << d.movedMomentumX << ',' << d.movedMomentumY << ','
         << d.stateUploadSeconds << ',' << d.kernelSeconds << ',' << d.scalarDownloadSeconds << ','
-        << d.patchbackDownloadSeconds << ',' << d.hostPatchbackSeconds << ',' << d.totalSeconds << '\n';
+        << d.patchbackDownloadSeconds << ',' << d.hostPatchbackSeconds << ',' << d.totalSeconds << ','
+        << d.entryMassShortfalls << ',' << d.donorTypeGroupUnderfills << ','
+        << d.plannedMass << ',' << d.selectedMass << ','
+        << d.selectedMassCoverageFraction << '\n';
 }
 
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
@@ -119,8 +123,13 @@ __global__ void apply_species_plan_direct_serial_0490m(
     unsigned int maxOps,
     unsigned int* outCount,
     unsigned int* outInvalid,
+    unsigned int* outEntryShortfalls,
+    unsigned int* outGroupUnderfills,
     unsigned long long* outTypeRejected,
+    double* outPlannedMass,
+    double* outSelectedMass,
     unsigned int* outParticle,
+    int* outDonor,
     int* outReceiver,
     std::uint32_t* outType,
     double* outMass,
@@ -137,7 +146,11 @@ __global__ void apply_species_plan_direct_serial_0490m(
     constexpr double eps = 1.0e-14;
     unsigned int ops = 0u;
     unsigned int invalid = 0u;
+    unsigned int entryShortfalls = 0u;
+    unsigned int groupUnderfills = 0u;
     unsigned long long typeRejected = 0u;
+    double plannedMassTotal = 0.0;
+    double selectedMassTotal = 0.0;
     unsigned int entries = planCount != nullptr ? *planCount : 0u;
     const unsigned int overflow = planOverflow != nullptr ? *planOverflow : 0u;
     if (entries > static_cast<unsigned int>(planCapacity)) {
@@ -152,6 +165,7 @@ __global__ void apply_species_plan_direct_serial_0490m(
         const std::uint32_t wantedType = planType[e];
         const double wantedMass = planMass[e];
         if (donor < 0 || receiver < 0 || !(wantedMass > eps)) continue;
+        plannedMassTotal += wantedMass;
         double gathered = 0.0;
         for (std::uint64_t p = 0u; p < nActive; ++p) {
             if (p >= nParticles || selected[p] != 0u || role[p] != fluidRole) continue;
@@ -171,6 +185,7 @@ __global__ void apply_species_plan_direct_serial_0490m(
             const double px = mp * vx[p];
             const double py = mp * vy[p];
             outParticle[ops] = static_cast<unsigned int>(p);
+            outDonor[ops] = donor;
             outReceiver[ops] = receiver;
             outType[ops] = type[p];
             outMass[ops] = mp;
@@ -193,13 +208,58 @@ __global__ void apply_species_plan_direct_serial_0490m(
 
             ++ops;
             gathered += mp;
+            selectedMassTotal += mp;
             if (gathered + eps >= wantedMass) break;
         }
-        if (gathered + eps < wantedMass) ++invalid;
+        if (gathered + eps < wantedMass) ++entryShortfalls;
     }
+
+    // The transfer plan is continuous while particle slots are indivisible.
+    // Per-entry underfill is therefore not a structural error: an earlier entry
+    // may consume a whole particle and overshoot its target, leaving a later
+    // entry in the same donor/type group underfilled.  Validate aggregate mass
+    // coverage for each donor/type group instead.  This matches the historical
+    // CPU selection semantics while preserving species constraints.
+    for (unsigned int e = 0u; e < entries; ++e) {
+        const int donor = planDonor[e];
+        const std::uint32_t wantedType = planType[e];
+        const double wantedMass = planMass[e];
+        if (donor < 0 || planReceiver[e] < 0 || !(wantedMass > eps)) continue;
+        bool firstInGroup = true;
+        for (unsigned int f = 0u; f < e; ++f) {
+            if (planDonor[f] == donor && planReceiver[f] >= 0 &&
+                planType[f] == wantedType && planMass[f] > eps) {
+                firstInGroup = false;
+                break;
+            }
+        }
+        if (!firstInGroup) continue;
+
+        double plannedGroup = 0.0;
+        for (unsigned int f = e; f < entries; ++f) {
+            if (planDonor[f] == donor && planReceiver[f] >= 0 &&
+                planType[f] == wantedType && planMass[f] > eps) {
+                plannedGroup += planMass[f];
+            }
+        }
+        double selectedGroup = 0.0;
+        for (unsigned int op = 0u; op < ops; ++op) {
+            if (outDonor[op] == donor && outType[op] == wantedType) {
+                selectedGroup += outMass[op];
+            }
+        }
+        if (selectedGroup + eps < plannedGroup) {
+            ++groupUnderfills;
+        }
+    }
+    invalid += groupUnderfills;
     *outCount = ops;
     *outInvalid = invalid;
+    *outEntryShortfalls = entryShortfalls;
+    *outGroupUnderfills = groupUnderfills;
     *outTypeRejected = typeRejected;
+    *outPlannedMass = plannedMassTotal;
+    *outSelectedMass = selectedMassTotal;
 }
 #endif
 
@@ -212,8 +272,13 @@ struct CudaSpeciesResamplingFastPathWorkspace0490m::Impl {
     unsigned char* selected = nullptr;
     unsigned int* outCount = nullptr;
     unsigned int* outInvalid = nullptr;
+    unsigned int* outEntryShortfalls = nullptr;
+    unsigned int* outGroupUnderfills = nullptr;
     unsigned long long* outTypeRejected = nullptr;
+    double* outPlannedMass = nullptr;
+    double* outSelectedMass = nullptr;
     unsigned int* outParticle = nullptr;
+    int* outDonor = nullptr;
     int* outReceiver = nullptr;
     std::uint32_t* outType = nullptr;
     double* outMass = nullptr;
@@ -255,8 +320,13 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::release() {
         cuda_free_0490m(impl_->selected);
         cuda_free_0490m(impl_->outCount);
         cuda_free_0490m(impl_->outInvalid);
+        cuda_free_0490m(impl_->outEntryShortfalls);
+        cuda_free_0490m(impl_->outGroupUnderfills);
         cuda_free_0490m(impl_->outTypeRejected);
+        cuda_free_0490m(impl_->outPlannedMass);
+        cuda_free_0490m(impl_->outSelectedMass);
         cuda_free_0490m(impl_->outParticle);
+        cuda_free_0490m(impl_->outDonor);
         cuda_free_0490m(impl_->outReceiver);
         cuda_free_0490m(impl_->outType);
         cuda_free_0490m(impl_->outMass);
@@ -293,8 +363,13 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::ensure_capacity(
     alloc(impl_->selected, activeParticles);
     alloc(impl_->outCount, 1u);
     alloc(impl_->outInvalid, 1u);
+    alloc(impl_->outEntryShortfalls, 1u);
+    alloc(impl_->outGroupUnderfills, 1u);
     alloc(impl_->outTypeRejected, 1u);
+    alloc(impl_->outPlannedMass, 1u);
+    alloc(impl_->outSelectedMass, 1u);
     alloc(impl_->outParticle, activeParticles);
+    alloc(impl_->outDonor, activeParticles);
     alloc(impl_->outReceiver, activeParticles);
     alloc(impl_->outType, activeParticles);
     alloc(impl_->outMass, activeParticles);
@@ -411,7 +486,11 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             static_cast<std::size_t>(std::max<std::uint64_t>(1u, state.NactiveFluid)) * sizeof(unsigned char)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outCount, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outInvalid, 0, sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outEntryShortfalls, 0, sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outGroupUnderfills, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outTypeRejected, 0, sizeof(unsigned long long)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outPlannedMass, 0, sizeof(double)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outSelectedMass, 0, sizeof(double)));
 
         cudaEvent_t start{}, stop{};
         MPCD_CUDA_0490M_CHECK(cudaEventCreate(&start));
@@ -423,8 +502,10 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             view.n, view.nActiveFluid, grid.Nx, grid.Ny, grid.dx, grid.dy,
             static_cast<std::uint8_t>(ParticleRole::Fluid),
             impl->selected, static_cast<unsigned int>(fastWorkspace.capacity()),
-            impl->outCount, impl->outInvalid, impl->outTypeRejected,
-            impl->outParticle, impl->outReceiver, impl->outType,
+            impl->outCount, impl->outInvalid,
+            impl->outEntryShortfalls, impl->outGroupUnderfills,
+            impl->outTypeRejected, impl->outPlannedMass, impl->outSelectedMass,
+            impl->outParticle, impl->outDonor, impl->outReceiver, impl->outType,
             impl->outMass, impl->outPx, impl->outPy,
             view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
         MPCD_CUDA_0490M_CHECK(cudaEventRecord(stop));
@@ -439,13 +520,25 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         const Clock0490m::time_point scalar0 = Clock0490m::now();
         unsigned int operations = 0u;
         unsigned int invalid = 0u;
+        unsigned int entryShortfalls = 0u;
+        unsigned int groupUnderfills = 0u;
         unsigned long long rejected = 0u;
+        double plannedMass = 0.0;
+        double selectedMass = 0.0;
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&operations, impl->outCount,
                                          sizeof(operations), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&invalid, impl->outInvalid,
                                          sizeof(invalid), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&entryShortfalls, impl->outEntryShortfalls,
+                                         sizeof(entryShortfalls), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&groupUnderfills, impl->outGroupUnderfills,
+                                         sizeof(groupUnderfills), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&rejected, impl->outTypeRejected,
                                          sizeof(rejected), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&plannedMass, impl->outPlannedMass,
+                                         sizeof(plannedMass), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&selectedMass, impl->outSelectedMass,
+                                         sizeof(selectedMass), cudaMemcpyDeviceToHost));
         unsigned int planEntries = 0u;
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&planEntries, plan.count,
                                          sizeof(planEntries), cudaMemcpyDeviceToHost));
@@ -453,7 +546,13 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         d.planEntries = planEntries;
         d.operations = operations;
         d.invalidOperations = invalid;
+        d.entryMassShortfalls = entryShortfalls;
+        d.donorTypeGroupUnderfills = groupUnderfills;
         d.typeRejectedCandidates = static_cast<std::uint64_t>(rejected);
+        d.plannedMass = plannedMass;
+        d.selectedMass = selectedMass;
+        d.selectedMassCoverageFraction = plannedMass > 0.0
+            ? selectedMass / plannedMass : 1.0;
         if (operations > fastWorkspace.capacity()) {
             throw std::runtime_error("0490m compact patchback capacity overflow");
         }

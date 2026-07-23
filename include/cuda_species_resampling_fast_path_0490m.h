@@ -24,6 +24,11 @@ struct CudaSpeciesResamplingFastPathDiagnostics0490m {
     std::uint64_t planEntries = 0u;
     std::uint64_t operations = 0u;
     std::uint64_t invalidOperations = 0u;
+    // A continuous transfer-plan entry may be underfilled individually because
+    // particles are indivisible.  Such shortfalls are non-fatal when the
+    // aggregate selected mass covers every donor/type group in the plan.
+    std::uint64_t entryMassShortfalls = 0u;
+    std::uint64_t donorTypeGroupUnderfills = 0u;
     std::uint64_t typeRejectedCandidates = 0u;
 
     int usedSharedResidentState = 0;
@@ -41,6 +46,9 @@ struct CudaSpeciesResamplingFastPathDiagnostics0490m {
     std::uint64_t compactPatchbackBytes = 0u;
 
     double movedMass = 0.0;
+    double plannedMass = 0.0;
+    double selectedMass = 0.0;
+    double selectedMassCoverageFraction = 0.0;
     double movedMomentumX = 0.0;
     double movedMomentumY = 0.0;
     double stateUploadSeconds = 0.0;
