@@ -1815,8 +1815,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         // extraction/insertion operation vector.  A strict CPU/GPU operation
         // gate is kept; on PASS, the downstream 0448 apply backend consumes the
         // CUDA-materialized compact operation list.
-        (void)try_apply_cuda_resampling_operation_materializer_0453(
-            state, params, grid, step, workspace.resampling);
+        const CudaResamplingOperationMaterialize0453Diagnostics materialize0490l =
+            try_apply_cuda_resampling_operation_materializer_0453(
+                state, params, grid, step, workspace.resampling);
+        if (params.speciesResamplingCudaResidentValidationEnable &&
+            !workspace.resampling.transferPlan.empty() &&
+            (!materialize0490l.handled || !materialize0490l.pass ||
+             !materialize0490l.applied || materialize0490l.skipped)) {
+            throw std::runtime_error(
+                "0490l strict resident path failed to materialize GPU transfer operations");
+        }
     }
 
     if (params.resamplingExtractionEnable && result.resampling.extractionPlanBuilt &&
@@ -1844,6 +1852,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                     insertionApply);
             handledByCudaResampling0240 = cudaEdit0240.handled;
             planOrTransferEdited = planOrTransferEdited || cudaEdit0240.applied;
+        }
+
+        if (params.speciesResamplingCudaResidentValidationEnable &&
+            !handledByCudaResampling0448 && !handledByCudaResampling0240) {
+            throw std::runtime_error(
+                "0490l strict resident path would require CPU extraction/insertion fallback");
         }
 
         if (!handledByCudaResampling0448 && !handledByCudaResampling0240) {

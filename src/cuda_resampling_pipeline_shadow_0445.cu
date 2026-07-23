@@ -1990,7 +1990,7 @@ void append_operation_materialize_csv_0453(const SimulationParams& params,
     std::ofstream out(path, std::ios::app);
     out << std::setprecision(17);
     if (!exists) {
-        out << "step,attempted,handled,applied,pass,skipped,skipReason,nActive,planEntries,"
+        out << "step,attempted,handled,applied,pass,skipped,strictResidentMode,cpuReferenceSkipped,skipReason,nActive,planEntries,"
             << "cpuOps,gpuOps,invalidOps,opMismatch,duplicateParticleMismatch,"
             << "maxMassAbs,maxPxAbs,maxPyAbs,cpuMass,gpuMass,cpuPx,gpuPx,cpuPy,gpuPy,cpuKe,gpuKe,"
             << "materializerSharedState0475,materializerUploadSkipped0475,materializerCompactDownload0475,"
@@ -1999,6 +1999,8 @@ void append_operation_materialize_csv_0453(const SimulationParams& params,
     }
     out << d.step << ',' << (d.attempted ? 1 : 0) << ',' << (d.handled ? 1 : 0) << ','
         << (d.applied ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ',' << (d.skipped ? 1 : 0) << ','
+        << (params.speciesResamplingCudaResidentValidationEnable ? 1 : 0) << ','
+        << (params.speciesResamplingCudaResidentValidationEnable ? 1 : 0) << ','
         << csv_escape_0445(d.skipReason) << ','
         << d.nActive << ',' << d.planEntries << ','
         << d.cpuOps << ',' << d.gpuOps << ',' << d.invalidOps << ',' << d.opMismatch << ',' << d.duplicateParticleMismatch << ','
@@ -2574,7 +2576,8 @@ CudaResamplingOperationMaterialize0453Diagnostics try_apply_cuda_resampling_oper
         const bool materializerOnPlan0475A =
             cuda_resampling_materializer_on_plan_0475a_requested() &&
             !operationWorkspace.transferPlan.empty() &&
-            !operationWorkspace.passiveExtractionOperations.empty();
+            (!operationWorkspace.passiveExtractionOperations.empty() ||
+             params.speciesResamplingCudaResidentValidationEnable);
         if (!cuda_resampling_operation_materialize_0453_requested(step) && !materializerOnPlan0475A) {
             d.skipped = true;
             d.skipReason = "operation materializer flag disabled";
@@ -2631,19 +2634,22 @@ CudaResamplingOperationMaterialize0453Diagnostics try_apply_cuda_resampling_oper
         d.downloadSeconds = gpu.downloadSeconds;
 
         const auto& cpuOps = operationWorkspace.passiveExtractionOperations;
-        const std::size_t cmp = std::min(cpuOps.size(), gpu.ops.size());
-        d.opMismatch = static_cast<std::uint64_t>(std::max(cpuOps.size(), gpu.ops.size()) - cmp);
-        for (std::size_t i = 0; i < cmp; ++i) {
-            const auto& a = cpuOps[i];
-            const auto& b = gpu.ops[i];
-            if (a.particleIndex != b.particleIndex || a.donorCell != b.donorCell ||
-                a.receiverCell != b.receiverCell || a.particleType != b.particleType ||
-                a.currentRole != b.currentRole || a.plannedRoleAfterExtraction != b.plannedRoleAfterExtraction) {
-                ++d.opMismatch;
+        const bool strictResident = params.speciesResamplingCudaResidentValidationEnable;
+        if (!strictResident) {
+            const std::size_t cmp = std::min(cpuOps.size(), gpu.ops.size());
+            d.opMismatch = static_cast<std::uint64_t>(std::max(cpuOps.size(), gpu.ops.size()) - cmp);
+            for (std::size_t i = 0; i < cmp; ++i) {
+                const auto& a = cpuOps[i];
+                const auto& b = gpu.ops[i];
+                if (a.particleIndex != b.particleIndex || a.donorCell != b.donorCell ||
+                    a.receiverCell != b.receiverCell || a.particleType != b.particleType ||
+                    a.currentRole != b.currentRole || a.plannedRoleAfterExtraction != b.plannedRoleAfterExtraction) {
+                    ++d.opMismatch;
+                }
+                d.maxMassAbs = std::max(d.maxMassAbs, std::abs(a.particleMass - b.particleMass));
+                d.maxPxAbs = std::max(d.maxPxAbs, std::abs(a.momentumX - b.momentumX));
+                d.maxPyAbs = std::max(d.maxPyAbs, std::abs(a.momentumY - b.momentumY));
             }
-            d.maxMassAbs = std::max(d.maxMassAbs, std::abs(a.particleMass - b.particleMass));
-            d.maxPxAbs = std::max(d.maxPxAbs, std::abs(a.momentumX - b.momentumX));
-            d.maxPyAbs = std::max(d.maxPyAbs, std::abs(a.momentumY - b.momentumY));
         }
         auto addTotals = [](const std::vector<ResamplingPassiveExtractionOperation>& ops,
                             double& m, double& px, double& py, double& ke) {
@@ -2676,16 +2682,23 @@ CudaResamplingOperationMaterialize0453Diagnostics try_apply_cuda_resampling_oper
             return std::abs(a - b) <= tol * scale;
         };
         d.handled = true;
-        d.pass = d.invalidOps == 0u && d.opMismatch == 0u && d.duplicateParticleMismatch == 0u &&
-                 d.cpuOps == d.gpuOps && d.maxMassAbs <= tol && d.maxPxAbs <= tol && d.maxPyAbs <= tol &&
-                 close(d.cpuMass, d.gpuMass) && close(d.cpuPx, d.gpuPx) &&
-                 close(d.cpuPy, d.gpuPy) && close(d.cpuKe, d.gpuKe);
+        if (strictResident) {
+            d.pass = d.invalidOps == 0u && d.duplicateParticleMismatch == 0u &&
+                     d.gpuOps > 0u && std::isfinite(d.gpuMass) && d.gpuMass > 0.0;
+        } else {
+            d.pass = d.invalidOps == 0u && d.opMismatch == 0u && d.duplicateParticleMismatch == 0u &&
+                     d.cpuOps == d.gpuOps && d.maxMassAbs <= tol && d.maxPxAbs <= tol && d.maxPyAbs <= tol &&
+                     close(d.cpuMass, d.gpuMass) && close(d.cpuPx, d.gpuPx) &&
+                     close(d.cpuPy, d.gpuPy) && close(d.cpuKe, d.gpuKe);
+        }
         if (d.pass) {
             operationWorkspace.passiveExtractionOperations = gpu.ops;
             d.applied = true;
         } else {
             d.skipped = true;
-            d.skipReason = "CUDA operation materializer did not match CPU operation gate; keeping CPU operations";
+            d.skipReason = strictResident
+                ? "strict resident CUDA operation materializer failed internal validity checks"
+                : "CUDA operation materializer did not match CPU operation gate; keeping CPU operations";
         }
         d.totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         append_operation_materialize_csv_0453(params, d);

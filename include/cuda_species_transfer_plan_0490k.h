@@ -16,6 +16,8 @@ struct CudaSpeciesTransferPlanDiagnostics0490k {
     bool handled = false;
     bool pass = false;
     bool accepted = false;
+    bool strictResidentMode = false;
+    bool cpuReferenceSkipped = false;
 
     std::uint64_t step = 0u;
     std::string outputCsv;

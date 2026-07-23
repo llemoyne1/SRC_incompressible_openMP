@@ -206,7 +206,7 @@ void append_csv_0490k(
     std::ofstream out(path, std::ios::app);
     if (!out) throw std::runtime_error("0490k failed to open diagnostics CSV: " + path.string());
     if (writeHeader) {
-        out << "step,handled,pass,accepted,particlesScanned,receiverCells,donorCells,"
+        out << "step,handled,pass,accepted,strictResidentMode,cpuReferenceSkipped,particlesScanned,receiverCells,donorCells,"
                "cpuPlanEntries,gpuPlanEntries,planMismatch,typeMismatch,overflowCount,"
                "usedSharedResidentState,particleUploadSkipped,speciesWorkspaceReused,planWorkspaceReused,"
                "cpuPlannedMass,gpuPlannedMass,maxPlanMassError,maxPlanDistanceError,"
@@ -216,7 +216,8 @@ void append_csv_0490k(
                "plannerKernelSeconds,compactDownloadSeconds,totalSeconds\n";
     }
     out << d.step << ',' << (d.handled ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ','
-        << (d.accepted ? 1 : 0) << ',' << d.particlesScanned << ',' << d.receiverCells << ','
+        << (d.accepted ? 1 : 0) << ',' << (d.strictResidentMode ? 1 : 0) << ','
+        << (d.cpuReferenceSkipped ? 1 : 0) << ',' << d.particlesScanned << ',' << d.receiverCells << ','
         << d.donorCells << ',' << d.cpuPlanEntries << ',' << d.gpuPlanEntries << ','
         << d.planMismatch << ',' << d.typeMismatch << ',' << d.overflowCount << ','
         << d.usedSharedResidentState << ',' << d.particleUploadSkipped << ','
@@ -416,8 +417,12 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         : (std::filesystem::path(params.outputDir) /
            params.speciesTransferCudaDiagnosticsFilename).string();
     d.particlesScanned = state.NactiveFluid;
-    d.cpuPlanEntries = static_cast<std::uint64_t>(resamplingWorkspace.transferPlan.size());
-    d.cpuPlannedMass = resamplingDiagnostics.plannedTransferMass;
+    d.strictResidentMode = params.speciesResamplingCudaResidentValidationEnable;
+    d.cpuReferenceSkipped = d.strictResidentMode;
+    d.cpuPlanEntries = d.strictResidentMode
+        ? 0u
+        : static_cast<std::uint64_t>(resamplingWorkspace.transferPlan.size());
+    d.cpuPlannedMass = d.strictResidentMode ? 0.0 : resamplingDiagnostics.plannedTransferMass;
     const Clock0490k::time_point total0 = Clock0490k::now();
 
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
@@ -436,9 +441,12 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         throw std::runtime_error(
             "0490k requires the validated 0490g species transfer configuration");
     }
-    if (!resamplingDiagnostics.computed || !resamplingDiagnostics.transferPlanBuilt ||
-        !resamplingDiagnostics.candidateListsBuilt) {
-        throw std::runtime_error("0490k requires a complete 0490g CPU reference plan");
+    if (!resamplingDiagnostics.computed || !resamplingDiagnostics.candidateListsBuilt ||
+        (!d.strictResidentMode && !resamplingDiagnostics.transferPlanBuilt)) {
+        throw std::runtime_error(
+            d.strictResidentMode
+                ? "0490l strict resident planner requires complete candidate lists"
+                : "0490k requires a complete 0490g CPU reference plan");
     }
     if (grid.numCells <= 0 ||
         static_cast<std::size_t>(grid.numCells) != resamplingWorkspace.wetCell.size()) {
@@ -590,42 +598,56 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
             donorAfter[i], receiverAfter[i]});
     }
 
-    const auto& cpuPlan = resamplingWorkspace.transferPlan;
-    const std::size_t compareCount = std::min(cpuPlan.size(), gpuPlan.size());
-    d.planMismatch = static_cast<std::uint64_t>(
-        std::max(cpuPlan.size(), gpuPlan.size()) - compareCount);
-    const double tol = params.speciesTransferCudaComparisonTolerance;
-    for (std::size_t i = 0; i < compareCount; ++i) {
-        const auto& a = cpuPlan[i];
-        const auto& b = gpuPlan[i];
-        if (a.donorCell != b.donorCell || a.receiverCell != b.receiverCell ||
-            a.speciesConstrained != b.speciesConstrained) {
-            ++d.planMismatch;
+    if (d.strictResidentMode) {
+        d.handled = true;
+        d.pass = d.overflowCount == 0u && std::isfinite(d.gpuPlannedMass) &&
+                 d.gpuPlannedMass >= 0.0;
+    } else {
+        const auto& cpuPlan = resamplingWorkspace.transferPlan;
+        const std::size_t compareCount = std::min(cpuPlan.size(), gpuPlan.size());
+        d.planMismatch = static_cast<std::uint64_t>(
+            std::max(cpuPlan.size(), gpuPlan.size()) - compareCount);
+        const double tol = params.speciesTransferCudaComparisonTolerance;
+        for (std::size_t i = 0; i < compareCount; ++i) {
+            const auto& a = cpuPlan[i];
+            const auto& b = gpuPlan[i];
+            if (a.donorCell != b.donorCell || a.receiverCell != b.receiverCell ||
+                a.speciesConstrained != b.speciesConstrained) {
+                ++d.planMismatch;
+            }
+            if (a.particleType != b.particleType) {
+                ++d.typeMismatch;
+            }
+            d.maxPlanMassError = std::max(d.maxPlanMassError, std::abs(a.plannedMass - b.plannedMass));
+            d.maxPlanDistanceError = std::max(d.maxPlanDistanceError, std::abs(a.cellDistance - b.cellDistance));
+            d.maxDonorRemainingError = std::max(
+                d.maxDonorRemainingError,
+                std::abs(a.donorRemainingAfter - b.donorRemainingAfter));
+            d.maxReceiverRemainingError = std::max(
+                d.maxReceiverRemainingError,
+                std::abs(a.receiverRemainingAfter - b.receiverRemainingAfter));
         }
-        if (a.particleType != b.particleType) {
-            ++d.typeMismatch;
-        }
-        d.maxPlanMassError = std::max(d.maxPlanMassError, std::abs(a.plannedMass - b.plannedMass));
-        d.maxPlanDistanceError = std::max(d.maxPlanDistanceError, std::abs(a.cellDistance - b.cellDistance));
-        d.maxDonorRemainingError = std::max(
-            d.maxDonorRemainingError,
-            std::abs(a.donorRemainingAfter - b.donorRemainingAfter));
-        d.maxReceiverRemainingError = std::max(
-            d.maxReceiverRemainingError,
-            std::abs(a.receiverRemainingAfter - b.receiverRemainingAfter));
+        const auto close = [tol](double a, double b) {
+            const double scale = std::max({1.0, std::abs(a), std::abs(b)});
+            return std::abs(a - b) <= tol * scale;
+        };
+        d.handled = true;
+        d.pass = d.planMismatch == 0u && d.typeMismatch == 0u && d.overflowCount == 0u &&
+                 d.cpuPlanEntries == d.gpuPlanEntries &&
+                 d.maxPlanMassError <= tol && d.maxPlanDistanceError <= tol &&
+                 d.maxDonorRemainingError <= tol && d.maxReceiverRemainingError <= tol &&
+                 close(d.cpuPlannedMass, d.gpuPlannedMass);
     }
-    const auto close = [tol](double a, double b) {
-        const double scale = std::max({1.0, std::abs(a), std::abs(b)});
-        return std::abs(a - b) <= tol * scale;
-    };
-    d.handled = true;
-    d.pass = d.planMismatch == 0u && d.typeMismatch == 0u && d.overflowCount == 0u &&
-             d.cpuPlanEntries == d.gpuPlanEntries &&
-             d.maxPlanMassError <= tol && d.maxPlanDistanceError <= tol &&
-             d.maxDonorRemainingError <= tol && d.maxReceiverRemainingError <= tol &&
-             close(d.cpuPlannedMass, d.gpuPlannedMass);
     if (d.pass) {
         resamplingWorkspace.transferPlan = gpuPlan;
+        resamplingDiagnostics.transferPlanBuilt = true;
+        resamplingDiagnostics.extractionPlanBuilt = !gpuPlan.empty();
+        resamplingDiagnostics.nTransferPairs = static_cast<std::uint64_t>(gpuPlan.size());
+        resamplingDiagnostics.plannedTransferMass = d.gpuPlannedMass;
+        resamplingDiagnostics.transferMassCoverageFraction =
+            resamplingDiagnostics.receiverMassDeficitToTarget > 0.0
+                ? d.gpuPlannedMass / resamplingDiagnostics.receiverMassDeficitToTarget
+                : 0.0;
         d.accepted = true;
         if (!gpuPlan.empty()) {
             d.firstDonorCell = gpuPlan.front().donorCell;
@@ -634,6 +656,10 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
             d.lastDonorCell = gpuPlan.back().donorCell;
             d.lastReceiverCell = gpuPlan.back().receiverCell;
             d.lastParticleType = gpuPlan.back().particleType;
+            resamplingDiagnostics.firstTransferDonorCell = d.firstDonorCell;
+            resamplingDiagnostics.firstTransferReceiverCell = d.firstReceiverCell;
+            resamplingDiagnostics.lastTransferDonorCell = d.lastDonorCell;
+            resamplingDiagnostics.lastTransferReceiverCell = d.lastReceiverCell;
         }
     }
     d.totalSeconds = seconds_since_0490k(total0);

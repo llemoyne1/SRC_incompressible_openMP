@@ -102,6 +102,14 @@ struct SimulationParams {
         "cuda_species_transfer_plan_0490k.csv";
     double speciesTransferCudaComparisonTolerance = 1.0e-11;
 
+    // 0490l strict resident validation gate. When enabled, the 0490g CPU
+    // transfer plan and the CPU passive-operation mirror are deliberately
+    // skipped. The native 0490k CUDA plan, the 0453 CUDA materializer and the
+    // 0448 CUDA particle-edit backend become authoritative. Any required CPU
+    // fallback is a fatal error. This is an opt-in validation mode, not a
+    // legacy-default change.
+    bool speciesResamplingCudaResidentValidationEnable = false;
+
     std::string inputState;
     std::string outputDir = "run_base";
 

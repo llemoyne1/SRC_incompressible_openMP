@@ -128,6 +128,7 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesResamplingTransferCudaEnable" ||
         key == "speciesTransferCudaDiagnosticsFilename" ||
         key == "speciesTransferCudaComparisonTolerance" ||
+        key == "speciesResamplingCudaResidentValidationEnable" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
     }
@@ -589,6 +590,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesResamplingTransferCudaEnable") p.speciesResamplingTransferCudaEnable = parse_bool(value, key);
         else if (key == "speciesTransferCudaDiagnosticsFilename") p.speciesTransferCudaDiagnosticsFilename = trim(value);
         else if (key == "speciesTransferCudaComparisonTolerance") p.speciesTransferCudaComparisonTolerance = parse_double(value, key);
+        else if (key == "speciesResamplingCudaResidentValidationEnable") p.speciesResamplingCudaResidentValidationEnable = parse_bool(value, key);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
@@ -1524,6 +1526,20 @@ void validate_simulation_params(const SimulationParams& p) {
         if (p.speciesTransferCudaDiagnosticsFilename.empty()) {
             throw std::runtime_error(
                 "speciesTransferCudaDiagnosticsFilename must not be empty");
+        }
+    }
+    if (p.speciesResamplingCudaResidentValidationEnable) {
+        if (!p.speciesResamplingTransferCudaEnable) {
+            throw std::runtime_error(
+                "speciesResamplingCudaResidentValidationEnable=true requires speciesResamplingTransferCudaEnable=true");
+        }
+        if (!p.speciesRegistryEnable || !p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesResamplingCudaResidentValidationEnable=true requires a strict registered species registry");
+        }
+        if (!p.resamplingEnable || !p.resamplingExtractionEnable || !p.resamplingInsertionEnable) {
+            throw std::runtime_error(
+                "speciesResamplingCudaResidentValidationEnable=true requires resampling extraction/insertion");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {

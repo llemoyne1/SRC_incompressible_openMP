@@ -700,6 +700,7 @@ int main(int argc, char** argv) {
                   << " speciesMixedRefill=" << (params.cudaResamplingEmptyRefillSpeciesCompositionEnable ? "on" : "off")
                   << " speciesTransfer=" << (params.speciesResamplingTransferEnable ? "on" : "off")
                   << " speciesTransferCuda=" << (params.speciesResamplingTransferCudaEnable ? "on" : "off")
+                  << " speciesCudaResidentValidation=" << (params.speciesResamplingCudaResidentValidationEnable ? "on" : "off")
                   << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {
