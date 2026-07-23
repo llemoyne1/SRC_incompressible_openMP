@@ -1632,13 +1632,54 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // resampStdN/resampMRel* in runtime_summary.csv.  Synchronize only on summary/final
     // steps, i.e. exactly when collectResamplingDiagnosticsWhenDisabled is true, so the
     // resident performance path is preserved between summaries.
-    if (residentClassicCuda || q6ResidentHandled0400 || thermostatHandledByQ6Resident0400) {
+    const bool residentDeposit0490n = params.speciesResamplingCudaResidentDepositsEnable;
+    const bool residentPool0490n = params.speciesResamplingCudaResidentPoolEnable;
+    const bool strictResidentMaintenance0490n =
+        params.speciesResamplingCudaResidentMaintenanceStrict;
+    const bool fullResidentMaintenance0490n = residentDeposit0490n && residentPool0490n;
+
+    // 0490n: when both particle-state maintenance consumers are resident, the
+    // pre-resampling full-state download would only feed CPU scans that are now
+    // disabled. Keep the shared CUDA state authoritative and download only the
+    // compact cell/pool mirrors produced below.
+    if ((residentClassicCuda || q6ResidentHandled0400 || thermostatHandledByQ6Resident0400) &&
+        !fullResidentMaintenance0490n) {
         (void)cuda_shared_particle_state_0251_download_if_fresh(state);
         q6ResidentHandled0400 = false;
         thermostatHandledByQ6Resident0400 = false;
     }
 
-    {
+    const auto refreshResidentMaintenance0490n =
+        [&](const char* context, bool refreshDeposit, bool refreshPool) {
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+            const CudaSpeciesResidentMaintenanceDiagnostics0490n maintenance0490n =
+                refresh_cuda_species_resident_maintenance_0490n(
+                    state, params, grid, result.domain, time, step, context,
+                    refreshDeposit, refreshPool,
+                    workspace.speciesCellCuda0490h,
+                    workspace.speciesResidentMaintenanceCuda0490n,
+                    workspace.resampling, result.resampling,
+                    workspace.resamplingPool, result.resamplingPool);
+            if (!maintenance0490n.handled || !maintenance0490n.pass || maintenance0490n.skipped) {
+                throw std::runtime_error(
+                    std::string("0490n resident maintenance failed at ") + context +
+                    ": " + maintenance0490n.skipReason);
+            }
+#else
+            (void)context; (void)refreshDeposit; (void)refreshPool;
+            throw std::runtime_error(
+                "0490n resident maintenance requires CUDA particle/cell support");
+#endif
+        };
+
+    if (residentPool0490n || residentDeposit0490n) {
+        refreshResidentMaintenance0490n(
+            "initial", residentDeposit0490n, residentPool0490n);
+    }
+    if (!residentPool0490n) {
+        if (strictResidentMaintenance0490n) {
+            throw std::runtime_error("0490n strict mode would require CPU initial pool rebuild");
+        }
         MPCD_PROFILE_PHASE(result.profile, ResamplingPoolInitial);
         result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
     }
@@ -1648,7 +1689,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // post-guard state. Deposit moments/classification first, then build exactly
     // one mutation plan from the state that will actually feed extraction.
     const bool buildInitialResamplingPlan = false;
-    {
+    if (!residentDeposit0490n) {
+        if (strictResidentMaintenance0490n) {
+            throw std::runtime_error("0490n strict mode would require CPU initial weighted deposit");
+        }
         MPCD_PROFILE_PHASE(result.profile, ResamplingDepositInitial);
         result.resampling = deposit_weighted_real_fluid(
             state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
@@ -1699,16 +1743,26 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
     }
     populationGuardEdited = populationGuard.applied;
-    if (populationGuardEdited) {
+    if (populationGuardEdited && !params.speciesResamplingPopulationGuardCudaEnable) {
         cuda_shared_particle_state_0251_invalidate("cpu_resampling_population_guard_edited_0472");
     }
 
     if (populationGuardEdited) {
-        {
+        if (residentPool0490n || residentDeposit0490n) {
+            refreshResidentMaintenance0490n(
+                "post_guard", residentDeposit0490n, residentPool0490n);
+        }
+        if (!residentPool0490n) {
+            if (strictResidentMaintenance0490n) {
+                throw std::runtime_error("0490n strict mode would require CPU post-guard pool rebuild");
+            }
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardPool);
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         }
-        {
+        if (!residentDeposit0490n) {
+            if (strictResidentMaintenance0490n) {
+                throw std::runtime_error("0490n strict mode would require CPU post-guard weighted deposit");
+            }
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
@@ -1724,12 +1778,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
         }
     } else if (params.resamplingExtractionEnable) {
-        // No support edit occurred, so no post-guard rebuild is needed. Build
-        // the deferred mutation plan from the unchanged initial state.
-        MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
-        result.resampling = deposit_weighted_real_fluid(
-            state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
-            true, ResamplingDepositProfileContext::PostGuard, true);
+        // No support edit occurred. The 0490n initial resident deposit already
+        // contains complete poor/rich candidate lists for the native GPU plan.
+        if (!residentDeposit0490n) {
+            MPCD_PROFILE_PHASE(result.profile, ResamplingPostGuardDeposit);
+            result.resampling = deposit_weighted_real_fluid(
+                state, params, grid, result.domain, time, GridShift{}, workspace.resampling,
+                true, ResamplingDepositProfileContext::PostGuard, true);
+        }
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
         attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
     }
@@ -1929,11 +1985,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     if (planOrTransferEdited) {
-        {
+        // 0490m moves an existing Fluid slot from donor to receiver without
+        // changing role membership. The resident free-list therefore remains
+        // valid; only the species-cell deposit needs refreshing.
+        if (residentDeposit0490n) {
+            refreshResidentMaintenance0490n("post_edit", true, false);
+        }
+        if (!residentPool0490n) {
+            if (strictResidentMaintenance0490n) {
+                throw std::runtime_error("0490n strict mode would require CPU post-edit pool rebuild");
+            }
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostEditPool);
             result.resamplingPool = rebuild_resampling_particle_pool(state, workspace.resamplingPool);
         }
-        {
+        if (!residentDeposit0490n) {
+            if (strictResidentMaintenance0490n) {
+                throw std::runtime_error("0490n strict mode would require CPU post-edit weighted deposit");
+            }
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostEditDeposit);
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false,
@@ -2035,7 +2103,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             !sharedStatePreservedByCudaRemap) {
             cuda_shared_particle_state_0251_invalidate("resampling_remap_thermal_or_massguard_edited_0472");
         }
-        {
+        if (residentDeposit0490n) {
+            refreshResidentMaintenance0490n(
+                "post_remap", true, false);
+        }
+        if (!residentDeposit0490n) {
+            if (strictResidentMaintenance0490n) {
+                throw std::runtime_error("0490n strict mode would require CPU post-remap weighted deposit");
+            }
             MPCD_PROFILE_PHASE(result.profile, ResamplingPostRemapDeposit);
             result.resampling = deposit_weighted_real_fluid(
                 state, params, grid, result.domain, time, GridShift{}, workspace.resampling, false,

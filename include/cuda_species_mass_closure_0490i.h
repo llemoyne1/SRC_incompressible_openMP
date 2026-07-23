@@ -109,9 +109,9 @@ bool cuda_species_mass_closure_available_0490i();
 // species-conservative matrix balance preserves every global species mass while
 // approaching the requested cell-mass closure and restoring each cell mean
 // velocity. Dense per-cell diagnostic downloads and the CPU deposit equivalence
-// loop are skipped. The active mass/velocity prefix is still downloaded
-// temporarily because the legacy post-remap CPU deposit remains the next
-// migration target.
+// loop are skipped. With 0490n resident deposits enabled, the active
+// mass/velocity prefix also remains resident and the post-remap deposit consumes
+// the shared CUDA state directly.
 CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     ParticleState& state,
     const SimulationParams& params,

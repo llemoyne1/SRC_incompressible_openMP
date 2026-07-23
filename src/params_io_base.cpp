@@ -131,6 +131,10 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesResamplingCudaResidentValidationEnable" ||
         key == "speciesResamplingCudaResidentFastPathEnable" ||
         key == "speciesCudaResidentFastPathDiagnosticsFilename" ||
+        key == "speciesResamplingCudaResidentDepositsEnable" ||
+        key == "speciesResamplingCudaResidentPoolEnable" ||
+        key == "speciesResamplingCudaResidentMaintenanceStrict" ||
+        key == "speciesCudaResidentMaintenanceDiagnosticsFilename" ||
         key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") {
         return false;
     }
@@ -595,6 +599,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesResamplingCudaResidentValidationEnable") p.speciesResamplingCudaResidentValidationEnable = parse_bool(value, key);
         else if (key == "speciesResamplingCudaResidentFastPathEnable") p.speciesResamplingCudaResidentFastPathEnable = parse_bool(value, key);
         else if (key == "speciesCudaResidentFastPathDiagnosticsFilename") p.speciesCudaResidentFastPathDiagnosticsFilename = trim(value);
+        else if (key == "speciesResamplingCudaResidentDepositsEnable") p.speciesResamplingCudaResidentDepositsEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingCudaResidentPoolEnable") p.speciesResamplingCudaResidentPoolEnable = parse_bool(value, key);
+        else if (key == "speciesResamplingCudaResidentMaintenanceStrict") p.speciesResamplingCudaResidentMaintenanceStrict = parse_bool(value, key);
+        else if (key == "speciesCudaResidentMaintenanceDiagnosticsFilename") p.speciesCudaResidentMaintenanceDiagnosticsFilename = trim(value);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
@@ -1585,6 +1593,42 @@ void validate_simulation_params(const SimulationParams& p) {
         if (p.resamplingThermalRenormalizationEnable) {
             throw std::runtime_error(
                 "0490m resident fast path currently requires resamplingThermalRenormalizationEnable=false");
+        }
+    }
+    if (p.speciesResamplingCudaResidentDepositsEnable ||
+        p.speciesResamplingCudaResidentPoolEnable ||
+        p.speciesResamplingCudaResidentMaintenanceStrict) {
+        if (!p.speciesResamplingCudaResidentFastPathEnable) {
+            throw std::runtime_error(
+                "0490n resident maintenance requires speciesResamplingCudaResidentFastPathEnable=true");
+        }
+        if (p.speciesCudaResidentMaintenanceDiagnosticsFilename.empty()) {
+            throw std::runtime_error(
+                "speciesCudaResidentMaintenanceDiagnosticsFilename must not be empty");
+        }
+        if (p.speciesResamplingCudaResidentMaintenanceStrict &&
+            (!p.speciesResamplingCudaResidentDepositsEnable ||
+             !p.speciesResamplingCudaResidentPoolEnable)) {
+            throw std::runtime_error(
+                "0490n strict maintenance requires both resident deposits and resident pool");
+        }
+        const bool fullStaticDomain0490n =
+            p.fluidXMin0 == 0.0 && p.fluidYMin0 == 0.0 &&
+            (p.fluidXMax0 < 0.0 || p.fluidXMax0 == p.Lx) &&
+            (p.fluidYMax0 < 0.0 || p.fluidYMax0 == p.Ly) &&
+            p.fluidXMinVelocity == 0.0 && p.fluidXMaxVelocity == 0.0 &&
+            p.fluidYMinVelocity == 0.0 && p.fluidYMaxVelocity == 0.0;
+        if (!fullStaticDomain0490n) {
+            throw std::runtime_error(
+                "0490n resident compact policy mirror currently requires the full static fluid domain");
+        }
+        if (p.resamplingLatentActivationEnable) {
+            throw std::runtime_error(
+                "0490n resident pool currently requires resamplingLatentActivationEnable=false");
+        }
+        if (p.resamplingThermalRenormalizationEnable) {
+            throw std::runtime_error(
+                "0490n compact resident deposit mirror currently requires resamplingThermalRenormalizationEnable=false");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {

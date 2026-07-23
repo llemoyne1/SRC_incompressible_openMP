@@ -643,14 +643,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         throw std::runtime_error("0490i received an invalid CPU reference deposit");
     }
     validate_species_definitions(params.speciesDefinitions, "0490i species registry");
-    validate_state_species_registry(
-        state, params.speciesDefinitions, true, "0490i host state registry");
+    if (!params.speciesResamplingCudaResidentDepositsEnable) {
+        validate_state_species_registry(
+            state, params.speciesDefinitions, true, "0490i host state registry");
+    }
     if (threadsPerBlock <= 0 || threadsPerBlock > 1024) threadsPerBlock = 256;
 
     CudaParticleState& shared = cuda_shared_particle_state_0251();
     const bool sharedFresh = cuda_shared_particle_state_0251_is_fresh() &&
                              shared.size() == state.Np &&
-                             shared.active_fluid_size() == state.NactiveFluid;
+                             (params.speciesResamplingCudaResidentDepositsEnable ||
+                              shared.active_fluid_size() == state.NactiveFluid);
     CudaParticleStateDiagnostics particleUpload{};
     if (!sharedFresh) shared.upload_all(state, &particleUpload);
     d.usedSharedResidentState = 1;
@@ -658,16 +661,31 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     d.particleUploadSeconds = particleUpload.uploadSeconds;
 
     CudaSpeciesCellDepositDiagnostics0490h speciesDiag{};
-    cuda_deposit_species_cell_fields_resident_0490h(
-        shared.device_view(), grid, params, params.speciesDefinitions,
-        speciesWorkspace, &speciesDiag, threadsPerBlock);
-    d.speciesWorkspaceReused = speciesDiag.reusedAllocation;
-    d.speciesDepositSeconds = speciesDiag.resetSeconds + speciesDiag.depositSeconds +
-                              speciesDiag.finalizeSeconds;
-    d.invalidTypeCount = speciesDiag.invalidTypeCount;
-    d.particlesScanned = speciesDiag.particlesScanned;
-    if (d.invalidTypeCount != 0u) {
-        throw std::runtime_error("0490i CUDA species deposit found unregistered types");
+    if (!params.speciesResamplingCudaResidentDepositsEnable) {
+        cuda_deposit_species_cell_fields_resident_0490h(
+            shared.device_view(), grid, params, params.speciesDefinitions,
+            speciesWorkspace, &speciesDiag, threadsPerBlock);
+        d.speciesWorkspaceReused = speciesDiag.reusedAllocation;
+        d.speciesDepositSeconds = speciesDiag.resetSeconds + speciesDiag.depositSeconds +
+                                  speciesDiag.finalizeSeconds;
+        d.invalidTypeCount = speciesDiag.invalidTypeCount;
+        d.particlesScanned = speciesDiag.particlesScanned;
+        if (d.invalidTypeCount != 0u) {
+            throw std::runtime_error("0490i CUDA species deposit found unregistered types");
+        }
+    } else {
+        // 0490n refreshed the authoritative species-cell fields after the last
+        // support/transfer mutation. Reuse them directly for the closure.
+        const CudaSpeciesCellDeviceView0490h existing = speciesWorkspace.device_view();
+        if (existing.numCells != grid.numCells ||
+            existing.speciesCount != static_cast<int>(params.speciesDefinitions.size()) ||
+            existing.mass == nullptr || existing.totalCellMass == nullptr) {
+            throw std::runtime_error("0490n species workspace is not ready for 0490i closure");
+        }
+        d.speciesWorkspaceReused = 1;
+        d.speciesDepositSeconds = 0.0;
+        d.invalidTypeCount = 0u;
+        d.particlesScanned = shared.active_fluid_size();
     }
 
     int closureReused = 0;
@@ -978,9 +996,16 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     d.diagnosticDownloadSeconds = seconds_since_0490i(download0);
     cuda_shared_particle_state_0251_mark_fresh("species_mass_closure_0490i");
     d.sharedStatePreserved = 1;
-    CudaParticleStateDiagnostics particleDownload{};
-    shared.download_masses_and_velocities(state, &particleDownload);
-    d.particleDownloadSeconds = particleDownload.downloadSeconds;
+    if (!params.speciesResamplingCudaResidentDepositsEnable) {
+        CudaParticleStateDiagnostics particleDownload{};
+        shared.download_masses_and_velocities(state, &particleDownload);
+        d.particleDownloadSeconds = particleDownload.downloadSeconds;
+    } else {
+        // 0490n post-remap resident deposit consumes the authoritative shared
+        // state directly; the active mass/velocity prefix no longer needs a
+        // per-step host synchronization.
+        d.particleDownloadSeconds = 0.0;
+    }
 
     d.handled = 1;
     d.applied = remapApply.applied ? 1 : 0;

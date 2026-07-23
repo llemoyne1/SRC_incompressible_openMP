@@ -702,6 +702,9 @@ int main(int argc, char** argv) {
                   << " speciesTransferCuda=" << (params.speciesResamplingTransferCudaEnable ? "on" : "off")
                   << " speciesCudaResidentValidation=" << (params.speciesResamplingCudaResidentValidationEnable ? "on" : "off")
                   << " speciesCudaResidentFastPath=" << (params.speciesResamplingCudaResidentFastPathEnable ? "on" : "off")
+                  << " speciesCudaResidentDeposits=" << (params.speciesResamplingCudaResidentDepositsEnable ? "on" : "off")
+                  << " speciesCudaResidentPool=" << (params.speciesResamplingCudaResidentPoolEnable ? "on" : "off")
+                  << " speciesCudaResidentMaintenanceStrict=" << (params.speciesResamplingCudaResidentMaintenanceStrict ? "on" : "off")
                   << '\n';
 
         for (int step = 1; step <= params.nSteps; ++step) {

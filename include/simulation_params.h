@@ -121,6 +121,17 @@ struct SimulationParams {
     std::string speciesCudaResidentFastPathDiagnosticsFilename =
         "cuda_species_resident_fast_path_0490m.csv";
 
+    // 0490n integrated resident maintenance. The legacy weighted real-fluid
+    // particle scan and resampling-pool rebuild are replaced by CUDA scans of
+    // the shared particle state. The two components remain separately
+    // switchable for staged validation; strict mode requires both and forbids
+    // every CPU maintenance fallback.
+    bool speciesResamplingCudaResidentDepositsEnable = false;
+    bool speciesResamplingCudaResidentPoolEnable = false;
+    bool speciesResamplingCudaResidentMaintenanceStrict = false;
+    std::string speciesCudaResidentMaintenanceDiagnosticsFilename =
+        "cuda_species_resident_maintenance_0490n.csv";
+
     std::string inputState;
     std::string outputDir = "run_base";
 

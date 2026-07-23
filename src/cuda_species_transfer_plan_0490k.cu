@@ -476,15 +476,17 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         throw std::runtime_error("0490k invalid cell grid/workspace shape");
     }
     validate_species_definitions(params.speciesDefinitions, "0490k species registry");
-    validate_state_species_registry(
-        state, params.speciesDefinitions, true, "0490k particle state");
+    if (!params.speciesResamplingCudaResidentDepositsEnable) {
+        validate_state_species_registry(
+            state, params.speciesDefinitions, true, "0490k particle state");
+    }
     if (!cuda_species_transfer_plan_available_0490k()) {
         throw std::runtime_error("0490k requested but no CUDA device is available");
     }
 
     CudaParticleState& particles = cuda_shared_particle_state_0251();
     CudaParticleStateDiagnostics upload{};
-    if (cuda_shared_particle_state_0251_is_fresh()) {
+    if (cuda_shared_particle_state_0251_is_fresh() && particles.size() == state.Np) {
         d.usedSharedResidentState = 1;
         d.particleUploadSkipped = 1;
     } else {
@@ -498,12 +500,19 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
     }
 
     CudaSpeciesCellDepositDiagnostics0490h deposit{};
-    cuda_deposit_species_cell_fields_resident_0490h(
-        particleView, grid, params, params.speciesDefinitions,
-        speciesWorkspace, &deposit, params.speciesCellCudaThreadsPerBlock);
-    d.speciesWorkspaceReused = deposit.reusedAllocation;
-    d.speciesDepositSeconds = deposit.depositSeconds + deposit.finalizeSeconds;
-    d.metadataUploadSeconds = deposit.metadataUploadSeconds;
+    if (!params.speciesResamplingCudaResidentDepositsEnable) {
+        cuda_deposit_species_cell_fields_resident_0490h(
+            particleView, grid, params, params.speciesDefinitions,
+            speciesWorkspace, &deposit, params.speciesCellCudaThreadsPerBlock);
+        d.speciesWorkspaceReused = deposit.reusedAllocation;
+        d.speciesDepositSeconds = deposit.depositSeconds + deposit.finalizeSeconds;
+        d.metadataUploadSeconds = deposit.metadataUploadSeconds;
+    } else {
+        // 0490n already refreshed the authoritative species-cell workspace from
+        // the same shared particle generation immediately before planning.
+        d.speciesWorkspaceReused = 1;
+        d.speciesDepositSeconds = 0.0;
+    }
 
     const int nc = grid.numCells;
     const int ns = static_cast<int>(params.speciesDefinitions.size());

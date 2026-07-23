@@ -20,6 +20,7 @@
 #include "cuda_species_mass_closure_0490i.h"
 #include "cuda_species_transfer_plan_0490k.h"
 #include "cuda_species_resampling_fast_path_0490m.h"
+#include "cuda_species_resident_maintenance_0490n.h"
 #endif
 
 namespace mpcd {
@@ -59,6 +60,7 @@ struct SrcMpcdBaseWorkspace {
     CudaSpeciesMassClosureWorkspace0490i speciesMassClosureCuda0490i;
     CudaSpeciesTransferPlanWorkspace0490k speciesTransferPlanCuda0490k;
     CudaSpeciesResamplingFastPathWorkspace0490m speciesResamplingFastPathCuda0490m;
+    CudaSpeciesResidentMaintenanceWorkspace0490n speciesResidentMaintenanceCuda0490n;
 #endif
 };
 
