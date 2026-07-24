@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -1593,13 +1594,30 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     // 0296: conservative CUDA mass reconditioning at the same post-SRC,
-    // non-shifted-grid insertion point.  This first mutating resampling brick
-    // changes neither support nor roles: it only smooths particle masses inside
-    // wet cells and restores the cell momentum.  It is intentionally separate
-    // from the future population guard (0297).
-    if (cuda_resampling_mass_recondition_0296_requested(step)) {
+    // non-shifted-grid insertion point.  This legacy brick averages particle
+    // masses over all Fluid particles in a cell.  It is therefore incompatible
+    // with the 0490d/0490i species-aware closure: after a type-directed
+    // split/merge, a later 0296 pass would preserve the cell total while moving
+    // mass between particle types.  Suppress 0296 whenever the species-aware
+    // closure is enabled; dedicated 0491h-fix1b validation exercises this guard.
+    const bool massReconditionRequested0296 =
+        cuda_resampling_mass_recondition_0296_requested(step);
+    const bool speciesAwareMassClosure0490 =
+        params.speciesResamplingMassClosureEnable ||
+        params.speciesResamplingMassClosureCudaEnable;
+    if (massReconditionRequested0296 && speciesAwareMassClosure0490) {
+        static bool warnedMassReconditionSuppressed0491hFix1b = false;
+        if (!warnedMassReconditionSuppressed0491hFix1b) {
+            std::fprintf(
+                stderr,
+                "[0491h-fix1b] suppressed cuda_resampling_mass_recondition_0296: "
+                "incompatible with species-aware mass closure (0490d/0490i)\n");
+            warnedMassReconditionSuppressed0491hFix1b = true;
+        }
+    } else if (massReconditionRequested0296) {
         (void)try_apply_cuda_resampling_mass_recondition_0296(
-            state, params, grid, result.domain, step, time, "post_src_classic_post_thermostat_pre_cpu_resampling");
+            state, params, grid, result.domain, step, time,
+            "post_src_classic_post_thermostat_pre_cpu_resampling");
     }
 
     CudaResamplingPopulationGuard0297Diagnostics cudaPopulationGuard0490j{};

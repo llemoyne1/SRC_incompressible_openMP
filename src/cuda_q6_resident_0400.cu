@@ -120,6 +120,7 @@ void append_species_q6_resident_audit_0491e(
                "species_q6_deposit_seconds,species_q6_weight_seconds,"
                "species_q6_particle_apply_seconds,"
                "q6Applied,q6Converged,q6Iterations,barycentricResidualMaxAbs,"
+               "barycentricResidualMaxScaled,"
                "depositSeconds,solveSeconds,applySeconds,totalSeconds\n";
     }
     out << std::setprecision(17)
@@ -146,6 +147,7 @@ void append_species_q6_resident_audit_0491e(
         << (diag.converged ? 1 : 0) << ','
         << diag.iterations << ','
         << diag.speciesQ6BarycentricResidualMaxAbs << ','
+        << diag.speciesQ6BarycentricResidualMaxScaled << ','
         << diag.depositSeconds << ','
         << diag.solveSeconds << ','
         << diag.applySeconds << ','
@@ -1060,18 +1062,30 @@ __global__ void q6_species_barycentric_residual_stats_0491c(
         }
         const int useWeighted = weightedMode && sensitivity > 0.0 && alphaBar > alphaEpsilon;
 
-        double residualX = -totalMass * dux[c];
-        double residualY = -totalMass * duy[c];
+        const double targetX = totalMass * dux[c];
+        const double targetY = totalMass * duy[c];
+        double residualX = -targetX;
+        double residualY = -targetY;
+        double scaleX = fabs(targetX);
+        double scaleY = fabs(targetY);
         for (int s = 0; s < species.speciesCount; ++s) {
             const double weight = useWeighted
                 ? ((1.0 - sensitivity) + sensitivity * species.q6Strength[s] / alphaBar)
                 : 1.0;
             const double ms = species.mass[s * species.numCells + c];
-            residualX += ms * weight * dux[c];
-            residualY += ms * weight * duy[c];
+            const double termX = ms * weight * dux[c];
+            const double termY = ms * weight * duy[c];
+            residualX += termX;
+            residualY += termY;
+            scaleX += fabs(termX);
+            scaleY += fabs(termY);
         }
-        maxX = fmax(maxX, fabs(residualX));
-        maxY = fmax(maxY, fabs(residualY));
+        const double absResidualX = fabs(residualX);
+        const double absResidualY = fabs(residualY);
+        const double scaledResidualX = absResidualX / fmax(1.0, scaleX);
+        const double scaledResidualY = absResidualY / fmax(1.0, scaleY);
+        maxX = fmax(maxX, fmax(absResidualX, absResidualY));
+        maxY = fmax(maxY, fmax(scaledResidualX, scaledResidualY));
     }
     shX[tid] = maxX;
     shY[tid] = maxY;
@@ -1932,12 +1946,12 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
             speciesQ6Weighted0491c ? 1 : 0,
             ws.partial0.data(), ws.partial1.data());
         check_cuda_0400(cudaGetLastError(), "species q6 barycentric residual launch");
-        const double speciesResidualX0491c = reduce_host_max_0400(ws.partial0.data(), cellBlocks);
-        const double speciesResidualY0491c = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
         diag.speciesQ6BarycentricResidualMaxAbs =
-            std::max(speciesResidualX0491c, speciesResidualY0491c);
-        if (diag.speciesQ6BarycentricResidualMaxAbs > params.speciesQ6ComparisonTolerance) {
-            diag.reason = "speciesQ6 barycentric recomposition residual exceeded tolerance";
+            reduce_host_max_0400(ws.partial0.data(), cellBlocks);
+        diag.speciesQ6BarycentricResidualMaxScaled =
+            reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+        if (diag.speciesQ6BarycentricResidualMaxScaled > params.speciesQ6ComparisonTolerance) {
+            diag.reason = "speciesQ6 barycentric recomposition scaled residual exceeded tolerance";
             return diag;
         }
         diag.speciesQ6WeightSeconds = seconds_since_0400(tSpeciesWeight0491h);
@@ -2093,12 +2107,17 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
 
     t0 = Clock0400::now();
     std::vector<std::uint32_t> hostCount(static_cast<std::size_t>(grid.numCells), 0u);
+    std::vector<double> hostKinetic(static_cast<std::size_t>(grid.numCells), 0.0);
     std::vector<double> hostScale(static_cast<std::size_t>(grid.numCells), 1.0);
     unsigned long long fluidCounter = 0ull;
     check_cuda_0400(cudaMemcpy(hostCount.data(), cells.count,
                                static_cast<std::size_t>(grid.numCells) * sizeof(std::uint32_t),
                                cudaMemcpyDeviceToHost),
                     "thermostat count download");
+    check_cuda_0400(cudaMemcpy(hostKinetic.data(), cells.cellKinetic,
+                               static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                               cudaMemcpyDeviceToHost),
+                    "thermostat kinetic download");
     check_cuda_0400(cudaMemcpy(hostScale.data(), cells.cellScale,
                                static_cast<std::size_t>(grid.numCells) * sizeof(double),
                                cudaMemcpyDeviceToHost),
@@ -2116,8 +2135,9 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     std::uint64_t particlesRescaled = 0u;
     for (int c = 0; c < grid.numCells; ++c) {
         const std::uint32_t count = hostCount[static_cast<std::size_t>(c)];
+        const double K = hostKinetic[static_cast<std::size_t>(c)];
         const double scale = hostScale[static_cast<std::size_t>(c)];
-        if (count < static_cast<std::uint32_t>(minParticles) || scale == 1.0) {
+        if (count < static_cast<std::uint32_t>(minParticles) || !(K > epsilon)) {
             continue;
         }
         cellsRescaled += 1u;

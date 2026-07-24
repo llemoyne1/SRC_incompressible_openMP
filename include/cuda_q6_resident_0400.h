@@ -46,6 +46,7 @@ struct CudaQ6Resident0400Diagnostics {
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
     double speciesQ6BarycentricResidualMaxAbs = 0.0;
+    double speciesQ6BarycentricResidualMaxScaled = 0.0;
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;
