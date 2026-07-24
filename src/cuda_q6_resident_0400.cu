@@ -4,6 +4,7 @@
 
 #include "cuda_cell_workspace.h"
 #include "cuda_shared_particle_state_0251.h"
+#include "cuda_species_cell_fields_0490h.h"
 #include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
@@ -14,6 +15,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -66,6 +70,8 @@ struct Q6SegmentedIo0409 {
     double flux[kOpenBoundaryMaxSegments]{};
 };
 
+bool q6_open_fullface_0404_supported(const SimulationParams& params);
+bool q6_open_segmented_0409_supported(const SimulationParams& params);
 
 void check_cuda_0400(cudaError_t err, const char* where) {
     if (err != cudaSuccess) {
@@ -76,6 +82,123 @@ void check_cuda_0400(cudaError_t err, const char* where) {
 
 double seconds_since_0400(const Clock0400::time_point& t0) {
     return std::chrono::duration<double>(Clock0400::now() - t0).count();
+}
+
+std::string q6_boundary_family_0491g(const SimulationParams& params) {
+    if (q6_open_segmented_0409_supported(params)) return "open_segmented";
+    if (q6_open_fullface_0404_supported(params)) return "open_fullface";
+    if (is_x_periodic(params) && is_y_periodic(params)) return "periodic";
+    if (is_x_periodic(params) && !is_y_periodic(params)) return "channel_wall";
+    return "other";
+}
+
+void append_species_q6_resident_audit_0491e(
+    const SimulationParams& params,
+    int step,
+    double time,
+    int speciesCount,
+    const CudaQ6Resident0400Diagnostics& diag) {
+    if (!params.speciesQ6Enable || params.outputDir.empty()) return;
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) / "cuda_species_q6_0491.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("0491e failed to open species-Q6 resident audit CSV: " +
+                                 path.string());
+    }
+    if (header) {
+        out << "step,time,mode,sensitivity,speciesCount,boundaryFamily,"
+               "openBoundaryEnabled,darcyBrinkmanEnable,"
+               "species_q6_device_resident,species_q6_host_cell_array_entries,"
+               "species_q6_weight_h2d,species_q6_full_state_download,"
+               "species_q6_cpu_fallback,species_q6_remaining_cpu_scope,"
+               "species_q6_allocated_bytes,species_q6_allocation_calls,"
+               "species_q6_metadata_h2d_bytes,"
+               "species_q6_deposit_seconds,species_q6_weight_seconds,"
+               "species_q6_particle_apply_seconds,"
+               "q6Applied,q6Converged,q6Iterations,barycentricResidualMaxAbs,"
+               "depositSeconds,solveSeconds,applySeconds,totalSeconds\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ','
+        << '"' << params.speciesQ6Mode << '"' << ','
+        << params.speciesQ6Sensitivity << ','
+        << speciesCount << ','
+        << '"' << q6_boundary_family_0491g(params) << '"' << ','
+        << (diag.openBoundaryEnabled ? 1 : 0) << ','
+        << (params.darcyBrinkmanEnable ? 1 : 0) << ','
+        << 1 << ','  // species-Q6 deposit, weights and correction are device-resident.
+        << 0 << ','  // no host cell-species array is materialized by this path.
+        << 0 << ','  // weights are derived from resident cell-species masses on device.
+        << 0 << ','  // this path never downloads the full particle state.
+        << 0 << ','
+        << "\"none\","
+        << diag.speciesQ6AllocatedBytes << ','
+        << diag.speciesQ6AllocationCalls << ','
+        << diag.speciesQ6MetadataH2DBytes << ','
+        << diag.speciesQ6DepositSeconds << ','
+        << diag.speciesQ6WeightSeconds << ','
+        << diag.speciesQ6ParticleApplySeconds << ','
+        << (diag.applied ? 1 : 0) << ','
+        << (diag.converged ? 1 : 0) << ','
+        << diag.iterations << ','
+        << diag.speciesQ6BarycentricResidualMaxAbs << ','
+        << diag.depositSeconds << ','
+        << diag.solveSeconds << ','
+        << diag.applySeconds << ','
+        << diag.totalSeconds << '\n';
+}
+
+void append_q6_resident_thermostat_audit_0491f(
+    const SimulationParams& params,
+    std::uint64_t step,
+    double targetKBT,
+    std::uint64_t cellIdH2DEntries,
+    const CudaQ6ResidentThermostat0400Diagnostics& diag) {
+    if (!params.speciesQ6Enable || params.outputDir.empty() || !diag.handled) return;
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) / "cuda_species_q6_energy_0491f.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("0491f failed to open species-Q6 energy audit CSV: " +
+                                 path.string());
+    }
+    if (header) {
+        out << "step,targetKBT,thermostat_device_resident,thermostat_cpu_fallback,"
+               "thermostat_collision_cell_id_h2d_entries,thermostatApplied,"
+               "thermostatCells,thermostatParticles,thermostatKBTBefore,"
+               "thermostatKBTAfter,thermostatKBTErrorAbs,thermostatScaleMean,"
+               "thermostatScaleMin,thermostatScaleMax,kineticSeconds,scaleSeconds,"
+               "applySeconds,diagnosticsDownloadSeconds,totalSeconds\n";
+    }
+    const double kbtError =
+        std::abs(diag.thermostat.kBTAfter - targetKBT);
+    out << std::setprecision(17)
+        << step << ','
+        << targetKBT << ','
+        << 1 << ','
+        << 0 << ','
+        << cellIdH2DEntries << ','
+        << (diag.thermostat.applied ? 1 : 0) << ','
+        << diag.thermostat.cellsRescaled << ','
+        << diag.thermostat.particlesRescaled << ','
+        << diag.thermostat.kBTBefore << ','
+        << diag.thermostat.kBTAfter << ','
+        << kbtError << ','
+        << diag.thermostat.scaleMean << ','
+        << diag.thermostat.scaleMin << ','
+        << diag.thermostat.scaleMax << ','
+        << diag.kineticSeconds << ','
+        << diag.scaleSeconds << ','
+        << diag.applySeconds << ','
+        << diag.diagnosticsDownloadSeconds << ','
+        << diag.totalSeconds << '\n';
 }
 
 double inlet_velocity_ramp_factor_0400(const SimulationParams& params, double time) {
@@ -749,6 +872,223 @@ __global__ void q6_apply_particle_correction_0400(CudaParticleDeviceView particl
     }
 }
 
+__global__ void q6_reset_species_mass_0491c(CudaSpeciesCellDeviceView0490h species) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const int dense = species.numCells * species.speciesCount;
+    for (int k = tid; k < dense; k += stride) {
+        species.mass[k] = 0.0;
+    }
+    for (int c = tid; c < species.numCells; c += stride) {
+        species.totalCellMass[c] = 0.0;
+    }
+    if (tid == 0 && species.invalidTypeCounter != nullptr) {
+        *species.invalidTypeCounter = 0ull;
+    }
+}
+
+__global__ void q6_deposit_species_mass_from_cell_ids_0491c(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    std::uint64_t nParticles) {
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= species.numCells) {
+            continue;
+        }
+        int speciesIndex = -1;
+        const std::uint32_t type = particles.type ? particles.type[i] : 0u;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            if (species.speciesTypes[s] == type) {
+                speciesIndex = s;
+                break;
+            }
+        }
+        if (speciesIndex < 0) {
+            if (species.invalidTypeCounter != nullptr) {
+                atomicAdd(species.invalidTypeCounter, 1ull);
+            }
+            continue;
+        }
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        atomic_add_double_0400(&species.mass[speciesIndex * species.numCells + c], m);
+        atomic_add_double_0400(&species.totalCellMass[c], m);
+    }
+}
+
+__global__ void q6_apply_species_particle_correction_0491c(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    const double* dux,
+    const double* duy,
+    std::uint64_t nParticles,
+    double sensitivity,
+    double alphaEpsilon,
+    int weightedMode,
+    int fatalFallback,
+    double* partialPx,
+    double* partialPy,
+    unsigned long long* fallbackCounter) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= species.numCells) {
+            continue;
+        }
+        int speciesIndex = -1;
+        const std::uint32_t type = particles.type ? particles.type[i] : 0u;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            if (species.speciesTypes[s] == type) {
+                speciesIndex = s;
+                break;
+            }
+        }
+        if (speciesIndex < 0) {
+            continue;
+        }
+
+        double weight = 1.0;
+        if (weightedMode && sensitivity > 0.0) {
+            const double totalMass = species.totalCellMass[c];
+            double alphaBar = 0.0;
+            if (totalMass > 0.0) {
+                for (int s = 0; s < species.speciesCount; ++s) {
+                    const double ms = species.mass[s * species.numCells + c];
+                    alphaBar += (ms / totalMass) * species.q6Strength[s];
+                }
+            }
+            if (alphaBar > alphaEpsilon) {
+                weight = (1.0 - sensitivity) +
+                         sensitivity * species.q6Strength[speciesIndex] / alphaBar;
+            } else if (fatalFallback) {
+                atomicAdd(fallbackCounter, 1ull);
+                continue;
+            }
+        }
+
+        const double dvx = weight * dux[c];
+        const double dvy = weight * duy[c];
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        px += m * dvx;
+        py += m * dvy;
+    }
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
+__global__ void q6_count_zero_alpha_bar_0491c(CudaSpeciesCellDeviceView0490h species,
+                                              double alphaEpsilon,
+                                              unsigned long long* fallbackCounter) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < species.numCells; c += stride) {
+        const double totalMass = species.totalCellMass[c];
+        if (!(totalMass > 0.0)) {
+            continue;
+        }
+        double alphaBar = 0.0;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            const double ms = species.mass[s * species.numCells + c];
+            alphaBar += (ms / totalMass) * species.q6Strength[s];
+        }
+        if (!(alphaBar > alphaEpsilon)) {
+            atomicAdd(fallbackCounter, 1ull);
+        }
+    }
+}
+
+__global__ void q6_species_barycentric_residual_stats_0491c(
+    CudaSpeciesCellDeviceView0490h species,
+    const double* dux,
+    const double* duy,
+    double sensitivity,
+    double alphaEpsilon,
+    int weightedMode,
+    double* partialX,
+    double* partialY) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double maxX = 0.0;
+    double maxY = 0.0;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < species.numCells; c += stride) {
+        const double totalMass = species.totalCellMass[c];
+        if (!(totalMass > 0.0)) {
+            continue;
+        }
+
+        double alphaBar = 0.0;
+        if (weightedMode && sensitivity > 0.0) {
+            for (int s = 0; s < species.speciesCount; ++s) {
+                const double ms = species.mass[s * species.numCells + c];
+                alphaBar += (ms / totalMass) * species.q6Strength[s];
+            }
+        }
+        const int useWeighted = weightedMode && sensitivity > 0.0 && alphaBar > alphaEpsilon;
+
+        double residualX = -totalMass * dux[c];
+        double residualY = -totalMass * duy[c];
+        for (int s = 0; s < species.speciesCount; ++s) {
+            const double weight = useWeighted
+                ? ((1.0 - sensitivity) + sensitivity * species.q6Strength[s] / alphaBar)
+                : 1.0;
+            const double ms = species.mass[s * species.numCells + c];
+            residualX += ms * weight * dux[c];
+            residualY += ms * weight * duy[c];
+        }
+        maxX = fmax(maxX, fabs(residualX));
+        maxY = fmax(maxY, fabs(residualY));
+    }
+    shX[tid] = maxX;
+    shY[tid] = maxY;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] = fmax(shX[tid], shX[tid + offset]);
+            shY[tid] = fmax(shY[tid], shY[tid + offset]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialX[blockIdx.x] = shX[0];
+        partialY[blockIdx.x] = shY[0];
+    }
+}
+
 __global__ void q6_apply_uniform_momentum_correction_0400(CudaParticleDeviceView particles,
                                                           std::uint64_t nParticles,
                                                           double cvx,
@@ -1260,7 +1600,8 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
                                                               const CellGrid& grid,
                                                               const FluidDomainBounds& domain,
                                                               int step,
-                                                              double time) {
+                                                              double time,
+                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c) {
     (void)step;
     CudaQ6Resident0400Diagnostics diag;
     diag.requested = truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_0400"));
@@ -1305,6 +1646,20 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     ResidentWorkspace0400& ws = resident_workspace_0400();
     ws.ensure(nParticles, grid.numCells, blocks);
     CudaCellWorkspaceDeviceView cells = ws.cells.device_view();
+    CudaSpeciesCellDeviceView0490h species0491c{};
+    const bool speciesQ6Weighted0491c =
+        params.speciesQ6Enable && params.speciesQ6Mode == "weighted" &&
+        params.speciesQ6Sensitivity > 0.0;
+    if (params.speciesQ6Enable) {
+        if (speciesWorkspace0491c == nullptr) {
+            diag.reason = "speciesQ6Enable requires a resident CUDA species workspace";
+            return diag;
+        }
+        if (params.speciesDefinitions.empty()) {
+            diag.reason = "speciesQ6Enable requires registered species definitions";
+            return diag;
+        }
+    }
     const std::size_t scalarShared = static_cast<std::size_t>(threads) * sizeof(double);
     const std::size_t pairShared = 2u * static_cast<std::size_t>(threads) * sizeof(double);
     const int periodicX = is_x_periodic(params) ? 1 : 0;
@@ -1358,6 +1713,52 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     check_cuda_0400(cudaGetLastError(), "deposit launch");
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "finalize cells launch");
+    if (params.speciesQ6Enable) {
+        const auto tSpeciesDeposit0491h = Clock0400::now();
+        CudaSpeciesCellDepositDiagnostics0490h speciesDiag0491c{};
+        speciesWorkspace0491c->ensure_capacity(
+            grid.numCells,
+            static_cast<int>(params.speciesDefinitions.size()),
+            &speciesDiag0491c);
+        diag.speciesQ6AllocatedBytes = speciesDiag0491c.allocatedBytes;
+        diag.speciesQ6AllocationCalls = speciesDiag0491c.allocationCalls;
+        species0491c = speciesWorkspace0491c->device_view();
+        std::vector<std::uint32_t> hSpeciesTypes0491c(params.speciesDefinitions.size());
+        std::vector<double> hQ6Strength0491c(params.speciesDefinitions.size());
+        for (std::size_t s = 0; s < params.speciesDefinitions.size(); ++s) {
+            hSpeciesTypes0491c[s] = params.speciesDefinitions[s].type;
+            hQ6Strength0491c[s] = params.speciesDefinitions[s].q6StrengthDeclared;
+        }
+        diag.speciesQ6MetadataH2DBytes =
+            hSpeciesTypes0491c.size() * sizeof(std::uint32_t) +
+            hQ6Strength0491c.size() * sizeof(double);
+        check_cuda_0400(cudaMemcpy(species0491c.speciesTypes, hSpeciesTypes0491c.data(),
+                                   hSpeciesTypes0491c.size() * sizeof(std::uint32_t),
+                                   cudaMemcpyHostToDevice),
+                        "species q6 type metadata upload");
+        check_cuda_0400(cudaMemcpy(species0491c.q6Strength, hQ6Strength0491c.data(),
+                                   hQ6Strength0491c.size() * sizeof(double),
+                                   cudaMemcpyHostToDevice),
+                        "species q6 strength metadata upload");
+        const int denseSpecies0491c =
+            grid.numCells * static_cast<int>(params.speciesDefinitions.size());
+        const int speciesResetBlocks0491c =
+            std::max(1, std::min(1024, (std::max(grid.numCells, denseSpecies0491c) + threads - 1) / threads));
+        q6_reset_species_mass_0491c<<<speciesResetBlocks0491c, threads>>>(species0491c);
+        check_cuda_0400(cudaGetLastError(), "species q6 mass reset launch");
+        q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
+            particles, cells, species0491c, nParticles);
+        check_cuda_0400(cudaGetLastError(), "species q6 mass deposit launch");
+        unsigned long long invalidSpecies0491c = 0ull;
+        check_cuda_0400(cudaMemcpy(&invalidSpecies0491c, species0491c.invalidTypeCounter,
+                                   sizeof(invalidSpecies0491c), cudaMemcpyDeviceToHost),
+                        "species q6 invalid type counter download");
+        if (invalidSpecies0491c != 0ull) {
+            diag.reason = "speciesQ6Enable encountered unregistered fluid particle types";
+            return diag;
+        }
+        diag.speciesQ6DepositSeconds = seconds_since_0400(tSpeciesDeposit0491h);
+    }
     check_cuda_0400(cudaMemcpy(&diag.emptyCells, ws.counter.data(), sizeof(unsigned long long),
                                cudaMemcpyDeviceToHost),
                     "copy empty counter");
@@ -1506,9 +1907,62 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     check_cuda_0400(cudaGetLastError(), "total mass reduction launch");
     const double totalMass = std::max(1.0e-300, reduce_host_sum_0400(ws.partial0.data(), cellBlocks));
 
-    q6_apply_particle_correction_0400<<<particleBlocks, threads, pairShared>>>(
-        particles, cells, ws.dux.data(), ws.duy.data(), nParticles, ws.partial0.data(), ws.partial1.data());
-    check_cuda_0400(cudaGetLastError(), "apply particle correction launch");
+    if (params.speciesQ6Enable) {
+        const auto tSpeciesWeight0491h = Clock0400::now();
+        check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                        "species q6 fallback counter zero");
+        if (speciesQ6Weighted0491c && params.speciesQ6FallbackMode == "fatal") {
+            q6_count_zero_alpha_bar_0491c<<<cellBlocks, threads>>>(
+                species0491c, params.speciesQ6AlphaEpsilon, ws.counter.data());
+            check_cuda_0400(cudaGetLastError(), "species q6 alphaBar validation launch");
+            unsigned long long fallbackCount0491c = 0ull;
+            check_cuda_0400(cudaMemcpy(&fallbackCount0491c, ws.counter.data(),
+                                       sizeof(fallbackCount0491c), cudaMemcpyDeviceToHost),
+                            "species q6 alphaBar validation counter download");
+            if (fallbackCount0491c != 0ull) {
+                diag.reason = "speciesQ6 fallback=fatal encountered cells with zero alphaBar";
+                return diag;
+            }
+            check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                            "species q6 fallback counter reset after validation");
+        }
+        q6_species_barycentric_residual_stats_0491c<<<cellBlocks, threads, pairShared>>>(
+            species0491c, ws.dux.data(), ws.duy.data(),
+            params.speciesQ6Sensitivity, params.speciesQ6AlphaEpsilon,
+            speciesQ6Weighted0491c ? 1 : 0,
+            ws.partial0.data(), ws.partial1.data());
+        check_cuda_0400(cudaGetLastError(), "species q6 barycentric residual launch");
+        const double speciesResidualX0491c = reduce_host_max_0400(ws.partial0.data(), cellBlocks);
+        const double speciesResidualY0491c = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+        diag.speciesQ6BarycentricResidualMaxAbs =
+            std::max(speciesResidualX0491c, speciesResidualY0491c);
+        if (diag.speciesQ6BarycentricResidualMaxAbs > params.speciesQ6ComparisonTolerance) {
+            diag.reason = "speciesQ6 barycentric recomposition residual exceeded tolerance";
+            return diag;
+        }
+        diag.speciesQ6WeightSeconds = seconds_since_0400(tSpeciesWeight0491h);
+        const auto tSpeciesApply0491h = Clock0400::now();
+        q6_apply_species_particle_correction_0491c<<<particleBlocks, threads, pairShared>>>(
+            particles, cells, species0491c, ws.dux.data(), ws.duy.data(), nParticles,
+            params.speciesQ6Sensitivity, params.speciesQ6AlphaEpsilon,
+            speciesQ6Weighted0491c ? 1 : 0,
+            params.speciesQ6FallbackMode == "fatal" ? 1 : 0,
+            ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+        check_cuda_0400(cudaGetLastError(), "apply species q6 particle correction launch");
+        unsigned long long fallbackCount0491c = 0ull;
+        check_cuda_0400(cudaMemcpy(&fallbackCount0491c, ws.counter.data(),
+                                   sizeof(fallbackCount0491c), cudaMemcpyDeviceToHost),
+                        "species q6 fallback counter download");
+        if (fallbackCount0491c != 0ull) {
+            diag.reason = "speciesQ6 fallback=fatal encountered cells with zero alphaBar";
+            return diag;
+        }
+        diag.speciesQ6ParticleApplySeconds = seconds_since_0400(tSpeciesApply0491h);
+    } else {
+        q6_apply_particle_correction_0400<<<particleBlocks, threads, pairShared>>>(
+            particles, cells, ws.dux.data(), ws.duy.data(), nParticles, ws.partial0.data(), ws.partial1.data());
+        check_cuda_0400(cudaGetLastError(), "apply particle correction launch");
+    }
     const double dpx = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
     const double dpy = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
     diag.momentumResidualBeforeCorrection = std::sqrt(dpx * dpx + dpy * dpy);
@@ -1529,6 +1983,8 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     diag.handled = true;
     diag.reason = "ok";
     diag.totalSeconds = seconds_since_0400(tTotal);
+    append_species_q6_resident_audit_0491e(
+        params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);
     return diag;
 }
 
@@ -1575,10 +2031,6 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
         diag.reason = "empty particle/grid state";
         return diag;
     }
-    if (collisionCellId.size() != static_cast<std::size_t>(nParticles)) {
-        diag.reason = "collision cellId size mismatch";
-        return diag;
-    }
     ResidentWorkspace0400& ws = resident_workspace_0400();
     CudaCellWorkspaceDeviceView cells = ws.cells.device_view();
     if (cells.numCells != grid.numCells || cells.cellId == nullptr || cells.count == nullptr ||
@@ -1594,10 +2046,14 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     const std::size_t pairShared = 2u * static_cast<std::size_t>(threads) * sizeof(double);
 
     diag.supported = true;
-    check_cuda_0400(cudaMemcpy(cells.cellId, collisionCellId.data(),
-                               static_cast<std::size_t>(nParticles) * sizeof(int),
-                               cudaMemcpyHostToDevice),
-                    "thermostat collision cellId upload");
+    std::uint64_t cellIdH2DEntries0491f = 0u;
+    if (collisionCellId.size() == static_cast<std::size_t>(nParticles)) {
+        check_cuda_0400(cudaMemcpy(cells.cellId, collisionCellId.data(),
+                                   static_cast<std::size_t>(nParticles) * sizeof(int),
+                                   cudaMemcpyHostToDevice),
+                        "thermostat collision cellId upload");
+        cellIdH2DEntries0491f = nParticles;
+    }
     q6_zero_cells_0400<<<cellBlocks, threads>>>(cells, ws.rhs.data(), ws.phi.data(), ws.r.data(),
                                                 ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data(),
                                                 0);
@@ -1685,6 +2141,8 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     diag.handled = true;
     diag.reason = "ok";
     diag.totalSeconds = seconds_since_0400(tTotal);
+    append_q6_resident_thermostat_audit_0491f(
+        params, step, targetKBT, cellIdH2DEntries0491f, diag);
     return diag;
 }
 

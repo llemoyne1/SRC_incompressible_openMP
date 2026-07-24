@@ -1393,6 +1393,11 @@ Q6ProjectionDiagnostics apply_q6_periodic_projection(ParticleState& state,
     if (!q6_projection_requested(params)) {
         return diag;
     }
+    if (params.speciesQ6Enable) {
+        throw std::runtime_error(
+            "speciesQ6Enable is supported only by the 0491c CUDA-resident Q6 apply path; "
+            "the CPU Q6 fallback has no species-weighted application");
+    }
 
     resolve_q6_projection_backend_or_throw(params);
 

@@ -1483,7 +1483,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         MPCD_PROFILE_PHASE(result.profile, Q6Projection);
         if (!params.srcClassicCudaModeEnable) {
             const CudaQ6Resident0400Diagnostics cudaQ6 =
-                try_apply_cuda_q6_resident_0400(state, params, grid, result.domain, step, time);
+                try_apply_cuda_q6_resident_0400(state, params, grid, result.domain, step, time,
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+                                                &workspace.speciesCellCuda0490h
+#else
+                                                nullptr
+#endif
+                                                );
             if (cudaQ6.handled) {
                 result.q6 = q6_projection_diagnostics_from_cuda_resident_0400(cudaQ6, params);
                 q6ResidentHandled0400 = true;

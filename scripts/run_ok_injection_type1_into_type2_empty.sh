@@ -9,12 +9,12 @@ suite_root_cd_0434
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
 CASE_LABEL="injection_type1_into_type2"
+PHYSICS_LABEL="${PHYSICS_LABEL:-liquid_type1_into_gas_type2}"
 GEN_CASE="injection"
 TOPOLOGY="segmented"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
 GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.01}"; KBT="${KBT:-0.005}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0434_${CASE_LABEL}_${NX}x${NY}_g${GAMMA}}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-5.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
 BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
@@ -44,8 +44,25 @@ RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coe
 RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coef))
 GUARD_EVERY="${GUARD_EVERY:-5}"
 
-BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"
-INJECT_TYPE="${INJECT_TYPE:-1}"; INJECT_MASS="${INJECT_MASS:-1.0}"
+BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"   # compressible gas
+INJECT_TYPE="${INJECT_TYPE:-1}"           # incompressible liquid
+LIQUID_TO_GAS_MASS_RATIO="${LIQUID_TO_GAS_MASS_RATIO:-10.0}"
+GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-${PARTICLE_MASS:-1.0}}"
+PARTICLE_MASS="${PARTICLE_MASS:-$GAS_PARTICLE_MASS}"
+INJECT_MASS="${INJECT_MASS:-$(awk -v mg="$PARTICLE_MASS" -v r="$LIQUID_TO_GAS_MASS_RATIO" 'BEGIN{printf "%.17g", mg*r}')}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0491_${CASE_LABEL}_${PHYSICS_LABEL}_mr${LIQUID_TO_GAS_MASS_RATIO}_${NX}x${NY}_g${GAMMA}}"
+LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
+GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
+LIQUID_MASS_CLOSURE_STRENGTH="${LIQUID_MASS_CLOSURE_STRENGTH:-1.0}"
+GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-0.0}"
+SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-true}"
+SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false}"
+SPECIES_Q6_ENABLE="${SPECIES_Q6_ENABLE:-true}"
+SPECIES_Q6_MODE="${SPECIES_Q6_MODE:-weighted}"
+SPECIES_Q6_SENSITIVITY="${SPECIES_Q6_SENSITIVITY:-1.0}"
+SPECIES_Q6_FALLBACK_MODE="${SPECIES_Q6_FALLBACK_MODE:-common}"
+SPECIES_Q6_COMPARISON_TOLERANCE="${SPECIES_Q6_COMPARISON_TOLERANCE:-1.0e-11}"
+RESAMPLING_PARTICLE_MASS_MAX="${RESAMPLING_PARTICLE_MASS_MAX:-20.0}"
 UIN="${UIN:-0.5}"
 INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-15.0}"
 INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y/ly}')}"
@@ -63,14 +80,27 @@ INLET_THERMAL_NOISE="${INLET_THERMAL_NOISE:-1.0}"; INLET_RESERVOIR_CELLS="${INLE
 INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"
 EMPTY_INITIAL_SLOTS="${EMPTY_INITIAL_SLOTS:-}"
 EMPTY_INITIAL_TYPE="${EMPTY_INITIAL_TYPE:-$BACKGROUND_TYPE}"
-EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-1}"
+EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-$PARTICLE_MASS}"
 # -----------------------------------------------------------------------------
 
 suite_defaults_common_0434
 suite_compute_derived_0434
 
+if [[ "$INJECT_TYPE" == "$BACKGROUND_TYPE" ]]; then
+  echo "[0434-suite] ERROR INJECT_TYPE and BACKGROUND_TYPE must be distinct for liquid-into-gas testing" >&2
+  exit 2
+fi
+
+LIQUID_REFERENCE_CELL_MASS="${LIQUID_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$INJECT_MASS" 'BEGIN{printf "%.17g", g*m}')}"
+GAS_REFERENCE_CELL_MASS="${GAS_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$PARTICLE_MASS" 'BEGIN{printf "%.17g", g*m}')}"
+ACTUAL_LIQUID_TO_GAS_MASS_RATIO="$(awk -v ml="$INJECT_MASS" -v mg="$PARTICLE_MASS" 'BEGIN{printf "%.17g", ml/mg}')"
+
 write_params_0434() {
   local mode=$1 state=$2 out=$3 chi=$4 params=$5
+  local species_q6_enable_for_mode=false
+  if suite_path_has_q6_0434 "$mode" && suite_truthy_0434 "$SPECIES_Q6_ENABLE"; then
+    species_q6_enable_for_mode=true
+  fi
   cat > "$params" <<PARAMS
 inputState = $state
 outputDir = $out
@@ -117,6 +147,20 @@ wallVpGamma = ${GAMMA}
 wallVpMass = ${PARTICLE_MASS}
 wallKBT = -1.0
 wallThermalNoise = 0.0
+speciesRegistryEnable = true
+speciesCount = 2
+species0 = ${INJECT_TYPE} liquid_incompressible liquid ${LIQUID_Q6_STRENGTH} ${LIQUID_MASS_CLOSURE_STRENGTH} ${LIQUID_REFERENCE_CELL_MASS}
+species1 = ${BACKGROUND_TYPE} gas_compressible gas ${GAS_Q6_STRENGTH} ${GAS_MASS_CLOSURE_STRENGTH} ${GAS_REFERENCE_CELL_MASS}
+speciesRequireRegisteredTypes = true
+speciesDiagnosticsEnable = ${SPECIES_DIAGNOSTICS_ENABLE}
+speciesDiagnosticsFilename = species_runtime_liquid_into_gas_0491.csv
+speciesCellDiagnosticsEnable = ${SPECIES_CELL_DIAGNOSTICS_ENABLE}
+speciesCellDiagnosticsFilename = species_cell_liquid_into_gas_0491.csv
+speciesQ6Enable = ${species_q6_enable_for_mode}
+speciesQ6Mode = ${SPECIES_Q6_MODE}
+speciesQ6Sensitivity = ${SPECIES_Q6_SENSITIVITY}
+speciesQ6FallbackMode = ${SPECIES_Q6_FALLBACK_MODE}
+speciesQ6ComparisonTolerance = ${SPECIES_Q6_COMPARISON_TOLERANCE}
 PARAMS
   suite_write_common_params_0434 "$mode" >> "$params"
   :
@@ -220,6 +264,12 @@ run_one_mode_0434() {
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
   echo "[0434-suite] case=$CASE_LABEL mode=$mode root=$run_root"
   echo "[0434-suite] initialDomainMode=$INITIAL_DOMAIN_MODE state=$state"
+  echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH) into gas(type=$BACKGROUND_TYPE,mass=$PARTICLE_MASS,q6Alpha=$GAS_Q6_STRENGTH) mass_ratio=$ACTUAL_LIQUID_TO_GAS_MASS_RATIO"
+  if suite_path_has_q6_0434 "$mode" && suite_truthy_0434 "$SPECIES_Q6_ENABLE"; then
+    echo "[0434-suite] speciesQ6=on mode=$SPECIES_Q6_MODE sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE"
+  else
+    echo "[0434-suite] speciesQ6=off for mode=$mode"
+  fi
   echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }

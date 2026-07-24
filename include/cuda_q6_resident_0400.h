@@ -9,6 +9,7 @@
 
 namespace mpcd {
 
+class CudaSpeciesCellWorkspace0490h;
 
 struct CudaQ6ResidentThermostat0400Diagnostics {
     bool requested = false;
@@ -44,6 +45,7 @@ struct CudaQ6Resident0400Diagnostics {
     double divAfterCellVelocityMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
+    double speciesQ6BarycentricResidualMaxAbs = 0.0;
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;
@@ -58,6 +60,12 @@ struct CudaQ6Resident0400Diagnostics {
     double depositSeconds = 0.0;
     double solveSeconds = 0.0;
     double applySeconds = 0.0;
+    std::uint64_t speciesQ6AllocatedBytes = 0u;
+    std::uint64_t speciesQ6AllocationCalls = 0u;
+    std::uint64_t speciesQ6MetadataH2DBytes = 0u;
+    double speciesQ6DepositSeconds = 0.0;
+    double speciesQ6WeightSeconds = 0.0;
+    double speciesQ6ParticleApplySeconds = 0.0;
     const char* reason = "";
 };
 
@@ -67,7 +75,8 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
                                                               const CellGrid& grid,
                                                               const FluidDomainBounds& domain,
                                                               int step,
-                                                              double time);
+                                                              double time,
+                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c = nullptr);
 
 CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_0400(
     ParticleState& state,
@@ -81,7 +90,8 @@ inline CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleSta
                                                                      const CellGrid&,
                                                                      const FluidDomainBounds&,
                                                                      int,
-                                                                     double) {
+                                                                     double,
+                                                                     CudaSpeciesCellWorkspace0490h* = nullptr) {
     return {};
 }
 inline CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_0400(
@@ -113,6 +123,7 @@ inline Q6ProjectionDiagnostics q6_projection_diagnostics_from_cuda_resident_0400
     q6.divAfterCellVelocityMaxAbs = cudaDiag.divAfterCellVelocityMaxAbs;
     q6.correctionVelocityRms = cudaDiag.correctionVelocityRms;
     q6.correctionVelocityMaxAbs = cudaDiag.correctionVelocityMaxAbs;
+    q6.speciesQ6BarycentricResidualMaxAbs = cudaDiag.speciesQ6BarycentricResidualMaxAbs;
     q6.momentumCorrectionVx = cudaDiag.momentumCorrectionVx;
     q6.momentumCorrectionVy = cudaDiag.momentumCorrectionVy;
     q6.momentumResidualBeforeCorrection = cudaDiag.momentumResidualBeforeCorrection;

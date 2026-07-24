@@ -1,5 +1,6 @@
 #include "params_io_base.h"
 #include "open_boundary_segments.h"
+#include "q6_species_distribution_0491a.h"
 
 #include <algorithm>
 #include <cctype>
@@ -118,6 +119,12 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesCellCudaComparisonFilename" ||
         key == "speciesCellCudaComparisonTolerance" ||
         key == "speciesCellCudaThreadsPerBlock" ||
+        key == "speciesQ6Enable" ||
+        key == "speciesQ6Mode" ||
+        key == "speciesQ6Sensitivity" ||
+        key == "speciesQ6AlphaEpsilon" ||
+        key == "speciesQ6FallbackMode" ||
+        key == "speciesQ6ComparisonTolerance" ||
         key == "speciesResamplingMassClosureEnable" ||
         key == "speciesResamplingMassClosureCudaEnable" ||
         key == "speciesMassClosureCudaDiagnosticsFilename" ||
@@ -586,6 +593,18 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesCellCudaComparisonFilename") p.speciesCellCudaComparisonFilename = trim(value);
         else if (key == "speciesCellCudaComparisonTolerance") p.speciesCellCudaComparisonTolerance = parse_double(value, key);
         else if (key == "speciesCellCudaThreadsPerBlock") p.speciesCellCudaThreadsPerBlock = parse_int(value, key);
+        else if (key == "speciesQ6Enable") p.speciesQ6Enable = parse_bool(value, key);
+        else if (key == "speciesQ6Mode") {
+            p.speciesQ6Mode = get_lower(kv, key);
+            std::replace(p.speciesQ6Mode.begin(), p.speciesQ6Mode.end(), '-', '_');
+        }
+        else if (key == "speciesQ6Sensitivity") p.speciesQ6Sensitivity = parse_double(value, key);
+        else if (key == "speciesQ6AlphaEpsilon") p.speciesQ6AlphaEpsilon = parse_double(value, key);
+        else if (key == "speciesQ6FallbackMode") {
+            p.speciesQ6FallbackMode = get_lower(kv, key);
+            std::replace(p.speciesQ6FallbackMode.begin(), p.speciesQ6FallbackMode.end(), '-', '_');
+        }
+        else if (key == "speciesQ6ComparisonTolerance") p.speciesQ6ComparisonTolerance = parse_double(value, key);
         else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
         else if (key == "speciesResamplingMassClosureCudaEnable") p.speciesResamplingMassClosureCudaEnable = parse_bool(value, key);
         else if (key == "speciesMassClosureCudaDiagnosticsFilename") p.speciesMassClosureCudaDiagnosticsFilename = trim(value);
@@ -1184,6 +1203,27 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!(p.projectionImmersedSolidFluidFractionThreshold >= 0.0 &&
               p.projectionImmersedSolidFluidFractionThreshold <= 1.0)) {
             throw std::runtime_error("projectionImmersedSolidFluidFractionThreshold must lie in [0,1]");
+        }
+    }
+    parse_species_q6_mode_0491a(p.speciesQ6Mode, "validate_simulation_params");
+    parse_species_q6_fallback_0491a(p.speciesQ6FallbackMode, "validate_simulation_params");
+    if (!(p.speciesQ6Sensitivity >= 0.0 && p.speciesQ6Sensitivity <= 1.0) ||
+        !std::isfinite(p.speciesQ6Sensitivity)) {
+        throw std::runtime_error("speciesQ6Sensitivity must lie in [0,1]");
+    }
+    if (!(p.speciesQ6AlphaEpsilon > 0.0) || !std::isfinite(p.speciesQ6AlphaEpsilon)) {
+        throw std::runtime_error("speciesQ6AlphaEpsilon must be finite and positive");
+    }
+    if (!(p.speciesQ6ComparisonTolerance > 0.0) ||
+        !std::isfinite(p.speciesQ6ComparisonTolerance)) {
+        throw std::runtime_error("speciesQ6ComparisonTolerance must be finite and positive");
+    }
+    if (p.speciesQ6Enable) {
+        if (!p.speciesRegistryEnable) {
+            throw std::runtime_error("speciesQ6Enable=true requires speciesRegistryEnable=true");
+        }
+        if (!q6OrProjectionRequested) {
+            throw std::runtime_error("speciesQ6Enable=true requires active Q6 projection");
         }
     }
     if (p.closedCapacityResponseEnable && !classicSrcCudaMode) {

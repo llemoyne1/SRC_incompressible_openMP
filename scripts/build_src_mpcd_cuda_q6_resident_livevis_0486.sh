@@ -95,6 +95,7 @@ set -x
   src/particle_state.cpp \
   src/species_registry.cpp \
   src/species_cell_fields_0490b.cpp \
+  src/q6_species_distribution_0491a.cpp \
   src/cuda_species_cell_fields_0490h.cu \
   src/cuda_species_mass_closure_0490i.cu \
   src/cuda_species_transfer_plan_0490k.cu \

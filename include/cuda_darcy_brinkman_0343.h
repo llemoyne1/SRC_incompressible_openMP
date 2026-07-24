@@ -35,6 +35,9 @@ struct CudaDarcyBrinkman0343Diagnostics {
     double diagnosticsSeconds = 0.0;
     double applySeconds = 0.0;
     double totalSeconds = 0.0;
+    int speciesQ6Enable = 0;
+    int q6ResidentInputFresh = 0;
+    int particleUploadSkipped = 0;
     std::string csvPath;
 };
 

@@ -138,6 +138,7 @@ struct RuntimeSummary {
     double q6ImmersedSolidClosedFaceFluxEnforcedMaxAbs = 0.0;
     double q6CorrectionVelocityRms = 0.0;
     double q6CorrectionVelocityMaxAbs = 0.0;
+    double q6SpeciesQ6BarycentricResidualMaxAbs = 0.0;
     int q6OpenBoundaryEnabled = 0;
     double q6OpenBoundaryFluxXLow = 0.0;
     double q6OpenBoundaryFluxXHigh = 0.0;

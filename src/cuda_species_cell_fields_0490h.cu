@@ -247,6 +247,7 @@ struct CudaSpeciesCellWorkspace0490h::Impl {
     int speciesCount = 0;
     std::uint64_t allocatedBytes = 0u;
     std::uint32_t* speciesTypes = nullptr;
+    double* q6Strength = nullptr;
     double* referenceCellMass = nullptr;
     unsigned char* phaseFamily = nullptr;
     unsigned int* count = nullptr;
@@ -306,6 +307,7 @@ void CudaSpeciesCellWorkspace0490h::release() {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     if (impl_ != nullptr) {
         cuda_free_0490h(impl_->speciesTypes);
+        cuda_free_0490h(impl_->q6Strength);
         cuda_free_0490h(impl_->referenceCellMass);
         cuda_free_0490h(impl_->phaseFamily);
         cuda_free_0490h(impl_->count);
@@ -361,6 +363,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     const std::size_t dense = nc * ns;
 
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->speciesTypes, ns * sizeof(std::uint32_t)));
+    MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->q6Strength, ns * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->referenceCellMass, ns * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->phaseFamily, ns * sizeof(unsigned char)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->count, dense * sizeof(unsigned int)));
@@ -380,7 +383,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     impl_->numCells = numCells;
     impl_->speciesCount = speciesCount;
     impl_->allocatedBytes =
-        ns * (sizeof(std::uint32_t) + sizeof(double) + sizeof(unsigned char)) +
+        ns * (sizeof(std::uint32_t) + 2u * sizeof(double) + sizeof(unsigned char)) +
         dense * (sizeof(unsigned int) + 5u * sizeof(double)) +
         nc * 4u * sizeof(double) + sizeof(unsigned long long);
 
@@ -406,6 +409,7 @@ CudaSpeciesCellDeviceView0490h CudaSpeciesCellWorkspace0490h::device_view() cons
     v.numCells = impl_->numCells;
     v.speciesCount = impl_->speciesCount;
     v.speciesTypes = impl_->speciesTypes;
+    v.q6Strength = impl_->q6Strength;
     v.referenceCellMass = impl_->referenceCellMass;
     v.phaseFamily = impl_->phaseFamily;
     v.count = impl_->count;
@@ -473,10 +477,12 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     CudaSpeciesCellDeviceView0490h out = workspace.device_view();
 
     std::vector<std::uint32_t> hTypes(definitions.size());
+    std::vector<double> hQ6Strength(definitions.size());
     std::vector<double> hRefMass(definitions.size());
     std::vector<unsigned char> hPhase(definitions.size());
     for (std::size_t s = 0; s < definitions.size(); ++s) {
         hTypes[s] = definitions[s].type;
+        hQ6Strength[s] = definitions[s].q6StrengthDeclared;
         hRefMass[s] = definitions[s].referenceCellMassDeclared;
         hPhase[s] = static_cast<unsigned char>(definitions[s].phaseFamily);
     }
@@ -484,6 +490,9 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     const Clock::time_point tMeta = Clock::now();
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.speciesTypes, hTypes.data(),
                                     hTypes.size() * sizeof(std::uint32_t),
+                                    cudaMemcpyHostToDevice));
+    MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.q6Strength, hQ6Strength.data(),
+                                    hQ6Strength.size() * sizeof(double),
                                     cudaMemcpyHostToDevice));
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.referenceCellMass, hRefMass.data(),
                                     hRefMass.size() * sizeof(double),
@@ -493,6 +502,7 @@ void cuda_deposit_species_cell_fields_resident_0490h(
                                     cudaMemcpyHostToDevice));
     diag.metadataUploadBytes +=
         hTypes.size() * sizeof(std::uint32_t) +
+        hQ6Strength.size() * sizeof(double) +
         hRefMass.size() * sizeof(double) +
         hPhase.size() * sizeof(unsigned char);
     diag.metadataUploadSeconds += seconds_since_0490h(tMeta);
@@ -583,7 +593,11 @@ CudaSpeciesCellFields0490h cuda_download_species_cell_fields_0490h(
     CudaSpeciesCellFields0490h out{};
     out.numCells = view.numCells;
     out.speciesTypes.reserve(definitions.size());
-    for (const SpeciesDefinition& d : definitions) out.speciesTypes.push_back(d.type);
+    out.q6Strength.reserve(definitions.size());
+    for (const SpeciesDefinition& d : definitions) {
+        out.speciesTypes.push_back(d.type);
+        out.q6Strength.push_back(d.q6StrengthDeclared);
+    }
     out.count.resize(dense);
     out.mass.resize(dense);
     out.px.resize(dense);

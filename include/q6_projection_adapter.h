@@ -83,6 +83,7 @@ struct Q6ProjectionDiagnostics {
     double immersedSolidClosedFaceFluxEnforcedMaxAbs = 0.0;
     double correctionVelocityRms = 0.0;
     double correctionVelocityMaxAbs = 0.0;
+    double speciesQ6BarycentricResidualMaxAbs = 0.0;
 
     bool openBoundaryEnabled = false;
     double openBoundaryFluxXLow = 0.0;

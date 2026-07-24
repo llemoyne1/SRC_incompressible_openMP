@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -630,12 +631,13 @@ void append_darcy_csv_0343(const SimulationParams& params,
     if (!out) return;
     out << std::setprecision(17);
     if (writeHeader) {
-        out << "step,time,particles,activeFluid,numCells,mass,fluidVolumeFraction,meanChi,meanAlpha,darcyPower,darcyPowerPerMass,meanSpeedRms,solidLeakRms,alphaMin,alphaMax,q,chiMode\n";
+        out << "step,time,particles,activeFluid,numCells,mass,fluidVolumeFraction,meanChi,meanAlpha,darcyPower,darcyPowerPerMass,meanSpeedRms,solidLeakRms,alphaMin,alphaMax,q,chiMode,speciesQ6Enable,q6ResidentInputFresh,particleUploadSkipped\n";
     }
     out << step << ',' << time << ',' << d.particles << ',' << d.activeFluid << ',' << d.numCells << ','
         << d.mass << ',' << d.fluidVolumeFraction << ',' << d.meanChi << ',' << d.meanAlpha << ','
         << d.darcyPower << ',' << d.darcyPowerPerMass << ',' << d.meanSpeedRms << ',' << d.solidLeakRms << ','
-        << params.darcyAlphaMin << ',' << params.darcyAlphaMax << ',' << params.darcyQ << ',' << params.darcyChiMode << '\n';
+        << params.darcyAlphaMin << ',' << params.darcyAlphaMax << ',' << params.darcyQ << ',' << params.darcyChiMode << ','
+        << d.speciesQ6Enable << ',' << d.q6ResidentInputFresh << ',' << d.particleUploadSkipped << '\n';
 }
 
 } // namespace
@@ -676,6 +678,7 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.requested = params.darcyBrinkmanEnable;
     if (!params.darcyBrinkmanEnable) return d;
     d.supported = true;
+    d.speciesQ6Enable = params.speciesQ6Enable ? 1 : 0;
     const int nx = params.Nx;
     const int ny = params.Ny;
     const int ncell = nx * ny;
@@ -687,7 +690,16 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     if (chiMode < 0) return d;
 
     auto& shared = cuda_shared_particle_state_0251();
-    if (!cuda_shared_particle_state_0251_is_fresh()) {
+    const bool sharedFreshBefore0343 = cuda_shared_particle_state_0251_is_fresh();
+    const char* sharedWriter0343 = cuda_shared_particle_state_0251_last_writer();
+    const bool q6ResidentWriter0343 =
+        sharedWriter0343 != nullptr &&
+        (std::strcmp(sharedWriter0343, "cuda_q6_resident_0400") == 0 ||
+         std::strcmp(sharedWriter0343, "cuda_q6_resident_thermostat_0400") == 0);
+    d.q6ResidentInputFresh =
+        (params.speciesQ6Enable && sharedFreshBefore0343 && q6ResidentWriter0343) ? 1 : 0;
+    d.particleUploadSkipped = sharedFreshBefore0343 ? 1 : 0;
+    if (!sharedFreshBefore0343) {
         CudaParticleStateDiagnostics uploadDiag{};
         shared.upload_all(state, &uploadDiag);
         cuda_shared_particle_state_0251_mark_fresh("cuda_darcy_brinkman_0343_upload");

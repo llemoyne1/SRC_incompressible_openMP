@@ -38,6 +38,18 @@ struct SimulationParams {
     bool speciesCellDiagnosticsEnable = false;
     std::string speciesCellDiagnosticsFilename = "species_cell_runtime_0490b.csv";
 
+    // 0491a species-sensitive Q6 contract. This does not create another
+    // projection solve: Q6 remains barycentric, and these parameters describe
+    // how the final cell velocity correction is distributed between registered
+    // species. The CUDA resident Q6 path applies this weighting in 0491c; the
+    // CPU Q6 fallback still rejects it to avoid a silent common-correction run.
+    bool speciesQ6Enable = false;
+    std::string speciesQ6Mode = "common"; // common, weighted
+    double speciesQ6Sensitivity = 0.0;
+    double speciesQ6AlphaEpsilon = 1.0e-14;
+    std::string speciesQ6FallbackMode = "common"; // common, fatal
+    double speciesQ6ComparisonTolerance = 1.0e-11;
+
     // 0490h opt-in resident CUDA deposit of N_{c,s}, M_{c,s}, P_{c,s}
     // and composition fractions. The resident workspace is the production
     // foundation for later species-aware CUDA resampling and Q6. In 0490h,

@@ -111,7 +111,7 @@ suite_ensure_binary_0434() {
   if suite_truthy_0434 "$FORCE_BUILD" || [[ ! -x "$BIN" ]]; then
     needs=1
   elif suite_truthy_0434 "$BUILD_IF_STALE"; then
-    if find src include scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh -type f -newer "$BIN" -print -quit 2>/dev/null | grep -q .; then
+    if find src include scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh -type f -newer "$BIN" -print -quit 2>/dev/null | grep -q .; then
       needs=1
     fi
   fi
@@ -120,8 +120,13 @@ suite_ensure_binary_0434() {
       echo "[0434-suite] ERROR missing/stale binary and AUTO_BUILD=0: $BIN" >&2
       exit 127
     fi
-    local helper=""
-    for h in scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh; do
+    local helper="" helpers=()
+    if [[ "$BIN" == *livevis* ]]; then
+      helpers=(scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh)
+    else
+      helpers=(scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_0315b.sh)
+    fi
+    for h in "${helpers[@]}"; do
       [[ -f "$h" ]] && { helper="$h"; break; }
     done
     [[ -n "$helper" ]] || { echo "[0434-suite] ERROR no build helper found" >&2; exit 127; }
@@ -139,10 +144,13 @@ suite_clear_cuda_flags_0434() {
   export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=0
   export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264=0
   export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=0
+  export MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_STEP_0401=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=0
+  export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
 }
 
 suite_export_cuda_flags_0434() {
@@ -298,7 +306,9 @@ suite_export_cuda_flags_0434() {
 
 suite_prepare_livevis_control_0434() {
   local run_root=$1 mode=$2
-  LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
+  if [[ -z "${LIVE_VIS_CONTROL_FILE:-}" || "$LIVE_VIS_CONTROL_FILE" == "./livevis_control.kv" || "$LIVE_VIS_CONTROL_FILE" == "livevis_control.kv" ]]; then
+    LIVE_VIS_CONTROL_FILE="$run_root/livevis_control.kv"
+  fi
   mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE")"
   if [[ ! -f "$LIVE_VIS_CONTROL_FILE" || "${OVERWRITE_LIVEVIS_CONTROL:-1}" == 1 ]]; then
     cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
