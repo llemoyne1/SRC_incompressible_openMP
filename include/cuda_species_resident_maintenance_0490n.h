@@ -2,6 +2,7 @@
 
 #include "cell_grid.h"
 #include "cuda_species_cell_fields_0490h.h"
+#include "cuda_species_cell_policy_0490p.h"
 #include "fluid_domain.h"
 #include "particle_state.h"
 #include "simulation_params.h"
@@ -51,7 +52,10 @@ struct CudaSpeciesResidentMaintenanceDiagnostics0490n {
     std::uint64_t receiverCells = 0u;
     std::uint64_t donorCells = 0u;
     std::uint64_t cellMirrorDownloadBytes = 0u;
+    std::uint64_t policySummaryDownloadBytes = 0u;
+    std::uint64_t policyHostArrayEntries = 0u;
     std::uint64_t poolScalarDownloadBytes = 0u;
+    int cellPolicyDeviceResident = 0;
     std::uint64_t allocatedBytes = 0u;
 
     double totalMass = 0.0;
@@ -64,6 +68,7 @@ struct CudaSpeciesResidentMaintenanceDiagnostics0490n {
     double poolBuildSeconds = 0.0;
     double compactDownloadSeconds = 0.0;
     double hostCellMirrorSeconds = 0.0;
+    double policyKernelSeconds = 0.0;
     double totalSeconds = 0.0;
 };
 
@@ -93,10 +98,12 @@ public:
 
     void release();
     void ensure_capacity(std::uint64_t particles,
+                         int cells,
                          CudaSpeciesResidentMaintenanceDiagnostics0490n* diagnostics = nullptr);
     std::uint64_t capacity() const;
     std::uint64_t allocated_bytes() const;
     CudaSpeciesResidentPoolDeviceView0490n pool_device_view() const;
+    CudaSpeciesCellPolicyDeviceView0490p cell_policy_device_view_0490p() const;
 
 private:
     struct Impl;
@@ -125,9 +132,9 @@ bool cuda_species_resident_maintenance_available_0490n();
 
 // 0490n integrated resident maintenance gate. The expensive particle scans for
 // the legacy weighted deposit and pool rebuild execute on the shared CUDA state.
-// Only compact per-cell mirrors and pool scalar diagnostics are downloaded for
-// the still-host-orchestrated resampling policy. The resident free-list remains
-// on device and is exposed through pool_device_view().
+// 0490p keeps the per-cell wet/poor/rich policy entirely on device. Only a
+// fixed-size aggregate diagnostics summary and pool scalars are downloaded.
+// The resident free-list and policy masks are exposed through device views.
 CudaSpeciesResidentMaintenanceDiagnostics0490n
 refresh_cuda_species_resident_maintenance_0490n(
     ParticleState& state,

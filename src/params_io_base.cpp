@@ -1620,7 +1620,7 @@ void validate_simulation_params(const SimulationParams& p) {
             p.fluidYMinVelocity == 0.0 && p.fluidYMaxVelocity == 0.0;
         if (!fullStaticDomain0490n) {
             throw std::runtime_error(
-                "0490n resident compact policy mirror currently requires the full static fluid domain");
+                "0490p resident device cell policy currently requires the full static fluid domain");
         }
         if (p.resamplingLatentActivationEnable) {
             throw std::runtime_error(
@@ -1628,7 +1628,7 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if (p.resamplingThermalRenormalizationEnable) {
             throw std::runtime_error(
-                "0490n compact resident deposit mirror currently requires resamplingThermalRenormalizationEnable=false");
+                "0490p resident device cell policy currently requires resamplingThermalRenormalizationEnable=false");
         }
     }
     if (p.speciesResamplingMassClosureEnable) {

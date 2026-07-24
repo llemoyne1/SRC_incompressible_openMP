@@ -374,7 +374,7 @@ for seed in seeds:
     if len(plan)!=steps or len(fast)!=steps or len(close)!=steps:
         raise SystemExit(f'[0490n] FAIL seed={seed} incomplete per-step diagnostics')
     for r in plan:
-        for k in ('handled','pass','accepted','strictResidentMode','productionFastPath','cpuReferenceSkipped','planArrayDownloadSkipped','directDeviceHandoffReady'):
+        for k in ('handled','pass','accepted','strictResidentMode','productionFastPath','cpuReferenceSkipped','planArrayDownloadSkipped','directDeviceHandoffReady','residentPolicyDeviceHandoff','policyMaskUploadSkipped'):
             if int(r[k]) != 1: raise SystemExit(f'[0490n] FAIL seed={seed} plan step={r["step"]} {k}')
         if int(r['cpuPlanEntries']) != 0:
             raise SystemExit(f'[0490n] FAIL seed={seed} CPU plan entry detected')
@@ -397,6 +397,15 @@ for seed in seeds:
         if (int(r['invalidRoleSlots']) != 0 or int(r['activePrefixViolations']) != 0 or
             int(r['duplicateFreeSlots']) != 0 or int(r['activeAndFreeSlots']) != 0):
             raise SystemExit(f'[0490n] FAIL seed={seed} resident pool integrity')
+        if int(r['depositRequested']) == 1:
+            if int(r['cellPolicyDeviceResident']) != 1:
+                raise SystemExit(f'[0490n] FAIL seed={seed} device cell policy not resident')
+            if int(r['policyHostArrayEntries']) != 0 or int(r['cellMirrorDownloadBytes']) != 0:
+                raise SystemExit(f'[0490n] FAIL seed={seed} host per-cell policy mirror detected')
+            if int(r['policySummaryDownloadBytes']) <= 0:
+                raise SystemExit(f'[0490n] FAIL seed={seed} compact policy summary missing')
+            if not math.isclose(float(r['hostCellMirrorSeconds']),0.0,abs_tol=1e-15):
+                raise SystemExit(f'[0490n] FAIL seed={seed} host cell-policy loop detected')
     if not any(int(r['maintenanceWorkspaceReused'])==1 for r in maint[1:]):
         raise SystemExit(f'[0490n] FAIL seed={seed} maintenance workspace not reused')
     if sum(int(r['operations']) for r in fast) <= 0:
@@ -473,9 +482,13 @@ print('[0490n] cpu_post_edit_deposit_calls=0')
 print('[0490n] cpu_post_remap_deposit_calls=0')
 print('[0490n] resident_species_telemetry=compact_fluid_summary_snapshot')
 print('[0490n] resident_species_telemetry_extra_d2h=0')
-print('[0490n] remaining_cpu_scope=compact_cell_policy_mirror')
+print('[0490n] resident_cell_policy=device')
+print('[0490n] host_cell_policy_array_entries=0')
+print('[0490n] cell_policy_mask_h2d=0')
+print('[0490n] strict_zero_resampling_cpu=1')
+print('[0490n] remaining_cpu_scope=none')
 PY_CHECK_LONG_0490N
 
 echo "[0490n] PASS"
-echo "[0490n] validated=0490m_nonregression,resident_cell_deposit,resident_pool_free_list,strict_zero_cpu_maintenance,resident_species_telemetry,long_multispecies_resampling"
+echo "[0490n] validated=0490m_nonregression,resident_cell_deposit,resident_pool_free_list,resident_device_cell_policy,strict_zero_resampling_cpu,resident_species_telemetry,long_multispecies_resampling"
 echo "[0490n] RUN_ROOT=$RUN_ROOT"

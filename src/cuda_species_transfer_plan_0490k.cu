@@ -207,7 +207,8 @@ void append_csv_0490k(
     if (!out) throw std::runtime_error("0490k failed to open diagnostics CSV: " + path.string());
     if (writeHeader) {
         out << "step,handled,pass,accepted,strictResidentMode,productionFastPath,cpuReferenceSkipped,"
-               "planArrayDownloadSkipped,directDeviceHandoffReady,particlesScanned,receiverCells,donorCells,"
+               "planArrayDownloadSkipped,directDeviceHandoffReady,residentPolicyDeviceHandoff,"
+               "policyMaskUploadSkipped,particlesScanned,receiverCells,donorCells,"
                "cpuPlanEntries,gpuPlanEntries,planMismatch,typeMismatch,overflowCount,"
                "usedSharedResidentState,particleUploadSkipped,speciesWorkspaceReused,planWorkspaceReused,"
                "cpuPlannedMass,gpuPlannedMass,maxPlanMassError,maxPlanDistanceError,"
@@ -220,7 +221,8 @@ void append_csv_0490k(
         << (d.accepted ? 1 : 0) << ',' << (d.strictResidentMode ? 1 : 0) << ','
         << (d.productionFastPath ? 1 : 0) << ',' << (d.cpuReferenceSkipped ? 1 : 0) << ','
         << (d.planArrayDownloadSkipped ? 1 : 0) << ',' << (d.directDeviceHandoffReady ? 1 : 0) << ','
-        << d.particlesScanned << ',' << d.receiverCells << ','
+        << (d.residentPolicyDeviceHandoff ? 1 : 0) << ','
+        << (d.policyMaskUploadSkipped ? 1 : 0) << ',' << d.particlesScanned << ',' << d.receiverCells << ','
         << d.donorCells << ',' << d.cpuPlanEntries << ',' << d.gpuPlanEntries << ','
         << d.planMismatch << ',' << d.typeMismatch << ',' << d.overflowCount << ','
         << d.usedSharedResidentState << ',' << d.particleUploadSkipped << ','
@@ -427,6 +429,7 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
     std::uint64_t step,
     CudaSpeciesCellWorkspace0490h& speciesWorkspace,
     CudaSpeciesTransferPlanWorkspace0490k& planWorkspace,
+    const CudaSpeciesCellPolicyDeviceView0490p& residentPolicy0490p,
     WeightedRealFluidDepositWorkspace& resamplingWorkspace,
     WeightedResamplingDiagnostics& resamplingDiagnostics) {
     CudaSpeciesTransferPlanDiagnostics0490k d{};
@@ -471,9 +474,19 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
                 ? "0490l strict resident planner requires complete candidate lists"
                 : "0490k requires a complete 0490g CPU reference plan");
     }
-    if (grid.numCells <= 0 ||
-        static_cast<std::size_t>(grid.numCells) != resamplingWorkspace.wetCell.size()) {
-        throw std::runtime_error("0490k invalid cell grid/workspace shape");
+    const bool useResidentPolicy0490p =
+        d.productionFastPath && params.speciesResamplingCudaResidentDepositsEnable;
+    if (grid.numCells <= 0) {
+        throw std::runtime_error("0490k invalid cell grid");
+    }
+    if (useResidentPolicy0490p) {
+        if (residentPolicy0490p.numCells < grid.numCells || residentPolicy0490p.wetCell == nullptr) {
+            throw std::runtime_error("0490p resident cell-policy device view mismatch");
+        }
+        d.residentPolicyDeviceHandoff = true;
+        d.policyMaskUploadSkipped = true;
+    } else if (static_cast<std::size_t>(grid.numCells) != resamplingWorkspace.wetCell.size()) {
+        throw std::runtime_error("0490k invalid host cell-policy workspace shape");
     }
     validate_species_definitions(params.speciesDefinitions, "0490k species registry");
     if (!params.speciesResamplingCudaResidentDepositsEnable) {
@@ -527,11 +540,16 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         throw std::runtime_error("0490k species workspace device view mismatch");
     }
 
-    const Clock0490k::time_point metadata0 = Clock0490k::now();
-    MPCD_CUDA_0490K_CHECK(cudaMemcpy(
-        impl->wetCell, resamplingWorkspace.wetCell.data(),
-        static_cast<std::size_t>(nc) * sizeof(unsigned char), cudaMemcpyHostToDevice));
-    d.metadataUploadSeconds += seconds_since_0490k(metadata0);
+    const unsigned char* plannerWetCell0490p = impl->wetCell;
+    if (useResidentPolicy0490p) {
+        plannerWetCell0490p = residentPolicy0490p.wetCell;
+    } else {
+        const Clock0490k::time_point metadata0 = Clock0490k::now();
+        MPCD_CUDA_0490K_CHECK(cudaMemcpy(
+            impl->wetCell, resamplingWorkspace.wetCell.data(),
+            static_cast<std::size_t>(nc) * sizeof(unsigned char), cudaMemcpyHostToDevice));
+        d.metadataUploadSeconds += seconds_since_0490k(metadata0);
+    }
     MPCD_CUDA_0490K_CHECK(cudaMemset(impl->outCount, 0, sizeof(unsigned int)));
     MPCD_CUDA_0490K_CHECK(cudaMemset(impl->outOverflow, 0, sizeof(unsigned int)));
     MPCD_CUDA_0490K_CHECK(cudaMemset(impl->outReceiverCells, 0, sizeof(unsigned int)));
@@ -549,7 +567,7 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         resamplingDiagnostics.targetCellMass,
         resamplingDiagnostics.poorMassThreshold,
         resamplingDiagnostics.richMassThreshold,
-        impl->wetCell,
+        plannerWetCell0490p,
         speciesView.speciesTypes,
         speciesView.mass,
         speciesView.totalCellMass,

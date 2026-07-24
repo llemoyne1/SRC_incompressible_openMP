@@ -2,6 +2,7 @@
 
 #include "cell_grid.h"
 #include "cuda_species_cell_fields_0490h.h"
+#include "cuda_species_cell_policy_0490p.h"
 #include "particle_state.h"
 #include "simulation_params.h"
 #include "weighted_resampling.h"
@@ -21,6 +22,8 @@ struct CudaSpeciesTransferPlanDiagnostics0490k {
     bool cpuReferenceSkipped = false;
     bool planArrayDownloadSkipped = false;
     bool directDeviceHandoffReady = false;
+    bool residentPolicyDeviceHandoff = false;
+    bool policyMaskUploadSkipped = false;
 
     std::uint64_t step = 0u;
     std::string outputCsv;
@@ -108,6 +111,7 @@ private:
         std::uint64_t,
         CudaSpeciesCellWorkspace0490h&,
         CudaSpeciesTransferPlanWorkspace0490k&,
+        const CudaSpeciesCellPolicyDeviceView0490p&,
         WeightedRealFluidDepositWorkspace&,
         WeightedResamplingDiagnostics&);
 };
@@ -119,7 +123,8 @@ bool cuda_species_transfer_plan_available_0490k();
 // fields. In 0490l validation mode the CPU reference is skipped but a compact
 // host mirror remains available to the legacy CUDA materializer. In 0490m fast
 // mode, plan arrays remain device-resident and device_view_0490m() is consumed
-// directly by the production materialize+apply backend.
+// directly by the production materialize+apply backend. 0490p also consumes
+// the resident wet-cell policy mask directly, eliminating its host round-trip.
 CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_0490k(
     const ParticleState& state,
     const SimulationParams& params,
@@ -127,6 +132,7 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
     std::uint64_t step,
     CudaSpeciesCellWorkspace0490h& speciesWorkspace,
     CudaSpeciesTransferPlanWorkspace0490k& planWorkspace,
+    const CudaSpeciesCellPolicyDeviceView0490p& residentPolicy0490p,
     WeightedRealFluidDepositWorkspace& resamplingWorkspace,
     WeightedResamplingDiagnostics& resamplingDiagnostics);
 

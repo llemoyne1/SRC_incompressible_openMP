@@ -638,9 +638,14 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     if (grid.numCells <= 0 || grid.numCells != grid.Nx * grid.Ny) {
         throw std::runtime_error("0490i received an invalid grid");
     }
-    if (cpuDepositWorkspace.allocatedCells != grid.numCells ||
-        cpuDepositWorkspace.mass.size() != static_cast<std::size_t>(grid.numCells)) {
+    if (!d.productionFastPath &&
+        (cpuDepositWorkspace.allocatedCells != grid.numCells ||
+         cpuDepositWorkspace.mass.size() != static_cast<std::size_t>(grid.numCells))) {
         throw std::runtime_error("0490i received an invalid CPU reference deposit");
+    }
+    if (d.productionFastPath &&
+        (!cpuDepositDiagnostics.computed || !(cpuDepositDiagnostics.targetCellMass > 0.0))) {
+        throw std::runtime_error("0490p resident policy summary is not ready for 0490i closure");
     }
     validate_species_definitions(params.speciesDefinitions, "0490i species registry");
     if (!params.speciesResamplingCudaResidentDepositsEnable) {

@@ -1799,6 +1799,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 state, params, grid, step,
                 workspace.speciesCellCuda0490h,
                 workspace.speciesTransferPlanCuda0490k,
+                workspace.speciesResidentMaintenanceCuda0490n.cell_policy_device_view_0490p(),
                 workspace.resampling, result.resampling);
         if (!cudaTransferPlan0490k.handled ||
             !cudaTransferPlan0490k.pass ||
