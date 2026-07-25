@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "$ROOT/scripts/src_mpcd_run_common_0434.sh"
 suite_root_cd_0434
 
-CASE_LABEL="universal_species_resampling_matrix"
+CASE_LABEL="species_resampling_qualification_0493c"
 BIN="${BIN:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}"
-RUN_ROOT="${RUN_ROOT:-runs/0493b_universal_species_resampling_matrix}"
+RUN_ROOT="${RUN_ROOT:-runs/0493c_species_resampling_qualification}"
+CASE_GROUP="${CASE_GROUP:-extended}"
+CASE_LIST="${CASE_LIST:-}"
 NX="${NX:-12}"
 NY="${NY:-8}"
 GAMMA="${GAMMA:-6}"
-STEPS="${STEPS:-5}"
+STEPS="${STEPS:-8}"
 DT="${DT:-0.005}"
 KBT="${KBT:-0.005}"
-SEED="${SEED:-49302}"
+SEED="${SEED:-49303}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-1}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-0}"
 UIN="${UIN:-0.03}"
@@ -66,30 +68,29 @@ RESAMPLING_PARTICLE_MASS_MIN=0.1
 RESAMPLING_PARTICLE_MASS_MAX=20.0
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+REQUIRE_ACTIVITY="${REQUIRE_ACTIVITY:-1}"
+REQUIRE_DIRECT_TRANSFER="${REQUIRE_DIRECT_TRANSFER:-1}"
 
 export LIVE_PROGRESS
 suite_defaults_common_0434
 suite_compute_derived_0434
 
 if (( GAMMA < 4 )); then
-  echo "[0493b-matrix] ERROR GAMMA must be >=4" >&2
+  echo "[0493c] ERROR GAMMA must be >=4" >&2
   exit 2
 fi
 if (( GAMMA % 2 != 0 )); then
-  echo "[0493b-matrix] ERROR qualification GAMMA must be even" >&2
+  echo "[0493c] ERROR qualification GAMMA must be even" >&2
   exit 2
 fi
 if [[ "$CLEAN_RUN_ROOT" == 1 ]]; then rm -rf "$RUN_ROOT"; fi
 mkdir -p "$RUN_ROOT/init" "$RUN_ROOT/logs"
+if [[ "$PREFLIGHT_ONLY" != 1 ]]; then suite_ensure_binary_0434; fi
 
-# Compile or refresh the binary once. Individual cases launch the same binary directly.
-if [[ "$PREFLIGHT_ONLY" != 1 ]]; then
-  suite_ensure_binary_0434
-fi
-
-STATE="$RUN_ROOT/init/two_species_0493b.smpcd"
-python3 - "$STATE" "$NX" "$NY" "$GAMMA" "$SOLVENT_MASS" "$COLLOID_MASS" "$INACTIVE_SLOTS_CELL_FRACTION" <<'PY_STATE'
-import os, struct, sys
+make_state_0493c() {
+  local path=$1
+  python3 - "$path" "$NX" "$NY" "$GAMMA" "$SOLVENT_MASS" "$COLLOID_MASS" "$INACTIVE_SLOTS_CELL_FRACTION" <<'PY_STATE'
+import math, os, struct, sys
 path, nx, ny, gamma, ms, mc, inactive_fraction = sys.argv[1:]
 nx, ny, gamma = int(nx), int(ny), int(gamma)
 ms, mc, inactive_fraction = float(ms), float(mc), float(inactive_fraction)
@@ -113,9 +114,9 @@ for j in range(ny):
             else:
                 typ.append(2); mass.append(mc)
             role.append(1)
-active = len(x)
-inactive = max(1, int(round(nx * ny * inactive_fraction)))
-for k in range(inactive):
+active=len(x)
+inactive=max(1, int(round(nx*ny*inactive_fraction)))
+for _ in range(inactive):
     x.append(0.0); y.append(0.0); vx.append(0.0); vy.append(0.0)
     typ.append(0); mass.append(1.0); role.append(0)
 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -128,10 +129,14 @@ with open(path,"wb") as f:
     f.write(struct.pack("<8Q",*reserved))
     for arr,fmt in [(x,"d"),(y,"d"),(vx,"d"),(vy,"d"),(typ,"I"),(mass,"d"),(role,"B")]:
         f.write(struct.pack(f"<{N}{fmt}",*arr))
-print(f"[0493b-state] path={path} fluid={active} inactive={inactive} capacity={N} cells={nx*ny} gamma={gamma} donorCell={donor_cell} receiverCell={receiver_cell}")
+print(f"[0493c-state] path={path} fluid={active} inactive={inactive} capacity={N} donorCell={donor_cell} receiverCell={receiver_cell}")
 PY_STATE
+}
 
-write_topology_0493b() {
+STATE_STANDARD="$RUN_ROOT/init/two_species_standard_0493c.smpcd"
+make_state_0493c "$STATE_STANDARD"
+
+write_topology_0493c() {
   local topology=$1 params=$2
   case "$topology" in
     periodic)
@@ -211,11 +216,11 @@ wallVpGamma = $GAMMA
 wallVpMass = $PARTICLE_MASS
 EOF
       ;;
-    *) echo "[0493b-matrix] ERROR unsupported topology=$topology" >&2; return 2 ;;
+    *) echo "[0493c] ERROR unsupported topology=$topology" >&2; return 2 ;;
   esac
 }
 
-write_darcy_0493b() {
+write_darcy_0493c() {
   local params=$1
   cat >> "$params" <<'EOF'
 darcyBrinkmanEnable = true
@@ -231,16 +236,21 @@ darcyUSolidX = 0.0
 darcyUSolidY = 0.0
 darcyBrinkmanForcingMode = mean
 darcyCostEvery = 1
-darcyCostFilename = darcy_cost_0493b.csv
+darcyCostFilename = darcy_cost_0493c.csv
 EOF
 }
 
-write_params_0493b() {
+backend_topology_0493c() {
+  printf '%s' "$1"
+}
+
+write_params_0493c() {
   local case_dir=$1 mode=$2 topology=$3 solvent_switch=$4 colloid_switch=$5 darcy=$6
-  local params="$case_dir/params/params_0493b.kv"
+  local params="$case_dir/params/params_0493c.kv"
+  local state="$STATE_STANDARD"
   mkdir -p "$case_dir/params" "$case_dir/output" "$case_dir/logs"
   cat > "$params" <<EOF
-inputState = $STATE
+inputState = $state
 outputDir = $case_dir/output
 Lx = 1.0
 Ly = 1.0
@@ -265,10 +275,14 @@ speciesQ6Mode = weighted
 speciesQ6Sensitivity = 1.0
 speciesQ6FallbackMode = common
 speciesQ6ComparisonTolerance = 1.0e-11
+speciesMassClosureCudaDiagnosticsFilename = cuda_species_mass_closure_0490i.csv
+speciesTransferCudaDiagnosticsFilename = cuda_species_transfer_plan_0490k.csv
+speciesCudaResidentFastPathDiagnosticsFilename = cuda_species_resident_fast_path_0490m.csv
+speciesCudaResidentMaintenanceDiagnosticsFilename = cuda_species_resident_maintenance_0490n.csv
 EOF
-  write_topology_0493b "$topology" "$params"
+  write_topology_0493c "$topology" "$params"
   if [[ "$darcy" == 1 ]]; then
-    write_darcy_0493b "$params"
+    write_darcy_0493c "$params"
     CUDA_RESAMPLING_CHI_FILTER_ENABLE=true
   else
     CUDA_RESAMPLING_CHI_FILTER_ENABLE=false
@@ -283,27 +297,46 @@ EOF
   printf '%s\n' "$params"
 }
 
-run_case_0493b() {
-  local name=$1 mode=$2 topology=$3 solvent_switch=$4 colloid_switch=$5 darcy=$6
-  local case_dir="$RUN_ROOT/$name"
-  local log="$case_dir/logs/run_0493b.log"
-  local time_file="$case_dir/logs/time_0493b.txt"
-  local params
-  params="$(write_params_0493b "$case_dir" "$mode" "$topology" "$solvent_switch" "$colloid_switch" "$darcy")" || return 2
+case_selected_0493c() {
+  local name=$1
+  if [[ -n "$CASE_LIST" ]]; then
+    [[ ",$CASE_LIST," == *",$name,"* ]]
+    return
+  fi
+  case "$CASE_GROUP" in
+    all) return 0 ;;
+    extended)
+      [[ "$name" =~ ^(09_|10_|11_|12_|13_|14_) ]]
+      ;;
+    medium)
+      [[ "$name" =~ ^(01_periodic_all|02_periodic_solvent_only|09_periodic_colloid_only|12_periodic_darcy_none|13_q6_segmented_solvent_only|14_q6_segmented_darcy_solvent_only)$ ]]
+      ;;
+    *) echo "[0493c] ERROR unsupported CASE_GROUP=$CASE_GROUP" >&2; exit 2 ;;
+  esac
+}
 
+run_case_0493c() {
+  local name=$1 mode=$2 topology=$3 solvent_switch=$4 colloid_switch=$5 darcy=$6
+  case_selected_0493c "$name" || return 0
+  local case_dir="$RUN_ROOT/$name"
+  local log="$case_dir/logs/run_0493c.log"
+  local time_file="$case_dir/logs/time_0493c.txt"
+  local params backend_topology
+  params="$(write_params_0493c "$case_dir" "$mode" "$topology" "$solvent_switch" "$colloid_switch" "$darcy")"
+  backend_topology="$(backend_topology_0493c "$topology")"
   CUDA_RESAMPLING_CHI_FILTER_ENABLE=false
   [[ "$darcy" == 1 ]] && CUDA_RESAMPLING_CHI_FILTER_ENABLE=true
-  suite_export_cuda_flags_0434 "$mode" "$topology"
+  suite_export_cuda_flags_0434 "$mode" "$backend_topology"
   export SRC_LIVE_VIS_ENABLE=0 MPCD_LIVE_VIS_ENABLE=0 LIVE_PROGRESS
-  suite_preflight_run_ok_0492 "$params" || {
-    echo "$name,FAIL,preflight" >> "$RUN_ROOT/status_0493b.csv"; return 0; }
-
-  if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
-    echo "$name,PASS,preflight-only" >> "$RUN_ROOT/status_0493b.csv"
+  if ! suite_preflight_run_ok_0492 "$params"; then
+    echo "$name,FAIL,preflight" >> "$RUN_ROOT/status_0493c.csv"
     return 0
   fi
-
-  echo "[0493b-matrix] case=$name mode=$mode topology=$topology solvent=$solvent_switch colloid=$colloid_switch darcy=$darcy"
+  if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+    echo "$name,PASS,preflight-only" >> "$RUN_ROOT/status_0493c.csv"
+    return 0
+  fi
+  echo "[0493c] case=$name mode=$mode topology=$topology backendTopology=$backend_topology solvent=$solvent_switch colloid=$colloid_switch darcy=$darcy"
   set +e
   /usr/bin/time -o "$time_file" -f 'elapsed=%e user=%U sys=%S' "$BIN" "$params" > "$log" 2>&1
   local rc=$?
@@ -313,26 +346,38 @@ run_case_0493b() {
   if grep -Eqi 'Fatal error|\[.*ERROR|CPU equivalence gate|host patchback|fallback.*CPU' "$log"; then
     status=FAIL; reason=forbidden-log-pattern
   fi
-  if grep -Eq 'resampDisabledSpeciesMutationCount,?[^0-9]*[1-9]|disabledSpeciesMutationCount[=:,][[:space:]]*[1-9]' "$log"; then
-    status=FAIL; reason=disabled-species-mutation
-  fi
-  echo "$name,$status,$reason" >> "$RUN_ROOT/status_0493b.csv"
-  [[ "$status" == PASS ]] || tail -80 "$log" >&2 || true
+  echo "$name,$status,$reason" >> "$RUN_ROOT/status_0493c.csv"
+  [[ "$status" == PASS ]] || tail -100 "$log" >&2 || true
 }
 
-printf 'case,status,reason\n' > "$RUN_ROOT/status_0493b.csv"
-run_case_0493b 01_periodic_all src-resampling periodic true true 0
-run_case_0493b 02_periodic_solvent_only src-resampling periodic true false 0
-run_case_0493b 03_walls src-resampling wall true true 0
-run_case_0493b 04_fullface src-resampling io_fullface true true 0
-run_case_0493b 05_segmented src-resampling segmented true true 0
-run_case_0493b 06_darcy src-resampling periodic true true 1
-run_case_0493b 07_segmented_darcy src-resampling segmented true true 1
-run_case_0493b 08_q6_segmented src-q6-resampling segmented true true 0
+printf 'case,status,reason\n' > "$RUN_ROOT/status_0493c.csv"
+run_case_0493c 01_periodic_all src-resampling periodic true true 0
+run_case_0493c 02_periodic_solvent_only src-resampling periodic true false 0
+run_case_0493c 03_walls src-resampling wall true true 0
+run_case_0493c 04_fullface src-resampling io_fullface true true 0
+run_case_0493c 05_segmented src-resampling segmented true true 0
+run_case_0493c 06_darcy src-resampling periodic true true 1
+run_case_0493c 07_segmented_darcy src-resampling segmented true true 1
+run_case_0493c 08_q6_segmented src-q6-resampling segmented true true 0
+run_case_0493c 09_periodic_colloid_only src-resampling periodic false true 0
+run_case_0493c 10_periodic_none src-resampling periodic false false 0
+run_case_0493c 11_periodic_darcy_colloid_only src-resampling periodic false true 1
+run_case_0493c 12_periodic_darcy_none src-resampling periodic false false 1
+run_case_0493c 13_q6_segmented_solvent_only src-q6-resampling segmented true false 0
+run_case_0493c 14_q6_segmented_darcy_solvent_only src-q6-resampling segmented true false 1
 
-cat "$RUN_ROOT/status_0493b.csv"
-if grep -q ',FAIL,' "$RUN_ROOT/status_0493b.csv"; then
-  echo "[0493b-matrix] FAIL" >&2
+cat "$RUN_ROOT/status_0493c.csv"
+if grep -q ',FAIL,' "$RUN_ROOT/status_0493c.csv"; then
+  echo "[0493c] FAIL runner" >&2
   exit 2
 fi
-echo "[0493b-matrix] PASS"
+if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+  echo "[0493c] PASS preflight"
+  exit 0
+fi
+
+AUDIT_ARGS=(--root "$RUN_ROOT")
+[[ "$REQUIRE_ACTIVITY" == 1 ]] && AUDIT_ARGS+=(--require-activity)
+[[ "$REQUIRE_DIRECT_TRANSFER" == 1 ]] && AUDIT_ARGS+=(--require-direct-transfer)
+python3 scripts/analyze_0493c_resident_qualification.py "${AUDIT_ARGS[@]}"
+echo "[0493c] PASS"
