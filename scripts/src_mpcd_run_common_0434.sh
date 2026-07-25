@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Common helpers for homogeneous SRC/MPCD CUDA run scripts, 0434c.
+# Common helpers for homogeneous SRC/MPCD CUDA run scripts, 0434c + 0492.
 # Source this file from scripts/run_0434_*.sh.  It centralizes:
 #   - INTEG_PATH selection: src | src-resampling | src-q6 | src-q6-resampling
 #   - CUDA resident/Q6/resampling flags
 #   - gamma-relative resampling thresholds
 #   - livevis + 0433a WYSIWYR filtered recording controls
 #   - autonomous initial-state / chi generation.
+#   - 0492 run_ok preflight, LiveVis type filtering and optional 0490p species chain.
 
 set -euo pipefail
 
@@ -19,6 +20,47 @@ suite_path_has_q6_0434() {
 
 suite_path_has_resampling_0434() {
   case "${1:-src}" in src-resampling|resampling|src-q6-resampling|q6-resampling) return 0 ;; *) return 1 ;; esac
+}
+
+suite_species_resampling_active_0492() {
+  suite_path_has_resampling_0434 "${1:-src}" && suite_truthy_0434 "${SPECIES_RESAMPLING_ENABLE:-0}"
+}
+
+# 0493a universal resident routing.
+#
+# Boundary conditions select their own CUDA streaming/IO implementation, but
+# they no longer select a different species-resampling backend.
+#
+#   production : 0490m/0490n/0490p resident path for every supported topology.
+#   validation : explicit CPU/CUDA qualification path; never selected by auto.
+#
+# Historical aliases are accepted and routed to production so existing runners
+# do not silently re-enable the host-compatible path.
+suite_species_resident_mode_0493a() {
+  local mode="${1:-src}"
+  if ! suite_species_resampling_active_0492 "$mode"; then
+    printf 'off'
+    return 0
+  fi
+
+  local requested="${SPECIES_RESIDENT_MODE:-production}"
+  case "$requested" in
+    production|resident|fast|auto|compatible|transitional|host-compatible|host_compatible)
+      printf 'production'
+      ;;
+    validation)
+      printf 'validation'
+      ;;
+    *)
+      echo "[0493a-run-ok] ERROR unsupported SPECIES_RESIDENT_MODE=$requested; expected production or validation" >&2
+      return 2
+      ;;
+  esac
+}
+
+# Compatibility alias for existing 0492 callers.
+suite_species_resident_mode_0492a() {
+  suite_species_resident_mode_0493a "$@"
 }
 
 suite_validate_path_0434() {
@@ -151,10 +193,17 @@ suite_clear_cuda_flags_0434() {
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=0
   export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+  export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+  export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
 }
 
 suite_export_cuda_flags_0434() {
   local mode=$1 topology=$2
+  local species_resident_mode
+  species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+  SUITE_ACTIVE_MODE_0434="$mode"
+  SUITE_ACTIVE_TOPOLOGY_0434="$topology"
+  export SUITE_ACTIVE_MODE_0434 SUITE_ACTIVE_TOPOLOGY_0434
   suite_clear_cuda_flags_0434
 
   export MPCD_CUDA_INACTIVE_TAIL_POOL_0313="${MPCD_CUDA_INACTIVE_TAIL_POOL_0313:-1}"
@@ -227,7 +276,11 @@ suite_export_cuda_flags_0434() {
     RESAMPLING_FULL_GATE_ENABLE="${RESAMPLING_FULL_GATE_ENABLE:-0}"
     RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE="${RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE:-0}"
     RESAMPLING_UPSTREAM_VALIDATE_ENABLE="${RESAMPLING_UPSTREAM_VALIDATE_ENABLE:-0}"
-    RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}"
+    local resampling_materializer_validate
+    resampling_materializer_validate="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}"
+    if [[ "$species_resident_mode" == validation ]]; then
+      resampling_materializer_validate=1
+    fi
 
     export MPCD_CUDA_RESAMPLING_PRODUCTION_STRIP_0484="$RESAMPLING_PRODUCTION_STRIP"
     export MPCD_CUDA_RESAMPLING_DIAG_CSV_0484="$RESAMPLING_DIAG_CSV_ENABLE"
@@ -236,16 +289,26 @@ suite_export_cuda_flags_0434() {
 
     export MPCD_CUDA_RESAMPLING_PIPELINE_APPLY_0448=1
     export MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_0455=1
-    export MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461=1
+    export MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461="${RESAMPLING_SPARSE_DEVICE_GATE_ENABLE:-0}"
     export MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_GATE_EVERY_0461="${RESIDENT_GATE_EVERY:-${SUMMARY_EVERY:-100}}"
     export MPCD_CUDA_RESAMPLING_DIRECT_STATE_COMMIT_0471=1
     export MPCD_CUDA_RESAMPLING_SHARED_STATE_DIRECT_COMMIT_0472=1
-    export MPCD_CUDA_RESAMPLING_HOST_PATCHBACK_0473="${RESAMPLING_HOST_PATCHBACK_ENABLE:-1}"
+    export MPCD_CUDA_RESAMPLING_HOST_PATCHBACK_0473="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
     export MPCD_CUDA_RESAMPLING_UPSTREAM_SHARED_STATE_0474=1
-    export MPCD_CUDA_RESAMPLING_MATERIALIZER_SHARED_STATE_0475="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE}"
-    export MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE}"
-    export MPCD_CUDA_RESAMPLING_MATERIALIZER_CELL_LIST_0475B="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE}"
-    export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=1
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_SHARED_STATE_0475="$resampling_materializer_validate"
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A="$resampling_materializer_validate"
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_CELL_LIST_0475B="$resampling_materializer_validate"
+    if [[ "$species_resident_mode" == validation ]]; then
+      export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=1
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453="${SPECIES_VALIDATION_MATERIALIZE_EVERY:-1}"
+    else
+      # 0493a production: the CUDA plan and CUDA materializer are authoritative.
+      # Do not rebuild or upload a CPU passive-operation vector.
+      export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
+    fi
     export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450="$RESAMPLING_UPSTREAM_VALIDATE_ENABLE"
     export MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451="$RESAMPLING_UPSTREAM_VALIDATE_ENABLE"
     export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_EVERY_0450="${RESIDENT_GATE_EVERY:-${SUMMARY_EVERY:-100}}"
@@ -256,7 +319,12 @@ suite_export_cuda_flags_0434() {
     export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_EVERY="${FLAG_EVERY:-50}"
     export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_NMIN="$GUARD_NMIN"
     export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_EMPTY=1
-    export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296="${MASS_RECONDITION_ENABLE:-1}"
+    if suite_species_resampling_active_0492 "$mode"; then
+      # 0491h-fix1b: 0296 is not species-conservative after typed split/merge.
+      export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296=0
+    else
+      export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296="${MASS_RECONDITION_ENABLE:-1}"
+    fi
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_EVERY="${MASS_RECONDITION_EVERY:-${GUARD_EVERY:-5}}"
     export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_STRENGTH="${MASS_RECONDITION_STRENGTH:-1.0}"
     export MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=1
@@ -291,6 +359,8 @@ suite_export_cuda_flags_0434() {
     export MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A=0
     export MPCD_CUDA_RESAMPLING_MATERIALIZER_CELL_LIST_0475B=0
     export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+    export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+    export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
     export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450=0
     export MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451=0
     export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295=0
@@ -322,6 +392,7 @@ smoothPasses = ${LIVE_VIS_SMOOTH_PASSES}
 liveGridNx = ${LIVE_VIS_NX}
 liveGridNy = ${LIVE_VIS_NY}
 liveEvery = ${LIVE_VIS_EVERY}
+particleTypeFilter = ${PARTICLE_TYPE_FILTER}
 filterMode = ${FILTER_MODE}
 filterTau = ${FILTER_TAU}
 filterSampleEvery = ${FILTER_SAMPLE_EVERY}
@@ -356,13 +427,48 @@ suite_export_livevis_0434() {
   export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
   export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
   export SRC_LIVE_VIS_HOLD_ON_EXIT="$LIVE_VIS_HOLD_ON_EXIT"
+  export MPCD_LIVE_VIS_HOLD_ON_EXIT="$LIVE_VIS_HOLD_ON_EXIT"
+  export SRC_LIVE_VIS_PARTICLE_TYPE_FILTER="$PARTICLE_TYPE_FILTER"
+  export MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER="$PARTICLE_TYPE_FILTER"
   export MPCD_FILTERED_FIELD_RECORDING_0432="$FILTERED_RECORDING_ENABLE"
+  export LIVE_PROGRESS
 }
 
 suite_write_common_params_0434() {
   local mode=$1
-  local path_resampling
+  local path_resampling species_resampling=false
+  local species_resident_mode=off
+  local species_resident_validation=false
+  local species_resident_fast=false
+  local species_resident_deposits=false
+  local species_resident_pool=false
+  local species_resident_maintenance_strict=false
+  local thermal_renormalization mass_guard
   path_resampling="$(suite_path_resampling_kv_0434 "$mode")"
+  if suite_species_resampling_active_0492 "$mode"; then
+    species_resampling=true
+    species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "${SUITE_ACTIVE_TOPOLOGY_0434:-${TOPOLOGY:-unknown}}")"
+    case "$species_resident_mode" in
+      production)
+        species_resident_fast=true
+        species_resident_deposits=true
+        species_resident_pool=true
+        species_resident_maintenance_strict=true
+        ;;
+      validation)
+        species_resident_validation=true
+        ;;
+      *)
+        echo "[0493a-run-ok] ERROR invalid resolved species resident mode=$species_resident_mode" >&2
+        return 2
+        ;;
+    esac
+    thermal_renormalization=false
+    mass_guard=false
+  else
+    thermal_renormalization="${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-true}"
+    mass_guard="${RESAMPLING_MASS_GUARD_ENABLE:-true}"
+  fi
   cat <<PARAMS
 srcClassicCudaModeEnable = $(suite_path_src_classic_kv_0434 "$mode")
 projectionEnable = $(suite_path_projection_kv_0434 "$mode")
@@ -380,6 +486,18 @@ cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE}
 cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA}
 cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION}
 cudaResamplingEmptyRefillMemoryMaxAge = ${EMPTY_REFILL_MEMORY_MAX_AGE}
+cudaResamplingEmptyRefillSpeciesCompositionEnable = ${species_resampling}
+speciesResamplingMassClosureEnable = ${species_resampling}
+speciesResamplingMassClosureCudaEnable = ${species_resampling}
+speciesResamplingPopulationGuardEnable = ${species_resampling}
+speciesResamplingPopulationGuardCudaEnable = ${species_resampling}
+speciesResamplingTransferEnable = ${species_resampling}
+speciesResamplingTransferCudaEnable = ${species_resampling}
+speciesResamplingCudaResidentValidationEnable = ${species_resident_validation}
+speciesResamplingCudaResidentFastPathEnable = ${species_resident_fast}
+speciesResamplingCudaResidentDepositsEnable = ${species_resident_deposits}
+speciesResamplingCudaResidentPoolEnable = ${species_resident_pool}
+speciesResamplingCudaResidentMaintenanceStrict = ${species_resident_maintenance_strict}
 resamplingPopulationNMin = ${GUARD_NMIN}
 resamplingPopulationNTarget = ${GUARD_NTARGET}
 resamplingPopulationNMax = ${GUARD_NMAX}
@@ -389,8 +507,8 @@ resamplingWetCellMassThreshold = 0.0
 resamplingExtractionEnable = ${RESAMPLING_EXTRACTION_ENABLE:-true}
 resamplingInsertionEnable = ${RESAMPLING_INSERTION_ENABLE:-true}
 resamplingRemapEnable = ${RESAMPLING_REMAP_ENABLE:-true}
-resamplingThermalRenormalizationEnable = ${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-true}
-resamplingMassGuardEnable = ${RESAMPLING_MASS_GUARD_ENABLE:-true}
+resamplingThermalRenormalizationEnable = ${thermal_renormalization}
+resamplingMassGuardEnable = ${mass_guard}
 resamplingParticleMassMin = ${RESAMPLING_PARTICLE_MASS_MIN:-0.5}
 resamplingParticleMassMax = ${RESAMPLING_PARTICLE_MASS_MAX:-2.0}
 resamplingLatentActivationEnable = false
@@ -471,12 +589,105 @@ suite_generate_case_0434() {
     --naca-chord "$NACA_CHORD" --naca-cx "$NACA_CX" --naca-cy "$NACA_CY" --naca-alpha-deg "$NACA_ALPHA_DEG" --naca-thickness "$NACA_THICKNESS"
 }
 
+suite_preflight_run_ok_0492() {
+  local params=$1
+  local mode="${SUITE_ACTIVE_MODE_0434:-unknown}"
+  local topology="${SUITE_ACTIVE_TOPOLOGY_0434:-unknown}"
+  [[ -f "$params" ]] || { echo "[0492-run-ok] ERROR missing params: $params" >&2; return 2; }
+
+  if suite_truthy_0434 "$LIVE_VIS_ENABLE"; then
+    [[ -f "$LIVE_VIS_CONTROL_FILE" ]] || { echo "[0492-run-ok] ERROR missing LiveVis control: $LIVE_VIS_CONTROL_FILE" >&2; return 2; }
+    grep -Eq '^[[:space:]]*field[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis field missing" >&2; return 2; }
+    grep -Eq '^[[:space:]]*particleTypeFilter[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis particleTypeFilter missing" >&2; return 2; }
+  fi
+
+  if suite_species_resampling_active_0492 "$mode"; then
+    local key
+    grep -Eq '^[[:space:]]*speciesRegistryEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+      echo "[0492a-run-ok] ERROR species path requires speciesRegistryEnable=true" >&2; return 2; }
+    grep -Eq '^[[:space:]]*speciesRequireRegisteredTypes[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+      echo "[0492a-run-ok] ERROR species path requires speciesRequireRegisteredTypes=true" >&2; return 2; }
+    for key in \
+      cudaResamplingEmptyRefillEnable \
+      cudaResamplingEmptyRefillSpeciesCompositionEnable \
+      speciesResamplingMassClosureEnable \
+      speciesResamplingMassClosureCudaEnable \
+      speciesResamplingPopulationGuardEnable \
+      speciesResamplingPopulationGuardCudaEnable \
+      speciesResamplingTransferEnable \
+      speciesResamplingTransferCudaEnable; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true([[:space:]]|$)" "$params" || {
+        echo "[0492-run-ok] ERROR species-resampling key not enabled: $key" >&2
+        return 2
+      }
+    done
+    local species_resident_mode
+    species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+    local expect_true=() expect_false=()
+    case "$species_resident_mode" in
+      production)
+        expect_true=(
+          speciesResamplingCudaResidentFastPathEnable
+          speciesResamplingCudaResidentDepositsEnable
+          speciesResamplingCudaResidentPoolEnable
+          speciesResamplingCudaResidentMaintenanceStrict
+        )
+        expect_false=(speciesResamplingCudaResidentValidationEnable)
+        ;;
+      validation)
+        expect_true=(speciesResamplingCudaResidentValidationEnable)
+        expect_false=(
+          speciesResamplingCudaResidentFastPathEnable
+          speciesResamplingCudaResidentDepositsEnable
+          speciesResamplingCudaResidentPoolEnable
+          speciesResamplingCudaResidentMaintenanceStrict
+        )
+        [[ "${MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453:-0}" == 1 ]] || {
+          echo "[0493a-run-ok] ERROR validation mode requires CUDA operation materializer 0453" >&2
+          return 2
+        }
+        ;;
+      *)
+        echo "[0493a-run-ok] ERROR invalid species resident mode=$species_resident_mode" >&2
+        return 2
+        ;;
+    esac
+    for key in "${expect_true[@]}"; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true([[:space:]]|$)" "$params" || {
+        echo "[0492a-run-ok] ERROR expected $key=true for speciesResident=$species_resident_mode" >&2; return 2; }
+    done
+    for key in "${expect_false[@]}"; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*false([[:space:]]|$)" "$params" || {
+        echo "[0492a-run-ok] ERROR expected $key=false for speciesResident=$species_resident_mode" >&2; return 2; }
+    done
+    grep -Eq '^[[:space:]]*resamplingThermalRenormalizationEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0492-run-ok] ERROR species path requires resamplingThermalRenormalizationEnable=false" >&2; return 2; }
+    grep -Eq '^[[:space:]]*resamplingMassGuardEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0492-run-ok] ERROR species path requires resamplingMassGuardEnable=false" >&2; return 2; }
+    [[ "${MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296:-1}" == 0 ]] || {
+      echo "[0492-run-ok] ERROR species path requires 0296 disabled" >&2; return 2; }
+  fi
+
+  local resident_summary=off
+  if suite_species_resampling_active_0492 "$mode"; then
+    resident_summary="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+  fi
+  echo "[0493a-run-ok] preflight=PASS mode=$mode topology=$topology binary=$BIN livevis=$LIVE_VIS_ENABLE particleTypeFilter=$PARTICLE_TYPE_FILTER speciesResampling=${SPECIES_RESAMPLING_ENABLE:-0} speciesResident=$resident_summary 0296=${MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296:-0}"
+}
+
 suite_run_binary_0434() {
   local params=$1 log=$2 time=$3 out=$4
-  suite_ensure_binary_0434
+  if ! suite_truthy_0434 "${PREFLIGHT_ONLY:-0}"; then
+    suite_ensure_binary_0434
+  fi
+  suite_preflight_run_ok_0492 "$params"
   echo "[0434-suite] binary=$BIN"
   echo "[0434-suite] params=$params"
   echo "[0434-suite] output=$out"
+  if suite_truthy_0434 "${PREFLIGHT_ONLY:-0}"; then
+    echo "[0493a-run-ok] PREFLIGHT_ONLY=1: binary launch skipped"
+    return 0
+  fi
   local rc=0
   /usr/bin/time -o "$time" -f 'elapsed=%e user=%U sys=%S' "$BIN" "$params" | tee "$log" || rc=$?
   if [[ "$rc" != 0 ]]; then
@@ -490,7 +701,7 @@ suite_run_binary_0434() {
 suite_write_env_file_0434() {
   local file=$1 mode=$2
   mkdir -p "$(dirname "$file")"
-  env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
+  env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|LIVE_PROGRESS=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
   cat >> "$file" <<META
 mode=${mode}
 GUARD_NMIN=${GUARD_NMIN}
@@ -500,6 +711,13 @@ RESAMPLING_NMIN_COEF=${RESAMPLING_NMIN_COEF}
 RESAMPLING_NMAX_COEF=${RESAMPLING_NMAX_COEF}
 INACTIVE_SLOTS=${INACTIVE_SLOTS}
 LIVE_VIS_CONTROL_FILE=${LIVE_VIS_CONTROL_FILE}
+LIVE_PROGRESS=${LIVE_PROGRESS}
+PARTICLE_TYPE_FILTER=${PARTICLE_TYPE_FILTER}
+PREFLIGHT_ONLY=${PREFLIGHT_ONLY}
+SPECIES_RESAMPLING_ENABLE=${SPECIES_RESAMPLING_ENABLE}
+SPECIES_RESIDENT_MODE=${SPECIES_RESIDENT_MODE}
+SPECIES_RESIDENT_MODE_RESOLVED=$(suite_species_resident_mode_0492a "$mode" "${SUITE_ACTIVE_TOPOLOGY_0434:-${TOPOLOGY:-unknown}}")
+SPECIES_VALIDATION_MATERIALIZE_EVERY=${SPECIES_VALIDATION_MATERIALIZE_EVERY}
 META
 }
 
@@ -512,6 +730,9 @@ suite_defaults_common_0434() {
 
   BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
   CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+  PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+  LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+  export LIVE_PROGRESS
   PARTICLE_MASS="${PARTICLE_MASS:-1.0}"
   BACKGROUND_TYPE="${BACKGROUND_TYPE:-0}"
   INACTIVE_TYPE="${INACTIVE_TYPE:-0}"
@@ -526,7 +747,10 @@ suite_defaults_common_0434() {
   RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE="${RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE:-0}"
   RESAMPLING_UPSTREAM_VALIDATE_ENABLE="${RESAMPLING_UPSTREAM_VALIDATE_ENABLE:-0}"
   RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}"
-  RESAMPLING_HOST_PATCHBACK_ENABLE="${RESAMPLING_HOST_PATCHBACK_ENABLE:-1}"
+  RESAMPLING_HOST_PATCHBACK_ENABLE="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
+  SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-false}"
+  SPECIES_RESIDENT_MODE="${SPECIES_RESIDENT_MODE:-production}"
+  SPECIES_VALIDATION_MATERIALIZE_EVERY="${SPECIES_VALIDATION_MATERIALIZE_EVERY:-1}"
   DUMP_ROLE_FILTER="${DUMP_ROLE_FILTER:-fluid}"
   SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
 
@@ -567,6 +791,7 @@ suite_defaults_common_0434() {
   LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
   LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-0}"
   LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-0}"
+  PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:--1}"
 
   FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
   RECORD_ENABLE="${RECORD_ENABLE:-true}"

@@ -1603,11 +1603,10 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error(
                 "speciesResamplingCudaResidentFastPathEnable and speciesResamplingCudaResidentValidationEnable are mutually exclusive");
         }
-        if (!(p.bcLeft == "periodic" && p.bcRight == "periodic" &&
-              p.bcBottom == "periodic" && p.bcTop == "periodic")) {
-            throw std::runtime_error(
-                "0490m resident fast path is currently restricted to fully periodic boundaries");
-        }
+        // 0493a: topology-only qualification guard removed.
+        // The 0490m/n/p resident chain now consumes the current shared
+        // CUDA state for every already-supported boundary family.
+
         if (p.immersedSolidEnable) {
             throw std::runtime_error(
                 "0490m resident fast path is currently restricted to no immersed solid");

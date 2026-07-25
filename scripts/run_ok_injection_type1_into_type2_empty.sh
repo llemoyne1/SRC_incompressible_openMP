@@ -9,7 +9,7 @@ suite_root_cd_0434
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
 CASE_LABEL="injection_type1_into_type2"
-PHYSICS_LABEL="${PHYSICS_LABEL:-liquid_type1_into_gas_type2}"
+PHYSICS_LABEL="${PHYSICS_LABEL:-liquid_type1_injection}"
 GEN_CASE="injection"
 TOPOLOGY="segmented"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
@@ -18,26 +18,33 @@ SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-5.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
 BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
-LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
 # Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
 # Default runs one robust path selected below. To compare all paths, set:
 #   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6}}}}"
-
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}}"
+ 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
-LIVE_VIS_NX="${LIVE_VIS_NX:-1200}"; LIVE_VIS_NY="${LIVE_VIS_NY:-300}"
-LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-gray}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-$NX}"; LIVE_VIS_NY="${LIVE_VIS_NY:-$NY}"
+LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-hot}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
 LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-2}"
 RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
 FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
-LIVE_PROGRESS=${LIVE_PROGRESS:-1}
-LIVE_VIS_HOLD_ON_EXIT=${LIVE_VIS_HOLD_ON_EXIT:-1}
+LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-1}"
+# LiveVis may consume device snapshots, but must not request a resampling host mirror.
+LIVE_VIS_RESAMPLING_HOST_MIRROR="${LIVE_VIS_RESAMPLING_HOST_MIRROR:-0}"
+LIVE_VIS_FORCE_HOST_MIRROR="${LIVE_VIS_FORCE_HOST_MIRROR:-0}"
+export LIVE_VIS_RESAMPLING_HOST_MIRROR LIVE_VIS_FORCE_HOST_MIRROR
+PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:--1}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 # Gamma-relative resampling thresholds. Actual integer thresholds are derived in common.
 RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coef))
@@ -46,22 +53,32 @@ GUARD_EVERY="${GUARD_EVERY:-5}"
 
 BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"   # compressible gas
 INJECT_TYPE="${INJECT_TYPE:-1}"           # incompressible liquid
-LIQUID_TO_GAS_MASS_RATIO="${LIQUID_TO_GAS_MASS_RATIO:-10.0}"
+LIQUID_TO_GAS_MASS_RATIO="${LIQUID_TO_GAS_MASS_RATIO:-100.0}"
 GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-${PARTICLE_MASS:-1.0}}"
 PARTICLE_MASS="${PARTICLE_MASS:-$GAS_PARTICLE_MASS}"
 INJECT_MASS="${INJECT_MASS:-$(awk -v mg="$PARTICLE_MASS" -v r="$LIQUID_TO_GAS_MASS_RATIO" 'BEGIN{printf "%.17g", mg*r}')}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0491_${CASE_LABEL}_${PHYSICS_LABEL}_mr${LIQUID_TO_GAS_MASS_RATIO}_${NX}x${NY}_g${GAMMA}}"
 LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
-GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
+GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-1.0}"
 LIQUID_MASS_CLOSURE_STRENGTH="${LIQUID_MASS_CLOSURE_STRENGTH:-1.0}"
-GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-0.0}"
-SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-true}"
+GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-1.0}"
+SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-false}"
 SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false}"
 SPECIES_Q6_ENABLE="${SPECIES_Q6_ENABLE:-true}"
 SPECIES_Q6_MODE="${SPECIES_Q6_MODE:-weighted}"
 SPECIES_Q6_SENSITIVITY="${SPECIES_Q6_SENSITIVITY:-1.0}"
 SPECIES_Q6_FALLBACK_MODE="${SPECIES_Q6_FALLBACK_MODE:-common}"
 SPECIES_Q6_COMPARISON_TOLERANCE="${SPECIES_Q6_COMPARISON_TOLERANCE:-1.0e-11}"
+# 0490p strict species-aware resident resampling. 0491h-fix1 established that
+# generic 0296, thermal renormalization and the legacy mass guard must remain off.
+SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-true}"
+# 0493a: one resident production path for every boundary family.
+SPECIES_RESIDENT_MODE="${SPECIES_RESIDENT_MODE:-production}"
+RESAMPLING_HOST_PATCHBACK_ENABLE="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
+RESAMPLING_SPARSE_DEVICE_GATE_ENABLE="${RESAMPLING_SPARSE_DEVICE_GATE_ENABLE:-0}"
+MASS_RECONDITION_ENABLE="${MASS_RECONDITION_ENABLE:-0}"
+RESAMPLING_THERMAL_RENORMALIZATION_ENABLE="${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-false}"
+RESAMPLING_MASS_GUARD_ENABLE="${RESAMPLING_MASS_GUARD_ENABLE:-false}"
 RESAMPLING_PARTICLE_MASS_MAX="${RESAMPLING_PARTICLE_MASS_MAX:-20.0}"
 UIN="${UIN:-0.5}"
 INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-15.0}"
@@ -72,11 +89,9 @@ OUTLET_MODE="${OUTLET_MODE:-hybrid}"; OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GA
 INLET_THERMAL_NOISE="${INLET_THERMAL_NOISE:-1.0}"; INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-2}"
 
 # Initial state selector.
-#   INITIAL_DOMAIN_MODE=full  : current 0434 behavior, domain initially filled at gamma.
-#   INITIAL_DOMAIN_MODE=empty : no initial fluid particles; inactive pool sized for refill.
-#
-# EMPTY_INITIAL_SLOTS defaults to one full-domain target occupancy GAMMA*Nx*Ny,
-# so the same script can be used for empty-refill / advancing-front tests.
+#   INITIAL_DOMAIN_MODE=empty : empty domain with a preallocated inactive slot pool.
+#   INITIAL_DOMAIN_MODE=full  : domain initially filled with background type-2 gas.
+# The inlet injects type-1 liquid in both cases. No additional scenario layer is used.
 INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"
 EMPTY_INITIAL_SLOTS="${EMPTY_INITIAL_SLOTS:-}"
 EMPTY_INITIAL_TYPE="${EMPTY_INITIAL_TYPE:-$BACKGROUND_TYPE}"
@@ -85,6 +100,11 @@ EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-$PARTICLE_MASS}"
 
 suite_defaults_common_0434
 suite_compute_derived_0434
+
+case "$INITIAL_DOMAIN_MODE" in
+  empty|empty_refill|empty-refill|full) ;;
+  *) echo "[0434-suite] ERROR unknown INITIAL_DOMAIN_MODE=$INITIAL_DOMAIN_MODE; expected empty or full" >&2; exit 2 ;;
+esac
 
 if [[ "$INJECT_TYPE" == "$BACKGROUND_TYPE" ]]; then
   echo "[0434-suite] ERROR INJECT_TYPE and BACKGROUND_TYPE must be distinct for liquid-into-gas testing" >&2
@@ -264,14 +284,22 @@ run_one_mode_0434() {
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
   echo "[0434-suite] case=$CASE_LABEL mode=$mode root=$run_root"
   echo "[0434-suite] initialDomainMode=$INITIAL_DOMAIN_MODE state=$state"
-  echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH) into gas(type=$BACKGROUND_TYPE,mass=$PARTICLE_MASS,q6Alpha=$GAS_Q6_STRENGTH) mass_ratio=$ACTUAL_LIQUID_TO_GAS_MASS_RATIO"
+  if [[ "$INITIAL_DOMAIN_MODE" == full ]]; then
+    echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH,closure=$LIQUID_MASS_CLOSURE_STRENGTH) into gas(type=$BACKGROUND_TYPE,mass=$PARTICLE_MASS,q6Alpha=$GAS_Q6_STRENGTH,closure=$GAS_MASS_CLOSURE_STRENGTH) mass_ratio=$ACTUAL_LIQUID_TO_GAS_MASS_RATIO"
+  else
+    echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH,closure=$LIQUID_MASS_CLOSURE_STRENGTH) into empty domain; inactiveSlotType=$BACKGROUND_TYPE inactiveSlotMass=$PARTICLE_MASS"
+  fi
   if suite_path_has_q6_0434 "$mode" && suite_truthy_0434 "$SPECIES_Q6_ENABLE"; then
     echo "[0434-suite] speciesQ6=on mode=$SPECIES_Q6_MODE sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE"
   else
     echo "[0434-suite] speciesQ6=off for mode=$mode"
   fi
-  echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA"
+  local resident_mode
+  resident_mode="$(suite_species_resident_mode_0492a "$mode" "$TOPOLOGY")"
+  echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA speciesResampling=$SPECIES_RESAMPLING_ENABLE speciesResident=$resident_mode massRecondition0296=$MASS_RECONDITION_ENABLE"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
+
+
 }
 
 while IFS= read -r mode; do
