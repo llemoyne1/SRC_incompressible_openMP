@@ -81,7 +81,7 @@ fi
 
 WORK_PARENT="$(cd "$(dirname "$WORK")" && pwd)"
 WORK_BASE="$(basename "$WORK")"
-( cd "$WORK_PARENT" && find "$WORK_BASE" -type f -print0 | sort -z | xargs -0 sha256sum ) > "$WORK/MANIFEST_SHA256.txt"
+( cd "$WORK_PARENT" && find "$WORK_BASE" -type f ! -name 'MANIFEST_SHA256.txt' -print0 | sort -z | xargs -0 sha256sum ) > "$WORK/MANIFEST_SHA256.txt"
 tar -C "$WORK_PARENT" -czf "$ARCHIVE" "$WORK_BASE"
 sha256sum "$ARCHIVE" | tee "$ARCHIVE.sha256"
 echo "[0493c-collect] archive=$ARCHIVE"

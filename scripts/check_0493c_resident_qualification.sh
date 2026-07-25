@@ -45,6 +45,10 @@ grep -q '12_periodic_darcy_none' scripts/analyze_0493c_resident_qualification.py
 grep -q 'cellMirrorDownloadBytes' scripts/analyze_0493c_resident_qualification.py || fail "resident policy audit missing"
 grep -q 'compactPatchbackBytes' scripts/analyze_0493c_resident_qualification.py || fail "patchback audit missing"
 grep -q 'disabledSpeciesMutationCount' scripts/analyze_0493c_resident_qualification.py || fail "disabled mutation audit missing"
+grep -Fq 'GUARD_NMIN="${GUARD_NMIN:-$((GAMMA - 1))}"' scripts/run_0493c_species_resampling_qualification.sh || fail "gamma-relative guard NMin missing"
+grep -Fq 'GUARD_NTARGET="${GUARD_NTARGET:-$GAMMA}"' scripts/run_0493c_species_resampling_qualification.sh || fail "gamma-relative guard NTarget missing"
+grep -Fq 'GUARD_NMAX="${GUARD_NMAX:-$((GAMMA + 1))}"' scripts/run_0493c_species_resampling_qualification.sh || fail "gamma-relative guard NMax missing"
+grep -q "! -name 'MANIFEST_SHA256.txt'" scripts/collect_0493c_validation_bundle.sh || fail "manifest self-exclusion missing"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -59,10 +63,14 @@ grep -q '^11_periodic_darcy_colloid_only,PASS,preflight-only$' "$tmp/extended/st
 grep -q '^12_periodic_darcy_none,PASS,preflight-only$' "$tmp/extended/status_0493c.csv" || fail "Darcy all-disabled preflight missing"
 grep -q '^14_q6_segmented_darcy_solvent_only,PASS,preflight-only$' "$tmp/extended/status_0493c.csv" || fail "combined Q6/Darcy preflight missing"
 
-PREFLIGHT_ONLY=1 CLEAN_RUN_ROOT=1 RUN_ROOT="$tmp/medium" CASE_GROUP=medium \
-  bash scripts/run_0493c_species_resampling_qualification.sh > "$tmp/medium_preflight.log"
+PREFLIGHT_ONLY=1 CLEAN_RUN_ROOT=1 RUN_ROOT="$tmp/medium" \
+  bash scripts/run_0493c_medium_qualification.sh > "$tmp/medium_preflight.log"
 [[ "$(grep -c ',PASS,preflight-only$' "$tmp/medium/status_0493c.csv")" == 6 ]] || fail "medium preflight is not 6/6"
 grep -q '^14_q6_segmented_darcy_solvent_only,PASS,preflight-only$' "$tmp/medium/status_0493c.csv" || fail "combined Q6/Darcy medium case missing"
+medium_params="$tmp/medium/01_periodic_all/params/params_0493c.kv"
+grep -q '^resamplingPopulationNMin = 9$' "$medium_params" || fail "medium guard NMin is not gamma-1"
+grep -q '^resamplingPopulationNTarget = 10$' "$medium_params" || fail "medium guard NTarget is not gamma"
+grep -q '^resamplingPopulationNMax = 11$' "$medium_params" || fail "medium guard NMax is not gamma+1"
 
 git diff --check -- scripts README_0493C_RESIDENT_QUALIFICATION.md || fail "git diff --check"
 
@@ -75,5 +83,7 @@ echo "[0493c-check] medium_preflight=6/6"
 echo "[0493c-check] immersed_solid_scope=excluded"
 echo "[0493c-check] darcy_chi_scope=reference"
 echo "[0493c-check] direct_0490m_activity_required=1"
+echo "[0493c-check] medium_guard=gamma_relative_9_10_11"
 echo "[0493c-check] medium_runner=ready"
+echo "[0493c-check] manifest_self_hash=excluded"
 echo "[0493c-check] audit_collector=ready"

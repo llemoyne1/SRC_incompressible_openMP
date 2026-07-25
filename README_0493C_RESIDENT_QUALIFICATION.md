@@ -91,6 +91,28 @@ from 0490i, 0490k, 0490m and 0490n. It checks:
 - nonzero resampling mutation except when every species is disabled;
 - optional mandatory nonzero 0490k plan and 0490m direct transfer.
 
+## 0493c-fix3: gamma-relative medium population guard
+
+The short qualification uses `gamma=6`, so the historical guard values
+`5/6/7` were appropriate there. The medium runner uses `gamma=10`; retaining
+those fixed values would incorrectly classify every nominal ten-particle cell
+as overfull and extract particles until at most seven remained.
+
+Fix3 makes the qualification guard defaults relative to `GAMMA`:
+
+- `NMin = GAMMA - 1`;
+- `NTarget = GAMMA`;
+- `NMax = GAMMA + 1`.
+
+The short matrix therefore remains at `5/6/7`, while the medium matrix uses
+`9/10/11`. Explicit environment overrides remain supported. This is a runner
+correction only and does not change production defaults or solver physics.
+
+The checker now invokes the actual medium wrapper and verifies the generated
+`9/10/11` parameters. The collector also excludes `MANIFEST_SHA256.txt` from
+its own manifest, avoiding the impossible self-hash entry previously recorded
+as the hash of an empty file.
+
 ## Commands
 
 Audit the completed corrected 0493b matrix:
