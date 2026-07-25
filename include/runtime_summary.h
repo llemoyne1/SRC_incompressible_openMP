@@ -533,6 +533,7 @@ struct RuntimeSummary {
     std::int64_t resampPoolLastFreeIndex = -1;
     double resampPoolFreeSlotFraction = 0.0;
     double resampPoolDormantSlotFraction = 0.0;
+    std::uint64_t resampDisabledSpeciesMutationCount = 0;
 };
 
 RuntimeSummary compute_runtime_summary(const ParticleState& state,

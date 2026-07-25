@@ -32,6 +32,7 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     std::uint64_t cellsConsidered = 0u;
     std::uint64_t cellsRemapped = 0u;
     std::uint64_t invalidTypeCount = 0u;
+    std::uint64_t disabledSpeciesMutationCount = 0u;
     std::uint64_t allocatedBytes = 0u;
     double maxAbsDepositMassError = 0.0;
     double scaleMin = 1.0;
@@ -75,6 +76,7 @@ struct CudaSpeciesMassClosureDeviceView0490i {
     double* maxCellMassRelResidual = nullptr;
     double* maxVelocityShift = nullptr;
     unsigned long long* particlesScaled = nullptr;
+    unsigned long long* disabledSpeciesMutationCount = nullptr;
 };
 
 class CudaSpeciesMassClosureWorkspace0490i {

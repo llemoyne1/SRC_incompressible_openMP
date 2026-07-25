@@ -267,10 +267,9 @@ suite_export_cuda_flags_0434() {
   fi
 
   if suite_path_has_resampling_0434 "$mode"; then
-    # Validated resident chain through 0483. 0484 defaults to the production strip:
-    # keep the functional resident apply/remap path, keep the compact host patchback
-    # still required by host-side post-edit deposits, but disable CPU/CUDA validation
-    # shadows, full operation gates and detailed CSV rows unless explicitly requested.
+    # 0493b production: the shared CUDA particle state is authoritative. Keep the
+    # resident apply/remap chain and scalar reductions, while CPU/CUDA validation
+    # shadows, operation carriers and host particle patchback remain disabled.
     RESAMPLING_PRODUCTION_STRIP="${RESAMPLING_PRODUCTION_STRIP:-1}"
     RESAMPLING_DIAG_CSV_ENABLE="${RESAMPLING_DIAG_CSV_ENABLE:-0}"
     RESAMPLING_FULL_GATE_ENABLE="${RESAMPLING_FULL_GATE_ENABLE:-0}"
@@ -377,10 +376,10 @@ suite_export_cuda_flags_0434() {
 suite_prepare_livevis_control_0434() {
   local run_root=$1 mode=$2
   if [[ -z "${LIVE_VIS_CONTROL_FILE:-}" || "$LIVE_VIS_CONTROL_FILE" == "./livevis_control.kv" || "$LIVE_VIS_CONTROL_FILE" == "livevis_control.kv" ]]; then
-    LIVE_VIS_CONTROL_FILE="$run_root/livevis_control.kv"
+    LIVE_VIS_CONTROL_FILE="$ROOT/livevis_control.kv"
   fi
   mkdir -p "$(dirname "$LIVE_VIS_CONTROL_FILE")"
-  if [[ ! -f "$LIVE_VIS_CONTROL_FILE" || "${OVERWRITE_LIVEVIS_CONTROL:-1}" == 1 ]]; then
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE" || "${OVERWRITE_LIVEVIS_CONTROL:-0}" == 1 ]]; then
     cat > "$LIVE_VIS_CONTROL_FILE" <<CONTROL
 # 0434b livevis + filtered recorder runtime controls.
 # 0433a WYSIWYR: if recordEvery is absent or <=0, recording follows liveEvery.

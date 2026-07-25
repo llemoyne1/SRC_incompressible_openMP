@@ -12,7 +12,8 @@ namespace mpcd {
 enum class SpeciesPhaseFamily : std::uint8_t {
     Unspecified = 0u,
     Gas = 1u,
-    Liquid = 2u
+    Liquid = 2u,
+    Dispersed = 3u
 };
 
 struct SpeciesDefinition {
@@ -29,6 +30,12 @@ struct SpeciesDefinition {
     // for composition diagnostics; 0490d also consumes it for the optional
     // phase-aware local mass target.
     double referenceCellMassDeclared = 1.0;
+
+    // 0493b: orthogonal mutation policy. Disabled species remain physical
+    // participants in streaming, SRC, boundaries, Darcy, thermostat and Q6,
+    // and remain present in every species-cell deposit. Only resampling
+    // mutations are disabled. The parser default is true for compatibility.
+    bool resamplingEnable = true;
 };
 
 const char* species_phase_family_name(SpeciesPhaseFamily family);

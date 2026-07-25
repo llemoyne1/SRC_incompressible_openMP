@@ -93,9 +93,9 @@ __global__ void compute_species_mass_closure_scale_kernel_0490i(
     double globalStrength,
     const double* speciesMass,
     const double* totalCellMass,
-    const double* totalOccupancyWeight,
     const double* referenceCellMass,
     const double* speciesClosureStrength,
+    const unsigned char* speciesResamplingEnabled,
     double* targetCellMass,
     double* localClosureStrength,
     double* scale,
@@ -108,36 +108,42 @@ __global__ void compute_species_mass_closure_scale_kernel_0490i(
     scale[c] = 1.0;
     remapCell[c] = 0u;
 
-    const double mass = totalCellMass[c];
-    const double occupancy = totalOccupancyWeight[c];
-    if (!(mass > 0.0) || !isfinite(mass) ||
-        !(occupancy > 0.0) || !isfinite(occupancy)) {
-        return;
-    }
+    const double totalMass = totalCellMass[c];
+    if (!(totalMass > 0.0) || !isfinite(totalMass)) return;
 
+    double mutableMass = 0.0;
+    double frozenMass = 0.0;
+    double mutableOccupancy = 0.0;
     double closureWeight = 0.0;
-    for (int s = 0; s < speciesCount; ++s) {
-        const int k = s * numCells + c;
+    for (int species = 0; species < speciesCount; ++species) {
+        const int k = species * numCells + c;
         const double ms = speciesMass[k];
-        const double ref = referenceCellMass[s];
-        if (!(ms >= 0.0) || !isfinite(ms) || !(ref > 0.0) || !isfinite(ref)) {
-            return;
+        const double ref = referenceCellMass[species];
+        if (!(ms >= 0.0) || !isfinite(ms) || !(ref > 0.0) || !isfinite(ref)) return;
+        if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) {
+            frozenMass += ms;
+            continue;
         }
-        closureWeight += (ms / ref) * speciesClosureStrength[s];
+        const double occupancy = ms / ref;
+        mutableMass += ms;
+        mutableOccupancy += occupancy;
+        closureWeight += occupancy * speciesClosureStrength[species];
     }
+    if (!(mutableMass > 0.0) || !isfinite(mutableMass) ||
+        !(mutableOccupancy > 0.0) || !isfinite(mutableOccupancy)) return;
 
-    const double localTarget = mass / occupancy;
-    const double speciesStrength = closureWeight / occupancy;
+    const double mutableTarget = mutableMass / mutableOccupancy;
+    const double speciesStrength = closureWeight / mutableOccupancy;
     const double localStrength = fmax(0.0, fmin(1.0,
         fmax(0.0, fmin(1.0, globalStrength)) * speciesStrength));
-    const double effectiveTarget = mass + localStrength * (localTarget - mass);
-    const double localScale = effectiveTarget / mass;
-    if (!(localTarget > 0.0) || !isfinite(localTarget) ||
-        !isfinite(localStrength) || !(localScale > 0.0) || !isfinite(localScale)) {
-        return;
-    }
+    const double effectiveMutableMass =
+        mutableMass + localStrength * (mutableTarget - mutableMass);
+    const double localScale = effectiveMutableMass / mutableMass;
+    if (!(mutableTarget > 0.0) || !isfinite(mutableTarget) ||
+        !isfinite(frozenMass) || !isfinite(localStrength) ||
+        !(localScale > 0.0) || !isfinite(localScale)) return;
 
-    targetCellMass[c] = localTarget;
+    targetCellMass[c] = frozenMass + mutableTarget;
     localClosureStrength[c] = localStrength;
     scale[c] = localScale;
     remapCell[c] = 1u;
@@ -147,22 +153,33 @@ __global__ void apply_species_mass_closure_kernel_0490i(
     std::uint64_t nParticles,
     const double* x,
     const double* y,
+    const std::uint32_t* particleType,
     const unsigned char* role,
     unsigned char fluidRole,
     DeviceGridConfig0490i grid,
+    int speciesCount,
+    const std::uint32_t* speciesTypes,
+    const unsigned char* speciesResamplingEnabled,
     const unsigned char* remapCell,
     const double* scale,
     double* particleMass,
-    unsigned long long* particlesScaled) {
+    unsigned long long* particlesScaled,
+    unsigned long long* disabledSpeciesMutationCount) {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i >= nParticles) return;
-    if (role[i] != fluidRole) return;
+    if (i >= nParticles || role[i] != fluidRole) return;
+    int species = -1;
+    for (int s = 0; s < speciesCount; ++s) {
+        if (speciesTypes[s] == particleType[i]) { species = s; break; }
+    }
+    if (species < 0) return;
+    if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) return;
     const int c = cell_index_0490i(x[i], y[i], grid);
     if (!remapCell[c]) return;
-    const double s = scale[c];
-    if (!(s > 0.0) || !isfinite(s)) return;
-    particleMass[i] *= s;
+    const double factor = scale[c];
+    if (!(factor > 0.0) || !isfinite(factor)) return;
+    particleMass[i] *= factor;
     atomicAdd(particlesScaled, 1ull);
+    (void)disabledSpeciesMutationCount;
 }
 
 __device__ void atomic_max_nonnegative_double_0490m(double* address, double value) {
@@ -183,12 +200,15 @@ __global__ void initialize_species_balance_kernel_0490m(
     int speciesCount,
     const unsigned char* remapCell,
     const double* cellScale,
+    const unsigned char* speciesResamplingEnabled,
     double* speciesCellScale) {
     const int k = blockIdx.x * blockDim.x + threadIdx.x;
     const int total = numCells * speciesCount;
     if (k >= total) return;
     const int c = k % numCells;
-    speciesCellScale[k] = remapCell[c] ? cellScale[c] : 1.0;
+    const int species = k / numCells;
+    speciesCellScale[k] = speciesResamplingEnabled && speciesResamplingEnabled[species] != 0u && remapCell[c]
+        ? cellScale[c] : 1.0;
 }
 
 __global__ void compute_species_totals_kernel_0490m(
@@ -220,11 +240,13 @@ __global__ void apply_species_column_balance_kernel_0490m(
     int speciesCount,
     const double* targetSpeciesMass,
     const double* currentSpeciesMass,
+    const unsigned char* speciesResamplingEnabled,
     double* speciesCellScale) {
     const int k = blockIdx.x * blockDim.x + threadIdx.x;
     const int total = numCells * speciesCount;
     if (k >= total) return;
     const int species = k / numCells;
+    if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) return;
     const double target = targetSpeciesMass[species];
     const double current = currentSpeciesMass[species];
     if (!(target >= 0.0) || !isfinite(target) || !(current > 0.0) || !isfinite(current)) {
@@ -254,8 +276,9 @@ __global__ void compute_cell_totals_kernel_0490m(
 __global__ void apply_cell_row_balance_kernel_0490m(
     int numCells,
     int speciesCount,
-    const double* totalCellMass,
-    const double* desiredCellScale,
+    const double* speciesMass,
+    const unsigned char* speciesResamplingEnabled,
+    const double* desiredMutableScale,
     const unsigned char* remapCell,
     const double* currentCellMass,
     double* speciesCellScale) {
@@ -263,13 +286,22 @@ __global__ void apply_cell_row_balance_kernel_0490m(
     const int total = numCells * speciesCount;
     if (k >= total) return;
     const int c = k % numCells;
-    if (!remapCell[c]) return;
-    const double target = totalCellMass[c] * desiredCellScale[c];
-    const double current = currentCellMass[c];
-    if (!(target > 0.0) || !isfinite(target) || !(current > 0.0) || !isfinite(current)) {
-        return;
+    const int species = k / numCells;
+    if (!remapCell[c] || !speciesResamplingEnabled ||
+        speciesResamplingEnabled[species] == 0u) return;
+
+    double frozenMass = 0.0;
+    double mutableOriginalMass = 0.0;
+    for (int s = 0; s < speciesCount; ++s) {
+        const double ms = speciesMass[s * numCells + c];
+        if (speciesResamplingEnabled[s] != 0u) mutableOriginalMass += ms;
+        else frozenMass += ms;
     }
-    const double correction = target / current;
+    const double currentMutableMass = currentCellMass[c] - frozenMass;
+    const double targetMutableMass = mutableOriginalMass * desiredMutableScale[c];
+    if (!(targetMutableMass > 0.0) || !isfinite(targetMutableMass) ||
+        !(currentMutableMass > 0.0) || !isfinite(currentMutableMass)) return;
+    const double correction = targetMutableMass / currentMutableMass;
     if (!(correction > 0.0) || !isfinite(correction)) return;
     speciesCellScale[k] *= correction;
 }
@@ -278,9 +310,11 @@ __global__ void compute_species_balance_residual_kernel_0490m(
     int speciesCount,
     const double* targetSpeciesMass,
     const double* currentSpeciesMass,
+    const unsigned char* speciesResamplingEnabled,
     double* maxRelativeResidual) {
     const int species = blockIdx.x * blockDim.x + threadIdx.x;
     if (species >= speciesCount) return;
+    if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) return;
     const double target = targetSpeciesMass[species];
     const double current = currentSpeciesMass[species];
     const double denom = fmax(1.0, fabs(target));
@@ -294,8 +328,8 @@ __global__ void compute_cell_balance_and_velocity_shift_kernel_0490m(
     const double* speciesMass,
     const double* speciesPx,
     const double* speciesPy,
-    const double* totalCellMass,
-    const double* desiredCellScale,
+    const unsigned char* speciesResamplingEnabled,
+    const double* desiredMutableScale,
     const double* speciesCellScale,
     double* currentCellMass,
     double* velocityShiftX,
@@ -305,34 +339,39 @@ __global__ void compute_cell_balance_and_velocity_shift_kernel_0490m(
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= numCells) return;
 
-    double originalPx = 0.0;
-    double originalPy = 0.0;
-    double balancedMass = 0.0;
-    double balancedPx = 0.0;
-    double balancedPy = 0.0;
+    double frozenMass = 0.0;
+    double mutableOriginalMass = 0.0;
+    double mutableOriginalPx = 0.0;
+    double mutableOriginalPy = 0.0;
+    double balancedMutableMass = 0.0;
+    double balancedMutablePx = 0.0;
+    double balancedMutablePy = 0.0;
     for (int species = 0; species < speciesCount; ++species) {
         const int k = species * numCells + c;
         const double factor = speciesCellScale[k];
-        originalPx += speciesPx[k];
-        originalPy += speciesPy[k];
-        balancedMass += speciesMass[k] * factor;
-        balancedPx += speciesPx[k] * factor;
-        balancedPy += speciesPy[k] * factor;
+        if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) {
+            frozenMass += speciesMass[k];
+            continue;
+        }
+        mutableOriginalMass += speciesMass[k];
+        mutableOriginalPx += speciesPx[k];
+        mutableOriginalPy += speciesPy[k];
+        balancedMutableMass += speciesMass[k] * factor;
+        balancedMutablePx += speciesPx[k] * factor;
+        balancedMutablePy += speciesPy[k] * factor;
     }
-    currentCellMass[c] = balancedMass;
-
-    const double originalMass = totalCellMass[c];
-    const double desiredMass = originalMass * desiredCellScale[c];
-    const double denom = fmax(1.0, fabs(desiredMass));
-    const double residual = fabs(balancedMass - desiredMass) / denom;
-    atomic_max_nonnegative_double_0490m(maxCellRelativeResidual, residual);
+    const double balancedTotalMass = frozenMass + balancedMutableMass;
+    currentCellMass[c] = balancedTotalMass;
+    const double desiredTotalMass = frozenMass + mutableOriginalMass * desiredMutableScale[c];
+    const double denom = fmax(1.0, fabs(desiredTotalMass));
+    atomic_max_nonnegative_double_0490m(
+        maxCellRelativeResidual, fabs(balancedTotalMass - desiredTotalMass) / denom);
 
     double shiftX = 0.0;
     double shiftY = 0.0;
-    if (originalMass > 0.0 && isfinite(originalMass) &&
-        balancedMass > 0.0 && isfinite(balancedMass)) {
-        shiftX = originalPx / originalMass - balancedPx / balancedMass;
-        shiftY = originalPy / originalMass - balancedPy / balancedMass;
+    if (balancedMutableMass > 0.0 && isfinite(balancedMutableMass)) {
+        shiftX = (mutableOriginalPx - balancedMutablePx) / balancedMutableMass;
+        shiftY = (mutableOriginalPy - balancedMutablePy) / balancedMutableMass;
     }
     velocityShiftX[c] = shiftX;
     velocityShiftY[c] = shiftY;
@@ -354,10 +393,12 @@ __global__ void apply_species_balanced_mass_closure_kernel_0490m(
     int numCells,
     int speciesCount,
     const std::uint32_t* speciesTypes,
+    const unsigned char* speciesResamplingEnabled,
     const double* speciesCellScale,
     const double* velocityShiftX,
     const double* velocityShiftY,
-    unsigned long long* particlesScaled) {
+    unsigned long long* particlesScaled,
+    unsigned long long* disabledSpeciesMutationCount) {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= nParticles) return;
     if (role[i] != fluidRole) return;
@@ -372,6 +413,12 @@ __global__ void apply_species_balanced_mass_closure_kernel_0490m(
     }
     if (species < 0) return;
     const double factor = speciesCellScale[species * numCells + c];
+    if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) {
+        if (isfinite(factor) && fabs(factor - 1.0) > 1.0e-14) {
+            atomicAdd(disabledSpeciesMutationCount, 1ull);
+        }
+        return;
+    }
     if (!(factor > 0.0) || !isfinite(factor)) return;
     particleMass[i] *= factor;
     vx[i] += velocityShiftX[c];
@@ -404,7 +451,7 @@ void append_diagnostics_0490i(const SimulationParams& params,
                "speciesWorkspaceReused,closureWorkspaceReused,sharedStatePreserved,productionFastPath,"
                "diagnosticCellDownloadSkipped,cpuDepositComparisonSkipped,speciesConservativeBalance,"
                "balanceIterations,particlesScanned,"
-               "particlesScaled,cellsConsidered,cellsRemapped,invalidTypeCount,allocatedBytes,"
+               "particlesScaled,cellsConsidered,cellsRemapped,invalidTypeCount,disabledSpeciesMutationCount,allocatedBytes,"
                "maxAbsDepositMassError,scaleMin,scaleMax,targetCellMassMin,targetCellMassMax,"
                "closureStrengthMin,closureStrengthMax,massBefore,massAfter,massDelta,"
                "maxSpeciesMassRelResidual,maxCellMassRelResidual,maxVelocityShift,"
@@ -420,7 +467,7 @@ void append_diagnostics_0490i(const SimulationParams& params,
         << d.speciesConservativeBalance << ',' << d.balanceIterations << ','
         << d.particlesScanned << ',' << d.particlesScaled << ','
         << d.cellsConsidered << ',' << d.cellsRemapped << ',' << d.invalidTypeCount << ','
-        << d.allocatedBytes << ',' << d.maxAbsDepositMassError << ',' << d.scaleMin << ','
+        << d.disabledSpeciesMutationCount << ',' << d.allocatedBytes << ',' << d.maxAbsDepositMassError << ',' << d.scaleMin << ','
         << d.scaleMax << ',' << d.targetCellMassMin << ',' << d.targetCellMassMax << ','
         << d.closureStrengthMin << ',' << d.closureStrengthMax << ',' << d.massBefore << ','
         << d.massAfter << ',' << d.massDelta << ','
@@ -455,6 +502,7 @@ struct CudaSpeciesMassClosureWorkspace0490i::Impl {
     double* maxCellMassRelResidual = nullptr;
     double* maxVelocityShift = nullptr;
     unsigned long long* particlesScaled = nullptr;
+    unsigned long long* disabledSpeciesMutationCount = nullptr;
 };
 
 CudaSpeciesMassClosureWorkspace0490i::CudaSpeciesMassClosureWorkspace0490i()
@@ -501,6 +549,7 @@ void CudaSpeciesMassClosureWorkspace0490i::release() {
         cuda_free_0490i(impl_->maxCellMassRelResidual);
         cuda_free_0490i(impl_->maxVelocityShift);
         cuda_free_0490i(impl_->particlesScaled);
+        cuda_free_0490i(impl_->disabledSpeciesMutationCount);
     }
 #endif
     if (impl_ != nullptr) *impl_ = Impl{};
@@ -543,6 +592,7 @@ void CudaSpeciesMassClosureWorkspace0490i::ensure_capacity(
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxCellMassRelResidual, sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxVelocityShift, sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->particlesScaled, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->disabledSpeciesMutationCount, sizeof(unsigned long long)));
     impl_->cellCapacity = numCells;
     impl_->speciesCapacity = speciesCount;
     impl_->numCells = numCells;
@@ -551,7 +601,7 @@ void CudaSpeciesMassClosureWorkspace0490i::ensure_capacity(
         ns * sizeof(double) + nc * (3u * sizeof(double) + sizeof(unsigned char)) +
         nc * ns * sizeof(double) + 2u * ns * sizeof(double) +
         3u * nc * sizeof(double) + 3u * sizeof(double) +
-        sizeof(unsigned long long);
+        2u * sizeof(unsigned long long);
     if (reused) *reused = 0;
 #endif
 }
@@ -580,6 +630,7 @@ CudaSpeciesMassClosureDeviceView0490i CudaSpeciesMassClosureWorkspace0490i::devi
     v.maxCellMassRelResidual = impl_->maxCellMassRelResidual;
     v.maxVelocityShift = impl_->maxVelocityShift;
     v.particlesScaled = impl_->particlesScaled;
+    v.disabledSpeciesMutationCount = impl_->disabledSpeciesMutationCount;
     return v;
 }
 
@@ -703,8 +754,8 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
 
     std::vector<double> hostClosureStrength(params.speciesDefinitions.size(), 0.0);
     for (std::size_t s = 0; s < params.speciesDefinitions.size(); ++s) {
-        hostClosureStrength[s] =
-            params.speciesDefinitions[s].resamplingMassClosureStrengthDeclared;
+        hostClosureStrength[s] = params.speciesDefinitions[s].resamplingEnable
+            ? params.speciesDefinitions[s].resamplingMassClosureStrengthDeclared : 0.0;
     }
     const Clock0490i::time_point meta0 = Clock0490i::now();
     MPCD_CUDA_0490I_CHECK(cudaMemcpy(
@@ -712,6 +763,8 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         hostClosureStrength.size() * sizeof(double), cudaMemcpyHostToDevice));
     MPCD_CUDA_0490I_CHECK(cudaMemset(
         closureView.particlesScaled, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMemset(
+        closureView.disabledSpeciesMutationCount, 0, sizeof(unsigned long long)));
     d.metadataUploadSeconds = seconds_since_0490i(meta0);
 
     const int cellBlocks = std::max(1, (grid.numCells + threadsPerBlock - 1) / threadsPerBlock);
@@ -737,8 +790,8 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     MPCD_CUDA_0490I_CHECK(cudaEventRecord(start));
     compute_species_mass_closure_scale_kernel_0490i<<<cellBlocks, threadsPerBlock>>>(
         grid.numCells, speciesCount, massCorrectionStrength, speciesView.mass,
-        speciesView.totalCellMass, speciesView.totalOccupancyWeight,
-        speciesView.referenceCellMass, closureView.speciesClosureStrength,
+        speciesView.totalCellMass, speciesView.referenceCellMass,
+        closureView.speciesClosureStrength, speciesView.resamplingEnabled,
         closureView.targetCellMass, closureView.localClosureStrength,
         closureView.scale, closureView.remapCell);
     MPCD_CUDA_0490I_CHECK(cudaGetLastError());
@@ -756,7 +809,7 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
 
         initialize_species_balance_kernel_0490m<<<matrixBlocks, threadsPerBlock>>>(
             grid.numCells, speciesCount, closureView.remapCell, closureView.scale,
-            closureView.speciesCellScale);
+            speciesView.resamplingEnabled, closureView.speciesCellScale);
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         compute_species_totals_kernel_0490m<<<
             speciesCount, speciesReductionThreads, speciesReductionSharedBytes>>>(
@@ -772,16 +825,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
             MPCD_CUDA_0490I_CHECK(cudaGetLastError());
             apply_species_column_balance_kernel_0490m<<<matrixBlocks, threadsPerBlock>>>(
                 grid.numCells, speciesCount, closureView.targetSpeciesMass,
-                closureView.currentSpeciesMass, closureView.speciesCellScale);
+                closureView.currentSpeciesMass, speciesView.resamplingEnabled,
+                closureView.speciesCellScale);
             MPCD_CUDA_0490I_CHECK(cudaGetLastError());
             compute_cell_totals_kernel_0490m<<<cellBlocks, threadsPerBlock>>>(
                 grid.numCells, speciesCount, speciesView.mass,
                 closureView.speciesCellScale, closureView.currentCellMass);
             MPCD_CUDA_0490I_CHECK(cudaGetLastError());
             apply_cell_row_balance_kernel_0490m<<<matrixBlocks, threadsPerBlock>>>(
-                grid.numCells, speciesCount, speciesView.totalCellMass,
-                closureView.scale, closureView.remapCell, closureView.currentCellMass,
-                closureView.speciesCellScale);
+                grid.numCells, speciesCount, speciesView.mass,
+                speciesView.resamplingEnabled, closureView.scale, closureView.remapCell,
+                closureView.currentCellMass, closureView.speciesCellScale);
             MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         }
 
@@ -795,7 +849,8 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         apply_species_column_balance_kernel_0490m<<<matrixBlocks, threadsPerBlock>>>(
             grid.numCells, speciesCount, closureView.targetSpeciesMass,
-            closureView.currentSpeciesMass, closureView.speciesCellScale);
+            closureView.currentSpeciesMass, speciesView.resamplingEnabled,
+            closureView.speciesCellScale);
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         compute_species_totals_kernel_0490m<<<
             speciesCount, speciesReductionThreads, speciesReductionSharedBytes>>>(
@@ -804,11 +859,12 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         compute_species_balance_residual_kernel_0490m<<<speciesBlocks, threadsPerBlock>>>(
             speciesCount, closureView.targetSpeciesMass,
-            closureView.currentSpeciesMass, closureView.maxSpeciesMassRelResidual);
+            closureView.currentSpeciesMass, speciesView.resamplingEnabled,
+            closureView.maxSpeciesMassRelResidual);
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
         compute_cell_balance_and_velocity_shift_kernel_0490m<<<cellBlocks, threadsPerBlock>>>(
             grid.numCells, speciesCount, speciesView.mass, speciesView.px,
-            speciesView.py, speciesView.totalCellMass, closureView.scale,
+            speciesView.py, speciesView.resamplingEnabled, closureView.scale,
             closureView.speciesCellScale, closureView.currentCellMass,
             closureView.velocityShiftX, closureView.velocityShiftY,
             closureView.maxCellMassRelResidual, closureView.maxVelocityShift);
@@ -866,15 +922,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
                 particleView.vy, particleView.mass, particleView.type,
                 particleView.role, static_cast<unsigned char>(kParticleRoleFluid),
                 cfg, grid.numCells, speciesCount, speciesView.speciesTypes,
-                closureView.speciesCellScale, closureView.velocityShiftX,
-                closureView.velocityShiftY, closureView.particlesScaled);
+                speciesView.resamplingEnabled, closureView.speciesCellScale,
+                closureView.velocityShiftX, closureView.velocityShiftY,
+                closureView.particlesScaled, closureView.disabledSpeciesMutationCount);
         } else {
             apply_species_mass_closure_kernel_0490i<<<
                 static_cast<int>(blockCount64), threadsPerBlock>>>(
-                nParticles, particleView.x, particleView.y, particleView.role,
-                static_cast<unsigned char>(kParticleRoleFluid), cfg,
+                nParticles, particleView.x, particleView.y, particleView.type, particleView.role,
+                static_cast<unsigned char>(kParticleRoleFluid), cfg, speciesCount,
+                speciesView.speciesTypes, speciesView.resamplingEnabled,
                 closureView.remapCell, closureView.scale, particleView.mass,
-                closureView.particlesScaled);
+                closureView.particlesScaled, closureView.disabledSpeciesMutationCount);
         }
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
     }
@@ -886,8 +944,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
 
     const Clock0490i::time_point download0 = Clock0490i::now();
     unsigned long long particlesScaled = 0ull;
+    unsigned long long disabledSpeciesMutationCount = 0ull;
     MPCD_CUDA_0490I_CHECK(cudaMemcpy(&particlesScaled, closureView.particlesScaled,
                                     sizeof(particlesScaled), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_0490I_CHECK(cudaMemcpy(
+        &disabledSpeciesMutationCount, closureView.disabledSpeciesMutationCount,
+        sizeof(disabledSpeciesMutationCount), cudaMemcpyDeviceToHost));
+    d.disabledSpeciesMutationCount = disabledSpeciesMutationCount;
+    if (disabledSpeciesMutationCount != 0ull) {
+        throw std::runtime_error(
+            "0493b mass closure attempted to mutate a resampling-disabled species");
+    }
     d.particlesScaled = static_cast<std::uint64_t>(particlesScaled);
 
     remapApply = ResamplingRemapApplyDiagnostics{};

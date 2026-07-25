@@ -41,7 +41,7 @@ void append_csv_0490m(const SimulationParams& params,
     if (!out) throw std::runtime_error("0490m failed to open diagnostics CSV: " + path.string());
     if (header) {
         out << "step,attempted,handled,applied,pass,skipped,skipReason,particlesScanned,planEntries,operations,"
-               "invalidOperations,typeRejectedCandidates,usedSharedResidentState,particleUploadSkipped,workspaceReused,"
+               "invalidOperations,disabledSpeciesMutationCount,typeRejectedCandidates,usedSharedResidentState,particleUploadSkipped,workspaceReused,"
                "directDevicePlanHandoff,planArrayDownloadSkipped,planArrayUploadSkipped,operationRoundTripSkipped,"
                "fullStateCopySkipped,fullStateDownloadSkipped,allocatedBytes,allocationCalls,compactPatchbackBytes,"
                "movedMass,movedMomentumX,movedMomentumY,stateUploadSeconds,kernelSeconds,scalarDownloadSeconds,"
@@ -53,8 +53,8 @@ void append_csv_0490m(const SimulationParams& params,
         << (d.applied ? 1 : 0) << ',' << (d.pass ? 1 : 0) << ',' << (d.skipped ? 1 : 0) << ','
         << '"' << d.skipReason << '"' << ','
         << d.particlesScanned << ',' << d.planEntries << ',' << d.operations << ','
-        << d.invalidOperations << ',' << d.typeRejectedCandidates << ','
-        << d.usedSharedResidentState << ',' << d.particleUploadSkipped << ',' << d.workspaceReused << ','
+        << d.invalidOperations << ',' << d.disabledSpeciesMutationCount << ','
+        << d.typeRejectedCandidates << ',' << d.usedSharedResidentState << ',' << d.particleUploadSkipped << ',' << d.workspaceReused << ','
         << d.directDevicePlanHandoff << ',' << d.planArrayDownloadSkipped << ','
         << d.planArrayUploadSkipped << ',' << d.operationRoundTripSkipped << ','
         << d.fullStateCopySkipped << ',' << d.fullStateDownloadSkipped << ','
@@ -89,15 +89,35 @@ __device__ int particle_cell_0490m(double x,
                                    int nx,
                                    int ny,
                                    double dx,
-                                   double dy) {
+                                   double dy,
+                                   int periodicX,
+                                   int periodicY) {
     if (nx <= 0 || ny <= 0 || !(dx > 0.0) || !(dy > 0.0)) return -1;
     int ix = static_cast<int>(floor(x / dx));
     int iy = static_cast<int>(floor(y / dy));
-    while (ix < 0) ix += nx;
-    while (ix >= nx) ix -= nx;
-    while (iy < 0) iy += ny;
-    while (iy >= ny) iy -= ny;
+    if (periodicX) {
+        while (ix < 0) ix += nx;
+        while (ix >= nx) ix -= nx;
+    } else {
+        if (ix < 0) ix = 0;
+        if (ix >= nx) ix = nx - 1;
+    }
+    if (periodicY) {
+        while (iy < 0) iy += ny;
+        while (iy >= ny) iy -= ny;
+    } else {
+        if (iy < 0) iy = 0;
+        if (iy >= ny) iy = ny - 1;
+    }
     return iy * nx + ix;
+}
+
+__device__ int species_index_0493b(
+    std::uint32_t type, int speciesCount, const std::uint32_t* speciesTypes) {
+    for (int s = 0; s < speciesCount; ++s) {
+        if (speciesTypes[s] == type) return s;
+    }
+    return -1;
 }
 
 // Correctness-first direct resident consumer. One thread preserves the exact
@@ -118,16 +138,28 @@ __global__ void apply_species_plan_direct_serial_0490m(
     int ny,
     double dx,
     double dy,
+    int periodicX,
+    int periodicY,
+    int speciesCount,
+    const std::uint32_t* speciesTypes,
+    const unsigned char* resamplingEnabled,
     std::uint8_t fluidRole,
     unsigned char* selected,
     unsigned int maxOps,
     unsigned int* outCount,
     unsigned int* outInvalid,
+    unsigned long long* outDisabledSpeciesMutation,
     unsigned int* outEntryShortfalls,
     unsigned int* outGroupUnderfills,
     unsigned long long* outTypeRejected,
     double* outPlannedMass,
     double* outSelectedMass,
+    double* outMovedPx,
+    double* outMovedPy,
+    unsigned int* outFirstParticle,
+    unsigned int* outLastParticle,
+    int* outFirstReceiver,
+    int* outLastReceiver,
     unsigned int* outParticle,
     int* outDonor,
     int* outReceiver,
@@ -149,8 +181,15 @@ __global__ void apply_species_plan_direct_serial_0490m(
     unsigned int entryShortfalls = 0u;
     unsigned int groupUnderfills = 0u;
     unsigned long long typeRejected = 0u;
+    unsigned long long disabledSpeciesMutation = 0u;
     double plannedMassTotal = 0.0;
     double selectedMassTotal = 0.0;
+    double movedPxTotal = 0.0;
+    double movedPyTotal = 0.0;
+    unsigned int firstParticle = 0xffffffffu;
+    unsigned int lastParticle = 0xffffffffu;
+    int firstReceiver = -1;
+    int lastReceiver = -1;
     unsigned int entries = planCount != nullptr ? *planCount : 0u;
     const unsigned int overflow = planOverflow != nullptr ? *planOverflow : 0u;
     if (entries > static_cast<unsigned int>(planCapacity)) {
@@ -165,11 +204,22 @@ __global__ void apply_species_plan_direct_serial_0490m(
         const std::uint32_t wantedType = planType[e];
         const double wantedMass = planMass[e];
         if (donor < 0 || receiver < 0 || !(wantedMass > eps)) continue;
+        const int wantedSpecies = species_index_0493b(
+            wantedType, speciesCount, speciesTypes);
+        if (wantedSpecies < 0) {
+            ++invalid;
+            continue;
+        }
+        if (resamplingEnabled[wantedSpecies] == 0u) {
+            ++disabledSpeciesMutation;
+            continue;
+        }
         plannedMassTotal += wantedMass;
         double gathered = 0.0;
         for (std::uint64_t p = 0u; p < nActive; ++p) {
             if (p >= nParticles || selected[p] != 0u || role[p] != fluidRole) continue;
-            const int cell = particle_cell_0490m(x[p], y[p], nx, ny, dx, dy);
+            const int cell = particle_cell_0490m(
+                x[p], y[p], nx, ny, dx, dy, periodicX, periodicY);
             if (cell != donor) continue;
             if (type[p] != wantedType) {
                 ++typeRejected;
@@ -181,9 +231,19 @@ __global__ void apply_species_plan_direct_serial_0490m(
                 ++invalid;
                 break;
             }
-            selected[p] = 1u;
             const double px = mp * vx[p];
             const double py = mp * vy[p];
+            const int particleSpecies = species_index_0493b(
+                type[p], speciesCount, speciesTypes);
+            if (particleSpecies < 0) {
+                ++invalid;
+                continue;
+            }
+            if (resamplingEnabled[particleSpecies] == 0u) {
+                ++disabledSpeciesMutation;
+                continue;
+            }
+            selected[p] = 1u;
             outParticle[ops] = static_cast<unsigned int>(p);
             outDonor[ops] = donor;
             outReceiver[ops] = receiver;
@@ -206,9 +266,17 @@ __global__ void apply_species_plan_direct_serial_0490m(
             vy[p] = py / mp;
             role[p] = fluidRole;
 
+            if (firstParticle == 0xffffffffu) {
+                firstParticle = static_cast<unsigned int>(p);
+                firstReceiver = receiver;
+            }
+            lastParticle = static_cast<unsigned int>(p);
+            lastReceiver = receiver;
             ++ops;
             gathered += mp;
             selectedMassTotal += mp;
+            movedPxTotal += px;
+            movedPyTotal += py;
             if (gathered + eps >= wantedMass) break;
         }
         if (gathered + eps < wantedMass) ++entryShortfalls;
@@ -255,11 +323,18 @@ __global__ void apply_species_plan_direct_serial_0490m(
     invalid += groupUnderfills;
     *outCount = ops;
     *outInvalid = invalid;
+    *outDisabledSpeciesMutation = disabledSpeciesMutation;
     *outEntryShortfalls = entryShortfalls;
     *outGroupUnderfills = groupUnderfills;
     *outTypeRejected = typeRejected;
     *outPlannedMass = plannedMassTotal;
     *outSelectedMass = selectedMassTotal;
+    *outMovedPx = movedPxTotal;
+    *outMovedPy = movedPyTotal;
+    *outFirstParticle = firstParticle;
+    *outLastParticle = lastParticle;
+    *outFirstReceiver = firstReceiver;
+    *outLastReceiver = lastReceiver;
 }
 #endif
 
@@ -272,11 +347,18 @@ struct CudaSpeciesResamplingFastPathWorkspace0490m::Impl {
     unsigned char* selected = nullptr;
     unsigned int* outCount = nullptr;
     unsigned int* outInvalid = nullptr;
+    unsigned long long* outDisabledSpeciesMutation = nullptr;
     unsigned int* outEntryShortfalls = nullptr;
     unsigned int* outGroupUnderfills = nullptr;
     unsigned long long* outTypeRejected = nullptr;
     double* outPlannedMass = nullptr;
     double* outSelectedMass = nullptr;
+    double* outMovedPx = nullptr;
+    double* outMovedPy = nullptr;
+    unsigned int* outFirstParticle = nullptr;
+    unsigned int* outLastParticle = nullptr;
+    int* outFirstReceiver = nullptr;
+    int* outLastReceiver = nullptr;
     unsigned int* outParticle = nullptr;
     int* outDonor = nullptr;
     int* outReceiver = nullptr;
@@ -320,11 +402,18 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::release() {
         cuda_free_0490m(impl_->selected);
         cuda_free_0490m(impl_->outCount);
         cuda_free_0490m(impl_->outInvalid);
+        cuda_free_0490m(impl_->outDisabledSpeciesMutation);
         cuda_free_0490m(impl_->outEntryShortfalls);
         cuda_free_0490m(impl_->outGroupUnderfills);
         cuda_free_0490m(impl_->outTypeRejected);
         cuda_free_0490m(impl_->outPlannedMass);
         cuda_free_0490m(impl_->outSelectedMass);
+        cuda_free_0490m(impl_->outMovedPx);
+        cuda_free_0490m(impl_->outMovedPy);
+        cuda_free_0490m(impl_->outFirstParticle);
+        cuda_free_0490m(impl_->outLastParticle);
+        cuda_free_0490m(impl_->outFirstReceiver);
+        cuda_free_0490m(impl_->outLastReceiver);
         cuda_free_0490m(impl_->outParticle);
         cuda_free_0490m(impl_->outDonor);
         cuda_free_0490m(impl_->outReceiver);
@@ -363,11 +452,18 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::ensure_capacity(
     alloc(impl_->selected, activeParticles);
     alloc(impl_->outCount, 1u);
     alloc(impl_->outInvalid, 1u);
+    alloc(impl_->outDisabledSpeciesMutation, 1u);
     alloc(impl_->outEntryShortfalls, 1u);
     alloc(impl_->outGroupUnderfills, 1u);
     alloc(impl_->outTypeRejected, 1u);
     alloc(impl_->outPlannedMass, 1u);
     alloc(impl_->outSelectedMass, 1u);
+    alloc(impl_->outMovedPx, 1u);
+    alloc(impl_->outMovedPy, 1u);
+    alloc(impl_->outFirstParticle, 1u);
+    alloc(impl_->outLastParticle, 1u);
+    alloc(impl_->outFirstReceiver, 1u);
+    alloc(impl_->outLastReceiver, 1u);
     alloc(impl_->outParticle, activeParticles);
     alloc(impl_->outDonor, activeParticles);
     alloc(impl_->outReceiver, activeParticles);
@@ -413,6 +509,7 @@ try_apply_cuda_species_resampling_fast_path_0490m(
     const CellGrid& grid,
     std::uint64_t step,
     const CudaSpeciesTransferPlanWorkspace0490k& planWorkspace,
+    const CudaSpeciesCellWorkspace0490h& speciesWorkspace,
     CudaSpeciesResamplingFastPathWorkspace0490m& fastWorkspace,
     ResamplingExtractionApplyDiagnostics& extractionApply,
     ResamplingInsertionApplyDiagnostics& insertionApply) {
@@ -429,7 +526,7 @@ try_apply_cuda_species_resampling_fast_path_0490m(
     const Clock0490m::time_point total0 = Clock0490m::now();
 
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-    (void)state; (void)params; (void)grid; (void)planWorkspace; (void)fastWorkspace;
+    (void)state; (void)params; (void)grid; (void)planWorkspace; (void)speciesWorkspace; (void)fastWorkspace;
     (void)extractionApply; (void)insertionApply;
     d.skipped = true;
     d.skipReason = "CUDA particle/cell support is not compiled";
@@ -445,16 +542,16 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             append_csv_0490m(params, d);
             return d;
         }
-        if (!(params.bcLeft == "periodic" && params.bcRight == "periodic" &&
-              params.bcBottom == "periodic" && params.bcTop == "periodic") ||
-            params.immersedSolidEnable) {
-            throw std::runtime_error("0490m direct fast path requires periodic wall-free no-solid geometry");
-        }
         if (!cuda_species_resampling_fast_path_available_0490m()) {
             throw std::runtime_error("0490m requested but no CUDA device is available");
         }
         const CudaSpeciesTransferPlanDeviceView0490m plan =
             planWorkspace.device_view_0490m();
+        const CudaSpeciesCellDeviceView0490h species = speciesWorkspace.device_view();
+        if (species.speciesCount <= 0 || species.speciesTypes == nullptr ||
+            species.resamplingEnabled == nullptr) {
+            throw std::runtime_error("0493b fast path requires resident species mutation metadata");
+        }
         if (plan.capacity <= 0 || plan.donorCell == nullptr ||
             plan.receiverCell == nullptr || plan.particleType == nullptr ||
             plan.plannedMass == nullptr || plan.count == nullptr ||
@@ -486,11 +583,18 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             static_cast<std::size_t>(std::max<std::uint64_t>(1u, state.NactiveFluid)) * sizeof(unsigned char)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outCount, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outInvalid, 0, sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outDisabledSpeciesMutation, 0, sizeof(unsigned long long)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outEntryShortfalls, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outGroupUnderfills, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outTypeRejected, 0, sizeof(unsigned long long)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outPlannedMass, 0, sizeof(double)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outSelectedMass, 0, sizeof(double)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outMovedPx, 0, sizeof(double)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outMovedPy, 0, sizeof(double)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outFirstParticle, 0xff, sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outLastParticle, 0xff, sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outFirstReceiver, 0xff, sizeof(int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outLastReceiver, 0xff, sizeof(int)));
 
         cudaEvent_t start{}, stop{};
         MPCD_CUDA_0490M_CHECK(cudaEventCreate(&start));
@@ -500,11 +604,16 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             plan.capacity, plan.count, plan.overflow,
             plan.donorCell, plan.receiverCell, plan.particleType, plan.plannedMass,
             view.n, view.nActiveFluid, grid.Nx, grid.Ny, grid.dx, grid.dy,
+            (params.bcLeft == "periodic" && params.bcRight == "periodic") ? 1 : 0,
+            (params.bcBottom == "periodic" && params.bcTop == "periodic") ? 1 : 0,
+            species.speciesCount, species.speciesTypes, species.resamplingEnabled,
             static_cast<std::uint8_t>(ParticleRole::Fluid),
             impl->selected, static_cast<unsigned int>(fastWorkspace.capacity()),
-            impl->outCount, impl->outInvalid,
+            impl->outCount, impl->outInvalid, impl->outDisabledSpeciesMutation,
             impl->outEntryShortfalls, impl->outGroupUnderfills,
             impl->outTypeRejected, impl->outPlannedMass, impl->outSelectedMass,
+            impl->outMovedPx, impl->outMovedPy, impl->outFirstParticle,
+            impl->outLastParticle, impl->outFirstReceiver, impl->outLastReceiver,
             impl->outParticle, impl->outDonor, impl->outReceiver, impl->outType,
             impl->outMass, impl->outPx, impl->outPy,
             view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
@@ -520,15 +629,25 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         const Clock0490m::time_point scalar0 = Clock0490m::now();
         unsigned int operations = 0u;
         unsigned int invalid = 0u;
+        unsigned long long disabledSpeciesMutation = 0u;
         unsigned int entryShortfalls = 0u;
         unsigned int groupUnderfills = 0u;
         unsigned long long rejected = 0u;
         double plannedMass = 0.0;
         double selectedMass = 0.0;
+        double movedPx = 0.0;
+        double movedPy = 0.0;
+        unsigned int firstParticle = 0xffffffffu;
+        unsigned int lastParticle = 0xffffffffu;
+        int firstReceiver = -1;
+        int lastReceiver = -1;
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&operations, impl->outCount,
                                          sizeof(operations), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&invalid, impl->outInvalid,
                                          sizeof(invalid), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&disabledSpeciesMutation,
+                                         impl->outDisabledSpeciesMutation,
+                                         sizeof(disabledSpeciesMutation), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&entryShortfalls, impl->outEntryShortfalls,
                                          sizeof(entryShortfalls), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&groupUnderfills, impl->outGroupUnderfills,
@@ -539,6 +658,18 @@ try_apply_cuda_species_resampling_fast_path_0490m(
                                          sizeof(plannedMass), cudaMemcpyDeviceToHost));
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&selectedMass, impl->outSelectedMass,
                                          sizeof(selectedMass), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&movedPx, impl->outMovedPx,
+                                         sizeof(movedPx), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&movedPy, impl->outMovedPy,
+                                         sizeof(movedPy), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&firstParticle, impl->outFirstParticle,
+                                         sizeof(firstParticle), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&lastParticle, impl->outLastParticle,
+                                         sizeof(lastParticle), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&firstReceiver, impl->outFirstReceiver,
+                                         sizeof(firstReceiver), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490M_CHECK(cudaMemcpy(&lastReceiver, impl->outLastReceiver,
+                                         sizeof(lastReceiver), cudaMemcpyDeviceToHost));
         unsigned int planEntries = 0u;
         MPCD_CUDA_0490M_CHECK(cudaMemcpy(&planEntries, plan.count,
                                          sizeof(planEntries), cudaMemcpyDeviceToHost));
@@ -546,74 +677,26 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         d.planEntries = planEntries;
         d.operations = operations;
         d.invalidOperations = invalid;
+        d.disabledSpeciesMutationCount =
+            static_cast<std::uint64_t>(disabledSpeciesMutation);
         d.entryMassShortfalls = entryShortfalls;
         d.donorTypeGroupUnderfills = groupUnderfills;
         d.typeRejectedCandidates = static_cast<std::uint64_t>(rejected);
         d.plannedMass = plannedMass;
         d.selectedMass = selectedMass;
+        d.movedMass = selectedMass;
+        d.movedMomentumX = movedPx;
+        d.movedMomentumY = movedPy;
         d.selectedMassCoverageFraction = plannedMass > 0.0
             ? selectedMass / plannedMass : 1.0;
         if (operations > fastWorkspace.capacity()) {
-            throw std::runtime_error("0490m compact patchback capacity overflow");
+            throw std::runtime_error("0490m resident operation capacity overflow");
         }
-
-        std::vector<unsigned int> particle(operations);
-        std::vector<int> receiver(operations);
-        std::vector<std::uint32_t> type(operations);
-        std::vector<double> mass(operations), px(operations), py(operations);
-        const Clock0490m::time_point patchDownload0 = Clock0490m::now();
-        if (operations > 0u) {
-            const std::size_t n = static_cast<std::size_t>(operations);
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(particle.data(), impl->outParticle,
-                n * sizeof(unsigned int), cudaMemcpyDeviceToHost));
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(receiver.data(), impl->outReceiver,
-                n * sizeof(int), cudaMemcpyDeviceToHost));
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(type.data(), impl->outType,
-                n * sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(mass.data(), impl->outMass,
-                n * sizeof(double), cudaMemcpyDeviceToHost));
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(px.data(), impl->outPx,
-                n * sizeof(double), cudaMemcpyDeviceToHost));
-            MPCD_CUDA_0490M_CHECK(cudaMemcpy(py.data(), impl->outPy,
-                n * sizeof(double), cudaMemcpyDeviceToHost));
-            d.compactPatchbackBytes = static_cast<std::uint64_t>(n) *
-                (sizeof(unsigned int) + sizeof(int) + sizeof(std::uint32_t) + 3u * sizeof(double));
-        }
-        d.patchbackDownloadSeconds = seconds_since_0490m(patchDownload0);
-
-        const Clock0490m::time_point patchHost0 = Clock0490m::now();
-        for (std::size_t op = 0; op < static_cast<std::size_t>(operations); ++op) {
-            const std::size_t i = static_cast<std::size_t>(particle[op]);
-            const int cSigned = receiver[op];
-            const double mp = mass[op];
-            if (i >= static_cast<std::size_t>(state.Np) || cSigned < 0 || !(mp > 0.0)) {
-                ++d.invalidOperations;
-                continue;
-            }
-            const unsigned int c = static_cast<unsigned int>(cSigned);
-            if (c >= static_cast<unsigned int>(grid.numCells)) {
-                ++d.invalidOperations;
-                continue;
-            }
-            const unsigned int ix = c % static_cast<unsigned int>(grid.Nx);
-            const unsigned int iy = c / static_cast<unsigned int>(grid.Nx);
-            const unsigned int q = static_cast<unsigned int>(op) & 15u;
-            const double fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
-            const double fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
-            state.x[i] = (static_cast<double>(ix) + fx) * grid.dx;
-            state.y[i] = (static_cast<double>(iy) + fy) * grid.dy;
-            state.mass[i] = mp;
-            state.type[i] = type[op];
-            state.vx[i] = px[op] / mp;
-            state.vy[i] = py[op] / mp;
-            if (!state.role.empty()) {
-                state.role[i] = static_cast<std::uint8_t>(ParticleRole::Fluid);
-            }
-            d.movedMass += mp;
-            d.movedMomentumX += px[op];
-            d.movedMomentumY += py[op];
-        }
-        d.hostPatchbackSeconds = seconds_since_0490m(patchHost0);
+        // 0493b: CUDA state is authoritative. No operation arrays or particle
+        // attributes are downloaded and no host particle patchback is applied.
+        d.compactPatchbackBytes = 0u;
+        d.patchbackDownloadSeconds = 0.0;
+        d.hostPatchbackSeconds = 0.0;
 
         extractionApply = ResamplingExtractionApplyDiagnostics{};
         insertionApply = ResamplingInsertionApplyDiagnostics{};
@@ -641,18 +724,19 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         insertionApply.massResidualVsPlan = 0.0;
         insertionApply.noInvalidReceiverCells = d.invalidOperations == 0u;
         insertionApply.allSourcesWereInactive = d.invalidOperations == 0u;
-        if (operations > 0u) {
-            extractionApply.firstAppliedParticle = particle.front();
-            extractionApply.lastAppliedParticle = particle.back();
-            insertionApply.firstInsertedParticle = particle.front();
-            insertionApply.lastInsertedParticle = particle.back();
-            insertionApply.firstInsertionReceiverCell = receiver.front();
-            insertionApply.lastInsertionReceiverCell = receiver.back();
+        if (operations > 0u && firstParticle != 0xffffffffu) {
+            extractionApply.firstAppliedParticle = firstParticle;
+            extractionApply.lastAppliedParticle = lastParticle;
+            insertionApply.firstInsertedParticle = firstParticle;
+            insertionApply.lastInsertedParticle = lastParticle;
+            insertionApply.firstInsertionReceiverCell = firstReceiver;
+            insertionApply.lastInsertionReceiverCell = lastReceiver;
         }
 
         d.handled = true;
         d.applied = operations > 0u;
-        d.pass = d.invalidOperations == 0u;
+        d.pass = d.invalidOperations == 0u &&
+                 d.disabledSpeciesMutationCount == 0u;
         if (d.pass) {
             cuda_shared_particle_state_0251_mark_fresh("species_resampling_fast_path_0490m");
         } else {

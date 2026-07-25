@@ -11,7 +11,7 @@ suite_root_cd_0434
 CASE_LABEL="injection_type1_into_type2"
 PHYSICS_LABEL="${PHYSICS_LABEL:-liquid_type1_injection}"
 GEN_CASE="injection"
-TOPOLOGY="segmented"
+TOPOLOGY="${TOPOLOGY:-segmented}"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
 GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.01}"; KBT="${KBT:-0.005}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
@@ -19,7 +19,7 @@ INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-5.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
 BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
-LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/livevis_control.kv}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
 # Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
@@ -72,6 +72,9 @@ SPECIES_Q6_COMPARISON_TOLERANCE="${SPECIES_Q6_COMPARISON_TOLERANCE:-1.0e-11}"
 # 0490p strict species-aware resident resampling. 0491h-fix1 established that
 # generic 0296, thermal renormalization and the legacy mass guard must remain off.
 SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-true}"
+# 0493b: mutation policy is per species and defaults to enabled.
+SPECIES0_RESAMPLING_ENABLE="${SPECIES0_RESAMPLING_ENABLE:-true}"
+SPECIES1_RESAMPLING_ENABLE="${SPECIES1_RESAMPLING_ENABLE:-true}"
 # 0493a: one resident production path for every boundary family.
 SPECIES_RESIDENT_MODE="${SPECIES_RESIDENT_MODE:-production}"
 RESAMPLING_HOST_PATCHBACK_ENABLE="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
@@ -170,7 +173,9 @@ wallThermalNoise = 0.0
 speciesRegistryEnable = true
 speciesCount = 2
 species0 = ${INJECT_TYPE} liquid_incompressible liquid ${LIQUID_Q6_STRENGTH} ${LIQUID_MASS_CLOSURE_STRENGTH} ${LIQUID_REFERENCE_CELL_MASS}
+species0ResamplingEnable = ${SPECIES0_RESAMPLING_ENABLE}
 species1 = ${BACKGROUND_TYPE} gas_compressible gas ${GAS_Q6_STRENGTH} ${GAS_MASS_CLOSURE_STRENGTH} ${GAS_REFERENCE_CELL_MASS}
+species1ResamplingEnable = ${SPECIES1_RESAMPLING_ENABLE}
 speciesRequireRegisteredTypes = true
 speciesDiagnosticsEnable = ${SPECIES_DIAGNOSTICS_ENABLE}
 speciesDiagnosticsFilename = species_runtime_liquid_into_gas_0491.csv

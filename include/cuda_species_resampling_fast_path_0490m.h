@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cell_grid.h"
+#include "cuda_species_cell_fields_0490h.h"
 #include "cuda_species_transfer_plan_0490k.h"
 #include "particle_state.h"
 #include "simulation_params.h"
@@ -24,6 +25,7 @@ struct CudaSpeciesResamplingFastPathDiagnostics0490m {
     std::uint64_t planEntries = 0u;
     std::uint64_t operations = 0u;
     std::uint64_t invalidOperations = 0u;
+    std::uint64_t disabledSpeciesMutationCount = 0u;
     // A continuous transfer-plan entry may be underfilled individually because
     // particles are indivisible.  Such shortfalls are non-fatal when the
     // aggregate selected mass covers every donor/type group in the plan.
@@ -90,6 +92,7 @@ private:
         const CellGrid&,
         std::uint64_t,
         const CudaSpeciesTransferPlanWorkspace0490k&,
+        const CudaSpeciesCellWorkspace0490h&,
         CudaSpeciesResamplingFastPathWorkspace0490m&,
         ResamplingExtractionApplyDiagnostics&,
         ResamplingInsertionApplyDiagnostics&);
@@ -100,9 +103,9 @@ bool cuda_species_resampling_fast_path_available_0490m();
 // 0490m direct resident handoff. The authoritative 0490k device plan is
 // consumed in-place, donor particles are selected by donor cell and exact
 // particle type, and the shared CUDA particle state is mutated without any
-// host plan/operation vector. A compact patchback of moved particles keeps the
-// legacy host state coherent until the remaining resampling orchestration is
-// migrated fully to CUDA.
+// host plan/operation vector. The CUDA particle state is authoritative; only
+// fixed-size scalar diagnostics are downloaded. No particle patchback is
+// performed in production.
 CudaSpeciesResamplingFastPathDiagnostics0490m
 try_apply_cuda_species_resampling_fast_path_0490m(
     ParticleState& state,
@@ -110,6 +113,7 @@ try_apply_cuda_species_resampling_fast_path_0490m(
     const CellGrid& grid,
     std::uint64_t step,
     const CudaSpeciesTransferPlanWorkspace0490k& planWorkspace,
+    const CudaSpeciesCellWorkspace0490h& speciesWorkspace,
     CudaSpeciesResamplingFastPathWorkspace0490m& fastWorkspace,
     ResamplingExtractionApplyDiagnostics& extractionApply,
     ResamplingInsertionApplyDiagnostics& insertionApply);

@@ -1163,6 +1163,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                                   SrcMpcdBaseWorkspace& workspace,
                                   bool collectResamplingDiagnosticsWhenDisabled) {
     StepResult result{};
+    std::uint64_t disabledSpeciesMutationCount0493b = 0u;
 
     validate_particle_state(state, "run_src_mpcd_base_step");
     ensure_particle_roles(state, ParticleRole::Fluid);
@@ -1631,6 +1632,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         cudaPopulationGuard0490j = try_apply_cuda_resampling_population_guard_0297(
             state, params, grid, result.domain, step, time,
             "post_src_classic_post_thermostat_pre_cpu_resampling");
+        disabledSpeciesMutationCount0493b +=
+            cudaPopulationGuard0490j.disabledSpeciesMutationCount0493b;
         if (params.speciesResamplingPopulationGuardCudaEnable &&
             !cudaPopulationGuard0490j.handled) {
             throw std::runtime_error(
@@ -1865,6 +1868,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             try_apply_cuda_species_resampling_fast_path_0490m(
                 state, params, grid, step,
                 workspace.speciesTransferPlanCuda0490k,
+                workspace.speciesCellCuda0490h,
                 workspace.speciesResamplingFastPathCuda0490m,
                 extractionApply, insertionApply);
         if (!fast0490m.handled || !fast0490m.pass || fast0490m.skipped ||
@@ -1872,6 +1876,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             throw std::runtime_error(
                 "0490m direct resident species materialize/apply path failed");
         }
+        disabledSpeciesMutationCount0493b += fast0490m.disabledSpeciesMutationCount;
         handledByCudaSpeciesFastPath0490m = true;
         planOrTransferEdited = planOrTransferEdited || fast0490m.applied;
     }
@@ -2083,6 +2088,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 throw std::runtime_error(
                     "0490i resident CUDA species mass closure was requested but not handled");
             }
+            disabledSpeciesMutationCount0493b +=
+                cudaSpeciesClosure0490i.disabledSpeciesMutationCount;
             handledByCudaResamplingApply0448 = true;
             sharedStatePreservedByCudaRemap =
                 cudaSpeciesClosure0490i.sharedStatePreserved != 0;
@@ -2207,6 +2214,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
         }
     }
+
+    result.resampling.disabledSpeciesMutationCount =
+        disabledSpeciesMutationCount0493b;
 
     if (cudaResamplingPipelineShadow0445Requested) {
         (void)try_run_cuda_resampling_pipeline_shadow_0445(

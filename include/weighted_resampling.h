@@ -905,6 +905,9 @@ struct WeightedResamplingDiagnostics {
     std::uint64_t poolLastFreeIndex = kInvalidParticleIndex;
     double poolFreeSlotFraction = 0.0;
     double poolDormantSlotFraction = 0.0;
+
+    // 0493b scalar corruption guard, aggregated from CUDA resampling stages.
+    std::uint64_t disabledSpeciesMutationCount = 0;
 };
 
 ResamplingParticlePoolDiagnostics rebuild_resampling_particle_pool(

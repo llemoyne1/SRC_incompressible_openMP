@@ -79,6 +79,7 @@ __global__ void build_species_transfer_plan_serial_0490k(
     double richThreshold,
     const unsigned char* wetCell,
     const std::uint32_t* speciesTypes,
+    const unsigned char* resamplingEnabled,
     const double* speciesMass,
     const double* totalCellMass,
     double* receiverRemaining,
@@ -109,13 +110,22 @@ __global__ void build_species_transfer_plan_serial_0490k(
 
     for (int c = 0; c < numCells; ++c) {
         const double total = totalCellMass[c];
+        double mutableMass = 0.0;
+        double frozenMass = 0.0;
+        for (int s = 0; s < speciesCount; ++s) {
+            const double ms = speciesMass[s * numCells + c];
+            if (resamplingEnabled[s] != 0u) mutableMass += ms;
+            else frozenMass += ms;
+        }
         const bool wet = wetCell[c] != 0u;
         const bool receiver = wet && total < poorThreshold;
         const bool donor = wet && total > richThreshold;
-        const double deficit = receiver && targetCellMass > total
-            ? targetCellMass - total : 0.0;
-        const double excess = donor && total > targetCellMass
-            ? total - targetCellMass : 0.0;
+        const double mutableTarget = targetCellMass > frozenMass
+            ? targetCellMass - frozenMass : 0.0;
+        const double deficit = receiver && mutableTarget > mutableMass
+            ? mutableTarget - mutableMass : 0.0;
+        const double excess = donor && mutableMass > mutableTarget
+            ? mutableMass - mutableTarget : 0.0;
         receiverRemaining[c] = deficit;
         donorRemaining[c] = excess;
         if (deficit > eps) ++receiverCells;
@@ -123,10 +133,13 @@ __global__ void build_species_transfer_plan_serial_0490k(
         for (int s = 0; s < speciesCount; ++s) {
             const int k = s * numCells + c;
             const double ms = speciesMass[k];
+            const bool enabled = resamplingEnabled[s] != 0u;
             receiverSpeciesRemaining[k] =
-                deficit > eps && total > eps && ms > eps ? deficit * ms / total : 0.0;
+                enabled && deficit > eps && mutableMass > eps && ms > eps
+                    ? deficit * ms / mutableMass : 0.0;
             donorSpeciesRemaining[k] =
-                excess > eps && total > eps && ms > eps ? excess * ms / total : 0.0;
+                enabled && excess > eps && mutableMass > eps && ms > eps
+                    ? excess * ms / mutableMass : 0.0;
         }
     }
 
@@ -536,7 +549,7 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
     const CudaSpeciesCellDeviceView0490h speciesView = speciesWorkspace.device_view();
     if (speciesView.numCells != nc || speciesView.speciesCount != ns ||
         speciesView.mass == nullptr || speciesView.totalCellMass == nullptr ||
-        speciesView.speciesTypes == nullptr) {
+        speciesView.speciesTypes == nullptr || speciesView.resamplingEnabled == nullptr) {
         throw std::runtime_error("0490k species workspace device view mismatch");
     }
 
@@ -569,6 +582,7 @@ CudaSpeciesTransferPlanDiagnostics0490k try_apply_cuda_species_transfer_plan_049
         resamplingDiagnostics.richMassThreshold,
         plannerWetCell0490p,
         speciesView.speciesTypes,
+        speciesView.resamplingEnabled,
         speciesView.mass,
         speciesView.totalCellMass,
         impl->receiverRemaining,

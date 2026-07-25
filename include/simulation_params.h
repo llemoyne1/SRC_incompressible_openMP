@@ -23,6 +23,7 @@ struct SimulationParams {
     // 0490a multiphase scaffold. Disabled by default, so legacy parameter files
     // and trajectories are unchanged. Each declaration uses:
     //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared [referenceCellMassDeclared]
+    //   speciesKResamplingEnable = true|false  (default: true)
     // The Q6 strength remains declarative in 0490d. The mass-closure strength
     // and reference cell mass become active only when
     // speciesResamplingMassClosureEnable=true.

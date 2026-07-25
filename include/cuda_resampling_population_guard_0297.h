@@ -56,6 +56,7 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     std::uint64_t speciesDirectedMerges0490j = 0u;
     std::uint64_t speciesTargetInfeasibleCells0490j = 0u;
     std::uint64_t speciesInvalidTypeCount0490j = 0u;
+    std::uint64_t disabledSpeciesMutationCount0493b = 0u;
     int speciesWorkspaceReused0490j = 0;
 
     int nMin = 0;

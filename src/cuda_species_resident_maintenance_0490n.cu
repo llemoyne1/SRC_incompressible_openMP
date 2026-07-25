@@ -1,6 +1,8 @@
 #include "cuda_species_resident_maintenance_0490n.h"
 
 #include "cuda_shared_particle_state_0251.h"
+#include "cuda_darcy_brinkman_0343.h"
+#include "immersed_solid.h"
 
 #include <algorithm>
 #include <chrono>
@@ -232,6 +234,94 @@ struct RoleEquals0490n {
     }
 };
 
+struct DevicePhysicalCellMaskConfig0493b {
+    int nx = 0;
+    int ny = 0;
+    int periodicX = 0;
+    int periodicY = 0;
+    int solidEnable = 0;
+    int solidShape = 0; // 1 circle, 2 rectangle
+    int samples = 1;
+    double lx = 1.0;
+    double ly = 1.0;
+    double dx = 1.0;
+    double dy = 1.0;
+    double domainXMin = 0.0;
+    double domainXMax = 1.0;
+    double domainYMin = 0.0;
+    double domainYMax = 1.0;
+    double circleCx = 0.0;
+    double circleCy = 0.0;
+    double circleR = 0.0;
+    double rectXMin = 0.0;
+    double rectXMax = 0.0;
+    double rectYMin = 0.0;
+    double rectYMax = 0.0;
+    double fluidFractionThreshold = 0.5;
+};
+
+__device__ double wrap_periodic_0493b(double value, double length) {
+    value = fmod(value, length);
+    if (value < 0.0) value += length;
+    if (value >= length) value -= length;
+    return value;
+}
+
+__device__ bool inside_physical_domain_0493b(
+    double x, double y, const DevicePhysicalCellMaskConfig0493b& cfg) {
+    return x >= cfg.domainXMin && x <= cfg.domainXMax &&
+           y >= cfg.domainYMin && y <= cfg.domainYMax;
+}
+
+__device__ bool inside_immersed_solid_0493b(
+    double x, double y, const DevicePhysicalCellMaskConfig0493b& cfg) {
+    if (!cfg.solidEnable) return false;
+    if (cfg.solidShape == 1) {
+        const double rx = x - cfg.circleCx;
+        const double ry = y - cfg.circleCy;
+        return rx * rx + ry * ry < cfg.circleR * cfg.circleR;
+    }
+    if (cfg.solidShape == 2) {
+        return x >= cfg.rectXMin && x <= cfg.rectXMax &&
+               y >= cfg.rectYMin && y <= cfg.rectYMax;
+    }
+    return false;
+}
+
+__global__ void build_physical_fluid_cell_mask_kernel_0493b(
+    int numCells,
+    DevicePhysicalCellMaskConfig0493b cfg,
+    unsigned char* physicalFluidCell) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= numCells) return;
+    if (!cfg.solidEnable) {
+        physicalFluidCell[c] = 1u;
+        return;
+    }
+    const int ix = c % cfg.nx;
+    const int iy = c / cfg.nx;
+    const int ns = cfg.samples > 0 ? cfg.samples : 1;
+    int inside = 0;
+    int fluidSamples = 0;
+    const int total = ns * ns;
+    for (int sy = 0; sy < ns; ++sy) {
+        double y = static_cast<double>(iy) * cfg.dy +
+                   (static_cast<double>(sy) + 0.5) * cfg.dy / static_cast<double>(ns);
+        if (cfg.periodicY) y = wrap_periodic_0493b(y, cfg.ly);
+        for (int sx = 0; sx < ns; ++sx) {
+            double x = static_cast<double>(ix) * cfg.dx +
+                       (static_cast<double>(sx) + 0.5) * cfg.dx / static_cast<double>(ns);
+            if (cfg.periodicX) x = wrap_periodic_0493b(x, cfg.lx);
+            if (!inside_physical_domain_0493b(x, y, cfg)) continue;
+            ++fluidSamples;
+            if (inside_immersed_solid_0493b(x, y, cfg)) ++inside;
+        }
+    }
+    const int denom = fluidSamples > 0 ? fluidSamples : total;
+    const double solidFraction = static_cast<double>(inside) / static_cast<double>(denom);
+    const double fluidFraction = fmax(0.0, fmin(1.0, 1.0 - solidFraction));
+    physicalFluidCell[c] = fluidFraction >= cfg.fluidFractionThreshold ? 1u : 0u;
+}
 
 __global__ void build_species_cell_policy_serial_0490p(
     int numCells,
@@ -245,6 +335,10 @@ __global__ void build_species_cell_policy_serial_0490p(
     const double* speciesPx,
     const double* speciesPy,
     const double* totalCellMass,
+    const unsigned char* physicalFluidCell,
+    const float* chiField,
+    int chiFilterEnable,
+    double chiMin,
     unsigned char* wetCell,
     unsigned char* poorCell,
     unsigned char* richCell,
@@ -272,7 +366,11 @@ __global__ void build_species_cell_policy_serial_0490p(
         }
         const double mass = totalCellMass[c];
         const bool nonEmpty = mass > 0.0;
-        const bool wet = !occupiedWetMode || mass > wetMassThreshold;
+        const bool physical = physicalFluidCell == nullptr || physicalFluidCell[c] != 0u;
+        const bool chiAllowed = !chiFilterEnable ||
+            (chiField != nullptr && static_cast<double>(chiField[c]) >= chiMin);
+        const bool wet = physical && chiAllowed &&
+            (!occupiedWetMode || mass > wetMassThreshold);
         wetCell[c] = wet ? 1u : 0u;
         poorCell[c] = 0u;
         richCell[c] = 0u;
@@ -368,6 +466,7 @@ struct CudaSpeciesResidentMaintenanceWorkspace0490n::Impl {
     unsigned char* poorCell = nullptr;
     unsigned char* richCell = nullptr;
     unsigned char* targetBandCell = nullptr;
+    unsigned char* physicalFluidCell = nullptr;
     CellPolicySummary0490p* policySummary = nullptr;
 #endif
 };
@@ -413,6 +512,7 @@ void CudaSpeciesResidentMaintenanceWorkspace0490n::release() {
         cuda_free_0490n(impl_->poorCell);
         cuda_free_0490n(impl_->richCell);
         cuda_free_0490n(impl_->targetBandCell);
+        cuda_free_0490n(impl_->physicalFluidCell);
         cuda_free_0490n(impl_->policySummary);
     }
 #endif
@@ -456,6 +556,7 @@ void CudaSpeciesResidentMaintenanceWorkspace0490n::ensure_capacity(
     alloc(impl_->poorCell, static_cast<std::uint64_t>(cells));
     alloc(impl_->richCell, static_cast<std::uint64_t>(cells));
     alloc(impl_->targetBandCell, static_cast<std::uint64_t>(cells));
+    alloc(impl_->physicalFluidCell, static_cast<std::uint64_t>(cells));
     alloc(impl_->policySummary, 1u);
 
     cub::CountingInputIterator<unsigned int> counting(0u);
@@ -580,11 +681,6 @@ refresh_cuda_species_resident_maintenance_0490n(
         }
         if (state.Np > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
             throw std::runtime_error("0490n particle storage exceeds CUB selection index range");
-        }
-        if (!(params.bcLeft == "periodic" && params.bcRight == "periodic" &&
-              params.bcBottom == "periodic" && params.bcTop == "periodic") ||
-            params.immersedSolidEnable) {
-            throw std::runtime_error("0490n currently requires periodic wall-free no-solid geometry");
         }
         if (!cuda_species_resident_maintenance_available_0490n()) {
             throw std::runtime_error("0490n requested but no CUDA device is available");
@@ -731,6 +827,56 @@ refresh_cuda_species_resident_maintenance_0490n(
                 speciesView.py == nullptr || speciesView.totalCellMass == nullptr) {
                 throw std::runtime_error("0490p species workspace is not ready for device policy");
             }
+            DevicePhysicalCellMaskConfig0493b physicalCfg{};
+            physicalCfg.nx = grid.Nx;
+            physicalCfg.ny = grid.Ny;
+            physicalCfg.periodicX = is_x_periodic(params) ? 1 : 0;
+            physicalCfg.periodicY = is_y_periodic(params) ? 1 : 0;
+            physicalCfg.solidEnable = immersed_solid_enabled(params) ? 1 : 0;
+            const ImmersedSolidShape solidShape0493b = immersed_solid_shape(params);
+            physicalCfg.solidShape = solidShape0493b == ImmersedSolidShape::Circle
+                ? 1 : (solidShape0493b == ImmersedSolidShape::Rectangle ? 2 : 0);
+            physicalCfg.samples = std::max(1, params.immersedSolidFractionSamples);
+            physicalCfg.lx = grid.Lx;
+            physicalCfg.ly = grid.Ly;
+            physicalCfg.dx = grid.dx;
+            physicalCfg.dy = grid.dy;
+            physicalCfg.domainXMin = domain.xMin;
+            physicalCfg.domainXMax = domain.xMax;
+            physicalCfg.domainYMin = domain.yMin;
+            physicalCfg.domainYMax = domain.yMax;
+            immersed_solid_circle_center(
+                params, time, physicalCfg.circleCx, physicalCfg.circleCy);
+            physicalCfg.circleR = params.immersedSolidR;
+            immersed_solid_rectangle_bounds(
+                params, time,
+                physicalCfg.rectXMin, physicalCfg.rectXMax,
+                physicalCfg.rectYMin, physicalCfg.rectYMax);
+            physicalCfg.fluidFractionThreshold = fmax(
+                0.0, fmin(1.0, params.projectionImmersedSolidFluidFractionThreshold));
+            const int physicalBlock0493b = 256;
+            const int physicalGrid0493b =
+                (grid.numCells + physicalBlock0493b - 1) / physicalBlock0493b;
+            build_physical_fluid_cell_mask_kernel_0493b<<<
+                physicalGrid0493b, physicalBlock0493b>>>(
+                    grid.numCells, physicalCfg, impl->physicalFluidCell);
+            MPCD_CUDA_0490N_CHECK(cudaGetLastError());
+
+            const float* chiField0493b = nullptr;
+            int chiNx0493b = 0;
+            int chiNy0493b = 0;
+            const bool chiFilter0493b = params.darcyBrinkmanEnable &&
+                                        params.cudaResamplingChiFilterEnable;
+            if (chiFilter0493b) {
+                if (!cuda_darcy_brinkman_0343_device_chi_field(
+                        params, &chiField0493b, &chiNx0493b, &chiNy0493b) ||
+                    chiField0493b == nullptr || chiNx0493b != grid.Nx ||
+                    chiNy0493b != grid.Ny) {
+                    throw std::runtime_error(
+                        "0493b resident policy requires the current Darcy chi field");
+                }
+            }
+
             const Clock0490n::time_point policy0 = Clock0490n::now();
             build_species_cell_policy_serial_0490p<<<1, 1>>>(
                 grid.numCells, speciesView.speciesCount,
@@ -740,7 +886,8 @@ refresh_cuda_species_resident_maintenance_0490n(
                 params.resamplingPoorCellMassFraction,
                 params.resamplingRichCellMassFraction,
                 speciesView.count, speciesView.px, speciesView.py,
-                speciesView.totalCellMass,
+                speciesView.totalCellMass, impl->physicalFluidCell,
+                chiField0493b, chiFilter0493b ? 1 : 0, params.cudaResamplingChiMin,
                 impl->wetCell, impl->poorCell, impl->richCell,
                 impl->targetBandCell, impl->policySummary);
             MPCD_CUDA_0490N_CHECK(cudaGetLastError());

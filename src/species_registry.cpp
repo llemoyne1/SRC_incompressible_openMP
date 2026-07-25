@@ -46,6 +46,7 @@ const char* species_phase_family_name(SpeciesPhaseFamily family) {
     switch (family) {
         case SpeciesPhaseFamily::Gas: return "gas";
         case SpeciesPhaseFamily::Liquid: return "liquid";
+        case SpeciesPhaseFamily::Dispersed: return "dispersed";
         default: return "unspecified";
     }
 }
@@ -55,10 +56,13 @@ SpeciesPhaseFamily parse_species_phase_family(const std::string& value,
     const std::string v = lower_copy(value);
     if (v == "gas") return SpeciesPhaseFamily::Gas;
     if (v == "liquid") return SpeciesPhaseFamily::Liquid;
+    if (v == "dispersed" || v == "colloid" || v == "colloidal") {
+        return SpeciesPhaseFamily::Dispersed;
+    }
     if (v == "unspecified" || v == "unknown" || v == "legacy") {
         return SpeciesPhaseFamily::Unspecified;
     }
-    throw std::runtime_error(context + ": phase family must be gas, liquid or unspecified");
+    throw std::runtime_error(context + ": phase family must be gas, liquid, dispersed or unspecified");
 }
 
 void validate_species_definitions(const std::vector<SpeciesDefinition>& definitions,
@@ -130,7 +134,7 @@ SpeciesDiagnosticsWriter0490a::SpeciesDiagnosticsWriter0490a(const std::string& 
         throw std::runtime_error("Cannot open species diagnostics file for writing: " + filepath);
     }
     out_ << "step,time,type,name,phaseFamily,registered,q6StrengthDeclared,"
-            "resamplingMassClosureStrengthDeclared,referenceCellMassDeclared,nFluid,nLatent,totalMass,Px,Py,"
+            "resamplingMassClosureStrengthDeclared,referenceCellMassDeclared,resamplingEnable,nFluid,nLatent,totalMass,Px,Py,"
             "kineticEnergy,meanVx,meanVy,meanParticleMass,minParticleMass,maxParticleMass\n";
 }
 
@@ -200,6 +204,7 @@ void SpeciesDiagnosticsWriter0490a::append(
              << acc.definition.q6StrengthDeclared << ','
              << acc.definition.resamplingMassClosureStrengthDeclared << ','
              << acc.definition.referenceCellMassDeclared << ','
+             << (acc.definition.resamplingEnable ? 1 : 0) << ','
              << acc.nFluid << ','
              << acc.nLatent << ','
              << acc.totalMass << ','

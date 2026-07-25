@@ -24,6 +24,11 @@ struct CudaCellMomentsOptions {
     bool computeCellVelocities = true;
     bool downloadCellVelocities = true;
 
+    // 0493b: resident consumers may keep cellId/count/mass/momentum and
+    // velocities entirely on the device. The default preserves every legacy
+    // caller. When false, `out` remains empty and no cell-sized D2H copy occurs.
+    bool downloadHostArrays = true;
+
     // Conservative automatic fast paths. They are enabled by default because
     // they are guarded by exact host-side checks performed in the deposit call.
     bool enableAllFluidFastPath = true;
@@ -42,6 +47,7 @@ struct CudaCellMomentsDiagnostics {
     int allFluidFastPath = 0;
     int uniformMassFastPath = 0;
     int downloadedCellVelocities = 1;
+    int downloadedHostArrays = 1;
 };
 
 struct CudaCellMoments {

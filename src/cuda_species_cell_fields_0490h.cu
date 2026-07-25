@@ -250,6 +250,7 @@ struct CudaSpeciesCellWorkspace0490h::Impl {
     double* q6Strength = nullptr;
     double* referenceCellMass = nullptr;
     unsigned char* phaseFamily = nullptr;
+    unsigned char* resamplingEnabled = nullptr;
     unsigned int* count = nullptr;
     double* mass = nullptr;
     double* px = nullptr;
@@ -310,6 +311,7 @@ void CudaSpeciesCellWorkspace0490h::release() {
         cuda_free_0490h(impl_->q6Strength);
         cuda_free_0490h(impl_->referenceCellMass);
         cuda_free_0490h(impl_->phaseFamily);
+        cuda_free_0490h(impl_->resamplingEnabled);
         cuda_free_0490h(impl_->count);
         cuda_free_0490h(impl_->mass);
         cuda_free_0490h(impl_->px);
@@ -366,6 +368,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->q6Strength, ns * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->referenceCellMass, ns * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->phaseFamily, ns * sizeof(unsigned char)));
+    MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->resamplingEnabled, ns * sizeof(unsigned char)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->count, dense * sizeof(unsigned int)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->mass, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->px, dense * sizeof(double)));
@@ -383,7 +386,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     impl_->numCells = numCells;
     impl_->speciesCount = speciesCount;
     impl_->allocatedBytes =
-        ns * (sizeof(std::uint32_t) + 2u * sizeof(double) + sizeof(unsigned char)) +
+        ns * (sizeof(std::uint32_t) + 2u * sizeof(double) + 2u * sizeof(unsigned char)) +
         dense * (sizeof(unsigned int) + 5u * sizeof(double)) +
         nc * 4u * sizeof(double) + sizeof(unsigned long long);
 
@@ -412,6 +415,7 @@ CudaSpeciesCellDeviceView0490h CudaSpeciesCellWorkspace0490h::device_view() cons
     v.q6Strength = impl_->q6Strength;
     v.referenceCellMass = impl_->referenceCellMass;
     v.phaseFamily = impl_->phaseFamily;
+    v.resamplingEnabled = impl_->resamplingEnabled;
     v.count = impl_->count;
     v.mass = impl_->mass;
     v.px = impl_->px;
@@ -480,11 +484,13 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     std::vector<double> hQ6Strength(definitions.size());
     std::vector<double> hRefMass(definitions.size());
     std::vector<unsigned char> hPhase(definitions.size());
+    std::vector<unsigned char> hResamplingEnabled(definitions.size());
     for (std::size_t s = 0; s < definitions.size(); ++s) {
         hTypes[s] = definitions[s].type;
         hQ6Strength[s] = definitions[s].q6StrengthDeclared;
         hRefMass[s] = definitions[s].referenceCellMassDeclared;
         hPhase[s] = static_cast<unsigned char>(definitions[s].phaseFamily);
+        hResamplingEnabled[s] = definitions[s].resamplingEnable ? 1u : 0u;
     }
 
     const Clock::time_point tMeta = Clock::now();
@@ -500,11 +506,15 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.phaseFamily, hPhase.data(),
                                     hPhase.size() * sizeof(unsigned char),
                                     cudaMemcpyHostToDevice));
+    MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.resamplingEnabled, hResamplingEnabled.data(),
+                                    hResamplingEnabled.size() * sizeof(unsigned char),
+                                    cudaMemcpyHostToDevice));
     diag.metadataUploadBytes +=
         hTypes.size() * sizeof(std::uint32_t) +
         hQ6Strength.size() * sizeof(double) +
         hRefMass.size() * sizeof(double) +
-        hPhase.size() * sizeof(unsigned char);
+        hPhase.size() * sizeof(unsigned char) +
+        hResamplingEnabled.size() * sizeof(unsigned char);
     diag.metadataUploadSeconds += seconds_since_0490h(tMeta);
 
     const int denseSize = speciesCount * grid.numCells;
@@ -594,9 +604,11 @@ CudaSpeciesCellFields0490h cuda_download_species_cell_fields_0490h(
     out.numCells = view.numCells;
     out.speciesTypes.reserve(definitions.size());
     out.q6Strength.reserve(definitions.size());
+    out.resamplingEnabled.reserve(definitions.size());
     for (const SpeciesDefinition& d : definitions) {
         out.speciesTypes.push_back(d.type);
         out.q6Strength.push_back(d.q6StrengthDeclared);
+        out.resamplingEnabled.push_back(d.resamplingEnable ? 1u : 0u);
     }
     out.count.resize(dense);
     out.mass.resize(dense);

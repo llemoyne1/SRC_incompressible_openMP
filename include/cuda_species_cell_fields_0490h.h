@@ -25,6 +25,7 @@ struct CudaSpeciesCellDeviceView0490h {
     double* q6Strength = nullptr;
     double* referenceCellMass = nullptr;
     unsigned char* phaseFamily = nullptr;
+    unsigned char* resamplingEnabled = nullptr;
     unsigned int* count = nullptr;
     double* mass = nullptr;
     double* px = nullptr;
@@ -42,6 +43,7 @@ struct CudaSpeciesCellFields0490h {
     int numCells = 0;
     std::vector<std::uint32_t> speciesTypes;
     std::vector<double> q6Strength;
+    std::vector<unsigned char> resamplingEnabled;
     std::vector<std::uint32_t> count;
     std::vector<double> mass;
     std::vector<double> px;

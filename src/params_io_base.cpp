@@ -108,6 +108,28 @@ bool is_removed_open_aperture_key(const std::string& key) {
            key == "topOpenXMax" || key == "outletTopXMax";
 }
 
+bool parse_species_resampling_enable_key(const std::string& key, int* speciesIndex) {
+    const std::string prefix = "species";
+    const std::string suffix = "ResamplingEnable";
+    if (key.rfind(prefix, 0) != 0 || key.size() <= prefix.size() + suffix.size() ||
+        key.compare(key.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return false;
+    }
+    const std::string indexText = key.substr(
+        prefix.size(), key.size() - prefix.size() - suffix.size());
+    if (indexText.empty() ||
+        !std::all_of(indexText.begin(), indexText.end(),
+                     [](unsigned char c) { return std::isdigit(c); })) {
+        return false;
+    }
+    const long long value = std::stoll(indexText);
+    if (value < 0 || value > static_cast<long long>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error(key + ": species index exceeds int range");
+    }
+    if (speciesIndex != nullptr) *speciesIndex = static_cast<int>(value);
+    return true;
+}
+
 bool is_species_definition_key(const std::string& key) {
     const std::string prefix = "species";
     if (key.rfind(prefix, 0) != 0) return false;
@@ -623,6 +645,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesResamplingCudaResidentMaintenanceStrict") p.speciesResamplingCudaResidentMaintenanceStrict = parse_bool(value, key);
         else if (key == "speciesCudaResidentMaintenanceDiagnosticsFilename") p.speciesCudaResidentMaintenanceDiagnosticsFilename = trim(value);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
+        else if (parse_species_resampling_enable_key(key, nullptr)) {
+            // Parsed after the generic loop, once speciesCount and speciesK are known.
+        }
         else if (is_species_definition_key(key)) {
             // Parsed after the generic loop, once speciesCount is known.
         }
@@ -701,8 +726,22 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             if (!has_key(kv, speciesKey)) {
                 throw std::runtime_error("Missing required species declaration: " + speciesKey);
             }
-            p.speciesDefinitions.push_back(
-                parse_species_definition_value(kv.at(speciesKey), speciesKey));
+            SpeciesDefinition definition =
+                parse_species_definition_value(kv.at(speciesKey), speciesKey);
+            const std::string resamplingKey =
+                speciesKey + "ResamplingEnable";
+            if (has_key(kv, resamplingKey)) {
+                definition.resamplingEnable = parse_bool(kv.at(resamplingKey), resamplingKey);
+            }
+            p.speciesDefinitions.push_back(std::move(definition));
+        }
+        for (const auto& item : kv) {
+            int speciesIndex = -1;
+            if (parse_species_resampling_enable_key(item.first, &speciesIndex) &&
+                (speciesIndex < 0 || speciesIndex >= p.speciesCount)) {
+                throw std::runtime_error(
+                    item.first + ": species index is outside [0,speciesCount)");
+            }
         }
         validate_species_definitions(p.speciesDefinitions, "simulation species registry");
     } else {
@@ -711,7 +750,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
                 "speciesCount is set but speciesRegistryEnable=false; enable the registry or remove species declarations");
         }
         for (const auto& item : kv) {
-            if (is_species_definition_key(item.first)) {
+            if (is_species_definition_key(item.first) ||
+                parse_species_resampling_enable_key(item.first, nullptr)) {
                 throw std::runtime_error("Found " + item.first +
                                          " but speciesRegistryEnable=false");
             }
@@ -1607,10 +1647,6 @@ void validate_simulation_params(const SimulationParams& p) {
         // The 0490m/n/p resident chain now consumes the current shared
         // CUDA state for every already-supported boundary family.
 
-        if (p.immersedSolidEnable) {
-            throw std::runtime_error(
-                "0490m resident fast path is currently restricted to no immersed solid");
-        }
         if (p.speciesCudaResidentFastPathDiagnosticsFilename.empty()) {
             throw std::runtime_error(
                 "speciesCudaResidentFastPathDiagnosticsFilename must not be empty");
