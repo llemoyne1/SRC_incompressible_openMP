@@ -54,6 +54,7 @@ SpeciesCellFields0490b deposit_species_cell_fields_0490b(
     fields.mass.assign(denseSize, 0.0);
     fields.px.assign(denseSize, 0.0);
     fields.py.assign(denseSize, 0.0);
+    fields.kinetic.assign(denseSize, 0.0);
     fields.totalCellMass.assign(static_cast<std::size_t>(grid.numCells), 0.0);
     fields.totalOccupancyWeight.assign(static_cast<std::size_t>(grid.numCells), 0.0);
     fields.activeSpeciesCount.assign(static_cast<std::size_t>(grid.numCells), 0u);
@@ -90,6 +91,8 @@ SpeciesCellFields0490b deposit_species_cell_fields_0490b(
         fields.mass[k] += m;
         fields.px[k] += m * state.vx[i];
         fields.py[k] += m * state.vy[i];
+        fields.kinetic[k] += 0.5 * m *
+            (state.vx[i] * state.vx[i] + state.vy[i] * state.vy[i]);
     }
 
     for (int c = 0; c < grid.numCells; ++c) {
@@ -141,7 +144,7 @@ SpeciesCellDiagnosticsWriter0490b::SpeciesCellDiagnosticsWriter0490b(
             "SpeciesCellDiagnosticsWriter0490b: invalid grid");
     }
     out_ << "step,time,cell,ix,iy,xCenter,yCenter,type,name,phaseFamily,"
-            "count,mass,Px,Py,ux,uy,occupancyWeight,fractionProxy,totalCellMass,"
+            "count,mass,Px,Py,kinetic,relativeKinetic,ux,uy,occupancyWeight,fractionProxy,totalCellMass,"
             "totalOccupancyWeight,activeSpeciesCount,dominantType,dominantFractionProxy,"
             "liquidFractionProxy,gasFractionProxy\n";
 }
@@ -175,12 +178,17 @@ void SpeciesCellDiagnosticsWriter0490b::append(
             const double occupancyWeight = m / definitions[s].referenceCellMassDeclared;
             const double fraction = totalWeight > 0.0 ? occupancyWeight / totalWeight : 0.0;
             const double invMass = m > 0.0 ? 1.0 / m : 0.0;
+            const double relativeKinetic = m > 0.0
+                ? fields.kinetic[k] - 0.5 *
+                    (fields.px[k] * fields.px[k] + fields.py[k] * fields.py[k]) * invMass
+                : 0.0;
             out_ << step << ',' << time << ',' << c << ',' << ix << ',' << iy << ','
                  << xCenter << ',' << yCenter << ',' << definitions[s].type << ','
                  << csv_safe_0490b(definitions[s].name) << ','
                  << species_phase_family_name(definitions[s].phaseFamily) << ','
                  << fields.count[k] << ',' << m << ',' << fields.px[k] << ','
-                 << fields.py[k] << ',' << fields.px[k] * invMass << ','
+                 << fields.py[k] << ',' << fields.kinetic[k] << ','
+                 << relativeKinetic << ',' << fields.px[k] * invMass << ','
                  << fields.py[k] * invMass << ',' << occupancyWeight << ','
                  << fraction << ',' << fields.totalCellMass[cc] << ','
                  << totalWeight << ',' << fields.activeSpeciesCount[cc] << ','

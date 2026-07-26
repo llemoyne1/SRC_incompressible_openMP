@@ -112,6 +112,7 @@ __global__ void reset_species_cell_fields_0490h(
     double* mass,
     double* px,
     double* py,
+    double* kinetic,
     double* totalCellMass,
     double* totalOccupancyWeight,
     double* massFraction,
@@ -126,6 +127,7 @@ __global__ void reset_species_cell_fields_0490h(
         mass[k] = 0.0;
         px[k] = 0.0;
         py[k] = 0.0;
+        kinetic[k] = 0.0;
         massFraction[k] = 0.0;
         occupancyFraction[k] = 0.0;
     }
@@ -155,6 +157,7 @@ __global__ void deposit_species_cell_fields_0490h(
     double* mass,
     double* px,
     double* py,
+    double* kinetic,
     unsigned long long* invalidTypeCounter) {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= nParticles) return;
@@ -180,6 +183,8 @@ __global__ void deposit_species_cell_fields_0490h(
     atomic_add_double_0490h(&mass[k], m);
     atomic_add_double_0490h(&px[k], m * vx[i]);
     atomic_add_double_0490h(&py[k], m * vy[i]);
+    atomic_add_double_0490h(
+        &kinetic[k], 0.5 * m * (vx[i] * vx[i] + vy[i] * vy[i]));
 }
 
 __global__ void finalize_species_cell_fields_0490h(
@@ -255,6 +260,7 @@ struct CudaSpeciesCellWorkspace0490h::Impl {
     double* mass = nullptr;
     double* px = nullptr;
     double* py = nullptr;
+    double* kinetic = nullptr;
     double* totalCellMass = nullptr;
     double* totalOccupancyWeight = nullptr;
     double* massFraction = nullptr;
@@ -316,6 +322,7 @@ void CudaSpeciesCellWorkspace0490h::release() {
         cuda_free_0490h(impl_->mass);
         cuda_free_0490h(impl_->px);
         cuda_free_0490h(impl_->py);
+        cuda_free_0490h(impl_->kinetic);
         cuda_free_0490h(impl_->totalCellMass);
         cuda_free_0490h(impl_->totalOccupancyWeight);
         cuda_free_0490h(impl_->massFraction);
@@ -373,6 +380,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->mass, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->px, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->py, dense * sizeof(double)));
+    MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->kinetic, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->totalCellMass, nc * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->totalOccupancyWeight, nc * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->massFraction, dense * sizeof(double)));
@@ -387,7 +395,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     impl_->speciesCount = speciesCount;
     impl_->allocatedBytes =
         ns * (sizeof(std::uint32_t) + 2u * sizeof(double) + 2u * sizeof(unsigned char)) +
-        dense * (sizeof(unsigned int) + 5u * sizeof(double)) +
+        dense * (sizeof(unsigned int) + 6u * sizeof(double)) +
         nc * 4u * sizeof(double) + sizeof(unsigned long long);
 
     if (diag != nullptr) {
@@ -420,6 +428,7 @@ CudaSpeciesCellDeviceView0490h CudaSpeciesCellWorkspace0490h::device_view() cons
     v.mass = impl_->mass;
     v.px = impl_->px;
     v.py = impl_->py;
+    v.kinetic = impl_->kinetic;
     v.totalCellMass = impl_->totalCellMass;
     v.totalOccupancyWeight = impl_->totalOccupancyWeight;
     v.massFraction = impl_->massFraction;
@@ -522,7 +531,7 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     const int resetBlocks = std::max(1, (resetWork + threadsPerBlock - 1) / threadsPerBlock);
     const Clock::time_point tReset = Clock::now();
     reset_species_cell_fields_0490h<<<resetBlocks, threadsPerBlock>>>(
-        denseSize, grid.numCells, out.count, out.mass, out.px, out.py,
+        denseSize, grid.numCells, out.count, out.mass, out.px, out.py, out.kinetic,
         out.totalCellMass, out.totalOccupancyWeight, out.massFraction,
         out.occupancyFraction, out.liquidFractionProxy, out.gasFractionProxy,
         out.invalidTypeCounter);
@@ -559,7 +568,7 @@ void cuda_deposit_species_cell_fields_resident_0490h(
             nParticles, particles.x, particles.y, particles.vx, particles.vy,
             particles.mass, particles.type, particles.role,
             static_cast<unsigned char>(kParticleRoleFluid), cfg, speciesCount,
-            out.speciesTypes, out.count, out.mass, out.px, out.py,
+            out.speciesTypes, out.count, out.mass, out.px, out.py, out.kinetic,
             out.invalidTypeCounter);
         MPCD_CUDA_0490H_CHECK(cudaGetLastError());
         MPCD_CUDA_0490H_CHECK(cudaDeviceSynchronize());
@@ -594,7 +603,9 @@ CudaSpeciesCellFields0490h cuda_download_species_cell_fields_0490h(
 #else
     const CudaSpeciesCellDeviceView0490h view = workspace.device_view();
     if (view.numCells <= 0 || view.speciesCount <= 0 ||
-        static_cast<std::size_t>(view.speciesCount) != definitions.size()) {
+        static_cast<std::size_t>(view.speciesCount) != definitions.size() ||
+        view.count == nullptr || view.mass == nullptr || view.px == nullptr ||
+        view.py == nullptr || view.kinetic == nullptr) {
         throw std::runtime_error("0490h CUDA species field download received incompatible workspace");
     }
     const Clock::time_point t0 = Clock::now();
@@ -614,6 +625,7 @@ CudaSpeciesCellFields0490h cuda_download_species_cell_fields_0490h(
     out.mass.resize(dense);
     out.px.resize(dense);
     out.py.resize(dense);
+    out.kinetic.resize(dense);
     out.totalCellMass.resize(nc);
     out.totalOccupancyWeight.resize(nc);
     out.massFraction.resize(dense);
@@ -628,6 +640,8 @@ CudaSpeciesCellFields0490h cuda_download_species_cell_fields_0490h(
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.px.data(), view.px,
                                     dense * sizeof(double), cudaMemcpyDeviceToHost));
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.py.data(), view.py,
+                                    dense * sizeof(double), cudaMemcpyDeviceToHost));
+    MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.kinetic.data(), view.kinetic,
                                     dense * sizeof(double), cudaMemcpyDeviceToHost));
     MPCD_CUDA_0490H_CHECK(cudaMemcpy(out.totalCellMass.data(), view.totalCellMass,
                                     nc * sizeof(double), cudaMemcpyDeviceToHost));
@@ -678,7 +692,8 @@ SpeciesCellCudaEquivalence0490h compare_species_cell_cuda_cpu_0490h(
     eq.invalidTypeCount = gpu.invalidTypeCount;
 
     if (gpu.numCells != cpu.numCells || gpu.speciesTypes != cpu.speciesTypes ||
-        gpu.count.size() != cpu.count.size()) {
+        gpu.count.size() != cpu.count.size() ||
+        gpu.kinetic.size() != cpu.kinetic.size()) {
         return eq;
     }
 
@@ -687,6 +702,8 @@ SpeciesCellCudaEquivalence0490h compare_species_cell_cuda_cpu_0490h(
         eq.maxAbsMassError = max_abs_0490h(eq.maxAbsMassError, gpu.mass[k] - cpu.mass[k]);
         eq.maxAbsPxError = max_abs_0490h(eq.maxAbsPxError, gpu.px[k] - cpu.px[k]);
         eq.maxAbsPyError = max_abs_0490h(eq.maxAbsPyError, gpu.py[k] - cpu.py[k]);
+        eq.maxAbsKineticError = max_abs_0490h(
+            eq.maxAbsKineticError, gpu.kinetic[k] - cpu.kinetic[k]);
         const std::size_t c = k % static_cast<std::size_t>(cpu.numCells);
         const double expectedMassFraction = cpu.totalCellMass[c] > 0.0
             ? cpu.mass[k] / cpu.totalCellMass[c]
@@ -720,6 +737,7 @@ SpeciesCellCudaEquivalence0490h compare_species_cell_cuda_cpu_0490h(
         eq.maxAbsMassError,
         eq.maxAbsPxError,
         eq.maxAbsPyError,
+        eq.maxAbsKineticError,
         eq.maxAbsTotalMassError,
         eq.maxAbsTotalOccupancyWeightError,
         eq.maxAbsMassFractionError,
@@ -738,7 +756,7 @@ SpeciesCellCudaEquivalenceWriter0490h::SpeciesCellCudaEquivalenceWriter0490h(
         throw std::runtime_error("Cannot open 0490h species CUDA equivalence file: " + filepath);
     }
     out_ << "step,time,pass,usedSharedResidentState,reusedAllocation,particlesScanned,"
-            "invalidTypeCount,countMismatches,maxAbsMassError,maxAbsPxError,maxAbsPyError,"
+            "invalidTypeCount,countMismatches,maxAbsMassError,maxAbsPxError,maxAbsPyError,maxAbsKineticError,"
             "maxAbsTotalMassError,maxAbsTotalOccupancyWeightError,maxAbsMassFractionError,"
             "maxAbsOccupancyFractionError,maxAbsLiquidFractionError,maxAbsGasFractionError,"
             "numCells,speciesCount,allocatedBytes,allocationCalls,metadataUploadBytes,"
@@ -769,7 +787,7 @@ SpeciesCellCudaEquivalence0490h SpeciesCellCudaEquivalenceWriter0490h::append(
          << eq.particlesScanned << ',' << eq.invalidTypeCount << ','
          << eq.countMismatches << ',' << eq.maxAbsMassError << ','
          << eq.maxAbsPxError << ',' << eq.maxAbsPyError << ','
-         << eq.maxAbsTotalMassError << ','
+         << eq.maxAbsKineticError << ',' << eq.maxAbsTotalMassError << ','
          << eq.maxAbsTotalOccupancyWeightError << ','
          << eq.maxAbsMassFractionError << ','
          << eq.maxAbsOccupancyFractionError << ','

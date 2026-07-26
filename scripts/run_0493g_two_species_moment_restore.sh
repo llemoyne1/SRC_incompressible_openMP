@@ -66,7 +66,7 @@ U0=0.0
 UIN=0.0
 SUMMARY_EVERY=1
 DUMP_STATE_EVERY=1
-DUMP_ROLE_FILTER=all
+DUMP_ROLE_FILTER=fluid
 SUMMARY_ROLE_FILTER=fluid
 SPECIES_RESAMPLING_ENABLE=true
 SPECIES_RESIDENT_MODE=production
@@ -122,8 +122,10 @@ if [[ "$ANALYZE_ONLY" != 1 ]]; then
 fi
 if [[ "$PREFLIGHT_ONLY" != 1 && "$ANALYZE_ONLY" != 1 ]]; then
   suite_ensure_binary_0434
-  if [[ "$BIN" -ot src/cuda_resampling_population_guard_0297.cu ]]; then
-    echo "[0493g] ERROR binary is older than the 0493g source patch; rebuild first" >&2
+  if [[ "$BIN" -ot src/cuda_resampling_population_guard_0297.cu ||
+        "$BIN" -ot src/cuda_species_mass_closure_0490i.cu ||
+        "$BIN" -ot src/cuda_species_cell_fields_0490h.cu ]]; then
+    echo "[0493g] ERROR binary is older than the 0493g/0493j source patches; rebuild first" >&2
     echo "[0493g] build command: bash scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh" >&2
     exit 2
   fi

@@ -25,6 +25,7 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     int diagnosticCellDownloadSkipped = 0;
     int cpuDepositComparisonSkipped = 0;
     int speciesConservativeBalance = 0;
+    int speciesKineticConservativeBalance = 0;
     int balanceIterations = 0;
     std::uint64_t step = 0u;
     std::uint64_t particlesScanned = 0u;
@@ -33,6 +34,8 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     std::uint64_t cellsRemapped = 0u;
     std::uint64_t invalidTypeCount = 0u;
     std::uint64_t disabledSpeciesMutationCount = 0u;
+    std::uint64_t kineticCellsRestored = 0u;
+    std::uint64_t infeasibleKineticCells = 0u;
     std::uint64_t allocatedBytes = 0u;
     double maxAbsDepositMassError = 0.0;
     double scaleMin = 1.0;
@@ -47,6 +50,8 @@ struct CudaSpeciesMassClosure0490iDiagnostics {
     double maxSpeciesMassRelResidual = 0.0;
     double maxCellMassRelResidual = 0.0;
     double maxVelocityShift = 0.0;
+    double maxKineticEnergyRelResidual = 0.0;
+    double maxKineticScaleDeviation = 0.0;
     double particleUploadSeconds = 0.0;
     double speciesDepositSeconds = 0.0;
     double metadataUploadSeconds = 0.0;
@@ -70,12 +75,18 @@ struct CudaSpeciesMassClosureDeviceView0490i {
     double* targetSpeciesMass = nullptr;
     double* currentSpeciesMass = nullptr;
     double* currentCellMass = nullptr;
+    // 0493j dense species-major moment restoration fields: k=s*numCells+c.
+    double* kineticScale = nullptr;
     double* velocityShiftX = nullptr;
     double* velocityShiftY = nullptr;
     double* maxSpeciesMassRelResidual = nullptr;
     double* maxCellMassRelResidual = nullptr;
     double* maxVelocityShift = nullptr;
+    double* maxKineticEnergyRelResidual = nullptr;
+    double* maxKineticScaleDeviation = nullptr;
     unsigned long long* particlesScaled = nullptr;
+    unsigned long long* kineticCellsRestored = nullptr;
+    unsigned long long* infeasibleKineticCells = nullptr;
     unsigned long long* disabledSpeciesMutationCount = nullptr;
 };
 
@@ -109,8 +120,10 @@ bool cuda_species_mass_closure_available_0490i();
 // 0490i production path. The physical closure is computed and applied on the
 // resident GPU particle state. In 0490m production-fast mode, a resident
 // species-conservative matrix balance preserves every global species mass while
-// approaching the requested cell-mass closure and restoring each cell mean
-// velocity. Dense per-cell diagnostic downloads and the CPU deposit equivalence
+// approaching the requested cell-mass closure. 0493j additionally restores the
+// pre-closure momentum and total kinetic energy of every mutable species in each
+// cell using a species-local affine velocity transform. Dense per-cell diagnostic
+// downloads and the CPU deposit equivalence
 // loop are skipped. With 0490n resident deposits enabled, the active
 // mass/velocity prefix also remains resident and the post-remap deposit consumes
 // the shared CUDA state directly.

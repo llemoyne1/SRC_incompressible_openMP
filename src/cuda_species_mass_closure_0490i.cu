@@ -322,64 +322,131 @@ __global__ void compute_species_balance_residual_kernel_0490m(
     atomic_max_nonnegative_double_0490m(maxRelativeResidual, residual);
 }
 
-__global__ void compute_cell_balance_and_velocity_shift_kernel_0490m(
+__global__ void compute_cell_balance_and_species_moment_restore_kernel_0493j(
     int numCells,
     int speciesCount,
     const double* speciesMass,
     const double* speciesPx,
     const double* speciesPy,
+    const double* speciesKinetic,
     const unsigned char* speciesResamplingEnabled,
     const double* desiredMutableScale,
     const double* speciesCellScale,
     double* currentCellMass,
     double* velocityShiftX,
     double* velocityShiftY,
+    double* kineticScale,
     double* maxCellRelativeResidual,
-    double* maxVelocityShift) {
+    double* maxVelocityShift,
+    double* maxKineticEnergyRelativeResidual,
+    double* maxKineticScaleDeviation,
+    unsigned long long* kineticCellsRestored,
+    unsigned long long* infeasibleKineticCells) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= numCells) return;
 
     double frozenMass = 0.0;
     double mutableOriginalMass = 0.0;
-    double mutableOriginalPx = 0.0;
-    double mutableOriginalPy = 0.0;
     double balancedMutableMass = 0.0;
-    double balancedMutablePx = 0.0;
-    double balancedMutablePy = 0.0;
     for (int species = 0; species < speciesCount; ++species) {
         const int k = species * numCells + c;
+        kineticScale[k] = 1.0;
+        velocityShiftX[k] = 0.0;
+        velocityShiftY[k] = 0.0;
+
+        const double ms = speciesMass[k];
         const double factor = speciesCellScale[k];
         if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) {
-            frozenMass += speciesMass[k];
+            frozenMass += ms;
             continue;
         }
-        mutableOriginalMass += speciesMass[k];
-        mutableOriginalPx += speciesPx[k];
-        mutableOriginalPy += speciesPy[k];
-        balancedMutableMass += speciesMass[k] * factor;
-        balancedMutablePx += speciesPx[k] * factor;
-        balancedMutablePy += speciesPy[k] * factor;
+        mutableOriginalMass += ms;
+        balancedMutableMass += ms * factor;
+        if (!(ms > 0.0) || !isfinite(ms) || !(factor > 0.0) || !isfinite(factor)) {
+            continue;
+        }
+
+        const double px = speciesPx[k];
+        const double py = speciesPy[k];
+        const double targetKinetic = speciesKinetic[k];
+        if (!isfinite(px) || !isfinite(py) || !(targetKinetic >= 0.0) ||
+            !isfinite(targetKinetic)) {
+            atomicAdd(infeasibleKineticCells, 1ull);
+            continue;
+        }
+
+        const double newMass = ms * factor;
+        const double oldUx = px / ms;
+        const double oldUy = py / ms;
+        const double newUx = px / newMass;
+        const double newUy = py / newMass;
+        const double shiftX = newUx - oldUx;
+        const double shiftY = newUy - oldUy;
+        velocityShiftX[k] = shiftX;
+        velocityShiftY[k] = shiftY;
+        atomic_max_nonnegative_double_0490m(
+            maxVelocityShift, fmax(fabs(shiftX), fabs(shiftY)));
+
+        const double oldMeanKinetic = 0.5 * (px * px + py * py) / ms;
+        const double newMeanKinetic = 0.5 * (px * px + py * py) / newMass;
+        double oldRelativeKinetic = targetKinetic - oldMeanKinetic;
+        const double energyScale = fmax(
+            1.0, fmax(fabs(targetKinetic),
+                      fmax(fabs(oldMeanKinetic), fabs(newMeanKinetic))));
+        const double tolerance = 1.0e-12 * energyScale;
+        if (oldRelativeKinetic < 0.0 && oldRelativeKinetic >= -tolerance) {
+            oldRelativeKinetic = 0.0;
+        }
+        const double currentRelativeKinetic = factor * oldRelativeKinetic;
+        double requiredRelativeKinetic = targetKinetic - newMeanKinetic;
+        if (requiredRelativeKinetic < 0.0 && requiredRelativeKinetic >= -tolerance) {
+            requiredRelativeKinetic = 0.0;
+        }
+
+        constexpr double minRelativeKinetic = 1.0e-30;
+        double alpha = 1.0;
+        bool feasible = oldRelativeKinetic >= 0.0 && isfinite(oldRelativeKinetic) &&
+                        requiredRelativeKinetic >= 0.0 && isfinite(requiredRelativeKinetic) &&
+                        currentRelativeKinetic >= 0.0 && isfinite(currentRelativeKinetic);
+        if (feasible && currentRelativeKinetic > minRelativeKinetic) {
+            alpha = sqrt(requiredRelativeKinetic / currentRelativeKinetic);
+            feasible = alpha >= 0.0 && isfinite(alpha);
+        } else if (feasible && requiredRelativeKinetic <= tolerance) {
+            alpha = 1.0;
+        } else {
+            feasible = false;
+        }
+
+        if (!feasible) {
+            // At fixed new mass and original momentum, the mean-flow kinetic
+            // energy can exceed the complete pre-closure kinetic budget. No
+            // real velocity rescaling can then preserve M, P and K together.
+            alpha = 0.0;
+            atomicAdd(infeasibleKineticCells, 1ull);
+        } else if (fabs(alpha - 1.0) > 1.0e-13) {
+            atomicAdd(kineticCellsRestored, 1ull);
+        }
+        kineticScale[k] = alpha;
+
+        const double afterKinetic =
+            newMeanKinetic + alpha * alpha * fmax(0.0, currentRelativeKinetic);
+        const double residual = fabs(afterKinetic - targetKinetic) /
+            fmax(1.0, fabs(targetKinetic));
+        atomic_max_nonnegative_double_0490m(
+            maxKineticEnergyRelativeResidual, residual);
+        atomic_max_nonnegative_double_0490m(
+            maxKineticScaleDeviation, fabs(alpha - 1.0));
     }
+
     const double balancedTotalMass = frozenMass + balancedMutableMass;
     currentCellMass[c] = balancedTotalMass;
     const double desiredTotalMass = frozenMass + mutableOriginalMass * desiredMutableScale[c];
     const double denom = fmax(1.0, fabs(desiredTotalMass));
     atomic_max_nonnegative_double_0490m(
         maxCellRelativeResidual, fabs(balancedTotalMass - desiredTotalMass) / denom);
-
-    double shiftX = 0.0;
-    double shiftY = 0.0;
-    if (balancedMutableMass > 0.0 && isfinite(balancedMutableMass)) {
-        shiftX = (mutableOriginalPx - balancedMutablePx) / balancedMutableMass;
-        shiftY = (mutableOriginalPy - balancedMutablePy) / balancedMutableMass;
-    }
-    velocityShiftX[c] = shiftX;
-    velocityShiftY[c] = shiftY;
-    atomic_max_nonnegative_double_0490m(
-        maxVelocityShift, fmax(fabs(shiftX), fabs(shiftY)));
 }
 
-__global__ void apply_species_balanced_mass_closure_kernel_0490m(
+__global__ void apply_species_balanced_mass_closure_kernel_0493j(
     std::uint64_t nParticles,
     const double* x,
     const double* y,
@@ -394,14 +461,17 @@ __global__ void apply_species_balanced_mass_closure_kernel_0490m(
     int speciesCount,
     const std::uint32_t* speciesTypes,
     const unsigned char* speciesResamplingEnabled,
+    const double* speciesMass,
+    const double* speciesPx,
+    const double* speciesPy,
     const double* speciesCellScale,
     const double* velocityShiftX,
     const double* velocityShiftY,
+    const double* kineticScale,
     unsigned long long* particlesScaled,
     unsigned long long* disabledSpeciesMutationCount) {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i >= nParticles) return;
-    if (role[i] != fluidRole) return;
+    if (i >= nParticles || role[i] != fluidRole) return;
     const int c = cell_index_0490i(x[i], y[i], grid);
     int species = -1;
     const std::uint32_t type = particleType[i];
@@ -412,17 +482,26 @@ __global__ void apply_species_balanced_mass_closure_kernel_0490m(
         }
     }
     if (species < 0) return;
-    const double factor = speciesCellScale[species * numCells + c];
+    const int k = species * numCells + c;
+    const double factor = speciesCellScale[k];
     if (!speciesResamplingEnabled || speciesResamplingEnabled[species] == 0u) {
         if (isfinite(factor) && fabs(factor - 1.0) > 1.0e-14) {
             atomicAdd(disabledSpeciesMutationCount, 1ull);
         }
         return;
     }
-    if (!(factor > 0.0) || !isfinite(factor)) return;
+    const double ms = speciesMass[k];
+    const double alpha = kineticScale[k];
+    if (!(factor > 0.0) || !isfinite(factor) || !(ms > 0.0) || !isfinite(ms) ||
+        !(alpha >= 0.0) || !isfinite(alpha)) return;
+
+    const double oldUx = speciesPx[k] / ms;
+    const double oldUy = speciesPy[k] / ms;
+    const double dvx = vx[i] - oldUx;
+    const double dvy = vy[i] - oldUy;
     particleMass[i] *= factor;
-    vx[i] += velocityShiftX[c];
-    vy[i] += velocityShiftY[c];
+    vx[i] = oldUx + velocityShiftX[k] + alpha * dvx;
+    vy[i] = oldUy + velocityShiftY[k] + alpha * dvy;
     atomicAdd(particlesScaled, 1ull);
 }
 
@@ -450,11 +529,13 @@ void append_diagnostics_0490i(const SimulationParams& params,
         out << "step,attempted,handled,applied,usedSharedResidentState,particleUploadSkipped,"
                "speciesWorkspaceReused,closureWorkspaceReused,sharedStatePreserved,productionFastPath,"
                "diagnosticCellDownloadSkipped,cpuDepositComparisonSkipped,speciesConservativeBalance,"
-               "balanceIterations,particlesScanned,"
-               "particlesScaled,cellsConsidered,cellsRemapped,invalidTypeCount,disabledSpeciesMutationCount,allocatedBytes,"
+               "speciesKineticConservativeBalance,balanceIterations,particlesScanned,"
+               "particlesScaled,cellsConsidered,cellsRemapped,invalidTypeCount,disabledSpeciesMutationCount,"
+               "kineticCellsRestored,infeasibleKineticCells,allocatedBytes,"
                "maxAbsDepositMassError,scaleMin,scaleMax,targetCellMassMin,targetCellMassMax,"
                "closureStrengthMin,closureStrengthMax,massBefore,massAfter,massDelta,"
                "maxSpeciesMassRelResidual,maxCellMassRelResidual,maxVelocityShift,"
+               "maxKineticEnergyRelResidual,maxKineticScaleDeviation,"
                "particleUploadSeconds,speciesDepositSeconds,metadataUploadSeconds,scaleKernelSeconds,"
                "applyKernelSeconds,diagnosticDownloadSeconds,particleDownloadSeconds,totalSeconds\n";
     }
@@ -464,15 +545,19 @@ void append_diagnostics_0490i(const SimulationParams& params,
         << d.speciesWorkspaceReused << ',' << d.closureWorkspaceReused << ','
         << d.sharedStatePreserved << ',' << d.productionFastPath << ','
         << d.diagnosticCellDownloadSkipped << ',' << d.cpuDepositComparisonSkipped << ','
-        << d.speciesConservativeBalance << ',' << d.balanceIterations << ','
+        << d.speciesConservativeBalance << ',' << d.speciesKineticConservativeBalance << ','
+        << d.balanceIterations << ','
         << d.particlesScanned << ',' << d.particlesScaled << ','
         << d.cellsConsidered << ',' << d.cellsRemapped << ',' << d.invalidTypeCount << ','
-        << d.disabledSpeciesMutationCount << ',' << d.allocatedBytes << ',' << d.maxAbsDepositMassError << ',' << d.scaleMin << ','
+        << d.disabledSpeciesMutationCount << ',' << d.kineticCellsRestored << ','
+        << d.infeasibleKineticCells << ',' << d.allocatedBytes << ','
+        << d.maxAbsDepositMassError << ',' << d.scaleMin << ','
         << d.scaleMax << ',' << d.targetCellMassMin << ',' << d.targetCellMassMax << ','
         << d.closureStrengthMin << ',' << d.closureStrengthMax << ',' << d.massBefore << ','
         << d.massAfter << ',' << d.massDelta << ','
         << d.maxSpeciesMassRelResidual << ',' << d.maxCellMassRelResidual << ','
-        << d.maxVelocityShift << ',' << d.particleUploadSeconds << ','
+        << d.maxVelocityShift << ',' << d.maxKineticEnergyRelResidual << ','
+        << d.maxKineticScaleDeviation << ',' << d.particleUploadSeconds << ','
         << d.speciesDepositSeconds << ',' << d.metadataUploadSeconds << ','
         << d.scaleKernelSeconds << ',' << d.applyKernelSeconds << ','
         << d.diagnosticDownloadSeconds << ',' << d.particleDownloadSeconds << ','
@@ -496,13 +581,18 @@ struct CudaSpeciesMassClosureWorkspace0490i::Impl {
     double* targetSpeciesMass = nullptr;
     double* currentSpeciesMass = nullptr;
     double* currentCellMass = nullptr;
+    double* kineticScale = nullptr;
     double* velocityShiftX = nullptr;
     double* velocityShiftY = nullptr;
     double* maxSpeciesMassRelResidual = nullptr;
     double* maxCellMassRelResidual = nullptr;
     double* maxVelocityShift = nullptr;
+    double* maxKineticEnergyRelResidual = nullptr;
+    double* maxKineticScaleDeviation = nullptr;
     unsigned long long* particlesScaled = nullptr;
     unsigned long long* disabledSpeciesMutationCount = nullptr;
+    unsigned long long* kineticCellsRestored = nullptr;
+    unsigned long long* infeasibleKineticCells = nullptr;
 };
 
 CudaSpeciesMassClosureWorkspace0490i::CudaSpeciesMassClosureWorkspace0490i()
@@ -543,13 +633,18 @@ void CudaSpeciesMassClosureWorkspace0490i::release() {
         cuda_free_0490i(impl_->targetSpeciesMass);
         cuda_free_0490i(impl_->currentSpeciesMass);
         cuda_free_0490i(impl_->currentCellMass);
+        cuda_free_0490i(impl_->kineticScale);
         cuda_free_0490i(impl_->velocityShiftX);
         cuda_free_0490i(impl_->velocityShiftY);
         cuda_free_0490i(impl_->maxSpeciesMassRelResidual);
         cuda_free_0490i(impl_->maxCellMassRelResidual);
         cuda_free_0490i(impl_->maxVelocityShift);
+        cuda_free_0490i(impl_->maxKineticEnergyRelResidual);
+        cuda_free_0490i(impl_->maxKineticScaleDeviation);
         cuda_free_0490i(impl_->particlesScaled);
         cuda_free_0490i(impl_->disabledSpeciesMutationCount);
+        cuda_free_0490i(impl_->kineticCellsRestored);
+        cuda_free_0490i(impl_->infeasibleKineticCells);
     }
 #endif
     if (impl_ != nullptr) *impl_ = Impl{};
@@ -586,22 +681,27 @@ void CudaSpeciesMassClosureWorkspace0490i::ensure_capacity(
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->targetSpeciesMass, ns * sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->currentSpeciesMass, ns * sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->currentCellMass, nc * sizeof(double)));
-    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->velocityShiftX, nc * sizeof(double)));
-    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->velocityShiftY, nc * sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->kineticScale, nc * ns * sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->velocityShiftX, nc * ns * sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->velocityShiftY, nc * ns * sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxSpeciesMassRelResidual, sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxCellMassRelResidual, sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxVelocityShift, sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxKineticEnergyRelResidual, sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->maxKineticScaleDeviation, sizeof(double)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->particlesScaled, sizeof(unsigned long long)));
     MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->disabledSpeciesMutationCount, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->kineticCellsRestored, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMalloc(&impl_->infeasibleKineticCells, sizeof(unsigned long long)));
     impl_->cellCapacity = numCells;
     impl_->speciesCapacity = speciesCount;
     impl_->numCells = numCells;
     impl_->speciesCount = speciesCount;
     impl_->allocatedBytes =
         ns * sizeof(double) + nc * (3u * sizeof(double) + sizeof(unsigned char)) +
-        nc * ns * sizeof(double) + 2u * ns * sizeof(double) +
-        3u * nc * sizeof(double) + 3u * sizeof(double) +
-        2u * sizeof(unsigned long long);
+        4u * nc * ns * sizeof(double) + 2u * ns * sizeof(double) +
+        nc * sizeof(double) + 5u * sizeof(double) +
+        4u * sizeof(unsigned long long);
     if (reused) *reused = 0;
 #endif
 }
@@ -624,12 +724,17 @@ CudaSpeciesMassClosureDeviceView0490i CudaSpeciesMassClosureWorkspace0490i::devi
     v.targetSpeciesMass = impl_->targetSpeciesMass;
     v.currentSpeciesMass = impl_->currentSpeciesMass;
     v.currentCellMass = impl_->currentCellMass;
+    v.kineticScale = impl_->kineticScale;
     v.velocityShiftX = impl_->velocityShiftX;
     v.velocityShiftY = impl_->velocityShiftY;
     v.maxSpeciesMassRelResidual = impl_->maxSpeciesMassRelResidual;
     v.maxCellMassRelResidual = impl_->maxCellMassRelResidual;
     v.maxVelocityShift = impl_->maxVelocityShift;
+    v.maxKineticEnergyRelResidual = impl_->maxKineticEnergyRelResidual;
+    v.maxKineticScaleDeviation = impl_->maxKineticScaleDeviation;
     v.particlesScaled = impl_->particlesScaled;
+    v.kineticCellsRestored = impl_->kineticCellsRestored;
+    v.infeasibleKineticCells = impl_->infeasibleKineticCells;
     v.disabledSpeciesMutationCount = impl_->disabledSpeciesMutationCount;
     return v;
 }
@@ -681,7 +786,9 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         throw std::runtime_error("0490i requires the 0490d species mass closure policy");
     }
     if (params.resamplingThermalRenormalizationEnable) {
-        throw std::runtime_error("0490i does not yet include CUDA thermal renormalization");
+        throw std::runtime_error(
+            "0493j resident species closure conserves kinetic energy intrinsically; "
+            "the legacy resamplingThermalRenormalizationEnable path remains unsupported");
     }
     if (targetCellMassOverride > 0.0 && std::isfinite(targetCellMassOverride)) {
         throw std::runtime_error("0490i does not support targetCellMassOverride");
@@ -735,7 +842,8 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         const CudaSpeciesCellDeviceView0490h existing = speciesWorkspace.device_view();
         if (existing.numCells != grid.numCells ||
             existing.speciesCount != static_cast<int>(params.speciesDefinitions.size()) ||
-            existing.mass == nullptr || existing.totalCellMass == nullptr) {
+            existing.mass == nullptr || existing.px == nullptr || existing.py == nullptr ||
+            existing.kinetic == nullptr || existing.totalCellMass == nullptr) {
             throw std::runtime_error("0490n species workspace is not ready for 0490i closure");
         }
         d.speciesWorkspaceReused = 1;
@@ -765,6 +873,14 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         closureView.particlesScaled, 0, sizeof(unsigned long long)));
     MPCD_CUDA_0490I_CHECK(cudaMemset(
         closureView.disabledSpeciesMutationCount, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMemset(
+        closureView.kineticCellsRestored, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMemset(
+        closureView.infeasibleKineticCells, 0, sizeof(unsigned long long)));
+    MPCD_CUDA_0490I_CHECK(cudaMemset(
+        closureView.maxKineticEnergyRelResidual, 0, sizeof(double)));
+    MPCD_CUDA_0490I_CHECK(cudaMemset(
+        closureView.maxKineticScaleDeviation, 0, sizeof(double)));
     d.metadataUploadSeconds = seconds_since_0490i(meta0);
 
     const int cellBlocks = std::max(1, (grid.numCells + threadsPerBlock - 1) / threadsPerBlock);
@@ -785,7 +901,12 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         std::max(1, (speciesCount + threadsPerBlock - 1) / threadsPerBlock);
     const int matrixEntries = grid.numCells * speciesCount;
     const int matrixBlocks = std::max(1, (matrixEntries + threadsPerBlock - 1) / threadsPerBlock);
-    const bool useSpeciesConservativeBalance = d.productionFastPath && speciesCount > 1;
+    // 0493i: the production-resident closure must also use the conservative
+    // mass/momentum balance for a single registered species.  The historical
+    // speciesCount > 1 gate sent mono-species runs through the mass-only kernel,
+    // which changed particle masses without the matching velocity correction
+    // and therefore introduced a finite global-momentum drift.
+    const bool useSpeciesConservativeBalance = d.productionFastPath && speciesCount > 0;
 
     MPCD_CUDA_0490I_CHECK(cudaEventRecord(start));
     compute_species_mass_closure_scale_kernel_0490i<<<cellBlocks, threadsPerBlock>>>(
@@ -806,6 +927,7 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
             closureView.maxCellMassRelResidual, 0, sizeof(double)));
         MPCD_CUDA_0490I_CHECK(cudaMemset(
             closureView.maxVelocityShift, 0, sizeof(double)));
+        d.speciesKineticConservativeBalance = 1;
 
         initialize_species_balance_kernel_0490m<<<matrixBlocks, threadsPerBlock>>>(
             grid.numCells, speciesCount, closureView.remapCell, closureView.scale,
@@ -862,12 +984,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
             closureView.currentSpeciesMass, speciesView.resamplingEnabled,
             closureView.maxSpeciesMassRelResidual);
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
-        compute_cell_balance_and_velocity_shift_kernel_0490m<<<cellBlocks, threadsPerBlock>>>(
+        compute_cell_balance_and_species_moment_restore_kernel_0493j<<<
+            cellBlocks, threadsPerBlock>>>(
             grid.numCells, speciesCount, speciesView.mass, speciesView.px,
-            speciesView.py, speciesView.resamplingEnabled, closureView.scale,
-            closureView.speciesCellScale, closureView.currentCellMass,
-            closureView.velocityShiftX, closureView.velocityShiftY,
-            closureView.maxCellMassRelResidual, closureView.maxVelocityShift);
+            speciesView.py, speciesView.kinetic, speciesView.resamplingEnabled,
+            closureView.scale, closureView.speciesCellScale,
+            closureView.currentCellMass, closureView.velocityShiftX,
+            closureView.velocityShiftY, closureView.kineticScale,
+            closureView.maxCellMassRelResidual, closureView.maxVelocityShift,
+            closureView.maxKineticEnergyRelResidual,
+            closureView.maxKineticScaleDeviation, closureView.kineticCellsRestored,
+            closureView.infeasibleKineticCells);
         MPCD_CUDA_0490I_CHECK(cudaGetLastError());
     }
 
@@ -885,6 +1012,28 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
         MPCD_CUDA_0490I_CHECK(cudaMemcpy(
             &d.maxVelocityShift, closureView.maxVelocityShift,
             sizeof(double), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490I_CHECK(cudaMemcpy(
+            &d.maxKineticEnergyRelResidual,
+            closureView.maxKineticEnergyRelResidual, sizeof(double),
+            cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490I_CHECK(cudaMemcpy(
+            &d.maxKineticScaleDeviation, closureView.maxKineticScaleDeviation,
+            sizeof(double), cudaMemcpyDeviceToHost));
+        unsigned long long kineticCellsRestored = 0ull;
+        unsigned long long infeasibleKineticCells = 0ull;
+        MPCD_CUDA_0490I_CHECK(cudaMemcpy(
+            &kineticCellsRestored, closureView.kineticCellsRestored,
+            sizeof(kineticCellsRestored), cudaMemcpyDeviceToHost));
+        MPCD_CUDA_0490I_CHECK(cudaMemcpy(
+            &infeasibleKineticCells, closureView.infeasibleKineticCells,
+            sizeof(infeasibleKineticCells), cudaMemcpyDeviceToHost));
+        d.kineticCellsRestored = static_cast<std::uint64_t>(kineticCellsRestored);
+        d.infeasibleKineticCells = static_cast<std::uint64_t>(infeasibleKineticCells);
+        // 0493j never invalidates an otherwise usable resident state solely
+        // because the local M/P/K constraints are mathematically incompatible.
+        // In that rare case alpha=0 gives the minimum kinetic energy compatible
+        // with the new mass and the preserved species-cell momentum; the count
+        // and residual remain visible in the 0490i diagnostics.
         const double conservationTolerance = std::max(
             1.0e-13, params.speciesMassClosureCudaComparisonTolerance);
         if (!std::isfinite(d.maxSpeciesMassRelResidual) ||
@@ -916,15 +1065,17 @@ CudaSpeciesMassClosure0490iDiagnostics apply_cuda_species_mass_closure_0490i(
     MPCD_CUDA_0490I_CHECK(cudaEventRecord(start));
     if (nParticles > 0u) {
         if (useSpeciesConservativeBalance) {
-            apply_species_balanced_mass_closure_kernel_0490m<<<
+            apply_species_balanced_mass_closure_kernel_0493j<<<
                 static_cast<int>(blockCount64), threadsPerBlock>>>(
                 nParticles, particleView.x, particleView.y, particleView.vx,
                 particleView.vy, particleView.mass, particleView.type,
                 particleView.role, static_cast<unsigned char>(kParticleRoleFluid),
                 cfg, grid.numCells, speciesCount, speciesView.speciesTypes,
-                speciesView.resamplingEnabled, closureView.speciesCellScale,
+                speciesView.resamplingEnabled, speciesView.mass, speciesView.px,
+                speciesView.py, closureView.speciesCellScale,
                 closureView.velocityShiftX, closureView.velocityShiftY,
-                closureView.particlesScaled, closureView.disabledSpeciesMutationCount);
+                closureView.kineticScale, closureView.particlesScaled,
+                closureView.disabledSpeciesMutationCount);
         } else {
             apply_species_mass_closure_kernel_0490i<<<
                 static_cast<int>(blockCount64), threadsPerBlock>>>(

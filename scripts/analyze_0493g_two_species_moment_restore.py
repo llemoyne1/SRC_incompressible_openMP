@@ -749,6 +749,15 @@ def main() -> int:
             f"max={max_float(closure, 'maxSpeciesMassRelResidual'):.3e}",
         )
         check(
+            f"{case_key}_species_kinetic_closure",
+            max_int(closure, "speciesKineticConservativeBalance") == 1
+            and max_int(closure, "infeasibleKineticCells") == 0
+            and max_float(closure, "maxKineticEnergyRelResidual") <= args.mass_rel_tol,
+            f"active={max_int(closure, 'speciesKineticConservativeBalance')} "
+            f"infeasible={max_int(closure, 'infeasibleKineticCells')} "
+            f"residual={max_float(closure, 'maxKineticEnergyRelResidual'):.3e}",
+        )
+        check(
             f"{case_key}_pool_integrity",
             all(
                 max_int(maintenance, c) == 0

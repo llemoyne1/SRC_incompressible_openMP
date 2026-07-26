@@ -21,6 +21,7 @@ struct SpeciesCellFields0490b {
     std::vector<double> mass;
     std::vector<double> px;
     std::vector<double> py;
+    std::vector<double> kinetic;
     std::vector<double> totalCellMass;
     std::vector<double> totalOccupancyWeight;
     std::vector<std::uint32_t> activeSpeciesCount;

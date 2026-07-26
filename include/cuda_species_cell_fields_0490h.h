@@ -30,6 +30,7 @@ struct CudaSpeciesCellDeviceView0490h {
     double* mass = nullptr;
     double* px = nullptr;
     double* py = nullptr;
+    double* kinetic = nullptr;
     double* totalCellMass = nullptr;
     double* totalOccupancyWeight = nullptr;
     double* massFraction = nullptr;
@@ -48,6 +49,7 @@ struct CudaSpeciesCellFields0490h {
     std::vector<double> mass;
     std::vector<double> px;
     std::vector<double> py;
+    std::vector<double> kinetic;
     std::vector<double> totalCellMass;
     std::vector<double> totalOccupancyWeight;
     std::vector<double> massFraction;
@@ -85,6 +87,7 @@ struct SpeciesCellCudaEquivalence0490h {
     double maxAbsMassError = 0.0;
     double maxAbsPxError = 0.0;
     double maxAbsPyError = 0.0;
+    double maxAbsKineticError = 0.0;
     double maxAbsTotalMassError = 0.0;
     double maxAbsTotalOccupancyWeightError = 0.0;
     double maxAbsMassFractionError = 0.0;
