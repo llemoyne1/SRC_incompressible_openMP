@@ -77,6 +77,7 @@ public:
 
     void release();
     void ensure_capacity(std::uint64_t activeParticles,
+                         int planCapacity,
                          CudaSpeciesResamplingFastPathDiagnostics0490m* diagnostics = nullptr);
     std::uint64_t capacity() const;
     std::uint64_t allocated_bytes() const;

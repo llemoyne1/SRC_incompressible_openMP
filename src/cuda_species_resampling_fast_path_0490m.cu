@@ -120,14 +120,18 @@ __device__ int species_index_0493b(
     return -1;
 }
 
-// Correctness-first direct resident consumer. One thread preserves the exact
-// deterministic ordering used by 0490g/0490k: plan order then ascending active
-// particle index. Unlike the transitional 0453 materializer, particle type is
-// checked explicitly against the species-constrained plan entry.
-__global__ void apply_species_plan_direct_serial_0490m(
+// 0493d deterministic parallel resident consumer.
+//
+// A particle can only be selected by transfer entries sharing its original
+// (donor cell, particle type) pair. Different donor/type groups are therefore
+// independent. One CUDA thread owns each first entry of a donor/type group,
+// processes that group's entries in original plan order, and consumes matching
+// particles in ascending active-particle order. A later device prefix over plan
+// entries reconstructs the exact global operation order used by the historical
+// serial algorithm, including the sub-cell placement phase q = operation & 15.
+__global__ void assign_species_plan_groups_0493d(
     int planCapacity,
     const unsigned int* planCount,
-    const unsigned int* planOverflow,
     const int* planDonor,
     const int* planReceiver,
     const std::uint32_t* planType,
@@ -144,61 +148,206 @@ __global__ void apply_species_plan_direct_serial_0490m(
     const std::uint32_t* speciesTypes,
     const unsigned char* resamplingEnabled,
     std::uint8_t fluidRole,
-    unsigned char* selected,
+    const double* x,
+    const double* y,
+    const double* mass,
+    const std::uint32_t* type,
+    const unsigned char* role,
+    int* assignedEntry,
+    unsigned int* assignedLocalIndex,
+    unsigned int* entrySelectedCount,
+    double* entrySelectedMass,
+    unsigned char* entryShortfall,
+    unsigned char* groupFirst,
+    unsigned char* groupUnderfill) {
+    const unsigned int e0 = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int entries = planCount != nullptr ? *planCount : 0u;
+    if (entries > static_cast<unsigned int>(planCapacity)) {
+        entries = static_cast<unsigned int>(planCapacity);
+    }
+    if (e0 >= entries) return;
+
+    constexpr double eps = 1.0e-14;
+    const int donor = planDonor[e0];
+    const int receiver = planReceiver[e0];
+    const std::uint32_t wantedType = planType[e0];
+    const double wantedMass = planMass[e0];
+    if (donor < 0 || receiver < 0 || !(wantedMass > eps)) return;
+
+    const int wantedSpecies = species_index_0493b(
+        wantedType, speciesCount, speciesTypes);
+    if (wantedSpecies < 0 || resamplingEnabled[wantedSpecies] == 0u) return;
+
+    // Exactly one thread owns each valid donor/type group: the earliest valid
+    // plan entry for that pair. Interleaving with other groups is immaterial to
+    // selection because original donor/type memberships are disjoint.
+    for (unsigned int f = 0u; f < e0; ++f) {
+        if (planDonor[f] == donor && planReceiver[f] >= 0 &&
+            planType[f] == wantedType && planMass[f] > eps) {
+            return;
+        }
+    }
+    groupFirst[e0] = 1u;
+
+    std::uint64_t particleCursor = 0u;
+    double plannedGroup = 0.0;
+    double selectedGroup = 0.0;
+
+    for (unsigned int e = e0; e < entries; ++e) {
+        if (planDonor[e] != donor || planReceiver[e] < 0 ||
+            planType[e] != wantedType || !(planMass[e] > eps)) {
+            continue;
+        }
+
+        const double target = planMass[e];
+        plannedGroup += target;
+        double gathered = 0.0;
+        unsigned int localCount = 0u;
+
+        // Continuing the cursor is exactly equivalent to restarting at zero and
+        // skipping particles selected by earlier entries in this group.
+        while (particleCursor < nActive && gathered + eps < target) {
+            const std::uint64_t p = particleCursor++;
+            if (p >= nParticles || role[p] != fluidRole) continue;
+            const int cell = particle_cell_0490m(
+                x[p], y[p], nx, ny, dx, dy, periodicX, periodicY);
+            if (cell != donor || type[p] != wantedType) continue;
+            const double mp = mass[p];
+            if (!(mp > 0.0) || !isfinite(mp)) continue;
+
+            assignedEntry[p] = static_cast<int>(e);
+            assignedLocalIndex[p] = localCount;
+            ++localCount;
+            gathered += mp;
+            selectedGroup += mp;
+        }
+
+        entrySelectedCount[e] = localCount;
+        entrySelectedMass[e] = gathered;
+        if (gathered + eps < target) entryShortfall[e] = 1u;
+    }
+
+    if (selectedGroup + eps < plannedGroup) groupUnderfill[e0] = 1u;
+}
+
+// Preserve the historical typeRejectedCandidates diagnostic exactly. The
+// assignment map identifies particles consumed by earlier global plan entries,
+// reproducing the original selected[p] gate before donor/type inspection.
+__global__ void count_type_rejections_0493d(
+    int planCapacity,
+    const unsigned int* planCount,
+    const int* planDonor,
+    const int* planReceiver,
+    const std::uint32_t* planType,
+    const double* planMass,
+    std::uint64_t nParticles,
+    std::uint64_t nActive,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    int speciesCount,
+    const std::uint32_t* speciesTypes,
+    const unsigned char* resamplingEnabled,
+    std::uint8_t fluidRole,
+    const int* assignedEntry,
+    unsigned long long* entryTypeRejected,
+    const double* x,
+    const double* y,
+    const double* mass,
+    const std::uint32_t* type,
+    const unsigned char* role) {
+    const unsigned int e = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int entries = planCount != nullptr ? *planCount : 0u;
+    if (entries > static_cast<unsigned int>(planCapacity)) {
+        entries = static_cast<unsigned int>(planCapacity);
+    }
+    if (e >= entries) return;
+
+    constexpr double eps = 1.0e-14;
+    const int donor = planDonor[e];
+    const int receiver = planReceiver[e];
+    const std::uint32_t wantedType = planType[e];
+    const double target = planMass[e];
+    if (donor < 0 || receiver < 0 || !(target > eps)) return;
+    const int wantedSpecies = species_index_0493b(
+        wantedType, speciesCount, speciesTypes);
+    if (wantedSpecies < 0 || resamplingEnabled[wantedSpecies] == 0u) return;
+
+    unsigned long long rejected = 0u;
+    double gathered = 0.0;
+    for (std::uint64_t p = 0u; p < nActive; ++p) {
+        if (p >= nParticles || role[p] != fluidRole) continue;
+        const int owner = assignedEntry[p];
+        if (owner >= 0 && static_cast<unsigned int>(owner) < e) continue;
+        const int cell = particle_cell_0490m(
+            x[p], y[p], nx, ny, dx, dy, periodicX, periodicY);
+        if (cell != donor) continue;
+        if (type[p] != wantedType) {
+            ++rejected;
+            continue;
+        }
+        const double mp = mass[p];
+        if (!(mp > 0.0) || !isfinite(mp)) continue;
+        if (owner == static_cast<int>(e)) {
+            gathered += mp;
+            if (gathered + eps >= target) break;
+        }
+    }
+    entryTypeRejected[e] = rejected;
+}
+
+// A serial device prefix over O(plan entries), not O(particles x entries).
+// This reconstructs the exact historical global operation order while keeping
+// all plan and operation arrays resident on the GPU.
+__global__ void finalize_species_plan_offsets_0493d(
+    int planCapacity,
+    const unsigned int* planCount,
+    const unsigned int* planOverflow,
+    const int* planDonor,
+    const int* planReceiver,
+    const std::uint32_t* planType,
+    const double* planMass,
+    int speciesCount,
+    const std::uint32_t* speciesTypes,
+    const unsigned char* resamplingEnabled,
     unsigned int maxOps,
+    const unsigned int* entrySelectedCount,
+    const unsigned char* entryShortfall,
+    const unsigned char* groupFirst,
+    const unsigned char* groupUnderfill,
+    const unsigned long long* entryTypeRejected,
+    unsigned int* entryOpOffset,
     unsigned int* outCount,
     unsigned int* outInvalid,
     unsigned long long* outDisabledSpeciesMutation,
     unsigned int* outEntryShortfalls,
     unsigned int* outGroupUnderfills,
     unsigned long long* outTypeRejected,
-    double* outPlannedMass,
-    double* outSelectedMass,
-    double* outMovedPx,
-    double* outMovedPy,
-    unsigned int* outFirstParticle,
-    unsigned int* outLastParticle,
-    int* outFirstReceiver,
-    int* outLastReceiver,
-    unsigned int* outParticle,
-    int* outDonor,
-    int* outReceiver,
-    std::uint32_t* outType,
-    double* outMass,
-    double* outPx,
-    double* outPy,
-    double* x,
-    double* y,
-    double* vx,
-    double* vy,
-    double* mass,
-    std::uint32_t* type,
-    unsigned char* role) {
+    double* outPlannedMass) {
     if (blockIdx.x != 0 || threadIdx.x != 0) return;
     constexpr double eps = 1.0e-14;
-    unsigned int ops = 0u;
+
+    const unsigned int rawEntries = planCount != nullptr ? *planCount : 0u;
+    unsigned int entries = rawEntries;
     unsigned int invalid = 0u;
-    unsigned int entryShortfalls = 0u;
-    unsigned int groupUnderfills = 0u;
-    unsigned long long typeRejected = 0u;
-    unsigned long long disabledSpeciesMutation = 0u;
-    double plannedMassTotal = 0.0;
-    double selectedMassTotal = 0.0;
-    double movedPxTotal = 0.0;
-    double movedPyTotal = 0.0;
-    unsigned int firstParticle = 0xffffffffu;
-    unsigned int lastParticle = 0xffffffffu;
-    int firstReceiver = -1;
-    int lastReceiver = -1;
-    unsigned int entries = planCount != nullptr ? *planCount : 0u;
-    const unsigned int overflow = planOverflow != nullptr ? *planOverflow : 0u;
     if (entries > static_cast<unsigned int>(planCapacity)) {
         entries = static_cast<unsigned int>(planCapacity);
         ++invalid;
     }
-    if (overflow != 0u) invalid += overflow;
+    if (planOverflow != nullptr) invalid += *planOverflow;
+
+    unsigned int operations = 0u;
+    unsigned int shortfalls = 0u;
+    unsigned int groupUnderfills = 0u;
+    unsigned long long disabled = 0u;
+    unsigned long long rejected = 0u;
+    double plannedMassTotal = 0.0;
 
     for (unsigned int e = 0u; e < entries; ++e) {
+        entryOpOffset[e] = operations;
         const int donor = planDonor[e];
         const int receiver = planReceiver[e];
         const std::uint32_t wantedType = planType[e];
@@ -211,126 +360,154 @@ __global__ void apply_species_plan_direct_serial_0490m(
             continue;
         }
         if (resamplingEnabled[wantedSpecies] == 0u) {
-            ++disabledSpeciesMutation;
+            ++disabled;
             continue;
         }
         plannedMassTotal += wantedMass;
-        double gathered = 0.0;
-        for (std::uint64_t p = 0u; p < nActive; ++p) {
-            if (p >= nParticles || selected[p] != 0u || role[p] != fluidRole) continue;
-            const int cell = particle_cell_0490m(
-                x[p], y[p], nx, ny, dx, dy, periodicX, periodicY);
-            if (cell != donor) continue;
-            if (type[p] != wantedType) {
-                ++typeRejected;
-                continue;
-            }
-            const double mp = mass[p];
-            if (!(mp > 0.0) || !isfinite(mp)) continue;
-            if (ops >= maxOps) {
-                ++invalid;
-                break;
-            }
-            const double px = mp * vx[p];
-            const double py = mp * vy[p];
-            const int particleSpecies = species_index_0493b(
-                type[p], speciesCount, speciesTypes);
-            if (particleSpecies < 0) {
-                ++invalid;
-                continue;
-            }
-            if (resamplingEnabled[particleSpecies] == 0u) {
-                ++disabledSpeciesMutation;
-                continue;
-            }
-            selected[p] = 1u;
-            outParticle[ops] = static_cast<unsigned int>(p);
-            outDonor[ops] = donor;
-            outReceiver[ops] = receiver;
-            outType[ops] = type[p];
-            outMass[ops] = mp;
-            outPx[ops] = px;
-            outPy[ops] = py;
-
-            const unsigned int c = static_cast<unsigned int>(receiver);
-            const unsigned int ix = c % static_cast<unsigned int>(nx);
-            const unsigned int iy = c / static_cast<unsigned int>(nx);
-            const unsigned int q = ops & 15u;
-            const double fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
-            const double fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
-            x[p] = (static_cast<double>(ix) + fx) * dx;
-            y[p] = (static_cast<double>(iy) + fy) * dy;
-            mass[p] = mp;
-            type[p] = wantedType;
-            vx[p] = px / mp;
-            vy[p] = py / mp;
-            role[p] = fluidRole;
-
-            if (firstParticle == 0xffffffffu) {
-                firstParticle = static_cast<unsigned int>(p);
-                firstReceiver = receiver;
-            }
-            lastParticle = static_cast<unsigned int>(p);
-            lastReceiver = receiver;
-            ++ops;
-            gathered += mp;
-            selectedMassTotal += mp;
-            movedPxTotal += px;
-            movedPyTotal += py;
-            if (gathered + eps >= wantedMass) break;
-        }
-        if (gathered + eps < wantedMass) ++entryShortfalls;
-    }
-
-    // The transfer plan is continuous while particle slots are indivisible.
-    // Per-entry underfill is therefore not a structural error: an earlier entry
-    // may consume a whole particle and overshoot its target, leaving a later
-    // entry in the same donor/type group underfilled.  Validate aggregate mass
-    // coverage for each donor/type group instead.  This matches the historical
-    // CPU selection semantics while preserving species constraints.
-    for (unsigned int e = 0u; e < entries; ++e) {
-        const int donor = planDonor[e];
-        const std::uint32_t wantedType = planType[e];
-        const double wantedMass = planMass[e];
-        if (donor < 0 || planReceiver[e] < 0 || !(wantedMass > eps)) continue;
-        bool firstInGroup = true;
-        for (unsigned int f = 0u; f < e; ++f) {
-            if (planDonor[f] == donor && planReceiver[f] >= 0 &&
-                planType[f] == wantedType && planMass[f] > eps) {
-                firstInGroup = false;
-                break;
-            }
-        }
-        if (!firstInGroup) continue;
-
-        double plannedGroup = 0.0;
-        for (unsigned int f = e; f < entries; ++f) {
-            if (planDonor[f] == donor && planReceiver[f] >= 0 &&
-                planType[f] == wantedType && planMass[f] > eps) {
-                plannedGroup += planMass[f];
-            }
-        }
-        double selectedGroup = 0.0;
-        for (unsigned int op = 0u; op < ops; ++op) {
-            if (outDonor[op] == donor && outType[op] == wantedType) {
-                selectedGroup += outMass[op];
-            }
-        }
-        if (selectedGroup + eps < plannedGroup) {
+        operations += entrySelectedCount[e];
+        shortfalls += entryShortfall[e] != 0u ? 1u : 0u;
+        rejected += entryTypeRejected[e];
+        if (groupFirst[e] != 0u && groupUnderfill[e] != 0u) {
             ++groupUnderfills;
         }
     }
+
+    if (operations > maxOps) ++invalid;
     invalid += groupUnderfills;
-    *outCount = ops;
+    *outCount = operations;
     *outInvalid = invalid;
-    *outDisabledSpeciesMutation = disabledSpeciesMutation;
-    *outEntryShortfalls = entryShortfalls;
+    *outDisabledSpeciesMutation = disabled;
+    *outEntryShortfalls = shortfalls;
     *outGroupUnderfills = groupUnderfills;
-    *outTypeRejected = typeRejected;
+    *outTypeRejected = rejected;
     *outPlannedMass = plannedMassTotal;
-    *outSelectedMass = selectedMassTotal;
-    *outMovedPx = movedPxTotal;
-    *outMovedPy = movedPyTotal;
+}
+
+__global__ void materialize_assigned_species_particles_0493d_fix1(
+    std::uint64_t nParticles,
+    std::uint64_t nActive,
+    unsigned int maxOps,
+    const int* assignedEntry,
+    const unsigned int* assignedLocalIndex,
+    const unsigned int* entryOpOffset,
+    const int* planDonor,
+    const int* planReceiver,
+    const std::uint32_t* planType,
+    unsigned int* outParticle,
+    int* outDonor,
+    int* outReceiver,
+    std::uint32_t* outType) {
+    const std::uint64_t p =
+        static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (p >= nActive || p >= nParticles) return;
+    const int e = assignedEntry[p];
+    if (e < 0) return;
+
+    const unsigned int op = entryOpOffset[e] + assignedLocalIndex[p];
+    if (op >= maxOps) return;
+    outParticle[op] = static_cast<unsigned int>(p);
+    outDonor[op] = planDonor[e];
+    outReceiver[op] = planReceiver[e];
+    outType[op] = planType[e];
+}
+
+// 0493d-fix1: preserve the historical state-update arithmetic and operation
+// order exactly. Selection remains parallel by independent donor/type groups,
+// but all particle mutations and diagnostic reductions are replayed by one
+// device thread in global plan/particle order, as in the original 0490m kernel.
+// This O(number of operations) serial tail is small; the removed pathological
+// cost was the O(plan entries x active particles) serial search.
+__global__ void apply_materialized_species_operations_serial_0493d_fix1(
+    const unsigned int* outCount,
+    unsigned int maxOps,
+    std::uint64_t nParticles,
+    std::uint64_t nActive,
+    int nx,
+    double dx,
+    double dy,
+    std::uint8_t fluidRole,
+    unsigned int* outInvalid,
+    double* outSelectedMass,
+    double* outMovedPx,
+    double* outMovedPy,
+    unsigned int* outFirstParticle,
+    unsigned int* outLastParticle,
+    int* outFirstReceiver,
+    int* outLastReceiver,
+    const unsigned int* outParticle,
+    const int* outReceiver,
+    const std::uint32_t* outType,
+    double* outMass,
+    double* outPx,
+    double* outPy,
+    double* x,
+    double* y,
+    double* vx,
+    double* vy,
+    double* mass,
+    std::uint32_t* type,
+    unsigned char* role) {
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    unsigned int operations = outCount != nullptr ? *outCount : 0u;
+    if (operations > maxOps) operations = maxOps;
+
+    unsigned int invalid = outInvalid != nullptr ? *outInvalid : 0u;
+    double selectedMass = 0.0;
+    double movedPx = 0.0;
+    double movedPy = 0.0;
+    unsigned int firstParticle = 0xffffffffu;
+    unsigned int lastParticle = 0xffffffffu;
+    int firstReceiver = -1;
+    int lastReceiver = -1;
+
+    for (unsigned int op = 0u; op < operations; ++op) {
+        const unsigned int p = outParticle[op];
+        const int receiver = outReceiver[op];
+        const std::uint32_t wantedType = outType[op];
+        if (p >= nActive || p >= nParticles || receiver < 0) {
+            ++invalid;
+            continue;
+        }
+        const double mp = mass[p];
+        if (!(mp > 0.0) || !isfinite(mp)) {
+            ++invalid;
+            continue;
+        }
+        const double px = mp * vx[p];
+        const double py = mp * vy[p];
+        outMass[op] = mp;
+        outPx[op] = px;
+        outPy[op] = py;
+
+        const unsigned int c = static_cast<unsigned int>(receiver);
+        const unsigned int ix = c % static_cast<unsigned int>(nx);
+        const unsigned int iy = c / static_cast<unsigned int>(nx);
+        const unsigned int q = op & 15u;
+        const double fx = 0.2 + 0.2 * static_cast<double>(q & 3u);
+        const double fy = 0.2 + 0.2 * static_cast<double>(q >> 2u);
+        x[p] = (static_cast<double>(ix) + fx) * dx;
+        y[p] = (static_cast<double>(iy) + fy) * dy;
+        mass[p] = mp;
+        type[p] = wantedType;
+        vx[p] = px / mp;
+        vy[p] = py / mp;
+        role[p] = fluidRole;
+
+        if (firstParticle == 0xffffffffu) {
+            firstParticle = p;
+            firstReceiver = receiver;
+        }
+        lastParticle = p;
+        lastReceiver = receiver;
+        selectedMass += mp;
+        movedPx += px;
+        movedPy += py;
+    }
+
+    *outInvalid = invalid;
+    *outSelectedMass = selectedMass;
+    *outMovedPx = movedPx;
+    *outMovedPy = movedPy;
     *outFirstParticle = firstParticle;
     *outLastParticle = lastParticle;
     *outFirstReceiver = firstReceiver;
@@ -342,9 +519,18 @@ __global__ void apply_species_plan_direct_serial_0490m(
 
 struct CudaSpeciesResamplingFastPathWorkspace0490m::Impl {
     std::uint64_t capacity = 0u;
+    int planCapacity = 0;
     std::uint64_t allocatedBytes = 0u;
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-    unsigned char* selected = nullptr;
+    int* assignedEntry = nullptr;
+    unsigned int* assignedLocalIndex = nullptr;
+    unsigned int* entrySelectedCount = nullptr;
+    unsigned int* entryOpOffset = nullptr;
+    double* entrySelectedMass = nullptr;
+    unsigned char* entryShortfall = nullptr;
+    unsigned char* groupFirst = nullptr;
+    unsigned char* groupUnderfill = nullptr;
+    unsigned long long* entryTypeRejected = nullptr;
     unsigned int* outCount = nullptr;
     unsigned int* outInvalid = nullptr;
     unsigned long long* outDisabledSpeciesMutation = nullptr;
@@ -399,7 +585,15 @@ CudaSpeciesResamplingFastPathWorkspace0490m::operator=(
 void CudaSpeciesResamplingFastPathWorkspace0490m::release() {
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     if (impl_ != nullptr) {
-        cuda_free_0490m(impl_->selected);
+        cuda_free_0490m(impl_->assignedEntry);
+        cuda_free_0490m(impl_->assignedLocalIndex);
+        cuda_free_0490m(impl_->entrySelectedCount);
+        cuda_free_0490m(impl_->entryOpOffset);
+        cuda_free_0490m(impl_->entrySelectedMass);
+        cuda_free_0490m(impl_->entryShortfall);
+        cuda_free_0490m(impl_->groupFirst);
+        cuda_free_0490m(impl_->groupUnderfill);
+        cuda_free_0490m(impl_->entryTypeRejected);
         cuda_free_0490m(impl_->outCount);
         cuda_free_0490m(impl_->outInvalid);
         cuda_free_0490m(impl_->outDisabledSpeciesMutation);
@@ -428,14 +622,17 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::release() {
 
 void CudaSpeciesResamplingFastPathWorkspace0490m::ensure_capacity(
     std::uint64_t activeParticles,
+    int planCapacity,
     CudaSpeciesResamplingFastPathDiagnostics0490m* diagnostics) {
 #if !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-    (void)activeParticles; (void)diagnostics;
+    (void)activeParticles; (void)planCapacity; (void)diagnostics;
     throw std::runtime_error("0490m CUDA workspace requires CUDA particle/cell support");
 #else
     if (activeParticles == 0u) activeParticles = 1u;
+    if (planCapacity <= 0) planCapacity = 1;
     if (impl_ == nullptr) throw std::runtime_error("0490m workspace has null impl");
-    const bool reuse = impl_->capacity >= activeParticles;
+    const bool reuse = impl_->capacity >= activeParticles &&
+                       impl_->planCapacity >= planCapacity;
     if (diagnostics) diagnostics->workspaceReused = reuse ? 1 : 0;
     if (reuse) {
         if (diagnostics) diagnostics->allocatedBytes = impl_->allocatedBytes;
@@ -449,7 +646,16 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::ensure_capacity(
                                          static_cast<std::size_t>(count) * sizeof(T)));
         bytes += count * static_cast<std::uint64_t>(sizeof(T));
     };
-    alloc(impl_->selected, activeParticles);
+    const std::uint64_t planEntries = static_cast<std::uint64_t>(planCapacity);
+    alloc(impl_->assignedEntry, activeParticles);
+    alloc(impl_->assignedLocalIndex, activeParticles);
+    alloc(impl_->entrySelectedCount, planEntries);
+    alloc(impl_->entryOpOffset, planEntries);
+    alloc(impl_->entrySelectedMass, planEntries);
+    alloc(impl_->entryShortfall, planEntries);
+    alloc(impl_->groupFirst, planEntries);
+    alloc(impl_->groupUnderfill, planEntries);
+    alloc(impl_->entryTypeRejected, planEntries);
     alloc(impl_->outCount, 1u);
     alloc(impl_->outInvalid, 1u);
     alloc(impl_->outDisabledSpeciesMutation, 1u);
@@ -472,6 +678,7 @@ void CudaSpeciesResamplingFastPathWorkspace0490m::ensure_capacity(
     alloc(impl_->outPx, activeParticles);
     alloc(impl_->outPy, activeParticles);
     impl_->capacity = activeParticles;
+    impl_->planCapacity = planCapacity;
     impl_->allocatedBytes = bytes;
     if (diagnostics) {
         diagnostics->allocationCalls += 1u;
@@ -576,11 +783,31 @@ try_apply_cuda_species_resampling_fast_path_0490m(
             throw std::runtime_error("0490m shared particle state shape mismatch");
         }
 
-        fastWorkspace.ensure_capacity(state.NactiveFluid, &d);
+        fastWorkspace.ensure_capacity(state.NactiveFluid, plan.capacity, &d);
         d.allocatedBytes = fastWorkspace.allocated_bytes();
         auto* impl = fastWorkspace.impl_;
-        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->selected, 0,
-            static_cast<std::size_t>(std::max<std::uint64_t>(1u, state.NactiveFluid)) * sizeof(unsigned char)));
+        const std::size_t particleBytes = static_cast<std::size_t>(
+            std::max<std::uint64_t>(1u, state.NactiveFluid));
+        const std::size_t planBytes = static_cast<std::size_t>(
+            std::max(1, plan.capacity));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->assignedEntry, 0xff,
+                                         particleBytes * sizeof(int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->assignedLocalIndex, 0,
+                                         particleBytes * sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->entrySelectedCount, 0,
+                                         planBytes * sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->entryOpOffset, 0,
+                                         planBytes * sizeof(unsigned int)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->entrySelectedMass, 0,
+                                         planBytes * sizeof(double)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->entryShortfall, 0,
+                                         planBytes * sizeof(unsigned char)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->groupFirst, 0,
+                                         planBytes * sizeof(unsigned char)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->groupUnderfill, 0,
+                                         planBytes * sizeof(unsigned char)));
+        MPCD_CUDA_0490M_CHECK(cudaMemset(impl->entryTypeRejected, 0,
+                                         planBytes * sizeof(unsigned long long)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outCount, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outInvalid, 0, sizeof(unsigned int)));
         MPCD_CUDA_0490M_CHECK(cudaMemset(impl->outDisabledSpeciesMutation, 0, sizeof(unsigned long long)));
@@ -600,23 +827,71 @@ try_apply_cuda_species_resampling_fast_path_0490m(
         MPCD_CUDA_0490M_CHECK(cudaEventCreate(&start));
         MPCD_CUDA_0490M_CHECK(cudaEventCreate(&stop));
         MPCD_CUDA_0490M_CHECK(cudaEventRecord(start));
-        apply_species_plan_direct_serial_0490m<<<1, 1>>>(
-            plan.capacity, plan.count, plan.overflow,
+
+        constexpr int planThreads = 128;
+        const int planBlocks = (plan.capacity + planThreads - 1) / planThreads;
+        assign_species_plan_groups_0493d<<<planBlocks, planThreads>>>(
+            plan.capacity, plan.count,
             plan.donorCell, plan.receiverCell, plan.particleType, plan.plannedMass,
             view.n, view.nActiveFluid, grid.Nx, grid.Ny, grid.dx, grid.dy,
             (params.bcLeft == "periodic" && params.bcRight == "periodic") ? 1 : 0,
             (params.bcBottom == "periodic" && params.bcTop == "periodic") ? 1 : 0,
             species.speciesCount, species.speciesTypes, species.resamplingEnabled,
             static_cast<std::uint8_t>(ParticleRole::Fluid),
-            impl->selected, static_cast<unsigned int>(fastWorkspace.capacity()),
+            view.x, view.y, view.mass, view.type, view.role,
+            impl->assignedEntry, impl->assignedLocalIndex,
+            impl->entrySelectedCount, impl->entrySelectedMass,
+            impl->entryShortfall, impl->groupFirst, impl->groupUnderfill);
+        MPCD_CUDA_0490M_CHECK(cudaGetLastError());
+
+        count_type_rejections_0493d<<<planBlocks, planThreads>>>(
+            plan.capacity, plan.count,
+            plan.donorCell, plan.receiverCell, plan.particleType, plan.plannedMass,
+            view.n, view.nActiveFluid, grid.Nx, grid.Ny, grid.dx, grid.dy,
+            (params.bcLeft == "periodic" && params.bcRight == "periodic") ? 1 : 0,
+            (params.bcBottom == "periodic" && params.bcTop == "periodic") ? 1 : 0,
+            species.speciesCount, species.speciesTypes, species.resamplingEnabled,
+            static_cast<std::uint8_t>(ParticleRole::Fluid),
+            impl->assignedEntry, impl->entryTypeRejected,
+            view.x, view.y, view.mass, view.type, view.role);
+        MPCD_CUDA_0490M_CHECK(cudaGetLastError());
+
+        finalize_species_plan_offsets_0493d<<<1, 1>>>(
+            plan.capacity, plan.count, plan.overflow,
+            plan.donorCell, plan.receiverCell, plan.particleType, plan.plannedMass,
+            species.speciesCount, species.speciesTypes, species.resamplingEnabled,
+            static_cast<unsigned int>(fastWorkspace.capacity()),
+            impl->entrySelectedCount, impl->entryShortfall,
+            impl->groupFirst, impl->groupUnderfill, impl->entryTypeRejected,
+            impl->entryOpOffset,
             impl->outCount, impl->outInvalid, impl->outDisabledSpeciesMutation,
             impl->outEntryShortfalls, impl->outGroupUnderfills,
-            impl->outTypeRejected, impl->outPlannedMass, impl->outSelectedMass,
-            impl->outMovedPx, impl->outMovedPy, impl->outFirstParticle,
-            impl->outLastParticle, impl->outFirstReceiver, impl->outLastReceiver,
-            impl->outParticle, impl->outDonor, impl->outReceiver, impl->outType,
+            impl->outTypeRejected, impl->outPlannedMass);
+        MPCD_CUDA_0490M_CHECK(cudaGetLastError());
+
+        constexpr int particleThreads = 256;
+        const int particleBlocks = static_cast<int>(
+            (view.nActiveFluid + particleThreads - 1u) / particleThreads);
+        materialize_assigned_species_particles_0493d_fix1<<<particleBlocks, particleThreads>>>(
+            view.n, view.nActiveFluid,
+            static_cast<unsigned int>(fastWorkspace.capacity()),
+            impl->assignedEntry, impl->assignedLocalIndex, impl->entryOpOffset,
+            plan.donorCell, plan.receiverCell, plan.particleType,
+            impl->outParticle, impl->outDonor, impl->outReceiver, impl->outType);
+        MPCD_CUDA_0490M_CHECK(cudaGetLastError());
+
+        apply_materialized_species_operations_serial_0493d_fix1<<<1, 1>>>(
+            impl->outCount, static_cast<unsigned int>(fastWorkspace.capacity()),
+            view.n, view.nActiveFluid, grid.Nx, grid.dx, grid.dy,
+            static_cast<std::uint8_t>(ParticleRole::Fluid),
+            impl->outInvalid,
+            impl->outSelectedMass, impl->outMovedPx, impl->outMovedPy,
+            impl->outFirstParticle, impl->outLastParticle,
+            impl->outFirstReceiver, impl->outLastReceiver,
+            impl->outParticle, impl->outReceiver, impl->outType,
             impl->outMass, impl->outPx, impl->outPy,
             view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role);
+        MPCD_CUDA_0490M_CHECK(cudaGetLastError());
         MPCD_CUDA_0490M_CHECK(cudaEventRecord(stop));
         MPCD_CUDA_0490M_CHECK(cudaEventSynchronize(stop));
         MPCD_CUDA_0490M_CHECK(cudaGetLastError());
