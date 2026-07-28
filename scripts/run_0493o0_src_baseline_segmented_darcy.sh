@@ -3,8 +3,10 @@ set -euo pipefail
 
 # 0493o0 -- SRC-only general-capability baseline.
 # Segmented inlet/outlet, external solid walls, and a file-driven Darcy/chi
-# obstacle. No Q6 and no mutating resampling operation. Passive support,
-# geometry, Darcy and topology diagnostics remain enabled.
+# obstacle. No Q6. Mutating resampling is disabled by default; setting
+# SUPPORT_REPAIR_ENABLE=true activates the current 0493o1/0493o3 split-only
+# target-driven Neff support repair. Passive support, geometry, Darcy and
+# topology diagnostics remain enabled in both modes.
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "$ROOT/scripts/src_mpcd_run_common_0434.sh"
@@ -14,6 +16,16 @@ CASE_LABEL="0493o0_src_baseline_segmented_darcy"
 GEN_CASE="vk"
 TOPOLOGY="segmented"
 MODE="src"
+
+# One runner-level switch only.  The enabled path is deliberately constrained
+# to the validated local split-only support repair: no refill, extraction,
+# remap, mass guard, thermal renormalization or legacy population mutation.
+SUPPORT_REPAIR_ENABLE="${SUPPORT_REPAIR_ENABLE:-false}"
+if suite_truthy_0434 "$SUPPORT_REPAIR_ENABLE"; then
+  SUPPORT_REPAIR_ENABLE=true
+else
+  SUPPORT_REPAIR_ENABLE=false
+fi
 
 Lx="${Lx:-1.0}"
 Ly="${Ly:-1.0}"
@@ -67,7 +79,12 @@ TOPO_BENCHMARK_EVERY="${TOPO_BENCHMARK_EVERY:-$SUMMARY_EVERY}"
 THREADS="${THREADS:-8}"
 INACTIVE_SLOTS_PER_CELL="${INACTIVE_SLOTS_PER_CELL:-8}"
 INACTIVE_SLOTS="${INACTIVE_SLOTS:-$((NX * NY * INACTIVE_SLOTS_PER_CELL))}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493o0_src_baseline_dual_bench/segmented_darcy}"
+if [[ "$SUPPORT_REPAIR_ENABLE" == true ]]; then
+  DEFAULT_BASE_RUN_ROOT="runs/0493o0_src_support_repair/segmented_darcy"
+else
+  DEFAULT_BASE_RUN_ROOT="runs/0493o0_src_baseline_dual_bench/segmented_darcy"
+fi
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-$DEFAULT_BASE_RUN_ROOT}"
 RUN_ROOT="${RUN_ROOT:-$BASE_RUN_ROOT}"
 CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
 
@@ -87,7 +104,12 @@ LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-1}"
 OVERWRITE_LIVEVIS_CONTROL="${OVERWRITE_LIVEVIS_CONTROL:-0}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
 RECORD_ENABLE="${RECORD_ENABLE:-true}"
-RECORD_SESSION_PREFIX="${RECORD_SESSION_PREFIX:-0493o0_src_baseline}"
+if [[ "$SUPPORT_REPAIR_ENABLE" == true ]]; then
+  DEFAULT_RECORD_SESSION_PREFIX="0493o0_src_support_repair"
+else
+  DEFAULT_RECORD_SESSION_PREFIX="0493o0_src_baseline"
+fi
+RECORD_SESSION_PREFIX="${RECORD_SESSION_PREFIX:-$DEFAULT_RECORD_SESSION_PREFIX}"
 RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"
 RECORD_EVERY="${RECORD_EVERY:-$DUMP_STATE_EVERY}"
 RECORD_STRIDE="${RECORD_STRIDE:-1}"
@@ -97,8 +119,52 @@ FLAG_EVERY="${FLAG_EVERY:-25}"
 SUPPORT_TRIGGER_NMIN="${SUPPORT_TRIGGER_NMIN:-$(( (3 * GAMMA + 4) / 5 ))}"
 OUTLIER_U_THRESHOLD="${OUTLIER_U_THRESHOLD:-1.0}"
 
+# Reuse the already-established population parameters.  These defaults match
+# the validated mono-species TG support-repair configuration; callers may still
+# override the existing GUARD_N* variables.
+if [[ "$SUPPORT_REPAIR_ENABLE" == true ]]; then
+  GUARD_NMIN="${GUARD_NMIN:-10}"
+  GUARD_NTARGET="${GUARD_NTARGET:-12}"
+  GUARD_NMAX="${GUARD_NMAX:-32}"
+fi
+
 suite_defaults_common_0434
 suite_compute_derived_0434
+
+TARGET_CELL_MASS="$(python3 - "$GAMMA" "$PARTICLE_MASS" <<'PY_MASS'
+import sys
+gamma = float(sys.argv[1])
+particle_mass = float(sys.argv[2])
+print(gamma * particle_mass)
+PY_MASS
+)"
+
+# Resolve the exact current support-repair path before writing params.  The χ
+# filter reuses the Darcy deactivation threshold, so no new physical threshold
+# is introduced.
+if [[ "$SUPPORT_REPAIR_ENABLE" == true ]]; then
+  WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=true
+  CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
+  RESAMPLING_INSERTION_ENABLE=true
+  RESAMPLING_EXTRACTION_ENABLE=false
+  RESAMPLING_REMAP_ENABLE=false
+  RESAMPLING_MASS_GUARD_ENABLE=false
+  RESAMPLING_THERMAL_RENORMALIZATION_ENABLE=false
+  CUDA_RESAMPLING_CHI_FILTER_ENABLE=true
+  CUDA_RESAMPLING_CHI_MIN="${CUDA_RESAMPLING_CHI_MIN:-$DARCY_INITIAL_DEACTIVATE_BELOW_CHI}"
+  SPECIES0_RESAMPLING_ENABLE=true
+else
+  WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=false
+  CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
+  RESAMPLING_INSERTION_ENABLE=false
+  RESAMPLING_EXTRACTION_ENABLE=false
+  RESAMPLING_REMAP_ENABLE=false
+  RESAMPLING_MASS_GUARD_ENABLE=false
+  RESAMPLING_THERMAL_RENORMALIZATION_ENABLE=false
+  CUDA_RESAMPLING_CHI_FILTER_ENABLE=false
+  SPECIES0_RESAMPLING_ENABLE=false
+fi
+
 suite_prepare_dirs_0434 "$RUN_ROOT"
 
 STATE="$RUN_ROOT/init/${CASE_LABEL}_${NX}x${NY}_g${GAMMA}.smpcd"
@@ -128,8 +194,8 @@ bcX = solid
 bcY = solid
 openBoundarySegmentsEnable = true
 openBoundarySegmentCount = 2
-openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
-openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${U0} 0.0 0 ${PARTICLE_MASS}
+openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${U0} 0.0 ${BACKGROUND_TYPE} ${PARTICLE_MASS}
+openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${U0} 0.0 ${BACKGROUND_TYPE} ${PARTICLE_MASS}
 inletVelocityRampEnable = true
 inletVelocityRampStartTime = 0.0
 inletVelocityRampEndTime = ${INLET_RAMP_END_TIME}
@@ -160,13 +226,26 @@ wallKBT = -1.0
 wallThermalNoise = 0.0
 bodyAccelerationX = 0.0
 bodyAccelerationY = 0.0
+
+# The current local support repair always deposits by cell and registered
+# species, including mono-species cases.  Keeping the registry present in the
+# baseline makes paired off/on comparisons differ only by the repair switch.
+speciesRegistryEnable = true
+speciesCount = 1
+species0 = ${BACKGROUND_TYPE} segmented_darcy_mono unspecified 1.0 1.0 ${TARGET_CELL_MASS}
+species0ResamplingEnable = ${SPECIES0_RESAMPLING_ENABLE}
+speciesRequireRegisteredTypes = true
+speciesDiagnosticsEnable = false
+speciesCellDiagnosticsEnable = false
+
 $(suite_write_common_params_0434 "$MODE")
 $(suite_write_darcy_params_0434 "$CHI")
 PARAMS
 
 suite_export_cuda_flags_0434 "$MODE" "$TOPOLOGY"
 
-# Passive support and geometry diagnostics, with every mutating resampling brick off.
+# Passive support and geometry diagnostics.  Legacy/competing mutating bricks
+# remain off even when the local split-only support repair is enabled.
 export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295=1
 export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295_EVERY="$RESAMPLING_SURVEY_EVERY"
 export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295_MODE=full
@@ -193,6 +272,16 @@ suite_write_env_file_0434 "$RUN_ROOT/logs/environment_0493o0.env" "$MODE"
 cat >> "$RUN_ROOT/logs/environment_0493o0.env" <<META
 MPCD_INTERNAL_PROFILES=${MPCD_INTERNAL_PROFILES}
 MPCD_CUDA_RESIDENT_PROFILE_0266=${MPCD_CUDA_RESIDENT_PROFILE_0266}
+SUPPORT_REPAIR_ENABLE=${SUPPORT_REPAIR_ENABLE}
+WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=${WEIGHTED_RESAMPLING_ENABLE_OVERRIDE}
+RESAMPLING_INSERTION_ENABLE=${RESAMPLING_INSERTION_ENABLE}
+RESAMPLING_EXTRACTION_ENABLE=${RESAMPLING_EXTRACTION_ENABLE}
+RESAMPLING_REMAP_ENABLE=${RESAMPLING_REMAP_ENABLE}
+CUDA_RESAMPLING_CHI_FILTER_ENABLE=${CUDA_RESAMPLING_CHI_FILTER_ENABLE}
+CUDA_RESAMPLING_CHI_MIN=${CUDA_RESAMPLING_CHI_MIN}
+GUARD_NMIN=${GUARD_NMIN}
+GUARD_NTARGET=${GUARD_NTARGET}
+GUARD_NMAX=${GUARD_NMAX}
 RESAMPLING_SURVEY_EVERY=${RESAMPLING_SURVEY_EVERY}
 FLAG_EVERY=${FLAG_EVERY}
 SUPPORT_TRIGGER_NMIN=${SUPPORT_TRIGGER_NMIN}
@@ -201,6 +290,10 @@ OUTLET_SEGMENT=${OUTLET_FACE}:${OUTLET_SMIN}:${OUTLET_SMAX}
 META
 
 printf '[0493o0-general] SRC-only segmented inlet/outlet + walls + Darcy/chi\n'
+printf '[0493o0-general] supportRepair=%s speciesType=%s targetCellMass=%s Nmin=%s Ntarget=%s Nmax=%s chiFilter=%s chiMin=%s\n' \
+  "$SUPPORT_REPAIR_ENABLE" "$BACKGROUND_TYPE" "$TARGET_CELL_MASS" \
+  "$GUARD_NMIN" "$GUARD_NTARGET" "$GUARD_NMAX" \
+  "$CUDA_RESAMPLING_CHI_FILTER_ENABLE" "$CUDA_RESAMPLING_CHI_MIN"
 printf '[0493o0-general] grid=%sx%s gamma=%s active~%s inactive=%s steps=%s dt=%s\n' \
   "$NX" "$NY" "$GAMMA" "$((NX * NY * GAMMA))" "$INACTIVE_SLOTS" "$STEPS" "$DT"
 printf '[0493o0-general] segments=%s:[%s,%s] -> %s:[%s,%s] U0=%s\n' \
