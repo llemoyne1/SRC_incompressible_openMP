@@ -28,6 +28,8 @@ struct CudaSpeciesCellDeviceView0490h {
     unsigned char* resamplingEnabled = nullptr;
     unsigned int* count = nullptr;
     double* mass = nullptr;
+    // 0493o1: sum of squared representative masses for Neff=(sum m)^2/sum(m^2).
+    double* massSquared = nullptr;
     double* px = nullptr;
     double* py = nullptr;
     double* kinetic = nullptr;

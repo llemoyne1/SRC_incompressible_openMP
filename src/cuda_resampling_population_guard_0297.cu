@@ -98,6 +98,11 @@ struct DevicePopulationGuardConfig0297 {
     int speciesPopulationGuardEnable0490j = 0;
     int speciesCount0490j = 0;
 
+    // 0493o1 is resolved from the existing split-only parameter combination.
+    int localSupportSplitOnly0493o1 = 0;
+    int maxSplitsPerCell0493o1 = 0;
+    int maxSplitsPerStep0493o1 = 0;
+
     int chiFilterEnable = 0;
     double chiMin = 0.0;
 };
@@ -2085,6 +2090,18 @@ DevicePopulationGuardConfig0297 make_config_0297(const SimulationParams& params,
         cfg.nTarget = params.resamplingPopulationNTarget;
         cfg.nMax = params.resamplingPopulationNMax;
     }
+    cfg.localSupportSplitOnly0493o1 =
+        (params.resamplingEnable && params.resamplingInsertionEnable &&
+         !params.resamplingExtractionEnable && !params.resamplingRemapEnable) ? 1 : 0;
+    if (cfg.localSupportSplitOnly0493o1) {
+        cfg.nMin = params.resamplingPopulationNMin;
+        cfg.nTarget = params.resamplingPopulationNTarget;
+        cfg.nMax = params.resamplingPopulationNMax;
+        cfg.splitFraction = 0.5;
+        cfg.preferMaxMassDonor0307 = 1;
+        cfg.maxSplitsPerCell0493o1 = params.resamplingPopulationMaxSplitsPerCell;
+        cfg.maxSplitsPerStep0493o1 = params.resamplingPopulationMaxSplitsPerStep;
+    }
     cfg.chiFilterEnable = (params.darcyBrinkmanEnable && params.cudaResamplingChiFilterEnable) ? 1 : 0;
     cfg.chiMin = std::clamp(params.cudaResamplingChiMin, 0.0, 1.0);
     cfg.boundaryAware0299 = env_truthy_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE") ? 1 : 0;
@@ -2172,7 +2189,19 @@ void write_csv_row_0297(const SimulationParams& params,
                "maxAbsCellMassError,maxRelCellMassError,maxAbsCellMomentumError,maxRelCellMomentumError,"
                "boundaryAware0299,boundaryHaloCells0299,openBoundaryHaloCells0299,solidHaloCells0299,"
                "excludedBoundaryCells0299,excludedOpenBoundaryCells0299,excludedSolidHaloCells0299,"
-               "depositBeforeSeconds,kernelSeconds,depositAfterSeconds,downloadSeconds,totalSeconds\n";
+               "localSupportSplitOnly0493o1,poorNonEmptyPairs0493o1,emptySpeciesPairs0493o1,"
+               "requestedSplits0493o1,appliedSplits0493o1,repairedToTarget0493o1,"
+               "incompleteRepairCells0493o1,missingSplitsToTarget0493o1,"
+               "limitedByCellCap0493o1,limitedByStepCap0493o1,limitedByPool0493o1,"
+               "noCandidatePairs0493o1,candidateCountMismatchPairs0493o1,"
+               "safetyLimitedPairs0493o1,maxSplitsPerPair0493o1,"
+               "minNeffBefore0493o1,minNeffAfter0493o1,"
+               "depositBeforeSeconds,kernelSeconds,depositAfterSeconds,downloadSeconds,totalSeconds,"
+               "noPoorEarlyExit0493o3,speciesDepositSeconds0493o3,krelBeforeSeconds0493o3,"
+               "localSupportResetSeconds0493o3,localSupportClassifySeconds0493o3,"
+               "localSupportPoorCountDownloadSeconds0493o3,localSupportCandidateBuildSeconds0493o3,"
+               "localSupportPlanSeconds0493o3,localSupportApplySeconds0493o3,"
+               "localSupportDiagnosticsSeconds0493o3,postMutationValidationSeconds0493o3\n";
     }
     out << std::setprecision(17)
         << d.step << ','
@@ -2238,8 +2267,26 @@ void write_csv_row_0297(const SimulationParams& params,
         << (d.boundaryAware0299 ? 1 : 0) << ','
         << d.boundaryHaloCells0299 << ',' << d.openBoundaryHaloCells0299 << ',' << d.solidHaloCells0299 << ','
         << d.excludedBoundaryCells0299 << ',' << d.excludedOpenBoundaryCells0299 << ',' << d.excludedSolidHaloCells0299 << ','
+        << (d.localSupportSplitOnly0493o1 ? 1 : 0) << ','
+        << d.poorNonEmptyPairs0493o1 << ',' << d.emptySpeciesPairs0493o1 << ','
+        << d.requestedSplits0493o1 << ',' << d.appliedSplits0493o1 << ','
+        << d.repairedToTarget0493o1 << ',' << d.incompleteRepairCells0493o1 << ','
+        << d.missingSplitsToTarget0493o1 << ',' << d.limitedByCellCap0493o1 << ','
+        << d.limitedByStepCap0493o1 << ',' << d.limitedByPool0493o1 << ','
+        << d.noCandidatePairs0493o1 << ',' << d.candidateCountMismatchPairs0493o1 << ','
+        << d.safetyLimitedPairs0493o1 << ',' << d.maxSplitsPerPair0493o1 << ','
+        << d.minNeffBefore0493o1 << ','
+        << d.minNeffAfter0493o1 << ','
         << d.depositBeforeSeconds << ',' << d.kernelSeconds << ','
-        << d.depositAfterSeconds << ',' << d.downloadSeconds << ',' << d.totalSeconds << '\n';
+        << d.depositAfterSeconds << ',' << d.downloadSeconds << ',' << d.totalSeconds << ','
+        << (d.noPoorEarlyExit0493o3 ? 1 : 0) << ','
+        << d.speciesDepositSeconds0493o3 << ',' << d.krelBeforeSeconds0493o3 << ','
+        << d.localSupportResetSeconds0493o3 << ',' << d.localSupportClassifySeconds0493o3 << ','
+        << d.localSupportPoorCountDownloadSeconds0493o3 << ','
+        << d.localSupportCandidateBuildSeconds0493o3 << ','
+        << d.localSupportPlanSeconds0493o3 << ',' << d.localSupportApplySeconds0493o3 << ','
+        << d.localSupportDiagnosticsSeconds0493o3 << ','
+        << d.postMutationValidationSeconds0493o3 << '\n';
 }
 
 void accumulate_global_diagnostics_0297(const CudaCellMoments& m,
@@ -2365,6 +2412,7 @@ void compare_krel_vectors_0298(const std::vector<double>& target,
     }
 }
 
+#include "cuda_local_support_split_0493o1.cuh"
 } // namespace
 
 bool cuda_resampling_population_guard_0297_requested(const SimulationParams& params, std::uint64_t step) {
@@ -2372,9 +2420,52 @@ bool cuda_resampling_population_guard_0297_requested(const SimulationParams& par
     const bool requestedByEmptyRefill = params.resamplingEnable && params.cudaResamplingEmptyRefillEnable;
     const bool requestedBySpecies0490j =
         params.resamplingEnable && params.speciesResamplingPopulationGuardCudaEnable;
-    if (!requestedByEnv && !requestedByEmptyRefill && !requestedBySpecies0490j) return false;
+    const bool requestedByLocalSupport0493o1 =
+        params.resamplingEnable && params.resamplingInsertionEnable &&
+        !params.resamplingExtractionEnable && !params.resamplingRemapEnable;
+    if (!requestedByEnv && !requestedByEmptyRefill && !requestedBySpecies0490j &&
+        !requestedByLocalSupport0493o1) return false;
     const int every = std::max(1, env_int_0297("MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_EVERY", 1));
     return (step % static_cast<std::uint64_t>(every)) == 0u;
+}
+
+void write_cuda_resampling_population_guard_caller_0493o3(
+    const SimulationParams& params,
+    const CudaResamplingPopulationGuard0297Diagnostics& guard,
+    double stateSyncSeconds,
+    double initialMaintenanceSeconds,
+    double authoritySeconds,
+    double postGuardMaintenanceSeconds,
+    double remainingPipelineSeconds,
+    double totalCallerSeconds) {
+    if (!guard.attempted || !guard.handled || !guard.localSupportSplitOnly0493o1) return;
+    namespace fs = std::filesystem;
+    fs::create_directories(params.outputDir);
+    const fs::path path = fs::path(params.outputDir) /
+        "cuda_resampling_population_guard_caller_0493o3.csv";
+    static fs::path openPath0493o3;
+    static std::ofstream out0493o3;
+    if (!out0493o3.is_open() || openPath0493o3 != path) {
+        if (out0493o3.is_open()) out0493o3.close();
+        const bool exists = fs::exists(path) && fs::file_size(path) > 0u;
+        out0493o3.open(path, std::ios::out | std::ios::app);
+        if (!out0493o3) {
+            throw std::runtime_error("0493o3 failed to open caller timing CSV: " + path.string());
+        }
+        openPath0493o3 = path;
+        if (!exists) {
+            out0493o3 << "step,noPoorEarlyExit0493o3,poorNonEmptyPairs0493o1,appliedSplits0493o1,"
+                           "stateSyncSeconds0493o3,initialMaintenanceSeconds0493o3,authoritySeconds0493o3,"
+                           "postGuardMaintenanceSeconds0493o3,remainingPipelineSeconds0493o3,"
+                           "totalCallerSeconds0493o3\n";
+        }
+    }
+    out0493o3 << std::setprecision(17)
+        << guard.step << ',' << (guard.noPoorEarlyExit0493o3 ? 1 : 0) << ','
+        << guard.poorNonEmptyPairs0493o1 << ',' << guard.appliedSplits0493o1 << ','
+        << stateSyncSeconds << ',' << initialMaintenanceSeconds << ',' << authoritySeconds << ','
+        << postGuardMaintenanceSeconds << ',' << remainingPipelineSeconds << ','
+        << totalCallerSeconds << '\n';
 }
 
 CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_population_guard_0297(
@@ -2416,6 +2507,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     d.emptyRefillSpeciesCount0490f = static_cast<std::uint64_t>(std::max(0, cfg.speciesCount0490f));
     d.speciesPopulationGuardCuda0490j = cfg.speciesPopulationGuardEnable0490j != 0;
     d.speciesCount0490j = static_cast<std::uint64_t>(std::max(0, cfg.speciesCount0490j));
+    d.localSupportSplitOnly0493o1 = cfg.localSupportSplitOnly0493o1 != 0;
     d.boundaryAware0299 = cfg.boundaryAware0299 != 0;
     d.boundaryHaloCells0299 = cfg.boundaryHaloCells0299;
     d.openBoundaryHaloCells0299 = cfg.openBoundaryHaloCells0299;
@@ -2550,9 +2642,16 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         throw std::runtime_error("cuda_resampling_population_guard_0297: active particle count exceeds int range");
     }
     const int particleGrid = std::max(1, (particleCountBefore + block - 1) / block);
+    const bool resolvedLocalSupportOnly0493o3 =
+        cfg.localSupportSplitOnly0493o1 &&
+        !cfg.emptyRefillEnable0319 &&
+        !cfg.speciesPopulationGuardEnable0490j &&
+        !cfg.speciesCompositionEnable0490f;
+    LocalSupportSplitResult0493o1 detectedLocalSupport0493o3{};
 
     const Clock::time_point tk0 = Clock::now();
-    reset_population_guard_buffers_kernel_0297<<<cellGrid, block>>>(
+    if (!resolvedLocalSupportOnly0493o3) {
+        reset_population_guard_buffers_kernel_0297<<<cellGrid, block>>>(
         grid.numCells,
         g_populationGuardBuffers0297.dPoorCount,
         g_populationGuardBuffers0297.dRichCount,
@@ -2565,7 +2664,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         g_populationGuardBuffers0297.dEmptyCount0319,
         g_populationGuardBuffers0297.dEmptyAdded0319,
         g_populationGuardBuffers0297.dCounters);
-    cuda_check_0297(cudaGetLastError(), "launch reset_population_guard_buffers_kernel_0297");
+        cuda_check_0297(cudaGetLastError(), "launch reset_population_guard_buffers_kernel_0297");
+    }
 
     const bool speciesMutationPolicy0493b =
         params.speciesRegistryEnable && !params.speciesDefinitions.empty();
@@ -2591,6 +2691,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardSpeciesWorkspace0490j.device_view();
         d.speciesWorkspaceReused0490j = speciesDeposit0490j.reusedAllocation;
         d.speciesInvalidTypeCount0490j = speciesDeposit0490j.invalidTypeCount;
+        d.speciesDepositSeconds0493o3 = speciesDeposit0490j.totalSeconds;
         if (speciesDeposit0490j.invalidTypeCount != 0u &&
             params.speciesRequireRegisteredTypes) {
             throw std::runtime_error(
@@ -2598,6 +2699,55 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         }
     }
 
+    if (resolvedLocalSupportOnly0493o3) {
+        detectedLocalSupport0493o3 = detect_local_support_pairs_0493o3(
+            particleCountBefore, block, mutationSpeciesView0493b, dChi0297, cfg);
+        d.noPoorEarlyExit0493o3 = detectedLocalSupport0493o3.noPoorEarlyExit0493o3;
+        d.poorCells = detectedLocalSupport0493o3.poorNonEmptyPairs;
+        d.richCells = 0u;
+        d.poorNonEmptyPairs0493o1 = detectedLocalSupport0493o3.poorNonEmptyPairs;
+        d.emptySpeciesPairs0493o1 = detectedLocalSupport0493o3.emptySpeciesPairs;
+        d.minNeffBefore0493o1 = detectedLocalSupport0493o3.minNeffBefore;
+        d.localSupportResetSeconds0493o3 = detectedLocalSupport0493o3.resetSeconds0493o3;
+        d.localSupportClassifySeconds0493o3 = detectedLocalSupport0493o3.classifySeconds0493o3;
+        d.localSupportPoorCountDownloadSeconds0493o3 =
+            detectedLocalSupport0493o3.poorCountDownloadSeconds0493o3;
+        if (detectedLocalSupport0493o3.noPoorEarlyExit0493o3) {
+            d.fluidParticlesAfter = d.fluidParticlesBefore;
+            d.wetCellsAfter = d.wetCellsBefore;
+            d.totalMassAfter = d.totalMassBefore;
+            d.totalPxAfter = d.totalPxBefore;
+            d.totalPyAfter = d.totalPyBefore;
+            d.inactiveParticlesBefore = hostMirror.Np >= d.fluidParticlesBefore
+                ? hostMirror.Np - d.fluidParticlesBefore : 0u;
+            d.inactiveParticlesAfter = d.inactiveParticlesBefore;
+            d.kernelSeconds = seconds_between(tk0, Clock::now());
+            d.downloadSeconds = d.localSupportPoorCountDownloadSeconds0493o3;
+            d.handled = true;
+            d.totalSeconds = seconds_between(t0, Clock::now());
+            write_csv_row_0297(params, d);
+            return d;
+        }
+        // Active path: initialize the historical counters only after the
+        // lightweight detector has established that at least one pair is poor.
+        reset_population_guard_buffers_kernel_0297<<<cellGrid, block>>>(
+            grid.numCells,
+            g_populationGuardBuffers0297.dPoorCount,
+            g_populationGuardBuffers0297.dRichCount,
+            g_populationGuardBuffers0297.dInactiveCount,
+            g_populationGuardBuffers0297.dPoorDonor,
+            g_populationGuardBuffers0297.dPoorDonorMassBits0307,
+            g_populationGuardBuffers0297.dMinima0307,
+            g_populationGuardBuffers0297.dRichKeep,
+            g_populationGuardBuffers0297.dRichExtract,
+            g_populationGuardBuffers0297.dEmptyCount0319,
+            g_populationGuardBuffers0297.dEmptyAdded0319,
+            g_populationGuardBuffers0297.dCounters);
+        cuda_check_0297(cudaGetLastError(),
+                        "launch reset_population_guard_buffers_kernel_0297 after 0493o3 detection");
+    }
+
+    const Clock::time_point tKrelBefore0493o3 = Clock::now();
     std::vector<double> krelBefore0298 = compute_cell_krel_0298(
         particleCountBefore, grid.numCells, particleGrid, cellGrid, block,
         pv, cv, mutationSpeciesView0493b,
@@ -2622,6 +2772,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
             g_populationGuardBuffers0297.dSpeciesKrelBefore0493g,
             "reset 0493g species krel before", false);
     }
+    d.krelBeforeSeconds0493o3 = seconds_between(tKrelBefore0493o3, Clock::now());
 
     if (cfg.speciesCompositionEnable0490f) {
         const std::size_t ns0490f = static_cast<std::size_t>(cfg.speciesCount0490f);
@@ -2689,6 +2840,33 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         cuda_check_0297(cudaGetLastError(), "launch classify_empty_refill_cells_kernel_0319");
     }
 
+    LocalSupportSplitResult0493o1 localSupportResult0493o1 = detectedLocalSupport0493o3;
+    if (cfg.localSupportSplitOnly0493o1) {
+        if (!resolvedLocalSupportOnly0493o3) {
+            localSupportResult0493o1 = detect_local_support_pairs_0493o3(
+                particleCountBefore, block, mutationSpeciesView0493b, dChi0297, cfg);
+        }
+        localSupportResult0493o1 = apply_local_support_split_only_0493o1(
+            particleCountBefore, particleGrid, block, pv, cv,
+            mutationSpeciesView0493b, dChi0297, cfg,
+            g_populationGuardBuffers0297.dCounters, localSupportResult0493o1);
+        d.noPoorEarlyExit0493o3 = localSupportResult0493o1.noPoorEarlyExit0493o3;
+        d.localSupportResetSeconds0493o3 = localSupportResult0493o1.resetSeconds0493o3;
+        d.localSupportClassifySeconds0493o3 = localSupportResult0493o1.classifySeconds0493o3;
+        d.localSupportPoorCountDownloadSeconds0493o3 =
+            localSupportResult0493o1.poorCountDownloadSeconds0493o3;
+        d.localSupportCandidateBuildSeconds0493o3 =
+            localSupportResult0493o1.candidateBuildSeconds0493o3;
+        d.localSupportPlanSeconds0493o3 = localSupportResult0493o1.planSeconds0493o3;
+        d.localSupportApplySeconds0493o3 = localSupportResult0493o1.applySeconds0493o3;
+        d.localSupportDiagnosticsSeconds0493o3 =
+            localSupportResult0493o1.diagnosticsSeconds0493o3;
+        // Keep the historical machinery compiled and available, but make it a
+        // no-op for this resolved mode.  0493o1 has already applied the splits.
+        cfg.nMin = 0;
+        cfg.nMax = std::numeric_limits<int>::max();
+        cfg.speciesPopulationGuardEnable0490j = 0;
+    }
     classify_population_guard_cells_kernel_0297<<<cellGrid, block>>>(
         cv.count,
         dChi0297,
@@ -2744,6 +2922,26 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
                     "copy rich count D2H");
     d.poorCells = hPoorCount;
     d.richCells = hRichCount;
+    if (d.localSupportSplitOnly0493o1) {
+        d.poorCells = localSupportResult0493o1.poorNonEmptyPairs;
+        d.richCells = 0u;
+        d.poorNonEmptyPairs0493o1 = localSupportResult0493o1.poorNonEmptyPairs;
+        d.emptySpeciesPairs0493o1 = localSupportResult0493o1.emptySpeciesPairs;
+        d.requestedSplits0493o1 = localSupportResult0493o1.requestedSplits;
+        d.appliedSplits0493o1 = localSupportResult0493o1.appliedSplits;
+        d.repairedToTarget0493o1 = localSupportResult0493o1.repairedToTarget;
+        d.incompleteRepairCells0493o1 = localSupportResult0493o1.incompleteRepairCells;
+        d.missingSplitsToTarget0493o1 = localSupportResult0493o1.missingSplitsToTarget;
+        d.limitedByCellCap0493o1 = localSupportResult0493o1.limitedByCellCap;
+        d.limitedByStepCap0493o1 = localSupportResult0493o1.limitedByStepCap;
+        d.limitedByPool0493o1 = localSupportResult0493o1.limitedByPool;
+        d.noCandidatePairs0493o1 = localSupportResult0493o1.noCandidatePairs;
+        d.candidateCountMismatchPairs0493o1 = localSupportResult0493o1.candidateCountMismatchPairs;
+        d.safetyLimitedPairs0493o1 = localSupportResult0493o1.safetyLimitedPairs;
+        d.maxSplitsPerPair0493o1 = localSupportResult0493o1.maxSplitsPerPair;
+        d.minNeffBefore0493o1 = localSupportResult0493o1.minNeffBefore;
+        d.minNeffAfter0493o1 = localSupportResult0493o1.minNeffAfter;
+    }
 
     std::uint64_t activeBaseAfterRefill0319 = activeBase0315;
     if (cfg.emptyRefillEnable0319 && cfg.activePrefixSafe0315 && cfg.emptyRefillTarget0319 > 0) {
@@ -2970,7 +3168,8 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
                                sizeof(hMinima0307), cudaMemcpyDeviceToHost),
                     "copy 0307 minima D2H");
     const Clock::time_point td1 = Clock::now();
-    d.downloadSeconds = seconds_between(td0, td1);
+    d.downloadSeconds = seconds_between(td0, td1) +
+        d.localSupportPoorCountDownloadSeconds0493o3;
     d.mergeApplied = static_cast<std::uint64_t>(hCounters[0]);
     d.splitApplied = static_cast<std::uint64_t>(hCounters[1]);
     d.splitSkippedNoInactive = static_cast<std::uint64_t>(hCounters[2]);
@@ -3024,6 +3223,7 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
         cuda_shared_particle_state_0251_mark_fresh("cuda_resampling_population_guard_0297");
     }
 
+    const Clock::time_point tPostMutationValidation0493o3 = Clock::now();
     ParticleState afterMirror = guardMirror;
     if (cfg.activePrefixSafe0315) {
         afterMirror.NactiveFluid = gpuState.active_fluid_size();
@@ -3142,6 +3342,9 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     } else {
         d.fluidParticlesAfter = gpuState.active_fluid_size();
     }
+
+    d.postMutationValidationSeconds0493o3 =
+        seconds_between(tPostMutationValidation0493o3, Clock::now());
 
     // Do not download the resident particle state just for 0297 diagnostics.
     // These counts are non-fluid storage slots (inactive plus any latent slots)

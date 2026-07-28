@@ -110,6 +110,7 @@ __global__ void reset_species_cell_fields_0490h(
     int numCells,
     unsigned int* count,
     double* mass,
+    double* massSquared,
     double* px,
     double* py,
     double* kinetic,
@@ -125,6 +126,7 @@ __global__ void reset_species_cell_fields_0490h(
     for (int k = tid; k < denseSize; k += stride) {
         count[k] = 0u;
         mass[k] = 0.0;
+        massSquared[k] = 0.0;
         px[k] = 0.0;
         py[k] = 0.0;
         kinetic[k] = 0.0;
@@ -155,6 +157,7 @@ __global__ void deposit_species_cell_fields_0490h(
     const std::uint32_t* speciesTypes,
     unsigned int* count,
     double* mass,
+    double* massSquared,
     double* px,
     double* py,
     double* kinetic,
@@ -181,6 +184,8 @@ __global__ void deposit_species_cell_fields_0490h(
     const double m = particleMass[i];
     atomicAdd(&count[k], 1u);
     atomic_add_double_0490h(&mass[k], m);
+    // 0493o1: sum(m^2) is deposited in the same particle pass.
+    atomic_add_double_0490h(&massSquared[k], m * m);
     atomic_add_double_0490h(&px[k], m * vx[i]);
     atomic_add_double_0490h(&py[k], m * vy[i]);
     atomic_add_double_0490h(
@@ -258,6 +263,8 @@ struct CudaSpeciesCellWorkspace0490h::Impl {
     unsigned char* resamplingEnabled = nullptr;
     unsigned int* count = nullptr;
     double* mass = nullptr;
+    // 0493o1: sum(m^2), species-major.
+    double* massSquared = nullptr;
     double* px = nullptr;
     double* py = nullptr;
     double* kinetic = nullptr;
@@ -320,6 +327,7 @@ void CudaSpeciesCellWorkspace0490h::release() {
         cuda_free_0490h(impl_->resamplingEnabled);
         cuda_free_0490h(impl_->count);
         cuda_free_0490h(impl_->mass);
+        cuda_free_0490h(impl_->massSquared);
         cuda_free_0490h(impl_->px);
         cuda_free_0490h(impl_->py);
         cuda_free_0490h(impl_->kinetic);
@@ -351,7 +359,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     const Clock::time_point tTotal0 = Clock::now();
     const bool reusable = impl_->cellCapacity >= numCells &&
                           impl_->speciesCapacity >= speciesCount &&
-                          impl_->count != nullptr;
+                          impl_->count != nullptr && impl_->massSquared != nullptr;
     if (reusable) {
         impl_->numCells = numCells;
         impl_->speciesCount = speciesCount;
@@ -378,6 +386,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->resamplingEnabled, ns * sizeof(unsigned char)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->count, dense * sizeof(unsigned int)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->mass, dense * sizeof(double)));
+    MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->massSquared, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->px, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->py, dense * sizeof(double)));
     MPCD_CUDA_0490H_CHECK(cudaMalloc(&impl_->kinetic, dense * sizeof(double)));
@@ -395,7 +404,7 @@ void CudaSpeciesCellWorkspace0490h::ensure_capacity(
     impl_->speciesCount = speciesCount;
     impl_->allocatedBytes =
         ns * (sizeof(std::uint32_t) + 2u * sizeof(double) + 2u * sizeof(unsigned char)) +
-        dense * (sizeof(unsigned int) + 6u * sizeof(double)) +
+        dense * (sizeof(unsigned int) + 7u * sizeof(double)) +
         nc * 4u * sizeof(double) + sizeof(unsigned long long);
 
     if (diag != nullptr) {
@@ -426,6 +435,7 @@ CudaSpeciesCellDeviceView0490h CudaSpeciesCellWorkspace0490h::device_view() cons
     v.resamplingEnabled = impl_->resamplingEnabled;
     v.count = impl_->count;
     v.mass = impl_->mass;
+    v.massSquared = impl_->massSquared;
     v.px = impl_->px;
     v.py = impl_->py;
     v.kinetic = impl_->kinetic;
@@ -531,7 +541,7 @@ void cuda_deposit_species_cell_fields_resident_0490h(
     const int resetBlocks = std::max(1, (resetWork + threadsPerBlock - 1) / threadsPerBlock);
     const Clock::time_point tReset = Clock::now();
     reset_species_cell_fields_0490h<<<resetBlocks, threadsPerBlock>>>(
-        denseSize, grid.numCells, out.count, out.mass, out.px, out.py, out.kinetic,
+        denseSize, grid.numCells, out.count, out.mass, out.massSquared, out.px, out.py, out.kinetic,
         out.totalCellMass, out.totalOccupancyWeight, out.massFraction,
         out.occupancyFraction, out.liquidFractionProxy, out.gasFractionProxy,
         out.invalidTypeCounter);
@@ -568,7 +578,7 @@ void cuda_deposit_species_cell_fields_resident_0490h(
             nParticles, particles.x, particles.y, particles.vx, particles.vy,
             particles.mass, particles.type, particles.role,
             static_cast<unsigned char>(kParticleRoleFluid), cfg, speciesCount,
-            out.speciesTypes, out.count, out.mass, out.px, out.py, out.kinetic,
+            out.speciesTypes, out.count, out.mass, out.massSquared, out.px, out.py, out.kinetic,
             out.invalidTypeCounter);
         MPCD_CUDA_0490H_CHECK(cudaGetLastError());
         MPCD_CUDA_0490H_CHECK(cudaDeviceSynchronize());

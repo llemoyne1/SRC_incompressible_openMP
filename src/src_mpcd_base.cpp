@@ -1622,6 +1622,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     CudaResamplingPopulationGuard0297Diagnostics cudaPopulationGuard0490j{};
+    bool callerTimingActive0493o3 = false;
+    ProfileClock::time_point callerStart0493o3{};
+    ProfileClock::time_point callerRemainingStart0493o3{};
+    double callerStateSyncSeconds0493o3 = 0.0;
+    double callerInitialMaintenanceSeconds0493o3 = 0.0;
+    double callerAuthoritySeconds0493o3 = 0.0;
+    double callerPostGuardMaintenanceSeconds0493o3 = 0.0;
 
     // 0297/0490j: minimal local CUDA population guard at the same post-SRC,
     // physical-grid insertion point.  Unlike 0296, this brick can change the
@@ -1634,10 +1641,22 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             "post_src_classic_post_thermostat_pre_cpu_resampling");
         disabledSpeciesMutationCount0493b +=
             cudaPopulationGuard0490j.disabledSpeciesMutationCount0493b;
-        if (params.speciesResamplingPopulationGuardCudaEnable &&
+        const bool localSupportSplitOnlyRequested0493o1 =
+            params.resamplingEnable && params.resamplingInsertionEnable &&
+            !params.resamplingExtractionEnable && !params.resamplingRemapEnable;
+        if ((params.speciesResamplingPopulationGuardCudaEnable ||
+             localSupportSplitOnlyRequested0493o1) &&
             !cudaPopulationGuard0490j.handled) {
             throw std::runtime_error(
-                "0490j resident CUDA species population guard was requested but not handled");
+                localSupportSplitOnlyRequested0493o1
+                    ? "0493o1 local-support CUDA split guard was requested but not handled"
+                    : "0490j resident CUDA species population guard was requested but not handled");
+        }
+        callerTimingActive0493o3 =
+            cudaPopulationGuard0490j.handled &&
+            cudaPopulationGuard0490j.localSupportSplitOnly0493o1;
+        if (callerTimingActive0493o3) {
+            callerStart0493o3 = ProfileClock::now();
         }
     }
 
@@ -1669,11 +1688,16 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // pre-resampling full-state download would only feed CPU scans that are now
     // disabled. Keep the shared CUDA state authoritative and download only the
     // compact cell/pool mirrors produced below.
+    const ProfileClock::time_point callerStateSyncStart0493o3 = ProfileClock::now();
     if ((residentClassicCuda || q6ResidentHandled0400 || thermostatHandledByQ6Resident0400) &&
         !fullResidentMaintenance0490n) {
         (void)cuda_shared_particle_state_0251_download_if_fresh(state);
         q6ResidentHandled0400 = false;
         thermostatHandledByQ6Resident0400 = false;
+    }
+    if (callerTimingActive0493o3) {
+        callerStateSyncSeconds0493o3 = std::chrono::duration<double>(
+            ProfileClock::now() - callerStateSyncStart0493o3).count();
     }
 
     const auto refreshResidentMaintenance0490n =
@@ -1699,6 +1723,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
 #endif
         };
 
+    const ProfileClock::time_point callerInitialMaintenanceStart0493o3 = ProfileClock::now();
     if (residentPool0490n || residentDeposit0490n) {
         refreshResidentMaintenance0490n(
             "initial", residentDeposit0490n, residentPool0490n);
@@ -1730,6 +1755,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         MPCD_PROFILE_PHASE(result.profile, ResamplingAttachInitial);
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
     }
+    if (callerTimingActive0493o3) {
+        callerInitialMaintenanceSeconds0493o3 = std::chrono::duration<double>(
+            ProfileClock::now() - callerInitialMaintenanceStart0493o3).count();
+    }
 
     if (!params.resamplingEnable) {
         return result;
@@ -1746,7 +1775,19 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     bool populationGuardEdited = false;
     bool planOrTransferEdited = false;
     ResamplingPopulationGuardDiagnostics populationGuard{};
-    if (params.speciesResamplingPopulationGuardCudaEnable) {
+    // 0493o1-fix2: the split-only CUDA guard is authoritative.  Falling through
+    // to the historical CPU population guard is not harmless: that guard can
+    // merge N>NMax cells even when resamplingExtractionEnable=false.  In an
+    // active-prefix state, the CPU merge leaves an interior inactive hole; the
+    // next prefix synchronization repairs role[] to Fluid and duplicates the
+    // victim mass already transferred to the survivor.
+    const ProfileClock::time_point callerAuthorityStart0493o3 = ProfileClock::now();
+    const bool localSupportSplitOnly0493o1 =
+        cudaPopulationGuard0490j.localSupportSplitOnly0493o1;
+    const bool cudaPopulationGuardAuthoritative0493o1 =
+        params.speciesResamplingPopulationGuardCudaEnable ||
+        localSupportSplitOnly0493o1;
+    if (cudaPopulationGuardAuthoritative0493o1) {
         populationGuard.attempted = true;
         populationGuard.applied =
             cudaPopulationGuard0490j.mergeApplied > 0u ||
@@ -1755,25 +1796,40 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         populationGuard.nTarget = cudaPopulationGuard0490j.nTarget;
         populationGuard.nMax = cudaPopulationGuard0490j.nMax;
         populationGuard.speciesPopulationGuardActive = true;
-        populationGuard.speciesPopulationCells =
-            cudaPopulationGuard0490j.speciesPoorSelections0490j +
-            cudaPopulationGuard0490j.speciesRichSelections0490j;
-        populationGuard.speciesDirectedSplits =
-            cudaPopulationGuard0490j.speciesDirectedSplits0490j;
-        populationGuard.speciesDirectedMerges =
-            cudaPopulationGuard0490j.speciesDirectedMerges0490j;
-        populationGuard.speciesTargetInfeasibleCells =
-            cudaPopulationGuard0490j.speciesTargetInfeasibleCells0490j;
+        if (localSupportSplitOnly0493o1) {
+            populationGuard.speciesPopulationCells =
+                cudaPopulationGuard0490j.poorNonEmptyPairs0493o1;
+            populationGuard.speciesDirectedSplits =
+                cudaPopulationGuard0490j.appliedSplits0493o1;
+            populationGuard.speciesDirectedMerges = 0u;
+            populationGuard.speciesTargetInfeasibleCells =
+                cudaPopulationGuard0490j.incompleteRepairCells0493o1;
+        } else {
+            populationGuard.speciesPopulationCells =
+                cudaPopulationGuard0490j.speciesPoorSelections0490j +
+                cudaPopulationGuard0490j.speciesRichSelections0490j;
+            populationGuard.speciesDirectedSplits =
+                cudaPopulationGuard0490j.speciesDirectedSplits0490j;
+            populationGuard.speciesDirectedMerges =
+                cudaPopulationGuard0490j.speciesDirectedMerges0490j;
+            populationGuard.speciesTargetInfeasibleCells =
+                cudaPopulationGuard0490j.speciesTargetInfeasibleCells0490j;
+        }
     } else {
         MPCD_PROFILE_PHASE(result.profile, ResamplingPopulationGuard);
         populationGuard = apply_resampling_population_support_guard(
             state, workspace.resamplingPool, workspace.resampling, result.resampling, params, grid);
     }
     populationGuardEdited = populationGuard.applied;
-    if (populationGuardEdited && !params.speciesResamplingPopulationGuardCudaEnable) {
+    if (populationGuardEdited && !cudaPopulationGuardAuthoritative0493o1) {
         cuda_shared_particle_state_0251_invalidate("cpu_resampling_population_guard_edited_0472");
     }
+    if (callerTimingActive0493o3) {
+        callerAuthoritySeconds0493o3 = std::chrono::duration<double>(
+            ProfileClock::now() - callerAuthorityStart0493o3).count();
+    }
 
+    const ProfileClock::time_point callerPostGuardMaintenanceStart0493o3 = ProfileClock::now();
     if (populationGuardEdited) {
         if (residentPool0490n || residentDeposit0490n) {
             refreshResidentMaintenance0490n(
@@ -1815,6 +1871,11 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         attach_resampling_pool_diagnostics(result.resampling, result.resamplingPool);
         attach_resampling_population_guard_diagnostics(result.resampling, populationGuard);
+    }
+    if (callerTimingActive0493o3) {
+        callerPostGuardMaintenanceSeconds0493o3 = std::chrono::duration<double>(
+            ProfileClock::now() - callerPostGuardMaintenanceStart0493o3).count();
+        callerRemainingStart0493o3 = ProfileClock::now();
     }
 
     bool cudaSpeciesTransferPlanReady0490m = false;
@@ -2235,6 +2296,21 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             insertionApply,
             remapApply,
             thermalApply);
+    }
+    if (callerTimingActive0493o3) {
+        const ProfileClock::time_point callerEnd0493o3 = ProfileClock::now();
+        const double callerRemainingPipelineSeconds0493o3 = std::chrono::duration<double>(
+            callerEnd0493o3 - callerRemainingStart0493o3).count();
+        const double callerTotalSeconds0493o3 = std::chrono::duration<double>(
+            callerEnd0493o3 - callerStart0493o3).count();
+        write_cuda_resampling_population_guard_caller_0493o3(
+            params, cudaPopulationGuard0490j,
+            callerStateSyncSeconds0493o3,
+            callerInitialMaintenanceSeconds0493o3,
+            callerAuthoritySeconds0493o3,
+            callerPostGuardMaintenanceSeconds0493o3,
+            callerRemainingPipelineSeconds0493o3,
+            callerTotalSeconds0493o3);
     }
     return result;
 }

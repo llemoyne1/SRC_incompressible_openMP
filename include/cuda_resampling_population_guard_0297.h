@@ -57,6 +57,38 @@ struct CudaResamplingPopulationGuard0297Diagnostics {
     std::uint64_t speciesTargetInfeasibleCells0490j = 0u;
     std::uint64_t speciesInvalidTypeCount0490j = 0u;
     std::uint64_t disabledSpeciesMutationCount0493b = 0u;
+    // 0493o1: immediate, target-driven split-only support repair based on Neff.
+    bool localSupportSplitOnly0493o1 = false;
+    std::uint64_t poorNonEmptyPairs0493o1 = 0u;
+    std::uint64_t emptySpeciesPairs0493o1 = 0u;
+    std::uint64_t requestedSplits0493o1 = 0u;
+    std::uint64_t appliedSplits0493o1 = 0u;
+    std::uint64_t repairedToTarget0493o1 = 0u;
+    std::uint64_t incompleteRepairCells0493o1 = 0u;
+    std::uint64_t missingSplitsToTarget0493o1 = 0u;
+    std::uint64_t limitedByCellCap0493o1 = 0u;
+    std::uint64_t limitedByStepCap0493o1 = 0u;
+    std::uint64_t limitedByPool0493o1 = 0u;
+    std::uint64_t noCandidatePairs0493o1 = 0u;
+    std::uint64_t candidateCountMismatchPairs0493o1 = 0u;
+    std::uint64_t safetyLimitedPairs0493o1 = 0u;
+    std::uint64_t maxSplitsPerPair0493o1 = 0u;
+    double minNeffBefore0493o1 = 0.0;
+    double minNeffAfter0493o1 = 0.0;
+
+    // 0493o3: safe no-poor fast exit and phase-level timing.  These fields
+    // are diagnostic only; they introduce no new runtime parameter.
+    bool noPoorEarlyExit0493o3 = false;
+    double speciesDepositSeconds0493o3 = 0.0;
+    double krelBeforeSeconds0493o3 = 0.0;
+    double localSupportResetSeconds0493o3 = 0.0;
+    double localSupportClassifySeconds0493o3 = 0.0;
+    double localSupportPoorCountDownloadSeconds0493o3 = 0.0;
+    double localSupportCandidateBuildSeconds0493o3 = 0.0;
+    double localSupportPlanSeconds0493o3 = 0.0;
+    double localSupportApplySeconds0493o3 = 0.0;
+    double localSupportDiagnosticsSeconds0493o3 = 0.0;
+    double postMutationValidationSeconds0493o3 = 0.0;
     int speciesWorkspaceReused0490j = 0;
 
     int nMin = 0;
@@ -186,6 +218,19 @@ CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_populatio
     double time,
     const char* stage);
 
+// 0493o3 supplemental caller timing.  The core 0297 CSV is written inside the
+// CUDA brick; this second compact CSV measures the downstream authority and
+// maintenance path without delaying the core diagnostic row.
+void write_cuda_resampling_population_guard_caller_0493o3(
+    const SimulationParams& params,
+    const CudaResamplingPopulationGuard0297Diagnostics& guard,
+    double stateSyncSeconds,
+    double initialMaintenanceSeconds,
+    double authoritySeconds,
+    double postGuardMaintenanceSeconds,
+    double remainingPipelineSeconds,
+    double totalCallerSeconds);
+
 #else
 
 inline bool cuda_resampling_population_guard_0297_requested(const SimulationParams&, std::uint64_t) {
@@ -202,6 +247,11 @@ inline CudaResamplingPopulationGuard0297Diagnostics try_apply_cuda_resampling_po
     const char*) {
     return CudaResamplingPopulationGuard0297Diagnostics{};
 }
+
+inline void write_cuda_resampling_population_guard_caller_0493o3(
+    const SimulationParams&,
+    const CudaResamplingPopulationGuard0297Diagnostics&,
+    double, double, double, double, double, double) {}
 
 #endif
 

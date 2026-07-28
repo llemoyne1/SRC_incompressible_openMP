@@ -1340,8 +1340,14 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.resamplingActiveFluidFractionThreshold >= 0.0 && p.resamplingActiveFluidFractionThreshold <= 1.0)) {
         throw std::runtime_error("resamplingActiveFluidFractionThreshold must lie in [0,1]");
     }
-    if (p.resamplingInsertionEnable && !p.resamplingExtractionEnable) {
-        throw std::runtime_error("resamplingInsertionEnable currently requires resamplingExtractionEnable=true");
+    const bool localSupportSplitOnly0493o1 =
+        p.resamplingEnable && p.resamplingInsertionEnable &&
+        !p.resamplingExtractionEnable && !p.resamplingRemapEnable;
+    if (p.resamplingInsertionEnable && !p.resamplingExtractionEnable &&
+        !localSupportSplitOnly0493o1) {
+        throw std::runtime_error(
+            "resamplingInsertionEnable without extraction is reserved for the 0493o1 "
+            "local-support split-only mode and requires resamplingEnable=true and resamplingRemapEnable=false");
     }
     if (p.resamplingMassGuardEnable && !p.resamplingRemapEnable) {
         throw std::runtime_error("resamplingMassGuardEnable currently requires resamplingRemapEnable=true");
@@ -1369,6 +1375,34 @@ void validate_simulation_params(const SimulationParams& p) {
             p.resamplingPopulationNMin > 0 && p.resamplingPopulationNTarget > 0 && p.resamplingPopulationNMax > 0;
         const bool allPopulationBoundsInferred =
             p.resamplingPopulationNMin == 0 && p.resamplingPopulationNTarget == 0 && p.resamplingPopulationNMax == 0;
+        if (localSupportSplitOnly0493o1) {
+            if (!p.speciesRegistryEnable || p.speciesDefinitions.empty() ||
+                !p.speciesRequireRegisteredTypes) {
+                throw std::runtime_error(
+                    "0493o1 local-support split-only mode requires a non-empty strict species registry");
+            }
+            if (!allPopulationBoundsExplicit) {
+                throw std::runtime_error(
+                    "0493o1 local-support split-only mode requires explicit positive "
+                    "resamplingPopulationNMin/NTarget/NMax");
+            }
+            if (p.resamplingPopulationMaxSplitsPerCell <= 0 ||
+                p.resamplingPopulationMaxSplitsPerStep <= 0) {
+                throw std::runtime_error(
+                    "0493o1 local-support split-only mode requires positive split caps");
+            }
+            if (p.cudaResamplingEmptyRefillEnable) {
+                throw std::runtime_error(
+                    "0493o1 first patch keeps cudaResamplingEmptyRefillEnable=false");
+            }
+            if (p.speciesResamplingTransferEnable ||
+                p.speciesResamplingTransferCudaEnable ||
+                p.speciesResamplingMassClosureEnable ||
+                p.speciesResamplingMassClosureCudaEnable) {
+                throw std::runtime_error(
+                    "0493o1 split-only mode requires species transfer and mass closure disabled");
+            }
+        }
         if (!allPopulationBoundsExplicit && !allPopulationBoundsInferred) {
             throw std::runtime_error("resamplingEnable=true requires either all population bounds NMin/NTarget/NMax positive, or all three set to 0 for inferred defaults");
         }
