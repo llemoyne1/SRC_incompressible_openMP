@@ -414,7 +414,7 @@ __host__ inline int inlet_segment_index_for_cell_interval_host_0288(
     return inlet_segment_index_for_cell_interval_core_0288(cfg, face, s0, s1);
 }
 
-__device__ inline bool clip_reservoir_cell_to_segment_device_0288(
+__host__ __device__ inline bool clip_reservoir_cell_to_segment_device_0288(
     const CudaClassicSrcIoFullfaceConfig0263& cfg,
     int inletFace,
     int segmentIndex,
@@ -453,6 +453,14 @@ __device__ inline bool clip_reservoir_cell_to_segment_device_0288(
         return areaFraction > 0.0;
     }
     return true;
+}
+
+__host__ __device__ inline int scaled_partial_cell_target_0493w3(int targetN,
+                                                                  double areaFraction) {
+    if (targetN <= 0 || !(areaFraction > 0.0)) return 0;
+    const double boundedFraction = min2_device_0288(1.0, max2_device_0288(0.0, areaFraction));
+    const double scaled = static_cast<double>(targetN) * boundedFraction;
+    return static_cast<int>(scaled + 0.5);
 }
 
 __device__ inline double smoothstep01_device_0263(double x) {
@@ -751,7 +759,8 @@ __device__ void insert_reservoir_cell_device_0263(
     if (!clip_reservoir_cell_to_segment_device_0288(
             cfg, inletFace, segmentIndex,
             clippedX0, clippedX1, clippedY0, clippedY1, clippedAreaFraction)) return;
-    const int effectiveTargetN = targetN;
+    const int effectiveTargetN = scaled_partial_cell_target_0493w3(targetN, clippedAreaFraction);
+    if (effectiveTargetN <= 0) return;
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
@@ -775,8 +784,10 @@ __device__ void insert_reservoir_cell_device_0263(
     for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
         const double ry = uniform01_device_0263(rng);
-        const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
-        const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
+        const double xp = clamp_strictly_inside_device_0263(
+            clippedX0 + rx * (clippedX1 - clippedX0), clippedX0, clippedX1);
+        const double yp = clamp_strictly_inside_device_0263(
+            clippedY0 + ry * (clippedY1 - clippedY0), clippedY0, clippedY1);
         double ux = 0.0, uy = 0.0;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
@@ -2074,7 +2085,8 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     if (!clip_reservoir_cell_to_segment_device_0288(
             cfg, inletFace, segmentIndex,
             clippedX0, clippedX1, clippedY0, clippedY1, clippedAreaFraction)) return;
-    const int effectiveTargetN = targetN;
+    const int effectiveTargetN = scaled_partial_cell_target_0493w3(targetN, clippedAreaFraction);
+    if (effectiveTargetN <= 0) return;
     const double xc = 0.5 * (x0 + x1);
     const double yc = 0.5 * (y0 + y1);
     if (reservoir_cell_center_inside_immersed_device_0263(xc, yc, cfg)) return;
@@ -2098,8 +2110,10 @@ __device__ void insert_reservoir_cell_pool_device_0268(
     for (int k = 0; k < effectiveTargetN; ++k) {
         const double rx = uniform01_device_0263(rng);
         const double ry = uniform01_device_0263(rng);
-        const double xp = clamp_strictly_inside_device_0263(x0 + rx * (x1 - x0), x0, x1);
-        const double yp = clamp_strictly_inside_device_0263(y0 + ry * (y1 - y0), y0, y1);
+        const double xp = clamp_strictly_inside_device_0263(
+            clippedX0 + rx * (clippedX1 - clippedX0), clippedX0, clippedX1);
+        const double yp = clamp_strictly_inside_device_0263(
+            clippedY0 + ry * (clippedY1 - clippedY0), clippedY0, clippedY1);
         double ux = 0.0, uy = 0.0;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
@@ -2307,12 +2321,76 @@ unsigned long long fullface_reservoir_target_particles_host_0293(const CudaClass
 unsigned long long segmented_reservoir_target_particles_host_0293(const CudaClassicSrcIoFullfaceConfig0263& cfg) {
     const int targetN = cfg.inletTargetOccupancy;
     if (targetN <= 0) return 0ULL;
-    // Conservative but simple: 0288 already clips insertion cells; this helper
-    // intentionally estimates the target from the accepted inlet cells so that
-    // equilibrium outlet extraction can free pool slots before hard insertion.
-    // Exact partial-cell targets are accounted for by the insertion counters;
-    // this pre-extraction is only a capacity guard and mass-balance predictor.
-    return segmented_reservoir_cell_count_host_0269(cfg) * static_cast<unsigned long long>(targetN);
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int cellsX = std::max(1, std::min(cfg.inletReservoirCells, nx));
+    const int cellsY = std::max(1, std::min(cfg.inletReservoirCells, ny));
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    unsigned long long out = 0ULL;
+
+    auto add_cell = [&](int face, int seg, int ix, int iy) {
+        double x0 = cfg.xMin + static_cast<double>(ix) * dx;
+        double x1 = cfg.xMin + static_cast<double>(ix + 1) * dx;
+        double y0 = cfg.yMin + static_cast<double>(iy) * dy;
+        double y1 = cfg.yMin + static_cast<double>(iy + 1) * dy;
+        double areaFraction = 1.0;
+        if (!clip_reservoir_cell_to_segment_device_0288(
+                cfg, face, seg, x0, x1, y0, y1, areaFraction)) return;
+        const double xc = cfg.xMin + (static_cast<double>(ix) + 0.5) * dx;
+        const double yc = cfg.yMin + (static_cast<double>(iy) + 0.5) * dy;
+        if (reservoir_cell_center_inside_immersed_host_0269(xc, yc, cfg)) return;
+        out += static_cast<unsigned long long>(
+            scaled_partial_cell_target_0493w3(targetN, areaFraction));
+    };
+
+    for (int seg = 0; seg < cfg.segmentCount; ++seg) {
+        if (cfg.segmentMode[seg] != 1) continue;
+        const int face = cfg.segmentFace[seg];
+        if (face == 0) {
+            for (int ix = 0; ix < cellsX; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) == seg) {
+                        add_cell(face, seg, ix, iy);
+                    }
+                }
+            }
+        } else if (face == 1) {
+            for (int ix = nx - cellsX; ix < nx; ++ix) {
+                for (int iy = 0; iy < ny; ++iy) {
+                    const double s0 = static_cast<double>(iy) / static_cast<double>(ny);
+                    const double s1 = static_cast<double>(iy + 1) / static_cast<double>(ny);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) == seg) {
+                        add_cell(face, seg, ix, iy);
+                    }
+                }
+            }
+        } else if (face == 2) {
+            for (int iy = 0; iy < cellsY; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) == seg) {
+                        add_cell(face, seg, ix, iy);
+                    }
+                }
+            }
+        } else if (face == 3) {
+            for (int iy = ny - cellsY; iy < ny; ++iy) {
+                for (int ix = 0; ix < nx; ++ix) {
+                    const double s0 = static_cast<double>(ix) / static_cast<double>(nx);
+                    const double s1 = static_cast<double>(ix + 1) / static_cast<double>(nx);
+                    if (inlet_segment_index_for_cell_interval_host_0288(cfg, face, s0, s1) == seg) {
+                        add_cell(face, seg, ix, iy);
+                    }
+                }
+            }
+        }
+    }
+    return out;
 }
 
 __device__ bool map_segmented_reservoir_cell_device_0269(
