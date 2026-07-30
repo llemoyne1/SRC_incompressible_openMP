@@ -37,7 +37,9 @@ SpeciesQ6Mode0491a parse_species_q6_mode_0491a(const std::string& value,
     const std::string v = lower_copy_0491a(value);
     if (v == "common") return SpeciesQ6Mode0491a::Common;
     if (v == "weighted") return SpeciesQ6Mode0491a::Weighted;
-    throw std::runtime_error(context + ": speciesQ6Mode must be common or weighted");
+    if (v == "independent_masked") return SpeciesQ6Mode0491a::IndependentMasked;
+    throw std::runtime_error(
+        context + ": speciesQ6Mode must be common, weighted or independent_masked");
 }
 
 SpeciesQ6Fallback0491a parse_species_q6_fallback_0491a(const std::string& value,
@@ -63,6 +65,11 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
     if (!(input.alphaEpsilon > 0.0) || !std::isfinite(input.alphaEpsilon)) {
         throw std::runtime_error("0491a speciesQ6AlphaEpsilon must be finite and positive");
     }
+    if (!(input.minOccupancyFraction >= 0.0 && input.minOccupancyFraction <= 1.0) ||
+        !std::isfinite(input.minOccupancyFraction)) {
+        throw std::runtime_error(
+            "0493w5 speciesQ6MinOccupancyFraction must lie in [0,1]");
+    }
 
     const std::size_t nc = static_cast<std::size_t>(input.numCells);
     const std::size_t ns = static_cast<std::size_t>(input.speciesCount);
@@ -73,11 +80,27 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
         input.cellDUy.size() != nc) {
         throw std::runtime_error("0491a species-Q6 distribution input has inconsistent dimensions");
     }
+    if (input.mode == SpeciesQ6Mode0491a::IndependentMasked &&
+        input.referenceCellMass.size() != ns) {
+        throw std::runtime_error(
+            "0493w5 independent_masked requires one referenceCellMass per species");
+    }
 
     for (std::size_t s = 0; s < ns; ++s) {
         const double a = input.q6Alpha[s];
         if (!std::isfinite(a) || a < 0.0) {
             throw std::runtime_error("0491a q6 alpha must be finite and non-negative");
+        }
+        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+            const double ref = input.referenceCellMass[s];
+            if (!(ref > 0.0) || !std::isfinite(ref)) {
+                throw std::runtime_error(
+                    "0493w5 independent_masked referenceCellMass must be finite and positive");
+            }
+            if (a > 1.0) {
+                throw std::runtime_error(
+                    "0493w5 independent_masked q6 alpha must lie in [0,1]");
+            }
         }
     }
 
@@ -87,6 +110,9 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
     out.speciesCount = input.speciesCount;
     out.totalCellMass.assign(nc, 0.0);
     out.massFraction.assign(dense, 0.0);
+    out.totalOccupancyWeight.assign(nc, 0.0);
+    out.occupancyFraction.assign(dense, 0.0);
+    out.activeMask.assign(dense, 0u);
     out.alphaBar.assign(nc, 0.0);
     out.weight.assign(dense, 1.0);
     out.speciesDUx.assign(dense, 0.0);
@@ -125,13 +151,71 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
         }
 
         double alphaBar = 0.0;
+        double totalOccupancyWeight = 0.0;
         for (std::size_t s = 0; s < ns; ++s) {
             const std::size_t k = q6_species_flat_index_0491a(s, c, input.numCells);
             const double y = input.speciesMass[k] / totalMass;
             out.massFraction[k] = y;
             alphaBar += y * input.q6Alpha[s];
+            if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+                totalOccupancyWeight += input.speciesMass[k] / input.referenceCellMass[s];
+            }
         }
         out.alphaBar[cc] = alphaBar;
+        out.totalOccupancyWeight[cc] = totalOccupancyWeight;
+        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked &&
+            totalOccupancyWeight > 0.0) {
+            for (std::size_t s = 0; s < ns; ++s) {
+                const std::size_t k = q6_species_flat_index_0491a(s, c, input.numCells);
+                out.occupancyFraction[k] =
+                    (input.speciesMass[k] / input.referenceCellMass[s]) /
+                    totalOccupancyWeight;
+            }
+        }
+
+        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+            bool cellProjected = false;
+            for (std::size_t s = 0; s < ns; ++s) {
+                const std::size_t k = q6_species_flat_index_0491a(s, c, input.numCells);
+                const bool active = input.speciesMass[k] > 0.0 &&
+                    input.q6Alpha[s] > 0.0 &&
+                    out.occupancyFraction[k] >= input.minOccupancyFraction;
+                const double w = active ? input.q6Alpha[s] : 0.0;
+                out.activeMask[k] = active ? 1u : 0u;
+                out.weight[k] = w;
+                out.speciesDUx[k] = w * input.cellDUx[cc];
+                out.speciesDUy[k] = w * input.cellDUy[cc];
+                if (active) {
+                    ++summary.projectedSpeciesCellPairs;
+                    cellProjected = true;
+                } else if (input.speciesMass[k] > 0.0) {
+                    ++summary.suppressedSpeciesCellPairs;
+                }
+                if (input.q6Alpha[s] == 0.0) {
+                    summary.maxAbsDisabledSpeciesCorrection = std::max(
+                        summary.maxAbsDisabledSpeciesCorrection,
+                        std::hypot(out.speciesDUx[k], out.speciesDUy[k]));
+                }
+                if (input.speciesMass[k] > 0.0) {
+                    summary.weightMin = sawWeight ? std::min(summary.weightMin, w) : w;
+                    summary.weightMax = sawWeight ? std::max(summary.weightMax, w) : w;
+                    sawWeight = true;
+                    const double y = out.massFraction[k];
+                    weightMassSum += y * w;
+                    weightMassSquareSum += y * w * w;
+                    const double dw = w - 1.0;
+                    relativeVelocityDeltaSquareSum +=
+                        y * dw * dw *
+                        (input.cellDUx[cc] * input.cellDUx[cc] +
+                         input.cellDUy[cc] * input.cellDUy[cc]);
+                }
+            }
+            if (cellProjected) ++summary.projectedCells;
+            massWeightedCells += 1.0;
+            // A barycentric residual is intentionally not an invariant of the
+            // independent path: q6Strength=0 means zero direct correction.
+            continue;
+        }
 
         const bool commonMode =
             input.mode == SpeciesQ6Mode0491a::Common || input.sensitivity == 0.0;

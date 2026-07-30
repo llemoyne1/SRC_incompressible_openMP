@@ -694,7 +694,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     const char* sharedWriter0343 = cuda_shared_particle_state_0251_last_writer();
     const bool q6ResidentWriter0343 =
         sharedWriter0343 != nullptr &&
-        (std::strcmp(sharedWriter0343, "cuda_q6_resident_0400") == 0 ||
+        (std::strncmp(sharedWriter0343, "cuda_q6_resident_0400",
+                      std::strlen("cuda_q6_resident_0400")) == 0 ||
          std::strcmp(sharedWriter0343, "cuda_q6_resident_thermostat_0400") == 0);
     d.q6ResidentInputFresh =
         (params.speciesQ6Enable && sharedFreshBefore0343 && q6ResidentWriter0343) ? 1 : 0;

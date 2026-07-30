@@ -9,7 +9,8 @@ namespace mpcd {
 
 enum class SpeciesQ6Mode0491a : std::uint8_t {
     Common = 0u,
-    Weighted = 1u
+    Weighted = 1u,
+    IndependentMasked = 2u
 };
 
 enum class SpeciesQ6Fallback0491a : std::uint8_t {
@@ -22,12 +23,17 @@ struct SpeciesQ6DistributionInput0491a {
     int speciesCount = 0;
     std::vector<double> speciesMass; // species-major: s * numCells + cell
     std::vector<double> q6Alpha;
+    // 0493w5: occupancy proxy reference for independent_masked.  The local
+    // volume/occupancy proxy is mass/referenceCellMass, never the raw mass
+    // fraction (which would be unusable at large density ratios).
+    std::vector<double> referenceCellMass;
     std::vector<double> cellDUx;
     std::vector<double> cellDUy;
     SpeciesQ6Mode0491a mode = SpeciesQ6Mode0491a::Common;
     SpeciesQ6Fallback0491a fallback = SpeciesQ6Fallback0491a::Common;
     double sensitivity = 0.0;
     double alphaEpsilon = 1.0e-14;
+    double minOccupancyFraction = 0.5;
 };
 
 struct SpeciesQ6Distribution0491a {
@@ -35,6 +41,9 @@ struct SpeciesQ6Distribution0491a {
     int speciesCount = 0;
     std::vector<double> totalCellMass;
     std::vector<double> massFraction; // species-major
+    std::vector<double> totalOccupancyWeight;
+    std::vector<double> occupancyFraction; // species-major
+    std::vector<unsigned char> activeMask; // species-major, independent_masked
     std::vector<double> alphaBar;
     std::vector<double> weight; // species-major
     std::vector<double> speciesDUx; // species-major
@@ -47,6 +56,10 @@ struct SpeciesQ6DistributionSummary0491a {
     std::uint64_t pureCells = 0u;
     std::uint64_t mixedCells = 0u;
     std::uint64_t alphaFallbackCells = 0u;
+    std::uint64_t projectedCells = 0u;
+    std::uint64_t projectedSpeciesCellPairs = 0u;
+    std::uint64_t suppressedSpeciesCellPairs = 0u;
+    double maxAbsDisabledSpeciesCorrection = 0.0;
     double weightMin = 0.0;
     double weightMax = 0.0;
     double weightMassMean = 0.0;

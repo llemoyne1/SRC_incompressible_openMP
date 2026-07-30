@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """0492b semantic checks for the injection runners.
 
-The state check proves what is initially active. The runtime check validates the
-species contract at the first and last recorded steps and can optionally require
-at least one mixed cell in the final species-cell diagnostic block.
+The state check proves what is active in the generated initial state. The first
+runtime diagnostic may already follow the step-zero boundary-reservoir update,
+so the runtime check validates the allowed species and the final injection
+contract rather than requiring the first runtime row to reproduce the state
+file. It can optionally require a mixed cell in the final species-cell block.
 """
 
 from __future__ import annotations
@@ -130,6 +132,7 @@ def read_species_runtime(path: Path) -> tuple[int, int, dict[int, dict[str, str]
         required = {
             "step",
             "type",
+            "phaseFamily",
             "q6StrengthDeclared",
             "resamplingMassClosureStrengthDeclared",
             "nFluid",
@@ -203,6 +206,16 @@ def check_runtime(args: argparse.Namespace) -> None:
     inject_mass_last = parse_float(last_rows[args.inject_type]["totalMass"], "inject totalMass last")
     background_mass_last = parse_float(last_rows[args.background_type]["totalMass"], "background totalMass last")
 
+    inject_phase = last_rows[args.inject_type]["phaseFamily"].strip().lower()
+    background_phase = last_rows[args.background_type]["phaseFamily"].strip().lower()
+    inject_q6 = parse_float(
+        last_rows[args.inject_type]["q6StrengthDeclared"],
+        "inject q6 strength",
+    )
+    background_q6 = parse_float(
+        last_rows[args.background_type]["q6StrengthDeclared"],
+        "background q6 strength",
+    )
     inject_closure = parse_float(
         last_rows[args.inject_type]["resamplingMassClosureStrengthDeclared"],
         "inject closure",
@@ -211,16 +224,36 @@ def check_runtime(args: argparse.Namespace) -> None:
         last_rows[args.background_type]["resamplingMassClosureStrengthDeclared"],
         "background closure",
     )
+    if inject_phase != args.inject_phase:
+        fail(f"inject phase {inject_phase} != expected {args.inject_phase}")
+    if background_phase != args.background_phase:
+        fail(f"background phase {background_phase} != expected {args.background_phase}")
+    if not close_enough(inject_q6, args.inject_q6):
+        fail(f"inject q6 strength {inject_q6} != expected {args.inject_q6}")
+    if not close_enough(background_q6, args.background_q6):
+        fail(f"background q6 strength {background_q6} != expected {args.background_q6}")
     if not close_enough(inject_closure, args.inject_closure):
         fail(f"inject closure {inject_closure} != expected {args.inject_closure}")
     if not close_enough(background_closure, args.background_closure):
         fail(f"background closure {background_closure} != expected {args.background_closure}")
 
+    for label, count in (
+        ("inject first", inject_first),
+        ("background first", background_first),
+        ("inject last", inject_last),
+        ("background last", background_last),
+    ):
+        if count < 0:
+            fail(f"negative runtime population for {label}: {count}")
+
     if args.scenario == "empty":
-        if inject_first != 0 or background_first != 0:
+        # The generated state is checked separately and is strictly empty.
+        # The first runtime row may already include the step-zero inlet
+        # reservoir fill, but it must never activate the background species.
+        if background_first != 0:
             fail(
-                "empty runtime initial rows are not empty: "
-                f"inject={inject_first} background={background_first}"
+                "empty runtime activated background species at first recorded step: "
+                f"n={background_first}"
             )
         if inject_last <= 0 or inject_mass_last <= 0.0:
             fail("empty runtime did not inject type 1")
@@ -230,10 +263,10 @@ def check_runtime(args: argparse.Namespace) -> None:
                 f"n={background_last} mass={background_mass_last}"
             )
     elif args.scenario == "two_species":
-        if inject_first != 0:
-            fail(f"two_species runtime initially contains injected particles: {inject_first}")
+        # The state check proves that type 1 was absent initially. At the first
+        # runtime record, step-zero boundary insertion may already have added it.
         if background_first <= 0:
-            fail("two_species runtime initial background is empty")
+            fail("two_species runtime first recorded background is empty")
         if inject_last <= 0 or inject_mass_last <= 0.0:
             fail("two_species runtime did not inject type 1")
         if background_last <= 0 or background_mass_last <= 0.0:
@@ -251,13 +284,14 @@ def check_runtime(args: argparse.Namespace) -> None:
         if cell_step != last_step:
             fail(f"species-cell last step {cell_step} != species-runtime last step {last_step}")
         if mixed <= 0:
-            fail("no mixed liquid/gas cell at final step")
+            fail("no mixed injected/background cell at final step")
         mixed_text = str(mixed)
 
     print(
         "[0492b-species-runtime] PASS "
         f"scenario={args.scenario} steps={first_step}->{last_step} "
         f"inject={inject_first}->{inject_last} background={background_first}->{background_last} "
+        f"phases={inject_phase}/{background_phase} "
         f"massInject={inject_mass_last:.17g} massBackground={background_mass_last:.17g} "
         f"mixedCells={mixed_text}"
     )
@@ -279,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     runtime.add_argument("--scenario", choices=("empty", "two_species"), required=True)
     runtime.add_argument("--inject-type", type=int, required=True)
     runtime.add_argument("--background-type", type=int, required=True)
+    runtime.add_argument("--inject-phase", choices=("liquid", "gas"), required=True)
+    runtime.add_argument("--background-phase", choices=("liquid", "gas"), required=True)
+    runtime.add_argument("--inject-q6", type=float, required=True)
+    runtime.add_argument("--background-q6", type=float, required=True)
     runtime.add_argument("--inject-closure", type=float, required=True)
     runtime.add_argument("--background-closure", type=float, required=True)
     runtime.add_argument("--cell-csv")

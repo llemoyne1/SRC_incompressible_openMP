@@ -39,6 +39,7 @@ SpeciesQ6DistributionInput0491a base_input(int cells, int species) {
     in.speciesCount = species;
     in.speciesMass.assign(static_cast<std::size_t>(cells) * static_cast<std::size_t>(species), 0.0);
     in.q6Alpha.assign(static_cast<std::size_t>(species), 1.0);
+    in.referenceCellMass.assign(static_cast<std::size_t>(species), 1.0);
     in.cellDUx.assign(static_cast<std::size_t>(cells), 0.25);
     in.cellDUy.assign(static_cast<std::size_t>(cells), -0.125);
     in.mode = SpeciesQ6Mode0491a::Weighted;
@@ -53,6 +54,9 @@ int main() {
                  "parse common mode");
     require_true(parse_species_q6_mode_0491a("weighted", "smoke") == SpeciesQ6Mode0491a::Weighted,
                  "parse weighted mode");
+    require_true(parse_species_q6_mode_0491a("independent_masked", "smoke") ==
+                     SpeciesQ6Mode0491a::IndependentMasked,
+                 "parse independent_masked mode");
     require_true(parse_species_q6_fallback_0491a("common", "smoke") == SpeciesQ6Fallback0491a::Common,
                  "parse common fallback");
     require_true(parse_species_q6_fallback_0491a("fatal", "smoke") == SpeciesQ6Fallback0491a::Fatal,
@@ -129,6 +133,49 @@ int main() {
             threw = true;
         }
         require_true(threw, "S6 fatal fallback");
+    }
+    {
+        auto in = base_input(1, 2);
+        in.mode = SpeciesQ6Mode0491a::IndependentMasked;
+        in.minOccupancyFraction = 0.5;
+        in.speciesMass[0] = 60.0;
+        in.speciesMass[1] = 4.0;
+        in.referenceCellMass[0] = 100.0;
+        in.referenceCellMass[1] = 10.0;
+        in.q6Alpha[0] = 1.0;
+        in.q6Alpha[1] = 0.0;
+        auto r = compute_q6_species_distribution_0491a(in);
+        // Occupancy proxies are 0.6 and 0.4: liquid is active even though the
+        // raw mass fraction is 60/64, and the disabled gas remains untouched.
+        require_close(r.fields.occupancyFraction[0], 0.6, tol, "S7 occupancy 0");
+        require_close(r.fields.occupancyFraction[1], 0.4, tol, "S7 occupancy 1");
+        require_true(r.fields.activeMask[0] == 1u, "S7 active liquid");
+        require_true(r.fields.activeMask[1] == 0u, "S7 inactive gas");
+        require_close(r.fields.weight[0], 1.0, tol, "S7 liquid strength");
+        require_close(r.fields.weight[1], 0.0, tol, "S7 gas strict zero");
+        require_close(r.fields.speciesDUx[1], 0.0, tol, "S7 gas dux zero");
+        require_close(r.fields.speciesDUy[1], 0.0, tol, "S7 gas duy zero");
+        require_true(r.summary.projectedSpeciesCellPairs == 1u,
+                     "S7 projected pair count");
+        require_close(r.summary.maxAbsDisabledSpeciesCorrection, 0.0, tol,
+                      "S7 disabled correction leak");
+    }
+    {
+        auto in = base_input(1, 2);
+        in.mode = SpeciesQ6Mode0491a::IndependentMasked;
+        in.minOccupancyFraction = 0.5;
+        in.speciesMass[0] = 40.0;
+        in.speciesMass[1] = 6.0;
+        in.referenceCellMass[0] = 100.0;
+        in.referenceCellMass[1] = 10.0;
+        in.q6Alpha[0] = 1.0;
+        in.q6Alpha[1] = 0.0;
+        auto r = compute_q6_species_distribution_0491a(in);
+        require_close(r.fields.occupancyFraction[0], 0.4, tol, "S8 occupancy 0");
+        require_true(r.fields.activeMask[0] == 0u, "S8 threshold suppresses liquid");
+        require_close(r.fields.speciesDUx[0], 0.0, tol, "S8 liquid suppressed dux");
+        require_true(r.summary.projectedSpeciesCellPairs == 0u,
+                     "S8 no projected pairs");
     }
     std::cout << "[0491a] PASS species-Q6 CPU reference analytic smokes\n";
     return 0;

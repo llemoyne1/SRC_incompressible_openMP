@@ -9,7 +9,6 @@ suite_root_cd_0434
 # USER EDIT ZONE -- common layout in all 0434 scripts
 # -----------------------------------------------------------------------------
 CASE_LABEL="injection_type1_into_type2"
-PHYSICS_LABEL="${PHYSICS_LABEL:-liquid_type1_injection}"
 GEN_CASE="injection"
 TOPOLOGY="${TOPOLOGY:-segmented}"
 Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
@@ -22,11 +21,12 @@ LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
 LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
-# Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
-# Default runs one robust path selected below. To compare all paths, set:
-#   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}}"
- 
+# Baseline validation intentionally excludes resampling so SRC and SRC+Q6 can
+# be compared before any population mutation is introduced. Resampling paths
+# remain available only through an explicit override such as:
+#   RUN_MODES="src-resampling src-q6-resampling" SPECIES_RESAMPLING_ENABLE=true
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"
+
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
@@ -51,27 +51,61 @@ RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"  # Nmin = ceil(gamma*(1-coe
 RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"  # Nmax = ceil(gamma*(1+coef))
 GUARD_EVERY="${GUARD_EVERY:-5}"
 
-BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"   # compressible gas
-INJECT_TYPE="${INJECT_TYPE:-1}"           # incompressible liquid
-LIQUID_TO_GAS_MASS_RATIO="${LIQUID_TO_GAS_MASS_RATIO:-100.0}"
-GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-${PARTICLE_MASS:-1.0}}"
-PARTICLE_MASS="${PARTICLE_MASS:-$GAS_PARTICLE_MASS}"
-INJECT_MASS="${INJECT_MASS:-$(awk -v mg="$PARTICLE_MASS" -v r="$LIQUID_TO_GAS_MASS_RATIO" 'BEGIN{printf "%.17g", mg*r}')}"
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0491_${CASE_LABEL}_${PHYSICS_LABEL}_mr${LIQUID_TO_GAS_MASS_RATIO}_${NX}x${NY}_g${GAMMA}}"
-LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
-GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-1.0}"
-LIQUID_MASS_CLOSURE_STRENGTH="${LIQUID_MASS_CLOSURE_STRENGTH:-1.0}"
-GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-1.0}"
-SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-false}"
+# Particle type ids are independent of the physical phase family.
+INJECT_TYPE="${INJECT_TYPE:-1}"
+BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"
+INJECT_PHASE="${INJECT_PHASE:-liquid}"
+BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"
+
+phase_defaults_0493w4() {
+  local phase=$1 role=$2
+  case "$phase" in
+    liquid)
+      printf '%s %s %s\n' "${role}_liquid_incompressible" 1.0 1.0
+      ;;
+    gas)
+      printf '%s %s %s\n' "${role}_gas_compressible" 0.0 0.0
+      ;;
+    *)
+      echo "[0493w4] ERROR ${role} phase must be liquid or gas, got '$phase'" >&2
+      return 2
+      ;;
+  esac
+}
+
+read -r INJECT_NAME_DEFAULT INJECT_Q6_DEFAULT INJECT_CLOSURE_DEFAULT   < <(phase_defaults_0493w4 "$INJECT_PHASE" injected)
+read -r BACKGROUND_NAME_DEFAULT BACKGROUND_Q6_DEFAULT BACKGROUND_CLOSURE_DEFAULT   < <(phase_defaults_0493w4 "$BACKGROUND_PHASE" background)
+
+INJECT_SPECIES_NAME="${INJECT_SPECIES_NAME:-$INJECT_NAME_DEFAULT}"
+BACKGROUND_SPECIES_NAME="${BACKGROUND_SPECIES_NAME:-$BACKGROUND_NAME_DEFAULT}"
+INJECT_Q6_STRENGTH="${INJECT_Q6_STRENGTH:-${LIQUID_Q6_STRENGTH:-$INJECT_Q6_DEFAULT}}"
+BACKGROUND_Q6_STRENGTH="${BACKGROUND_Q6_STRENGTH:-${GAS_Q6_STRENGTH:-$BACKGROUND_Q6_DEFAULT}}"
+INJECT_MASS_CLOSURE_STRENGTH="${INJECT_MASS_CLOSURE_STRENGTH:-${LIQUID_MASS_CLOSURE_STRENGTH:-$INJECT_CLOSURE_DEFAULT}}"
+BACKGROUND_MASS_CLOSURE_STRENGTH="${BACKGROUND_MASS_CLOSURE_STRENGTH:-${GAS_MASS_CLOSURE_STRENGTH:-$BACKGROUND_CLOSURE_DEFAULT}}"
+
+case "$INJECT_PHASE:$BACKGROUND_PHASE" in
+  liquid:gas) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=100.0 ;;
+  gas:liquid) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=0.01 ;;
+  *) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=10.0 ;;
+esac
+INJECT_TO_BACKGROUND_MASS_RATIO="${INJECT_TO_BACKGROUND_MASS_RATIO:-${LIQUID_TO_GAS_MASS_RATIO:-$DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO}}"
+BACKGROUND_PARTICLE_MASS="${BACKGROUND_PARTICLE_MASS:-${GAS_PARTICLE_MASS:-${PARTICLE_MASS:-1.0}}}"
+PARTICLE_MASS="$BACKGROUND_PARTICLE_MASS"
+INJECT_MASS="${INJECT_MASS:-$(awk -v mb="$BACKGROUND_PARTICLE_MASS" -v r="$INJECT_TO_BACKGROUND_MASS_RATIO" 'BEGIN{printf "%.17g", mb*r}')}"
+
+SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-true}"
+SPECIES_DIAGNOSTICS_FILENAME="${SPECIES_DIAGNOSTICS_FILENAME:-species_runtime_injection_0493w4.csv}"
 SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false}"
+SPECIES_CELL_DIAGNOSTICS_FILENAME="${SPECIES_CELL_DIAGNOSTICS_FILENAME:-species_cell_injection_0493w4.csv}"
 SPECIES_Q6_ENABLE="${SPECIES_Q6_ENABLE:-true}"
-SPECIES_Q6_MODE="${SPECIES_Q6_MODE:-weighted}"
+SPECIES_Q6_MODE="${SPECIES_Q6_MODE:-independent_masked}" #weighted}"
 SPECIES_Q6_SENSITIVITY="${SPECIES_Q6_SENSITIVITY:-1.0}"
 SPECIES_Q6_FALLBACK_MODE="${SPECIES_Q6_FALLBACK_MODE:-common}"
 SPECIES_Q6_COMPARISON_TOLERANCE="${SPECIES_Q6_COMPARISON_TOLERANCE:-1.0e-11}"
+SPECIES_Q6_MIN_OCCUPANCY_FRACTION="${SPECIES_Q6_MIN_OCCUPANCY_FRACTION:-0.5}"
 # 0490p strict species-aware resident resampling. 0491h-fix1 established that
 # generic 0296, thermal renormalization and the legacy mass guard must remain off.
-SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-true}"
+SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-false}"
 # 0493b: mutation policy is per species and defaults to enabled.
 SPECIES0_RESAMPLING_ENABLE="${SPECIES0_RESAMPLING_ENABLE:-true}"
 SPECIES1_RESAMPLING_ENABLE="${SPECIES1_RESAMPLING_ENABLE:-true}"
@@ -89,17 +123,90 @@ INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELL
 INLET_SMAX="${INLET_SMAX:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y/ly}')}"
 OUTLET_SMIN="${OUTLET_SMIN:-0.0}"; OUTLET_SMAX="${OUTLET_SMAX:-1.0}"
 OUTLET_MODE="${OUTLET_MODE:-hybrid}"; OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GAIN:-0.0}"
+
+# This runner currently implements a left-inlet/right-outlet geometry with
+# velocities aligned with x. Balance the prescribed volumetric boundary flux:
+# Uin * inletWidth = Uout * outletWidth.
+if [[ "$INLET_FACE" != "left" ]]; then
+  echo "[0493w4] ERROR INLET_FACE=$INLET_FACE unsupported; this runner currently requires left" >&2
+  exit 2
+fi
+
+INLET_WIDTH="$(awk \
+  -v a="$INLET_SMIN" \
+  -v b="$INLET_SMAX" \
+  'BEGIN {
+     w = b - a;
+     if (!(w > 0.0)) exit 2;
+     printf "%.17g", w;
+   }')"
+
+OUTLET_WIDTH="$(awk \
+  -v a="$OUTLET_SMIN" \
+  -v b="$OUTLET_SMAX" \
+  'BEGIN {
+     w = b - a;
+     if (!(w > 0.0)) exit 2;
+     printf "%.17g", w;
+   }')"
+
+if [[ -z "${UOUT+x}" ]]; then
+  UOUT="$(awk \
+    -v u="$UIN" \
+    -v wi="$INLET_WIDTH" \
+    -v wo="$OUTLET_WIDTH" \
+    'BEGIN {
+       printf "%.17g", u * wi / wo;
+     }')"
+fi
+
+if ! awk \
+  -v uin="$UIN" \
+  -v uout="$UOUT" \
+  -v wi="$INLET_WIDTH" \
+  -v wo="$OUTLET_WIDTH" \
+  'BEGIN { exit (wi > 0.0 && wo > 0.0 && uin >= 0.0 && uout >= 0.0) ? 0 : 1 }'
+then
+  echo "[0493w4] ERROR invalid inlet/outlet geometry or velocities" >&2
+  exit 2
+fi
+
 INLET_THERMAL_NOISE="${INLET_THERMAL_NOISE:-1.0}"; INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-2}"
 
 # Initial state selector.
 #   INITIAL_DOMAIN_MODE=empty : empty domain with a preallocated inactive slot pool.
-#   INITIAL_DOMAIN_MODE=full  : domain initially filled with background type-2 gas.
-# The inlet injects type-1 liquid in both cases. No additional scenario layer is used.
-INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"
+#   INITIAL_DOMAIN_MODE=full  : domain initially filled with background type 2.
+# The inlet injects type 1 in both cases. Phase families are selected
+# independently through INJECT_PHASE and BACKGROUND_PHASE.
+INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-empty}"
 EMPTY_INITIAL_SLOTS="${EMPTY_INITIAL_SLOTS:-}"
 EMPTY_INITIAL_TYPE="${EMPTY_INITIAL_TYPE:-$BACKGROUND_TYPE}"
-EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-$PARTICLE_MASS}"
+EMPTY_INITIAL_MASS="${EMPTY_INITIAL_MASS:-$BACKGROUND_PARTICLE_MASS}"
+SCENARIO_EXPECTATION="${SCENARIO_EXPECTATION:-empty}"
+POSTCHECK_SPECIES_ENABLE="${POSTCHECK_SPECIES_ENABLE:-true}"
+REQUIRE_MIXED_CELL_AT_END="${REQUIRE_MIXED_CELL_AT_END:-false}"
+PHYSICS_LABEL="${PHYSICS_LABEL:-${INJECT_PHASE}_type${INJECT_TYPE}_into_${INITIAL_DOMAIN_MODE}_${BACKGROUND_PHASE}_type${BACKGROUND_TYPE}}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493w4_${CASE_LABEL}_${PHYSICS_LABEL}_mr${INJECT_TO_BACKGROUND_MASS_RATIO}_${NX}x${NY}_g${GAMMA}}"
 # -----------------------------------------------------------------------------
+
+INLET_TARGET_FLUX="$(awk \
+  -v u="$UIN" \
+  -v w="$INLET_WIDTH" \
+  'BEGIN { printf "%.17g", u * w }')"
+
+OUTLET_TARGET_FLUX="$(awk \
+  -v u="$UOUT" \
+  -v w="$OUTLET_WIDTH" \
+  'BEGIN { printf "%.17g", u * w }')"
+
+printf \
+  '[0493w4] open-boundary targets Uin=%s widthIn=%s Uout=%s widthOut=%s Qin=%s Qout=%s\n' \
+  "$UIN" \
+  "$INLET_WIDTH" \
+  "$UOUT" \
+  "$OUTLET_WIDTH" \
+  "$INLET_TARGET_FLUX" \
+  "$OUTLET_TARGET_FLUX"
 
 suite_defaults_common_0434
 suite_compute_derived_0434
@@ -109,14 +216,36 @@ case "$INITIAL_DOMAIN_MODE" in
   *) echo "[0434-suite] ERROR unknown INITIAL_DOMAIN_MODE=$INITIAL_DOMAIN_MODE; expected empty or full" >&2; exit 2 ;;
 esac
 
-if [[ "$INJECT_TYPE" == "$BACKGROUND_TYPE" ]]; then
-  echo "[0434-suite] ERROR INJECT_TYPE and BACKGROUND_TYPE must be distinct for liquid-into-gas testing" >&2
+case "$SCENARIO_EXPECTATION" in
+  empty|two_species) ;;
+  *) echo "[0493w4] ERROR unknown SCENARIO_EXPECTATION=$SCENARIO_EXPECTATION; expected empty or two_species" >&2; exit 2 ;;
+esac
+
+case "$INITIAL_DOMAIN_MODE:$SCENARIO_EXPECTATION" in
+  empty:empty|empty_refill:empty|empty-refill:empty|full:two_species) ;;
+  *)
+    echo "[0493w4] ERROR inconsistent initial/scenario contract: INITIAL_DOMAIN_MODE=$INITIAL_DOMAIN_MODE SCENARIO_EXPECTATION=$SCENARIO_EXPECTATION" >&2
+    exit 2
+    ;;
+esac
+
+if suite_truthy_0434 "$POSTCHECK_SPECIES_ENABLE" && ! suite_truthy_0434 "$SPECIES_DIAGNOSTICS_ENABLE"; then
+  echo "[0493w4] ERROR POSTCHECK_SPECIES_ENABLE=true requires SPECIES_DIAGNOSTICS_ENABLE=true" >&2
+  exit 2
+fi
+if suite_truthy_0434 "$REQUIRE_MIXED_CELL_AT_END" && ! suite_truthy_0434 "$SPECIES_CELL_DIAGNOSTICS_ENABLE"; then
+  echo "[0493w4] ERROR REQUIRE_MIXED_CELL_AT_END=true requires SPECIES_CELL_DIAGNOSTICS_ENABLE=true" >&2
   exit 2
 fi
 
-LIQUID_REFERENCE_CELL_MASS="${LIQUID_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$INJECT_MASS" 'BEGIN{printf "%.17g", g*m}')}"
-GAS_REFERENCE_CELL_MASS="${GAS_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$PARTICLE_MASS" 'BEGIN{printf "%.17g", g*m}')}"
-ACTUAL_LIQUID_TO_GAS_MASS_RATIO="$(awk -v ml="$INJECT_MASS" -v mg="$PARTICLE_MASS" 'BEGIN{printf "%.17g", ml/mg}')"
+if [[ "$INJECT_TYPE" == "$BACKGROUND_TYPE" ]]; then
+  echo "[0434-suite] ERROR INJECT_TYPE and BACKGROUND_TYPE must be distinct for two-species injection testing" >&2
+  exit 2
+fi
+
+INJECT_REFERENCE_CELL_MASS="${INJECT_REFERENCE_CELL_MASS:-${LIQUID_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$INJECT_MASS" 'BEGIN{printf "%.17g", g*m}')}}"
+BACKGROUND_REFERENCE_CELL_MASS="${BACKGROUND_REFERENCE_CELL_MASS:-${GAS_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$BACKGROUND_PARTICLE_MASS" 'BEGIN{printf "%.17g", g*m}')}}"
+ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO="$(awk -v mi="$INJECT_MASS" -v mb="$BACKGROUND_PARTICLE_MASS" 'BEGIN{printf "%.17g", mi/mb}')"
 
 write_params_0434() {
   local mode=$1 state=$2 out=$3 chi=$4 params=$5
@@ -142,7 +271,7 @@ bcY = solid
 openBoundarySegmentsEnable = true
 openBoundarySegmentCount = 2
 openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${UIN} 0.0 ${INJECT_TYPE} ${INJECT_MASS}
-openBoundarySegment1 = right outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${UIN} 0.0 0 ${PARTICLE_MASS}
+openBoundarySegment1 = right outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${UOUT} 0.0 0 ${PARTICLE_MASS}
 inletVelocityRampEnable = true
 inletVelocityRampStartTime = 0.0
 inletVelocityRampEndTime = 0.25
@@ -172,20 +301,21 @@ wallKBT = -1.0
 wallThermalNoise = 0.0
 speciesRegistryEnable = true
 speciesCount = 2
-species0 = ${INJECT_TYPE} liquid_incompressible liquid ${LIQUID_Q6_STRENGTH} ${LIQUID_MASS_CLOSURE_STRENGTH} ${LIQUID_REFERENCE_CELL_MASS}
+species0 = ${INJECT_TYPE} ${INJECT_SPECIES_NAME} ${INJECT_PHASE} ${INJECT_Q6_STRENGTH} ${INJECT_MASS_CLOSURE_STRENGTH} ${INJECT_REFERENCE_CELL_MASS}
 species0ResamplingEnable = ${SPECIES0_RESAMPLING_ENABLE}
-species1 = ${BACKGROUND_TYPE} gas_compressible gas ${GAS_Q6_STRENGTH} ${GAS_MASS_CLOSURE_STRENGTH} ${GAS_REFERENCE_CELL_MASS}
+species1 = ${BACKGROUND_TYPE} ${BACKGROUND_SPECIES_NAME} ${BACKGROUND_PHASE} ${BACKGROUND_Q6_STRENGTH} ${BACKGROUND_MASS_CLOSURE_STRENGTH} ${BACKGROUND_REFERENCE_CELL_MASS}
 species1ResamplingEnable = ${SPECIES1_RESAMPLING_ENABLE}
 speciesRequireRegisteredTypes = true
 speciesDiagnosticsEnable = ${SPECIES_DIAGNOSTICS_ENABLE}
-speciesDiagnosticsFilename = species_runtime_liquid_into_gas_0491.csv
+speciesDiagnosticsFilename = ${SPECIES_DIAGNOSTICS_FILENAME}
 speciesCellDiagnosticsEnable = ${SPECIES_CELL_DIAGNOSTICS_ENABLE}
-speciesCellDiagnosticsFilename = species_cell_liquid_into_gas_0491.csv
+speciesCellDiagnosticsFilename = ${SPECIES_CELL_DIAGNOSTICS_FILENAME}
 speciesQ6Enable = ${species_q6_enable_for_mode}
 speciesQ6Mode = ${SPECIES_Q6_MODE}
 speciesQ6Sensitivity = ${SPECIES_Q6_SENSITIVITY}
 speciesQ6FallbackMode = ${SPECIES_Q6_FALLBACK_MODE}
 speciesQ6ComparisonTolerance = ${SPECIES_Q6_COMPARISON_TOLERANCE}
+speciesQ6MinOccupancyFraction = ${SPECIES_Q6_MIN_OCCUPANCY_FRACTION}
 PARAMS
   suite_write_common_params_0434 "$mode" >> "$params"
   :
@@ -282,20 +412,43 @@ run_one_mode_0434() {
       ;;
   esac
 
+  python3 scripts/check_injection_species_0492b.py state \
+    --state "$state" \
+    --scenario "$SCENARIO_EXPECTATION" \
+    --inject-type "$INJECT_TYPE" \
+    --background-type "$BACKGROUND_TYPE"
+
   write_params_0434 "$mode" "$state" "$out" "$chi" "$params"
   suite_export_cuda_flags_0434 "$mode" "$TOPOLOGY"
   suite_prepare_livevis_control_0434 "$run_root" "$mode"
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
+  cat >> "$run_root/logs/environment_0434.env" <<META_0493W4
+INITIAL_DOMAIN_MODE=${INITIAL_DOMAIN_MODE}
+SCENARIO_EXPECTATION=${SCENARIO_EXPECTATION}
+POSTCHECK_SPECIES_ENABLE=${POSTCHECK_SPECIES_ENABLE}
+REQUIRE_MIXED_CELL_AT_END=${REQUIRE_MIXED_CELL_AT_END}
+SPECIES_DIAGNOSTICS_ENABLE=${SPECIES_DIAGNOSTICS_ENABLE}
+SPECIES_CELL_DIAGNOSTICS_ENABLE=${SPECIES_CELL_DIAGNOSTICS_ENABLE}
+INJECT_PHASE=${INJECT_PHASE}
+BACKGROUND_PHASE=${BACKGROUND_PHASE}
+INJECT_SPECIES_NAME=${INJECT_SPECIES_NAME}
+BACKGROUND_SPECIES_NAME=${BACKGROUND_SPECIES_NAME}
+INJECT_Q6_STRENGTH=${INJECT_Q6_STRENGTH}
+BACKGROUND_Q6_STRENGTH=${BACKGROUND_Q6_STRENGTH}
+INJECT_MASS_CLOSURE_STRENGTH=${INJECT_MASS_CLOSURE_STRENGTH}
+BACKGROUND_MASS_CLOSURE_STRENGTH=${BACKGROUND_MASS_CLOSURE_STRENGTH}
+INJECT_TO_BACKGROUND_MASS_RATIO=${ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO}
+META_0493W4
   echo "[0434-suite] case=$CASE_LABEL mode=$mode root=$run_root"
   echo "[0434-suite] initialDomainMode=$INITIAL_DOMAIN_MODE state=$state"
   if [[ "$INITIAL_DOMAIN_MODE" == full ]]; then
-    echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH,closure=$LIQUID_MASS_CLOSURE_STRENGTH) into gas(type=$BACKGROUND_TYPE,mass=$PARTICLE_MASS,q6Alpha=$GAS_Q6_STRENGTH,closure=$GAS_MASS_CLOSURE_STRENGTH) mass_ratio=$ACTUAL_LIQUID_TO_GAS_MASS_RATIO"
+    echo "[0434-suite] inject(type=$INJECT_TYPE,phase=$INJECT_PHASE,mass=$INJECT_MASS,q6Alpha=$INJECT_Q6_STRENGTH,closure=$INJECT_MASS_CLOSURE_STRENGTH) into background(type=$BACKGROUND_TYPE,phase=$BACKGROUND_PHASE,mass=$BACKGROUND_PARTICLE_MASS,q6Alpha=$BACKGROUND_Q6_STRENGTH,closure=$BACKGROUND_MASS_CLOSURE_STRENGTH) mass_ratio=$ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO"
   else
-    echo "[0434-suite] liquid(type=$INJECT_TYPE,mass=$INJECT_MASS,q6Alpha=$LIQUID_Q6_STRENGTH,closure=$LIQUID_MASS_CLOSURE_STRENGTH) into empty domain; inactiveSlotType=$BACKGROUND_TYPE inactiveSlotMass=$PARTICLE_MASS"
+    echo "[0434-suite] inject(type=$INJECT_TYPE,phase=$INJECT_PHASE,mass=$INJECT_MASS,q6Alpha=$INJECT_Q6_STRENGTH,closure=$INJECT_MASS_CLOSURE_STRENGTH) into empty domain; inactiveSlotType=$BACKGROUND_TYPE inactiveSlotPhase=$BACKGROUND_PHASE inactiveSlotMass=$BACKGROUND_PARTICLE_MASS"
   fi
   if suite_path_has_q6_0434 "$mode" && suite_truthy_0434 "$SPECIES_Q6_ENABLE"; then
-    echo "[0434-suite] speciesQ6=on mode=$SPECIES_Q6_MODE sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE"
+    echo "[0434-suite] speciesQ6=on mode=$SPECIES_Q6_MODE sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE minOcc=$SPECIES_Q6_MIN_OCCUPANCY_FRACTION"
   else
     echo "[0434-suite] speciesQ6=off for mode=$mode"
   fi
@@ -304,7 +457,28 @@ run_one_mode_0434() {
   echo "[0434-suite] resampling thresholds: Nmin=$GUARD_NMIN Ntarget=$GUARD_NTARGET Nmax=$GUARD_NMAX from gamma=$GAMMA speciesResampling=$SPECIES_RESAMPLING_ENABLE speciesResident=$resident_mode massRecondition0296=$MASS_RECONDITION_ENABLE"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 
-
+  if ! suite_truthy_0434 "$PREFLIGHT_ONLY" && suite_truthy_0434 "$POSTCHECK_SPECIES_ENABLE"; then
+    postcheck_args=(
+      runtime
+      --csv "$out/$SPECIES_DIAGNOSTICS_FILENAME"
+      --scenario "$SCENARIO_EXPECTATION"
+      --inject-type "$INJECT_TYPE"
+      --background-type "$BACKGROUND_TYPE"
+      --inject-phase "$INJECT_PHASE"
+      --background-phase "$BACKGROUND_PHASE"
+      --inject-q6 "$INJECT_Q6_STRENGTH"
+      --background-q6 "$BACKGROUND_Q6_STRENGTH"
+      --inject-closure "$INJECT_MASS_CLOSURE_STRENGTH"
+      --background-closure "$BACKGROUND_MASS_CLOSURE_STRENGTH"
+    )
+    if suite_truthy_0434 "$REQUIRE_MIXED_CELL_AT_END"; then
+      postcheck_args+=(
+        --cell-csv "$out/$SPECIES_CELL_DIAGNOSTICS_FILENAME"
+        --require-mixed-cell
+      )
+    fi
+    python3 scripts/check_injection_species_0492b.py "${postcheck_args[@]}"
+  fi
 }
 
 while IFS= read -r mode; do

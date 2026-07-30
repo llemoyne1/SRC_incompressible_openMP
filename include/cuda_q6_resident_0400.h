@@ -47,6 +47,11 @@ struct CudaQ6Resident0400Diagnostics {
     double correctionVelocityMaxAbs = 0.0;
     double speciesQ6BarycentricResidualMaxAbs = 0.0;
     double speciesQ6BarycentricResidualMaxScaled = 0.0;
+    bool speciesQ6IndependentMasked = false;
+    std::uint64_t speciesQ6IndependentSolves = 0u;
+    std::uint64_t speciesQ6IndependentActiveCells = 0u;
+    std::uint64_t speciesQ6IndependentCorrectedParticles = 0u;
+    double speciesQ6IndependentDisabledCorrectionMaxAbs = 0.0;
     double momentumCorrectionVx = 0.0;
     double momentumCorrectionVy = 0.0;
     double momentumResidualBeforeCorrection = 0.0;

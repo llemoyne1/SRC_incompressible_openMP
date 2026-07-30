@@ -147,6 +147,7 @@ bool is_species_definition_key(const std::string& key) {
         key == "speciesQ6AlphaEpsilon" ||
         key == "speciesQ6FallbackMode" ||
         key == "speciesQ6ComparisonTolerance" ||
+        key == "speciesQ6MinOccupancyFraction" ||
         key == "speciesResamplingMassClosureEnable" ||
         key == "speciesResamplingMassClosureCudaEnable" ||
         key == "speciesMassClosureCudaDiagnosticsFilename" ||
@@ -627,6 +628,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             std::replace(p.speciesQ6FallbackMode.begin(), p.speciesQ6FallbackMode.end(), '-', '_');
         }
         else if (key == "speciesQ6ComparisonTolerance") p.speciesQ6ComparisonTolerance = parse_double(value, key);
+        else if (key == "speciesQ6MinOccupancyFraction") p.speciesQ6MinOccupancyFraction = parse_double(value, key);
         else if (key == "speciesResamplingMassClosureEnable") p.speciesResamplingMassClosureEnable = parse_bool(value, key);
         else if (key == "speciesResamplingMassClosureCudaEnable") p.speciesResamplingMassClosureCudaEnable = parse_bool(value, key);
         else if (key == "speciesMassClosureCudaDiagnosticsFilename") p.speciesMassClosureCudaDiagnosticsFilename = trim(value);
@@ -1257,6 +1259,24 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.speciesQ6ComparisonTolerance > 0.0) ||
         !std::isfinite(p.speciesQ6ComparisonTolerance)) {
         throw std::runtime_error("speciesQ6ComparisonTolerance must be finite and positive");
+    }
+    if (!(p.speciesQ6MinOccupancyFraction >= 0.0 &&
+          p.speciesQ6MinOccupancyFraction <= 1.0) ||
+        !std::isfinite(p.speciesQ6MinOccupancyFraction)) {
+        throw std::runtime_error("speciesQ6MinOccupancyFraction must lie in [0,1]");
+    }
+    if (p.speciesQ6Mode == "independent_masked") {
+        for (const SpeciesDefinition& d : p.speciesDefinitions) {
+            if (d.q6StrengthDeclared > 1.0) {
+                throw std::runtime_error(
+                    "independent_masked requires species q6StrengthDeclared in [0,1]");
+            }
+            if (!(d.referenceCellMassDeclared > 0.0) ||
+                !std::isfinite(d.referenceCellMassDeclared)) {
+                throw std::runtime_error(
+                    "independent_masked requires positive finite referenceCellMassDeclared");
+            }
+        }
     }
     if (p.speciesQ6Enable) {
         if (!p.speciesRegistryEnable) {

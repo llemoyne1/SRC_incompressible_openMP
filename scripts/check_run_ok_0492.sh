@@ -22,9 +22,15 @@ for token in \
   'src-q6-resampling' \
   'SPECIES_RESAMPLING_ENABLE=' \
   'MASS_RECONDITION_ENABLE=' \
-  'GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-0.0}"' \
+  'INJECT_PHASE="${INJECT_PHASE:-liquid}"' \
+  'BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"' \
+  'INJECT_Q6_STRENGTH=' \
+  'BACKGROUND_Q6_STRENGTH=' \
+  'INJECT_MASS_CLOSURE_STRENGTH=' \
+  'BACKGROUND_MASS_CLOSURE_STRENGTH=' \
   'SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false}"' \
   'speciesQ6Mode = ${SPECIES_Q6_MODE}' \
+  'RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"' \
   'INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-empty}"' \
   'SCENARIO_EXPECTATION="${SCENARIO_EXPECTATION:-empty}"' \
   'check_injection_species_0492b.py'; do
@@ -35,7 +41,8 @@ inj_two=scripts/run_ok_injection_type1_into_type2.sh
 for token in \
   'INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"' \
   'SCENARIO_EXPECTATION="${SCENARIO_EXPECTATION:-two_species}"' \
-  'GAS_MASS_CLOSURE_STRENGTH="${GAS_MASS_CLOSURE_STRENGTH:-0.0}"' \
+  'INJECT_PHASE="${INJECT_PHASE:-liquid}"' \
+  'BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"' \
   'run_ok_injection_type1_into_type2_empty.sh'; do
   grep -Fq "$token" "$inj_two" || { echo "[0492b-check] two-species wrapper contract missing: $token" >&2; exit 1; }
 done
@@ -50,14 +57,14 @@ for token in \
   'speciesResamplingCudaResidentMaintenanceStrict' \
   'suite_species_resident_mode_0492a' \
   'particleTypeFilter = ${PARTICLE_TYPE_FILTER}' \
-  '[0492a-run-ok] preflight=PASS'; do
+  '[0493a-run-ok] preflight=PASS'; do
   grep -Fq "$token" "$common" || { echo "[0492b-check] common contract missing: $token" >&2; exit 1; }
 done
 
 source "$common"
 SPECIES_RESAMPLING_ENABLE=true
-[[ "$(suite_species_resident_mode_0492a src-q6-resampling periodic)" == fast ]] || { echo '[0492b-check] periodic auto mode is not fast' >&2; exit 1; }
-[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == compatible ]] || { echo '[0492b-check] segmented auto mode is not compatible' >&2; exit 1; }
+[[ "$(suite_species_resident_mode_0492a src-q6-resampling periodic)" == production ]] || { echo '[0492b-check] periodic auto mode is not production' >&2; exit 1; }
+[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == production ]] || { echo '[0492b-check] segmented auto mode is not production' >&2; exit 1; }
 SPECIES_RESIDENT_MODE=validation
 [[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == validation ]] || { echo '[0492b-check] explicit validation mode failed' >&2; exit 1; }
 unset SPECIES_RESIDENT_MODE SPECIES_RESAMPLING_ENABLE

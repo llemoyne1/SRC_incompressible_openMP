@@ -65,6 +65,8 @@ struct Q6SegmentedIo0409 {
     int enabled = 0;
     int count = 0;
     int face[kOpenBoundaryMaxSegments]{}; // 0 left, 1 right, 2 bottom, 3 top
+    int mode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
+    std::uint32_t type[kOpenBoundaryMaxSegments]{};
     double sMin[kOpenBoundaryMaxSegments]{};
     double sMax[kOpenBoundaryMaxSegments]{};
     double flux[kOpenBoundaryMaxSegments]{};
@@ -152,6 +154,78 @@ void append_species_q6_resident_audit_0491e(
         << diag.solveSeconds << ','
         << diag.applySeconds << ','
         << diag.totalSeconds << '\n';
+}
+
+struct IndependentMaskedSpeciesAudit0493w5 {
+    int speciesIndex = -1;
+    std::uint32_t type = 0u;
+    double strength = 0.0;
+    std::uint64_t activeCells = 0u;
+    std::uint64_t correctedParticles = 0u;
+    bool fullDomain = false;
+    bool converged = true;
+    int iterations = 0;
+    double residualRel = 0.0;
+    double divBeforeRms = 0.0;
+    double divBeforeMaxAbs = 0.0;
+    // Compatibility aliases retained for the original 0493w5 CSV schema.
+    // They continue to denote the divergence of the projected auxiliary face flux.
+    double divAfterRms = 0.0;
+    double divAfterMaxAbs = 0.0;
+    double divAfterProjectedFaceFluxRms = 0.0;
+    double divAfterProjectedFaceFluxMaxAbs = 0.0;
+    // 0493w6: divergence rebuilt from the post-application, per-species
+    // cell velocity deposited directly from the resident particle state.
+    double divAfterAppliedCellVelocityRms = 0.0;
+    double divAfterAppliedCellVelocityMaxAbs = 0.0;
+    double correctionRms = 0.0;
+    double correctionMaxAbs = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+};
+
+void append_independent_masked_species_audit_0493w5(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const std::vector<IndependentMaskedSpeciesAudit0493w5>& rows) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_species_q6_independent_masked_0493w5.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493w5 failed to open independent-masked species Q6 audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,speciesIndex,type,q6Strength,minOccupancyFraction,"
+               "activeCells,fullDomain,correctedParticles,converged,iterations,"
+               "residualRel,divBeforeRms,divBeforeMaxAbs,divAfterRms,"
+               "divAfterMaxAbs,divAfterProjectedFaceFluxRms,"
+               "divAfterProjectedFaceFluxMaxAbs,divAfterAppliedCellVelocityRms,"
+               "divAfterAppliedCellVelocityMaxAbs,correctionRms,correctionMaxAbs,"
+               "momentumX,momentumY\n";
+    }
+    for (const IndependentMaskedSpeciesAudit0493w5& r : rows) {
+        out << std::setprecision(17)
+            << step << ',' << time << ',' << r.speciesIndex << ',' << r.type << ','
+            << r.strength << ',' << params.speciesQ6MinOccupancyFraction << ','
+            << r.activeCells << ',' << (r.fullDomain ? 1 : 0) << ','
+            << r.correctedParticles << ',' << (r.converged ? 1 : 0) << ','
+            << r.iterations << ',' << r.residualRel << ','
+            << r.divBeforeRms << ',' << r.divBeforeMaxAbs << ','
+            << r.divAfterRms << ',' << r.divAfterMaxAbs << ','
+            << r.divAfterProjectedFaceFluxRms << ','
+            << r.divAfterProjectedFaceFluxMaxAbs << ','
+            << r.divAfterAppliedCellVelocityRms << ','
+            << r.divAfterAppliedCellVelocityMaxAbs << ','
+            << r.correctionRms << ',' << r.correctionMaxAbs << ','
+            << r.momentumX << ',' << r.momentumY << '\n';
+    }
 }
 
 void append_q6_resident_thermostat_audit_0491f(
@@ -312,6 +386,8 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
     for (int k = 0; k < cfg.count; ++k) {
         const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
         cfg.face[k] = q6_face_code_0409(seg.face);
+        cfg.mode[k] = open_boundary_segment_is_inlet(seg) ? 1 : 2;
+        cfg.type[k] = seg.type;
         cfg.sMin[k] = seg.sMin;
         cfg.sMax[k] = seg.sMax;
         cfg.flux[k] = ramp * (open_boundary_face_is_x(seg.face) ? seg.ux : seg.uy);
@@ -370,6 +446,13 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> Ap;
     DeviceBuffer0400<double> dux;
     DeviceBuffer0400<double> duy;
+    DeviceBuffer0400<unsigned char> speciesMask0493w5;
+    // 0493w6 keeps the exact pre-application support mask of every species on
+    // device.  The post-application diagnostic therefore cannot be perturbed by
+    // a second threshold evaluation or require a host-side cell mask.
+    DeviceBuffer0400<unsigned char> speciesMasks0493w6;
+    DeviceBuffer0400<double> speciesDUx0493w5;
+    DeviceBuffer0400<double> speciesDUy0493w5;
     DeviceBuffer0400<double> partial0;
     DeviceBuffer0400<double> partial1;
     DeviceBuffer0400<double> partial2;
@@ -380,9 +463,10 @@ struct ResidentWorkspace0400 {
     int warmPeriodicX = 0;
     int warmPeriodicY = 0;
 
-    void ensure(std::uint64_t particles, int numCells, int blocks) {
+    void ensure(std::uint64_t particles, int numCells, int blocks, int speciesCount = 1) {
         cells.ensure_capacity(particles, numCells);
         const std::size_t c = static_cast<std::size_t>(std::max(1, numCells));
+        const std::size_t denseSpecies = c * static_cast<std::size_t>(std::max(1, speciesCount));
         rhs.ensure(c);
         phi.ensure(c);
         r.ensure(c);
@@ -390,6 +474,10 @@ struct ResidentWorkspace0400 {
         Ap.ensure(c);
         dux.ensure(c);
         duy.ensure(c);
+        speciesMask0493w5.ensure(c);
+        speciesMasks0493w6.ensure(denseSpecies);
+        speciesDUx0493w5.ensure(denseSpecies);
+        speciesDUy0493w5.ensure(denseSpecies);
         partial0.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial1.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial2.ensure(static_cast<std::size_t>(std::max(1, blocks)));
@@ -552,6 +640,64 @@ __device__ double q6_segmented_flux_for_cell_0409(const Q6SegmentedIo0409& cfg,
             return cfg.flux[k];
         }
     }
+    return 0.0;
+}
+
+
+
+__device__ double q6_species_boundary_fraction_0493w7(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int cell,
+    int exclusiveProjectedSpecies) {
+    if (exclusiveProjectedSpecies) return 1.0;
+    if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
+        cell < 0 || cell >= species.numCells) {
+        return 0.0;
+    }
+    const int k = speciesIndex * species.numCells + cell;
+    return fmin(1.0, fmax(0.0, species.occupancyFraction[k]));
+}
+
+__device__ double q6_species_boundary_flux_for_cell_0493w7(
+    const Q6SegmentedIo0409& cfg,
+    int face,
+    int ix,
+    int iy,
+    int nx,
+    int ny,
+    double fallback,
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    std::uint32_t speciesType,
+    int cell,
+    int exclusiveProjectedSpecies) {
+    const double fraction = q6_species_boundary_fraction_0493w7(
+        species, speciesIndex, cell, exclusiveProjectedSpecies);
+    if (!cfg.enabled) return fallback * fraction;
+    const double tangent = (face == 0 || face == 1)
+        ? ((static_cast<double>(iy) + 0.5) /
+           static_cast<double>(ny > 0 ? ny : 1))
+        : ((static_cast<double>(ix) + 0.5) /
+           static_cast<double>(nx > 0 ? nx : 1));
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] != face || tangent < cfg.sMin[k] || tangent > cfg.sMax[k]) {
+            continue;
+        }
+        if (cfg.mode[k] == 1) {
+            // A typed reservoir injects only its declared species.  Untyped
+            // legacy inlets fall back to the local occupancy split.
+            if (cfg.type[k] != 0u) {
+                return cfg.type[k] == speciesType ? cfg.flux[k] : 0.0;
+            }
+            return cfg.flux[k] * fraction;
+        }
+        // Outlet flux is shared only when several species are independently
+        // projected.  With the liquid-only target configuration, the sole
+        // projected species retains the full prescribed outlet flux.
+        return cfg.flux[k] * fraction;
+    }
+    // The complement of a segmented face remains an impermeable wall.
     return 0.0;
 }
 
@@ -879,10 +1025,16 @@ __global__ void q6_reset_species_mass_0491c(CudaSpeciesCellDeviceView0490h speci
     const int stride = blockDim.x * gridDim.x;
     const int dense = species.numCells * species.speciesCount;
     for (int k = tid; k < dense; k += stride) {
+        species.count[k] = 0u;
         species.mass[k] = 0.0;
+        species.px[k] = 0.0;
+        species.py[k] = 0.0;
+        species.massFraction[k] = 0.0;
+        species.occupancyFraction[k] = 0.0;
     }
     for (int c = tid; c < species.numCells; c += stride) {
         species.totalCellMass[c] = 0.0;
+        species.totalOccupancyWeight[c] = 0.0;
     }
     if (tid == 0 && species.invalidTypeCounter != nullptr) {
         *species.invalidTypeCounter = 0ull;
@@ -918,9 +1070,36 @@ __global__ void q6_deposit_species_mass_from_cell_ids_0491c(
             }
             continue;
         }
+        const int k = speciesIndex * species.numCells + c;
         const double m = particles.mass ? particles.mass[i] : 1.0;
-        atomic_add_double_0400(&species.mass[speciesIndex * species.numCells + c], m);
+        atomicAdd(&species.count[k], 1u);
+        atomic_add_double_0400(&species.mass[k], m);
+        atomic_add_double_0400(&species.px[k], m * particles.vx[i]);
+        atomic_add_double_0400(&species.py[k], m * particles.vy[i]);
         atomic_add_double_0400(&species.totalCellMass[c], m);
+    }
+}
+
+__global__ void q6_finalize_species_occupancy_0493w5(
+    CudaSpeciesCellDeviceView0490h species) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < species.numCells; c += stride) {
+        const double totalMass = species.totalCellMass[c];
+        double totalOcc = 0.0;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            const int k = s * species.numCells + c;
+            const double ref = species.referenceCellMass[s];
+            if (ref > 0.0) totalOcc += species.mass[k] / ref;
+        }
+        species.totalOccupancyWeight[c] = totalOcc;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            const int k = s * species.numCells + c;
+            species.massFraction[k] = totalMass > 0.0 ? species.mass[k] / totalMass : 0.0;
+            const double ref = species.referenceCellMass[s];
+            const double occ = ref > 0.0 ? species.mass[k] / ref : 0.0;
+            species.occupancyFraction[k] = totalOcc > 0.0 ? occ / totalOcc : 0.0;
+        }
     }
 }
 
@@ -1100,6 +1279,604 @@ __global__ void q6_species_barycentric_residual_stats_0491c(
     if (tid == 0) {
         partialX[blockIdx.x] = shX[0];
         partialY[blockIdx.x] = shY[0];
+    }
+}
+
+
+__device__ bool q6_species_cell_active_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int cell,
+    double minOccupancyFraction) {
+    if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
+        cell < 0 || cell >= species.numCells) {
+        return false;
+    }
+    const int k = speciesIndex * species.numCells + cell;
+    return species.q6Strength[speciesIndex] > 0.0 &&
+           species.mass[k] > 0.0 &&
+           species.occupancyFraction[k] >= minOccupancyFraction;
+}
+
+__device__ double q6_species_cell_velocity_component_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int cell,
+    int component) {
+    const int k = speciesIndex * species.numCells + cell;
+    const double m = species.mass[k];
+    if (!(m > 0.0)) return 0.0;
+    return component == 0 ? species.px[k] / m : species.py[k] / m;
+}
+
+__device__ double q6_species_face_velocity_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    const unsigned char* mask,
+    int speciesIndex,
+    int cellA,
+    int cellB,
+    int component) {
+    const bool activeA = mask[cellA] != 0u;
+    const bool activeB = mask[cellB] != 0u;
+    if (!activeA && !activeB) return 0.0;
+    const double ua = activeA
+        ? q6_species_cell_velocity_component_0493w5(species, speciesIndex, cellA, component)
+        : 0.0;
+    const double ub = activeB
+        ? q6_species_cell_velocity_component_0493w5(species, speciesIndex, cellB, component)
+        : 0.0;
+    if (activeA && activeB) return 0.5 * (ua + ub);
+    return activeA ? ua : ub;
+}
+
+__global__ void q6_build_independent_mask_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    double minOccupancyFraction,
+    unsigned char* mask,
+    double* rhs,
+    int n,
+    unsigned long long* activeCounter) {
+    unsigned long long activeLocal = 0ull;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const bool active = q6_species_cell_active_0493w5(
+            species, speciesIndex, c, minOccupancyFraction);
+        mask[c] = active ? 1u : 0u;
+        rhs[c] = 0.0;
+        if (active) ++activeLocal;
+    }
+    if (activeLocal != 0ull) atomicAdd(activeCounter, activeLocal);
+}
+
+__global__ void q6_build_independent_rhs_after_mask_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const unsigned char* mask,
+    double* rhs,
+    double* partialSum,
+    double* partialSq,
+    double* partialMax,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double xLowFlux,
+    double xHighFlux,
+    double yLowFlux,
+    double yHighFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    std::uint32_t speciesType,
+    int exclusiveProjectedSpecies,
+    int fullDomain) {
+    extern __shared__ double sh[];
+    double* shSum = sh;
+    double* shSq = sh + blockDim.x;
+    double* shMax = sh + 2 * blockDim.x;
+    const int tid = threadIdx.x;
+    double sum = 0.0;
+    double sq = 0.0;
+    double mx = 0.0;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) {
+            rhs[c] = 0.0;
+            continue;
+        }
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+
+        const double localXLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+        const double localXHighFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 1, ix, iy, nx, ny, xHighFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+        const double localYLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+        const double localYHighFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 3, ix, iy, nx, ny, yHighFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+
+        const double uxC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 0);
+        const double uyC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 1);
+        const double fxEastInterior = fullDomain
+            ? uxC
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, east, 0);
+        const double fxWestInterior = fullDomain
+            ? q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, west, 0)
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, west, c, 0);
+        const double fyNorthInterior = fullDomain
+            ? uyC
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, north, 1);
+        const double fySouthInterior = fullDomain
+            ? q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, south, 1)
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, south, c, 1);
+
+        const double fxWest = hasWest ? fxWestInterior : localXLowFlux;
+        const double fxEastBefore = hasEast ? fxEastInterior : uxC;
+        const double fxEastSolve = hasEast ? fxEastInterior : localXHighFlux;
+        const double fySouth = hasSouth ? fySouthInterior : localYLowFlux;
+        const double fyNorthBefore = hasNorth ? fyNorthInterior : uyC;
+        const double fyNorthSolve = hasNorth ? fyNorthInterior : localYHighFlux;
+        const double divBefore = (fxEastBefore - fxWest) / dx +
+                                 (fyNorthBefore - fySouth) / dy;
+        const double divSolve = (fxEastSolve - fxWest) / dx +
+                                (fyNorthSolve - fySouth) / dy;
+        rhs[c] = -divSolve;
+        sum += rhs[c];
+        sq += divBefore * divBefore;
+        mx = fmax(mx, fabs(divBefore));
+    }
+    shSum[tid] = sum;
+    shSq[tid] = sq;
+    shMax[tid] = mx;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shSum[tid] += shSum[tid + offset];
+            shSq[tid] += shSq[tid + offset];
+            shMax[tid] = fmax(shMax[tid], shMax[tid + offset]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialSum[blockIdx.x] = shSum[0];
+        partialSq[blockIdx.x] = shSq[0];
+        partialMax[blockIdx.x] = shMax[0];
+    }
+}
+
+__global__ void q6_init_masked_cg_0493w5(
+    double* rhs,
+    double* phi,
+    double* r,
+    double* p,
+    const unsigned char* mask,
+    double mean,
+    int subtractMean,
+    int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) {
+            rhs[c] = 0.0;
+            phi[c] = 0.0;
+            r[c] = 0.0;
+            p[c] = 0.0;
+            continue;
+        }
+        const double v = rhs[c] - (subtractMean ? mean : 0.0);
+        rhs[c] = v;
+        phi[c] = 0.0;
+        r[c] = v;
+        p[c] = v;
+    }
+}
+
+__global__ void q6_apply_masked_operator_and_dot_0493w5(
+    const double* p,
+    double* Ap,
+    const unsigned char* mask,
+    double* partialDot,
+    int nx,
+    int ny,
+    double invDx2,
+    double invDy2,
+    int periodicX,
+    int periodicY) {
+    extern __shared__ double sh[];
+    const int tid = threadIdx.x;
+    double dot = 0.0;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) {
+            Ap[c] = 0.0;
+            continue;
+        }
+        const int ix = c % nx;
+        const int iy = c / nx;
+        double a = 0.0;
+        if (periodicX || ix < nx - 1) {
+            const int east = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            a += invDx2 * (p[c] - (mask[east] ? p[east] : 0.0));
+        }
+        if (periodicX || ix > 0) {
+            const int west = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
+            a += invDx2 * (p[c] - (mask[west] ? p[west] : 0.0));
+        }
+        if (periodicY || iy < ny - 1) {
+            const int north =
+                (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            a += invDy2 * (p[c] - (mask[north] ? p[north] : 0.0));
+        }
+        if (periodicY || iy > 0) {
+            const int south =
+                (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
+            a += invDy2 * (p[c] - (mask[south] ? p[south] : 0.0));
+        }
+        Ap[c] = a;
+        dot += p[c] * a;
+    }
+    sh[tid] = dot;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) sh[tid] += sh[tid + offset];
+        __syncthreads();
+    }
+    if (tid == 0) partialDot[blockIdx.x] = sh[0];
+}
+
+__global__ void q6_compute_masked_face_correction_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const double* phi,
+    const unsigned char* mask,
+    double* faceDUx,
+    double* faceDUy,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    double strength,
+    int periodicX,
+    int periodicY,
+    double xHighFlux,
+    double yHighFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    std::uint32_t speciesType,
+    int exclusiveProjectedSpecies) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+
+        if (hasEast) {
+            if (mask[c] || mask[east]) {
+                const double pc = mask[c] ? phi[c] : 0.0;
+                const double pe = mask[east] ? phi[east] : 0.0;
+                faceDUx[c] = -strength * (pe - pc) / dx;
+            } else {
+                faceDUx[c] = 0.0;
+            }
+        } else if (mask[c]) {
+            const double target = q6_species_boundary_flux_for_cell_0493w7(
+                segmentedIo, 1, ix, iy, nx, ny, xHighFlux, species, speciesIndex,
+                speciesType, c, exclusiveProjectedSpecies);
+            const double before = q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, c, 0);
+            faceDUx[c] = strength * (target - before);
+        } else {
+            faceDUx[c] = 0.0;
+        }
+
+        if (hasNorth) {
+            if (mask[c] || mask[north]) {
+                const double pc = mask[c] ? phi[c] : 0.0;
+                const double pn = mask[north] ? phi[north] : 0.0;
+                faceDUy[c] = -strength * (pn - pc) / dy;
+            } else {
+                faceDUy[c] = 0.0;
+            }
+        } else if (mask[c]) {
+            const double target = q6_species_boundary_flux_for_cell_0493w7(
+                segmentedIo, 3, ix, iy, nx, ny, yHighFlux, species, speciesIndex,
+                speciesType, c, exclusiveProjectedSpecies);
+            const double before = q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, c, 1);
+            faceDUy[c] = strength * (target - before);
+        } else {
+            faceDUy[c] = 0.0;
+        }
+    }
+}
+
+__global__ void q6_compute_masked_cell_correction_stats_0493w5(
+    const unsigned char* mask,
+    const double* faceDUx,
+    const double* faceDUy,
+    double* cellDUx,
+    double* cellDUy,
+    double* partialSq,
+    double* partialMax,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    int fullDomain) {
+    extern __shared__ double sh[];
+    double* shSq = sh;
+    double* shMax = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double sq = 0.0;
+    double mx = 0.0;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) {
+            cellDUx[c] = 0.0;
+            cellDUy[c] = 0.0;
+            continue;
+        }
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasSouth = periodicY || iy > 0;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const double westCorrection = hasWest ? faceDUx[west] : 0.0;
+        const double southCorrection = hasSouth ? faceDUy[south] : 0.0;
+        const double cx = fullDomain
+            ? faceDUx[c]
+            : 0.5 * (faceDUx[c] + westCorrection);
+        const double cy = fullDomain
+            ? faceDUy[c]
+            : 0.5 * (faceDUy[c] + southCorrection);
+        cellDUx[c] = cx;
+        cellDUy[c] = cy;
+        const double q = cx * cx + cy * cy;
+        sq += q;
+        mx = fmax(mx, sqrt(q));
+    }
+    shSq[tid] = sq;
+    shMax[tid] = mx;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shSq[tid] += shSq[tid + offset];
+            shMax[tid] = fmax(shMax[tid], shMax[tid + offset]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialSq[blockIdx.x] = shSq[0];
+        partialMax[blockIdx.x] = shMax[0];
+    }
+}
+
+__global__ void q6_masked_projected_divergence_stats_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const unsigned char* mask,
+    const double* faceDUx,
+    const double* faceDUy,
+    double* partialSq,
+    double* partialMax,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double xLowFlux,
+    double xHighFlux,
+    double yLowFlux,
+    double yHighFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    std::uint32_t speciesType,
+    int exclusiveProjectedSpecies,
+    int fullDomain) {
+    extern __shared__ double sh[];
+    double* shSq = sh;
+    double* shMax = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    (void)xHighFlux;
+    (void)yHighFlux;
+    double sq = 0.0;
+    double mx = 0.0;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) continue;
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+
+        const double localXLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+        const double localYLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+
+        const double uxC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 0);
+        const double uyC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 1);
+        const double fxEastBase = hasEast
+            ? (fullDomain ? uxC : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, east, 0))
+            : uxC;
+        const double fxWestBase = hasWest
+            ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, west, 0)
+                : q6_species_face_velocity_0493w5(
+                    species, mask, speciesIndex, west, c, 0))
+            : localXLowFlux;
+        const double fyNorthBase = hasNorth
+            ? (fullDomain ? uyC : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, north, 1))
+            : uyC;
+        const double fySouthBase = hasSouth
+            ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, south, 1)
+                : q6_species_face_velocity_0493w5(
+                    species, mask, speciesIndex, south, c, 1))
+            : localYLowFlux;
+
+        const double fxEast = fxEastBase + faceDUx[c];
+        const double fxWest = hasWest ? fxWestBase + faceDUx[west] : fxWestBase;
+        const double fyNorth = fyNorthBase + faceDUy[c];
+        const double fySouth = hasSouth ? fySouthBase + faceDUy[south] : fySouthBase;
+        const double div = (fxEast - fxWest) / dx + (fyNorth - fySouth) / dy;
+        sq += div * div;
+        mx = fmax(mx, fabs(div));
+    }
+    shSq[tid] = sq;
+    shMax[tid] = mx;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shSq[tid] += shSq[tid + offset];
+            shMax[tid] = fmax(shMax[tid], shMax[tid + offset]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialSq[blockIdx.x] = shSq[0];
+        partialMax[blockIdx.x] = shMax[0];
+    }
+}
+
+__global__ void q6_apply_independent_species_correction_0493w5(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    double minOccupancyFraction,
+    const double* cellDUx,
+    const double* cellDUy,
+    std::uint32_t speciesType,
+    std::uint64_t nParticles,
+    double* partialPx,
+    double* partialPy,
+    unsigned long long* correctedCounter) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    unsigned long long correctedLocal = 0ull;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+        if (particles.type == nullptr || particles.type[i] != speciesType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || !q6_species_cell_active_0493w5(
+                species, speciesIndex, c, minOccupancyFraction)) continue;
+        const double dvx = cellDUx[c];
+        const double dvy = cellDUy[c];
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        px += m * dvx;
+        py += m * dvy;
+        ++correctedLocal;
+    }
+    if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
+__global__ void q6_zero_cell_moments_only_0493w5(CudaCellWorkspaceDeviceView cells) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < cells.numCells; c += stride) {
+        cells.count[c] = 0u;
+        cells.cellMass[c] = 0.0;
+        cells.cellPx[c] = 0.0;
+        cells.cellPy[c] = 0.0;
+        cells.cellUx[c] = 0.0;
+        cells.cellUy[c] = 0.0;
     }
 }
 
@@ -1555,6 +2332,383 @@ double reduce_host_max_0400(double* devicePartials, int blocks) {
     return m;
 }
 
+
+bool apply_independent_masked_species_q6_0493w5(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    ResidentWorkspace0400& ws,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    std::uint64_t nParticles,
+    int threads,
+    int cellBlocks,
+    int particleBlocks,
+    std::size_t scalarShared,
+    std::size_t pairShared,
+    std::size_t tripleShared,
+    int periodicX,
+    int periodicY,
+    double xLowFlux,
+    double xHighFlux,
+    double yLowFlux,
+    double yHighFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    CudaQ6Resident0400Diagnostics& diag) {
+    const auto tSolveAll = Clock0400::now();
+    const int speciesCount = static_cast<int>(params.speciesDefinitions.size());
+    const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
+                              static_cast<std::size_t>(speciesCount);
+    check_cuda_0400(cudaMemset(ws.speciesMasks0493w6.data(), 0,
+                                   dense * sizeof(unsigned char)),
+                    "independent masked dense support zero");
+    check_cuda_0400(cudaMemset(ws.speciesDUx0493w5.data(), 0, dense * sizeof(double)),
+                    "independent masked dux zero");
+    check_cuda_0400(cudaMemset(ws.speciesDUy0493w5.data(), 0, dense * sizeof(double)),
+                    "independent masked duy zero");
+
+    std::vector<IndependentMaskedSpeciesAudit0493w5> audits;
+    audits.reserve(static_cast<std::size_t>(speciesCount));
+    double totalDivBeforeSq = 0.0;
+    double totalDivAfterSq = 0.0;
+    double totalCorrectionSq = 0.0;
+    std::uint64_t totalActiveCells = 0u;
+    double maxDivBefore = 0.0;
+    double maxDivAfter = 0.0;
+    double maxCorrection = 0.0;
+    int maxIterations = 0;
+    double maxResidualRel = 0.0;
+    bool allConverged = true;
+    const double dx = grid.dx;
+    const double dy = grid.dy;
+    const double invDx2 = 1.0 / (dx * dx);
+    const double invDy2 = 1.0 / (dy * dy);
+    const double tol = std::max(0.0, params.projectionTolerance);
+    int projectedSpeciesCount = 0;
+    for (const SpeciesDefinition& def : params.speciesDefinitions) {
+        if (def.q6StrengthDeclared > 0.0) ++projectedSpeciesCount;
+    }
+    const int exclusiveProjectedSpecies = projectedSpeciesCount == 1 ? 1 : 0;
+
+    for (int s = 0; s < speciesCount; ++s) {
+        IndependentMaskedSpeciesAudit0493w5 audit{};
+        audit.speciesIndex = s;
+        audit.type = params.speciesDefinitions[static_cast<std::size_t>(s)].type;
+        audit.strength = params.speciesDefinitions[static_cast<std::size_t>(s)].q6StrengthDeclared;
+        if (!(audit.strength > 0.0)) {
+            audits.push_back(audit);
+            continue;
+        }
+
+        check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                        "independent masked active counter zero");
+        q6_build_independent_mask_0493w5<<<cellBlocks, threads>>>(
+            species, s, params.speciesQ6MinOccupancyFraction,
+            ws.speciesMask0493w5.data(), ws.rhs.data(),
+            grid.numCells, ws.counter.data());
+        check_cuda_0400(cudaGetLastError(), "independent masked support launch");
+        unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        check_cuda_0400(cudaMemcpy(denseMask0493w6, ws.speciesMask0493w5.data(),
+                                   static_cast<std::size_t>(grid.numCells) *
+                                       sizeof(unsigned char),
+                                   cudaMemcpyDeviceToDevice),
+                        "independent masked dense support store");
+        unsigned long long activeCells = 0ull;
+        check_cuda_0400(cudaMemcpy(&activeCells, ws.counter.data(), sizeof(activeCells),
+                                   cudaMemcpyDeviceToHost),
+                        "independent masked active counter download");
+        audit.activeCells = static_cast<std::uint64_t>(activeCells);
+        audit.fullDomain = audit.activeCells == static_cast<std::uint64_t>(grid.numCells);
+        if (audit.activeCells == 0u) {
+            audits.push_back(audit);
+            continue;
+        }
+
+        q6_build_independent_rhs_after_mask_0493w5<<<cellBlocks, threads, tripleShared>>>(
+            species, s, ws.speciesMask0493w5.data(), ws.rhs.data(),
+            ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
+            audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
+        const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+        const double divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+        audit.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
+        audit.divBeforeRms = std::sqrt(
+            divBeforeSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+        const double rhsMean = audit.fullDomain
+            ? rhsSum / static_cast<double>(grid.numCells)
+            : 0.0;
+
+        q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
+            ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
+            ws.speciesMask0493w5.data(), rhsMean, audit.fullDomain ? 1 : 0,
+            grid.numCells);
+        check_cuda_0400(cudaGetLastError(), "independent masked cg init launch");
+        q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+            ws.r.data(), ws.partial0.data(), grid.numCells);
+        check_cuda_0400(cudaGetLastError(), "independent masked initial rr launch");
+        double rr = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+        const double rhsNorm = std::sqrt(std::max(0.0, rr));
+        const double rhsNormSafe = std::max(rhsNorm, 1.0e-300);
+        audit.converged = rhsNorm <= tol;
+        audit.residualRel = audit.converged ? 0.0 : 1.0;
+
+        for (int it = 0; it < params.projectionMaxIterations && !audit.converged; ++it) {
+            q6_apply_masked_operator_and_dot_0493w5<<<cellBlocks, threads, scalarShared>>>(
+                ws.p.data(), ws.Ap.data(), ws.speciesMask0493w5.data(),
+                ws.partial0.data(), grid.Nx, grid.Ny, invDx2, invDy2,
+                periodicX, periodicY);
+            check_cuda_0400(cudaGetLastError(), "independent masked operator launch");
+            const double pAp = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            if (!(pAp > 0.0) || !std::isfinite(pAp)) {
+                audit.converged = false;
+                audit.residualRel = std::numeric_limits<double>::infinity();
+                break;
+            }
+            const double alpha = rr / pAp;
+            q6_axpy_residual_0400<<<cellBlocks, threads>>>(
+                ws.phi.data(), ws.r.data(), ws.p.data(), ws.Ap.data(), alpha,
+                grid.numCells);
+            check_cuda_0400(cudaGetLastError(), "independent masked axpy launch");
+            q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                ws.r.data(), ws.partial0.data(), grid.numCells);
+            check_cuda_0400(cudaGetLastError(), "independent masked rr launch");
+            double rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            audit.iterations = it + 1;
+            audit.residualRel = std::sqrt(std::max(0.0, rrNew)) / rhsNormSafe;
+            if (audit.residualRel <= tol) {
+                rr = rrNew;
+                audit.converged = true;
+                break;
+            }
+            if (audit.fullDomain && (it + 1) % 25 == 0) {
+                q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                    ws.phi.data(), ws.partial0.data(), grid.numCells);
+                q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                    ws.r.data(), ws.partial1.data(), grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "independent masked mean reduction launch");
+                const double phiMean = reduce_host_sum_0400(ws.partial0.data(), cellBlocks) /
+                                       static_cast<double>(grid.numCells);
+                const double rMean = reduce_host_sum_0400(ws.partial1.data(), cellBlocks) /
+                                     static_cast<double>(grid.numCells);
+                q6_subtract_mean_pair_0400<<<cellBlocks, threads>>>(
+                    ws.phi.data(), ws.r.data(), phiMean, rMean, grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "independent masked mean subtract launch");
+                q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                    ws.r.data(), ws.partial0.data(), grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "independent masked rr after mean launch");
+                rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            }
+            const double beta = rrNew / std::max(rr, 1.0e-300);
+            q6_update_p_0400<<<cellBlocks, threads>>>(
+                ws.p.data(), ws.r.data(), beta, grid.numCells);
+            check_cuda_0400(cudaGetLastError(), "independent masked p update launch");
+            rr = rrNew;
+        }
+
+        allConverged = allConverged && audit.converged;
+        maxIterations = std::max(maxIterations, audit.iterations);
+        maxResidualRel = std::max(maxResidualRel, audit.residualRel);
+        if (!audit.converged) {
+            audits.push_back(audit);
+            append_independent_masked_species_audit_0493w5(params, step, time, audits);
+            diag.reason = "independent_masked species solve did not converge";
+            return false;
+        }
+
+        const double effectiveStrength = params.q6ProjectionStrength * audit.strength;
+        q6_compute_masked_face_correction_0493w5<<<cellBlocks, threads>>>(
+            species, s, ws.phi.data(), ws.speciesMask0493w5.data(),
+            ws.r.data(), ws.p.data(), grid.Nx, grid.Ny, dx, dy,
+            effectiveStrength, periodicX, periodicY, xHighFlux, yHighFlux,
+            segmentedIo, audit.type, exclusiveProjectedSpecies);
+        check_cuda_0400(cudaGetLastError(), "independent masked face correction launch");
+        q6_compute_masked_cell_correction_stats_0493w5<<<
+            cellBlocks, threads, pairShared>>>(
+            ws.speciesMask0493w5.data(), ws.r.data(), ws.p.data(),
+            ws.dux.data(), ws.duy.data(), ws.partial0.data(), ws.partial1.data(),
+            grid.Nx, grid.Ny, periodicX, periodicY,
+            audit.fullDomain ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(), "independent masked cell correction launch");
+        const double correctionSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+        audit.correctionMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+        audit.correctionRms = std::sqrt(
+            correctionSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+
+        q6_masked_projected_divergence_stats_0493w5<<<
+            cellBlocks, threads, pairShared>>>(
+            species, s, ws.speciesMask0493w5.data(), ws.r.data(), ws.p.data(),
+            ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
+            periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
+            segmentedIo, audit.type, exclusiveProjectedSpecies,
+            audit.fullDomain ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(),
+                        "independent masked projected divergence launch");
+        const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+        audit.divAfterProjectedFaceFluxMaxAbs =
+            reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+        audit.divAfterProjectedFaceFluxRms = std::sqrt(
+            divAfterSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+        // Preserve the 0493w5 column meaning while exposing an unambiguous name.
+        audit.divAfterMaxAbs = audit.divAfterProjectedFaceFluxMaxAbs;
+        audit.divAfterRms = audit.divAfterProjectedFaceFluxRms;
+
+        double* denseDUx = ws.speciesDUx0493w5.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        double* denseDUy = ws.speciesDUy0493w5.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        check_cuda_0400(cudaMemcpy(denseDUx, ws.dux.data(),
+                                   static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                                   cudaMemcpyDeviceToDevice),
+                        "independent masked dux store");
+        check_cuda_0400(cudaMemcpy(denseDUy, ws.duy.data(),
+                                   static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                                   cudaMemcpyDeviceToDevice),
+                        "independent masked duy store");
+
+        totalDivBeforeSq += divBeforeSq;
+        totalDivAfterSq += divAfterSq;
+        totalCorrectionSq += correctionSq;
+        totalActiveCells += audit.activeCells;
+        maxDivBefore = std::max(maxDivBefore, audit.divBeforeMaxAbs);
+        maxDivAfter = std::max(maxDivAfter, audit.divAfterProjectedFaceFluxMaxAbs);
+        maxCorrection = std::max(maxCorrection, audit.correctionMaxAbs);
+        ++diag.speciesQ6IndependentSolves;
+        diag.speciesQ6IndependentActiveCells += audit.activeCells;
+        audits.push_back(audit);
+    }
+
+    diag.solveSeconds = seconds_since_0400(tSolveAll);
+    diag.converged = allConverged;
+    diag.iterations = maxIterations;
+    diag.residualRel = maxResidualRel;
+    if (totalActiveCells > 0u) {
+        const double denom = static_cast<double>(totalActiveCells);
+        diag.divBeforeRms = std::sqrt(totalDivBeforeSq / denom);
+        diag.divAfterProjectedFluxRms = std::sqrt(totalDivAfterSq / denom);
+        diag.correctionVelocityRms = std::sqrt(totalCorrectionSq / denom);
+    }
+    diag.divBeforeMaxAbs = maxDivBefore;
+    diag.divAfterProjectedFluxMaxAbs = maxDivAfter;
+    diag.correctionVelocityMaxAbs = maxCorrection;
+
+    const auto tApplyAll = Clock0400::now();
+    double totalDpx = 0.0;
+    double totalDpy = 0.0;
+    for (IndependentMaskedSpeciesAudit0493w5& audit : audits) {
+        if (!(audit.strength > 0.0) || audit.activeCells == 0u) continue;
+        const int s = audit.speciesIndex;
+        const double* denseDUx = ws.speciesDUx0493w5.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        const double* denseDUy = ws.speciesDUy0493w5.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                        "independent masked corrected counter zero");
+        q6_apply_independent_species_correction_0493w5<<<
+            particleBlocks, threads, pairShared>>>(
+            particles, cells, species, s, params.speciesQ6MinOccupancyFraction,
+            denseDUx, denseDUy, audit.type, nParticles,
+            ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+        check_cuda_0400(cudaGetLastError(), "independent masked particle apply launch");
+        audit.momentumX = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
+        audit.momentumY = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
+        unsigned long long corrected = 0ull;
+        check_cuda_0400(cudaMemcpy(&corrected, ws.counter.data(), sizeof(corrected),
+                                   cudaMemcpyDeviceToHost),
+                        "independent masked corrected counter download");
+        audit.correctedParticles = static_cast<std::uint64_t>(corrected);
+        diag.speciesQ6IndependentCorrectedParticles += audit.correctedParticles;
+        totalDpx += audit.momentumX;
+        totalDpy += audit.momentumY;
+    }
+    diag.speciesQ6ParticleApplySeconds = seconds_since_0400(tApplyAll);
+    diag.applySeconds = diag.speciesQ6ParticleApplySeconds;
+    diag.momentumResidualBeforeCorrection = std::sqrt(totalDpx * totalDpx + totalDpy * totalDpy);
+    // A masked free-surface pressure solve may legitimately change the momentum
+    // of the projected species through its Dirichlet interface.  Do not apply
+    // the legacy all-particle uniform momentum correction, which would directly
+    // modify species declared compressible.
+    diag.momentumCorrectionVx = 0.0;
+    diag.momentumCorrectionVy = 0.0;
+
+    // 0493w6: rebuild each species mass and momentum directly from the corrected
+    // resident particle state.  No particle or dense cell array is downloaded.
+    // Only the already-established scalar block reductions cross to the host.
+    const int speciesResetBlocks0493w6 = std::max(
+        1, std::min(1024,
+            (std::max(grid.numCells, grid.numCells * speciesCount) + threads - 1) / threads));
+    q6_reset_species_mass_0491c<<<speciesResetBlocks0493w6, threads>>>(species);
+    check_cuda_0400(cudaGetLastError(),
+                    "independent masked post-apply species reset launch");
+    q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
+        particles, cells, species, nParticles);
+    check_cuda_0400(cudaGetLastError(),
+                    "independent masked post-apply species deposit launch");
+    q6_finalize_species_occupancy_0493w5<<<cellBlocks, threads>>>(species);
+    check_cuda_0400(cudaGetLastError(),
+                    "independent masked post-apply occupancy finalize launch");
+
+    double totalAppliedCellDivSq0493w6 = 0.0;
+    double maxAppliedCellDiv0493w6 = 0.0;
+    std::uint64_t totalAppliedActiveCells0493w6 = 0u;
+    for (IndependentMaskedSpeciesAudit0493w5& audit : audits) {
+        if (!(audit.strength > 0.0) || audit.activeCells == 0u) continue;
+        const unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
+            static_cast<std::size_t>(audit.speciesIndex) *
+                static_cast<std::size_t>(grid.numCells);
+        q6_build_independent_rhs_after_mask_0493w5<<<
+            cellBlocks, threads, tripleShared>>>(
+            species, audit.speciesIndex, denseMask0493w6, ws.rhs.data(),
+            ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
+            audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(),
+                        "independent masked post-apply divergence launch");
+        const double divAppliedSq0493w6 =
+            reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+        audit.divAfterAppliedCellVelocityMaxAbs =
+            reduce_host_max_0400(ws.partial2.data(), cellBlocks);
+        audit.divAfterAppliedCellVelocityRms = std::sqrt(
+            divAppliedSq0493w6 /
+            static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+        totalAppliedCellDivSq0493w6 += divAppliedSq0493w6;
+        totalAppliedActiveCells0493w6 += audit.activeCells;
+        maxAppliedCellDiv0493w6 = std::max(
+            maxAppliedCellDiv0493w6, audit.divAfterAppliedCellVelocityMaxAbs);
+    }
+    if (totalAppliedActiveCells0493w6 > 0u) {
+        diag.divAfterCellVelocityRms = std::sqrt(
+            totalAppliedCellDivSq0493w6 /
+            static_cast<double>(totalAppliedActiveCells0493w6));
+    }
+    diag.divAfterCellVelocityMaxAbs = maxAppliedCellDiv0493w6;
+
+    check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                    "independent masked cell refresh counter zero");
+    q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
+    check_cuda_0400(cudaGetLastError(), "independent masked cell moments reset launch");
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+        particles, cells, nParticles);
+    check_cuda_0400(cudaGetLastError(), "independent masked cell moments redeposit launch");
+    q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
+    check_cuda_0400(cudaGetLastError(), "independent masked cell moments finalize launch");
+
+    append_independent_masked_species_audit_0493w5(params, step, time, audits);
+    diag.speciesQ6IndependentMasked = true;
+    diag.speciesQ6IndependentDisabledCorrectionMaxAbs = 0.0;
+    diag.speciesQ6BarycentricResidualMaxAbs = 0.0;
+    diag.speciesQ6BarycentricResidualMaxScaled = 0.0;
+    return true;
+}
+
 bool supported_subset_0400(const SimulationParams& params,
                            const CellGrid& grid,
                            const FluidDomainBounds& domain,
@@ -1658,12 +2812,16 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     diag.cells = static_cast<std::uint64_t>(grid.numCells);
 
     ResidentWorkspace0400& ws = resident_workspace_0400();
-    ws.ensure(nParticles, grid.numCells, blocks);
+    ws.ensure(nParticles, grid.numCells, blocks,
+              params.speciesQ6Enable ? static_cast<int>(params.speciesDefinitions.size()) : 1);
     CudaCellWorkspaceDeviceView cells = ws.cells.device_view();
     CudaSpeciesCellDeviceView0490h species0491c{};
     const bool speciesQ6Weighted0491c =
         params.speciesQ6Enable && params.speciesQ6Mode == "weighted" &&
         params.speciesQ6Sensitivity > 0.0;
+    const bool speciesQ6IndependentMasked0493w5 =
+        params.speciesQ6Enable && params.speciesQ6Mode == "independent_masked";
+    diag.speciesQ6IndependentMasked = speciesQ6IndependentMasked0493w5;
     if (params.speciesQ6Enable) {
         if (speciesWorkspace0491c == nullptr) {
             diag.reason = "speciesQ6Enable requires a resident CUDA species workspace";
@@ -1739,13 +2897,17 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         species0491c = speciesWorkspace0491c->device_view();
         std::vector<std::uint32_t> hSpeciesTypes0491c(params.speciesDefinitions.size());
         std::vector<double> hQ6Strength0491c(params.speciesDefinitions.size());
+        std::vector<double> hReferenceCellMass0493w5(params.speciesDefinitions.size());
         for (std::size_t s = 0; s < params.speciesDefinitions.size(); ++s) {
             hSpeciesTypes0491c[s] = params.speciesDefinitions[s].type;
             hQ6Strength0491c[s] = params.speciesDefinitions[s].q6StrengthDeclared;
+            hReferenceCellMass0493w5[s] =
+                params.speciesDefinitions[s].referenceCellMassDeclared;
         }
         diag.speciesQ6MetadataH2DBytes =
             hSpeciesTypes0491c.size() * sizeof(std::uint32_t) +
-            hQ6Strength0491c.size() * sizeof(double);
+            hQ6Strength0491c.size() * sizeof(double) +
+            hReferenceCellMass0493w5.size() * sizeof(double);
         check_cuda_0400(cudaMemcpy(species0491c.speciesTypes, hSpeciesTypes0491c.data(),
                                    hSpeciesTypes0491c.size() * sizeof(std::uint32_t),
                                    cudaMemcpyHostToDevice),
@@ -1754,6 +2916,11 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
                                    hQ6Strength0491c.size() * sizeof(double),
                                    cudaMemcpyHostToDevice),
                         "species q6 strength metadata upload");
+        check_cuda_0400(cudaMemcpy(species0491c.referenceCellMass,
+                                   hReferenceCellMass0493w5.data(),
+                                   hReferenceCellMass0493w5.size() * sizeof(double),
+                                   cudaMemcpyHostToDevice),
+                        "species q6 reference cell mass metadata upload");
         const int denseSpecies0491c =
             grid.numCells * static_cast<int>(params.speciesDefinitions.size());
         const int speciesResetBlocks0491c =
@@ -1763,6 +2930,8 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
             particles, cells, species0491c, nParticles);
         check_cuda_0400(cudaGetLastError(), "species q6 mass deposit launch");
+        q6_finalize_species_occupancy_0493w5<<<cellBlocks, threads>>>(species0491c);
+        check_cuda_0400(cudaGetLastError(), "species q6 occupancy finalize launch");
         unsigned long long invalidSpecies0491c = 0ull;
         check_cuda_0400(cudaMemcpy(&invalidSpecies0491c, species0491c.invalidTypeCounter,
                                    sizeof(invalidSpecies0491c), cudaMemcpyDeviceToHost),
@@ -1778,10 +2947,31 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
                     "copy empty counter");
     diag.depositSeconds = seconds_since_0400(tDeposit);
 
+    const std::size_t tripleShared = 3u * static_cast<std::size_t>(threads) * sizeof(double);
+    if (speciesQ6IndependentMasked0493w5) {
+        ws.warmPhiValid = false;
+        const bool ok0493w5 = apply_independent_masked_species_q6_0493w5(
+            particles, cells, species0491c, ws, params, grid, step, time,
+            nParticles, threads, cellBlocks, particleBlocks,
+            scalarShared, pairShared, tripleShared, periodicX, periodicY,
+            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo0409, diag);
+        if (!ok0493w5) {
+            return diag;
+        }
+        cuda_shared_particle_state_0251_mark_fresh(
+            "cuda_q6_resident_0400_independent_masked_0493w5");
+        diag.applied = true;
+        diag.handled = true;
+        diag.reason = "ok";
+        diag.totalSeconds = seconds_since_0400(tTotal);
+        append_species_q6_resident_audit_0491e(
+            params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);
+        return diag;
+    }
+
     const auto tSolve = Clock0400::now();
     const double dx = grid.dx;
     const double dy = grid.dy;
-    const std::size_t tripleShared = 3u * static_cast<std::size_t>(threads) * sizeof(double);
     q6_build_rhs_and_stats_0400<<<cellBlocks, threads, tripleShared>>>(
         cells, ws.rhs.data(), ws.partial0.data(), ws.partial1.data(), ws.partial2.data(), grid.Nx, grid.Ny, dx, dy,
         periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo0409);
