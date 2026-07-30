@@ -25,8 +25,8 @@ LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 # be compared before any population mutation is introduced. Resampling paths
 # remain available only through an explicit override such as:
 #   RUN_MODES="src-resampling src-q6-resampling" SPECIES_RESAMPLING_ENABLE=true
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"
-
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}" 
+ 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
 LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
@@ -84,7 +84,7 @@ INJECT_MASS_CLOSURE_STRENGTH="${INJECT_MASS_CLOSURE_STRENGTH:-${LIQUID_MASS_CLOS
 BACKGROUND_MASS_CLOSURE_STRENGTH="${BACKGROUND_MASS_CLOSURE_STRENGTH:-${GAS_MASS_CLOSURE_STRENGTH:-$BACKGROUND_CLOSURE_DEFAULT}}"
 
 case "$INJECT_PHASE:$BACKGROUND_PHASE" in
-  liquid:gas) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=2.0 ;; ##################
+  liquid:gas) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=1.5 ;; ##################
   gas:liquid) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=0.01 ;;
   *) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=10.0 ;;
 esac
