@@ -75,6 +75,21 @@ struct Q6SegmentedIo0409 {
 bool q6_open_fullface_0404_supported(const SimulationParams& params);
 bool q6_open_segmented_0409_supported(const SimulationParams& params);
 
+bool q6_static_wall_mode_0493x1(const std::string& mode) {
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
+}
+
+bool q6_closed_box_0493x1_supported(const SimulationParams& params) {
+    return truthy_0400(std::getenv("MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1")) &&
+           !is_x_periodic(params) && !is_y_periodic(params) &&
+           q6_static_wall_mode_0493x1(params.bcLeft) &&
+           q6_static_wall_mode_0493x1(params.bcRight) &&
+           q6_static_wall_mode_0493x1(params.bcBottom) &&
+           q6_static_wall_mode_0493x1(params.bcTop) &&
+           params.bcLeft != "bounceback" && params.bcRight != "bounceback" &&
+           params.bcBottom != "bounceback" && params.bcTop != "bounceback";
+}
+
 void check_cuda_0400(cudaError_t err, const char* where) {
     if (err != cudaSuccess) {
         throw std::runtime_error(std::string("cuda_q6_resident_0400 ") + where + ": " +
@@ -91,6 +106,7 @@ std::string q6_boundary_family_0491g(const SimulationParams& params) {
     if (q6_open_fullface_0404_supported(params)) return "open_fullface";
     if (is_x_periodic(params) && is_y_periodic(params)) return "periodic";
     if (is_x_periodic(params) && !is_y_periodic(params)) return "channel_wall";
+    if (q6_closed_box_0493x1_supported(params)) return "closed_box";
     return "other";
 }
 
@@ -2725,11 +2741,12 @@ bool supported_subset_0400(const SimulationParams& params,
     }
     const bool periodicXY = is_x_periodic(params) && is_y_periodic(params);
     const bool channelXY = is_x_periodic(params) && !is_y_periodic(params) &&
-        (params.bcBottom == "solid" || params.bcBottom == "specular" || params.bcBottom == "bounceback") &&
-        (params.bcTop == "solid" || params.bcTop == "specular" || params.bcTop == "bounceback");
+        q6_static_wall_mode_0493x1(params.bcBottom) &&
+        q6_static_wall_mode_0493x1(params.bcTop);
+    const bool closedBox = q6_closed_box_0493x1_supported(params);
     const bool openFullface = q6_open_fullface_0404_supported(params);
     const bool openSegmented0409 = q6_open_segmented_0409_supported(params);
-    if (!periodicXY && !channelXY && !openFullface && !openSegmented0409) {
+    if (!periodicXY && !channelXY && !closedBox && !openFullface && !openSegmented0409) {
         *reason = "unsupported boundary condition";
         return false;
     }

@@ -188,13 +188,23 @@ bool cuda_q6_resident_src_step_0401_supported(const SimulationParams& params) {
 }
 
 bool cuda_q6_resident_src_wall_step_0402_supported(const SimulationParams& params) {
+    const auto wallMode = [](const std::string& bc) {
+        return bc == "solid" || bc == "specular" || bc == "bounceback";
+    };
+    const bool channel =
+        params.bcLeft == "periodic" && params.bcRight == "periodic" &&
+        wallMode(params.bcBottom) && wallMode(params.bcTop);
+    const bool closedBox =
+        env_truthy_0270("MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1") &&
+        wallMode(params.bcLeft) && wallMode(params.bcRight) &&
+        wallMode(params.bcBottom) && wallMode(params.bcTop) &&
+        params.bcLeft != "bounceback" && params.bcRight != "bounceback" &&
+        params.bcBottom != "bounceback" && params.bcTop != "bounceback";
     return cuda_q6_resident_src_wall_step_0402_requested() &&
            cuda_q6_resident_src_common_0401_supported(params) &&
            env_truthy_0270("MPCD_CUDA_STREAMING_WALL_SIMPLE_0246") &&
            env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261") &&
-           params.bcLeft == "periodic" && params.bcRight == "periodic" &&
-           (params.bcBottom == "solid" || params.bcBottom == "specular" || params.bcBottom == "bounceback") &&
-           (params.bcTop == "solid" || params.bcTop == "specular" || params.bcTop == "bounceback") &&
+           (channel || closedBox) &&
            (params.projectionOperator == "channel_fv_cg" || params.projectionOperator == "auto_fv_cg" ||
             params.projectionOperator == "elliptic_fv_cg");
 }
@@ -488,10 +498,20 @@ bool cuda_classic_src_wall_resident_0261_supported(const SimulationParams& param
          params.thermostatMode == "cell_relative_rescale" &&
          env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE") &&
          env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260"));
+    const bool channel =
+        params.bcLeft == "periodic" && params.bcRight == "periodic" &&
+        cuda_wall_mode_supported_0261(params.bcBottom) &&
+        cuda_wall_mode_supported_0261(params.bcTop);
+    const bool closedBox =
+        env_truthy_0270("MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1") &&
+        cuda_wall_mode_supported_0261(params.bcLeft) &&
+        cuda_wall_mode_supported_0261(params.bcRight) &&
+        cuda_wall_mode_supported_0261(params.bcBottom) &&
+        cuda_wall_mode_supported_0261(params.bcTop) &&
+        params.bcLeft != "bounceback" && params.bcRight != "bounceback" &&
+        params.bcBottom != "bounceback" && params.bcTop != "bounceback";
     return params.srcClassicCudaModeEnable &&
-           params.bcLeft == "periodic" && params.bcRight == "periodic" &&
-           (params.bcBottom == "solid" || params.bcBottom == "specular" || params.bcBottom == "bounceback") &&
-           (params.bcTop == "solid" || params.bcTop == "specular" || params.bcTop == "bounceback") &&
+           (channel || closedBox) &&
            !params.openBoundarySegmentsEnable && params.openBoundarySegmentCount == 0 &&
            !params.immersedSolidEnable &&
            !params.projectionEnable &&
@@ -1229,7 +1249,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         const bool fusedStreamDeposit0274 = fusedClassicOnly0274 &&
             env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274") &&
             !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FUSED_STREAM_DEPOSIT_0274");
-        if (!handledByCudaStreaming && fusedStreamDeposit0274 && residentClassicWall0261) {
+        if (!handledByCudaStreaming && fusedStreamDeposit0274 && residentClassicWall0261 &&
+            is_x_periodic(params)) {
             CudaWallSimpleStreaming0246Diagnostics deferred{};
             deferred.requested = true;
             deferred.supported = true;
@@ -1294,8 +1315,12 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 (residentClassicWall0261 || residentClassicWallCircle0318) && cudaStreaming0246.handled;
             if (wallSimpleResidentStreamHandled0270) {
                 cudaWallResidentBoundaryDiagnostics0270 = BoundaryDiagnostics{};
+                cudaWallResidentBoundaryDiagnostics0270.hitsLeft = cudaStreaming0246.hitsLeft;
+                cudaWallResidentBoundaryDiagnostics0270.hitsRight = cudaStreaming0246.hitsRight;
                 cudaWallResidentBoundaryDiagnostics0270.hitsBottom = cudaStreaming0246.hitsBottom;
                 cudaWallResidentBoundaryDiagnostics0270.hitsTop = cudaStreaming0246.hitsTop;
+                cudaWallResidentBoundaryDiagnostics0270.maxXWallReflectionsPerParticle =
+                    cudaStreaming0246.maxXWallReflectionsPerParticle;
                 cudaWallResidentBoundaryDiagnostics0270.maxYWallReflectionsPerParticle =
                     cudaStreaming0246.maxYWallReflectionsPerParticle;
                 cudaWallResidentBoundaryDiagnosticsValid0270 = true;
@@ -1361,9 +1386,9 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (!handledByCudaBoundary && wallSimpleResidentStreamHandled0270 &&
             !env_truthy_0270("MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0270_DISABLE_BOUNDARY_SKIP")) {
-            // The wall-simple CUDA stream kernel already applies the periodic-x
-            // wrap and bounded-y reflections for the validated static channel
-            // subset.  Re-running apply_boundary_conditions() here only scans
+            // The wall-simple CUDA stream kernel already applies either the
+            // periodic-x channel wrapping or all four static closed-box
+            // reflections. Re-running apply_boundary_conditions() here only scans
             // the host ParticleState, which is intentionally stale in resident
             // mode.  The physical reflections have already been applied by
             // CUDA 0246, so keep the CPU boundary pass skipped but propagate the

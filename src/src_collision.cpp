@@ -192,6 +192,10 @@ bool face_has_wall_coupling(const std::string& mode, const SimulationParams& par
     return mode == "solid" || (params.wallVpEnable && (mode == "specular" || mode == "bounceback"));
 }
 
+bool wall_reflection_mode_supported_0493x1(const std::string& mode) {
+    return mode == "solid" || mode == "specular" || mode == "bounceback";
+}
+
 void add_virtual_face_to_cell(const VirtualFaceContribution& v,
                               double& mass,
                               double& px,
@@ -862,20 +866,39 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
     }
 
     if (cuda_wall_simple_collision_0253_enabled()) {
-        if (!is_x_periodic(params) || is_y_periodic(params)) return fail("wall-simple 0253 requires periodic x and bounded y");
-        if (face_has_wall_coupling(params.bcLeft, params) || face_has_wall_coupling(params.bcRight, params)) {
-            return fail("wall-simple 0253 does not support left/right wall coupling");
+        const bool channel = is_x_periodic(params) && !is_y_periodic(params) &&
+            face_has_wall_coupling(params.bcBottom, params) &&
+            face_has_wall_coupling(params.bcTop, params);
+        const bool closedBox =
+            persistent_env_flag_enabled("MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1", false) &&
+            !is_x_periodic(params) && !is_y_periodic(params) &&
+            wall_reflection_mode_supported_0493x1(params.bcLeft) &&
+            wall_reflection_mode_supported_0493x1(params.bcRight) &&
+            wall_reflection_mode_supported_0493x1(params.bcBottom) &&
+            wall_reflection_mode_supported_0493x1(params.bcTop) &&
+            params.bcLeft != "bounceback" && params.bcRight != "bounceback" &&
+            params.bcBottom != "bounceback" && params.bcTop != "bounceback";
+        if (!channel && !closedBox) {
+            return fail("wall-simple 0253 requires periodic-x wall channel or opt-in static closed box");
         }
-        if (!face_has_wall_coupling(params.bcBottom, params) || !face_has_wall_coupling(params.bcTop, params)) {
-            return fail("wall-simple 0253 requires bottom/top wall coupling");
+        if (channel && (face_has_wall_coupling(params.bcLeft, params) ||
+                        face_has_wall_coupling(params.bcRight, params))) {
+            return fail("wall-simple 0253 channel does not support left/right wall coupling");
         }
         if (std::abs(params.wallThermalNoise) > 1.0e-15) {
             return fail("wall-simple 0253 requires wallThermalNoise=0 for deterministic equivalence");
         }
-        if (params.wallAccommodation < 0.0 || params.wallVpMass <= 0.0) {
+        const bool hasWallCoupling =
+            face_has_wall_coupling(params.bcLeft, params) ||
+            face_has_wall_coupling(params.bcRight, params) ||
+            face_has_wall_coupling(params.bcBottom, params) ||
+            face_has_wall_coupling(params.bcTop, params);
+        if (params.wallAccommodation < 0.0 || (hasWallCoupling && params.wallVpMass <= 0.0)) {
             return fail("wall-simple 0253 invalid wall accommodation/mass");
         }
-        if (reason != nullptr) *reason = "supported_wall_simple_0253";
+        if (reason != nullptr) {
+            *reason = closedBox ? "supported_closed_box_0493x1" : "supported_wall_simple_0253";
+        }
         return true;
     }
 

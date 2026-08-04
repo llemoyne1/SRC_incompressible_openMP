@@ -14,8 +14,11 @@ struct CudaWallSimpleStreaming0246Diagnostics {
     bool applied = false;
     std::uint64_t particles = 0u;
     std::uint64_t fluidParticles = 0u;
+    std::uint64_t hitsLeft = 0u;
+    std::uint64_t hitsRight = 0u;
     std::uint64_t hitsBottom = 0u;
     std::uint64_t hitsTop = 0u;
+    int maxXWallReflectionsPerParticle = 0;
     int maxYWallReflectionsPerParticle = 0;
     std::uint64_t allocationCalls = 0u;
     std::uint64_t uploadCalls = 0u;

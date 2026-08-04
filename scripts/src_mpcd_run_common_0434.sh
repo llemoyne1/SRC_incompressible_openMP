@@ -188,6 +188,7 @@ suite_clear_cuda_flags_0434() {
   export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=0
   export MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A=0
   export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=0
+  export MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_STEP_0401=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
@@ -237,6 +238,13 @@ suite_export_cuda_flags_0434() {
       export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
       export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=1
       export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=1; fi
+      ;;
+    closed_box)
+      export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
+      export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=1
+      export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
+      export MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=1
       if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=1; fi
       ;;
     io_fullface)
@@ -598,6 +606,25 @@ suite_preflight_run_ok_0492() {
     [[ -f "$LIVE_VIS_CONTROL_FILE" ]] || { echo "[0492-run-ok] ERROR missing LiveVis control: $LIVE_VIS_CONTROL_FILE" >&2; return 2; }
     grep -Eq '^[[:space:]]*field[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis field missing" >&2; return 2; }
     grep -Eq '^[[:space:]]*particleTypeFilter[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis particleTypeFilter missing" >&2; return 2; }
+  fi
+
+  if [[ "$topology" == closed_box ]]; then
+    [[ "${MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1:-0}" == 1 ]] || {
+      echo "[0493x1-run-ok] ERROR closed_box topology requires MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=1" >&2
+      return 2
+    }
+    grep -Eq '^[[:space:]]*openBoundarySegmentsEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0493x1-run-ok] ERROR closed_box requires openBoundarySegmentsEnable=false" >&2; return 2; }
+    grep -Eq '^[[:space:]]*openBoundarySegmentCount[[:space:]]*=[[:space:]]*0([[:space:]]|$)' "$params" || {
+      echo "[0493x1-run-ok] ERROR closed_box requires openBoundarySegmentCount=0" >&2; return 2; }
+    local face bc
+    for face in Left Right Bottom Top; do
+      bc="$(awk -F= -v key="bc${face}" '$1 ~ "^[[:space:]]*" key "[[:space:]]*$" {gsub(/[[:space:]]/, "", $2); value=$2} END{print value}' "$params")"
+      case "$bc" in
+        solid|specular) ;;
+        *) echo "[0493x1-run-ok] ERROR closed_box bc${face}=$bc unsupported: use solid or specular" >&2; return 2 ;;
+      esac
+    done
   fi
 
   if suite_species_resampling_active_0492 "$mode"; then
