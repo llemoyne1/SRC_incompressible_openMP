@@ -24,6 +24,16 @@ struct CudaQ6ResidentThermostat0400Diagnostics {
     const char* reason = "";
 };
 
+struct CudaQ6ForceKick0493x3Diagnostics {
+    bool requested = false;
+    bool handled = false;
+    bool applied = false;
+    std::uint64_t particles = 0u;
+    int blocks = 0;
+    int threads = 0;
+    const char* reason = "";
+};
+
 struct CudaQ6Resident0400Diagnostics {
     bool requested = false;
     bool handled = false;
@@ -72,17 +82,23 @@ struct CudaQ6Resident0400Diagnostics {
     double speciesQ6DepositSeconds = 0.0;
     double speciesQ6WeightSeconds = 0.0;
     double speciesQ6ParticleApplySeconds = 0.0;
+    bool fusedForceKick0493x4b = false;
     const char* reason = "";
 };
 
 #if defined(MPCD_ENABLE_CUDA_Q6_RESIDENT_0400)
+CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
+    ParticleState& state,
+    const SimulationParams& params);
+
 CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& state,
                                                               const SimulationParams& params,
                                                               const CellGrid& grid,
                                                               const FluidDomainBounds& domain,
                                                               int step,
                                                               double time,
-                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c = nullptr);
+                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c = nullptr,
+                                                              bool fuseForceKick0493x4b = false);
 
 CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_0400(
     ParticleState& state,
@@ -91,13 +107,18 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     const std::vector<int>& collisionCellId,
     std::uint64_t step);
 #else
+inline CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
+    ParticleState&, const SimulationParams&) {
+    return {};
+}
 inline CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState&,
                                                                      const SimulationParams&,
                                                                      const CellGrid&,
                                                                      const FluidDomainBounds&,
                                                                      int,
                                                                      double,
-                                                                     CudaSpeciesCellWorkspace0490h* = nullptr) {
+                                                                     CudaSpeciesCellWorkspace0490h* = nullptr,
+                                                                     bool = false) {
     return {};
 }
 inline CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_0400(

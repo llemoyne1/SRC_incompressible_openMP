@@ -30,6 +30,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -1202,6 +1203,75 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const std::size_t n = active_fluid_count_size(state);
     const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const double time = static_cast<double>(step) * params.dt;
+    const bool forceFieldActive0493x3 =
+        params.bodyAccelerationX != 0.0 || params.bodyAccelerationY != 0.0 ||
+        (params.taylorGreenForcingEnable && params.taylorGreenForcingAmplitude > 0.0);
+    const bool q6ForcePrestreamDouble0493x3 =
+        params.q6ForceProjectionMode == "prestream" && forceFieldActive0493x3;
+    const bool q6ForcePrestreamFused0493x4b =
+        params.q6ForceProjectionMode == "prestream_single_fused" && forceFieldActive0493x3;
+    const bool q6ForcePrestreamSingle0493x4a =
+        (params.q6ForceProjectionMode == "prestream_single" ||
+         params.q6ForceProjectionMode == "prestream_single_fused") &&
+        forceFieldActive0493x3;
+    const bool q6ForcePrestream0493x3 =
+        q6ForcePrestreamDouble0493x3 || q6ForcePrestreamSingle0493x4a;
+    bool prestreamQ6Handled0493x4a = false;
+
+    std::optional<SimulationParams> forceStreamParamsStorage0493x3;
+    const SimulationParams* forceStreamParamsPtr0493x3 = &params;
+    if (q6ForcePrestream0493x3) {
+        MPCD_PROFILE_PHASE(result.profile, ForceStream);
+        if (!q6ForcePrestreamFused0493x4b) {
+            const CudaQ6ForceKick0493x3Diagnostics forceKick0493x3 =
+                try_apply_cuda_q6_force_kick_0493x3(state, params);
+            if (!forceKick0493x3.handled || !forceKick0493x3.applied) {
+                throw std::runtime_error(
+                    std::string("0493x3 CUDA prestream force kick was not handled: ") +
+                    forceKick0493x3.reason);
+            }
+        }
+
+        SimulationParams prestreamQ6Params0493x3 = params;
+        // With two projections, the normal post-collision solve remains the
+        // authoritative audit row.  The single-solve mode has no later Q6, so
+        // preserve the output directory and expose the pre-stream diagnostics.
+        if (q6ForcePrestreamDouble0493x3) {
+            prestreamQ6Params0493x3.outputDir.clear();
+        }
+        const FluidDomainBounds prestreamDomain0493x3 =
+            make_fluid_domain_bounds(params, time);
+        const CudaQ6Resident0400Diagnostics prestreamQ60493x3 =
+            try_apply_cuda_q6_resident_0400(
+                state, prestreamQ6Params0493x3, grid, prestreamDomain0493x3,
+                static_cast<int>(step), time,
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+                &workspace.speciesCellCuda0490h,
+#else
+                nullptr,
+#endif
+                q6ForcePrestreamFused0493x4b);
+        if (!prestreamQ60493x3.handled || !prestreamQ60493x3.applied ||
+            !prestreamQ60493x3.converged) {
+            throw std::runtime_error(
+                std::string("0493x3 CUDA prestream Q6 failed: ") +
+                prestreamQ60493x3.reason);
+        }
+        prestreamQ6Handled0493x4a = true;
+        if (q6ForcePrestreamSingle0493x4a) {
+            result.q6 = q6_projection_diagnostics_from_cuda_resident_0400(
+                prestreamQ60493x3, params);
+        }
+
+        forceStreamParamsStorage0493x3.emplace(params);
+        forceStreamParamsStorage0493x3->bodyAccelerationX = 0.0;
+        forceStreamParamsStorage0493x3->bodyAccelerationY = 0.0;
+        forceStreamParamsStorage0493x3->taylorGreenForcingEnable = false;
+        forceStreamParamsStorage0493x3->taylorGreenForcingAmplitude = 0.0;
+        forceStreamParamsPtr0493x3 = &*forceStreamParamsStorage0493x3;
+    }
+    const SimulationParams& forceStreamParams0493x3 =
+        *forceStreamParamsPtr0493x3;
 
     // 0270: wall-simple resident CUDA performs y-wall reflection directly in
     // the force/stream kernel.  The generic CPU boundary pass is therefore a
@@ -1224,33 +1294,33 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         MPCD_PROFILE_PHASE(result.profile, ForceStream);
         bool handledByCudaStreaming = false;
         if (residentClassicIo0264) {
-            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
+            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(forceStreamParams0493x3, time);
             const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0264 =
-                try_apply_cuda_classic_src_io_segmented_stream_0264(state, params, streamDomain, step);
+                try_apply_cuda_classic_src_io_segmented_stream_0264(state, forceStreamParams0493x3, streamDomain, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "io_segmented_0264", "force_stream", cudaIoStream0264);
             handledByCudaStreaming = cudaIoStream0264.handled;
         }
         if (!handledByCudaStreaming && residentClassicIo0263) {
-            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(params, time);
+            const FluidDomainBounds streamDomain = make_fluid_domain_bounds(forceStreamParams0493x3, time);
             const CudaClassicSrcIoResident0263Diagnostics cudaIoStream0263 =
-                try_apply_cuda_classic_src_io_fullface_stream_0263(state, params, streamDomain, step);
+                try_apply_cuda_classic_src_io_fullface_stream_0263(state, forceStreamParams0493x3, streamDomain, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "io_fullface_0263", "force_stream", cudaIoStream0263);
             handledByCudaStreaming = cudaIoStream0263.handled;
         }
         if (!handledByCudaStreaming && cuda_piston_streaming_0247b_requested()) {
             const CudaPistonStreaming0247bDiagnostics cudaStreaming0247b =
-                try_apply_cuda_piston_streaming_0247b(state, params, step);
+                try_apply_cuda_piston_streaming_0247b(state, forceStreamParams0493x3, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "piston_0247b", "force_stream", cudaStreaming0247b);
             handledByCudaStreaming = cudaStreaming0247b.handled;
         }
         const bool fusedClassicOnly0274 =
-            !params.projectionEnable && !params.resamplingEnable &&
-            !params.closedCapacityResponseEnable && !params.thermostatEnable;
+            !forceStreamParams0493x3.projectionEnable && !forceStreamParams0493x3.resamplingEnable &&
+            !forceStreamParams0493x3.closedCapacityResponseEnable && !forceStreamParams0493x3.thermostatEnable;
         const bool fusedStreamDeposit0274 = fusedClassicOnly0274 &&
             env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274") &&
             !env_truthy_0270("MPCD_CUDA_PERSISTENT_SRC_COLLISION_DISABLE_FUSED_STREAM_DEPOSIT_0274");
         if (!handledByCudaStreaming && fusedStreamDeposit0274 && residentClassicWall0261 &&
-            is_x_periodic(params)) {
+            is_x_periodic(forceStreamParams0493x3)) {
             CudaWallSimpleStreaming0246Diagnostics deferred{};
             deferred.requested = true;
             deferred.supported = true;
@@ -1308,7 +1378,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (!handledByCudaStreaming && cuda_wall_simple_streaming_0246_requested()) {
             const CudaWallSimpleStreaming0246Diagnostics cudaStreaming0246 =
-                try_apply_cuda_wall_simple_streaming_0246(state, params, step);
+                try_apply_cuda_wall_simple_streaming_0246(state, forceStreamParams0493x3, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "wall_simple_0246", "force_stream", cudaStreaming0246);
             handledByCudaStreaming = cudaStreaming0246.handled;
             wallSimpleResidentStreamHandled0270 =
@@ -1328,7 +1398,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         if (!handledByCudaStreaming && cuda_periodic_streaming_0245_requested()) {
             const CudaPeriodicStreaming0245Diagnostics cudaStreaming0245 =
-                try_apply_cuda_periodic_streaming_0245(state, params, step);
+                try_apply_cuda_periodic_streaming_0245(state, forceStreamParams0493x3, step);
             record_cuda_resident_profile_0266(params.outputDir, step, "periodic_0245", "force_stream", cudaStreaming0245);
             handledByCudaStreaming = cudaStreaming0245.handled;
             periodicResidentStreamHandled0334 = residentClassicPeriodic0260 && cudaStreaming0245.handled;
@@ -1342,11 +1412,11 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 }
                 double tgAx = 0.0;
                 double tgAy = 0.0;
-                taylor_green_body_acceleration(params, state.x[i], state.y[i], tgAx, tgAy);
-                state.vx[i] += (params.bodyAccelerationX + tgAx) * params.dt;
-                state.vy[i] += (params.bodyAccelerationY + tgAy) * params.dt;
-                state.x[i] += state.vx[i] * params.dt;
-                state.y[i] += state.vy[i] * params.dt;
+                taylor_green_body_acceleration(forceStreamParams0493x3, state.x[i], state.y[i], tgAx, tgAy);
+                state.vx[i] += (forceStreamParams0493x3.bodyAccelerationX + tgAx) * forceStreamParams0493x3.dt;
+                state.vy[i] += (forceStreamParams0493x3.bodyAccelerationY + tgAy) * forceStreamParams0493x3.dt;
+                state.x[i] += state.vx[i] * forceStreamParams0493x3.dt;
+                state.y[i] += state.vy[i] * forceStreamParams0493x3.dt;
             }
         }
     }
@@ -1509,25 +1579,38 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     {
         MPCD_PROFILE_PHASE(result.profile, Q6Projection);
         if (!params.srcClassicCudaModeEnable) {
-            const CudaQ6Resident0400Diagnostics cudaQ6 =
-                try_apply_cuda_q6_resident_0400(state, params, grid, result.domain, step, time,
-#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
-                                                &workspace.speciesCellCuda0490h
-#else
-                                                nullptr
-#endif
-                                                );
-            if (cudaQ6.handled) {
-                result.q6 = q6_projection_diagnostics_from_cuda_resident_0400(cudaQ6, params);
+            if (q6ForcePrestreamSingle0493x4a) {
+                // 0493x4a: the transport velocity was already projected before
+                // streaming.  Collision and the relative thermostat do not move
+                // particles, so defer the next projection until the next step,
+                // immediately before the next transport.
+                if (!prestreamQ6Handled0493x4a ||
+                    !cuda_shared_particle_state_0251_is_fresh()) {
+                    throw std::runtime_error(
+                        "0493x4a prestream_single lost CUDA resident state after collision");
+                }
                 q6ResidentHandled0400 = true;
             } else {
-                if (env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_STRICT_0400")) {
-                    throw std::runtime_error(std::string("CUDA resident Q6 strict path was requested but not handled: ") +
-                                             cudaQ6.reason);
-                }
-                result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
-                if (params.projectionEnable) {
-                    cuda_shared_particle_state_0251_invalidate("cpu_q6_projection_after_collision");
+                const CudaQ6Resident0400Diagnostics cudaQ6 =
+                    try_apply_cuda_q6_resident_0400(state, params, grid, result.domain, step, time,
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+                                                    &workspace.speciesCellCuda0490h
+#else
+                                                    nullptr
+#endif
+                                                    );
+                if (cudaQ6.handled) {
+                    result.q6 = q6_projection_diagnostics_from_cuda_resident_0400(cudaQ6, params);
+                    q6ResidentHandled0400 = true;
+                } else {
+                    if (env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_STRICT_0400")) {
+                        throw std::runtime_error(std::string("CUDA resident Q6 strict path was requested but not handled: ") +
+                                                 cudaQ6.reason);
+                    }
+                    result.q6 = apply_q6_periodic_projection(state, params, grid, result.domain, time, workspace.q6);
+                    if (params.projectionEnable) {
+                        cuda_shared_particle_state_0251_invalidate("cpu_q6_projection_after_collision");
+                    }
                 }
             }
         }

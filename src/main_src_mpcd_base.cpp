@@ -680,6 +680,7 @@ int main(int argc, char** argv) {
                   << " fluid=[" << initialDomain.xMin << "," << initialDomain.xMax
                   << "]x[" << initialDomain.yMin << "," << initialDomain.yMax << "]"
                   << " projection=" << (params.projectionEnable ? params.projectionOperator : std::string("off"))
+                  << " q6ForceProjection=" << params.q6ForceProjectionMode
                   << " resampling=" << (params.resamplingEnable ? std::string("on") : std::string("off"))
                   << " thermostat=" << (params.thermostatEnable ? params.thermostatMode : std::string("off"))
                   << " steps=" << params.nSteps

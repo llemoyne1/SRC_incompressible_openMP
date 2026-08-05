@@ -15,12 +15,14 @@ Lx="${Lx:-1.0}"; Ly="${Ly:-1.0}"; NX="${NX:-200}"; NY="${NY:-200}"
 GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-15000}"; DT="${DT:-0.005}"; KBT="${KBT:-0.05}"
 SEED="${SEED:-493900}"
 COLUMN_WIDTH="${COLUMN_WIDTH:-0.1}"; COLUMN_HEIGHT="${COLUMN_HEIGHT:-0.99}"
+LIQUID_ONLY="${LIQUID_ONLY:-0}"
 GRAVITY_Y="${GRAVITY_Y:--0.05}"
 LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"
 LIQUID_MASS="${LIQUID_MASS:-1000.0}"; GAS_MASS="${GAS_MASS:-1.}"
 LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
 GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
 SPECIES_Q6_MIN_OCCUPANCY_FRACTION="${SPECIES_Q6_MIN_OCCUPANCY_FRACTION:-0.5}"
+SPECIES_Q6_MODE="${SPECIES_Q6_MODE:-independent_masked}"
 # The 900x300 masked liquid solve is much larger than the qualification
 # smokes.  Keep a demo-appropriate relative tolerance and additional CG
 # headroom, while leaving both values explicitly overridable.
@@ -31,7 +33,12 @@ WALL_ACCOMMODATION="${WALL_ACCOMMODATION:-1.0}"
 BC_LEFT="${BC_LEFT:-specular}"; BC_RIGHT="${BC_RIGHT:-specular}"
 BC_BOTTOM="${BC_BOTTOM:-solid}"; BC_TOP="${BC_TOP:-specular}"
 
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493x0_dam_break_${NX}x${NY}_g${GAMMA}}"
+if suite_truthy_0434 "$LIQUID_ONLY"; then
+  DEFAULT_RUN_ROOT="runs/0493x2_liquid_only_${NX}x${NY}_g${GAMMA}"
+else
+  DEFAULT_RUN_ROOT="runs/0493x0_dam_break_${NX}x${NY}_g${GAMMA}"
+fi
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-$DEFAULT_RUN_ROOT}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.5}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-500}"
@@ -88,14 +95,20 @@ for mode in "${MODES_0493X0[@]}"; do
   esac
 done
 
-python3 - "$Lx" "$Ly" "$COLUMN_WIDTH" "$COLUMN_HEIGHT" "$LIQUID_MASS" "$GAS_MASS" "$GRAVITY_Y" "$Q6_PROJECTION_TOLERANCE" "$Q6_PROJECTION_MAX_ITERATIONS" "$WALL_ACCOMMODATION" "$BC_LEFT" "$BC_RIGHT" "$BC_BOTTOM" "$BC_TOP" <<'PY_VALIDATE'
+python3 - "$Lx" "$Ly" "$COLUMN_WIDTH" "$COLUMN_HEIGHT" "$LIQUID_MASS" "$GAS_MASS" "$GRAVITY_Y" "$Q6_PROJECTION_TOLERANCE" "$Q6_PROJECTION_MAX_ITERATIONS" "$WALL_ACCOMMODATION" "$BC_LEFT" "$BC_RIGHT" "$BC_BOTTOM" "$BC_TOP" "$LIQUID_ONLY" "$SPECIES_Q6_MODE" <<'PY_VALIDATE'
 import math
 import sys
 lx, ly, width, height, ml, mg, gy, q6_tol = map(float, sys.argv[1:9])
 q6_max_iter = int(sys.argv[9])
 accommodation = float(sys.argv[10])
 boundaries = sys.argv[11:15]
-if not (0.0 < width < lx and 0.0 < height < ly):
+liquid_only = sys.argv[15].strip().lower() in {"1", "true", "yes", "on"}
+q6_mode = sys.argv[16].strip()
+if q6_mode not in {"independent_masked", "common"}:
+    raise SystemExit("[0493x0] SPECIES_Q6_MODE must be independent_masked or common")
+if q6_mode == "common" and not liquid_only:
+    raise SystemExit("[0493x0] SPECIES_Q6_MODE=common is restricted to the liquid-only control")
+if (not liquid_only) and not (0.0 < width < lx and 0.0 < height < ly):
     raise SystemExit("[0493x0] invalid liquid-column dimensions")
 if not (ml > 0.0 and mg > 0.0 and math.isfinite(gy) and gy < 0.0):
     raise SystemExit("[0493x0] require positive masses and downward GRAVITY_Y")
@@ -111,14 +124,21 @@ if suite_truthy_0434 "$CLEAN_RUN_ROOT"; then
   rm -rf "$BASE_RUN_ROOT"
 fi
 mkdir -p "$BASE_RUN_ROOT/init_shared"
-STATE="$BASE_RUN_ROOT/init_shared/dam_break_${NX}x${NY}_g${GAMMA}.smpcd"
+if suite_truthy_0434 "$LIQUID_ONLY"; then
+  STATE_BASENAME="liquid_only_${NX}x${NY}_g${GAMMA}"
+  GENERATOR_PROFILE_ARGS=(--liquid-only)
+else
+  STATE_BASENAME="dam_break_${NX}x${NY}_g${GAMMA}"
+  GENERATOR_PROFILE_ARGS=()
+fi
+STATE="$BASE_RUN_ROOT/init_shared/${STATE_BASENAME}.smpcd"
 STATE_METADATA="$STATE.json"
 python3 scripts/generate_0493x0_dam_break_state.py \
   --output "$STATE" --Lx "$Lx" --Ly "$Ly" --nx "$NX" --ny "$NY" --gamma "$GAMMA" \
   --column-width "$COLUMN_WIDTH" --column-height "$COLUMN_HEIGHT" \
   --liquid-type "$LIQUID_TYPE" --gas-type "$GAS_TYPE" \
   --liquid-mass "$LIQUID_MASS" --gas-mass "$GAS_MASS" \
-  --kBT "$KBT" --seed "$SEED"
+  --kBT "$KBT" --seed "$SEED" "${GENERATOR_PROFILE_ARGS[@]}"
 
 LIQUID_REFERENCE_CELL_MASS="$(awk -v g="$GAMMA" -v m="$LIQUID_MASS" 'BEGIN{printf "%.17g",g*m}')"
 GAS_REFERENCE_CELL_MASS="$(awk -v g="$GAMMA" -v m="$GAS_MASS" 'BEGIN{printf "%.17g",g*m}')"
@@ -164,7 +184,7 @@ speciesDiagnosticsEnable = true
 speciesDiagnosticsFilename = species_runtime_0493x0.csv
 speciesCellDiagnosticsEnable = false
 speciesQ6Enable = $species_q6_enable
-speciesQ6Mode = independent_masked
+speciesQ6Mode = $SPECIES_Q6_MODE
 speciesQ6Sensitivity = 1.0
 speciesQ6FallbackMode = common
 speciesQ6ComparisonTolerance = 1.0e-11
@@ -198,12 +218,14 @@ run_one_mode_0493x0() {
   cat >> "$run_root/logs/environment_0493x0.env" <<META
 COLUMN_WIDTH=$COLUMN_WIDTH
 COLUMN_HEIGHT=$COLUMN_HEIGHT
+LIQUID_ONLY=$LIQUID_ONLY
 GRAVITY_Y=$GRAVITY_Y
 LIQUID_TYPE=$LIQUID_TYPE
 GAS_TYPE=$GAS_TYPE
 LIQUID_MASS=$LIQUID_MASS
 GAS_MASS=$GAS_MASS
 SPECIES_Q6_MIN_OCCUPANCY_FRACTION=$SPECIES_Q6_MIN_OCCUPANCY_FRACTION
+SPECIES_Q6_MODE=$SPECIES_Q6_MODE
 Q6_PROJECTION_TOLERANCE=$Q6_PROJECTION_TOLERANCE
 Q6_PROJECTION_MAX_ITERATIONS=$Q6_PROJECTION_MAX_ITERATIONS
 WALL_ACCOMMODATION=$WALL_ACCOMMODATION
@@ -213,8 +235,12 @@ BC_BOTTOM=$BC_BOTTOM
 BC_TOP=$BC_TOP
 META
   echo "[0493x0] mode=$mode grid=${NX}x${NY} gamma=$GAMMA steps=$STEPS"
+  if suite_truthy_0434 "$LIQUID_ONLY"; then
+    echo "[0493x2] profile=liquid_only fullBox=1 gravityY=$GRAVITY_Y closedBox=[L:$BC_LEFT R:$BC_RIGHT B:$BC_BOTTOM T:$BC_TOP]"
+  else
   echo "[0493x0] column=${COLUMN_WIDTH}x${COLUMN_HEIGHT} gravityY=$GRAVITY_Y closedBox=[L:$BC_LEFT R:$BC_RIGHT B:$BC_BOTTOM T:$BC_TOP] massRatio=$(awk -v a="$LIQUID_MASS" -v b="$GAS_MASS" 'BEGIN{printf "%.6g",a/b}')"
-  echo "[0493x0] q6Mode=independent_masked liquidStrength=$LIQUID_Q6_STRENGTH gasStrength=$GAS_Q6_STRENGTH minOcc=$SPECIES_Q6_MIN_OCCUPANCY_FRACTION"
+  fi
+  echo "[0493x0] q6Mode=$SPECIES_Q6_MODE liquidStrength=$LIQUID_Q6_STRENGTH gasStrength=$GAS_Q6_STRENGTH minOcc=$SPECIES_Q6_MIN_OCCUPANCY_FRACTION"
   echo "[0493x0] q6Solver tolerance=$Q6_PROJECTION_TOLERANCE maxIterations=$Q6_PROJECTION_MAX_ITERATIONS"
   suite_run_binary_0434 "$params" "$log" "$time" "$out"
 }

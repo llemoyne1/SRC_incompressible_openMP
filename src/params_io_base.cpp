@@ -351,6 +351,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "taylorGreenForcingAmplitude" || key == "tgForcingAmplitude" || key == "tgForceAmplitude") p.taylorGreenForcingAmplitude = parse_double(value, key);
         else if (key == "taylorGreenForcingModeX" || key == "tgForcingModeX") p.taylorGreenForcingModeX = parse_int(value, key);
         else if (key == "taylorGreenForcingModeY" || key == "tgForcingModeY") p.taylorGreenForcingModeY = parse_int(value, key);
+        else if (key == "q6ForceProjectionMode") p.q6ForceProjectionMode = value;
         else if (key == "keepMeanFlowEnable" || key == "keepMeanFlow") p.keepMeanFlowEnable = parse_bool(value, key);
         else if (key == "targetMeanUx" || key == "meanFlowUx" || key == "U0") p.targetMeanUx = parse_double(value, key);
         else if (key == "targetMeanUy" || key == "meanFlowUy") p.targetMeanUy = parse_double(value, key);
@@ -1327,6 +1328,46 @@ void validate_simulation_params(const SimulationParams& p) {
         p.immersedSolidEnable && p.projectionImmersedSolidMaskEnable &&
         (std::abs(p.immersedSolidVx) > 0.0 || std::abs(p.immersedSolidVy) > 0.0 || std::abs(p.immersedSolidOmega) > 0.0)) {
         throw std::runtime_error("Q6 immersed-solid projection mask currently supports fixed immersed solids only");
+    }
+    if (p.q6ForceProjectionMode != "legacy" &&
+        p.q6ForceProjectionMode != "prestream" &&
+        p.q6ForceProjectionMode != "prestream_single" &&
+        p.q6ForceProjectionMode != "prestream_single_fused") {
+        throw std::runtime_error(
+            "q6ForceProjectionMode supports: legacy, prestream, prestream_single, prestream_single_fused");
+    }
+    if (p.q6ForceProjectionMode != "legacy") {
+        const bool periodicBox = is_x_periodic(p) && is_y_periodic(p);
+        const auto staticWall = [](const std::string& mode) {
+            return mode == "solid" || mode == "specular";
+        };
+        const bool closedStaticBox = !is_x_periodic(p) && !is_y_periodic(p) &&
+            staticWall(p.bcLeft) && staticWall(p.bcRight) &&
+            staticWall(p.bcBottom) && staticWall(p.bcTop);
+        if (!q6OrProjectionRequested || p.projectionBackend != "cuda") {
+            throw std::runtime_error(
+                "non-legacy q6ForceProjectionMode requires active CUDA Q6 projection");
+        }
+        if (!periodicBox && !closedStaticBox) {
+            throw std::runtime_error(
+                "non-legacy q6ForceProjectionMode is restricted to periodic boxes or static closed boxes");
+        }
+        if (p.speciesQ6Enable && p.speciesQ6Mode != "common") {
+            throw std::runtime_error(
+                "non-legacy q6ForceProjectionMode currently requires speciesQ6Mode=common");
+        }
+        if (p.resamplingEnable || p.closedCapacityResponseEnable ||
+            p.closedCapacityVirialKickEnable || p.darcyBrinkmanEnable ||
+            p.immersedSolidEnable || p.projectionImmersedSolidMaskEnable ||
+            p.openBoundarySegmentsEnable) {
+            throw std::runtime_error(
+                "non-legacy q6ForceProjectionMode test excludes resampling, capacity/virial, Darcy, immersed solids and open boundaries");
+        }
+        if (std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0 ||
+            std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0) {
+            throw std::runtime_error(
+                "non-legacy q6ForceProjectionMode requires a static fluid domain");
+        }
     }
     if (p.taylorGreenForcingEnable) {
         if (!(p.Lx > 0.0) || !(p.Ly > 0.0)) {

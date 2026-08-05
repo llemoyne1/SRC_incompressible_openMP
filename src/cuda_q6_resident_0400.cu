@@ -101,6 +101,65 @@ double seconds_since_0400(const Clock0400::time_point& t0) {
     return std::chrono::duration<double>(Clock0400::now() - t0).count();
 }
 
+__device__ void q6_force_acceleration_0493x4b(
+    const double x,
+    const double y,
+    const double Lx,
+    const double Ly,
+    const double bodyAx,
+    const double bodyAy,
+    const int tgEnable,
+    const double tgAmplitude,
+    const int tgModeX,
+    const int tgModeY,
+    double* ax,
+    double* ay) {
+    double localAx = bodyAx;
+    double localAy = bodyAy;
+    if (tgEnable && tgAmplitude > 0.0) {
+        constexpr double pi = 3.141592653589793238462643383279502884;
+        const double kx = 2.0 * pi * static_cast<double>(tgModeX) / Lx;
+        const double ky = 2.0 * pi * static_cast<double>(tgModeY) / Ly;
+        localAx += tgAmplitude * sin(kx * x) * cos(ky * y);
+        localAy -= tgAmplitude * cos(kx * x) * sin(ky * y);
+    }
+    *ax = localAx;
+    *ay = localAy;
+}
+
+__global__ void q6_force_kick_0493x3(
+    CudaParticleDeviceView particles,
+    const std::uint64_t nParticles,
+    const double dt,
+    const double Lx,
+    const double Ly,
+    const double bodyAx,
+    const double bodyAy,
+    const int tgEnable,
+    const double tgAmplitude,
+    const int tgModeX,
+    const int tgModeY,
+    const unsigned char fluidRole) {
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) *
+                                static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= nParticles || particles.role[i] != fluidRole) return;
+
+    double ax = bodyAx;
+    double ay = bodyAy;
+    if (tgEnable && tgAmplitude > 0.0) {
+        constexpr double pi = 3.141592653589793238462643383279502884;
+        const double kx = 2.0 * pi * static_cast<double>(tgModeX) / Lx;
+        const double ky = 2.0 * pi * static_cast<double>(tgModeY) / Ly;
+        const double x = particles.x[i];
+        const double y = particles.y[i];
+        ax += tgAmplitude * sin(kx * x) * cos(ky * y);
+        ay -= tgAmplitude * cos(kx * x) * sin(ky * y);
+    }
+    particles.vx[i] += ax * dt;
+    particles.vy[i] += ay * dt;
+}
+
 std::string q6_boundary_family_0491g(const SimulationParams& params) {
     if (q6_open_segmented_0409_supported(params)) return "open_segmented";
     if (q6_open_fullface_0404_supported(params)) return "open_fullface";
@@ -623,6 +682,76 @@ __global__ void q6_deposit_periodic_0400(CudaParticleDeviceView particles,
     }
 }
 
+__global__ void q6_deposit_tentative_force_0493x4b(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    int periodicX,
+    int periodicY,
+    double dt,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY) {
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const double forceX = particles.x[i];
+        const double forceY = particles.y[i];
+        double x = forceX;
+        double y = forceY;
+        if (periodicX) {
+            x -= floor(x / lx) * lx;
+        } else {
+            x = fmin(fmax(x, 0.0), nextafter(lx, 0.0));
+        }
+        if (periodicY) {
+            y -= floor(y / ly) * ly;
+        } else {
+            y = fmin(fmax(y, 0.0), nextafter(ly, 0.0));
+        }
+        int ix = static_cast<int>(floor(x / dx));
+        int iy = static_cast<int>(floor(y / dy));
+        if (periodicX) {
+            ix = wrap_cell_index_0400(ix, nx);
+        } else {
+            if (ix < 0) ix = 0;
+            if (ix >= nx) ix = nx - 1;
+        }
+        if (periodicY) {
+            iy = wrap_cell_index_0400(iy, ny);
+        } else {
+            if (iy < 0) iy = 0;
+            if (iy >= ny) iy = ny - 1;
+        }
+        const int c = iy * nx + ix;
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            forceX, forceY, lx, ly, bodyAx, bodyAy, tgEnable, tgAmplitude,
+            tgModeX, tgModeY, &ax, &ay);
+        const double vxTentative = particles.vx[i] + ax * dt;
+        const double vyTentative = particles.vy[i] + ay * dt;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        cells.cellId[i] = c;
+        atomicAdd(&cells.count[c], 1u);
+        atomic_add_double_0400(&cells.cellMass[c], m);
+        atomic_add_double_0400(&cells.cellPx[c], m * vxTentative);
+        atomic_add_double_0400(&cells.cellPy[c], m * vyTentative);
+    }
+}
+
 __global__ void q6_finalize_cells_0400(CudaCellWorkspaceDeviceView cells,
                                        unsigned long long* emptyCounter) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1036,6 +1165,74 @@ __global__ void q6_apply_particle_correction_0400(CudaParticleDeviceView particl
     }
 }
 
+__global__ void q6_apply_force_and_particle_correction_0493x4b(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const double* dux,
+    const double* duy,
+    std::uint64_t nParticles,
+    double dt,
+    double lx,
+    double ly,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY,
+    double* partialPx,
+    double* partialPy) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0) {
+            continue;
+        }
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        const double dvx = dux[c];
+        const double dvy = duy[c];
+        // Preserve the 0493x4a arithmetic order while combining both updates in
+        // one resident CUDA particle pass.
+        particles.vx[i] += ax * dt;
+        particles.vy[i] += ay * dt;
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        // The momentum correction audits only the Q6 correction, as in the
+        // separate force-kick + Q6 path.  Physical force momentum is retained.
+        px += m * dvx;
+        py += m * dvy;
+    }
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
 __global__ void q6_reset_species_mass_0491c(CudaSpeciesCellDeviceView0490h species) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -1092,6 +1289,59 @@ __global__ void q6_deposit_species_mass_from_cell_ids_0491c(
         atomic_add_double_0400(&species.mass[k], m);
         atomic_add_double_0400(&species.px[k], m * particles.vx[i]);
         atomic_add_double_0400(&species.py[k], m * particles.vy[i]);
+        atomic_add_double_0400(&species.totalCellMass[c], m);
+    }
+}
+
+__global__ void q6_deposit_species_tentative_force_from_cell_ids_0493x4b(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    std::uint64_t nParticles,
+    double dt,
+    double lx,
+    double ly,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY) {
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= species.numCells) {
+            continue;
+        }
+        int speciesIndex = -1;
+        const std::uint32_t type = particles.type ? particles.type[i] : 0u;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            if (species.speciesTypes[s] == type) {
+                speciesIndex = s;
+                break;
+            }
+        }
+        if (speciesIndex < 0) {
+            if (species.invalidTypeCounter != nullptr) {
+                atomicAdd(species.invalidTypeCounter, 1ull);
+            }
+            continue;
+        }
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        const int k = speciesIndex * species.numCells + c;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        atomicAdd(&species.count[k], 1u);
+        atomic_add_double_0400(&species.mass[k], m);
+        atomic_add_double_0400(&species.px[k], m * (particles.vx[i] + ax * dt));
+        atomic_add_double_0400(&species.py[k], m * (particles.vy[i] + ay * dt));
         atomic_add_double_0400(&species.totalCellMass[c], m);
     }
 }
@@ -1182,6 +1432,107 @@ __global__ void q6_apply_species_particle_correction_0491c(
 
         const double dvx = weight * dux[c];
         const double dvy = weight * duy[c];
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        px += m * dvx;
+        py += m * dvy;
+    }
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
+__global__ void q6_apply_species_force_and_particle_correction_0493x4b(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    CudaSpeciesCellDeviceView0490h species,
+    const double* dux,
+    const double* duy,
+    std::uint64_t nParticles,
+    double sensitivity,
+    double alphaEpsilon,
+    int weightedMode,
+    int fatalFallback,
+    double dt,
+    double lx,
+    double ly,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY,
+    double* partialPx,
+    double* partialPy,
+    unsigned long long* fallbackCounter) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= species.numCells) {
+            continue;
+        }
+        int speciesIndex = -1;
+        const std::uint32_t type = particles.type ? particles.type[i] : 0u;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            if (species.speciesTypes[s] == type) {
+                speciesIndex = s;
+                break;
+            }
+        }
+        if (speciesIndex < 0) {
+            continue;
+        }
+
+        double weight = 1.0;
+        if (weightedMode && sensitivity > 0.0) {
+            const double totalMass = species.totalCellMass[c];
+            double alphaBar = 0.0;
+            if (totalMass > 0.0) {
+                for (int s = 0; s < species.speciesCount; ++s) {
+                    const double ms = species.mass[s * species.numCells + c];
+                    alphaBar += (ms / totalMass) * species.q6Strength[s];
+                }
+            }
+            if (alphaBar > alphaEpsilon) {
+                weight = (1.0 - sensitivity) +
+                         sensitivity * species.q6Strength[speciesIndex] / alphaBar;
+            } else if (fatalFallback) {
+                atomicAdd(fallbackCounter, 1ull);
+                continue;
+            }
+        }
+
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        const double dvx = weight * dux[c];
+        const double dvy = weight * duy[c];
+        particles.vx[i] += ax * dt;
+        particles.vy[i] += ay * dt;
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
         const double m = particles.mass ? particles.mass[i] : 1.0;
@@ -2780,13 +3131,75 @@ bool supported_subset_0400(const SimulationParams& params,
 
 } // namespace
 
+CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
+    ParticleState& state,
+    const SimulationParams& params) {
+    CudaQ6ForceKick0493x3Diagnostics diag;
+    diag.requested = params.q6ForceProjectionMode == "prestream" ||
+                     params.q6ForceProjectionMode == "prestream_single";
+    if (!diag.requested) {
+        diag.reason = "legacy force ordering";
+        return diag;
+    }
+    const bool tgActive = params.taylorGreenForcingEnable &&
+                          params.taylorGreenForcingAmplitude > 0.0;
+    const bool uniformActive = params.bodyAccelerationX != 0.0 ||
+                               params.bodyAccelerationY != 0.0;
+    if (!tgActive && !uniformActive) {
+        diag.handled = true;
+        diag.reason = "zero force";
+        return diag;
+    }
+
+    const std::uint64_t active = active_fluid_count(state);
+    if (active == 0u) {
+        diag.reason = "no active fluid particles";
+        return diag;
+    }
+    CudaParticleState& gpuState = cuda_shared_particle_state_0251();
+    if (!cuda_shared_particle_state_0251_is_fresh()) {
+        gpuState.upload_all(state);
+        gpuState.set_active_fluid_size(active);
+        cuda_shared_particle_state_0251_mark_fresh("cuda_q6_force_kick_0493x3_upload");
+    }
+    CudaParticleDeviceView particles = gpuState.device_view();
+    const std::uint64_t nParticles =
+        particles.nActiveFluid > 0u ? particles.nActiveFluid : active;
+    if (nParticles == 0u || nParticles > particles.n) {
+        diag.reason = "invalid resident active prefix";
+        return diag;
+    }
+
+    const int threads = 256;
+    const int blocks = std::max(
+        1, std::min(4096, static_cast<int>((nParticles + threads - 1u) / threads)));
+    q6_force_kick_0493x3<<<blocks, threads>>>(
+        particles, nParticles, params.dt, params.Lx, params.Ly,
+        params.bodyAccelerationX, params.bodyAccelerationY,
+        tgActive ? 1 : 0, params.taylorGreenForcingAmplitude,
+        params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
+        static_cast<unsigned char>(ParticleRole::Fluid));
+    check_cuda_0400(cudaGetLastError(), "0493x3 force kick launch");
+
+    state.NactiveFluid = nParticles;
+    cuda_shared_particle_state_0251_mark_fresh("cuda_q6_force_kick_0493x3");
+    diag.handled = true;
+    diag.applied = true;
+    diag.particles = nParticles;
+    diag.blocks = blocks;
+    diag.threads = threads;
+    diag.reason = "ok";
+    return diag;
+}
+
 CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& state,
                                                               const SimulationParams& params,
                                                               const CellGrid& grid,
                                                               const FluidDomainBounds& domain,
                                                               int step,
                                                               double time,
-                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c) {
+                                                              CudaSpeciesCellWorkspace0490h* speciesWorkspace0491c,
+                                                              bool fuseForceKick0493x4b) {
     (void)step;
     CudaQ6Resident0400Diagnostics diag;
     diag.requested = truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_0400"));
@@ -2799,6 +3212,25 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     diag.reason = reason;
     if (!diag.supported) {
         return diag;
+    }
+    diag.fusedForceKick0493x4b = fuseForceKick0493x4b;
+    const bool tgForceActive0493x4b = params.taylorGreenForcingEnable &&
+                                      params.taylorGreenForcingAmplitude > 0.0;
+    const bool uniformForceActive0493x4b = params.bodyAccelerationX != 0.0 ||
+                                           params.bodyAccelerationY != 0.0;
+    if (fuseForceKick0493x4b) {
+        if (params.q6ForceProjectionMode != "prestream_single_fused") {
+            diag.reason = "fused force kick requires q6ForceProjectionMode=prestream_single_fused";
+            return diag;
+        }
+        if (!tgForceActive0493x4b && !uniformForceActive0493x4b) {
+            diag.reason = "fused force kick requested with zero force";
+            return diag;
+        }
+        if (params.speciesQ6Enable && params.speciesQ6Mode != "common") {
+            diag.reason = "fused force kick currently requires speciesQ6Mode=common";
+            return diag;
+        }
     }
 
     const std::uint64_t active = active_fluid_count(state);
@@ -2897,9 +3329,20 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     check_cuda_0400(cudaGetLastError(), "zero cells launch");
     q6_zero_particle_cell_ids_0400<<<particleBlocks, threads>>>(cells, nParticles);
     check_cuda_0400(cudaGetLastError(), "zero particle cell ids launch");
-    q6_deposit_periodic_0400<<<particleBlocks, threads>>>(particles, cells, nParticles,
-                                                          grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY);
-    check_cuda_0400(cudaGetLastError(), "deposit launch");
+    if (fuseForceKick0493x4b) {
+        q6_deposit_tentative_force_0493x4b<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, grid.Nx, grid.Ny, params.Lx, params.Ly,
+            periodicX, periodicY, params.dt, params.bodyAccelerationX,
+            params.bodyAccelerationY, tgForceActive0493x4b ? 1 : 0,
+            params.taylorGreenForcingAmplitude, params.taylorGreenForcingModeX,
+            params.taylorGreenForcingModeY);
+        check_cuda_0400(cudaGetLastError(), "0493x4b fused tentative force deposit launch");
+    } else {
+        q6_deposit_periodic_0400<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, grid.Nx, grid.Ny, params.Lx, params.Ly,
+            periodicX, periodicY);
+        check_cuda_0400(cudaGetLastError(), "deposit launch");
+    }
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "finalize cells launch");
     if (params.speciesQ6Enable) {
@@ -2944,9 +3387,19 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
             std::max(1, std::min(1024, (std::max(grid.numCells, denseSpecies0491c) + threads - 1) / threads));
         q6_reset_species_mass_0491c<<<speciesResetBlocks0491c, threads>>>(species0491c);
         check_cuda_0400(cudaGetLastError(), "species q6 mass reset launch");
-        q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
-            particles, cells, species0491c, nParticles);
-        check_cuda_0400(cudaGetLastError(), "species q6 mass deposit launch");
+        if (fuseForceKick0493x4b) {
+            q6_deposit_species_tentative_force_from_cell_ids_0493x4b<<<particleBlocks, threads>>>(
+                particles, cells, species0491c, nParticles, params.dt, params.Lx,
+                params.Ly, params.bodyAccelerationX, params.bodyAccelerationY,
+                tgForceActive0493x4b ? 1 : 0, params.taylorGreenForcingAmplitude,
+                params.taylorGreenForcingModeX, params.taylorGreenForcingModeY);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x4b fused species tentative force deposit launch");
+        } else {
+            q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
+                particles, cells, species0491c, nParticles);
+            check_cuda_0400(cudaGetLastError(), "species q6 mass deposit launch");
+        }
         q6_finalize_species_occupancy_0493w5<<<cellBlocks, threads>>>(species0491c);
         check_cuda_0400(cudaGetLastError(), "species q6 occupancy finalize launch");
         unsigned long long invalidSpecies0491c = 0ull;
@@ -3163,13 +3616,28 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         }
         diag.speciesQ6WeightSeconds = seconds_since_0400(tSpeciesWeight0491h);
         const auto tSpeciesApply0491h = Clock0400::now();
-        q6_apply_species_particle_correction_0491c<<<particleBlocks, threads, pairShared>>>(
-            particles, cells, species0491c, ws.dux.data(), ws.duy.data(), nParticles,
-            params.speciesQ6Sensitivity, params.speciesQ6AlphaEpsilon,
-            speciesQ6Weighted0491c ? 1 : 0,
-            params.speciesQ6FallbackMode == "fatal" ? 1 : 0,
-            ws.partial0.data(), ws.partial1.data(), ws.counter.data());
-        check_cuda_0400(cudaGetLastError(), "apply species q6 particle correction launch");
+        if (fuseForceKick0493x4b) {
+            q6_apply_species_force_and_particle_correction_0493x4b<<<particleBlocks, threads, pairShared>>>(
+                particles, cells, species0491c, ws.dux.data(), ws.duy.data(), nParticles,
+                params.speciesQ6Sensitivity, params.speciesQ6AlphaEpsilon,
+                speciesQ6Weighted0491c ? 1 : 0,
+                params.speciesQ6FallbackMode == "fatal" ? 1 : 0,
+                params.dt, params.Lx, params.Ly, params.bodyAccelerationX,
+                params.bodyAccelerationY, tgForceActive0493x4b ? 1 : 0,
+                params.taylorGreenForcingAmplitude, params.taylorGreenForcingModeX,
+                params.taylorGreenForcingModeY, ws.partial0.data(), ws.partial1.data(),
+                ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x4b fused species force and Q6 apply launch");
+        } else {
+            q6_apply_species_particle_correction_0491c<<<particleBlocks, threads, pairShared>>>(
+                particles, cells, species0491c, ws.dux.data(), ws.duy.data(), nParticles,
+                params.speciesQ6Sensitivity, params.speciesQ6AlphaEpsilon,
+                speciesQ6Weighted0491c ? 1 : 0,
+                params.speciesQ6FallbackMode == "fatal" ? 1 : 0,
+                ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+            check_cuda_0400(cudaGetLastError(), "apply species q6 particle correction launch");
+        }
         unsigned long long fallbackCount0491c = 0ull;
         check_cuda_0400(cudaMemcpy(&fallbackCount0491c, ws.counter.data(),
                                    sizeof(fallbackCount0491c), cudaMemcpyDeviceToHost),
@@ -3180,9 +3648,21 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         }
         diag.speciesQ6ParticleApplySeconds = seconds_since_0400(tSpeciesApply0491h);
     } else {
-        q6_apply_particle_correction_0400<<<particleBlocks, threads, pairShared>>>(
-            particles, cells, ws.dux.data(), ws.duy.data(), nParticles, ws.partial0.data(), ws.partial1.data());
-        check_cuda_0400(cudaGetLastError(), "apply particle correction launch");
+        if (fuseForceKick0493x4b) {
+            q6_apply_force_and_particle_correction_0493x4b<<<particleBlocks, threads, pairShared>>>(
+                particles, cells, ws.dux.data(), ws.duy.data(), nParticles,
+                params.dt, params.Lx, params.Ly, params.bodyAccelerationX,
+                params.bodyAccelerationY, tgForceActive0493x4b ? 1 : 0,
+                params.taylorGreenForcingAmplitude, params.taylorGreenForcingModeX,
+                params.taylorGreenForcingModeY, ws.partial0.data(), ws.partial1.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x4b fused force and Q6 apply launch");
+        } else {
+            q6_apply_particle_correction_0400<<<particleBlocks, threads, pairShared>>>(
+                particles, cells, ws.dux.data(), ws.duy.data(), nParticles,
+                ws.partial0.data(), ws.partial1.data());
+            check_cuda_0400(cudaGetLastError(), "apply particle correction launch");
+        }
     }
     const double dpx = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
     const double dpy = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
@@ -3199,10 +3679,12 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     check_cuda_0400(cudaGetLastError(), "update corrected cell means launch");
     diag.applySeconds = seconds_since_0400(tApply);
 
-    cuda_shared_particle_state_0251_mark_fresh("cuda_q6_resident_0400");
+    cuda_shared_particle_state_0251_mark_fresh(
+        fuseForceKick0493x4b ? "cuda_q6_resident_0400_fused_force_0493x4b"
+                             : "cuda_q6_resident_0400");
     diag.applied = true;
     diag.handled = true;
-    diag.reason = "ok";
+    diag.reason = fuseForceKick0493x4b ? "ok_fused_force_0493x4b" : "ok";
     diag.totalSeconds = seconds_since_0400(tTotal);
     append_species_q6_resident_audit_0491e(
         params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);

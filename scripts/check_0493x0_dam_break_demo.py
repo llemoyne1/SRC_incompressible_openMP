@@ -45,6 +45,12 @@ def latest_type(rows: list[dict[str, str]], particle_type: int, label: str) -> d
         raise SystemExit(f"missing {label} row for particle type {particle_type}")
     return matches[-1]
 
+def latest_type_or_empty(
+    rows: list[dict[str, str]], particle_type: int
+) -> dict[str, str]:
+    matches = [row for row in rows if as_int(row.get("type"), -1) == particle_type]
+    return matches[-1] if matches else {}
+
 
 def as_int(value: str | None, default: int = -1) -> int:
     try:
@@ -87,8 +93,10 @@ def main() -> int:
     args = parser.parse_args()
 
     metadata = json.loads(args.state_metadata.read_text())
-    if metadata.get("profile") != "dam_break":
-        raise SystemExit("state metadata does not describe a dam-break profile")
+    profile = metadata.get("profile")
+    if profile not in {"dam_break", "liquid_only"}:
+        raise SystemExit("state metadata does not describe a supported 0493x0/x2 profile")
+    liquid_only = profile == "liquid_only"
 
     liquid_type = int(metadata["liquid_type"])
     gas_type = int(metadata["gas_type"])
@@ -97,8 +105,13 @@ def main() -> int:
     total_particles_expected = int(metadata["fluid_particles"])
     liquid_mass_expected = liquid_particles_expected * float(metadata["liquid_mass"])
     gas_mass_expected = gas_particles_expected * float(metadata["gas_mass"])
-    if min(liquid_particles_expected, gas_particles_expected) <= 0:
-        raise SystemExit("initial state must contain both liquid and gas")
+    if liquid_particles_expected <= 0:
+        raise SystemExit("initial state must contain liquid particles")
+    if liquid_only:
+        if gas_particles_expected != 0:
+            raise SystemExit("liquid-only state unexpectedly contains gas particles")
+    elif gas_particles_expected <= 0:
+        raise SystemExit("dam-break state must contain ambient gas particles")
 
     results: list[dict[str, object]] = []
     all_ok = True
@@ -109,7 +122,7 @@ def main() -> int:
         species_rows = read_rows(output / "species_runtime_0493x0.csv")
         final = summary[-1] if summary else {}
         liquid_species = latest_type(species_rows, liquid_type, "species diagnostic")
-        gas_species = latest_type(species_rows, gas_type, "species diagnostic")
+        gas_species = latest_type_or_empty(species_rows, gas_type)
 
         step_ok = as_int(final.get("step"), -1) >= args.expected_steps
         params_closed_ok = (
@@ -127,15 +140,22 @@ def main() -> int:
         )
         total_count_ok = as_int(final.get("nFluidParticles"), -1) == total_particles_expected
         liquid_count_ok = as_int(liquid_species.get("nFluid"), -1) == liquid_particles_expected
-        gas_count_ok = as_int(gas_species.get("nFluid"), -1) == gas_particles_expected
+        gas_count_ok = (
+            as_int(gas_species.get("nFluid"), 0 if liquid_only else -1)
+            == gas_particles_expected
+        )
         liquid_mass_ok = close_mass(liquid_species.get("totalMass"), liquid_mass_expected)
-        gas_mass_ok = close_mass(gas_species.get("totalMass"), gas_mass_expected)
+        gas_mass_ok = (
+            gas_particles_expected == 0
+            and (not gas_species or close_mass(gas_species.get("totalMass"), 0.0))
+        ) or close_mass(gas_species.get("totalMass"), gas_mass_expected)
         conservation_ok = (
             total_count_ok and liquid_count_ok and gas_count_ok and
             liquid_mass_ok and gas_mass_ok and no_open_mutation
         )
 
         q6_expected = "q6" in mode
+        q6_mode = params.get("speciesQ6Mode", "")
         q6_ok = True
         active_cells: object = ""
         corrected_particles: object = ""
@@ -143,16 +163,9 @@ def main() -> int:
 
         if q6_expected:
             generic_rows = read_rows(output / "cuda_species_q6_0491.csv")
-            independent_rows = read_rows(
-                output / "cuda_species_q6_independent_masked_0493w5.csv"
-            )
             generic = generic_rows[-1] if generic_rows else {}
-            liquid = latest_type(independent_rows, liquid_type, "Q6 diagnostic")
-            gas = latest_type(independent_rows, gas_type, "Q6 diagnostic")
-
-            resident_ok = (
-                generic.get("mode") == "independent_masked"
-                and generic.get("boundaryFamily") == "closed_box"
+            resident_base_ok = (
+                generic.get("boundaryFamily") == "closed_box"
                 and generic.get("openBoundaryEnabled") == "0"
                 and generic.get("darcyBrinkmanEnable") == "0"
                 and generic.get("species_q6_device_resident") == "1"
@@ -163,38 +176,61 @@ def main() -> int:
                 and generic.get("species_q6_remaining_cpu_scope") == "none"
                 and generic.get("q6Applied") == "1"
                 and generic.get("q6Converged") == "1"
-            )
-            liquid_ok = (
-                finite(liquid.get("q6Strength"))
-                and as_float(liquid.get("q6Strength")) > 0.0
-                and as_int(liquid.get("activeCells"), 0) > 0
-                and as_int(liquid.get("correctedParticles"), 0) > 0
-                and liquid.get("converged") == "1"
+                and as_int(generic.get("q6Iterations"), -1) >= 0
                 and all(
-                    finite(liquid.get(key))
-                    for key in (
-                        "residualRel",
-                        "divBeforeRms",
-                        "divAfterProjectedFaceFluxRms",
-                        "divAfterAppliedCellVelocityRms",
-                        "correctionMaxAbs",
-                    )
+                    finite(generic.get(key))
+                    for key in ("depositSeconds", "solveSeconds", "applySeconds", "totalSeconds")
                 )
             )
-            gas_ok = (
-                is_zero(gas.get("q6Strength"))
-                and as_int(gas.get("activeCells"), -1) == 0
-                and as_int(gas.get("correctedParticles"), -1) == 0
-                and is_zero(gas.get("correctionMaxAbs"))
-                and is_zero(gas.get("momentumX"))
-                and is_zero(gas.get("momentumY"))
-            )
-            q6_ok = resident_ok and liquid_ok and gas_ok
-            active_cells = liquid.get("activeCells", "")
-            corrected_particles = liquid.get("correctedParticles", "")
-            before = as_float(liquid.get("divBeforeRms"), 0.0)
-            after = as_float(liquid.get("divAfterAppliedCellVelocityRms"))
-            applied_ratio = after / before if before > 0.0 and math.isfinite(after) else ""
+
+            if q6_mode == "independent_masked":
+                independent_rows = read_rows(
+                    output / "cuda_species_q6_independent_masked_0493w5.csv"
+                )
+                liquid = latest_type(independent_rows, liquid_type, "Q6 diagnostic")
+                gas = latest_type_or_empty(independent_rows, gas_type)
+                resident_ok = generic.get("mode") == "independent_masked" and resident_base_ok
+                liquid_ok = (
+                    finite(liquid.get("q6Strength"))
+                    and as_float(liquid.get("q6Strength")) > 0.0
+                    and as_int(liquid.get("activeCells"), 0) > 0
+                    and as_int(liquid.get("correctedParticles"), 0) > 0
+                    and liquid.get("converged") == "1"
+                    and all(
+                        finite(liquid.get(key))
+                        for key in (
+                            "residualRel",
+                            "divBeforeRms",
+                            "divAfterProjectedFaceFluxRms",
+                            "divAfterAppliedCellVelocityRms",
+                            "correctionMaxAbs",
+                        )
+                    )
+                )
+                gas_ok = (
+                    liquid_only
+                    and not gas
+                ) or (
+                    is_zero(gas.get("q6Strength"))
+                    and as_int(gas.get("activeCells"), -1) == 0
+                    and as_int(gas.get("correctedParticles"), -1) == 0
+                    and is_zero(gas.get("correctionMaxAbs"))
+                    and is_zero(gas.get("momentumX"))
+                    and is_zero(gas.get("momentumY"))
+                )
+                q6_ok = resident_ok and liquid_ok and gas_ok
+                active_cells = liquid.get("activeCells", "")
+                corrected_particles = liquid.get("correctedParticles", "")
+                before = as_float(liquid.get("divBeforeRms"), 0.0)
+                after = as_float(liquid.get("divAfterAppliedCellVelocityRms"))
+                applied_ratio = after / before if before > 0.0 and math.isfinite(after) else ""
+            elif q6_mode == "common":
+                # Common Q6 deliberately solves on the complete geometric grid.
+                # It is accepted here only for the mono-liquid control, where no
+                # gas particle can receive the common correction.
+                q6_ok = liquid_only and generic.get("mode") == "common" and resident_base_ok
+            else:
+                q6_ok = False
 
         accumulated_side_hits = sum(
             max(0, as_int(row.get("hitsLeft"), 0)) +
@@ -211,7 +247,9 @@ def main() -> int:
         all_ok = all_ok and passed
         results.append(
             {
+                "profile": profile,
                 "mode": mode,
+                "q6Mode": q6_mode,
                 "pass": int(passed),
                 "finalStep": final.get("step", ""),
                 "closedBoxParams": int(params_closed_ok),
@@ -232,7 +270,8 @@ def main() -> int:
             }
         )
         print(
-            f"[0493x0] mode={mode} {'PASS' if passed else 'FAIL'} "
+            f"[0493x0] profile={profile} mode={mode} q6Mode={q6_mode} "
+            f"{'PASS' if passed else 'FAIL'} "
             f"step={final.get('step', '')} closedBox={int(params_closed_ok)} "
             f"openMutation={int(not no_open_mutation)} "
             f"liquidN={liquid_species.get('nFluid', '')}/{liquid_particles_expected} "

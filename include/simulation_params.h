@@ -204,6 +204,14 @@ struct SimulationParams {
     int taylorGreenForcingModeX = 1;
     int taylorGreenForcingModeY = 1;
 
+    // 0493x3/0493x4a/0493x4b experimental force/projection ordering. legacy
+    // preserves the historical kick-and-drift before Q6. prestream applies a
+    // force kick and Q6 before streaming while retaining the post-collision Q6.
+    // prestream_single omits the second Q6. prestream_single_fused additionally
+    // folds the tentative-force deposit and the final force+Q6 velocity update
+    // into the resident Q6 CUDA pass, removing the standalone force-kick kernel.
+    std::string q6ForceProjectionMode = "legacy"; // legacy, prestream, prestream_single, prestream_single_fused
+
     // Optional global mean-flow controller. This is useful for periodic wake
     // tests around immersed solids: it mimics the CUDA VK keepMeanFlow path by
     // applying a spatially uniform velocity shift after the SRC/Q6/thermostat

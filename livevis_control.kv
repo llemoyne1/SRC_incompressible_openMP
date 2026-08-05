@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power
-field = mass
+field = n
 
 # colormap:
 #   blue_red, gray, thermal
@@ -38,7 +38,7 @@ colormap = blue_red
 # clip:
 #   >0 fixes color saturation scale.
 #   <=0 lets the renderer use its default/auto behavior.
-clip = 1500
+clip = 2.5
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
@@ -75,7 +75,7 @@ liveEvery = 2
 # quiverScale:
 #   <0 disables quiver overlay.
 #   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
-quiverScale = 50.0
+quiverScale = 1500.0
 
 # quiverNx/quiverNy:
 #   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Generate a deterministic two-species closed-tank dam-break state.
+"""Generate deterministic closed-box dam-break or liquid-only states.
 
-The liquid column and ambient gas both use the same particle count per cell.
-Their density ratio is encoded only by particle mass.  Cellwise thermal
-velocities are paired and rescaled so every initial cell has exactly zero mean
-velocity while retaining the requested two-dimensional kinetic temperature.
+The normal dam-break profile contains a liquid column and ambient gas with the
+same particle count per cell; their density ratio is encoded by particle mass.
+The optional liquid-only profile fills every cell with the liquid species and is
+used to isolate the ability of Q6 to sustain a closed liquid under gravity.
+Cellwise thermal velocities are paired and rescaled so every initial cell has
+exactly zero mean velocity while retaining the requested two-dimensional
+kinetic temperature.
 """
 
 from __future__ import annotations
@@ -132,11 +135,18 @@ def main() -> int:
     parser.add_argument("--gas-mass", type=positive_float, default=1.0)
     parser.add_argument("--kBT", type=nonnegative_float, default=0.005)
     parser.add_argument("--seed", type=int, default=493900)
+    parser.add_argument(
+        "--liquid-only",
+        action="store_true",
+        help="fill the complete closed box with the liquid species",
+    )
     args = parser.parse_args()
 
     if args.liquid_type == args.gas_type:
         parser.error("liquid and gas particle types must differ")
-    if args.column_width >= args.Lx or args.column_height >= args.Ly:
+    if (not args.liquid_only) and (
+        args.column_width >= args.Lx or args.column_height >= args.Ly
+    ):
         parser.error("the initial liquid column must leave a non-empty gas region")
     if args.gamma < 2:
         parser.error("gamma must be at least 2")
@@ -167,7 +177,9 @@ def main() -> int:
         yc = (iy + 0.5) * dy
         for ix in range(args.nx):
             xc = (ix + 0.5) * dx
-            is_liquid = xc < args.column_width and yc < args.column_height
+            is_liquid = args.liquid_only or (
+                xc < args.column_width and yc < args.column_height
+            )
             particle_type = args.liquid_type if is_liquid else args.gas_type
             particle_mass = args.liquid_mass if is_liquid else args.gas_mass
             thermal = paired_thermal_velocities(rng, args.gamma, particle_mass, args.kBT)
@@ -196,7 +208,8 @@ def main() -> int:
 
     write_state(args.output, x, y, vx, vy, typ, mass, role)
     metadata = {
-        "profile": "dam_break",
+        "profile": "liquid_only" if args.liquid_only else "dam_break",
+        "liquid_only": args.liquid_only,
         "Lx": args.Lx,
         "Ly": args.Ly,
         "nx": args.nx,
@@ -225,7 +238,8 @@ def main() -> int:
     metadata_path = args.output.with_suffix(args.output.suffix + ".json")
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     print(
-        f"[0493x0-state] state={args.output} grid={args.nx}x{args.ny} "
+        f"[0493x0-state] profile={metadata['profile']} state={args.output} "
+        f"grid={args.nx}x{args.ny} "
         f"gamma={args.gamma} fluid={count} liquid={liquid_particles} gas={gas_particles} "
         f"massRatio={args.liquid_mass / args.gas_mass:.6g} "
         f"P=({total_px:.3e},{total_py:.3e})"
