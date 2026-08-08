@@ -18,6 +18,10 @@ LIQUID_MASS="${LIQUID_MASS:-1000.0}"; GAS_MASS="${GAS_MASS:-1.0}"
 LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
 GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
 SPECIES_Q6_MIN_FILL_FRACTION="${SPECIES_Q6_MIN_FILL_FRACTION:-0.25}"
+LIQUID_RESAMPLING_ENABLE="${LIQUID_RESAMPLING_ENABLE:-false}"
+GAS_RESAMPLING_ENABLE="${GAS_RESAMPLING_ENABLE:-false}"
+SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-false}"
+SPECIES_RESIDENT_MODE="${SPECIES_RESIDENT_MODE:-auto}"
 Q6_FORCE_PROJECTION_MODE="prestream_single_fused"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493x5b_liquid_gas_free_surface_dam_break_${NX}x${NY}_g${GAMMA}_w${LIQUID_COLUMN_WIDTH}_h${LIQUID_COLUMN_HEIGHT}}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-50}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-50}"
@@ -41,7 +45,7 @@ PROJECTION_TOLERANCE="${PROJECTION_TOLERANCE:-1.0e-5}"
 PROJECTION_MOMENTUM_CORRECTION_ENABLE="false"
 Q6_PROJECTION_STRENGTH="${Q6_PROJECTION_STRENGTH:-1.0}"
 Q6_STRICT="${Q6_STRICT:-1}"
-RUN_MODE="src-q6"
+RUN_MODE="${RUN_MODE:-src-q6}"
 
 GEN_CASE="tg"; U0=0.0; VELOCITY_MODE="zero"; PARTICLE_MASS="$GAS_MASS"
 BACKGROUND_TYPE="$GAS_TYPE"; INACTIVE_TYPE="$GAS_TYPE"; TG_HOLE_ENABLE=false
@@ -115,9 +119,9 @@ wallThermalNoise = 0.0
 speciesRegistryEnable = true
 speciesCount = 2
 species0 = $LIQUID_TYPE incompressible_liquid liquid $LIQUID_Q6_STRENGTH 1.0 $LIQUID_REFERENCE_CELL_MASS
-species0ResamplingEnable = false
+species0ResamplingEnable = $LIQUID_RESAMPLING_ENABLE
 species1 = $GAS_TYPE compressible_gas gas $GAS_Q6_STRENGTH 0.0 $GAS_REFERENCE_CELL_MASS
-species1ResamplingEnable = false
+species1ResamplingEnable = $GAS_RESAMPLING_ENABLE
 speciesRequireRegisteredTypes = true
 speciesDiagnosticsEnable = true
 speciesDiagnosticsFilename = species_runtime_0493x5b.csv
@@ -132,6 +136,20 @@ PARAMS_EOF
 suite_write_common_params_0434 "$RUN_MODE" >> "$PARAMS"
 
 suite_export_cuda_flags_0434 "$RUN_MODE" "$TOPOLOGY"
+
+# 0493x6f-r2: RUN_MODE=src-q6 deliberately keeps the general resampling path
+# disabled, but 0493o1 split-only can still be selected by the params-level
+# insertion-only policy. Restore only the validated 0307 split safeguards
+# that suite_export_cuda_flags_0434 disables for non-resampling run modes.
+if suite_truthy_0434 "${RESAMPLING_INSERTION_ENABLE:-false}" && \
+   ! suite_truthy_0434 "${RESAMPLING_EXTRACTION_ENABLE:-false}" && \
+   ! suite_truthy_0434 "${RESAMPLING_REMAP_ENABLE:-false}"; then
+  export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307=1
+  export MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307=1
+  export MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307="${SPLIT_DONOR_MIN_MASS:-0.5}"
+  export MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307="${SPLIT_NEW_PARTICLE_MIN_MASS:-0.25}"
+  echo "[0493x6f-r2] 0493o1 split-only safety: splitSafety0307=1 donorMin=${SPLIT_DONOR_MIN_MASS:-0.5} newMin=${SPLIT_NEW_PARTICLE_MIN_MASS:-0.25}"
+fi
 suite_prepare_livevis_control_0434 "$BASE_RUN_ROOT" "$RUN_MODE"
 suite_export_livevis_0434
 suite_write_env_file_0434 "$BASE_RUN_ROOT/logs/environment_0493x5b.env" "$RUN_MODE"
@@ -145,10 +163,16 @@ GAS_MASS=$GAS_MASS
 LIQUID_Q6_STRENGTH=$LIQUID_Q6_STRENGTH
 GAS_Q6_STRENGTH=$GAS_Q6_STRENGTH
 SPECIES_Q6_MIN_FILL_FRACTION=$SPECIES_Q6_MIN_FILL_FRACTION
+RUN_MODE=$RUN_MODE
+LIQUID_RESAMPLING_ENABLE=$LIQUID_RESAMPLING_ENABLE
+GAS_RESAMPLING_ENABLE=$GAS_RESAMPLING_ENABLE
+SPECIES_RESAMPLING_ENABLE=$SPECIES_RESAMPLING_ENABLE
+SPECIES_RESIDENT_MODE=$SPECIES_RESIDENT_MODE
 META
 
 echo "[0493x5b] liquid-gas dam break grid=${NX}x${NY} gamma=$GAMMA column=${LIQUID_COLUMN_WIDTH}x${LIQUID_COLUMN_HEIGHT} steps=$STEPS gravityY=$GRAVITY_Y"
 echo "[0493x5b] liquid=free_surface_masked Q6-g; gas=compressible q6Strength=0; massRatio=$(awk -v a="$LIQUID_MASS" -v b="$GAS_MASS" 'BEGIN{printf "%.6g",a/b}')"
+echo "[0493x5b] runMode=$RUN_MODE speciesResampling=$SPECIES_RESAMPLING_ENABLE liquidResampling=$LIQUID_RESAMPLING_ENABLE gasResampling=$GAS_RESAMPLING_ENABLE residentMode=$SPECIES_RESIDENT_MODE"
 echo "[0493x5b] ordering=tentative-force deposit -> liquid free-surface Q6 -> fused force+liquid correction -> stream -> multispecies collision -> thermostat"
 suite_run_binary_0434 "$PARAMS" "$LOG" "$TIME_FILE" "$OUT"
 

@@ -1381,12 +1381,19 @@ void validate_simulation_params(const SimulationParams& p) {
                     "free_surface_masked 0493x5a requires exactly one species with q6StrengthDeclared>0");
             }
         }
-        if (p.resamplingEnable || p.closedCapacityResponseEnable ||
+        // 0493x6f-r1: allow resampling only for the already-restricted
+        // free_surface_masked + prestream_single_fused static closed-box path.
+        // Keep all other historical non-legacy exclusions unchanged.
+        const bool allowFreeSurfaceResampling0493x6fr1 =
+            freeSurfaceMasked0493x5a &&
+            p.q6ForceProjectionMode == "prestream_single_fused";
+        if ((p.resamplingEnable && !allowFreeSurfaceResampling0493x6fr1) ||
+            p.closedCapacityResponseEnable ||
             p.closedCapacityVirialKickEnable || p.darcyBrinkmanEnable ||
             p.immersedSolidEnable || p.projectionImmersedSolidMaskEnable ||
             p.openBoundarySegmentsEnable) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode test excludes resampling, capacity/virial, Darcy, immersed solids and open boundaries");
+                "non-legacy q6ForceProjectionMode test excludes capacity/virial, Darcy, immersed solids, open boundaries, and resampling outside free_surface_masked prestream_single_fused");
         }
         if (std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0 ||
             std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0) {
