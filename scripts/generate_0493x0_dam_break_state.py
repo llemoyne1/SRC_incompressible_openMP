@@ -5,6 +5,10 @@ The normal dam-break profile contains a liquid column and ambient gas with the
 same particle count per cell; their density ratio is encoded by particle mass.
 The optional liquid-only profile fills every cell with the liquid species and is
 used to isolate the ability of Q6 to sustain a closed liquid under gravity.
+0493x5a optionally truncates that profile at a horizontal fill height, leaving
+the remaining cells empty for a free-surface pressure test without dynamic gas.
+0493x5a2 can instead retain only the rectangular liquid column and leave every
+cell outside it empty, providing a liquid-vacuum dam-break initial condition.
 Cellwise thermal velocities are paired and rescaled so every initial cell has
 exactly zero mean velocity while retaining the requested two-dimensional
 kinetic temperature.
@@ -138,12 +142,32 @@ def main() -> int:
     parser.add_argument(
         "--liquid-only",
         action="store_true",
-        help="fill the complete closed box with the liquid species",
+        help="generate liquid without ambient gas",
+    )
+    parser.add_argument(
+        "--liquid-fill-height",
+        type=positive_float,
+        default=None,
+        help="with --liquid-only, leave cells above this height empty",
+    )
+    parser.add_argument(
+        "--empty-outside-column",
+        action="store_true",
+        help="retain only the rectangular liquid column and leave its exterior empty",
     )
     args = parser.parse_args()
 
     if args.liquid_type == args.gas_type:
         parser.error("liquid and gas particle types must differ")
+    if args.empty_outside_column and args.liquid_only:
+        parser.error("--empty-outside-column and --liquid-only are mutually exclusive")
+    if args.empty_outside_column and args.liquid_fill_height is not None:
+        parser.error("--empty-outside-column cannot be combined with --liquid-fill-height")
+    if args.liquid_fill_height is not None:
+        if not args.liquid_only:
+            parser.error("--liquid-fill-height requires --liquid-only")
+        if not (0.0 < args.liquid_fill_height < args.Ly):
+            parser.error("--liquid-fill-height must lie strictly inside the box")
     if (not args.liquid_only) and (
         args.column_width >= args.Lx or args.column_height >= args.Ly
     ):
@@ -151,7 +175,7 @@ def main() -> int:
     if args.gamma < 2:
         parser.error("gamma must be at least 2")
 
-    count = args.nx * args.ny * args.gamma
+    full_capacity_count = args.nx * args.ny * args.gamma
     x = array("d")
     y = array("d")
     vx = array("d")
@@ -168,6 +192,7 @@ def main() -> int:
 
     liquid_cells = 0
     gas_cells = 0
+    empty_cells = 0
     liquid_particles = 0
     gas_particles = 0
     total_px = 0.0
@@ -177,9 +202,16 @@ def main() -> int:
         yc = (iy + 0.5) * dy
         for ix in range(args.nx):
             xc = (ix + 0.5) * dx
-            is_liquid = args.liquid_only or (
-                xc < args.column_width and yc < args.column_height
+            inside_column = xc < args.column_width and yc < args.column_height
+            is_empty = (
+                (args.liquid_only and args.liquid_fill_height is not None and
+                 yc >= args.liquid_fill_height)
+                or (args.empty_outside_column and not inside_column)
             )
+            if is_empty:
+                empty_cells += 1
+                continue
+            is_liquid = args.liquid_only or inside_column
             particle_type = args.liquid_type if is_liquid else args.gas_type
             particle_mass = args.liquid_mass if is_liquid else args.gas_mass
             thermal = paired_thermal_velocities(rng, args.gamma, particle_mass, args.kBT)
@@ -203,13 +235,22 @@ def main() -> int:
                 total_px += particle_mass * ux
                 total_py += particle_mass * uy
 
-    if len(x) != count:
-        raise RuntimeError(f"generated {len(x)} particles, expected {count}")
+    expected_count = (args.nx * args.ny - empty_cells) * args.gamma
+    if len(x) != expected_count:
+        raise RuntimeError(f"generated {len(x)} particles, expected {expected_count}")
 
     write_state(args.output, x, y, vx, vy, typ, mass, role)
     metadata = {
-        "profile": "liquid_only" if args.liquid_only else "dam_break",
+        "profile": (
+            "dam_break_empty" if args.empty_outside_column
+            else (
+                "partial_liquid" if args.liquid_fill_height is not None
+                else ("liquid_only" if args.liquid_only else "dam_break")
+            )
+        ),
         "liquid_only": args.liquid_only,
+        "empty_outside_column": args.empty_outside_column,
+        "liquid_fill_height": args.liquid_fill_height,
         "Lx": args.Lx,
         "Ly": args.Ly,
         "nx": args.nx,
@@ -224,9 +265,11 @@ def main() -> int:
         "density_ratio_proxy": args.liquid_mass / args.gas_mass,
         "kBT": args.kBT,
         "seed": args.seed,
-        "fluid_particles": count,
+        "fluid_particles": expected_count,
+        "full_capacity_particles": full_capacity_count,
         "liquid_cells": liquid_cells,
         "gas_cells": gas_cells,
+        "empty_cells": empty_cells,
         "liquid_particles": liquid_particles,
         "gas_particles": gas_particles,
         "total_mass": liquid_particles * args.liquid_mass + gas_particles * args.gas_mass,
@@ -240,7 +283,8 @@ def main() -> int:
     print(
         f"[0493x0-state] profile={metadata['profile']} state={args.output} "
         f"grid={args.nx}x{args.ny} "
-        f"gamma={args.gamma} fluid={count} liquid={liquid_particles} gas={gas_particles} "
+        f"gamma={args.gamma} fluid={expected_count} liquid={liquid_particles} "
+        f"gas={gas_particles} emptyCells={empty_cells} "
         f"massRatio={args.liquid_mass / args.gas_mass:.6g} "
         f"P=({total_px:.3e},{total_py:.3e})"
     )

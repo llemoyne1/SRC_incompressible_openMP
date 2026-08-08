@@ -39,16 +39,27 @@ struct SimulationParams {
     bool speciesCellDiagnosticsEnable = false;
     std::string speciesCellDiagnosticsFilename = "species_cell_runtime_0490b.csv";
 
+    // 0493x6a projection-variable contract: the CUDA Q6 scalar phi is a
+    // pressure potential, not an absolute thermodynamic pressure.  The discrete
+    // solve is Laplacian(phi) = -div(u*) and the particle correction is
+    // du = -grad(phi), hence for a constant-density incompressible phase
+    // phi = dt * p / rho_ref up to the usual gauge constant.  A later
+    // phase-coupled interface condition must convert gas pressure/stress to this
+    // variable before inserting it into the Q6 operator.
+    //
     // 0491a/0493w5 species-sensitive Q6 contract.
     //   common / weighted: one barycentric mixture solve, legacy 0491 path.
     //   independent_masked: one masked solve per species with q6Strength>0;
     //     q6Strength=0 guarantees no direct Q6 correction.  The support is
-    //     selected from the species occupancy proxy mass/referenceCellMass.
+    //     selected from the relative species occupancy.
+    //   free_surface_masked (0493x5a): one projected liquid species in a
+    //     static closed box.  Its support is selected from the absolute fill
+    //     proxy mass/referenceCellMass and inactive neighbours impose p=0.
     // The CPU Q6 fallback still rejects species Q6 to avoid a silent change of
     // operator. independent_masked remains CUDA-resident and follows every
     // boundary topology already accepted by the resident Q6 backend.
     bool speciesQ6Enable = false;
-    std::string speciesQ6Mode = "common"; // common, weighted, independent_masked
+    std::string speciesQ6Mode = "common"; // common, weighted, independent_masked, free_surface_masked
     double speciesQ6Sensitivity = 0.0;
     double speciesQ6AlphaEpsilon = 1.0e-14;
     std::string speciesQ6FallbackMode = "common"; // common, fatal; legacy weighted only

@@ -1266,16 +1266,19 @@ void validate_simulation_params(const SimulationParams& p) {
         !std::isfinite(p.speciesQ6MinOccupancyFraction)) {
         throw std::runtime_error("speciesQ6MinOccupancyFraction must lie in [0,1]");
     }
-    if (p.speciesQ6Mode == "independent_masked") {
+    const bool maskedSpeciesQ60493x5a =
+        p.speciesQ6Mode == "independent_masked" ||
+        p.speciesQ6Mode == "free_surface_masked";
+    if (maskedSpeciesQ60493x5a) {
         for (const SpeciesDefinition& d : p.speciesDefinitions) {
             if (d.q6StrengthDeclared > 1.0) {
                 throw std::runtime_error(
-                    "independent_masked requires species q6StrengthDeclared in [0,1]");
+                    "masked species Q6 requires q6StrengthDeclared in [0,1]");
             }
             if (!(d.referenceCellMassDeclared > 0.0) ||
                 !std::isfinite(d.referenceCellMassDeclared)) {
                 throw std::runtime_error(
-                    "independent_masked requires positive finite referenceCellMassDeclared");
+                    "masked species Q6 requires positive finite referenceCellMassDeclared");
             }
         }
     }
@@ -1352,9 +1355,31 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error(
                 "non-legacy q6ForceProjectionMode is restricted to periodic boxes or static closed boxes");
         }
-        if (p.speciesQ6Enable && p.speciesQ6Mode != "common") {
+        const bool freeSurfaceMasked0493x5a =
+            p.speciesQ6Enable && p.speciesQ6Mode == "free_surface_masked";
+        if (p.speciesQ6Enable && p.speciesQ6Mode != "common" &&
+            !freeSurfaceMasked0493x5a) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode currently requires speciesQ6Mode=common");
+                "non-legacy q6ForceProjectionMode currently requires speciesQ6Mode=common "
+                "or free_surface_masked");
+        }
+        if (freeSurfaceMasked0493x5a) {
+            if (p.q6ForceProjectionMode != "prestream_single_fused") {
+                throw std::runtime_error(
+                    "free_surface_masked requires q6ForceProjectionMode=prestream_single_fused");
+            }
+            if (!closedStaticBox) {
+                throw std::runtime_error(
+                    "free_surface_masked 0493x5a is restricted to a static closed box");
+            }
+            int projectedSpecies0493x5a = 0;
+            for (const SpeciesDefinition& d : p.speciesDefinitions) {
+                if (d.q6StrengthDeclared > 0.0) ++projectedSpecies0493x5a;
+            }
+            if (projectedSpecies0493x5a != 1) {
+                throw std::runtime_error(
+                    "free_surface_masked 0493x5a requires exactly one species with q6StrengthDeclared>0");
+            }
         }
         if (p.resamplingEnable || p.closedCapacityResponseEnable ||
             p.closedCapacityVirialKickEnable || p.darcyBrinkmanEnable ||

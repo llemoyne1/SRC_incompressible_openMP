@@ -38,8 +38,10 @@ SpeciesQ6Mode0491a parse_species_q6_mode_0491a(const std::string& value,
     if (v == "common") return SpeciesQ6Mode0491a::Common;
     if (v == "weighted") return SpeciesQ6Mode0491a::Weighted;
     if (v == "independent_masked") return SpeciesQ6Mode0491a::IndependentMasked;
+    if (v == "free_surface_masked") return SpeciesQ6Mode0491a::FreeSurfaceMasked;
     throw std::runtime_error(
-        context + ": speciesQ6Mode must be common, weighted or independent_masked");
+        context + ": speciesQ6Mode must be common, weighted, independent_masked "
+                  "or free_surface_masked");
 }
 
 SpeciesQ6Fallback0491a parse_species_q6_fallback_0491a(const std::string& value,
@@ -80,10 +82,12 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
         input.cellDUy.size() != nc) {
         throw std::runtime_error("0491a species-Q6 distribution input has inconsistent dimensions");
     }
-    if (input.mode == SpeciesQ6Mode0491a::IndependentMasked &&
-        input.referenceCellMass.size() != ns) {
+    const bool maskedMode0493x5a =
+        input.mode == SpeciesQ6Mode0491a::IndependentMasked ||
+        input.mode == SpeciesQ6Mode0491a::FreeSurfaceMasked;
+    if (maskedMode0493x5a && input.referenceCellMass.size() != ns) {
         throw std::runtime_error(
-            "0493w5 independent_masked requires one referenceCellMass per species");
+            "masked species Q6 requires one referenceCellMass per species");
     }
 
     for (std::size_t s = 0; s < ns; ++s) {
@@ -91,15 +95,15 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
         if (!std::isfinite(a) || a < 0.0) {
             throw std::runtime_error("0491a q6 alpha must be finite and non-negative");
         }
-        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+        if (maskedMode0493x5a) {
             const double ref = input.referenceCellMass[s];
             if (!(ref > 0.0) || !std::isfinite(ref)) {
                 throw std::runtime_error(
-                    "0493w5 independent_masked referenceCellMass must be finite and positive");
+                    "masked species Q6 referenceCellMass must be finite and positive");
             }
             if (a > 1.0) {
                 throw std::runtime_error(
-                    "0493w5 independent_masked q6 alpha must lie in [0,1]");
+                    "masked species Q6 q6 alpha must lie in [0,1]");
             }
         }
     }
@@ -157,23 +161,24 @@ SpeciesQ6DistributionResult0491a compute_q6_species_distribution_0491a(
             const double y = input.speciesMass[k] / totalMass;
             out.massFraction[k] = y;
             alphaBar += y * input.q6Alpha[s];
-            if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+            if (maskedMode0493x5a) {
                 totalOccupancyWeight += input.speciesMass[k] / input.referenceCellMass[s];
             }
         }
         out.alphaBar[cc] = alphaBar;
         out.totalOccupancyWeight[cc] = totalOccupancyWeight;
-        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked &&
-            totalOccupancyWeight > 0.0) {
+        if (maskedMode0493x5a && totalOccupancyWeight > 0.0) {
             for (std::size_t s = 0; s < ns; ++s) {
                 const std::size_t k = q6_species_flat_index_0491a(s, c, input.numCells);
+                const double fill = input.speciesMass[k] / input.referenceCellMass[s];
                 out.occupancyFraction[k] =
-                    (input.speciesMass[k] / input.referenceCellMass[s]) /
-                    totalOccupancyWeight;
+                    input.mode == SpeciesQ6Mode0491a::FreeSurfaceMasked
+                        ? fill
+                        : fill / totalOccupancyWeight;
             }
         }
 
-        if (input.mode == SpeciesQ6Mode0491a::IndependentMasked) {
+        if (maskedMode0493x5a) {
             bool cellProjected = false;
             for (std::size_t s = 0; s < ns; ++s) {
                 const std::size_t k = q6_species_flat_index_0491a(s, c, input.numCells);

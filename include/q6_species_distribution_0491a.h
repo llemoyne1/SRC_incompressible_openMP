@@ -10,7 +10,8 @@ namespace mpcd {
 enum class SpeciesQ6Mode0491a : std::uint8_t {
     Common = 0u,
     Weighted = 1u,
-    IndependentMasked = 2u
+    IndependentMasked = 2u,
+    FreeSurfaceMasked = 3u
 };
 
 enum class SpeciesQ6Fallback0491a : std::uint8_t {
@@ -23,9 +24,9 @@ struct SpeciesQ6DistributionInput0491a {
     int speciesCount = 0;
     std::vector<double> speciesMass; // species-major: s * numCells + cell
     std::vector<double> q6Alpha;
-    // 0493w5: occupancy proxy reference for independent_masked.  The local
-    // volume/occupancy proxy is mass/referenceCellMass, never the raw mass
-    // fraction (which would be unusable at large density ratios).
+    // 0493w5/0493x5a: occupancy proxy reference for independent_masked and
+    // free_surface_masked.  The latter thresholds the absolute fill proxy
+    // mass/referenceCellMass; the former keeps its species-composition mask.
     std::vector<double> referenceCellMass;
     std::vector<double> cellDUx;
     std::vector<double> cellDUy;
@@ -43,7 +44,7 @@ struct SpeciesQ6Distribution0491a {
     std::vector<double> massFraction; // species-major
     std::vector<double> totalOccupancyWeight;
     std::vector<double> occupancyFraction; // species-major
-    std::vector<unsigned char> activeMask; // species-major, independent_masked
+    std::vector<unsigned char> activeMask; // species-major, masked modes
     std::vector<double> alphaBar;
     std::vector<double> weight; // species-major
     std::vector<double> speciesDUx; // species-major

@@ -57,6 +57,9 @@ int main() {
     require_true(parse_species_q6_mode_0491a("independent_masked", "smoke") ==
                      SpeciesQ6Mode0491a::IndependentMasked,
                  "parse independent_masked mode");
+    require_true(parse_species_q6_mode_0491a("free_surface_masked", "smoke") ==
+                     SpeciesQ6Mode0491a::FreeSurfaceMasked,
+                 "parse free_surface_masked mode");
     require_true(parse_species_q6_fallback_0491a("common", "smoke") == SpeciesQ6Fallback0491a::Common,
                  "parse common fallback");
     require_true(parse_species_q6_fallback_0491a("fatal", "smoke") == SpeciesQ6Fallback0491a::Fatal,
@@ -176,6 +179,25 @@ int main() {
         require_close(r.fields.speciesDUx[0], 0.0, tol, "S8 liquid suppressed dux");
         require_true(r.summary.projectedSpeciesCellPairs == 0u,
                      "S8 no projected pairs");
+    }
+    {
+        auto in = base_input(1, 2);
+        in.mode = SpeciesQ6Mode0491a::FreeSurfaceMasked;
+        in.minOccupancyFraction = 0.5;
+        in.q6Alpha[0] = 1.0;
+        in.q6Alpha[1] = 0.0;
+        in.referenceCellMass[0] = 10.0;
+        in.referenceCellMass[1] = 1.0;
+        in.speciesMass[0] = 4.0;
+        auto low = compute_q6_species_distribution_0491a(in);
+        require_true(low.fields.activeMask[0] == 0u,
+                     "free-surface fill below threshold is inactive");
+        in.speciesMass[0] = 6.0;
+        auto high = compute_q6_species_distribution_0491a(in);
+        require_true(high.fields.activeMask[0] == 1u,
+                     "free-surface fill above threshold is active");
+        require_true(high.fields.activeMask[1] == 0u,
+                     "free-surface disabled species stays unprojected");
     }
     std::cout << "[0491a] PASS species-Q6 CPU reference analytic smokes\n";
     return 0;

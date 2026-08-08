@@ -8,6 +8,7 @@
 #include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
+#include <iostream>
 
 #include <algorithm>
 #include <chrono>
@@ -46,6 +47,15 @@ int env_int_0400(const char* name, int fallback) {
     return static_cast<int>(parsed);
 }
 
+double env_double_0400(const char* name, double fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') return fallback;
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || !std::isfinite(parsed)) return fallback;
+    return parsed;
+}
+
 bool cuda_q6_single_block_cg_0407_enabled(int numCells) {
     const char* forced = std::getenv("MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_0407");
     if (forced != nullptr && *forced != '\0') return truthy_0400(forced);
@@ -60,6 +70,101 @@ bool cuda_q6_warm_start_0408_requested() {
 bool cuda_q6_segmented_io_0409_requested() {
     return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409"));
 }
+
+// 0493x6a: diagnostic-only phase-pressure scaffold.  This does not alter the
+// Q6 operator or particle velocities.  It reconstructs the ideal-gas external
+// pressure potential that a later phase-coupled interface condition will use.
+bool cuda_q6_phase_pressure_diagnostics_0493x6a_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A"));
+}
+
+// 0493x6b: diagnostic-only phase-geometry scaffold.  It reconstructs an
+// interface proxy directly from the already resident species-cell masses.
+// No particle pass, no projection coefficient and no particle velocity is
+// changed.  The expensive path is entered only on the existing summary cadence.
+bool cuda_q6_phase_geometry_diagnostics_0493x6b_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B"));
+}
+
+// 0493x6c: resident phase-geometry infrastructure.  It materializes one raw
+// phase-fill field and one conservative filtered field on the device at every
+// free-surface Q6 solve.  Neither field is consumed by the projection yet.
+// Keeping this behind an experimental gate lets us measure the permanent
+// two-grid-pass cost before the geometry becomes part of the production path.
+bool cuda_q6_phase_geometry_resident_0493x6c_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C"));
+}
+
+// 0493x6d: first consumer of the resident geometry.  Only in-domain faces
+// separating the current Q6 carrier mask from an inactive cell are eligible.
+// The pressure remains zero gauge at the reconstructed interface; gas pressure
+// and surface tension are deliberately still absent from this stage.
+bool cuda_q6_phase_geometry_cutface_0493x6d_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D"));
+}
+
+// 0493x6e: diagnostic-only topology of the physical alpha=0.5 interface.
+// Unlike x6d, this scan is independent of the carrier-mask boundary: every
+// unique in-domain alpha=0.5 crossing is classified as active-active,
+// active-inactive or inactive-inactive.  It is fused into the sparse x6c audit
+// kernel, so it adds no production pass and does not alter Q6 physics.
+bool cuda_q6_phase_interface_topology_0493x6e_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E"));
+}
+
+// 0493x6f2 bounded phase geometry: raw occupancy is retained unbounded; the interface filter consumes clamp(raw,0,1).
+// 0493x6f: phase-interface pressure stencil.  The physical pressure domain is
+// reconstructed from the resident alpha=0.5 geometry while the historical
+// occupancy mask remains a numerical carrier for particle data.  The x6f
+// preparation pass materializes a pressure mask and east/north face
+// coefficients once per Q6 solve, so the iterative CG path no longer evaluates
+// alpha crossings, divisions or cut-face branches.  The interfacial pressure
+// value is still zero in x6f; x6g will reuse the same stencil for p_g.
+bool cuda_q6_phase_interface_stencil_0493x6f_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F"));
+}
+
+// 0493x6g: first physical use of the x6f interface stencil.  The gas-side
+// ideal-gas EOS provides the interfacial Dirichlet value while the matrix
+// coefficients remain exactly those prepared by x6f.  The pressure reference
+// is a pure gauge subtraction; the same face-value buffers are intended to
+// receive p_g + sigma*kappa in the later capillary stage.
+bool cuda_q6_phase_gas_pressure_0493x6g_requested() {
+    return truthy_0400(std::getenv("MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G"));
+}
+
+enum class PhaseGasPressureMode0493x6g : int {
+    Eos = 0,
+    Constant = 1
+};
+
+PhaseGasPressureMode0493x6g phase_gas_pressure_mode_0493x6g() {
+    const char* value = std::getenv("MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G");
+    if (value == nullptr || *value == '\0' || std::strcmp(value, "eos") == 0 ||
+        std::strcmp(value, "EOS") == 0) {
+        return PhaseGasPressureMode0493x6g::Eos;
+    }
+    if (std::strcmp(value, "constant") == 0 || std::strcmp(value, "CONSTANT") == 0) {
+        return PhaseGasPressureMode0493x6g::Constant;
+    }
+    throw std::runtime_error(
+        std::string("0493x6g invalid MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G: ") + value);
+}
+
+const char* phase_gas_pressure_mode_name_0493x6g(PhaseGasPressureMode0493x6g mode) {
+    return mode == PhaseGasPressureMode0493x6g::Constant ? "constant" : "eos";
+}
+
+// Small-cut-cell conditioning guard for the first active geometry test.  A
+// smaller theta would make the Dirichlet diagonal factor 1/theta very large.
+// Such faces keep the legacy half-cell factor rather than being clipped, so the
+// fallback remains explicit and measurable.  This is not a user parameter.
+constexpr double kPhaseCutFaceThetaMin0493x6d = 0.10;
+
+// One explicit conservative diffusion step.  lambda <= 1/4 keeps the 2-D
+// five-point update non-negative for non-negative input.  This fixed value is
+// intentionally not a new user parameter during the scaffold stage.
+constexpr double kPhaseGeometryFilterLambda0493x6c = 0.125;
 
 struct Q6SegmentedIo0409 {
     int enabled = 0;
@@ -303,6 +408,362 @@ void append_independent_masked_species_audit_0493w5(
     }
 }
 
+struct PhaseInterfacePressureAudit0493x6a {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    int gasSpeciesCount = 0;
+    std::uint64_t interfaceFaces = 0u;
+    double projectedLiquidReferenceCellMass = 0.0;
+    double cellArea = 0.0;
+    double meanGasParticlesPerExteriorFace = 0.0;
+    double pressureEOSMean = 0.0;
+    double pressureEOSStd = 0.0;
+    double pressureEOSMax = 0.0;
+    double pressurePotentialMean = 0.0;
+    double pressurePotentialStd = 0.0;
+    double pressurePotentialMax = 0.0;
+};
+
+void append_phase_interface_pressure_audit_0493x6a(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseInterfacePressureAudit0493x6a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_interface_pressure_0493x6a.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6a failed to open phase-interface pressure audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,gasSpeciesCount,"
+               "projectedLiquidReferenceCellMass,cellArea,kBT,dt,interfaceFaces,"
+               "meanGasParticlesPerExteriorFace,pressureEOSMean,pressureEOSStd,"
+               "pressureEOSMax,pressurePotentialMean,pressurePotentialStd,"
+               "pressurePotentialMax,pressurePotentialDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.gasSpeciesCount << ','
+        << a.projectedLiquidReferenceCellMass << ',' << a.cellArea << ','
+        << params.kBT << ',' << params.dt << ',' << a.interfaceFaces << ','
+        << a.meanGasParticlesPerExteriorFace << ','
+        << a.pressureEOSMean << ',' << a.pressureEOSStd << ','
+        << a.pressureEOSMax << ',' << a.pressurePotentialMean << ','
+        << a.pressurePotentialStd << ',' << a.pressurePotentialMax << ','
+        << "phi=dt*p/rho_liquid_ref" << '\n';
+}
+
+struct PhaseInterfaceGeometryAudit0493x6b {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    int liquidPhaseSpeciesCount = 0;
+    std::uint64_t maskActiveCells = 0u;
+    std::uint64_t phaseFillActiveCells = 0u;
+    std::uint64_t maskPhaseMismatchCells = 0u;
+    std::uint64_t interfaceFaces = 0u;
+    double liquidPhaseReferenceCellMass = 0.0;
+    double supportIsoFill = 0.0;
+    double insideFillMean = 0.0;
+    double outsideFillMean = 0.0;
+    double supportThetaValidFraction = 0.0;
+    double supportThetaMean = 0.0;
+    double supportThetaStd = 0.0;
+    double supportThetaMidpointRms = 0.0;
+    double supportThetaNearCellFraction = 0.0;
+    double supportThetaNearExteriorFraction = 0.0;
+    double halfIsoBracketFraction = 0.0;
+    double halfIsoThetaMean = 0.0;
+    double halfIsoThetaStd = 0.0;
+    double normalValidFraction = 0.0;
+    double normalOutwardFraction = 0.0;
+    double normalFaceAlignmentMean = 0.0;
+    double diagnosticSeconds = 0.0;
+};
+
+void append_phase_interface_geometry_audit_0493x6b(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseInterfaceGeometryAudit0493x6b& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_interface_geometry_0493x6b.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6b failed to open phase-interface geometry audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,liquidPhaseSpeciesCount,"
+               "liquidPhaseReferenceCellMass,supportIsoFill,maskActiveCells,"
+               "phaseFillActiveCells,maskPhaseMismatchCells,interfaceFaces,"
+               "insideFillMean,outsideFillMean,supportThetaValidFraction,"
+               "supportThetaMean,supportThetaStd,supportThetaMidpointRms,"
+               "supportThetaNearCellFraction,supportThetaNearExteriorFraction,"
+               "halfIsoBracketFraction,halfIsoThetaMean,halfIsoThetaStd,"
+               "normalValidFraction,normalOutwardFraction,normalFaceAlignmentMean,"
+               "diagnosticSeconds,geometryDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.liquidPhaseSpeciesCount << ','
+        << a.liquidPhaseReferenceCellMass << ',' << a.supportIsoFill << ','
+        << a.maskActiveCells << ',' << a.phaseFillActiveCells << ','
+        << a.maskPhaseMismatchCells << ',' << a.interfaceFaces << ','
+        << a.insideFillMean << ',' << a.outsideFillMean << ','
+        << a.supportThetaValidFraction << ',' << a.supportThetaMean << ','
+        << a.supportThetaStd << ',' << a.supportThetaMidpointRms << ','
+        << a.supportThetaNearCellFraction << ','
+        << a.supportThetaNearExteriorFraction << ','
+        << a.halfIsoBracketFraction << ',' << a.halfIsoThetaMean << ','
+        << a.halfIsoThetaStd << ',' << a.normalValidFraction << ','
+        << a.normalOutwardFraction << ',' << a.normalFaceAlignmentMean << ','
+        << a.diagnosticSeconds << ','
+        << "phaseFill=sum_liquid_mass/sum_liquid_reference_mass;"
+           "theta=(fill_in-iso)/(fill_in-fill_out);halfIso=0.5" << '\n';
+}
+
+struct PhaseGeometryResidentAudit0493x6c {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    int liquidPhaseSpeciesCount = 0;
+    std::uint64_t numCells = 0u;
+    std::uint64_t maskFilteredMismatchCells = 0u;
+    std::uint64_t interfaceFaces = 0u;
+    double liquidPhaseReferenceCellMass = 0.0;
+    double filterLambda = 0.0;
+    double rawFillSum = 0.0;
+    double boundedGeometrySourceSum = 0.0;
+    std::uint64_t boundedGeometryClippedCells = 0u;
+    double filteredFillSum = 0.0;
+    double conservationRelativeError = 0.0;
+    double filterDeltaRms = 0.0;
+    double halfIsoBracketFraction = 0.0;
+    double halfIsoThetaMean = 0.0;
+    double halfIsoThetaStd = 0.0;
+    double normalValidFraction = 0.0;
+    double normalOutwardFraction = 0.0;
+    double normalFaceAlignmentMean = 0.0;
+    double rawBuildSeconds = 0.0;
+    double filterSeconds = 0.0;
+    double auditKernelSeconds = 0.0;
+    std::uint64_t residentBytes = 0u;
+    int cutFaceGeometryEnabled = 0;
+    std::uint64_t cutFaceGeometricFaces = 0u;
+    std::uint64_t cutFaceLegacyFallbackFaces = 0u;
+    std::uint64_t cutFaceSmallThetaFallbackFaces = 0u;
+    double cutFaceThetaGuard = 0.0;
+    double cutFaceThetaMin = 0.0;
+    double cutFaceThetaMean = 0.0;
+    double cutFaceThetaMax = 0.0;
+    int phaseInterfaceTopologyEnabled = 0;
+    std::uint64_t alphaHalfCrossingFaces = 0u;
+    std::uint64_t alphaHalfCrossingActiveActiveFaces = 0u;
+    std::uint64_t alphaHalfCrossingActiveInactiveFaces = 0u;
+    std::uint64_t alphaHalfCrossingInactiveInactiveFaces = 0u;
+    std::uint64_t alphaHalfCrossingAIActiveLiquidSideFaces = 0u;
+    std::uint64_t alphaHalfCrossingAIActiveExteriorSideFaces = 0u;
+    double alphaHalfThetaMin = 0.0;
+    double alphaHalfThetaMean = 0.0;
+    double alphaHalfThetaStd = 0.0;
+    double alphaHalfThetaMax = 0.0;
+};
+
+void append_phase_geometry_resident_audit_0493x6c(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseGeometryResidentAudit0493x6c& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_geometry_resident_0493x6c.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6c failed to open resident phase-geometry audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,liquidPhaseSpeciesCount,"
+               "liquidPhaseReferenceCellMass,numCells,filterLambda,rawFillSum,"
+               "boundedGeometrySourceSum,boundedGeometryClippedCells,"
+               "filteredFillSum,conservationRelativeError,filterDeltaRms,"
+               "maskFilteredMismatchCells,interfaceFaces,halfIsoBracketFraction,"
+               "halfIsoThetaMean,halfIsoThetaStd,normalValidFraction,"
+               "normalOutwardFraction,normalFaceAlignmentMean,rawBuildSeconds,"
+               "filterSeconds,auditKernelSeconds,residentBytes,cutFaceGeometryEnabled,"
+               "cutFaceGeometricFaces,cutFaceLegacyFallbackFaces,"
+               "cutFaceSmallThetaFallbackFaces,cutFaceThetaGuard,cutFaceThetaMin,"
+               "cutFaceThetaMean,cutFaceThetaMax,phaseInterfaceTopologyEnabled,"
+               "alphaHalfCrossingFaces,alphaHalfCrossingActiveActiveFaces,"
+               "alphaHalfCrossingActiveInactiveFaces,"
+               "alphaHalfCrossingInactiveInactiveFaces,"
+               "alphaHalfCrossingAIActiveLiquidSideFaces,"
+               "alphaHalfCrossingAIActiveExteriorSideFaces,alphaHalfThetaMin,"
+               "alphaHalfThetaMean,alphaHalfThetaStd,alphaHalfThetaMax,"
+               "geometryDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.liquidPhaseSpeciesCount << ','
+        << a.liquidPhaseReferenceCellMass << ',' << a.numCells << ','
+        << a.filterLambda << ',' << a.rawFillSum << ','
+        << a.boundedGeometrySourceSum << ',' << a.boundedGeometryClippedCells << ','
+        << a.filteredFillSum << ',' << a.conservationRelativeError << ','
+        << a.filterDeltaRms << ','
+        << a.maskFilteredMismatchCells << ',' << a.interfaceFaces << ','
+        << a.halfIsoBracketFraction << ',' << a.halfIsoThetaMean << ','
+        << a.halfIsoThetaStd << ',' << a.normalValidFraction << ','
+        << a.normalOutwardFraction << ',' << a.normalFaceAlignmentMean << ','
+        << a.rawBuildSeconds << ',' << a.filterSeconds << ','
+        << a.auditKernelSeconds << ',' << a.residentBytes << ','
+        << a.cutFaceGeometryEnabled << ',' << a.cutFaceGeometricFaces << ','
+        << a.cutFaceLegacyFallbackFaces << ','
+        << a.cutFaceSmallThetaFallbackFaces << ',' << a.cutFaceThetaGuard << ','
+        << a.cutFaceThetaMin << ',' << a.cutFaceThetaMean << ','
+        << a.cutFaceThetaMax << ',' << a.phaseInterfaceTopologyEnabled << ','
+        << a.alphaHalfCrossingFaces << ','
+        << a.alphaHalfCrossingActiveActiveFaces << ','
+        << a.alphaHalfCrossingActiveInactiveFaces << ','
+        << a.alphaHalfCrossingInactiveInactiveFaces << ','
+        << a.alphaHalfCrossingAIActiveLiquidSideFaces << ','
+        << a.alphaHalfCrossingAIActiveExteriorSideFaces << ','
+        << a.alphaHalfThetaMin << ',' << a.alphaHalfThetaMean << ','
+        << a.alphaHalfThetaStd << ',' << a.alphaHalfThetaMax << ','
+        << "raw=sum_liquid_mass/sum_liquid_reference_mass;"
+           "geom0=clamp01(raw);"
+           "alpha=geom0+lambda*sum_face_neighbours(geom0_nb-geom0);"
+           "no_flux_at_nonperiodic_domain_boundary;halfIso=0.5" << '\n';
+}
+
+
+struct PhaseInterfaceStencilAudit0493x6f {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    std::uint64_t carrierActiveCells = 0u;
+    std::uint64_t pressureActiveCells = 0u;
+    std::uint64_t interiorPressureFaces = 0u;
+    std::uint64_t representedInterfaceFaces = 0u;
+    std::uint64_t smallThetaStabilizedFaces = 0u;
+    std::uint64_t carrierTruncationFaces = 0u;
+    std::uint64_t uncoveredInterfaceFaces = 0u;
+    double thetaGuard = 0.0;
+    double thetaMin = 0.0;
+    double thetaMean = 0.0;
+    double thetaMax = 0.0;
+    double prepareSeconds = 0.0;
+    std::uint64_t residentBytes = 0u;
+};
+
+void append_phase_interface_stencil_audit_0493x6f(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseInterfaceStencilAudit0493x6f& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_interface_stencil_0493x6f.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6f failed to open phase-interface stencil audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,carrierActiveCells,"
+               "pressureActiveCells,interiorPressureFaces,representedInterfaceFaces,"
+               "smallThetaStabilizedFaces,carrierTruncationFaces,"
+               "uncoveredInterfaceFaces,thetaGuard,thetaMin,thetaMean,thetaMax,"
+               "prepareSeconds,residentBytes,stencilDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.carrierActiveCells << ','
+        << a.pressureActiveCells << ',' << a.interiorPressureFaces << ','
+        << a.representedInterfaceFaces << ',' << a.smallThetaStabilizedFaces << ','
+        << a.carrierTruncationFaces << ',' << a.uncoveredInterfaceFaces << ','
+        << a.thetaGuard << ',' << a.thetaMin << ',' << a.thetaMean << ','
+        << a.thetaMax << ',' << a.prepareSeconds << ',' << a.residentBytes << ','
+        << "pressureMask=carrier&&alpha>=0.5;"
+           "faceCoeff=1(interior),1/theta(interface),2(small-theta),0(no-pressure-coupling);"
+           "pGamma=optional-prepared-face-value(zero-in-x6f);external-domain-BC-unchanged" << '\n';
+}
+
+struct PhaseInterfaceGasPressureAudit0493x6g {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    int gasSpeciesCount = 0;
+    std::uint64_t representedInterfaceFaces = 0u;
+    std::uint64_t nonzeroPressureFaces = 0u;
+    double liquidReferenceCellMass = 0.0;
+    double cellArea = 0.0;
+    double pressureReference = 0.0;
+    double pressureScale = 1.0;
+    double constantPressure = 0.0;
+    double pressurePotentialMean = 0.0;
+    double pressurePotentialStd = 0.0;
+    double pressureDeltaMean = 0.0;
+    double pressureDeltaStd = 0.0;
+    double prepareSeconds = 0.0;
+    std::uint64_t residentBytes = 0u;
+    const char* sourceMode = "eos";
+};
+
+void append_phase_interface_gas_pressure_audit_0493x6g(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseInterfaceGasPressureAudit0493x6g& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_interface_pressure_0493x6g.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6g failed to open phase-interface gas-pressure audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,gasSpeciesCount,"
+               "sourceMode,liquidReferenceCellMass,cellArea,kBT,dt,"
+               "pressureReference,pressureScale,constantPressure,"
+               "representedInterfaceFaces,nonzeroPressureFaces,"
+               "pressurePotentialMean,pressurePotentialStd,pressureDeltaMean,"
+               "pressureDeltaStd,prepareSeconds,residentBytes,pressureDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.gasSpeciesCount << ',' << a.sourceMode << ','
+        << a.liquidReferenceCellMass << ',' << a.cellArea << ',' << params.kBT << ','
+        << params.dt << ',' << a.pressureReference << ',' << a.pressureScale << ','
+        << a.constantPressure << ',' << a.representedInterfaceFaces << ','
+        << a.nonzeroPressureFaces << ',' << a.pressurePotentialMean << ','
+        << a.pressurePotentialStd << ',' << a.pressureDeltaMean << ','
+        << a.pressureDeltaStd << ',' << a.prepareSeconds << ',' << a.residentBytes << ','
+        << "phiGamma=dt*pressureScale*(pGas-pressureReference)/rhoLiquidRef;"
+           "EOS:pGas=Ng*kBT/cellArea;trace=gas-side(alpha<0.5)-cell" << '\n';
+}
+
 void append_q6_resident_thermostat_audit_0491f(
     const SimulationParams& params,
     std::uint64_t step,
@@ -512,6 +973,73 @@ private:
     std::size_t capacity_ = 0u;
 };
 
+struct PhaseGeometryAccumulator0493x6b {
+    unsigned long long phaseFillActiveCells = 0ull;
+    unsigned long long maskPhaseMismatchCells = 0ull;
+    unsigned long long interfaceFaces = 0ull;
+    unsigned long long supportThetaValidFaces = 0ull;
+    unsigned long long supportThetaNearCellFaces = 0ull;
+    unsigned long long supportThetaNearExteriorFaces = 0ull;
+    unsigned long long halfIsoBracketFaces = 0ull;
+    unsigned long long normalValidFaces = 0ull;
+    unsigned long long normalOutwardFaces = 0ull;
+    double insideFillSum = 0.0;
+    double outsideFillSum = 0.0;
+    double supportThetaSum = 0.0;
+    double supportThetaSqSum = 0.0;
+    double supportThetaMidSqSum = 0.0;
+    double halfIsoThetaSum = 0.0;
+    double halfIsoThetaSqSum = 0.0;
+    double normalFaceAlignmentSum = 0.0;
+};
+
+struct PhaseGeometryResidentAccumulator0493x6c {
+    unsigned long long maskFilteredMismatchCells = 0ull;
+    unsigned long long interfaceFaces = 0ull;
+    unsigned long long halfIsoBracketFaces = 0ull;
+    unsigned long long normalValidFaces = 0ull;
+    unsigned long long normalOutwardFaces = 0ull;
+    unsigned long long cutFaceGeometricFaces = 0ull;
+    unsigned long long cutFaceSmallThetaFallbackFaces = 0ull;
+    unsigned long long cutFaceThetaMaxScaled = 0ull;
+    unsigned long long cutFaceThetaMinComplementScaled = 0ull;
+    unsigned long long alphaHalfCrossingFaces = 0ull;
+    unsigned long long alphaHalfCrossingActiveActiveFaces = 0ull;
+    unsigned long long alphaHalfCrossingActiveInactiveFaces = 0ull;
+    unsigned long long alphaHalfCrossingInactiveInactiveFaces = 0ull;
+    unsigned long long alphaHalfCrossingAIActiveLiquidSideFaces = 0ull;
+    unsigned long long alphaHalfCrossingAIActiveExteriorSideFaces = 0ull;
+    unsigned long long alphaHalfThetaMaxScaled = 0ull;
+    unsigned long long alphaHalfThetaMinComplementScaled = 0ull;
+    unsigned long long boundedGeometryClippedCells = 0ull;
+    double rawFillSum = 0.0;
+    double boundedGeometrySourceSum = 0.0;
+    double filteredFillSum = 0.0;
+    double filterDeltaSqSum = 0.0;
+    double cutFaceThetaSum = 0.0;
+    double alphaHalfThetaSum = 0.0;
+    double alphaHalfThetaSqSum = 0.0;
+    double halfIsoThetaSum = 0.0;
+    double halfIsoThetaSqSum = 0.0;
+    double normalFaceAlignmentSum = 0.0;
+};
+
+
+struct PhaseInterfaceStencilAccumulator0493x6f {
+    unsigned long long pressureActiveCells = 0ull;
+    unsigned long long interiorPressureFaces = 0ull;
+    unsigned long long representedInterfaceFaces = 0ull;
+    unsigned long long smallThetaStabilizedFaces = 0ull;
+    unsigned long long carrierTruncationFaces = 0ull;
+    unsigned long long uncoveredInterfaceFaces = 0ull;
+    unsigned long long thetaMaxScaled = 0ull;
+    unsigned long long thetaMinComplementScaled = 0ull;
+    unsigned long long nonzeroPressureFaces0493x6g = 0ull;
+    double thetaSum = 0.0;
+    double pressurePotentialSum0493x6g = 0.0;
+    double pressurePotentialSqSum0493x6g = 0.0;
+};
+
 struct ResidentWorkspace0400 {
     CudaCellWorkspace cells;
     DeviceBuffer0400<double> rhs;
@@ -528,6 +1056,40 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<unsigned char> speciesMasks0493w6;
     DeviceBuffer0400<double> speciesDUx0493w5;
     DeviceBuffer0400<double> speciesDUy0493w5;
+    // 0493x6a introduced this gas-pressure potential buffer diagnostically;
+    // 0493x6g reuses it in production as the gauge-relative gas pressure
+    // potential sampled by the prepared physical interface.
+    DeviceBuffer0400<double> phaseGasPressurePotential0493x6a;
+    // 0493x6b uses one tiny accumulator only.  The phase fill is reconstructed
+    // on demand from the existing species-cell mass deposit, so there is no
+    // additional O(numCells) resident geometry field in this diagnostic stage.
+    DeviceBuffer0400<PhaseGeometryAccumulator0493x6b> phaseGeometryAccum0493x6b;
+    // 0493x6c permanent-shape scaffold: raw phase fill and its one-step
+    // conservative filtered geometry stay resident on CUDA.  Future Q6, gas
+    // pressure and surface-tension stages are expected to share these buffers.
+    DeviceBuffer0400<double> phaseFillRaw0493x6c;
+    DeviceBuffer0400<double> phaseAlphaFiltered0493x6c;
+    DeviceBuffer0400<PhaseGeometryResidentAccumulator0493x6c>
+        phaseGeometryResidentAccum0493x6c;
+    // 0493x6f resident pressure-domain stencil.  These are allocated lazily
+    // only when the x6f path is requested.  X/Y coefficients are stored on the
+    // east/north face owned by each cell and are reused by every CG iteration.
+    DeviceBuffer0400<unsigned char> phasePressureMask0493x6f;
+    DeviceBuffer0400<double> phaseFaceCoeffX0493x6f;
+    DeviceBuffer0400<double> phaseFaceCoeffY0493x6f;
+    // 0493x6g stores the interfacial Dirichlet potential on the same owned
+    // east/north faces.  These values are read by RHS assembly and by the
+    // velocity correction, but never by the CG matrix-vector product.
+    DeviceBuffer0400<double> phaseFacePhiGammaX0493x6g;
+    DeviceBuffer0400<double> phaseFacePhiGammaY0493x6g;
+    DeviceBuffer0400<PhaseInterfaceStencilAccumulator0493x6f>
+        phaseInterfaceStencilAccum0493x6f;
+    bool phaseInterfaceStencilValid0493x6f = false;
+    int phaseInterfaceStencilStep0493x6f = -1;
+    bool phaseGeometryResidentValid0493x6c = false;
+    int phaseGeometryResidentStep0493x6c = -1;
+    double phaseGeometryReferenceCellMass0493x6c = 0.0;
+    int phaseGeometryLiquidSpeciesCount0493x6c = 0;
     DeviceBuffer0400<double> partial0;
     DeviceBuffer0400<double> partial1;
     DeviceBuffer0400<double> partial2;
@@ -553,6 +1115,10 @@ struct ResidentWorkspace0400 {
         speciesMasks0493w6.ensure(denseSpecies);
         speciesDUx0493w5.ensure(denseSpecies);
         speciesDUy0493w5.ensure(denseSpecies);
+        phaseGasPressurePotential0493x6a.ensure(c);
+        phaseGeometryAccum0493x6b.ensure(1u);
+        phaseGeometryResidentAccum0493x6c.ensure(1u);
+        phaseInterfaceStencilAccum0493x6f.ensure(1u);
         partial0.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial1.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial2.ensure(static_cast<std::size_t>(std::max(1, blocks)));
@@ -1665,6 +2231,22 @@ __device__ bool q6_species_cell_active_0493w5(
            species.occupancyFraction[k] >= minOccupancyFraction;
 }
 
+__device__ bool q6_species_cell_active_free_surface_0493x5a(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int cell,
+    double minFillFraction) {
+    if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
+        cell < 0 || cell >= species.numCells) {
+        return false;
+    }
+    const int k = speciesIndex * species.numCells + cell;
+    const double ref = species.referenceCellMass[speciesIndex];
+    const double fill = ref > 0.0 ? species.mass[k] / ref : 0.0;
+    return species.q6Strength[speciesIndex] > 0.0 &&
+           species.mass[k] > 0.0 && fill >= minFillFraction;
+}
+
 __device__ double q6_species_cell_velocity_component_0493w5(
     CudaSpeciesCellDeviceView0490h species,
     int speciesIndex,
@@ -1700,6 +2282,7 @@ __global__ void q6_build_independent_mask_0493w5(
     CudaSpeciesCellDeviceView0490h species,
     int speciesIndex,
     double minOccupancyFraction,
+    int freeSurfaceMode0493x5a,
     unsigned char* mask,
     double* rhs,
     int n,
@@ -1708,8 +2291,11 @@ __global__ void q6_build_independent_mask_0493w5(
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int c = idx; c < n; c += stride) {
-        const bool active = q6_species_cell_active_0493w5(
-            species, speciesIndex, c, minOccupancyFraction);
+        const bool active = freeSurfaceMode0493x5a
+            ? q6_species_cell_active_free_surface_0493x5a(
+                species, speciesIndex, c, minOccupancyFraction)
+            : q6_species_cell_active_0493w5(
+                species, speciesIndex, c, minOccupancyFraction);
         mask[c] = active ? 1u : 0u;
         rhs[c] = 0.0;
         if (active) ++activeLocal;
@@ -1717,10 +2303,930 @@ __global__ void q6_build_independent_mask_0493w5(
     if (activeLocal != 0ull) atomicAdd(activeCounter, activeLocal);
 }
 
+__global__ void q6_regularize_free_surface_mask_0493x5a(
+    const unsigned char* rawMask,
+    unsigned char* regularizedMask,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    unsigned long long* activeCounter) {
+    unsigned long long activeLocal = 0ull;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        bool active = rawMask[c] != 0u;
+        if (!active) {
+            const int ix = c % nx;
+            const int iy = c / nx;
+            bool enclosed = true;
+            int neighbourCount = 0;
+
+            if (periodicX || ix > 0) {
+                const int west = iy * nx +
+                    (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
+                enclosed = enclosed && rawMask[west] != 0u;
+                ++neighbourCount;
+            }
+            if (periodicX || ix < nx - 1) {
+                const int east = iy * nx +
+                    (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+                enclosed = enclosed && rawMask[east] != 0u;
+                ++neighbourCount;
+            }
+            if (periodicY || iy > 0) {
+                const int south =
+                    (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
+                enclosed = enclosed && rawMask[south] != 0u;
+                ++neighbourCount;
+            }
+            if (periodicY || iy < ny - 1) {
+                const int north =
+                    (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+                enclosed = enclosed && rawMask[north] != 0u;
+                ++neighbourCount;
+            }
+
+            // Close only a one-cell cavity fully surrounded by the raw liquid
+            // support.  Missing neighbours at a solid box wall do not create a
+            // free surface, while an actual liquid-empty interface always has
+            // at least one in-domain inactive neighbour and remains open.
+            active = enclosed && neighbourCount >= 2;
+        }
+        regularizedMask[c] = active ? 1u : 0u;
+        if (active) ++activeLocal;
+    }
+    if (activeLocal != 0ull) atomicAdd(activeCounter, activeLocal);
+}
+
+__global__ void q6_build_phase_gas_pressure_potential_0493x6a(
+    CudaSpeciesCellDeviceView0490h species,
+    double dt,
+    double kBT,
+    double projectedLiquidReferenceCellMass,
+    double* gasPressurePotential) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < species.numCells; c += stride) {
+        unsigned long long gasCount = 0ull;
+        for (int s = 0; s < species.speciesCount; ++s) {
+            if (species.phaseFamily[s] ==
+                static_cast<unsigned char>(SpeciesPhaseFamily::Gas)) {
+                gasCount += static_cast<unsigned long long>(
+                    species.count[s * species.numCells + c]);
+            }
+        }
+        // In 2D, p_g = N_g kBT / A and rho_l,ref = M_l,ref / A, hence
+        // phi_g = dt * p_g / rho_l,ref = dt * N_g kBT / M_l,ref.
+        gasPressurePotential[c] = projectedLiquidReferenceCellMass > 0.0
+            ? dt * kBT * static_cast<double>(gasCount) /
+                  projectedLiquidReferenceCellMass
+            : 0.0;
+    }
+}
+
+__global__ void q6_phase_interface_pressure_stats_0493x6a(
+    const unsigned char* liquidMask,
+    const double* gasPressurePotential,
+    double* partialSum,
+    double* partialSq,
+    double* partialMax,
+    unsigned long long* interfaceFaceCounter,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    extern __shared__ double sh[];
+    double* shSum = sh;
+    double* shSq = sh + blockDim.x;
+    double* shMax = sh + 2 * blockDim.x;
+    const int tid = threadIdx.x;
+    double sum = 0.0;
+    double sq = 0.0;
+    double mx = 0.0;
+    unsigned long long faces = 0ull;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (liquidMask[c] == 0u) continue;
+        const int ix = c % nx;
+        const int iy = c / nx;
+        int neighbours[4];
+        int count = 0;
+        if (periodicX || ix > 0) {
+            neighbours[count++] = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
+        }
+        if (periodicX || ix < nx - 1) {
+            neighbours[count++] = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+        }
+        if (periodicY || iy > 0) {
+            neighbours[count++] =
+                (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
+        }
+        if (periodicY || iy < ny - 1) {
+            neighbours[count++] =
+                (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+        }
+        for (int k = 0; k < count; ++k) {
+            const int nb = neighbours[k];
+            if (liquidMask[nb] != 0u) continue;
+            // Current free-surface geometry places the interface at the
+            // midpoint of the active/inactive cell-centre segment.  Use the
+            // matching centred interpolation of the gas pressure potential.
+            const double phi = 0.5 *
+                (gasPressurePotential[c] + gasPressurePotential[nb]);
+            sum += phi;
+            sq += phi * phi;
+            mx = fmax(mx, fabs(phi));
+            ++faces;
+        }
+    }
+    shSum[tid] = sum;
+    shSq[tid] = sq;
+    shMax[tid] = mx;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shSum[tid] += shSum[tid + offset];
+            shSq[tid] += shSq[tid + offset];
+            shMax[tid] = fmax(shMax[tid], shMax[tid + offset]);
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialSum[blockIdx.x] = shSum[0];
+        partialSq[blockIdx.x] = shSq[0];
+        partialMax[blockIdx.x] = shMax[0];
+    }
+    // `faces` is a per-thread accumulator.  Do not add it only from tid==0:
+    // that would count the faces visited by thread 0 of each block and discard
+    // those visited by every other thread.  One atomic add per participating
+    // thread is negligible here because 0493x6a is diagnostic-only.
+    if (faces != 0ull) atomicAdd(interfaceFaceCounter, faces);
+}
+
+__device__ double q6_phase_fill_0493x6b(
+    CudaSpeciesCellDeviceView0490h species,
+    int cell,
+    unsigned char phaseFamily,
+    double phaseReferenceCellMass) {
+    if (cell < 0 || cell >= species.numCells || !(phaseReferenceCellMass > 0.0)) {
+        return 0.0;
+    }
+    double mass = 0.0;
+    for (int s = 0; s < species.speciesCount; ++s) {
+        if (species.phaseFamily[s] == phaseFamily) {
+            mass += species.mass[s * species.numCells + cell];
+        }
+    }
+    return mass / phaseReferenceCellMass;
+}
+
+__global__ void q6_phase_interface_geometry_stats_0493x6b(
+    CudaSpeciesCellDeviceView0490h species,
+    const unsigned char* liquidMask,
+    double liquidPhaseReferenceCellMass,
+    double supportIsoFill,
+    PhaseGeometryAccumulator0493x6b* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY) {
+    const unsigned char liquidFamily =
+        static_cast<unsigned char>(SpeciesPhaseFamily::Liquid);
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    unsigned long long phaseActiveLocal = 0ull;
+    unsigned long long mismatchLocal = 0ull;
+    unsigned long long facesLocal = 0ull;
+    unsigned long long supportValidLocal = 0ull;
+    unsigned long long nearCellLocal = 0ull;
+    unsigned long long nearExteriorLocal = 0ull;
+    unsigned long long halfBracketLocal = 0ull;
+    unsigned long long normalValidLocal = 0ull;
+    unsigned long long normalOutwardLocal = 0ull;
+    double insideSumLocal = 0.0;
+    double outsideSumLocal = 0.0;
+    double thetaSumLocal = 0.0;
+    double thetaSqLocal = 0.0;
+    double thetaMidSqLocal = 0.0;
+    double halfThetaSumLocal = 0.0;
+    double halfThetaSqLocal = 0.0;
+    double normalDotSumLocal = 0.0;
+
+    for (int c = idx; c < n; c += stride) {
+        const double fillC = q6_phase_fill_0493x6b(
+            species, c, liquidFamily, liquidPhaseReferenceCellMass);
+        const bool phaseActive = fillC >= supportIsoFill;
+        const bool maskActive = liquidMask[c] != 0u;
+        if (phaseActive) ++phaseActiveLocal;
+        if (phaseActive != maskActive) ++mismatchLocal;
+        if (!maskActive) continue;
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+
+        const bool interfaceCell =
+            (hasWest && liquidMask[west] == 0u) ||
+            (hasEast && liquidMask[east] == 0u) ||
+            (hasSouth && liquidMask[south] == 0u) ||
+            (hasNorth && liquidMask[north] == 0u);
+        if (!interfaceCell) continue;
+
+        // The raw normalized phase mass is deliberately not clamped to [0,1].
+        // Values above unity are useful diagnostics of local compression.  The
+        // 0.5 isosurface is therefore a geometric proxy, not yet a VOF field.
+        const double fillW = hasWest
+            ? q6_phase_fill_0493x6b(species, west, liquidFamily,
+                                    liquidPhaseReferenceCellMass)
+            : fillC;
+        const double fillE = hasEast
+            ? q6_phase_fill_0493x6b(species, east, liquidFamily,
+                                    liquidPhaseReferenceCellMass)
+            : fillC;
+        const double fillS = hasSouth
+            ? q6_phase_fill_0493x6b(species, south, liquidFamily,
+                                    liquidPhaseReferenceCellMass)
+            : fillC;
+        const double fillN = hasNorth
+            ? q6_phase_fill_0493x6b(species, north, liquidFamily,
+                                    liquidPhaseReferenceCellMass)
+            : fillC;
+        const double gradX = hasWest && hasEast
+            ? (fillE - fillW) / (2.0 * dx)
+            : (hasEast ? (fillE - fillC) / dx
+                       : (hasWest ? (fillC - fillW) / dx : 0.0));
+        const double gradY = hasSouth && hasNorth
+            ? (fillN - fillS) / (2.0 * dy)
+            : (hasNorth ? (fillN - fillC) / dy
+                        : (hasSouth ? (fillC - fillS) / dy : 0.0));
+        const double gradNorm = sqrt(gradX * gradX + gradY * gradY);
+        const bool normalValid = gradNorm > 1.0e-14;
+        const double nxOut = normalValid ? -gradX / gradNorm : 0.0;
+        const double nyOut = normalValid ? -gradY / gradNorm : 0.0;
+
+        int neighbours[4];
+        double faceNx[4];
+        double faceNy[4];
+        int count = 0;
+        if (hasWest) {
+            neighbours[count] = west; faceNx[count] = -1.0; faceNy[count] = 0.0; ++count;
+        }
+        if (hasEast) {
+            neighbours[count] = east; faceNx[count] = 1.0; faceNy[count] = 0.0; ++count;
+        }
+        if (hasSouth) {
+            neighbours[count] = south; faceNx[count] = 0.0; faceNy[count] = -1.0; ++count;
+        }
+        if (hasNorth) {
+            neighbours[count] = north; faceNx[count] = 0.0; faceNy[count] = 1.0; ++count;
+        }
+
+        for (int k = 0; k < count; ++k) {
+            const int nb = neighbours[k];
+            if (liquidMask[nb] != 0u) continue;
+            const double fillNb = q6_phase_fill_0493x6b(
+                species, nb, liquidFamily, liquidPhaseReferenceCellMass);
+            ++facesLocal;
+            insideSumLocal += fillC;
+            outsideSumLocal += fillNb;
+
+            const double denom = fillC - fillNb;
+            if (denom > 1.0e-14 &&
+                fillC >= supportIsoFill && fillNb < supportIsoFill) {
+                const double theta = (fillC - supportIsoFill) / denom;
+                if (theta >= 0.0 && theta <= 1.0) {
+                    ++supportValidLocal;
+                    thetaSumLocal += theta;
+                    thetaSqLocal += theta * theta;
+                    const double dmid = theta - 0.5;
+                    thetaMidSqLocal += dmid * dmid;
+                    if (theta < 0.1) ++nearCellLocal;
+                    if (theta > 0.9) ++nearExteriorLocal;
+                }
+            }
+
+            if (denom > 1.0e-14 && fillC >= 0.5 && fillNb < 0.5) {
+                const double thetaHalf = (fillC - 0.5) / denom;
+                if (thetaHalf >= 0.0 && thetaHalf <= 1.0) {
+                    ++halfBracketLocal;
+                    halfThetaSumLocal += thetaHalf;
+                    halfThetaSqLocal += thetaHalf * thetaHalf;
+                }
+            }
+
+            if (normalValid) {
+                const double alignment = nxOut * faceNx[k] + nyOut * faceNy[k];
+                ++normalValidLocal;
+                normalDotSumLocal += alignment;
+                if (alignment > 0.0) ++normalOutwardLocal;
+            }
+        }
+    }
+
+    if (phaseActiveLocal) atomicAdd(&accum->phaseFillActiveCells, phaseActiveLocal);
+    if (mismatchLocal) atomicAdd(&accum->maskPhaseMismatchCells, mismatchLocal);
+    if (facesLocal) atomicAdd(&accum->interfaceFaces, facesLocal);
+    if (supportValidLocal) atomicAdd(&accum->supportThetaValidFaces, supportValidLocal);
+    if (nearCellLocal) atomicAdd(&accum->supportThetaNearCellFaces, nearCellLocal);
+    if (nearExteriorLocal) atomicAdd(&accum->supportThetaNearExteriorFaces, nearExteriorLocal);
+    if (halfBracketLocal) atomicAdd(&accum->halfIsoBracketFaces, halfBracketLocal);
+    if (normalValidLocal) atomicAdd(&accum->normalValidFaces, normalValidLocal);
+    if (normalOutwardLocal) atomicAdd(&accum->normalOutwardFaces, normalOutwardLocal);
+    if (insideSumLocal != 0.0) atomic_add_double_0400(&accum->insideFillSum, insideSumLocal);
+    if (outsideSumLocal != 0.0) atomic_add_double_0400(&accum->outsideFillSum, outsideSumLocal);
+    if (thetaSumLocal != 0.0) atomic_add_double_0400(&accum->supportThetaSum, thetaSumLocal);
+    if (thetaSqLocal != 0.0) atomic_add_double_0400(&accum->supportThetaSqSum, thetaSqLocal);
+    if (thetaMidSqLocal != 0.0) atomic_add_double_0400(&accum->supportThetaMidSqSum, thetaMidSqLocal);
+    if (halfThetaSumLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSum, halfThetaSumLocal);
+    if (halfThetaSqLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSqSum, halfThetaSqLocal);
+    if (normalDotSumLocal != 0.0) atomic_add_double_0400(&accum->normalFaceAlignmentSum, normalDotSumLocal);
+}
+
+__global__ void q6_build_phase_fill_resident_0493x6c(
+    CudaSpeciesCellDeviceView0490h species,
+    unsigned char phaseFamily,
+    double phaseReferenceCellMass,
+    double* rawFill,
+    int n,
+    double* gasPressurePotential0493x6g,
+    int buildGasPressure0493x6g,
+    int gasPressureMode0493x6g,
+    double dt0493x6g,
+    double kBT0493x6g,
+    double cellArea0493x6g,
+    double pressureReference0493x6g,
+    double constantPressure0493x6g,
+    double pressureScale0493x6g) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        rawFill[c] = q6_phase_fill_0493x6b(
+            species, c, phaseFamily, phaseReferenceCellMass);
+        if (buildGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
+            double pressure = constantPressure0493x6g;
+            if (gasPressureMode0493x6g == static_cast<int>(PhaseGasPressureMode0493x6g::Eos)) {
+                unsigned long long gasCount = 0ull;
+                for (int s = 0; s < species.speciesCount; ++s) {
+                    if (species.phaseFamily[s] ==
+                        static_cast<unsigned char>(SpeciesPhaseFamily::Gas)) {
+                        gasCount += static_cast<unsigned long long>(
+                            species.count[s * species.numCells + c]);
+                    }
+                }
+                pressure = cellArea0493x6g > 0.0
+                    ? static_cast<double>(gasCount) * kBT0493x6g / cellArea0493x6g
+                    : 0.0;
+            }
+            // rho_l,ref = M_l,ref / A_cell.  Store only the gauge-relative
+            // pressure potential.  This keeps the matrix independent of p_g
+            // and avoids carrying a large uniform ambient pressure through CG.
+            gasPressurePotential0493x6g[c] =
+                phaseReferenceCellMass > 0.0
+                    ? dt0493x6g * pressureScale0493x6g *
+                          (pressure - pressureReference0493x6g) * cellArea0493x6g /
+                          phaseReferenceCellMass
+                    : 0.0;
+        }
+    }
+}
+
+__global__ void q6_filter_phase_fill_conservative_0493x6c(
+    const double* rawFill,
+    double* alpha,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    double lambda) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+
+        // 0493x6f2: rawFill remains the unbounded mass/occupancy diagnostic.
+        // Geometry is built from g=clamp(rawFill,0,1) before filtering.
+        // For lambda<=1/4 the five-point update is a convex combination of
+        // bounded values, hence alpha remains in [0,1] without post-clipping.
+        const double center = fmin(1.0, fmax(0.0, rawFill[c]));
+        double lap = 0.0;
+        if (periodicX || ix > 0) {
+            const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+            const double neighbour = fmin(1.0, fmax(0.0, rawFill[iy * nx + xw]));
+            lap += neighbour - center;
+        }
+        if (periodicX || ix < nx - 1) {
+            const int xe = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+            const double neighbour = fmin(1.0, fmax(0.0, rawFill[iy * nx + xe]));
+            lap += neighbour - center;
+        }
+        if (periodicY || iy > 0) {
+            const int ys = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+            const double neighbour = fmin(1.0, fmax(0.0, rawFill[ys * nx + ix]));
+            lap += neighbour - center;
+        }
+        if (periodicY || iy < ny - 1) {
+            const int yn = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+            const double neighbour = fmin(1.0, fmax(0.0, rawFill[yn * nx + ix]));
+            lap += neighbour - center;
+        }
+        alpha[c] = center + lambda * lap;
+    }
+}
+
+
+__global__ void q6_prepare_phase_interface_stencil_0493x6f(
+    const unsigned char* carrierMask,
+    const double* alpha,
+    unsigned char* pressureMask,
+    double* faceCoeffX,
+    double* faceCoeffY,
+    const double* gasPressurePotential0493x6g,
+    double* facePhiGammaX0493x6g,
+    double* facePhiGammaY0493x6g,
+    int useGasPressure0493x6g,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    double thetaMinGuard,
+    unsigned long long* activeCounter,
+    PhaseInterfaceStencilAccumulator0493x6f* accum,
+    int auditEnabled) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    unsigned long long activeLocal = 0ull;
+    unsigned long long interiorLocal = 0ull;
+    unsigned long long representedLocal = 0ull;
+    unsigned long long smallThetaLocal = 0ull;
+    unsigned long long truncationLocal = 0ull;
+    unsigned long long uncoveredLocal = 0ull;
+    unsigned long long nonzeroPressureLocal0493x6g = 0ull;
+    double thetaMinLocal = 1.0;
+    double thetaMaxLocal = 0.0;
+    double thetaSumLocal = 0.0;
+    double pressurePotentialSumLocal0493x6g = 0.0;
+    double pressurePotentialSqSumLocal0493x6g = 0.0;
+
+    for (int c = idx; c < n; c += stride) {
+        const double alphaC = alpha[c];
+        const bool pressureC = carrierMask[c] != 0u && alphaC >= 0.5;
+        pressureMask[c] = pressureC ? 1u : 0u;
+        if (pressureC) ++activeLocal;
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+
+        // Each stored coefficient owns one unique east/north face.  External
+        // non-periodic domain faces are intentionally left at zero here: the
+        // existing wall/open-boundary path continues to classify them.
+        double coeffX = 0.0;
+        double phiGammaX0493x6g = 0.0;
+        if (periodicX || ix < nx - 1) {
+            const int east = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            const double alphaE = alpha[east];
+            const bool pressureE = carrierMask[east] != 0u && alphaE >= 0.5;
+            const bool cHigh = alphaC >= 0.5 && alphaE < 0.5;
+            const bool eHigh = alphaE >= 0.5 && alphaC < 0.5;
+            const bool crossing = cHigh || eHigh;
+            if (pressureC && pressureE) {
+                coeffX = 1.0;
+                if (auditEnabled) ++interiorLocal;
+            } else if (pressureC || pressureE) {
+                if (crossing) {
+                    const double alphaHigh = cHigh ? alphaC : alphaE;
+                    const double alphaLow = cHigh ? alphaE : alphaC;
+                    const int gasSideCell = cHigh ? east : c;
+                    const double denom = alphaHigh - alphaLow;
+                    if (denom > 1.0e-14) {
+                        const double theta = (alphaHigh - 0.5) / denom;
+                        coeffX = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
+                        if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
+                            // First-order exterior trace: use the alpha<0.5
+                            // cell value.  It remains well-defined for AA and
+                            // AI carrier topologies and does not dilute p_g
+                            // with the liquid-side cell where gas may be absent.
+                            phiGammaX0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                        }
+                        if (auditEnabled) {
+                            ++representedLocal;
+                            if (theta < thetaMinGuard) ++smallThetaLocal;
+                            thetaMinLocal = fmin(thetaMinLocal, theta);
+                            thetaMaxLocal = fmax(thetaMaxLocal, theta);
+                            thetaSumLocal += theta;
+                            if (useGasPressure0493x6g) {
+                                if (fabs(phiGammaX0493x6g) > 0.0) {
+                                    ++nonzeroPressureLocal0493x6g;
+                                }
+                                pressurePotentialSumLocal0493x6g += phiGammaX0493x6g;
+                                pressurePotentialSqSumLocal0493x6g +=
+                                    phiGammaX0493x6g * phiGammaX0493x6g;
+                            }
+                        }
+                    }
+                } else {
+                    // The alpha-defined liquid continues across this face but
+                    // the numerical carrier has ended.  Do not turn that
+                    // carrier loss into an artificial p=0 interface.
+                    coeffX = 0.0;
+                    if (auditEnabled) ++truncationLocal;
+                }
+            } else if (crossing && auditEnabled) {
+                // The physical interface lies outside the available carrier.
+                // This is an explicit support-coverage diagnostic, not a
+                // pressure boundary silently invented by the solver.
+                ++uncoveredLocal;
+            }
+        }
+        faceCoeffX[c] = coeffX;
+        if (facePhiGammaX0493x6g != nullptr) facePhiGammaX0493x6g[c] = phiGammaX0493x6g;
+
+        double coeffY = 0.0;
+        double phiGammaY0493x6g = 0.0;
+        if (periodicY || iy < ny - 1) {
+            const int north =
+                (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            const double alphaN = alpha[north];
+            const bool pressureN = carrierMask[north] != 0u && alphaN >= 0.5;
+            const bool cHigh = alphaC >= 0.5 && alphaN < 0.5;
+            const bool nHigh = alphaN >= 0.5 && alphaC < 0.5;
+            const bool crossing = cHigh || nHigh;
+            if (pressureC && pressureN) {
+                coeffY = 1.0;
+                if (auditEnabled) ++interiorLocal;
+            } else if (pressureC || pressureN) {
+                if (crossing) {
+                    const double alphaHigh = cHigh ? alphaC : alphaN;
+                    const double alphaLow = cHigh ? alphaN : alphaC;
+                    const int gasSideCell = cHigh ? north : c;
+                    const double denom = alphaHigh - alphaLow;
+                    if (denom > 1.0e-14) {
+                        const double theta = (alphaHigh - 0.5) / denom;
+                        coeffY = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
+                        if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
+                            phiGammaY0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                        }
+                        if (auditEnabled) {
+                            ++representedLocal;
+                            if (theta < thetaMinGuard) ++smallThetaLocal;
+                            thetaMinLocal = fmin(thetaMinLocal, theta);
+                            thetaMaxLocal = fmax(thetaMaxLocal, theta);
+                            thetaSumLocal += theta;
+                            if (useGasPressure0493x6g) {
+                                if (fabs(phiGammaY0493x6g) > 0.0) {
+                                    ++nonzeroPressureLocal0493x6g;
+                                }
+                                pressurePotentialSumLocal0493x6g += phiGammaY0493x6g;
+                                pressurePotentialSqSumLocal0493x6g +=
+                                    phiGammaY0493x6g * phiGammaY0493x6g;
+                            }
+                        }
+                    }
+                } else {
+                    coeffY = 0.0;
+                    if (auditEnabled) ++truncationLocal;
+                }
+            } else if (crossing && auditEnabled) {
+                ++uncoveredLocal;
+            }
+        }
+        faceCoeffY[c] = coeffY;
+        if (facePhiGammaY0493x6g != nullptr) facePhiGammaY0493x6g[c] = phiGammaY0493x6g;
+    }
+
+    if (activeLocal) atomicAdd(activeCounter, activeLocal);
+    if (!auditEnabled) return;
+    if (activeLocal) atomicAdd(&accum->pressureActiveCells, activeLocal);
+    if (interiorLocal) atomicAdd(&accum->interiorPressureFaces, interiorLocal);
+    if (representedLocal) {
+        atomicAdd(&accum->representedInterfaceFaces, representedLocal);
+        constexpr double kThetaScale0493x6f = 1000000000.0;
+        const auto maxScaled = static_cast<unsigned long long>(
+            fmin(1.0, fmax(0.0, thetaMaxLocal)) * kThetaScale0493x6f + 0.5);
+        const auto minComplementScaled = static_cast<unsigned long long>(
+            (1.0 - fmin(1.0, fmax(0.0, thetaMinLocal))) *
+                kThetaScale0493x6f + 0.5);
+        atomicMax(&accum->thetaMaxScaled, maxScaled);
+        atomicMax(&accum->thetaMinComplementScaled, minComplementScaled);
+        atomic_add_double_0400(&accum->thetaSum, thetaSumLocal);
+    }
+    if (smallThetaLocal) {
+        atomicAdd(&accum->smallThetaStabilizedFaces, smallThetaLocal);
+    }
+    if (truncationLocal) {
+        atomicAdd(&accum->carrierTruncationFaces, truncationLocal);
+    }
+    if (uncoveredLocal) {
+        atomicAdd(&accum->uncoveredInterfaceFaces, uncoveredLocal);
+    }
+    if (nonzeroPressureLocal0493x6g) {
+        atomicAdd(&accum->nonzeroPressureFaces0493x6g, nonzeroPressureLocal0493x6g);
+    }
+    if (pressurePotentialSumLocal0493x6g != 0.0) {
+        atomic_add_double_0400(&accum->pressurePotentialSum0493x6g,
+                               pressurePotentialSumLocal0493x6g);
+    }
+    if (pressurePotentialSqSumLocal0493x6g != 0.0) {
+        atomic_add_double_0400(&accum->pressurePotentialSqSum0493x6g,
+                               pressurePotentialSqSumLocal0493x6g);
+    }
+}
+
+__global__ void q6_phase_geometry_resident_audit_0493x6c(
+    const double* rawFill,
+    const double* alpha,
+    const unsigned char* liquidMask,
+    double supportIsoFill,
+    PhaseGeometryResidentAccumulator0493x6c* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    int phaseInterfaceTopologyEnabled,
+    double cutFaceThetaMinGuard) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    unsigned long long mismatchLocal = 0ull;
+    unsigned long long facesLocal = 0ull;
+    unsigned long long halfBracketLocal = 0ull;
+    unsigned long long normalValidLocal = 0ull;
+    unsigned long long normalOutwardLocal = 0ull;
+    unsigned long long cutFaceGeometricLocal = 0ull;
+    unsigned long long cutFaceSmallThetaFallbackLocal = 0ull;
+    unsigned long long alphaHalfCrossingLocal = 0ull;
+    unsigned long long alphaHalfActiveActiveLocal = 0ull;
+    unsigned long long alphaHalfActiveInactiveLocal = 0ull;
+    unsigned long long alphaHalfInactiveInactiveLocal = 0ull;
+    unsigned long long alphaHalfAIActiveLiquidSideLocal = 0ull;
+    unsigned long long alphaHalfAIActiveExteriorSideLocal = 0ull;
+    double alphaHalfThetaMinLocal = 1.0;
+    double alphaHalfThetaMaxLocal = 0.0;
+    double alphaHalfThetaSumLocal = 0.0;
+    double alphaHalfThetaSqSumLocal = 0.0;
+    double cutFaceThetaMinLocal = 1.0;
+    double cutFaceThetaMaxLocal = 0.0;
+    double cutFaceThetaSumLocal = 0.0;
+    unsigned long long boundedGeometryClippedLocal = 0ull;
+    double rawSumLocal = 0.0;
+    double boundedGeometrySumLocal = 0.0;
+    double alphaSumLocal = 0.0;
+    double deltaSqLocal = 0.0;
+    double halfThetaSumLocal = 0.0;
+    double halfThetaSqLocal = 0.0;
+    double normalDotSumLocal = 0.0;
+
+    for (int c = idx; c < n; c += stride) {
+        const double rawC = rawFill[c];
+        const double geometryC = fmin(1.0, fmax(0.0, rawC));
+        const double alphaC = alpha[c];
+        rawSumLocal += rawC;
+        boundedGeometrySumLocal += geometryC;
+        if (geometryC != rawC) ++boundedGeometryClippedLocal;
+        alphaSumLocal += alphaC;
+        const double delta = alphaC - geometryC;
+        deltaSqLocal += delta * delta;
+        const bool maskActive = liquidMask[c] != 0u;
+        const bool filteredActive = alphaC >= supportIsoFill;
+        if (maskActive != filteredActive) ++mismatchLocal;
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+
+        // x6e scans each physical grid face exactly once (east and north only),
+        // independently of the carrier-mask boundary.  The high-alpha side is
+        // the liquid side for theta, so theta is always measured from liquid
+        // cell center toward the exterior cell center.
+        if (phaseInterfaceTopologyEnabled) {
+            int topologyNeighbours[2];
+            int topologyCount = 0;
+            if (periodicX || ix < nx - 1) {
+                topologyNeighbours[topologyCount++] = iy * nx +
+                    (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            }
+            if (periodicY || iy < ny - 1) {
+                topologyNeighbours[topologyCount++] =
+                    (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            }
+            for (int tk = 0; tk < topologyCount; ++tk) {
+                const int nb = topologyNeighbours[tk];
+                const double alphaNb = alpha[nb];
+                const bool cLiquidSide = alphaC >= 0.5 && alphaNb < 0.5;
+                const bool nbLiquidSide = alphaNb >= 0.5 && alphaC < 0.5;
+                if (!(cLiquidSide || nbLiquidSide)) continue;
+
+                ++alphaHalfCrossingLocal;
+                const bool maskNb = liquidMask[nb] != 0u;
+                if (maskActive && maskNb) {
+                    ++alphaHalfActiveActiveLocal;
+                } else if (maskActive || maskNb) {
+                    ++alphaHalfActiveInactiveLocal;
+                    const bool liquidSideActive = cLiquidSide ? maskActive : maskNb;
+                    if (liquidSideActive) {
+                        ++alphaHalfAIActiveLiquidSideLocal;
+                    } else {
+                        ++alphaHalfAIActiveExteriorSideLocal;
+                    }
+                } else {
+                    ++alphaHalfInactiveInactiveLocal;
+                }
+
+                const double alphaHigh = cLiquidSide ? alphaC : alphaNb;
+                const double alphaLow = cLiquidSide ? alphaNb : alphaC;
+                const double denomHalf = alphaHigh - alphaLow;
+                if (denomHalf > 1.0e-14) {
+                    const double thetaHalf = (alphaHigh - 0.5) / denomHalf;
+                    alphaHalfThetaMinLocal = fmin(alphaHalfThetaMinLocal, thetaHalf);
+                    alphaHalfThetaMaxLocal = fmax(alphaHalfThetaMaxLocal, thetaHalf);
+                    alphaHalfThetaSumLocal += thetaHalf;
+                    alphaHalfThetaSqSumLocal += thetaHalf * thetaHalf;
+                }
+            }
+        }
+
+        if (!maskActive) continue;
+
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+
+        const double alphaW = hasWest ? alpha[west] : alphaC;
+        const double alphaE = hasEast ? alpha[east] : alphaC;
+        const double alphaS = hasSouth ? alpha[south] : alphaC;
+        const double alphaN = hasNorth ? alpha[north] : alphaC;
+        const double gradX = hasWest && hasEast
+            ? (alphaE - alphaW) / (2.0 * dx)
+            : (hasEast ? (alphaE - alphaC) / dx
+                       : (hasWest ? (alphaC - alphaW) / dx : 0.0));
+        const double gradY = hasSouth && hasNorth
+            ? (alphaN - alphaS) / (2.0 * dy)
+            : (hasNorth ? (alphaN - alphaC) / dy
+                        : (hasSouth ? (alphaC - alphaS) / dy : 0.0));
+        const double gradNorm = sqrt(gradX * gradX + gradY * gradY);
+        const bool normalValid = gradNorm > 1.0e-14;
+        const double nxOut = normalValid ? -gradX / gradNorm : 0.0;
+        const double nyOut = normalValid ? -gradY / gradNorm : 0.0;
+
+        int neighbours[4];
+        double faceNx[4];
+        double faceNy[4];
+        int count = 0;
+        if (hasWest) {
+            neighbours[count] = west; faceNx[count] = -1.0; faceNy[count] = 0.0; ++count;
+        }
+        if (hasEast) {
+            neighbours[count] = east; faceNx[count] = 1.0; faceNy[count] = 0.0; ++count;
+        }
+        if (hasSouth) {
+            neighbours[count] = south; faceNx[count] = 0.0; faceNy[count] = -1.0; ++count;
+        }
+        if (hasNorth) {
+            neighbours[count] = north; faceNx[count] = 0.0; faceNy[count] = 1.0; ++count;
+        }
+
+        for (int k = 0; k < count; ++k) {
+            const int nb = neighbours[k];
+            if (liquidMask[nb] != 0u) continue;
+            ++facesLocal;
+            const double alphaNb = alpha[nb];
+            const double denom = alphaC - alphaNb;
+            if (denom > 1.0e-14 && alphaC >= 0.5 && alphaNb < 0.5) {
+                const double theta = (alphaC - 0.5) / denom;
+                if (theta >= 0.0 && theta <= 1.0) {
+                    ++halfBracketLocal;
+                    halfThetaSumLocal += theta;
+                    halfThetaSqLocal += theta * theta;
+                    if (theta >= cutFaceThetaMinGuard) {
+                        ++cutFaceGeometricLocal;
+                        cutFaceThetaMinLocal = fmin(cutFaceThetaMinLocal, theta);
+                        cutFaceThetaMaxLocal = fmax(cutFaceThetaMaxLocal, theta);
+                        cutFaceThetaSumLocal += theta;
+                    } else {
+                        ++cutFaceSmallThetaFallbackLocal;
+                    }
+                }
+            }
+            if (normalValid) {
+                const double alignment = nxOut * faceNx[k] + nyOut * faceNy[k];
+                ++normalValidLocal;
+                normalDotSumLocal += alignment;
+                if (alignment > 0.0) ++normalOutwardLocal;
+            }
+        }
+    }
+
+    if (mismatchLocal) atomicAdd(&accum->maskFilteredMismatchCells, mismatchLocal);
+    if (facesLocal) atomicAdd(&accum->interfaceFaces, facesLocal);
+    if (halfBracketLocal) atomicAdd(&accum->halfIsoBracketFaces, halfBracketLocal);
+    if (normalValidLocal) atomicAdd(&accum->normalValidFaces, normalValidLocal);
+    if (normalOutwardLocal) atomicAdd(&accum->normalOutwardFaces, normalOutwardLocal);
+    if (cutFaceGeometricLocal) {
+        atomicAdd(&accum->cutFaceGeometricFaces, cutFaceGeometricLocal);
+        constexpr double kThetaScale0493x6d = 1000000000.0;
+        const auto maxScaled = static_cast<unsigned long long>(
+            fmin(1.0, fmax(0.0, cutFaceThetaMaxLocal)) * kThetaScale0493x6d + 0.5);
+        const auto minComplementScaled = static_cast<unsigned long long>(
+            (1.0 - fmin(1.0, fmax(0.0, cutFaceThetaMinLocal))) *
+                kThetaScale0493x6d + 0.5);
+        atomicMax(&accum->cutFaceThetaMaxScaled, maxScaled);
+        atomicMax(&accum->cutFaceThetaMinComplementScaled, minComplementScaled);
+        if (cutFaceThetaSumLocal != 0.0) {
+            atomic_add_double_0400(&accum->cutFaceThetaSum, cutFaceThetaSumLocal);
+        }
+    }
+    if (cutFaceSmallThetaFallbackLocal) {
+        atomicAdd(&accum->cutFaceSmallThetaFallbackFaces,
+                  cutFaceSmallThetaFallbackLocal);
+    }
+    if (alphaHalfCrossingLocal) {
+        atomicAdd(&accum->alphaHalfCrossingFaces, alphaHalfCrossingLocal);
+        atomicAdd(&accum->alphaHalfCrossingActiveActiveFaces,
+                  alphaHalfActiveActiveLocal);
+        atomicAdd(&accum->alphaHalfCrossingActiveInactiveFaces,
+                  alphaHalfActiveInactiveLocal);
+        atomicAdd(&accum->alphaHalfCrossingInactiveInactiveFaces,
+                  alphaHalfInactiveInactiveLocal);
+        atomicAdd(&accum->alphaHalfCrossingAIActiveLiquidSideFaces,
+                  alphaHalfAIActiveLiquidSideLocal);
+        atomicAdd(&accum->alphaHalfCrossingAIActiveExteriorSideFaces,
+                  alphaHalfAIActiveExteriorSideLocal);
+        constexpr double kThetaScale0493x6e = 1000000000.0;
+        const auto maxScaled = static_cast<unsigned long long>(
+            fmin(1.0, fmax(0.0, alphaHalfThetaMaxLocal)) * kThetaScale0493x6e + 0.5);
+        const auto minComplementScaled = static_cast<unsigned long long>(
+            (1.0 - fmin(1.0, fmax(0.0, alphaHalfThetaMinLocal))) *
+                kThetaScale0493x6e + 0.5);
+        atomicMax(&accum->alphaHalfThetaMaxScaled, maxScaled);
+        atomicMax(&accum->alphaHalfThetaMinComplementScaled, minComplementScaled);
+        atomic_add_double_0400(&accum->alphaHalfThetaSum, alphaHalfThetaSumLocal);
+        atomic_add_double_0400(&accum->alphaHalfThetaSqSum, alphaHalfThetaSqSumLocal);
+    }
+    if (boundedGeometryClippedLocal) {
+        atomicAdd(&accum->boundedGeometryClippedCells, boundedGeometryClippedLocal);
+    }
+    if (rawSumLocal != 0.0) atomic_add_double_0400(&accum->rawFillSum, rawSumLocal);
+    if (boundedGeometrySumLocal != 0.0) {
+        atomic_add_double_0400(&accum->boundedGeometrySourceSum, boundedGeometrySumLocal);
+    }
+    if (alphaSumLocal != 0.0) atomic_add_double_0400(&accum->filteredFillSum, alphaSumLocal);
+    if (deltaSqLocal != 0.0) atomic_add_double_0400(&accum->filterDeltaSqSum, deltaSqLocal);
+    if (halfThetaSumLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSum, halfThetaSumLocal);
+    if (halfThetaSqLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSqSum, halfThetaSqLocal);
+    if (normalDotSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->normalFaceAlignmentSum, normalDotSumLocal);
+    }
+}
+
 __global__ void q6_build_independent_rhs_after_mask_0493w5(
     CudaSpeciesCellDeviceView0490h species,
     int speciesIndex,
     const unsigned char* mask,
+    const unsigned char* velocityMask,
     double* rhs,
     double* partialSum,
     double* partialSq,
@@ -1738,6 +3244,11 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     Q6SegmentedIo0409 segmentedIo,
     std::uint32_t speciesType,
     int exclusiveProjectedSpecies,
+    const double* preparedFaceCoeffX0493x6g,
+    const double* preparedFaceCoeffY0493x6g,
+    const double* preparedFacePhiGammaX0493x6g,
+    const double* preparedFacePhiGammaY0493x6g,
+    int usePreparedInterfacePressure0493x6g,
     int fullDomain) {
     extern __shared__ double sh[];
     double* shSum = sh;
@@ -1794,21 +3305,21 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
         const double fxEastInterior = fullDomain
             ? uxC
             : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, c, east, 0);
+                species, velocityMask, speciesIndex, c, east, 0);
         const double fxWestInterior = fullDomain
             ? q6_species_cell_velocity_component_0493w5(
                 species, speciesIndex, west, 0)
             : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, west, c, 0);
+                species, velocityMask, speciesIndex, west, c, 0);
         const double fyNorthInterior = fullDomain
             ? uyC
             : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, c, north, 1);
+                species, velocityMask, speciesIndex, c, north, 1);
         const double fySouthInterior = fullDomain
             ? q6_species_cell_velocity_component_0493w5(
                 species, speciesIndex, south, 1)
             : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, south, c, 1);
+                species, velocityMask, speciesIndex, south, c, 1);
 
         const double fxWest = hasWest ? fxWestInterior : localXLowFlux;
         const double fxEastBefore = hasEast ? fxEastInterior : uxC;
@@ -1820,7 +3331,28 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
                                  (fyNorthBefore - fySouth) / dy;
         const double divSolve = (fxEastSolve - fxWest) / dx +
                                 (fyNorthSolve - fySouth) / dy;
-        rhs[c] = -divSolve;
+        double rhsValue = -divSolve;
+        if (usePreparedInterfacePressure0493x6g) {
+            const double invDx2Local = 1.0 / (dx * dx);
+            const double invDy2Local = 1.0 / (dy * dy);
+            if (hasEast && mask[east] == 0u) {
+                rhsValue += preparedFaceCoeffX0493x6g[c] *
+                            preparedFacePhiGammaX0493x6g[c] * invDx2Local;
+            }
+            if (hasWest && mask[west] == 0u) {
+                rhsValue += preparedFaceCoeffX0493x6g[west] *
+                            preparedFacePhiGammaX0493x6g[west] * invDx2Local;
+            }
+            if (hasNorth && mask[north] == 0u) {
+                rhsValue += preparedFaceCoeffY0493x6g[c] *
+                            preparedFacePhiGammaY0493x6g[c] * invDy2Local;
+            }
+            if (hasSouth && mask[south] == 0u) {
+                rhsValue += preparedFaceCoeffY0493x6g[south] *
+                            preparedFacePhiGammaY0493x6g[south] * invDy2Local;
+            }
+        }
+        rhs[c] = rhsValue;
         sum += rhs[c];
         sq += divBefore * divBefore;
         mx = fmax(mx, fabs(divBefore));
@@ -1871,6 +3403,42 @@ __global__ void q6_init_masked_cg_0493w5(
     }
 }
 
+// Return the coefficient multiplying a center-to-neighbour pressure difference.
+// Interior liquid faces keep coefficient 1.  On a carrier/exterior face x6d
+// reconstructs alpha=0.5 at distance theta*h from the active-cell center, so
+// the finite-volume Dirichlet contribution is 1/(theta*h^2) and the face
+// correction is grad(phi)=Delta(phi)/(theta*h).  Faces that do not bracket the
+// interface, or whose theta is below the conditioning guard, retain the x5a
+// half-cell factor 2.
+__device__ double q6_masked_face_factor_0493x6d(
+    const unsigned char* mask,
+    const double* phaseAlpha,
+    int cellA,
+    int cellB,
+    double legacyInactiveFactor,
+    int useCutFaceGeometry,
+    double thetaMinGuard) {
+    const bool activeA = mask[cellA] != 0u;
+    const bool activeB = mask[cellB] != 0u;
+    if (activeA && activeB) return 1.0;
+    if (!activeA && !activeB) return legacyInactiveFactor;
+    if (!useCutFaceGeometry || phaseAlpha == nullptr) return legacyInactiveFactor;
+
+    const int inside = activeA ? cellA : cellB;
+    const int outside = activeA ? cellB : cellA;
+    const double alphaInside = phaseAlpha[inside];
+    const double alphaOutside = phaseAlpha[outside];
+    const double denom = alphaInside - alphaOutside;
+    if (!(alphaInside >= 0.5 && alphaOutside < 0.5 && denom > 1.0e-14)) {
+        return legacyInactiveFactor;
+    }
+    const double theta = (alphaInside - 0.5) / denom;
+    if (!(theta >= thetaMinGuard && theta <= 1.0)) {
+        return legacyInactiveFactor;
+    }
+    return 1.0 / theta;
+}
+
 __global__ void q6_apply_masked_operator_and_dot_0493w5(
     const double* p,
     double* Ap,
@@ -1881,7 +3449,14 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
     double invDx2,
     double invDy2,
     int periodicX,
-    int periodicY) {
+    int periodicY,
+    const double* phaseAlpha,
+    int useCutFaceGeometry,
+    double cutFaceThetaMinGuard,
+    const double* preparedFaceCoeffX,
+    const double* preparedFaceCoeffY,
+    int usePreparedPhaseStencil,
+    double inactiveNeighborFactor) {
     extern __shared__ double sh[];
     const int tid = threadIdx.x;
     double dot = 0.0;
@@ -1899,22 +3474,46 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
         if (periodicX || ix < nx - 1) {
             const int east = iy * nx +
                 (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
-            a += invDx2 * (p[c] - (mask[east] ? p[east] : 0.0));
+            const double factor = usePreparedPhaseStencil
+                ? preparedFaceCoeffX[c]
+                : q6_masked_face_factor_0493x6d(
+                    mask, phaseAlpha, c, east, inactiveNeighborFactor,
+                    useCutFaceGeometry, cutFaceThetaMinGuard);
+            a += factor * invDx2 *
+                 (p[c] - (mask[east] ? p[east] : 0.0));
         }
         if (periodicX || ix > 0) {
             const int west = iy * nx +
                 (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
-            a += invDx2 * (p[c] - (mask[west] ? p[west] : 0.0));
+            const double factor = usePreparedPhaseStencil
+                ? preparedFaceCoeffX[west]
+                : q6_masked_face_factor_0493x6d(
+                    mask, phaseAlpha, c, west, inactiveNeighborFactor,
+                    useCutFaceGeometry, cutFaceThetaMinGuard);
+            a += factor * invDx2 *
+                 (p[c] - (mask[west] ? p[west] : 0.0));
         }
         if (periodicY || iy < ny - 1) {
             const int north =
                 (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
-            a += invDy2 * (p[c] - (mask[north] ? p[north] : 0.0));
+            const double factor = usePreparedPhaseStencil
+                ? preparedFaceCoeffY[c]
+                : q6_masked_face_factor_0493x6d(
+                    mask, phaseAlpha, c, north, inactiveNeighborFactor,
+                    useCutFaceGeometry, cutFaceThetaMinGuard);
+            a += factor * invDy2 *
+                 (p[c] - (mask[north] ? p[north] : 0.0));
         }
         if (periodicY || iy > 0) {
             const int south =
                 (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
-            a += invDy2 * (p[c] - (mask[south] ? p[south] : 0.0));
+            const double factor = usePreparedPhaseStencil
+                ? preparedFaceCoeffY[south]
+                : q6_masked_face_factor_0493x6d(
+                    mask, phaseAlpha, c, south, inactiveNeighborFactor,
+                    useCutFaceGeometry, cutFaceThetaMinGuard);
+            a += factor * invDy2 *
+                 (p[c] - (mask[south] ? p[south] : 0.0));
         }
         Ap[c] = a;
         dot += p[c] * a;
@@ -1942,6 +3541,16 @@ __global__ void q6_compute_masked_face_correction_0493w5(
     double strength,
     int periodicX,
     int periodicY,
+    const double* phaseAlpha,
+    int useCutFaceGeometry,
+    double cutFaceThetaMinGuard,
+    const double* preparedFaceCoeffX,
+    const double* preparedFaceCoeffY,
+    const double* preparedFacePhiGammaX0493x6g,
+    const double* preparedFacePhiGammaY0493x6g,
+    int usePreparedInterfacePressure0493x6g,
+    int usePreparedPhaseStencil,
+    double inactiveNeighborFactor,
     double xHighFlux,
     double yHighFlux,
     Q6SegmentedIo0409 segmentedIo,
@@ -1964,9 +3573,16 @@ __global__ void q6_compute_masked_face_correction_0493w5(
 
         if (hasEast) {
             if (mask[c] || mask[east]) {
-                const double pc = mask[c] ? phi[c] : 0.0;
-                const double pe = mask[east] ? phi[east] : 0.0;
-                faceDUx[c] = -strength * (pe - pc) / dx;
+                const double phiGamma = usePreparedInterfacePressure0493x6g
+                    ? preparedFacePhiGammaX0493x6g[c] : 0.0;
+                const double pc = mask[c] ? phi[c] : phiGamma;
+                const double pe = mask[east] ? phi[east] : phiGamma;
+                const double factor = usePreparedPhaseStencil
+                    ? preparedFaceCoeffX[c]
+                    : q6_masked_face_factor_0493x6d(
+                        mask, phaseAlpha, c, east, inactiveNeighborFactor,
+                        useCutFaceGeometry, cutFaceThetaMinGuard);
+                faceDUx[c] = -strength * factor * (pe - pc) / dx;
             } else {
                 faceDUx[c] = 0.0;
             }
@@ -1983,9 +3599,16 @@ __global__ void q6_compute_masked_face_correction_0493w5(
 
         if (hasNorth) {
             if (mask[c] || mask[north]) {
-                const double pc = mask[c] ? phi[c] : 0.0;
-                const double pn = mask[north] ? phi[north] : 0.0;
-                faceDUy[c] = -strength * (pn - pc) / dy;
+                const double phiGamma = usePreparedInterfacePressure0493x6g
+                    ? preparedFacePhiGammaY0493x6g[c] : 0.0;
+                const double pc = mask[c] ? phi[c] : phiGamma;
+                const double pn = mask[north] ? phi[north] : phiGamma;
+                const double factor = usePreparedPhaseStencil
+                    ? preparedFaceCoeffY[c]
+                    : q6_masked_face_factor_0493x6d(
+                        mask, phaseAlpha, c, north, inactiveNeighborFactor,
+                        useCutFaceGeometry, cutFaceThetaMinGuard);
+                faceDUy[c] = -strength * factor * (pn - pc) / dy;
             } else {
                 faceDUy[c] = 0.0;
             }
@@ -2074,6 +3697,7 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     CudaSpeciesCellDeviceView0490h species,
     int speciesIndex,
     const unsigned char* mask,
+    const unsigned char* velocityMask,
     const double* faceDUx,
     const double* faceDUy,
     double* partialSq,
@@ -2137,23 +3761,23 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
             species, speciesIndex, c, 1);
         const double fxEastBase = hasEast
             ? (fullDomain ? uxC : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, c, east, 0))
+                species, velocityMask, speciesIndex, c, east, 0))
             : uxC;
         const double fxWestBase = hasWest
             ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
                     species, speciesIndex, west, 0)
                 : q6_species_face_velocity_0493w5(
-                    species, mask, speciesIndex, west, c, 0))
+                    species, velocityMask, speciesIndex, west, c, 0))
             : localXLowFlux;
         const double fyNorthBase = hasNorth
             ? (fullDomain ? uyC : q6_species_face_velocity_0493w5(
-                species, mask, speciesIndex, c, north, 1))
+                species, velocityMask, speciesIndex, c, north, 1))
             : uyC;
         const double fySouthBase = hasSouth
             ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
                     species, speciesIndex, south, 1)
                 : q6_species_face_velocity_0493w5(
-                    species, mask, speciesIndex, south, c, 1))
+                    species, velocityMask, speciesIndex, south, c, 1))
             : localYLowFlux;
 
         const double fxEast = fxEastBase + faceDUx[c];
@@ -2183,9 +3807,7 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
 __global__ void q6_apply_independent_species_correction_0493w5(
     CudaParticleDeviceView particles,
     CudaCellWorkspaceDeviceView cells,
-    CudaSpeciesCellDeviceView0490h species,
-    int speciesIndex,
-    double minOccupancyFraction,
+    const unsigned char* mask,
     const double* cellDUx,
     const double* cellDUy,
     std::uint32_t speciesType,
@@ -2206,13 +3828,82 @@ __global__ void q6_apply_independent_species_correction_0493w5(
         if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
         if (particles.type == nullptr || particles.type[i] != speciesType) continue;
         const int c = cells.cellId[i];
-        if (c < 0 || !q6_species_cell_active_0493w5(
-                species, speciesIndex, c, minOccupancyFraction)) continue;
+        if (c < 0 || mask[c] == 0u) continue;
         const double dvx = cellDUx[c];
         const double dvy = cellDUy[c];
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
         const double m = particles.mass ? particles.mass[i] : 1.0;
+        px += m * dvx;
+        py += m * dvy;
+        ++correctedLocal;
+    }
+    if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
+__global__ void q6_apply_free_surface_force_and_correction_0493x5a(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const unsigned char* mask,
+    const double* cellDUx,
+    const double* cellDUy,
+    std::uint32_t projectedType,
+    std::uint64_t nParticles,
+    double dt,
+    double lx,
+    double ly,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY,
+    double* partialPx,
+    double* partialPy,
+    unsigned long long* correctedCounter) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    unsigned long long correctedLocal = 0ull;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        particles.vx[i] += ax * dt;
+        particles.vy[i] += ay * dt;
+
+        if (particles.type == nullptr || particles.type[i] != projectedType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || mask[c] == 0u) continue;
+        const double dvx = cellDUx[c];
+        const double dvy = cellDUy[c];
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        // Keep the momentum audit restricted to the pressure correction.  The
+        // physical force momentum must not be removed by a global correction.
         px += m * dvx;
         py += m * dvy;
         ++correctedLocal;
@@ -2723,8 +4414,66 @@ bool apply_independent_masked_species_q6_0493w5(
     double yLowFlux,
     double yHighFlux,
     Q6SegmentedIo0409 segmentedIo,
+    bool freeSurfaceMode0493x5a,
+    bool fuseForceKick0493x4b,
     CudaQ6Resident0400Diagnostics& diag) {
     const auto tSolveAll = Clock0400::now();
+    const bool phaseGeometryResident0493x6c =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_geometry_resident_0493x6c_requested();
+    const bool cutFaceGeometry0493x6d =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_geometry_cutface_0493x6d_requested();
+    const bool phaseInterfaceTopology0493x6e =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_interface_topology_0493x6e_requested();
+    const bool phaseInterfaceStencil0493x6f =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_interface_stencil_0493x6f_requested();
+    const bool phaseGasPressure0493x6g =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_gas_pressure_0493x6g_requested();
+    const PhaseGasPressureMode0493x6g phaseGasPressureMode0493x6g =
+        phaseGasPressure0493x6g ? phase_gas_pressure_mode_0493x6g()
+                                : PhaseGasPressureMode0493x6g::Eos;
+    const double phaseGasPressureReference0493x6g = env_double_0400(
+        "MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G", 0.0);
+    const double phaseGasPressureConstant0493x6g = env_double_0400(
+        "MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G", 0.0);
+    const double phaseGasPressureScale0493x6g = env_double_0400(
+        "MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G", 1.0);
+    if (cutFaceGeometry0493x6d && phaseInterfaceStencil0493x6f) {
+        diag.reason = "0493x6d cut-face and 0493x6f prepared interface stencil are mutually exclusive";
+        return false;
+    }
+    if (cutFaceGeometry0493x6d && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x6d cut-face geometry requires 0493x6c resident geometry";
+        return false;
+    }
+    if (phaseInterfaceTopology0493x6e && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x6e interface topology requires 0493x6c resident geometry";
+        return false;
+    }
+    if (phaseInterfaceStencil0493x6f && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x6f interface stencil requires 0493x6c resident geometry";
+        return false;
+    }
+    if (phaseGasPressure0493x6g && !phaseInterfaceStencil0493x6f) {
+        diag.reason = "0493x6g gas pressure requires the x6f prepared interface stencil";
+        return false;
+    }
+    if (phaseGasPressure0493x6g && !(phaseGasPressureScale0493x6g >= 0.0)) {
+        diag.reason = "0493x6g gas-pressure scale must be finite and non-negative";
+        return false;
+    }
+    if (phaseGeometryResident0493x6c) {
+        ws.phaseGeometryResidentValid0493x6c = false;
+        ws.phaseGeometryResidentStep0493x6c = -1;
+    }
+    if (phaseInterfaceStencil0493x6f) {
+        ws.phaseInterfaceStencilValid0493x6f = false;
+        ws.phaseInterfaceStencilStep0493x6f = -1;
+    }
     const int speciesCount = static_cast<int>(params.speciesDefinitions.size());
     const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
                               static_cast<std::size_t>(speciesCount);
@@ -2753,6 +4502,10 @@ bool apply_independent_masked_species_q6_0493w5(
     const double invDx2 = 1.0 / (dx * dx);
     const double invDy2 = 1.0 / (dy * dy);
     const double tol = std::max(0.0, params.projectionTolerance);
+    const double inactiveNeighborFactor0493x5a =
+        freeSurfaceMode0493x5a ? 2.0 : 1.0;
+    const bool tgForceActive0493x5a = params.taylorGreenForcingEnable &&
+                                      params.taylorGreenForcingAmplitude > 0.0;
     int projectedSpeciesCount = 0;
     for (const SpeciesDefinition& def : params.speciesDefinitions) {
         if (def.q6StrengthDeclared > 0.0) ++projectedSpeciesCount;
@@ -2764,6 +4517,17 @@ bool apply_independent_masked_species_q6_0493w5(
         audit.speciesIndex = s;
         audit.type = params.speciesDefinitions[static_cast<std::size_t>(s)].type;
         audit.strength = params.speciesDefinitions[static_cast<std::size_t>(s)].q6StrengthDeclared;
+        const bool phaseInterfaceStencilSpecies0493x6f =
+            phaseInterfaceStencil0493x6f &&
+            params.speciesDefinitions[static_cast<std::size_t>(s)].phaseFamily ==
+                SpeciesPhaseFamily::Liquid;
+        const bool phaseGasPressureSpecies0493x6g =
+            phaseGasPressure0493x6g && phaseInterfaceStencilSpecies0493x6f;
+        // A zero scale is a strict physical no-op.  Keep the x6g audit enabled,
+        // but bypass every production-side gas-pressure buffer, branch and
+        // arithmetic contribution so the trajectory is exactly the x6f path.
+        const bool phaseGasPressureApplySpecies0493x6g =
+            phaseGasPressureSpecies0493x6g && phaseGasPressureScale0493x6g != 0.0;
         if (!(audit.strength > 0.0)) {
             audits.push_back(audit);
             continue;
@@ -2773,16 +4537,33 @@ bool apply_independent_masked_species_q6_0493w5(
                         "independent masked active counter zero");
         q6_build_independent_mask_0493w5<<<cellBlocks, threads>>>(
             species, s, params.speciesQ6MinOccupancyFraction,
+            freeSurfaceMode0493x5a ? 1 : 0,
             ws.speciesMask0493w5.data(), ws.rhs.data(),
             grid.numCells, ws.counter.data());
         check_cuda_0400(cudaGetLastError(), "independent masked support launch");
         unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
-        check_cuda_0400(cudaMemcpy(denseMask0493w6, ws.speciesMask0493w5.data(),
-                                   static_cast<std::size_t>(grid.numCells) *
-                                       sizeof(unsigned char),
-                                   cudaMemcpyDeviceToDevice),
-                        "independent masked dense support store");
+        if (freeSurfaceMode0493x5a) {
+            check_cuda_0400(cudaMemset(ws.counter.data(), 0,
+                                       sizeof(unsigned long long)),
+                            "0493x5a regularized active counter zero");
+            q6_regularize_free_surface_mask_0493x5a<<<cellBlocks, threads>>>(
+                ws.speciesMask0493w5.data(), denseMask0493w6,
+                grid.Nx, grid.Ny, periodicX, periodicY, ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x5a free-surface mask regularization launch");
+            check_cuda_0400(cudaMemcpy(ws.speciesMask0493w5.data(), denseMask0493w6,
+                                       static_cast<std::size_t>(grid.numCells) *
+                                           sizeof(unsigned char),
+                                       cudaMemcpyDeviceToDevice),
+                            "0493x5a regularized support restore");
+        } else {
+            check_cuda_0400(cudaMemcpy(denseMask0493w6, ws.speciesMask0493w5.data(),
+                                       static_cast<std::size_t>(grid.numCells) *
+                                           sizeof(unsigned char),
+                                       cudaMemcpyDeviceToDevice),
+                            "independent masked dense support store");
+        }
         unsigned long long activeCells = 0ull;
         check_cuda_0400(cudaMemcpy(&activeCells, ws.counter.data(), sizeof(activeCells),
                                    cudaMemcpyDeviceToHost),
@@ -2793,13 +4574,688 @@ bool apply_independent_masked_species_q6_0493w5(
             audits.push_back(audit);
             continue;
         }
+        const std::uint64_t carrierActiveCells0493x6f = audit.activeCells;
+        const unsigned char* q6SolveMask0493x6f = ws.speciesMask0493w5.data();
+
+        if (phaseGeometryResident0493x6c) {
+            double liquidPhaseReferenceCellMass0493x6c = 0.0;
+            int liquidPhaseSpeciesCount0493x6c = 0;
+            for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                if (d.phaseFamily == SpeciesPhaseFamily::Liquid) {
+                    liquidPhaseReferenceCellMass0493x6c += d.referenceCellMassDeclared;
+                    ++liquidPhaseSpeciesCount0493x6c;
+                }
+            }
+            if (!(liquidPhaseReferenceCellMass0493x6c > 0.0) ||
+                liquidPhaseSpeciesCount0493x6c == 0) {
+                diag.reason =
+                    "0493x6c resident phase geometry requires a positive liquid phase reference mass";
+                append_independent_masked_species_audit_0493w5(params, step, time, audits);
+                return false;
+            }
+
+            const std::size_t geometryCells0493x6c =
+                static_cast<std::size_t>(std::max(1, grid.numCells));
+            ws.phaseFillRaw0493x6c.ensure(geometryCells0493x6c);
+            ws.phaseAlphaFiltered0493x6c.ensure(geometryCells0493x6c);
+            const bool geometryAuditThisStep0493x6c =
+                step <= 1 || step % std::max(1, params.summaryEvery) == 0;
+
+            cudaEvent_t geometryStart0493x6c{};
+            cudaEvent_t geometryRawDone0493x6c{};
+            cudaEvent_t geometryFilterDone0493x6c{};
+            cudaEvent_t geometryAuditDone0493x6c{};
+            if (geometryAuditThisStep0493x6c) {
+                check_cuda_0400(cudaEventCreate(&geometryStart0493x6c),
+                                "0493x6c geometry start event create");
+                check_cuda_0400(cudaEventCreate(&geometryRawDone0493x6c),
+                                "0493x6c geometry raw event create");
+                check_cuda_0400(cudaEventCreate(&geometryFilterDone0493x6c),
+                                "0493x6c geometry filter event create");
+                check_cuda_0400(cudaEventCreate(&geometryAuditDone0493x6c),
+                                "0493x6c geometry audit event create");
+                check_cuda_0400(cudaEventRecord(geometryStart0493x6c),
+                                "0493x6c geometry start event record");
+            }
+
+            int gasSpeciesCount0493x6g = 0;
+            if (phaseGasPressureApplySpecies0493x6g) {
+                for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                    if (d.phaseFamily == SpeciesPhaseFamily::Gas) ++gasSpeciesCount0493x6g;
+                }
+                if (gasSpeciesCount0493x6g == 0 &&
+                    phaseGasPressureMode0493x6g == PhaseGasPressureMode0493x6g::Eos) {
+                    diag.reason = "0493x6g EOS gas pressure requires at least one gas species";
+                    append_independent_masked_species_audit_0493w5(
+                        params, step, time, audits);
+                    return false;
+                }
+            }
+
+            q6_build_phase_fill_resident_0493x6c<<<cellBlocks, threads>>>(
+                species,
+                static_cast<unsigned char>(SpeciesPhaseFamily::Liquid),
+                liquidPhaseReferenceCellMass0493x6c,
+                ws.phaseFillRaw0493x6c.data(), grid.numCells,
+                phaseGasPressureApplySpecies0493x6g ? ws.phaseGasPressurePotential0493x6a.data() : nullptr,
+                phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+                static_cast<int>(phaseGasPressureMode0493x6g),
+                params.dt, params.kBT, dx * dy,
+                phaseGasPressureReference0493x6g,
+                phaseGasPressureConstant0493x6g,
+                phaseGasPressureScale0493x6g);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6c resident raw phase-fill launch");
+            if (geometryAuditThisStep0493x6c) {
+                check_cuda_0400(cudaEventRecord(geometryRawDone0493x6c),
+                                "0493x6c geometry raw event record");
+            }
+
+            q6_filter_phase_fill_conservative_0493x6c<<<cellBlocks, threads>>>(
+                ws.phaseFillRaw0493x6c.data(),
+                ws.phaseAlphaFiltered0493x6c.data(),
+                grid.Nx, grid.Ny, periodicX, periodicY,
+                kPhaseGeometryFilterLambda0493x6c);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6c resident conservative phase filter launch");
+            if (geometryAuditThisStep0493x6c) {
+                check_cuda_0400(cudaEventRecord(geometryFilterDone0493x6c),
+                                "0493x6c geometry filter event record");
+            }
+
+            ws.phaseGeometryResidentValid0493x6c = true;
+            ws.phaseGeometryResidentStep0493x6c = step;
+            ws.phaseGeometryReferenceCellMass0493x6c =
+                liquidPhaseReferenceCellMass0493x6c;
+            ws.phaseGeometryLiquidSpeciesCount0493x6c =
+                liquidPhaseSpeciesCount0493x6c;
+
+            if (geometryAuditThisStep0493x6c) {
+                check_cuda_0400(cudaMemset(
+                                    ws.phaseGeometryResidentAccum0493x6c.data(), 0,
+                                    sizeof(PhaseGeometryResidentAccumulator0493x6c)),
+                                "0493x6c resident geometry accumulator zero");
+                q6_phase_geometry_resident_audit_0493x6c<<<cellBlocks, threads>>>(
+                    ws.phaseFillRaw0493x6c.data(),
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.speciesMask0493w5.data(),
+                    params.speciesQ6MinOccupancyFraction,
+                    ws.phaseGeometryResidentAccum0493x6c.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                    phaseInterfaceTopology0493x6e ? 1 : 0,
+                    kPhaseCutFaceThetaMin0493x6d);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x6c resident phase geometry audit launch");
+                check_cuda_0400(cudaEventRecord(geometryAuditDone0493x6c),
+                                "0493x6c geometry audit event record");
+
+                PhaseGeometryResidentAccumulator0493x6c accum0493x6c{};
+                check_cuda_0400(cudaMemcpy(
+                                    &accum0493x6c,
+                                    ws.phaseGeometryResidentAccum0493x6c.data(),
+                                    sizeof(accum0493x6c), cudaMemcpyDeviceToHost),
+                                "0493x6c resident phase geometry audit download");
+
+                float rawMs0493x6c = 0.0f;
+                float filterMs0493x6c = 0.0f;
+                float auditMs0493x6c = 0.0f;
+                check_cuda_0400(cudaEventElapsedTime(
+                                    &rawMs0493x6c, geometryStart0493x6c,
+                                    geometryRawDone0493x6c),
+                                "0493x6c raw geometry elapsed time");
+                check_cuda_0400(cudaEventElapsedTime(
+                                    &filterMs0493x6c, geometryRawDone0493x6c,
+                                    geometryFilterDone0493x6c),
+                                "0493x6c filter geometry elapsed time");
+                check_cuda_0400(cudaEventElapsedTime(
+                                    &auditMs0493x6c, geometryFilterDone0493x6c,
+                                    geometryAuditDone0493x6c),
+                                "0493x6c audit geometry elapsed time");
+                cudaEventDestroy(geometryStart0493x6c);
+                cudaEventDestroy(geometryRawDone0493x6c);
+                cudaEventDestroy(geometryFilterDone0493x6c);
+                cudaEventDestroy(geometryAuditDone0493x6c);
+
+                PhaseGeometryResidentAudit0493x6c geometryAudit0493x6c{};
+                geometryAudit0493x6c.projectedSpeciesIndex = s;
+                geometryAudit0493x6c.projectedType = audit.type;
+                geometryAudit0493x6c.liquidPhaseSpeciesCount =
+                    liquidPhaseSpeciesCount0493x6c;
+                geometryAudit0493x6c.liquidPhaseReferenceCellMass =
+                    liquidPhaseReferenceCellMass0493x6c;
+                geometryAudit0493x6c.numCells =
+                    static_cast<std::uint64_t>(grid.numCells);
+                geometryAudit0493x6c.filterLambda =
+                    kPhaseGeometryFilterLambda0493x6c;
+                geometryAudit0493x6c.rawFillSum = accum0493x6c.rawFillSum;
+                geometryAudit0493x6c.boundedGeometrySourceSum =
+                    accum0493x6c.boundedGeometrySourceSum;
+                geometryAudit0493x6c.boundedGeometryClippedCells =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.boundedGeometryClippedCells);
+                geometryAudit0493x6c.filteredFillSum =
+                    accum0493x6c.filteredFillSum;
+                // 0493x6f2: the filter conserves the bounded geometric source;
+                // rawFill remains a separate unbounded occupancy diagnostic.
+                const double conservationScale0493x6c = std::max(
+                    1.0, std::abs(accum0493x6c.boundedGeometrySourceSum));
+                geometryAudit0493x6c.conservationRelativeError =
+                    std::abs(accum0493x6c.filteredFillSum -
+                             accum0493x6c.boundedGeometrySourceSum) /
+                    conservationScale0493x6c;
+                if (grid.numCells > 0) {
+                    geometryAudit0493x6c.filterDeltaRms = std::sqrt(
+                        std::max(0.0, accum0493x6c.filterDeltaSqSum /
+                                          static_cast<double>(grid.numCells)));
+                }
+                geometryAudit0493x6c.maskFilteredMismatchCells =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.maskFilteredMismatchCells);
+                geometryAudit0493x6c.interfaceFaces =
+                    static_cast<std::uint64_t>(accum0493x6c.interfaceFaces);
+                if (accum0493x6c.interfaceFaces > 0ull) {
+                    const double invFaces =
+                        1.0 / static_cast<double>(accum0493x6c.interfaceFaces);
+                    geometryAudit0493x6c.halfIsoBracketFraction =
+                        static_cast<double>(accum0493x6c.halfIsoBracketFaces) *
+                        invFaces;
+                }
+                if (accum0493x6c.halfIsoBracketFaces > 0ull) {
+                    const double inv = 1.0 /
+                        static_cast<double>(accum0493x6c.halfIsoBracketFaces);
+                    geometryAudit0493x6c.halfIsoThetaMean =
+                        accum0493x6c.halfIsoThetaSum * inv;
+                    const double meanSq = accum0493x6c.halfIsoThetaSqSum * inv;
+                    geometryAudit0493x6c.halfIsoThetaStd = std::sqrt(std::max(
+                        0.0, meanSq - geometryAudit0493x6c.halfIsoThetaMean *
+                                          geometryAudit0493x6c.halfIsoThetaMean));
+                }
+                if (accum0493x6c.normalValidFaces > 0ull) {
+                    const double inv = 1.0 /
+                        static_cast<double>(accum0493x6c.normalValidFaces);
+                    geometryAudit0493x6c.normalValidFraction =
+                        accum0493x6c.interfaceFaces > 0ull
+                            ? static_cast<double>(accum0493x6c.normalValidFaces) /
+                                  static_cast<double>(accum0493x6c.interfaceFaces)
+                            : 0.0;
+                    geometryAudit0493x6c.normalOutwardFraction =
+                        static_cast<double>(accum0493x6c.normalOutwardFaces) * inv;
+                    geometryAudit0493x6c.normalFaceAlignmentMean =
+                        accum0493x6c.normalFaceAlignmentSum * inv;
+                }
+                geometryAudit0493x6c.rawBuildSeconds =
+                    1.0e-3 * static_cast<double>(rawMs0493x6c);
+                geometryAudit0493x6c.filterSeconds =
+                    1.0e-3 * static_cast<double>(filterMs0493x6c);
+                geometryAudit0493x6c.auditKernelSeconds =
+                    1.0e-3 * static_cast<double>(auditMs0493x6c);
+                geometryAudit0493x6c.residentBytes =
+                    static_cast<std::uint64_t>(2u * geometryCells0493x6c *
+                                               sizeof(double));
+                geometryAudit0493x6c.cutFaceGeometryEnabled =
+                    cutFaceGeometry0493x6d ? 1 : 0;
+                geometryAudit0493x6c.cutFaceGeometricFaces =
+                    static_cast<std::uint64_t>(accum0493x6c.cutFaceGeometricFaces);
+                geometryAudit0493x6c.cutFaceSmallThetaFallbackFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.cutFaceSmallThetaFallbackFaces);
+                geometryAudit0493x6c.cutFaceLegacyFallbackFaces =
+                    geometryAudit0493x6c.interfaceFaces >=
+                            geometryAudit0493x6c.cutFaceGeometricFaces
+                        ? geometryAudit0493x6c.interfaceFaces -
+                              geometryAudit0493x6c.cutFaceGeometricFaces
+                        : 0u;
+                geometryAudit0493x6c.cutFaceThetaGuard =
+                    kPhaseCutFaceThetaMin0493x6d;
+                if (accum0493x6c.cutFaceGeometricFaces > 0ull) {
+                    constexpr double kThetaScale0493x6d = 1000000000.0;
+                    geometryAudit0493x6c.cutFaceThetaMin = 1.0 -
+                        static_cast<double>(
+                            accum0493x6c.cutFaceThetaMinComplementScaled) /
+                            kThetaScale0493x6d;
+                    geometryAudit0493x6c.cutFaceThetaMean =
+                        accum0493x6c.cutFaceThetaSum /
+                        static_cast<double>(accum0493x6c.cutFaceGeometricFaces);
+                    geometryAudit0493x6c.cutFaceThetaMax =
+                        static_cast<double>(accum0493x6c.cutFaceThetaMaxScaled) /
+                        kThetaScale0493x6d;
+                }
+                geometryAudit0493x6c.phaseInterfaceTopologyEnabled =
+                    phaseInterfaceTopology0493x6e ? 1 : 0;
+                geometryAudit0493x6c.alphaHalfCrossingFaces =
+                    static_cast<std::uint64_t>(accum0493x6c.alphaHalfCrossingFaces);
+                geometryAudit0493x6c.alphaHalfCrossingActiveActiveFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.alphaHalfCrossingActiveActiveFaces);
+                geometryAudit0493x6c.alphaHalfCrossingActiveInactiveFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.alphaHalfCrossingActiveInactiveFaces);
+                geometryAudit0493x6c.alphaHalfCrossingInactiveInactiveFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.alphaHalfCrossingInactiveInactiveFaces);
+                geometryAudit0493x6c.alphaHalfCrossingAIActiveLiquidSideFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.alphaHalfCrossingAIActiveLiquidSideFaces);
+                geometryAudit0493x6c.alphaHalfCrossingAIActiveExteriorSideFaces =
+                    static_cast<std::uint64_t>(
+                        accum0493x6c.alphaHalfCrossingAIActiveExteriorSideFaces);
+                if (accum0493x6c.alphaHalfCrossingFaces > 0ull) {
+                    constexpr double kThetaScale0493x6e = 1000000000.0;
+                    geometryAudit0493x6c.alphaHalfThetaMin = 1.0 -
+                        static_cast<double>(
+                            accum0493x6c.alphaHalfThetaMinComplementScaled) /
+                            kThetaScale0493x6e;
+                    geometryAudit0493x6c.alphaHalfThetaMax =
+                        static_cast<double>(accum0493x6c.alphaHalfThetaMaxScaled) /
+                        kThetaScale0493x6e;
+                    const double invAlphaHalf = 1.0 /
+                        static_cast<double>(accum0493x6c.alphaHalfCrossingFaces);
+                    geometryAudit0493x6c.alphaHalfThetaMean =
+                        accum0493x6c.alphaHalfThetaSum * invAlphaHalf;
+                    const double alphaHalfMeanSq =
+                        accum0493x6c.alphaHalfThetaSqSum * invAlphaHalf;
+                    geometryAudit0493x6c.alphaHalfThetaStd = std::sqrt(std::max(
+                        0.0, alphaHalfMeanSq -
+                                 geometryAudit0493x6c.alphaHalfThetaMean *
+                                     geometryAudit0493x6c.alphaHalfThetaMean));
+                }
+                append_phase_geometry_resident_audit_0493x6c(
+                    params, step, time, geometryAudit0493x6c);
+            }
+
+            if (phaseInterfaceStencilSpecies0493x6f) {
+                // x6f converts the resident phase geometry into the algebraic
+                // pressure domain once per solve.  The historical occupancy
+                // support remains available in denseMask0493w6 for particle
+                // correction and support diagnostics.
+                ws.phasePressureMask0493x6f.ensure(geometryCells0493x6c);
+                ws.phaseFaceCoeffX0493x6f.ensure(geometryCells0493x6c);
+                ws.phaseFaceCoeffY0493x6f.ensure(geometryCells0493x6c);
+                if (phaseGasPressureApplySpecies0493x6g) {
+                    ws.phaseFacePhiGammaX0493x6g.ensure(geometryCells0493x6c);
+                    ws.phaseFacePhiGammaY0493x6g.ensure(geometryCells0493x6c);
+                }
+                check_cuda_0400(cudaMemset(ws.counter.data(), 0,
+                                           sizeof(unsigned long long)),
+                                "0493x6f pressure active counter zero");
+
+                cudaEvent_t stencilStart0493x6f{};
+                cudaEvent_t stencilDone0493x6f{};
+                if (geometryAuditThisStep0493x6c) {
+                    check_cuda_0400(cudaMemset(
+                                        ws.phaseInterfaceStencilAccum0493x6f.data(), 0,
+                                        sizeof(PhaseInterfaceStencilAccumulator0493x6f)),
+                                    "0493x6f stencil accumulator zero");
+                    check_cuda_0400(cudaEventCreate(&stencilStart0493x6f),
+                                    "0493x6f stencil start event create");
+                    check_cuda_0400(cudaEventCreate(&stencilDone0493x6f),
+                                    "0493x6f stencil done event create");
+                    check_cuda_0400(cudaEventRecord(stencilStart0493x6f),
+                                    "0493x6f stencil start event record");
+                }
+
+                q6_prepare_phase_interface_stencil_0493x6f<<<cellBlocks, threads>>>(
+                    ws.speciesMask0493w5.data(),
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.phasePressureMask0493x6f.data(),
+                    ws.phaseFaceCoeffX0493x6f.data(),
+                    ws.phaseFaceCoeffY0493x6f.data(),
+                    phaseGasPressureApplySpecies0493x6g
+                        ? ws.phaseGasPressurePotential0493x6a.data() : nullptr,
+                    phaseGasPressureApplySpecies0493x6g
+                        ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
+                    phaseGasPressureApplySpecies0493x6g
+                        ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
+                    phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+                    grid.Nx, grid.Ny, periodicX, periodicY,
+                    kPhaseCutFaceThetaMin0493x6d,
+                    ws.counter.data(),
+                    ws.phaseInterfaceStencilAccum0493x6f.data(),
+                    geometryAuditThisStep0493x6c ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x6f phase-interface stencil prepare launch");
+                if (geometryAuditThisStep0493x6c) {
+                    check_cuda_0400(cudaEventRecord(stencilDone0493x6f),
+                                    "0493x6f stencil done event record");
+                }
+
+                unsigned long long pressureActiveCells0493x6f = 0ull;
+                check_cuda_0400(cudaMemcpy(
+                                    &pressureActiveCells0493x6f, ws.counter.data(),
+                                    sizeof(pressureActiveCells0493x6f),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f pressure active counter download");
+                if (pressureActiveCells0493x6f == 0ull) {
+                    diag.reason = "0493x6f alpha=0.5 pressure domain has no active cells";
+                    append_independent_masked_species_audit_0493w5(
+                        params, step, time, audits);
+                    return false;
+                }
+                q6SolveMask0493x6f = ws.phasePressureMask0493x6f.data();
+                audit.activeCells =
+                    static_cast<std::uint64_t>(pressureActiveCells0493x6f);
+                audit.fullDomain =
+                    audit.activeCells == static_cast<std::uint64_t>(grid.numCells);
+                ws.phaseInterfaceStencilValid0493x6f = true;
+                ws.phaseInterfaceStencilStep0493x6f = step;
+
+                if (geometryAuditThisStep0493x6c) {
+                    PhaseInterfaceStencilAccumulator0493x6f accum0493x6f{};
+                    check_cuda_0400(cudaMemcpy(
+                                        &accum0493x6f,
+                                        ws.phaseInterfaceStencilAccum0493x6f.data(),
+                                        sizeof(accum0493x6f), cudaMemcpyDeviceToHost),
+                                    "0493x6f stencil audit download");
+                    float prepareMs0493x6f = 0.0f;
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &prepareMs0493x6f, stencilStart0493x6f,
+                                        stencilDone0493x6f),
+                                    "0493x6f stencil elapsed time");
+                    cudaEventDestroy(stencilStart0493x6f);
+                    cudaEventDestroy(stencilDone0493x6f);
+
+                    PhaseInterfaceStencilAudit0493x6f stencilAudit0493x6f{};
+                    stencilAudit0493x6f.projectedSpeciesIndex = s;
+                    stencilAudit0493x6f.projectedType = audit.type;
+                    stencilAudit0493x6f.carrierActiveCells =
+                        carrierActiveCells0493x6f;
+                    stencilAudit0493x6f.pressureActiveCells =
+                        static_cast<std::uint64_t>(pressureActiveCells0493x6f);
+                    stencilAudit0493x6f.interiorPressureFaces =
+                        static_cast<std::uint64_t>(accum0493x6f.interiorPressureFaces);
+                    stencilAudit0493x6f.representedInterfaceFaces =
+                        static_cast<std::uint64_t>(accum0493x6f.representedInterfaceFaces);
+                    stencilAudit0493x6f.smallThetaStabilizedFaces =
+                        static_cast<std::uint64_t>(accum0493x6f.smallThetaStabilizedFaces);
+                    stencilAudit0493x6f.carrierTruncationFaces =
+                        static_cast<std::uint64_t>(accum0493x6f.carrierTruncationFaces);
+                    stencilAudit0493x6f.uncoveredInterfaceFaces =
+                        static_cast<std::uint64_t>(accum0493x6f.uncoveredInterfaceFaces);
+                    stencilAudit0493x6f.thetaGuard = kPhaseCutFaceThetaMin0493x6d;
+                    if (accum0493x6f.representedInterfaceFaces > 0ull) {
+                        constexpr double kThetaScale0493x6f = 1000000000.0;
+                        stencilAudit0493x6f.thetaMin = 1.0 -
+                            static_cast<double>(accum0493x6f.thetaMinComplementScaled) /
+                                kThetaScale0493x6f;
+                        stencilAudit0493x6f.thetaMean = accum0493x6f.thetaSum /
+                            static_cast<double>(accum0493x6f.representedInterfaceFaces);
+                        stencilAudit0493x6f.thetaMax =
+                            static_cast<double>(accum0493x6f.thetaMaxScaled) /
+                                kThetaScale0493x6f;
+                    }
+                    stencilAudit0493x6f.prepareSeconds =
+                        1.0e-3 * static_cast<double>(prepareMs0493x6f);
+                    stencilAudit0493x6f.residentBytes =
+                        static_cast<std::uint64_t>(geometryCells0493x6c) *
+                        static_cast<std::uint64_t>(sizeof(unsigned char) +
+                                                   2u * sizeof(double));
+                    append_phase_interface_stencil_audit_0493x6f(
+                        params, step, time, stencilAudit0493x6f);
+                    if (phaseGasPressureSpecies0493x6g) {
+                        int gasSpeciesCount0493x6g = 0;
+                        for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                            if (d.phaseFamily == SpeciesPhaseFamily::Gas) {
+                                ++gasSpeciesCount0493x6g;
+                            }
+                        }
+                        PhaseInterfaceGasPressureAudit0493x6g gasAudit0493x6g{};
+                        gasAudit0493x6g.projectedSpeciesIndex = s;
+                        gasAudit0493x6g.projectedType = audit.type;
+                        gasAudit0493x6g.gasSpeciesCount = gasSpeciesCount0493x6g;
+                        gasAudit0493x6g.representedInterfaceFaces =
+                            static_cast<std::uint64_t>(accum0493x6f.representedInterfaceFaces);
+                        gasAudit0493x6g.nonzeroPressureFaces =
+                            static_cast<std::uint64_t>(accum0493x6f.nonzeroPressureFaces0493x6g);
+                        gasAudit0493x6g.liquidReferenceCellMass =
+                            liquidPhaseReferenceCellMass0493x6c;
+                        gasAudit0493x6g.cellArea = dx * dy;
+                        gasAudit0493x6g.pressureReference =
+                            phaseGasPressureReference0493x6g;
+                        gasAudit0493x6g.pressureScale = phaseGasPressureScale0493x6g;
+                        gasAudit0493x6g.constantPressure =
+                            phaseGasPressureConstant0493x6g;
+                        gasAudit0493x6g.prepareSeconds =
+                            1.0e-3 * static_cast<double>(prepareMs0493x6f);
+                        gasAudit0493x6g.residentBytes =
+                            phaseGasPressureApplySpecies0493x6g
+                                ? static_cast<std::uint64_t>(geometryCells0493x6c) *
+                                      static_cast<std::uint64_t>(3u * sizeof(double))
+                                : 0u;
+                        gasAudit0493x6g.sourceMode =
+                            phase_gas_pressure_mode_name_0493x6g(
+                                phaseGasPressureMode0493x6g);
+                        if (accum0493x6f.representedInterfaceFaces > 0ull) {
+                            const double invFaces = 1.0 /
+                                static_cast<double>(accum0493x6f.representedInterfaceFaces);
+                            gasAudit0493x6g.pressurePotentialMean =
+                                accum0493x6f.pressurePotentialSum0493x6g * invFaces;
+                            const double phiMeanSq =
+                                accum0493x6f.pressurePotentialSqSum0493x6g * invFaces;
+                            gasAudit0493x6g.pressurePotentialStd = std::sqrt(std::max(
+                                0.0, phiMeanSq -
+                                    gasAudit0493x6g.pressurePotentialMean *
+                                        gasAudit0493x6g.pressurePotentialMean));
+                            const double rhoLiquidRef =
+                                liquidPhaseReferenceCellMass0493x6c / (dx * dy);
+                            if (params.dt > 0.0) {
+                                const double pressurePerPhi = rhoLiquidRef / params.dt;
+                                gasAudit0493x6g.pressureDeltaMean =
+                                    gasAudit0493x6g.pressurePotentialMean * pressurePerPhi;
+                                gasAudit0493x6g.pressureDeltaStd =
+                                    gasAudit0493x6g.pressurePotentialStd * pressurePerPhi;
+                            }
+                        }
+                        append_phase_interface_gas_pressure_audit_0493x6g(
+                            params, step, time, gasAudit0493x6g);
+                    }
+                }
+            }
+        }
+
+        if (freeSurfaceMode0493x5a &&
+            cuda_q6_phase_pressure_diagnostics_0493x6a_requested()) {
+            double liquidReferenceCellMass0493x6a = 0.0;
+            int gasSpeciesCount0493x6a = 0;
+            for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                if (d.phaseFamily == SpeciesPhaseFamily::Liquid &&
+                    d.q6StrengthDeclared > 0.0) {
+                    liquidReferenceCellMass0493x6a += d.referenceCellMassDeclared;
+                }
+                if (d.phaseFamily == SpeciesPhaseFamily::Gas) {
+                    ++gasSpeciesCount0493x6a;
+                }
+            }
+            if (!(liquidReferenceCellMass0493x6a > 0.0)) {
+                diag.reason =
+                    "0493x6a phase-pressure diagnostic requires positive projected liquid reference mass";
+                append_independent_masked_species_audit_0493w5(params, step, time, audits);
+                return false;
+            }
+            q6_build_phase_gas_pressure_potential_0493x6a<<<cellBlocks, threads>>>(
+                species, params.dt, params.kBT, liquidReferenceCellMass0493x6a,
+                ws.phaseGasPressurePotential0493x6a.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6a gas pressure-potential build launch");
+            check_cuda_0400(cudaMemset(ws.counter.data(), 0,
+                                       sizeof(unsigned long long)),
+                            "0493x6a interface-face counter zero");
+            q6_phase_interface_pressure_stats_0493x6a<<<
+                cellBlocks, threads, tripleShared>>>(
+                    ws.speciesMask0493w5.data(),
+                    ws.phaseGasPressurePotential0493x6a.data(),
+                    ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+                    ws.counter.data(), grid.Nx, grid.Ny, periodicX, periodicY);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6a interface pressure stats launch");
+            unsigned long long interfaceFaces0493x6a = 0ull;
+            check_cuda_0400(cudaMemcpy(&interfaceFaces0493x6a, ws.counter.data(),
+                                       sizeof(interfaceFaces0493x6a),
+                                       cudaMemcpyDeviceToHost),
+                            "0493x6a interface-face counter download");
+            const double phiSum0493x6a =
+                reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            const double phiSq0493x6a =
+                reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+            const double phiMax0493x6a =
+                reduce_host_max_0400(ws.partial2.data(), cellBlocks);
+
+            PhaseInterfacePressureAudit0493x6a pressureAudit{};
+            pressureAudit.projectedSpeciesIndex = s;
+            pressureAudit.projectedType = audit.type;
+            pressureAudit.gasSpeciesCount = gasSpeciesCount0493x6a;
+            pressureAudit.interfaceFaces =
+                static_cast<std::uint64_t>(interfaceFaces0493x6a);
+            pressureAudit.projectedLiquidReferenceCellMass =
+                liquidReferenceCellMass0493x6a;
+            pressureAudit.cellArea = dx * dy;
+            if (interfaceFaces0493x6a > 0ull) {
+                const double invFaces =
+                    1.0 / static_cast<double>(interfaceFaces0493x6a);
+                pressureAudit.pressurePotentialMean = phiSum0493x6a * invFaces;
+                const double phiMeanSq = phiSq0493x6a * invFaces;
+                pressureAudit.pressurePotentialStd = std::sqrt(std::max(
+                    0.0, phiMeanSq -
+                    pressureAudit.pressurePotentialMean *
+                        pressureAudit.pressurePotentialMean));
+                pressureAudit.pressurePotentialMax = phiMax0493x6a;
+                if (params.dt > 0.0 && params.kBT > 0.0) {
+                    pressureAudit.meanGasParticlesPerExteriorFace =
+                        pressureAudit.pressurePotentialMean *
+                        liquidReferenceCellMass0493x6a /
+                        (params.dt * params.kBT);
+                }
+                const double rhoLiquidRef = pressureAudit.cellArea > 0.0
+                    ? liquidReferenceCellMass0493x6a / pressureAudit.cellArea
+                    : 0.0;
+                const double phiToPressure = params.dt > 0.0
+                    ? rhoLiquidRef / params.dt : 0.0;
+                pressureAudit.pressureEOSMean =
+                    pressureAudit.pressurePotentialMean * phiToPressure;
+                pressureAudit.pressureEOSStd =
+                    pressureAudit.pressurePotentialStd * phiToPressure;
+                pressureAudit.pressureEOSMax =
+                    pressureAudit.pressurePotentialMax * phiToPressure;
+            }
+            append_phase_interface_pressure_audit_0493x6a(
+                params, step, time, pressureAudit);
+        }
+
+        const bool geometryDiagnostic0493x6b =
+            freeSurfaceMode0493x5a &&
+            cuda_q6_phase_geometry_diagnostics_0493x6b_requested() &&
+            (step <= 1 || step % std::max(1, params.summaryEvery) == 0);
+        if (geometryDiagnostic0493x6b) {
+            double liquidPhaseReferenceCellMass0493x6b = 0.0;
+            int liquidPhaseSpeciesCount0493x6b = 0;
+            for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                if (d.phaseFamily == SpeciesPhaseFamily::Liquid) {
+                    liquidPhaseReferenceCellMass0493x6b += d.referenceCellMassDeclared;
+                    ++liquidPhaseSpeciesCount0493x6b;
+                }
+            }
+            if (!(liquidPhaseReferenceCellMass0493x6b > 0.0) ||
+                liquidPhaseSpeciesCount0493x6b == 0) {
+                diag.reason =
+                    "0493x6b phase-geometry diagnostic requires a positive liquid phase reference mass";
+                append_independent_masked_species_audit_0493w5(params, step, time, audits);
+                return false;
+            }
+
+            check_cuda_0400(cudaMemset(ws.phaseGeometryAccum0493x6b.data(), 0,
+                                       sizeof(PhaseGeometryAccumulator0493x6b)),
+                            "0493x6b phase geometry accumulator zero");
+            const auto tGeometry0493x6b = Clock0400::now();
+            q6_phase_interface_geometry_stats_0493x6b<<<cellBlocks, threads>>>(
+                species, ws.speciesMask0493w5.data(),
+                liquidPhaseReferenceCellMass0493x6b,
+                params.speciesQ6MinOccupancyFraction,
+                ws.phaseGeometryAccum0493x6b.data(),
+                grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6b phase geometry stats launch");
+            PhaseGeometryAccumulator0493x6b geometryAccum0493x6b{};
+            check_cuda_0400(cudaMemcpy(&geometryAccum0493x6b,
+                                       ws.phaseGeometryAccum0493x6b.data(),
+                                       sizeof(geometryAccum0493x6b),
+                                       cudaMemcpyDeviceToHost),
+                            "0493x6b phase geometry accumulator download");
+
+            PhaseInterfaceGeometryAudit0493x6b geometryAudit{};
+            geometryAudit.projectedSpeciesIndex = s;
+            geometryAudit.projectedType = audit.type;
+            geometryAudit.liquidPhaseSpeciesCount = liquidPhaseSpeciesCount0493x6b;
+            geometryAudit.maskActiveCells = carrierActiveCells0493x6f;
+            geometryAudit.phaseFillActiveCells =
+                static_cast<std::uint64_t>(geometryAccum0493x6b.phaseFillActiveCells);
+            geometryAudit.maskPhaseMismatchCells =
+                static_cast<std::uint64_t>(geometryAccum0493x6b.maskPhaseMismatchCells);
+            geometryAudit.interfaceFaces =
+                static_cast<std::uint64_t>(geometryAccum0493x6b.interfaceFaces);
+            geometryAudit.liquidPhaseReferenceCellMass =
+                liquidPhaseReferenceCellMass0493x6b;
+            geometryAudit.supportIsoFill = params.speciesQ6MinOccupancyFraction;
+            if (geometryAccum0493x6b.interfaceFaces > 0ull) {
+                const double invFaces =
+                    1.0 / static_cast<double>(geometryAccum0493x6b.interfaceFaces);
+                geometryAudit.insideFillMean = geometryAccum0493x6b.insideFillSum * invFaces;
+                geometryAudit.outsideFillMean = geometryAccum0493x6b.outsideFillSum * invFaces;
+                geometryAudit.supportThetaValidFraction =
+                    static_cast<double>(geometryAccum0493x6b.supportThetaValidFaces) * invFaces;
+                geometryAudit.supportThetaNearCellFraction =
+                    static_cast<double>(geometryAccum0493x6b.supportThetaNearCellFaces) * invFaces;
+                geometryAudit.supportThetaNearExteriorFraction =
+                    static_cast<double>(geometryAccum0493x6b.supportThetaNearExteriorFaces) * invFaces;
+                geometryAudit.halfIsoBracketFraction =
+                    static_cast<double>(geometryAccum0493x6b.halfIsoBracketFaces) * invFaces;
+                geometryAudit.normalValidFraction =
+                    static_cast<double>(geometryAccum0493x6b.normalValidFaces) * invFaces;
+            }
+            if (geometryAccum0493x6b.supportThetaValidFaces > 0ull) {
+                const double inv = 1.0 /
+                    static_cast<double>(geometryAccum0493x6b.supportThetaValidFaces);
+                geometryAudit.supportThetaMean = geometryAccum0493x6b.supportThetaSum * inv;
+                const double meanSq = geometryAccum0493x6b.supportThetaSqSum * inv;
+                geometryAudit.supportThetaStd = std::sqrt(std::max(
+                    0.0, meanSq - geometryAudit.supportThetaMean *
+                                      geometryAudit.supportThetaMean));
+                geometryAudit.supportThetaMidpointRms = std::sqrt(std::max(
+                    0.0, geometryAccum0493x6b.supportThetaMidSqSum * inv));
+            }
+            if (geometryAccum0493x6b.halfIsoBracketFaces > 0ull) {
+                const double inv = 1.0 /
+                    static_cast<double>(geometryAccum0493x6b.halfIsoBracketFaces);
+                geometryAudit.halfIsoThetaMean = geometryAccum0493x6b.halfIsoThetaSum * inv;
+                const double meanSq = geometryAccum0493x6b.halfIsoThetaSqSum * inv;
+                geometryAudit.halfIsoThetaStd = std::sqrt(std::max(
+                    0.0, meanSq - geometryAudit.halfIsoThetaMean *
+                                      geometryAudit.halfIsoThetaMean));
+            }
+            if (geometryAccum0493x6b.normalValidFaces > 0ull) {
+                const double inv = 1.0 /
+                    static_cast<double>(geometryAccum0493x6b.normalValidFaces);
+                geometryAudit.normalOutwardFraction =
+                    static_cast<double>(geometryAccum0493x6b.normalOutwardFaces) * inv;
+                geometryAudit.normalFaceAlignmentMean =
+                    geometryAccum0493x6b.normalFaceAlignmentSum * inv;
+            }
+            geometryAudit.diagnosticSeconds = seconds_since_0400(tGeometry0493x6b);
+            append_phase_interface_geometry_audit_0493x6b(
+                params, step, time, geometryAudit);
+        }
 
         q6_build_independent_rhs_after_mask_0493w5<<<cellBlocks, threads, tripleShared>>>(
-            species, s, ws.speciesMask0493w5.data(), ws.rhs.data(),
+            species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
+            ws.rhs.data(),
             ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
             grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
             xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
-            audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0);
+            audit.type, exclusiveProjectedSpecies,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+            audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
         const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
         const double divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
@@ -2812,7 +5268,7 @@ bool apply_independent_masked_species_q6_0493w5(
 
         q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
             ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
-            ws.speciesMask0493w5.data(), rhsMean, audit.fullDomain ? 1 : 0,
+            q6SolveMask0493x6f, rhsMean, audit.fullDomain ? 1 : 0,
             grid.numCells);
         check_cuda_0400(cudaGetLastError(), "independent masked cg init launch");
         q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
@@ -2826,9 +5282,16 @@ bool apply_independent_masked_species_q6_0493w5(
 
         for (int it = 0; it < params.projectionMaxIterations && !audit.converged; ++it) {
             q6_apply_masked_operator_and_dot_0493w5<<<cellBlocks, threads, scalarShared>>>(
-                ws.p.data(), ws.Ap.data(), ws.speciesMask0493w5.data(),
+                ws.p.data(), ws.Ap.data(), q6SolveMask0493x6f,
                 ws.partial0.data(), grid.Nx, grid.Ny, invDx2, invDy2,
-                periodicX, periodicY);
+                periodicX, periodicY,
+                cutFaceGeometry0493x6d ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+                cutFaceGeometry0493x6d ? 1 : 0,
+                kPhaseCutFaceThetaMin0493x6d,
+                phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+                phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
+                phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
+                inactiveNeighborFactor0493x5a);
             check_cuda_0400(cudaGetLastError(), "independent masked operator launch");
             const double pAp = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
             if (!(pAp > 0.0) || !std::isfinite(pAp)) {
@@ -2884,19 +5347,914 @@ bool apply_independent_masked_species_q6_0493w5(
         maxIterations = std::max(maxIterations, audit.iterations);
         maxResidualRel = std::max(maxResidualRel, audit.residualRel);
         if (!audit.converged) {
+            // 0493x6f-d1: failure-only algebraic/topology audit for the
+            // alpha-defined free-surface pressure domain.
+            //
+            // IMPORTANT: this block is diagnostic only.  It does not modify
+            // rhs, phi, masks, face coefficients, convergence criteria, or
+            // particle/cell corrections.  The device fields are downloaded
+            // only after the masked CG has already failed.
+            //
+            // The audit views the actual pressure operator as a graph:
+            //   - pressure-pressure faces with a positive prepared coefficient
+            //     connect pressure unknowns;
+            //   - pressure/non-pressure faces with coefficient > 0 are
+            //     Dirichlet anchors (physical alpha=0.5 interface in x6f);
+            //   - pressure/non-pressure faces with coefficient == 0 are
+            //     Neumann-like algebraic truncations;
+            //   - non-periodic exterior domain faces are also non-Dirichlet
+            //     for this masked operator.
+            //
+            // For every connected component we report sum(rhs).  An
+            // unanchored component requires sum(rhs)=0 for solvability.
+            if (freeSurfaceMode0493x5a && phaseInterfaceStencilSpecies0493x6f) {
+                const int topoNx0493x6fd1 = grid.Nx;
+                const int topoNy0493x6fd1 = grid.Ny;
+                const int topoN0493x6fd1 = grid.numCells;
+
+                std::vector<unsigned char> pressureMaskH0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0u);
+                std::vector<unsigned char> carrierMaskH0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0u);
+                std::vector<double> faceCoeffXH0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                std::vector<double> faceCoeffYH0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                std::vector<double> rhsH0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+
+                // 0493x6f-d2: capture the projected-species state that produced
+                // each carrier truncation.  These downloads remain failure-only.
+                std::vector<unsigned int> speciesCountH0493x6fd2(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0u);
+                std::vector<double> speciesMassH0493x6fd2(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                std::vector<double> speciesPxH0493x6fd2(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                std::vector<double> speciesPyH0493x6fd2(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                std::vector<double> alphaFilteredH0493x6fd2(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                // 0493x6f-d3: download the exact resident raw phase-fill field
+                // consumed by the x6c five-point filter.  This avoids inferring
+                // geometry from the projected species alone when more than one
+                // liquid species exists.
+                std::vector<double> phaseFillRawH0493x6fd3(
+                    static_cast<std::size_t>(topoN0493x6fd1), 0.0);
+                double referenceCellMassH0493x6fd2 = 0.0;
+                const std::size_t speciesOffset0493x6fd2 =
+                    static_cast<std::size_t>(s) *
+                    static_cast<std::size_t>(topoN0493x6fd1);
+
+                check_cuda_0400(cudaMemcpy(
+                                    pressureMaskH0493x6fd1.data(),
+                                    q6SolveMask0493x6f,
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(unsigned char),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d1 pressure mask download");
+                check_cuda_0400(cudaMemcpy(
+                                    carrierMaskH0493x6fd1.data(),
+                                    ws.speciesMask0493w5.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(unsigned char),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d1 carrier mask download");
+                check_cuda_0400(cudaMemcpy(
+                                    faceCoeffXH0493x6fd1.data(),
+                                    ws.phaseFaceCoeffX0493x6f.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d1 face coeff X download");
+                check_cuda_0400(cudaMemcpy(
+                                    faceCoeffYH0493x6fd1.data(),
+                                    ws.phaseFaceCoeffY0493x6f.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d1 face coeff Y download");
+                check_cuda_0400(cudaMemcpy(
+                                    rhsH0493x6fd1.data(),
+                                    ws.rhs.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d1 rhs download");
+                check_cuda_0400(cudaMemcpy(
+                                    speciesCountH0493x6fd2.data(),
+                                    species.count + speciesOffset0493x6fd2,
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(unsigned int),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 species count download");
+                check_cuda_0400(cudaMemcpy(
+                                    speciesMassH0493x6fd2.data(),
+                                    species.mass + speciesOffset0493x6fd2,
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 species mass download");
+                check_cuda_0400(cudaMemcpy(
+                                    speciesPxH0493x6fd2.data(),
+                                    species.px + speciesOffset0493x6fd2,
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 species px download");
+                check_cuda_0400(cudaMemcpy(
+                                    speciesPyH0493x6fd2.data(),
+                                    species.py + speciesOffset0493x6fd2,
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 species py download");
+                check_cuda_0400(cudaMemcpy(
+                                    alphaFilteredH0493x6fd2.data(),
+                                    ws.phaseAlphaFiltered0493x6c.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 filtered alpha download");
+                check_cuda_0400(cudaMemcpy(
+                                    phaseFillRawH0493x6fd3.data(),
+                                    ws.phaseFillRaw0493x6c.data(),
+                                    static_cast<std::size_t>(topoN0493x6fd1) *
+                                        sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d3 raw phase-fill download");
+                check_cuda_0400(cudaMemcpy(
+                                    &referenceCellMassH0493x6fd2,
+                                    species.referenceCellMass + s,
+                                    sizeof(double),
+                                    cudaMemcpyDeviceToHost),
+                                "0493x6f-d2 reference cell mass download");
+
+                std::cerr
+                    << "[0493x6f-d2] carrier-threshold context"
+                    << " step=" << step
+                    << " time=" << time
+                    << " species=" << s
+                    << " referenceCellMass=" << referenceCellMassH0493x6fd2
+                    << " minFill="
+                    << params.speciesQ6MinOccupancyFraction
+                    << "\n";
+
+                struct PressureComponent0493x6fd1 {
+                    std::uint64_t cells = 0;
+                    std::uint64_t dirichletFaces = 0;
+                    std::uint64_t zeroCoeffBoundaryFaces = 0;
+                    std::uint64_t truncationFaces = 0;
+                    std::uint64_t zeroCoeffCarrierPresentFaces = 0;
+                    std::uint64_t domainBoundaryFaces = 0;
+                    std::uint64_t zeroDiagCells = 0;
+                    std::uint64_t nonFiniteDiagCells = 0;
+                    std::uint64_t negativeFaceCoeffUses = 0;
+                    std::uint64_t nonFiniteFaceCoeffUses = 0;
+                    double rhsSum = 0.0;
+                    double rhsAbsSum = 0.0;
+                    double rhsSqSum = 0.0;
+                    double diagMin = std::numeric_limits<double>::infinity();
+                    double diagMax = 0.0;
+                };
+
+                std::vector<int> componentId0493x6fd1(
+                    static_cast<std::size_t>(topoN0493x6fd1), -1);
+                std::vector<int> stack0493x6fd1;
+                stack0493x6fd1.reserve(256);
+                std::vector<PressureComponent0493x6fd1> components0493x6fd1;
+
+                const double invDx2Topo0493x6fd1 = 1.0 / (dx * dx);
+                const double invDy2Topo0493x6fd1 = 1.0 / (dy * dy);
+
+                for (int seed0493x6fd1 = 0;
+                     seed0493x6fd1 < topoN0493x6fd1;
+                     ++seed0493x6fd1) {
+                    if (pressureMaskH0493x6fd1[seed0493x6fd1] == 0u ||
+                        componentId0493x6fd1[seed0493x6fd1] >= 0) {
+                        continue;
+                    }
+
+                    const int cid0493x6fd1 =
+                        static_cast<int>(components0493x6fd1.size());
+                    components0493x6fd1.emplace_back();
+                    auto& comp0493x6fd1 = components0493x6fd1.back();
+                    componentId0493x6fd1[seed0493x6fd1] = cid0493x6fd1;
+                    stack0493x6fd1.clear();
+                    stack0493x6fd1.push_back(seed0493x6fd1);
+
+                    while (!stack0493x6fd1.empty()) {
+                        const int c0493x6fd1 = stack0493x6fd1.back();
+                        stack0493x6fd1.pop_back();
+                        ++comp0493x6fd1.cells;
+
+                        const double rhsValue0493x6fd1 =
+                            rhsH0493x6fd1[c0493x6fd1];
+                        comp0493x6fd1.rhsSum += rhsValue0493x6fd1;
+                        comp0493x6fd1.rhsAbsSum += std::fabs(rhsValue0493x6fd1);
+                        comp0493x6fd1.rhsSqSum +=
+                            rhsValue0493x6fd1 * rhsValue0493x6fd1;
+
+                        const int ix0493x6fd1 = c0493x6fd1 % topoNx0493x6fd1;
+                        const int iy0493x6fd1 = c0493x6fd1 / topoNx0493x6fd1;
+                        double diag0493x6fd1 = 0.0;
+
+                        auto inspectFace0493x6fd1 =
+                            [&](bool hasNeighbour0493x6fd1,
+                                int neighbour0493x6fd1,
+                                double factor0493x6fd1,
+                                double invH20493x6fd1) {
+                                if (!hasNeighbour0493x6fd1) {
+                                    ++comp0493x6fd1.domainBoundaryFaces;
+                                    return;
+                                }
+
+                                if (!std::isfinite(factor0493x6fd1)) {
+                                    ++comp0493x6fd1.nonFiniteFaceCoeffUses;
+                                    diag0493x6fd1 =
+                                        std::numeric_limits<double>::quiet_NaN();
+                                    return;
+                                }
+                                if (factor0493x6fd1 < 0.0) {
+                                    ++comp0493x6fd1.negativeFaceCoeffUses;
+                                }
+
+                                diag0493x6fd1 +=
+                                    factor0493x6fd1 * invH20493x6fd1;
+
+                                if (pressureMaskH0493x6fd1[
+                                        neighbour0493x6fd1] != 0u) {
+                                    // Connectivity is defined by the actual
+                                    // off-diagonal coupling of A, not merely
+                                    // by pressure-mask adjacency.
+                                    if (factor0493x6fd1 > 0.0 &&
+                                        componentId0493x6fd1[
+                                            neighbour0493x6fd1] < 0) {
+                                        componentId0493x6fd1[
+                                            neighbour0493x6fd1] =
+                                            cid0493x6fd1;
+                                        stack0493x6fd1.push_back(
+                                            neighbour0493x6fd1);
+                                    }
+                                    return;
+                                }
+
+                                if (factor0493x6fd1 > 0.0) {
+                                    ++comp0493x6fd1.dirichletFaces;
+                                } else {
+                                    ++comp0493x6fd1.zeroCoeffBoundaryFaces;
+                                    if (carrierMaskH0493x6fd1[
+                                            neighbour0493x6fd1] == 0u) {
+                                        ++comp0493x6fd1.truncationFaces;
+                                    } else {
+                                        // This is not the normal x6f
+                                        // same-phase carrier truncation.
+                                        // It catches a pressure/exterior face
+                                        // whose carrier still exists but whose
+                                        // prepared coefficient nevertheless
+                                        // vanished (e.g. a pathological
+                                        // crossing/denominator case).
+                                        ++comp0493x6fd1
+                                              .zeroCoeffCarrierPresentFaces;
+                                    }
+                                }
+                            };
+
+                        // East.
+                        if (periodicX || ix0493x6fd1 < topoNx0493x6fd1 - 1) {
+                            const int xe0493x6fd1 =
+                                ix0493x6fd1 + 1 < topoNx0493x6fd1
+                                    ? ix0493x6fd1 + 1 : 0;
+                            const int east0493x6fd1 =
+                                iy0493x6fd1 * topoNx0493x6fd1 + xe0493x6fd1;
+                            inspectFace0493x6fd1(
+                                true, east0493x6fd1,
+                                faceCoeffXH0493x6fd1[c0493x6fd1],
+                                invDx2Topo0493x6fd1);
+                        } else {
+                            inspectFace0493x6fd1(false, c0493x6fd1, 0.0,
+                                                invDx2Topo0493x6fd1);
+                        }
+
+                        // West.
+                        if (periodicX || ix0493x6fd1 > 0) {
+                            const int xw0493x6fd1 =
+                                ix0493x6fd1 > 0
+                                    ? ix0493x6fd1 - 1 : topoNx0493x6fd1 - 1;
+                            const int west0493x6fd1 =
+                                iy0493x6fd1 * topoNx0493x6fd1 + xw0493x6fd1;
+                            inspectFace0493x6fd1(
+                                true, west0493x6fd1,
+                                faceCoeffXH0493x6fd1[west0493x6fd1],
+                                invDx2Topo0493x6fd1);
+                        } else {
+                            inspectFace0493x6fd1(false, c0493x6fd1, 0.0,
+                                                invDx2Topo0493x6fd1);
+                        }
+
+                        // North.
+                        if (periodicY || iy0493x6fd1 < topoNy0493x6fd1 - 1) {
+                            const int yn0493x6fd1 =
+                                iy0493x6fd1 + 1 < topoNy0493x6fd1
+                                    ? iy0493x6fd1 + 1 : 0;
+                            const int north0493x6fd1 =
+                                yn0493x6fd1 * topoNx0493x6fd1 + ix0493x6fd1;
+                            inspectFace0493x6fd1(
+                                true, north0493x6fd1,
+                                faceCoeffYH0493x6fd1[c0493x6fd1],
+                                invDy2Topo0493x6fd1);
+                        } else {
+                            inspectFace0493x6fd1(false, c0493x6fd1, 0.0,
+                                                invDy2Topo0493x6fd1);
+                        }
+
+                        // South.
+                        if (periodicY || iy0493x6fd1 > 0) {
+                            const int ys0493x6fd1 =
+                                iy0493x6fd1 > 0
+                                    ? iy0493x6fd1 - 1 : topoNy0493x6fd1 - 1;
+                            const int south0493x6fd1 =
+                                ys0493x6fd1 * topoNx0493x6fd1 + ix0493x6fd1;
+                            inspectFace0493x6fd1(
+                                true, south0493x6fd1,
+                                faceCoeffYH0493x6fd1[south0493x6fd1],
+                                invDy2Topo0493x6fd1);
+                        } else {
+                            inspectFace0493x6fd1(false, c0493x6fd1, 0.0,
+                                                invDy2Topo0493x6fd1);
+                        }
+
+                        if (!std::isfinite(diag0493x6fd1)) {
+                            ++comp0493x6fd1.nonFiniteDiagCells;
+                        } else {
+                            if (!(diag0493x6fd1 > 0.0)) {
+                                ++comp0493x6fd1.zeroDiagCells;
+                            }
+                            comp0493x6fd1.diagMin =
+                                std::min(comp0493x6fd1.diagMin,
+                                         diag0493x6fd1);
+                            comp0493x6fd1.diagMax =
+                                std::max(comp0493x6fd1.diagMax,
+                                         diag0493x6fd1);
+                        }
+                    }
+                }
+
+                std::uint64_t pressureCells0493x6fd1 = 0;
+                std::uint64_t unanchoredComponents0493x6fd1 = 0;
+                std::uint64_t unanchoredCells0493x6fd1 = 0;
+                std::uint64_t largestUnanchoredCells0493x6fd1 = 0;
+                double worstCompatibility0493x6fd1 = 0.0;
+                int worstCompatibilityComponent0493x6fd1 = -1;
+
+                for (std::size_t ci0493x6fd1 = 0;
+                     ci0493x6fd1 < components0493x6fd1.size();
+                     ++ci0493x6fd1) {
+                    const auto& comp0493x6fd1 =
+                        components0493x6fd1[ci0493x6fd1];
+                    pressureCells0493x6fd1 += comp0493x6fd1.cells;
+                    if (comp0493x6fd1.dirichletFaces != 0u) continue;
+
+                    ++unanchoredComponents0493x6fd1;
+                    unanchoredCells0493x6fd1 += comp0493x6fd1.cells;
+                    largestUnanchoredCells0493x6fd1 =
+                        std::max(largestUnanchoredCells0493x6fd1,
+                                 comp0493x6fd1.cells);
+                    const double compatibility0493x6fd1 =
+                        std::fabs(comp0493x6fd1.rhsSum) /
+                        std::max(comp0493x6fd1.rhsAbsSum, 1.0e-300);
+                    if (compatibility0493x6fd1 >
+                        worstCompatibility0493x6fd1) {
+                        worstCompatibility0493x6fd1 =
+                            compatibility0493x6fd1;
+                        worstCompatibilityComponent0493x6fd1 =
+                            static_cast<int>(ci0493x6fd1);
+                    }
+                }
+
+                std::cerr
+                    << "[0493x6f-d1] masked-CG failure topology"
+                    << " step=" << step
+                    << " time=" << time
+                    << " species=" << s
+                    << " iterations=" << audit.iterations
+                    << " residualRel=" << audit.residualRel
+                    << " pressureCells=" << pressureCells0493x6fd1
+                    << " components=" << components0493x6fd1.size()
+                    << " unanchoredComponents="
+                    << unanchoredComponents0493x6fd1
+                    << " unanchoredCells=" << unanchoredCells0493x6fd1
+                    << " largestUnanchoredCells="
+                    << largestUnanchoredCells0493x6fd1
+                    << " worstCompatibility="
+                    << worstCompatibility0493x6fd1
+                    << " worstComponent="
+                    << worstCompatibilityComponent0493x6fd1
+                    << "\n";
+
+                constexpr std::size_t kMaxPrintedComponents0493x6fd1 = 64;
+                constexpr std::size_t kMaxDetailedCells0493x6fd2 = 256;
+                constexpr std::size_t kMaxDetailedFaces0493x6fd2 = 512;
+                std::size_t printedComponents0493x6fd1 = 0;
+                std::size_t printedCells0493x6fd2 = 0;
+                std::size_t printedFaces0493x6fd2 = 0;
+                for (std::size_t ci0493x6fd1 = 0;
+                     ci0493x6fd1 < components0493x6fd1.size();
+                     ++ci0493x6fd1) {
+                    const auto& comp0493x6fd1 =
+                        components0493x6fd1[ci0493x6fd1];
+                    if (comp0493x6fd1.dirichletFaces != 0u) continue;
+                    if (printedComponents0493x6fd1 >=
+                        kMaxPrintedComponents0493x6fd1) {
+                        break;
+                    }
+                    const double compatibility0493x6fd1 =
+                        std::fabs(comp0493x6fd1.rhsSum) /
+                        std::max(comp0493x6fd1.rhsAbsSum, 1.0e-300);
+                    const double rhsRms0493x6fd1 =
+                        comp0493x6fd1.cells > 0u
+                            ? std::sqrt(
+                                  comp0493x6fd1.rhsSqSum /
+                                  static_cast<double>(comp0493x6fd1.cells))
+                            : 0.0;
+                    std::cerr
+                        << "[0493x6f-d1] unanchored"
+                        << " component=" << ci0493x6fd1
+                        << " cells=" << comp0493x6fd1.cells
+                        << " dirichletFaces="
+                        << comp0493x6fd1.dirichletFaces
+                        << " truncationFaces="
+                        << comp0493x6fd1.truncationFaces
+                        << " zeroCoeffBoundaryFaces="
+                        << comp0493x6fd1.zeroCoeffBoundaryFaces
+                        << " zeroCoeffCarrierPresentFaces="
+                        << comp0493x6fd1.zeroCoeffCarrierPresentFaces
+                        << " domainBoundaryFaces="
+                        << comp0493x6fd1.domainBoundaryFaces
+                        << " rhsSum=" << comp0493x6fd1.rhsSum
+                        << " rhsAbsSum=" << comp0493x6fd1.rhsAbsSum
+                        << " rhsRms=" << rhsRms0493x6fd1
+                        << " compatibility=" << compatibility0493x6fd1
+                        << " zeroDiagCells="
+                        << comp0493x6fd1.zeroDiagCells
+                        << " nonFiniteDiagCells="
+                        << comp0493x6fd1.nonFiniteDiagCells
+                        << " negativeFaceCoeffUses="
+                        << comp0493x6fd1.negativeFaceCoeffUses
+                        << " nonFiniteFaceCoeffUses="
+                        << comp0493x6fd1.nonFiniteFaceCoeffUses
+                        << " diagMin=" << comp0493x6fd1.diagMin
+                        << " diagMax=" << comp0493x6fd1.diagMax
+                        << "\n";
+
+                    // d2 resolves what the occupancy threshold removed on the
+                    // algebraic boundary of this unanchored component.  The
+                    // raw free-surface criterion is
+                    //   fill = speciesMass / referenceCellMass >= minFill.
+                    // x5a regularization can only add enclosed raw-inactive
+                    // cells, so a final carrier-inactive neighbour that still
+                    // has positive mass should normally classify as
+                    // "below_min_fill".
+                    double truncationRhsSum0493x6fd2 = 0.0;
+                    std::uint64_t truncationFacesSeen0493x6fd2 = 0u;
+                    for (int c0493x6fd2 = 0;
+                         c0493x6fd2 < topoN0493x6fd1;
+                         ++c0493x6fd2) {
+                        if (componentId0493x6fd1[c0493x6fd2] !=
+                            static_cast<int>(ci0493x6fd1)) {
+                            continue;
+                        }
+
+                        const int ix0493x6fd2 =
+                            c0493x6fd2 % topoNx0493x6fd1;
+                        const int iy0493x6fd2 =
+                            c0493x6fd2 / topoNx0493x6fd1;
+                        const double massC0493x6fd2 =
+                            speciesMassH0493x6fd2[c0493x6fd2];
+                        const double fillC0493x6fd2 =
+                            referenceCellMassH0493x6fd2 > 0.0
+                                ? massC0493x6fd2 /
+                                      referenceCellMassH0493x6fd2
+                                : 0.0;
+                        const double uxC0493x6fd2 =
+                            massC0493x6fd2 > 0.0
+                                ? speciesPxH0493x6fd2[c0493x6fd2] /
+                                      massC0493x6fd2
+                                : 0.0;
+                        const double uyC0493x6fd2 =
+                            massC0493x6fd2 > 0.0
+                                ? speciesPyH0493x6fd2[c0493x6fd2] /
+                                      massC0493x6fd2
+                                : 0.0;
+
+                        if (printedCells0493x6fd2 <
+                            kMaxDetailedCells0493x6fd2) {
+                            std::cerr
+                                << "[0493x6f-d2] component-cell"
+                                << " component=" << ci0493x6fd1
+                                << " cell=" << c0493x6fd2
+                                << " ix=" << ix0493x6fd2
+                                << " iy=" << iy0493x6fd2
+                                << " x="
+                                << (static_cast<double>(ix0493x6fd2) + 0.5) *
+                                       dx
+                                << " y="
+                                << (static_cast<double>(iy0493x6fd2) + 0.5) *
+                                       dy
+                                << " count="
+                                << speciesCountH0493x6fd2[c0493x6fd2]
+                                << " mass=" << massC0493x6fd2
+                                << " fill=" << fillC0493x6fd2
+                                << " alphaFiltered="
+                                << alphaFilteredH0493x6fd2[c0493x6fd2]
+                                << " carrier="
+                                << static_cast<int>(
+                                       carrierMaskH0493x6fd1[c0493x6fd2])
+                                << " pressure="
+                                << static_cast<int>(
+                                       pressureMaskH0493x6fd1[c0493x6fd2])
+                                << " rhs="
+                                << rhsH0493x6fd1[c0493x6fd2]
+                                << " ux=" << uxC0493x6fd2
+                                << " uy=" << uyC0493x6fd2
+                                << "\n";
+                            ++printedCells0493x6fd2;
+                        }
+
+                        auto inspectTruncation0493x6fd2 =
+                            [&](const char* face0493x6fd2,
+                                bool hasNeighbour0493x6fd2,
+                                int neighbour0493x6fd2,
+                                double factor0493x6fd2,
+                                double tentativeFaceVelocity0493x6fd2,
+                                double rhsFaceContribution0493x6fd2) {
+                                if (!hasNeighbour0493x6fd2 ||
+                                    pressureMaskH0493x6fd1[
+                                        neighbour0493x6fd2] != 0u ||
+                                    factor0493x6fd2 != 0.0 ||
+                                    carrierMaskH0493x6fd1[
+                                        neighbour0493x6fd2] != 0u) {
+                                    return;
+                                }
+
+                                ++truncationFacesSeen0493x6fd2;
+                                truncationRhsSum0493x6fd2 +=
+                                    rhsFaceContribution0493x6fd2;
+
+                                if (printedFaces0493x6fd2 >=
+                                    kMaxDetailedFaces0493x6fd2) {
+                                    return;
+                                }
+
+                                const int nix0493x6fd2 =
+                                    neighbour0493x6fd2 % topoNx0493x6fd1;
+                                const int niy0493x6fd2 =
+                                    neighbour0493x6fd2 / topoNx0493x6fd1;
+                                const double nMass0493x6fd2 =
+                                    speciesMassH0493x6fd2[
+                                        neighbour0493x6fd2];
+                                const double nFill0493x6fd2 =
+                                    referenceCellMassH0493x6fd2 > 0.0
+                                        ? nMass0493x6fd2 /
+                                              referenceCellMassH0493x6fd2
+                                        : 0.0;
+                                const bool rawThresholdActive0493x6fd2 =
+                                    nMass0493x6fd2 > 0.0 &&
+                                    referenceCellMassH0493x6fd2 > 0.0 &&
+                                    nFill0493x6fd2 >=
+                                        params.speciesQ6MinOccupancyFraction;
+                                const char* carrierReason0493x6fd2 =
+                                    !(nMass0493x6fd2 > 0.0)
+                                        ? "mass_nonpositive"
+                                        : (nFill0493x6fd2 <
+                                                   params
+                                                       .speciesQ6MinOccupancyFraction
+                                               ? "below_min_fill"
+                                               : "unexpected_inactive_after_regularization");
+                                const double nUx0493x6fd2 =
+                                    nMass0493x6fd2 > 0.0
+                                        ? speciesPxH0493x6fd2[
+                                              neighbour0493x6fd2] /
+                                              nMass0493x6fd2
+                                        : 0.0;
+                                const double nUy0493x6fd2 =
+                                    nMass0493x6fd2 > 0.0
+                                        ? speciesPyH0493x6fd2[
+                                              neighbour0493x6fd2] /
+                                              nMass0493x6fd2
+                                        : 0.0;
+
+                                // Re-evaluate the exact x6c conservative filter
+                                // on the carrier-inactive neighbour.  Non-periodic
+                                // missing neighbours contribute nothing (the same
+                                // no-flux convention as the device kernel).
+                                const double rawCenter0493x6fd3 =
+                                    phaseFillRawH0493x6fd3[
+                                        neighbour0493x6fd2];
+                                const bool hasW0493x6fd3 =
+                                    periodicX || nix0493x6fd2 > 0;
+                                const bool hasE0493x6fd3 =
+                                    periodicX ||
+                                    nix0493x6fd2 < topoNx0493x6fd1 - 1;
+                                const bool hasS0493x6fd3 =
+                                    periodicY || niy0493x6fd2 > 0;
+                                const bool hasN0493x6fd3 =
+                                    periodicY ||
+                                    niy0493x6fd2 < topoNy0493x6fd1 - 1;
+
+                                const int wix0493x6fd3 =
+                                    nix0493x6fd2 > 0
+                                        ? nix0493x6fd2 - 1
+                                        : topoNx0493x6fd1 - 1;
+                                const int eix0493x6fd3 =
+                                    nix0493x6fd2 + 1 < topoNx0493x6fd1
+                                        ? nix0493x6fd2 + 1
+                                        : 0;
+                                const int siy0493x6fd3 =
+                                    niy0493x6fd2 > 0
+                                        ? niy0493x6fd2 - 1
+                                        : topoNy0493x6fd1 - 1;
+                                const int northIy0493x6fd3 =
+                                    niy0493x6fd2 + 1 < topoNy0493x6fd1
+                                        ? niy0493x6fd2 + 1
+                                        : 0;
+
+                                const int westCell0493x6fd3 =
+                                    niy0493x6fd2 * topoNx0493x6fd1 +
+                                    wix0493x6fd3;
+                                const int eastCell0493x6fd3 =
+                                    niy0493x6fd2 * topoNx0493x6fd1 +
+                                    eix0493x6fd3;
+                                const int southCell0493x6fd3 =
+                                    siy0493x6fd3 * topoNx0493x6fd1 +
+                                    nix0493x6fd2;
+                                const int northCell0493x6fd3 =
+                                    northIy0493x6fd3 * topoNx0493x6fd1 +
+                                    nix0493x6fd2;
+
+                                const double rawW0493x6fd3 =
+                                    hasW0493x6fd3
+                                        ? phaseFillRawH0493x6fd3[
+                                              westCell0493x6fd3]
+                                        : 0.0;
+                                const double rawE0493x6fd3 =
+                                    hasE0493x6fd3
+                                        ? phaseFillRawH0493x6fd3[
+                                              eastCell0493x6fd3]
+                                        : 0.0;
+                                const double rawS0493x6fd3 =
+                                    hasS0493x6fd3
+                                        ? phaseFillRawH0493x6fd3[
+                                              southCell0493x6fd3]
+                                        : 0.0;
+                                const double rawN0493x6fd3 =
+                                    hasN0493x6fd3
+                                        ? phaseFillRawH0493x6fd3[
+                                              northCell0493x6fd3]
+                                        : 0.0;
+
+                                // 0493x6f2: reconstruct the exact bounded
+                                // geometric source used by the device filter.
+                                const double geomCenter0493x6fd3 =
+                                    std::min(1.0, std::max(0.0, rawCenter0493x6fd3));
+                                const double geomW0493x6fd3 =
+                                    std::min(1.0, std::max(0.0, rawW0493x6fd3));
+                                const double geomE0493x6fd3 =
+                                    std::min(1.0, std::max(0.0, rawE0493x6fd3));
+                                const double geomS0493x6fd3 =
+                                    std::min(1.0, std::max(0.0, rawS0493x6fd3));
+                                const double geomN0493x6fd3 =
+                                    std::min(1.0, std::max(0.0, rawN0493x6fd3));
+
+                                const double contribW0493x6fd3 =
+                                    hasW0493x6fd3
+                                        ? kPhaseGeometryFilterLambda0493x6c *
+                                              (geomW0493x6fd3 - geomCenter0493x6fd3)
+                                        : 0.0;
+                                const double contribE0493x6fd3 =
+                                    hasE0493x6fd3
+                                        ? kPhaseGeometryFilterLambda0493x6c *
+                                              (geomE0493x6fd3 - geomCenter0493x6fd3)
+                                        : 0.0;
+                                const double contribS0493x6fd3 =
+                                    hasS0493x6fd3
+                                        ? kPhaseGeometryFilterLambda0493x6c *
+                                              (geomS0493x6fd3 - geomCenter0493x6fd3)
+                                        : 0.0;
+                                const double contribN0493x6fd3 =
+                                    hasN0493x6fd3
+                                        ? kPhaseGeometryFilterLambda0493x6c *
+                                              (geomN0493x6fd3 - geomCenter0493x6fd3)
+                                        : 0.0;
+                                const double alphaReconstructed0493x6fd3 =
+                                    geomCenter0493x6fd3 +
+                                    contribW0493x6fd3 +
+                                    contribE0493x6fd3 +
+                                    contribS0493x6fd3 +
+                                    contribN0493x6fd3;
+
+                                std::cerr
+                                    << "[0493x6f-d2] truncation-face"
+                                    << " component=" << ci0493x6fd1
+                                    << " face=" << face0493x6fd2
+                                    << " fromCell=" << c0493x6fd2
+                                    << " fromIx=" << ix0493x6fd2
+                                    << " fromIy=" << iy0493x6fd2
+                                    << " toCell=" << neighbour0493x6fd2
+                                    << " toIx=" << nix0493x6fd2
+                                    << " toIy=" << niy0493x6fd2
+                                    << " coeff=" << factor0493x6fd2
+                                    << " faceVelocity="
+                                    << tentativeFaceVelocity0493x6fd2
+                                    << " rhsFaceContribution="
+                                    << rhsFaceContribution0493x6fd2
+                                    << " neighbourCount="
+                                    << speciesCountH0493x6fd2[
+                                           neighbour0493x6fd2]
+                                    << " neighbourMass="
+                                    << nMass0493x6fd2
+                                    << " neighbourFill="
+                                    << nFill0493x6fd2
+                                    << " minFill="
+                                    << params.speciesQ6MinOccupancyFraction
+                                    << " neighbourAlphaFiltered="
+                                    << alphaFilteredH0493x6fd2[
+                                           neighbour0493x6fd2]
+                                    << " neighbourCarrier="
+                                    << static_cast<int>(
+                                           carrierMaskH0493x6fd1[
+                                               neighbour0493x6fd2])
+                                    << " neighbourPressure="
+                                    << static_cast<int>(
+                                           pressureMaskH0493x6fd1[
+                                               neighbour0493x6fd2])
+                                    << " rawThresholdActive="
+                                    << (rawThresholdActive0493x6fd2 ? 1 : 0)
+                                    << " carrierReason="
+                                    << carrierReason0493x6fd2
+                                    << " neighbourUx=" << nUx0493x6fd2
+                                    << " neighbourUy=" << nUy0493x6fd2
+                                    << "\n";
+                                std::cerr
+                                    << "[0493x6f-d3] alpha-reconstruction"
+                                    << " component=" << ci0493x6fd1
+                                    << " face=" << face0493x6fd2
+                                    << " cell=" << neighbour0493x6fd2
+                                    << " ix=" << nix0493x6fd2
+                                    << " iy=" << niy0493x6fd2
+                                    << " lambda="
+                                    << kPhaseGeometryFilterLambda0493x6c
+                                    << " rawCenter=" << rawCenter0493x6fd3
+                                    << " geomCenter=" << geomCenter0493x6fd3
+                                    << " hasW=" << (hasW0493x6fd3 ? 1 : 0)
+                                    << " rawW=" << rawW0493x6fd3
+                                    << " geomW=" << geomW0493x6fd3
+                                    << " contribW=" << contribW0493x6fd3
+                                    << " hasE=" << (hasE0493x6fd3 ? 1 : 0)
+                                    << " rawE=" << rawE0493x6fd3
+                                    << " geomE=" << geomE0493x6fd3
+                                    << " contribE=" << contribE0493x6fd3
+                                    << " hasS=" << (hasS0493x6fd3 ? 1 : 0)
+                                    << " rawS=" << rawS0493x6fd3
+                                    << " geomS=" << geomS0493x6fd3
+                                    << " contribS=" << contribS0493x6fd3
+                                    << " hasN=" << (hasN0493x6fd3 ? 1 : 0)
+                                    << " rawN=" << rawN0493x6fd3
+                                    << " geomN=" << geomN0493x6fd3
+                                    << " contribN=" << contribN0493x6fd3
+                                    << " alphaReconstructed="
+                                    << alphaReconstructed0493x6fd3
+                                    << " alphaStored="
+                                    << alphaFilteredH0493x6fd2[
+                                           neighbour0493x6fd2]
+                                    << " delta="
+                                    << (alphaReconstructed0493x6fd3 -
+                                        alphaFilteredH0493x6fd2[
+                                            neighbour0493x6fd2])
+                                    << "\n";
+                                ++printedFaces0493x6fd2;
+                            };
+
+                        if (periodicX ||
+                            ix0493x6fd2 < topoNx0493x6fd1 - 1) {
+                            const int xe0493x6fd2 =
+                                ix0493x6fd2 + 1 < topoNx0493x6fd1
+                                    ? ix0493x6fd2 + 1 : 0;
+                            const int east0493x6fd2 =
+                                iy0493x6fd2 * topoNx0493x6fd1 +
+                                xe0493x6fd2;
+                            inspectTruncation0493x6fd2(
+                                "E", true, east0493x6fd2,
+                                faceCoeffXH0493x6fd1[c0493x6fd2],
+                                uxC0493x6fd2, -uxC0493x6fd2 / dx);
+                        }
+                        if (periodicX || ix0493x6fd2 > 0) {
+                            const int xw0493x6fd2 =
+                                ix0493x6fd2 > 0
+                                    ? ix0493x6fd2 - 1
+                                    : topoNx0493x6fd1 - 1;
+                            const int west0493x6fd2 =
+                                iy0493x6fd2 * topoNx0493x6fd1 +
+                                xw0493x6fd2;
+                            inspectTruncation0493x6fd2(
+                                "W", true, west0493x6fd2,
+                                faceCoeffXH0493x6fd1[west0493x6fd2],
+                                uxC0493x6fd2, uxC0493x6fd2 / dx);
+                        }
+                        if (periodicY ||
+                            iy0493x6fd2 < topoNy0493x6fd1 - 1) {
+                            const int yn0493x6fd2 =
+                                iy0493x6fd2 + 1 < topoNy0493x6fd1
+                                    ? iy0493x6fd2 + 1 : 0;
+                            const int north0493x6fd2 =
+                                yn0493x6fd2 * topoNx0493x6fd1 +
+                                ix0493x6fd2;
+                            inspectTruncation0493x6fd2(
+                                "N", true, north0493x6fd2,
+                                faceCoeffYH0493x6fd1[c0493x6fd2],
+                                uyC0493x6fd2, -uyC0493x6fd2 / dy);
+                        }
+                        if (periodicY || iy0493x6fd2 > 0) {
+                            const int ys0493x6fd2 =
+                                iy0493x6fd2 > 0
+                                    ? iy0493x6fd2 - 1
+                                    : topoNy0493x6fd1 - 1;
+                            const int south0493x6fd2 =
+                                ys0493x6fd2 * topoNx0493x6fd1 +
+                                ix0493x6fd2;
+                            inspectTruncation0493x6fd2(
+                                "S", true, south0493x6fd2,
+                                faceCoeffYH0493x6fd1[south0493x6fd2],
+                                uyC0493x6fd2, uyC0493x6fd2 / dy);
+                        }
+                    }
+
+                    std::cerr
+                        << "[0493x6f-d2] component-flux"
+                        << " component=" << ci0493x6fd1
+                        << " truncationFacesSeen="
+                        << truncationFacesSeen0493x6fd2
+                        << " truncationRhsSum="
+                        << truncationRhsSum0493x6fd2
+                        << " componentRhsSum="
+                        << comp0493x6fd1.rhsSum
+                        << " nonTruncationRhsSum="
+                        << (comp0493x6fd1.rhsSum -
+                            truncationRhsSum0493x6fd2)
+                        << "\n";
+
+                    ++printedComponents0493x6fd1;
+                }
+                if (unanchoredComponents0493x6fd1 >
+                    printedComponents0493x6fd1) {
+                    std::cerr
+                        << "[0493x6f-d1] unanchored output truncated"
+                        << " printed=" << printedComponents0493x6fd1
+                        << " total=" << unanchoredComponents0493x6fd1
+                        << "\n";
+                }
+                if (printedCells0493x6fd2 >= kMaxDetailedCells0493x6fd2 ||
+                    printedFaces0493x6fd2 >= kMaxDetailedFaces0493x6fd2) {
+                    std::cerr
+                        << "[0493x6f-d2] detailed output capped"
+                        << " printedCells=" << printedCells0493x6fd2
+                        << " printedFaces=" << printedFaces0493x6fd2
+                        << " maxCells=" << kMaxDetailedCells0493x6fd2
+                        << " maxFaces=" << kMaxDetailedFaces0493x6fd2
+                        << "\n";
+                }
+            }
+
             audits.push_back(audit);
             append_independent_masked_species_audit_0493w5(params, step, time, audits);
-            diag.reason = "independent_masked species solve did not converge";
+            diag.reason = freeSurfaceMode0493x5a
+                ? "free_surface_masked species solve did not converge"
+                : "independent_masked species solve did not converge";
             return false;
         }
 
         const double effectiveStrength = params.q6ProjectionStrength * audit.strength;
         q6_compute_masked_face_correction_0493w5<<<cellBlocks, threads>>>(
-            species, s, ws.phi.data(), ws.speciesMask0493w5.data(),
+            species, s, ws.phi.data(), q6SolveMask0493x6f,
             ws.r.data(), ws.p.data(), grid.Nx, grid.Ny, dx, dy,
-            effectiveStrength, periodicX, periodicY, xHighFlux, yHighFlux,
+            effectiveStrength, periodicX, periodicY,
+            cutFaceGeometry0493x6d ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+            cutFaceGeometry0493x6d ? 1 : 0,
+            kPhaseCutFaceThetaMin0493x6d,
+            phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+            phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
+            phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+            phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
+            inactiveNeighborFactor0493x5a,
+            xHighFlux, yHighFlux,
             segmentedIo, audit.type, exclusiveProjectedSpecies);
         check_cuda_0400(cudaGetLastError(), "independent masked face correction launch");
+        // The pressure solve uses q6SolveMask0493x6f, but the liquid carrier
+        // remains the correction/application band.  Exterior-side mixed cells
+        // can therefore receive the interface-face gradient without becoming
+        // pressure unknowns themselves.
         q6_compute_masked_cell_correction_stats_0493w5<<<
             cellBlocks, threads, pairShared>>>(
             ws.speciesMask0493w5.data(), ws.r.data(), ws.p.data(),
@@ -2911,7 +6269,8 @@ bool apply_independent_masked_species_q6_0493w5(
 
         q6_masked_projected_divergence_stats_0493w5<<<
             cellBlocks, threads, pairShared>>>(
-            species, s, ws.speciesMask0493w5.data(), ws.r.data(), ws.p.data(),
+            species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
+            ws.r.data(), ws.p.data(),
             ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
             periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
             segmentedIo, audit.type, exclusiveProjectedSpecies,
@@ -2965,6 +6324,10 @@ bool apply_independent_masked_species_q6_0493w5(
     diag.divBeforeMaxAbs = maxDivBefore;
     diag.divAfterProjectedFluxMaxAbs = maxDivAfter;
     diag.correctionVelocityMaxAbs = maxCorrection;
+    if (freeSurfaceMode0493x5a && totalActiveCells == 0u) {
+        diag.reason = "free_surface_masked has no active liquid support";
+        return false;
+    }
 
     const auto tApplyAll = Clock0400::now();
     double totalDpx = 0.0;
@@ -2978,12 +6341,29 @@ bool apply_independent_masked_species_q6_0493w5(
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
         check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
                         "independent masked corrected counter zero");
-        q6_apply_independent_species_correction_0493w5<<<
-            particleBlocks, threads, pairShared>>>(
-            particles, cells, species, s, params.speciesQ6MinOccupancyFraction,
-            denseDUx, denseDUy, audit.type, nParticles,
-            ws.partial0.data(), ws.partial1.data(), ws.counter.data());
-        check_cuda_0400(cudaGetLastError(), "independent masked particle apply launch");
+        const unsigned char* denseMask = ws.speciesMasks0493w6.data() +
+            static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
+        if (freeSurfaceMode0493x5a && fuseForceKick0493x4b) {
+            q6_apply_free_surface_force_and_correction_0493x5a<<<
+                particleBlocks, threads, pairShared>>>(
+                particles, cells, denseMask, denseDUx, denseDUy, audit.type,
+                nParticles, params.dt, params.Lx, params.Ly,
+                params.bodyAccelerationX, params.bodyAccelerationY,
+                tgForceActive0493x5a ? 1 : 0,
+                params.taylorGreenForcingAmplitude,
+                params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
+                ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x5a fused free-surface force and Q6 apply launch");
+        } else {
+            q6_apply_independent_species_correction_0493w5<<<
+                particleBlocks, threads, pairShared>>>(
+                particles, cells, denseMask, denseDUx, denseDUy, audit.type,
+                nParticles, ws.partial0.data(), ws.partial1.data(),
+                ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "independent masked particle apply launch");
+        }
         audit.momentumX = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
         audit.momentumY = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
         unsigned long long corrected = 0ull;
@@ -3032,11 +6412,14 @@ bool apply_independent_masked_species_q6_0493w5(
                 static_cast<std::size_t>(grid.numCells);
         q6_build_independent_rhs_after_mask_0493w5<<<
             cellBlocks, threads, tripleShared>>>(
-            species, audit.speciesIndex, denseMask0493w6, ws.rhs.data(),
+            species, audit.speciesIndex, denseMask0493w6, denseMask0493w6,
+            ws.rhs.data(),
             ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
             grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
             xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
-            audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0);
+            audit.type, exclusiveProjectedSpecies,
+            nullptr, nullptr, nullptr, nullptr, 0,
+            audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(),
                         "independent masked post-apply divergence launch");
         const double divAppliedSq0493w6 =
@@ -3227,8 +6610,10 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
             diag.reason = "fused force kick requested with zero force";
             return diag;
         }
-        if (params.speciesQ6Enable && params.speciesQ6Mode != "common") {
-            diag.reason = "fused force kick currently requires speciesQ6Mode=common";
+        if (params.speciesQ6Enable && params.speciesQ6Mode != "common" &&
+            params.speciesQ6Mode != "free_surface_masked") {
+            diag.reason =
+                "fused force kick requires speciesQ6Mode=common or free_surface_masked";
             return diag;
         }
     }
@@ -3268,8 +6653,12 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     const bool speciesQ6Weighted0491c =
         params.speciesQ6Enable && params.speciesQ6Mode == "weighted" &&
         params.speciesQ6Sensitivity > 0.0;
+    const bool speciesQ6FreeSurfaceMasked0493x5a =
+        params.speciesQ6Enable && params.speciesQ6Mode == "free_surface_masked";
     const bool speciesQ6IndependentMasked0493w5 =
-        params.speciesQ6Enable && params.speciesQ6Mode == "independent_masked";
+        params.speciesQ6Enable &&
+        (params.speciesQ6Mode == "independent_masked" ||
+         speciesQ6FreeSurfaceMasked0493x5a);
     diag.speciesQ6IndependentMasked = speciesQ6IndependentMasked0493w5;
     if (params.speciesQ6Enable) {
         if (speciesWorkspace0491c == nullptr) {
@@ -3358,16 +6747,20 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         std::vector<std::uint32_t> hSpeciesTypes0491c(params.speciesDefinitions.size());
         std::vector<double> hQ6Strength0491c(params.speciesDefinitions.size());
         std::vector<double> hReferenceCellMass0493w5(params.speciesDefinitions.size());
+        std::vector<unsigned char> hPhaseFamily0493x6a(params.speciesDefinitions.size());
         for (std::size_t s = 0; s < params.speciesDefinitions.size(); ++s) {
             hSpeciesTypes0491c[s] = params.speciesDefinitions[s].type;
             hQ6Strength0491c[s] = params.speciesDefinitions[s].q6StrengthDeclared;
             hReferenceCellMass0493w5[s] =
                 params.speciesDefinitions[s].referenceCellMassDeclared;
+            hPhaseFamily0493x6a[s] = static_cast<unsigned char>(
+                params.speciesDefinitions[s].phaseFamily);
         }
         diag.speciesQ6MetadataH2DBytes =
             hSpeciesTypes0491c.size() * sizeof(std::uint32_t) +
             hQ6Strength0491c.size() * sizeof(double) +
-            hReferenceCellMass0493w5.size() * sizeof(double);
+            hReferenceCellMass0493w5.size() * sizeof(double) +
+            hPhaseFamily0493x6a.size() * sizeof(unsigned char);
         check_cuda_0400(cudaMemcpy(species0491c.speciesTypes, hSpeciesTypes0491c.data(),
                                    hSpeciesTypes0491c.size() * sizeof(std::uint32_t),
                                    cudaMemcpyHostToDevice),
@@ -3381,6 +6774,11 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
                                    hReferenceCellMass0493w5.size() * sizeof(double),
                                    cudaMemcpyHostToDevice),
                         "species q6 reference cell mass metadata upload");
+        check_cuda_0400(cudaMemcpy(species0491c.phaseFamily,
+                                   hPhaseFamily0493x6a.data(),
+                                   hPhaseFamily0493x6a.size() * sizeof(unsigned char),
+                                   cudaMemcpyHostToDevice),
+                        "0493x6a species phase-family metadata upload");
         const int denseSpecies0491c =
             grid.numCells * static_cast<int>(params.speciesDefinitions.size());
         const int speciesResetBlocks0491c =
@@ -3424,15 +6822,19 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
             particles, cells, species0491c, ws, params, grid, step, time,
             nParticles, threads, cellBlocks, particleBlocks,
             scalarShared, pairShared, tripleShared, periodicX, periodicY,
-            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo0409, diag);
+            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo0409,
+            speciesQ6FreeSurfaceMasked0493x5a, fuseForceKick0493x4b, diag);
         if (!ok0493w5) {
             return diag;
         }
         cuda_shared_particle_state_0251_mark_fresh(
-            "cuda_q6_resident_0400_independent_masked_0493w5");
+            speciesQ6FreeSurfaceMasked0493x5a
+                ? "cuda_q6_resident_0400_free_surface_masked_0493x5a"
+                : "cuda_q6_resident_0400_independent_masked_0493w5");
         diag.applied = true;
         diag.handled = true;
-        diag.reason = "ok";
+        diag.reason = speciesQ6FreeSurfaceMasked0493x5a
+            ? "ok_free_surface_masked_0493x5a" : "ok";
         diag.totalSeconds = seconds_since_0400(tTotal);
         append_species_q6_resident_audit_0491e(
             params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);
