@@ -38,6 +38,10 @@ struct CudaDarcyBrinkman0343Diagnostics {
     int speciesQ6Enable = 0;
     int q6ResidentInputFresh = 0;
     int particleUploadSkipped = 0;
+    // 0493x7g: true when Darcy is the deterministic pre-transport source
+    // immediately upstream of the Q6-g-f projection.  This is an audit bit,
+    // not a new runtime control.
+    int q6GfPrestream = 0;
     std::string csvPath;
 };
 
@@ -48,7 +52,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     const CellGrid& grid,
     const FluidDomainBounds& domain,
     std::uint64_t step,
-    double time);
+    double time,
+    bool q6GfPrestream0493x7g = false);
 
 bool cuda_darcy_brinkman_0343_device_chi_field(
     const SimulationParams& params,
@@ -57,9 +62,10 @@ bool cuda_darcy_brinkman_0343_device_chi_field(
     int* ny);
 #else
 inline CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
-    ParticleState&, const SimulationParams& params, const CellGrid&, const FluidDomainBounds&, std::uint64_t, double) {
+    ParticleState&, const SimulationParams& params, const CellGrid&, const FluidDomainBounds&, std::uint64_t, double, bool q6GfPrestream0493x7g = false) {
     CudaDarcyBrinkman0343Diagnostics d{};
     d.requested = params.darcyBrinkmanEnable;
+    d.q6GfPrestream = q6GfPrestream0493x7g ? 1 : 0;
     return d;
 }
 

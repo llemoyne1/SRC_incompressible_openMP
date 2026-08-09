@@ -1216,6 +1216,24 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const bool q6GfPrestream0493x7f =
         params.q6ForceProjectionMode == "prestream_single_fused" &&
         params.speciesQ6Enable && params.speciesQ6Mode == "free_surface_masked";
+    // 0493x7g: the qualified Darcy/Brinkman source is part of the tentative
+    // transport velocity.  Apply it on the resident particle state before Q6-g-f
+    // so its cell-mean/compressive component is seen by the same projection as
+    // body force.  Mean+outward-bath variants remain resident and are projected
+    // at the cell-mean level; chi collision VP stays in the later SRC collision.
+    // The legacy/non-Q6-g-f ordering is preserved below.
+    const bool q6GfDarcyPrestream0493x7g =
+        q6GfPrestream0493x7f && params.darcyBrinkmanEnable;
+    if (q6GfDarcyPrestream0493x7g) {
+        const FluidDomainBounds darcyPrestreamDomain0493x7g =
+            make_fluid_domain_bounds(params, time);
+        result.darcy = try_apply_cuda_darcy_brinkman_0343(
+            state, params, grid, darcyPrestreamDomain0493x7g, step, time, true);
+        if (!result.darcy.handled || !result.darcy.applied) {
+            throw std::runtime_error(
+                "0493x7g Q6-g-f prestream Darcy/chi was requested but not handled");
+        }
+    }
     const bool q6ForcePrestreamFused0493x4b =
         params.q6ForceProjectionMode == "prestream_single_fused" &&
         (forceFieldActive0493x3 || q6GfPrestream0493x7f);
@@ -1681,12 +1699,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
     }
 
-    // 0343/topo: pure Brinkman/Darcy penalization for SRC classic CUDA-VIZ.
-    // It is deliberately placed after thermostat/mean-flow correction and before
-    // any resampling/Q6 future continuation.  The kernel applies a collective
-    // cell-mean velocity kick, leaving thermal fluctuations unchanged.
-    if (params.darcyBrinkmanEnable) {
-        result.darcy = try_apply_cuda_darcy_brinkman_0343(state, params, grid, result.domain, step, time);
+    // 0343/topo legacy ordering: retain the historical post-collision Darcy
+    // stage for every path except Q6-g-f.  In 0493x7g Q6-g-f has already applied
+    // Darcy before its pre-transport projection; applying it again
+    // here would double the source and recreate divergence after projection.
+    if (params.darcyBrinkmanEnable && !q6GfDarcyPrestream0493x7g) {
+        result.darcy = try_apply_cuda_darcy_brinkman_0343(
+            state, params, grid, result.domain, step, time);
     }
 
     // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally

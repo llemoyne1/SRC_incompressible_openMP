@@ -631,13 +631,13 @@ void append_darcy_csv_0343(const SimulationParams& params,
     if (!out) return;
     out << std::setprecision(17);
     if (writeHeader) {
-        out << "step,time,particles,activeFluid,numCells,mass,fluidVolumeFraction,meanChi,meanAlpha,darcyPower,darcyPowerPerMass,meanSpeedRms,solidLeakRms,alphaMin,alphaMax,q,chiMode,speciesQ6Enable,q6ResidentInputFresh,particleUploadSkipped\n";
+        out << "step,time,particles,activeFluid,numCells,mass,fluidVolumeFraction,meanChi,meanAlpha,darcyPower,darcyPowerPerMass,meanSpeedRms,solidLeakRms,alphaMin,alphaMax,q,chiMode,speciesQ6Enable,q6ResidentInputFresh,particleUploadSkipped,q6GfPrestream\n";
     }
     out << step << ',' << time << ',' << d.particles << ',' << d.activeFluid << ',' << d.numCells << ','
         << d.mass << ',' << d.fluidVolumeFraction << ',' << d.meanChi << ',' << d.meanAlpha << ','
         << d.darcyPower << ',' << d.darcyPowerPerMass << ',' << d.meanSpeedRms << ',' << d.solidLeakRms << ','
         << params.darcyAlphaMin << ',' << params.darcyAlphaMax << ',' << params.darcyQ << ',' << params.darcyChiMode << ','
-        << d.speciesQ6Enable << ',' << d.q6ResidentInputFresh << ',' << d.particleUploadSkipped << '\n';
+        << d.speciesQ6Enable << ',' << d.q6ResidentInputFresh << ',' << d.particleUploadSkipped << ',' << d.q6GfPrestream << '\n';
 }
 
 } // namespace
@@ -673,8 +673,10 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     const CellGrid&,
     const FluidDomainBounds&,
     std::uint64_t step,
-    double time) {
+    double time,
+    bool q6GfPrestream0493x7g) {
     CudaDarcyBrinkman0343Diagnostics d{};
+    d.q6GfPrestream = q6GfPrestream0493x7g ? 1 : 0;
     d.requested = params.darcyBrinkmanEnable;
     if (!params.darcyBrinkmanEnable) return d;
     d.supported = true;

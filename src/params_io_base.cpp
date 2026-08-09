@@ -1455,6 +1455,34 @@ void validate_simulation_params(const SimulationParams& p) {
             channelWall0493x7f || closedStaticBox ||
             openFullface0493x7f || openSegmented0493x7f;
 
+        // 0493x7g: Darcy/chi is admitted on Q6-g-f through the established
+        // Brinkman mean family, including the production mean+outward-bath
+        // variants.  Pure bath variants without the mean Brinkman relaxation
+        // remain outside this first qualification.
+        // Likewise, initial chi deactivation would turn the fictitious-domain
+        // obstacle into a particle-support hole that free_surface_masked could
+        // misinterpret as a liquid/gas interface, so it remains forbidden here.
+        std::string darcyMode0493x7g = p.darcyBrinkmanForcingMode;
+        std::replace(darcyMode0493x7g.begin(), darcyMode0493x7g.end(), '-', '_');
+        const bool q6GfDarcyRequested0493x7g =
+            freeSurfaceMasked0493x5a && p.darcyBrinkmanEnable;
+        const bool q6GfDarcyPrestreamMode0493x7g =
+            q6GfDarcyRequested0493x7g &&
+            (darcyMode0493x7g == "mean" ||
+             darcyMode0493x7g == "classic" ||
+             darcyMode0493x7g == "cell_mean" ||
+             darcyMode0493x7g == "mean_outward_bath" ||
+             darcyMode0493x7g == "mean_oriented_bath" ||
+             darcyMode0493x7g == "brinkman_outward_bath");
+        if (q6GfDarcyRequested0493x7g && !q6GfDarcyPrestreamMode0493x7g) {
+            throw std::runtime_error(
+                "0493x7g Q6-g-f Darcy supports mean/classic/cell_mean and mean_outward_bath/mean_oriented_bath/brinkman_outward_bath; pure bath modes remain unqualified");
+        }
+        if (q6GfDarcyPrestreamMode0493x7g && !(p.darcyInitialDeactivateBelowChi < 0.0)) {
+            throw std::runtime_error(
+                "0493x7g Q6-g-f Darcy requires darcyInitialDeactivateBelowChi<0 so chi remains a Brinkman fictitious-domain field rather than a particle-support hole");
+        }
+
         if (!q6OrProjectionRequested || p.projectionBackend != "cuda") {
             throw std::runtime_error(
                 "non-legacy q6ForceProjectionMode requires active CUDA Q6 projection");
@@ -1490,11 +1518,12 @@ void validate_simulation_params(const SimulationParams& p) {
                     "free_surface_masked 0493x5a requires exactly one species with q6StrengthDeclared>0");
             }
         }
-        // 0493x6f-r1 / 0493x7f: do not broaden resampling as a side effect of
-        // the boundary-condition patch.  The previously qualified resampling
-        // scope remains the static closed-box free_surface_masked + fused path.
-        // Darcy/chi, immersed-solid projection, moving domains and the legacy
-        // closedCapacityResponse/closedCapacityVirial coupling remain separate.
+        // 0493x6f-r1 / 0493x7f / 0493x7g: do not broaden resampling as a side
+        // effect of the boundary/Darcy qualification.  The previously qualified
+        // resampling scope remains the static closed-box free_surface_masked +
+        // fused path.  Qualified prestream Darcy/chi is now admitted separately;
+        // immersed-solid projection, moving domains and legacy closed-capacity
+        // coupling remain excluded.
         const bool allowFreeSurfaceResampling0493x6fr1 =
             freeSurfaceMasked0493x5a && closedStaticBox &&
             p.q6ForceProjectionMode == "prestream_single_fused";
@@ -1504,11 +1533,11 @@ void validate_simulation_params(const SimulationParams& p) {
         }
         if ((p.resamplingEnable && !allowFreeSurfaceResampling0493x6fr1) ||
             p.closedCapacityResponseEnable || p.closedCapacityVirialKickEnable ||
-            p.darcyBrinkmanEnable || p.immersedSolidEnable ||
-            p.projectionImmersedSolidMaskEnable ||
+            (p.darcyBrinkmanEnable && !q6GfDarcyPrestreamMode0493x7g) ||
+            p.immersedSolidEnable || p.projectionImmersedSolidMaskEnable ||
             (p.openBoundarySegmentsEnable && !freeSurfaceMasked0493x5a)) {
             throw std::runtime_error(
-                "0493x7f non-legacy Q6 excludes legacy closed-capacity coupling, Darcy/chi, immersed solids, unsupported segmented IO, and resampling outside the previously qualified closed-box Q6-g-f scope");
+                "0493x7g non-legacy Q6 excludes legacy closed-capacity coupling, unqualified Darcy forcing modes, immersed solids, unsupported segmented IO, and resampling outside the previously qualified closed-box Q6-g-f scope");
         }
         if (std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0 ||
             std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0) {
