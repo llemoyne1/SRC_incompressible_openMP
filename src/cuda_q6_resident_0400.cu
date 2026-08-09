@@ -7613,8 +7613,12 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
             diag.reason = "fused force kick requires q6ForceProjectionMode=prestream_single_fused";
             return diag;
         }
-        if (!tgForceActive0493x4b && !uniformForceActive0493x4b) {
-            diag.reason = "fused force kick requested with zero force";
+        const bool zeroForceQ6Gf0493x7f =
+            params.speciesQ6Enable &&
+            params.speciesQ6Mode == "free_surface_masked";
+        if (!tgForceActive0493x4b && !uniformForceActive0493x4b &&
+            !zeroForceQ6Gf0493x7f) {
+            diag.reason = "fused force kick requested with zero force outside Q6-g-f";
             return diag;
         }
         if (params.speciesQ6Enable && params.speciesQ6Mode != "common" &&

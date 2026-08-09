@@ -1208,12 +1208,21 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         (params.taylorGreenForcingEnable && params.taylorGreenForcingAmplitude > 0.0);
     const bool q6ForcePrestreamDouble0493x3 =
         params.q6ForceProjectionMode == "prestream" && forceFieldActive0493x3;
+    // 0493x7f: Q6-g-f is a pre-transport constraint, not merely a response to a
+    // non-zero body force.  In free_surface_masked mode the same fused resident
+    // path must therefore run before streaming even for zero body acceleration
+    // (for example inlet/outlet-driven flows).  The fused force arithmetic is
+    // then an exact zero-force no-op while x6f/x6g/x7d/B1 remain active.
+    const bool q6GfPrestream0493x7f =
+        params.q6ForceProjectionMode == "prestream_single_fused" &&
+        params.speciesQ6Enable && params.speciesQ6Mode == "free_surface_masked";
     const bool q6ForcePrestreamFused0493x4b =
-        params.q6ForceProjectionMode == "prestream_single_fused" && forceFieldActive0493x3;
+        params.q6ForceProjectionMode == "prestream_single_fused" &&
+        (forceFieldActive0493x3 || q6GfPrestream0493x7f);
     const bool q6ForcePrestreamSingle0493x4a =
-        (params.q6ForceProjectionMode == "prestream_single" ||
-         params.q6ForceProjectionMode == "prestream_single_fused") &&
-        forceFieldActive0493x3;
+        (params.q6ForceProjectionMode == "prestream_single" && forceFieldActive0493x3) ||
+        (params.q6ForceProjectionMode == "prestream_single_fused" &&
+         (forceFieldActive0493x3 || q6GfPrestream0493x7f));
     const bool q6ForcePrestream0493x3 =
         q6ForcePrestreamDouble0493x3 || q6ForcePrestreamSingle0493x4a;
     bool prestreamQ6Handled0493x4a = false;

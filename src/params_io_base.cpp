@@ -1391,22 +1391,85 @@ void validate_simulation_params(const SimulationParams& p) {
     }
     if (p.q6ForceProjectionMode != "legacy") {
         const bool periodicBox = is_x_periodic(p) && is_y_periodic(p);
-        const auto staticWall = [](const std::string& mode) {
+        const auto wallLike = [](const std::string& mode) {
+            return mode == "solid" || mode == "specular" || mode == "bounceback";
+        };
+        const auto staticClosedWall = [](const std::string& mode) {
+            // Keep the 0493x1 closed-box contract: bounceback corners remain
+            // outside the qualified resident four-wall subset.
             return mode == "solid" || mode == "specular";
         };
+        const bool channelWall0493x7f =
+            is_x_periodic(p) && !is_y_periodic(p) &&
+            wallLike(p.bcBottom) && wallLike(p.bcTop) &&
+            !p.openBoundarySegmentsEnable && p.openBoundarySegmentCount == 0;
         const bool closedStaticBox = !is_x_periodic(p) && !is_y_periodic(p) &&
-            staticWall(p.bcLeft) && staticWall(p.bcRight) &&
-            staticWall(p.bcBottom) && staticWall(p.bcTop);
+            staticClosedWall(p.bcLeft) && staticClosedWall(p.bcRight) &&
+            staticClosedWall(p.bcBottom) && staticClosedWall(p.bcTop) &&
+            !p.openBoundarySegmentsEnable && p.openBoundarySegmentCount == 0;
+
+        const bool leftInlet0493x7f = is_inlet_boundary_mode(p.bcLeft);
+        const bool rightInlet0493x7f = is_inlet_boundary_mode(p.bcRight);
+        const bool bottomInlet0493x7f = is_inlet_boundary_mode(p.bcBottom);
+        const bool topInlet0493x7f = is_inlet_boundary_mode(p.bcTop);
+        const bool leftOutlet0493x7f = is_outlet_boundary_mode(p.bcLeft);
+        const bool rightOutlet0493x7f = is_outlet_boundary_mode(p.bcRight);
+        const bool bottomOutlet0493x7f = is_outlet_boundary_mode(p.bcBottom);
+        const bool topOutlet0493x7f = is_outlet_boundary_mode(p.bcTop);
+        const bool fullfaceXPair0493x7f =
+            ((leftInlet0493x7f && rightOutlet0493x7f) ||
+             (leftOutlet0493x7f && rightInlet0493x7f)) &&
+            wallLike(p.bcBottom) && wallLike(p.bcTop);
+        const bool fullfaceYPair0493x7f =
+            ((bottomInlet0493x7f && topOutlet0493x7f) ||
+             (bottomOutlet0493x7f && topInlet0493x7f)) &&
+            wallLike(p.bcLeft) && wallLike(p.bcRight);
+        const bool openFullface0493x7f =
+            (fullfaceXPair0493x7f || fullfaceYPair0493x7f) &&
+            !p.openBoundarySegmentsEnable && p.openBoundarySegmentCount == 0 &&
+            hard_inlet_reservoir_requested(p) &&
+            p.inletVelocitySpatialProfile == "uniform" &&
+            (p.openBoundaryOutletMode == "balanced_flux" ||
+             p.openBoundaryOutletMode == "balanced");
+
+        std::string segmentedOutletMode0493x7f = p.openBoundaryOutletMode;
+        std::replace(segmentedOutletMode0493x7f.begin(),
+                     segmentedOutletMode0493x7f.end(), '-', '_');
+        const bool segmentedOutletModeSupported0493x7f =
+            segmentedOutletMode0493x7f == "neumann" ||
+            segmentedOutletMode0493x7f == "balanced_flux" ||
+            segmentedOutletMode0493x7f == "balanced" ||
+            segmentedOutletMode0493x7f == "hybrid";
+        const bool openSegmented0493x7f =
+            p.openBoundarySegmentsEnable && p.openBoundarySegmentCount > 0 &&
+            wallLike(p.bcLeft) && wallLike(p.bcRight) &&
+            wallLike(p.bcBottom) && wallLike(p.bcTop) &&
+            hard_inlet_reservoir_requested(p) &&
+            p.inletVelocitySpatialProfile == "uniform" &&
+            segmentedOutletModeSupported0493x7f;
+
+        const bool freeSurfaceMasked0493x5a =
+            p.speciesQ6Enable && p.speciesQ6Mode == "free_surface_masked";
+        const bool q6GfStaticBoundaryFamily0493x7f =
+            (periodicBox && !p.openBoundarySegmentsEnable) ||
+            channelWall0493x7f || closedStaticBox ||
+            openFullface0493x7f || openSegmented0493x7f;
+
         if (!q6OrProjectionRequested || p.projectionBackend != "cuda") {
             throw std::runtime_error(
                 "non-legacy q6ForceProjectionMode requires active CUDA Q6 projection");
         }
-        if (!periodicBox && !closedStaticBox) {
+        // Preserve the original narrow topology contract for the historical
+        // common-Q6 force-ordering experiments.  0493x7f broadens only the
+        // qualified Q6-g-f free-surface path, and only to static boundary
+        // families already represented by the resident Q6 backend.
+        if ((!freeSurfaceMasked0493x5a && !periodicBox && !closedStaticBox) ||
+            (freeSurfaceMasked0493x5a && !q6GfStaticBoundaryFamily0493x7f)) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode is restricted to periodic boxes or static closed boxes");
+                freeSurfaceMasked0493x5a
+                    ? "0493x7f Q6-g-f free_surface_masked requires a supported static resident boundary family (periodic, wall channel, closed box, full-face IO or segmented IO)"
+                    : "non-legacy q6ForceProjectionMode is restricted to periodic boxes or static closed boxes");
         }
-        const bool freeSurfaceMasked0493x5a =
-            p.speciesQ6Enable && p.speciesQ6Mode == "free_surface_masked";
         if (p.speciesQ6Enable && p.speciesQ6Mode != "common" &&
             !freeSurfaceMasked0493x5a) {
             throw std::runtime_error(
@@ -1418,10 +1481,6 @@ void validate_simulation_params(const SimulationParams& p) {
                 throw std::runtime_error(
                     "free_surface_masked requires q6ForceProjectionMode=prestream_single_fused");
             }
-            if (!closedStaticBox) {
-                throw std::runtime_error(
-                    "free_surface_masked 0493x5a is restricted to a static closed box");
-            }
             int projectedSpecies0493x5a = 0;
             for (const SpeciesDefinition& d : p.speciesDefinitions) {
                 if (d.q6StrengthDeclared > 0.0) ++projectedSpecies0493x5a;
@@ -1431,28 +1490,30 @@ void validate_simulation_params(const SimulationParams& p) {
                     "free_surface_masked 0493x5a requires exactly one species with q6StrengthDeclared>0");
             }
         }
-        // 0493x6f-r1: allow resampling only for the already-restricted
-        // free_surface_masked + prestream_single_fused static closed-box path.
-        // Keep all other historical non-legacy exclusions unchanged.
+        // 0493x6f-r1 / 0493x7f: do not broaden resampling as a side effect of
+        // the boundary-condition patch.  The previously qualified resampling
+        // scope remains the static closed-box free_surface_masked + fused path.
+        // Darcy/chi, immersed-solid projection, moving domains and the legacy
+        // closedCapacityResponse/closedCapacityVirial coupling remain separate.
         const bool allowFreeSurfaceResampling0493x6fr1 =
-            freeSurfaceMasked0493x5a &&
+            freeSurfaceMasked0493x5a && closedStaticBox &&
             p.q6ForceProjectionMode == "prestream_single_fused";
         if (p.virialDensityKickEnable && !allowFreeSurfaceResampling0493x6fr1) {
             throw std::runtime_error(
                 "0493x7b virial density kick currently requires free_surface_masked + prestream_single_fused");
         }
         if ((p.resamplingEnable && !allowFreeSurfaceResampling0493x6fr1) ||
-            p.closedCapacityResponseEnable ||
-            p.closedCapacityVirialKickEnable || p.darcyBrinkmanEnable ||
-            p.immersedSolidEnable || p.projectionImmersedSolidMaskEnable ||
-            p.openBoundarySegmentsEnable) {
+            p.closedCapacityResponseEnable || p.closedCapacityVirialKickEnable ||
+            p.darcyBrinkmanEnable || p.immersedSolidEnable ||
+            p.projectionImmersedSolidMaskEnable ||
+            (p.openBoundarySegmentsEnable && !freeSurfaceMasked0493x5a)) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode test excludes closed-capacity virial, Darcy, immersed solids, open boundaries, and resampling outside free_surface_masked prestream_single_fused");
+                "0493x7f non-legacy Q6 excludes legacy closed-capacity coupling, Darcy/chi, immersed solids, unsupported segmented IO, and resampling outside the previously qualified closed-box Q6-g-f scope");
         }
         if (std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0 ||
             std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode requires a static fluid domain");
+                "0493x7f Q6-g-f requires a static full fluid domain; piston and moving/truncated domains remain unsupported");
         }
     }
     if (p.taylorGreenForcingEnable) {

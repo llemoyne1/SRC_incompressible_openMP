@@ -866,9 +866,14 @@ bool cuda_persistent_collision_subset_supported(const SimulationParams& params,
     }
 
     if (cuda_wall_simple_collision_0253_enabled()) {
+        // 0493x7f-fix2: the wall-simple device collision already carries
+        // independent per-face wall-coupling flags.  A periodic-x bounded-y
+        // channel therefore only requires supported reflection modes on its
+        // two physical y faces; a specular face with wallVpEnable=false is a
+        // valid reflection-only face and need not manufacture virtual particles.
         const bool channel = is_x_periodic(params) && !is_y_periodic(params) &&
-            face_has_wall_coupling(params.bcBottom, params) &&
-            face_has_wall_coupling(params.bcTop, params);
+            wall_reflection_mode_supported_0493x1(params.bcBottom) &&
+            wall_reflection_mode_supported_0493x1(params.bcTop);
         const bool closedBox =
             persistent_env_flag_enabled("MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1", false) &&
             !is_x_periodic(params) && !is_y_periodic(params) &&
