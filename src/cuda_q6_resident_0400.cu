@@ -133,6 +133,26 @@ bool cuda_q6_phase_gas_pressure_0493x6g_requested() {
     return truthy_0400(std::getenv("MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G"));
 }
 
+// 0493x6h-B0: diagnostic-only localization of the divergence that remains
+// after the face-projected Q6 correction has been applied to resident
+// particles and redeposited.  The extra pass is summary-cadence only and is
+// completely absent unless explicitly requested.
+bool cuda_q6_postapply_region_diagnostics_0493x6h_b0_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0"));
+}
+
+// 0493x6h-B1: reconstruct the free-surface Q6 correction as an affine
+// face-compatible field at each resident particle instead of applying one
+// cell-constant increment.  B1 is intentionally gated and initially limited
+// to the single projected-species, fused force+Q6 free-surface path so the
+// existing east/north face buffers can be consumed directly without adding
+// persistent per-species storage or another particle pass.
+bool cuda_q6_face_to_particle_rt0_0493x6h_b1_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1"));
+}
+
 enum class PhaseGasPressureMode0493x6g : int {
     Eos = 0,
     Constant = 1
@@ -336,6 +356,44 @@ void append_species_q6_resident_audit_0491e(
         << diag.totalSeconds << '\n';
 }
 
+constexpr int kQ6PostApplyRegionCount0493x6hB0 = 6;
+
+enum Q6PostApplyRegion0493x6hB0 : int {
+    Q6PostApplyBulk0493x6hB0 = 0,
+    Q6PostApplyInterface0493x6hB0 = 1,
+    Q6PostApplyWall0493x6hB0 = 2,
+    Q6PostApplyWallInterface0493x6hB0 = 3,
+    Q6PostApplyCorner0493x6hB0 = 4,
+    Q6PostApplyCornerInterface0493x6hB0 = 5,
+};
+
+struct Q6PostApplyRegionAccumulator0493x6hB0 {
+    unsigned long long cells[kQ6PostApplyRegionCount0493x6hB0]{};
+    double divSq[kQ6PostApplyRegionCount0493x6hB0]{};
+    // Positive IEEE-754 doubles preserve ordering in their bit pattern, so a
+    // native atomicMax on these bits gives an inexpensive per-region |div|max.
+    unsigned long long divMaxAbsBits[kQ6PostApplyRegionCount0493x6hB0]{};
+};
+
+const char* q6_postapply_region_name_0493x6h_b0(int region) {
+    switch (region) {
+        case Q6PostApplyBulk0493x6hB0: return "bulk";
+        case Q6PostApplyInterface0493x6hB0: return "interface";
+        case Q6PostApplyWall0493x6hB0: return "wall";
+        case Q6PostApplyWallInterface0493x6hB0: return "wall_interface";
+        case Q6PostApplyCorner0493x6hB0: return "corner";
+        case Q6PostApplyCornerInterface0493x6hB0: return "corner_interface";
+        default: return "unknown";
+    }
+}
+
+double q6_positive_double_from_bits_0493x6h_b0(unsigned long long bits) {
+    double value = 0.0;
+    static_assert(sizeof(value) == sizeof(bits), "unexpected double size");
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 struct IndependentMaskedSpeciesAudit0493w5 {
     int speciesIndex = -1;
     std::uint32_t type = 0u;
@@ -405,6 +463,59 @@ void append_independent_masked_species_audit_0493w5(
             << r.divAfterAppliedCellVelocityMaxAbs << ','
             << r.correctionRms << ',' << r.correctionMaxAbs << ','
             << r.momentumX << ',' << r.momentumY << '\n';
+    }
+}
+
+void append_q6_postapply_region_audit_0493x6h_b0(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const IndependentMaskedSpeciesAudit0493w5& audit,
+    const Q6PostApplyRegionAccumulator0493x6hB0& accum,
+    bool interfaceGeometryAvailable,
+    double diagnosticSeconds) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_q6_postapply_regions_0493x6h_b0.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x6h-B0 failed to open post-apply region audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,speciesIndex,type,regionCode,region,regionCells,"
+               "carrierCells,q6ReportedActiveCells,divSq,divRms,divMaxAbs,"
+               "divSqFraction,q6AppliedRms,q6AppliedRmsReconstructed,"
+               "interfaceGeometryAvailable,diagnosticSeconds\n";
+    }
+    unsigned long long carrierCells = 0ull;
+    double totalDivSq = 0.0;
+    for (int r = 0; r < kQ6PostApplyRegionCount0493x6hB0; ++r) {
+        carrierCells += accum.cells[r];
+        totalDivSq += accum.divSq[r];
+    }
+    const double reportedDenom = static_cast<double>(
+        std::max<std::uint64_t>(1u, audit.activeCells));
+    const double reconstructed = std::sqrt(std::max(0.0, totalDivSq) / reportedDenom);
+    for (int r = 0; r < kQ6PostApplyRegionCount0493x6hB0; ++r) {
+        const double regionRms = accum.cells[r] > 0ull
+            ? std::sqrt(std::max(0.0, accum.divSq[r]) /
+                        static_cast<double>(accum.cells[r]))
+            : 0.0;
+        const double fraction = totalDivSq > 0.0 ? accum.divSq[r] / totalDivSq : 0.0;
+        out << std::setprecision(17)
+            << step << ',' << time << ',' << audit.speciesIndex << ',' << audit.type << ','
+            << r << ',' << q6_postapply_region_name_0493x6h_b0(r) << ','
+            << accum.cells[r] << ',' << carrierCells << ',' << audit.activeCells << ','
+            << accum.divSq[r] << ',' << regionRms << ','
+            << q6_positive_double_from_bits_0493x6h_b0(accum.divMaxAbsBits[r]) << ','
+            << fraction << ',' << audit.divAfterAppliedCellVelocityRms << ','
+            << reconstructed << ',' << (interfaceGeometryAvailable ? 1 : 0) << ','
+            << diagnosticSeconds << '\n';
     }
 }
 
@@ -1084,6 +1195,10 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> phaseFacePhiGammaY0493x6g;
     DeviceBuffer0400<PhaseInterfaceStencilAccumulator0493x6f>
         phaseInterfaceStencilAccum0493x6f;
+    // 0493x6h-B0 stays lazily allocated: production paths pay neither an
+    // allocation nor a kernel launch unless the diagnostic gate is enabled.
+    DeviceBuffer0400<Q6PostApplyRegionAccumulator0493x6hB0>
+        postApplyRegionAccum0493x6hB0;
     bool phaseInterfaceStencilValid0493x6f = false;
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
@@ -1410,6 +1525,188 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
     }
     // The complement of a segmented face remains an impermeable wall.
     return 0.0;
+}
+
+// 0493x6h-B0 is defined before the independent-masked helper bodies below.
+// Keep declarations here so the diagnostic kernel reuses exactly the same
+// cell/face velocity semantics as the production Q6 path without duplicating
+// any logic.
+__device__ double q6_species_cell_velocity_component_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int cell,
+    int component);
+
+__device__ double q6_species_face_velocity_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    const unsigned char* mask,
+    int speciesIndex,
+    int cellA,
+    int cellB,
+    int component);
+
+__device__ bool q6_segmented_face_is_open_for_cell_0493x6h_b0(
+    const Q6SegmentedIo0409& cfg,
+    int face,
+    int ix,
+    int iy,
+    int nx,
+    int ny) {
+    if (!cfg.enabled) return false;
+    const double tangent = (face == 0 || face == 1)
+        ? ((static_cast<double>(iy) + 0.5) /
+           static_cast<double>(ny > 0 ? ny : 1))
+        : ((static_cast<double>(ix) + 0.5) /
+           static_cast<double>(nx > 0 ? nx : 1));
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] == face && tangent >= cfg.sMin[k] &&
+            tangent <= cfg.sMax[k]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+__global__ void q6_postapply_region_stats_0493x6h_b0(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const unsigned char* mask,
+    const double* phaseAlpha,
+    int interfaceGeometryAvailable,
+    Q6PostApplyRegionAccumulator0493x6hB0* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double xLowFlux,
+    double yLowFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    std::uint32_t speciesType,
+    int exclusiveProjectedSpecies,
+    int fullDomain,
+    int wallLikeLeft,
+    int wallLikeRight,
+    int wallLikeBottom,
+    int wallLikeTop) {
+    __shared__ unsigned long long shCells[kQ6PostApplyRegionCount0493x6hB0];
+    __shared__ double shDivSq[kQ6PostApplyRegionCount0493x6hB0];
+    __shared__ unsigned long long shMaxBits[kQ6PostApplyRegionCount0493x6hB0];
+    const int tid = threadIdx.x;
+    if (tid < kQ6PostApplyRegionCount0493x6hB0) {
+        shCells[tid] = 0ull;
+        shDivSq[tid] = 0.0;
+        shMaxBits[tid] = 0ull;
+    }
+    __syncthreads();
+
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] == 0u) continue;
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+
+        const double localXLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+        const double localYLowFlux = q6_species_boundary_flux_for_cell_0493w7(
+            segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
+            speciesType, c, exclusiveProjectedSpecies);
+
+        const double uxC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 0);
+        const double uyC = q6_species_cell_velocity_component_0493w5(
+            species, speciesIndex, c, 1);
+        const double fxEastInterior = fullDomain
+            ? uxC
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, east, 0);
+        const double fxWestInterior = fullDomain
+            ? q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, west, 0)
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, west, c, 0);
+        const double fyNorthInterior = fullDomain
+            ? uyC
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, c, north, 1);
+        const double fySouthInterior = fullDomain
+            ? q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, south, 1)
+            : q6_species_face_velocity_0493w5(
+                species, mask, speciesIndex, south, c, 1);
+        const double fxWest = hasWest ? fxWestInterior : localXLowFlux;
+        const double fxEastBefore = hasEast ? fxEastInterior : uxC;
+        const double fySouth = hasSouth ? fySouthInterior : localYLowFlux;
+        const double fyNorthBefore = hasNorth ? fyNorthInterior : uyC;
+        const double div = (fxEastBefore - fxWest) / dx +
+                           (fyNorthBefore - fySouth) / dy;
+
+        bool interfaceAdjacent = false;
+        if (interfaceGeometryAvailable && phaseAlpha != nullptr) {
+            const bool highC = phaseAlpha[c] >= 0.5;
+            if (hasEast && ((phaseAlpha[east] >= 0.5) != highC)) interfaceAdjacent = true;
+            if (hasWest && ((phaseAlpha[west] >= 0.5) != highC)) interfaceAdjacent = true;
+            if (hasNorth && ((phaseAlpha[north] >= 0.5) != highC)) interfaceAdjacent = true;
+            if (hasSouth && ((phaseAlpha[south] >= 0.5) != highC)) interfaceAdjacent = true;
+        }
+
+        int wallTouches = 0;
+        if (!periodicX && ix == 0 && wallLikeLeft &&
+            !q6_segmented_face_is_open_for_cell_0493x6h_b0(
+                segmentedIo, 0, ix, iy, nx, ny)) ++wallTouches;
+        if (!periodicX && ix == nx - 1 && wallLikeRight &&
+            !q6_segmented_face_is_open_for_cell_0493x6h_b0(
+                segmentedIo, 1, ix, iy, nx, ny)) ++wallTouches;
+        if (!periodicY && iy == 0 && wallLikeBottom &&
+            !q6_segmented_face_is_open_for_cell_0493x6h_b0(
+                segmentedIo, 2, ix, iy, nx, ny)) ++wallTouches;
+        if (!periodicY && iy == ny - 1 && wallLikeTop &&
+            !q6_segmented_face_is_open_for_cell_0493x6h_b0(
+                segmentedIo, 3, ix, iy, nx, ny)) ++wallTouches;
+
+        int region = Q6PostApplyBulk0493x6hB0;
+        if (wallTouches >= 2) {
+            region = interfaceAdjacent ? Q6PostApplyCornerInterface0493x6hB0
+                                       : Q6PostApplyCorner0493x6hB0;
+        } else if (wallTouches == 1) {
+            region = interfaceAdjacent ? Q6PostApplyWallInterface0493x6hB0
+                                       : Q6PostApplyWall0493x6hB0;
+        } else if (interfaceAdjacent) {
+            region = Q6PostApplyInterface0493x6hB0;
+        }
+
+        atomicAdd(&shCells[region], 1ull);
+        atomicAdd(&shDivSq[region], div * div);
+        const unsigned long long bits = static_cast<unsigned long long>(
+            __double_as_longlong(fabs(div)));
+        atomicMax(&shMaxBits[region], bits);
+    }
+    __syncthreads();
+    if (tid < kQ6PostApplyRegionCount0493x6hB0) {
+        atomicAdd(&accum->cells[tid], shCells[tid]);
+        atomic_add_double_0400(&accum->divSq[tid], shDivSq[tid]);
+        atomicMax(&accum->divMaxAbsBits[tid], shMaxBits[tid]);
+    }
 }
 
 __global__ void q6_build_rhs_and_stats_0400(CudaCellWorkspaceDeviceView cells,
@@ -3626,7 +3923,10 @@ __global__ void q6_compute_masked_face_correction_0493w5(
 }
 
 __global__ void q6_compute_masked_cell_correction_stats_0493w5(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
     const unsigned char* mask,
+    const unsigned char* pressureMask,
     const double* faceDUx,
     const double* faceDUy,
     double* cellDUx,
@@ -3637,7 +3937,13 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     int ny,
     int periodicX,
     int periodicY,
-    int fullDomain) {
+    int fullDomain,
+    double strength,
+    double xLowFlux,
+    double yLowFlux,
+    Q6SegmentedIo0409 segmentedIo,
+    std::uint32_t speciesType,
+    int exclusiveProjectedSpecies) {
     extern __shared__ double sh[];
     double* shSq = sh;
     double* shMax = sh + blockDim.x;
@@ -3663,8 +3969,32 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
         const int south = hasSouth
             ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
             : c;
-        const double westCorrection = hasWest ? faceDUx[west] : 0.0;
-        const double southCorrection = hasSouth ? faceDUy[south] : 0.0;
+        // 0493x6h / patch A: on a non-periodic low domain boundary there is
+        // no west/south owner cell from which to fetch an east/north-owned face
+        // correction.  The projected boundary face is nevertheless constrained
+        // to its target by the FV solve.  Reconstruct the missing low-face
+        // increment with the same target-before convention used for high
+        // (east/north) physical faces.  Gate it with the pressure mask, exactly
+        // like q6_compute_masked_face_correction_0493w5 does on high faces, so
+        // carrier-only interface-band cells do not acquire a spurious wall kick.
+        double westCorrection = hasWest ? faceDUx[west] : 0.0;
+        double southCorrection = hasSouth ? faceDUy[south] : 0.0;
+        if (!fullDomain && !hasWest && pressureMask[c] != 0u) {
+            const double target = q6_species_boundary_flux_for_cell_0493w7(
+                segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
+                speciesType, c, exclusiveProjectedSpecies);
+            const double before = q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, c, 0);
+            westCorrection = strength * (target - before);
+        }
+        if (!fullDomain && !hasSouth && pressureMask[c] != 0u) {
+            const double target = q6_species_boundary_flux_for_cell_0493w7(
+                segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
+                speciesType, c, exclusiveProjectedSpecies);
+            const double before = q6_species_cell_velocity_component_0493w5(
+                species, speciesIndex, c, 1);
+            southCorrection = strength * (target - before);
+        }
         const double cx = fullDomain
             ? faceDUx[c]
             : 0.5 * (faceDUx[c] + westCorrection);
@@ -3834,6 +4164,116 @@ __global__ void q6_apply_independent_species_correction_0493w5(
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
         const double m = particles.mass ? particles.mass[i] : 1.0;
+        px += m * dvx;
+        py += m * dvy;
+        ++correctedLocal;
+    }
+    if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
+    shX[tid] = px;
+    shY[tid] = py;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+    }
+}
+
+// 0493x6h-B1: affine RT0/MAC-to-particle reconstruction for the gated
+// free-surface path.  q6_compute_masked_cell_correction_stats_0493w5 stores
+// Cx=(dUw+dUe)/2 and Cy=(dVs+dVn)/2 for non-full-domain cells (Patch A
+// supplies the missing low-wall faces).  Therefore the west/south values need
+// not be loaded: dUw=2*Cx-dUe and dVs=2*Cy-dVn.  The interpolation below is
+// exactly linear between the two face corrections and has the same discrete
+// divergence as the FV correction field used by Q6.
+__global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const unsigned char* mask,
+    const double* cellDUx,
+    const double* cellDUy,
+    const double* faceDUxEast,
+    const double* faceDUyNorth,
+    std::uint32_t projectedType,
+    std::uint64_t nParticles,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    int periodicX,
+    int periodicY,
+    double dt,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY,
+    double* partialPx,
+    double* partialPy,
+    unsigned long long* correctedCounter) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    unsigned long long correctedLocal = 0ull;
+    const double invDx = static_cast<double>(nx) / lx;
+    const double invDy = static_cast<double>(ny) / ly;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        particles.vx[i] += ax * dt;
+        particles.vy[i] += ay * dt;
+
+        if (particles.type == nullptr || particles.type[i] != projectedType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || mask[c] == 0u) continue;
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+        double x = particles.x[i];
+        double y = particles.y[i];
+        if (periodicX) {
+            x -= floor(x / lx) * lx;
+        } else {
+            x = fmin(fmax(x, 0.0), nextafter(lx, 0.0));
+        }
+        if (periodicY) {
+            y -= floor(y / ly) * ly;
+        } else {
+            y = fmin(fmax(y, 0.0), nextafter(ly, 0.0));
+        }
+        const double xi = fmin(fmax(x * invDx - static_cast<double>(ix), 0.0), 1.0);
+        const double eta = fmin(fmax(y * invDy - static_cast<double>(iy), 0.0), 1.0);
+
+        const double cx = cellDUx[c];
+        const double cy = cellDUy[c];
+        const double dUe = faceDUxEast[c];
+        const double dVn = faceDUyNorth[c];
+        // C + (2*s-1)*(Fplus-C) is algebraically identical to linear
+        // interpolation between Fminus=2*C-Fplus and Fplus.
+        const double dvx = cx + (2.0 * xi - 1.0) * (dUe - cx);
+        const double dvy = cy + (2.0 * eta - 1.0) * (dVn - cy);
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        // As in x5a, audit only the pressure correction.  The physical force
+        // momentum is deliberately not folded into the Q6 momentum residual.
         px += m * dvx;
         py += m * dvy;
         ++correctedLocal;
@@ -4433,6 +4873,20 @@ bool apply_independent_masked_species_q6_0493w5(
     const bool phaseGasPressure0493x6g =
         freeSurfaceMode0493x5a &&
         cuda_q6_phase_gas_pressure_0493x6g_requested();
+    const bool postApplyRegionDiagnostics0493x6hB0 =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_postapply_region_diagnostics_0493x6h_b0_requested();
+    const bool faceToParticleRt0Requested0493x6hB1 =
+        cuda_q6_face_to_particle_rt0_0493x6h_b1_requested();
+    if (faceToParticleRt0Requested0493x6hB1 &&
+        (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b)) {
+        diag.reason =
+            "0493x6h-B1 requires free_surface_masked with fused prestream force+Q6";
+        return false;
+    }
+    const bool postApplyRegionAuditThisStep0493x6hB0 =
+        postApplyRegionDiagnostics0493x6hB0 &&
+        (step <= 1 || step % std::max(1, params.summaryEvery) == 0);
     const PhaseGasPressureMode0493x6g phaseGasPressureMode0493x6g =
         phaseGasPressure0493x6g ? phase_gas_pressure_mode_0493x6g()
                                 : PhaseGasPressureMode0493x6g::Eos;
@@ -4477,6 +4931,9 @@ bool apply_independent_masked_species_q6_0493w5(
     const int speciesCount = static_cast<int>(params.speciesDefinitions.size());
     const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
                               static_cast<std::size_t>(speciesCount);
+    if (postApplyRegionAuditThisStep0493x6hB0) {
+        ws.postApplyRegionAccum0493x6hB0.ensure(1u);
+    }
     check_cuda_0400(cudaMemset(ws.speciesMasks0493w6.data(), 0,
                                    dense * sizeof(unsigned char)),
                     "independent masked dense support zero");
@@ -4511,6 +4968,16 @@ bool apply_independent_masked_species_q6_0493w5(
         if (def.q6StrengthDeclared > 0.0) ++projectedSpeciesCount;
     }
     const int exclusiveProjectedSpecies = projectedSpeciesCount == 1 ? 1 : 0;
+    if (faceToParticleRt0Requested0493x6hB1 && !exclusiveProjectedSpecies) {
+        // The current resident workspace reuses r/p as the east/north face
+        // buffers.  Keep B1 allocation-free by enabling it only when one Q6
+        // species owns those buffers.  Multi-projected-species B1 will require
+        // either persistent per-species faces or immediate per-species apply.
+        diag.reason = "0493x6h-B1 currently requires exactly one projected Q6 species";
+        return false;
+    }
+    const bool faceToParticleRt00493x6hB1 =
+        faceToParticleRt0Requested0493x6hB1 && exclusiveProjectedSpecies;
 
     for (int s = 0; s < speciesCount; ++s) {
         IndependentMaskedSpeciesAudit0493w5 audit{};
@@ -6257,10 +6724,12 @@ bool apply_independent_masked_species_q6_0493w5(
         // pressure unknowns themselves.
         q6_compute_masked_cell_correction_stats_0493w5<<<
             cellBlocks, threads, pairShared>>>(
-            ws.speciesMask0493w5.data(), ws.r.data(), ws.p.data(),
-            ws.dux.data(), ws.duy.data(), ws.partial0.data(), ws.partial1.data(),
-            grid.Nx, grid.Ny, periodicX, periodicY,
-            audit.fullDomain ? 1 : 0);
+            species, s, ws.speciesMask0493w5.data(), q6SolveMask0493x6f,
+            ws.r.data(), ws.p.data(), ws.dux.data(), ws.duy.data(),
+            ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny,
+            periodicX, periodicY, audit.fullDomain ? 1 : 0,
+            effectiveStrength, xLowFlux, yLowFlux, segmentedIo, audit.type,
+            exclusiveProjectedSpecies);
         check_cuda_0400(cudaGetLastError(), "independent masked cell correction launch");
         const double correctionSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
         audit.correctionMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
@@ -6343,7 +6812,24 @@ bool apply_independent_masked_species_q6_0493w5(
                         "independent masked corrected counter zero");
         const unsigned char* denseMask = ws.speciesMasks0493w6.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
-        if (freeSurfaceMode0493x5a && fuseForceKick0493x4b) {
+        if (faceToParticleRt00493x6hB1) {
+            // With exactly one projected species, ws.r/ws.p still hold that
+            // solve's east/north face corrections here.  Consume them directly
+            // in the fused resident particle kernel: no dense face copy, no
+            // extra allocation and no additional particle pass.
+            q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1<<<
+                particleBlocks, threads, pairShared>>>(
+                particles, cells, denseMask, denseDUx, denseDUy,
+                ws.r.data(), ws.p.data(), audit.type, nParticles,
+                grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
+                params.dt, params.bodyAccelerationX, params.bodyAccelerationY,
+                tgForceActive0493x5a ? 1 : 0,
+                params.taylorGreenForcingAmplitude,
+                params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
+                ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
+        } else if (freeSurfaceMode0493x5a && fuseForceKick0493x4b) {
             q6_apply_free_surface_force_and_correction_0493x5a<<<
                 particleBlocks, threads, pairShared>>>(
                 particles, cells, denseMask, denseDUx, denseDUy, audit.type,
@@ -6429,6 +6915,43 @@ bool apply_independent_masked_species_q6_0493w5(
         audit.divAfterAppliedCellVelocityRms = std::sqrt(
             divAppliedSq0493w6 /
             static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+
+        if (postApplyRegionAuditThisStep0493x6hB0) {
+            const auto tRegion0493x6hB0 = Clock0400::now();
+            check_cuda_0400(cudaMemset(
+                ws.postApplyRegionAccum0493x6hB0.data(), 0,
+                sizeof(Q6PostApplyRegionAccumulator0493x6hB0)),
+                "0493x6h-B0 post-apply region accumulator zero");
+            const bool interfaceGeometryAvailable0493x6hB0 =
+                phaseGeometryResident0493x6c &&
+                ws.phaseGeometryResidentValid0493x6c &&
+                ws.phaseGeometryResidentStep0493x6c == step;
+            q6_postapply_region_stats_0493x6h_b0<<<cellBlocks, threads>>>(
+                species, audit.speciesIndex, denseMask0493w6,
+                interfaceGeometryAvailable0493x6hB0
+                    ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+                interfaceGeometryAvailable0493x6hB0 ? 1 : 0,
+                ws.postApplyRegionAccum0493x6hB0.data(),
+                grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                xLowFlux, yLowFlux, segmentedIo,
+                audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0,
+                q6_wall_like_0409(params.bcLeft) ? 1 : 0,
+                q6_wall_like_0409(params.bcRight) ? 1 : 0,
+                q6_wall_like_0409(params.bcBottom) ? 1 : 0,
+                q6_wall_like_0409(params.bcTop) ? 1 : 0);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x6h-B0 post-apply region stats launch");
+            Q6PostApplyRegionAccumulator0493x6hB0 regionAccum0493x6hB0{};
+            check_cuda_0400(cudaMemcpy(
+                &regionAccum0493x6hB0, ws.postApplyRegionAccum0493x6hB0.data(),
+                sizeof(regionAccum0493x6hB0), cudaMemcpyDeviceToHost),
+                "0493x6h-B0 post-apply region accumulator download");
+            append_q6_postapply_region_audit_0493x6h_b0(
+                params, step, time, audit, regionAccum0493x6hB0,
+                interfaceGeometryAvailable0493x6hB0,
+                seconds_since_0400(tRegion0493x6hB0));
+        }
+
         totalAppliedCellDivSq0493w6 += divAppliedSq0493w6;
         totalAppliedActiveCells0493w6 += audit.activeCells;
         maxAppliedCellDiv0493w6 = std::max(

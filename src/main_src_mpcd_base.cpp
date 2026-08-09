@@ -986,7 +986,8 @@ int main(int argc, char** argv) {
           << " kBT=" << std::scientific << std::setprecision(3) << s.kBTEstimate
           << " stdN=" << std::fixed << std::setprecision(3) << s.stdN
           << " resM=" << std::scientific << std::setprecision(2) << s.resampMRelRms
-          << " q6=" << std::scientific << std::setprecision(2) << s.q6DivAfterProjectedFluxRms
+          << " q6F=" << std::scientific << std::setprecision(2) << s.q6DivAfterProjectedFluxRms
+          << " q6A=" << std::scientific << std::setprecision(2) << s.q6DivAfterCellVelocityRms
           << " wall=" << std::fixed << std::setprecision(1) << wallTime << "s"
           << std::flush;
             }
