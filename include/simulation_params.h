@@ -443,6 +443,29 @@ struct SimulationParams {
     double projectionTolerance = 1.0e-10;
     bool projectionMomentumCorrectionEnable = true;
     double q6ProjectionStrength = 1.0; // under-relax Q6 fluid-fluid correction; immersed-solid no-flux remains hard
+
+    // 0493x7b: continuum virial/EOS density-restoring kick on the CUDA-resident
+    // free-surface Q6-G path.  kVirial is a continuum stiffness with code units
+    // of velocity^2 in Pvir/rhoRef = kVirial*(rawFill-1); the finite-volume
+    // gradient carries the physical 1/dx,1/dy factors.  Therefore kVirial must
+    // NOT be rescaled with Nx/Ny when the same physical domain is refined.
+    // betaEOS is dimensionless.  The selected K32 calibration remains disabled
+    // by default, preserving all pre-virial paths as strict no-ops.
+    bool virialDensityKickEnable = false;
+    double kVirial = 0.10666666666666667;
+    double betaEOS = 0.05;
+    bool virialMomentumCorrectionEnable = true;
+
+    // 0493x7c/x7d: density-error relaxation embedded directly in the Q6
+    // projection constraint.  Zero is an exact no-op.  x7d makes the physical
+    // relaxation time tau the preferred parameter:
+    //     div(u_projected) = (rawFill - 1) / tau
+    // with betaPerStep = dt/tau.  q6DensityRelaxationBeta is retained as the
+    // legacy per-step input for backward compatibility; the two inputs are
+    // mutually exclusive when positive.
+    double q6DensityRelaxationBeta = 0.0;
+    double q6DensityRelaxationTime = 0.0;
+
     bool projectionImmersedSolidMaskEnable = false;
     bool projectionAllowUnmaskedImmersedSolid = false;
     double projectionImmersedSolidFluidFractionThreshold = 0.5;

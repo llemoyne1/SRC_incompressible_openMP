@@ -309,8 +309,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
     SimulationParams p{};
     for (const auto& item : kv) {
         const std::string lk = lower(trim(item.first));
-        if (lk.rfind("q9", 0) == 0 || lk.rfind("virial", 0) == 0 ||
-            lk == "kvirial" || lk == "betaeos" ||
+        if (lk.rfind("q9", 0) == 0 ||
             lk.rfind("massflux", 0) == 0 || lk.rfind("lowk", 0) == 0) {
             throw std::runtime_error("Unsupported parameter on openMP-resampling baseline: " + item.first +
                                      ". This branch intentionally supports only classic SRC/MPCD and Q6 projection.");
@@ -495,6 +494,12 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "projectionTolerance") p.projectionTolerance = parse_double(value, key);
         else if (key == "projectionMomentumCorrectionEnable") p.projectionMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "q6ProjectionStrength" || key == "projectionStrength") p.q6ProjectionStrength = parse_double(value, key);
+        else if (key == "virialDensityKickEnable" || key == "virialEnable") p.virialDensityKickEnable = parse_bool(value, key);
+        else if (key == "kVirial" || key == "Kvirial") p.kVirial = parse_double(value, key);
+        else if (key == "betaEOS" || key == "virialBeta") p.betaEOS = parse_double(value, key);
+        else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
+        else if (key == "q6DensityRelaxationBeta" || key == "densityRelaxationBeta") p.q6DensityRelaxationBeta = parse_double(value, key);
+        else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
         else if (key == "closedCapacityResponseEnable") p.closedCapacityResponseEnable = parse_bool(value, key);
         else if (key == "closedCapacityReferenceCellMass") p.closedCapacityReferenceCellMass = parse_double(value, key);
         else if (key == "closedCapacityReferenceParticleMass") p.closedCapacityReferenceParticleMass = parse_double(value, key);
@@ -1290,6 +1295,51 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error("speciesQ6Enable=true requires active Q6 projection");
         }
     }
+    if (!(p.kVirial >= 0.0) || !std::isfinite(p.kVirial) ||
+        !(p.betaEOS >= 0.0) || !std::isfinite(p.betaEOS)) {
+        throw std::runtime_error(
+            "0493x7b continuum virial parameters kVirial and betaEOS must be finite and non-negative");
+    }
+    if (p.virialDensityKickEnable &&
+        (classicSrcCudaMode || !q6OrProjectionRequested || p.projectionBackend != "cuda")) {
+        throw std::runtime_error(
+            "0493x7b virialDensityKickEnable requires active CUDA Q6 projection");
+    }
+    if (!(p.q6DensityRelaxationBeta >= 0.0) ||
+        !(p.q6DensityRelaxationBeta <= 1.0) ||
+        !std::isfinite(p.q6DensityRelaxationBeta)) {
+        throw std::runtime_error(
+            "0493x7c q6DensityRelaxationBeta must be finite and lie in [0,1]");
+    }
+    if (!(p.q6DensityRelaxationTime >= 0.0) ||
+        !std::isfinite(p.q6DensityRelaxationTime)) {
+        throw std::runtime_error(
+            "0493x7d q6DensityRelaxationTime must be finite and non-negative");
+    }
+    if (p.q6DensityRelaxationTime > 0.0 && p.q6DensityRelaxationBeta > 0.0) {
+        throw std::runtime_error(
+            "0493x7d q6DensityRelaxationTime and q6DensityRelaxationBeta are mutually exclusive when positive");
+    }
+    const double q6DensityRelaxationEffectiveBeta0493x7d =
+        p.q6DensityRelaxationTime > 0.0
+            ? p.dt / p.q6DensityRelaxationTime
+            : p.q6DensityRelaxationBeta;
+    if (!(q6DensityRelaxationEffectiveBeta0493x7d >= 0.0) ||
+        !(q6DensityRelaxationEffectiveBeta0493x7d <= 1.0) ||
+        !std::isfinite(q6DensityRelaxationEffectiveBeta0493x7d)) {
+        throw std::runtime_error(
+            "0493x7d effective density relaxation beta=dt/tau must be finite and lie in [0,1]");
+    }
+    if (q6DensityRelaxationEffectiveBeta0493x7d > 0.0 &&
+        (classicSrcCudaMode || !q6OrProjectionRequested || p.projectionBackend != "cuda")) {
+        throw std::runtime_error(
+            "0493x7d density relaxation requires active CUDA Q6 projection");
+    }
+    if (q6DensityRelaxationEffectiveBeta0493x7d > 0.0 && p.virialDensityKickEnable) {
+        throw std::runtime_error(
+            "0493x7d density-RHS relaxation and explicit virialDensityKickEnable are mutually exclusive");
+    }
+
     if (p.closedCapacityResponseEnable && !classicSrcCudaMode) {
         if (!(p.closedCapacityReferenceCellMass >= 0.0) || !std::isfinite(p.closedCapacityReferenceCellMass)) {
             throw std::runtime_error("closedCapacityReferenceCellMass must be finite and non-negative; use 0 to infer it");
@@ -1387,13 +1437,17 @@ void validate_simulation_params(const SimulationParams& p) {
         const bool allowFreeSurfaceResampling0493x6fr1 =
             freeSurfaceMasked0493x5a &&
             p.q6ForceProjectionMode == "prestream_single_fused";
+        if (p.virialDensityKickEnable && !allowFreeSurfaceResampling0493x6fr1) {
+            throw std::runtime_error(
+                "0493x7b virial density kick currently requires free_surface_masked + prestream_single_fused");
+        }
         if ((p.resamplingEnable && !allowFreeSurfaceResampling0493x6fr1) ||
             p.closedCapacityResponseEnable ||
             p.closedCapacityVirialKickEnable || p.darcyBrinkmanEnable ||
             p.immersedSolidEnable || p.projectionImmersedSolidMaskEnable ||
             p.openBoundarySegmentsEnable) {
             throw std::runtime_error(
-                "non-legacy q6ForceProjectionMode test excludes capacity/virial, Darcy, immersed solids, open boundaries, and resampling outside free_surface_masked prestream_single_fused");
+                "non-legacy q6ForceProjectionMode test excludes closed-capacity virial, Darcy, immersed solids, open boundaries, and resampling outside free_surface_masked prestream_single_fused");
         }
         if (std::abs(p.fluidXMinVelocity) > 0.0 || std::abs(p.fluidXMaxVelocity) > 0.0 ||
             std::abs(p.fluidYMinVelocity) > 0.0 || std::abs(p.fluidYMaxVelocity) > 0.0) {

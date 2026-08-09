@@ -375,6 +375,21 @@ struct Q6PostApplyRegionAccumulator0493x6hB0 {
     unsigned long long divMaxAbsBits[kQ6PostApplyRegionCount0493x6hB0]{};
 };
 
+// 0493x7a: tiny resident accumulator for the historical weak virial/EOS
+// density-restoring kick.  Only active-liquid mass and momentum sums are needed
+// every step for the exact global momentum correction.  The remaining fields
+// are filled only on audit steps.
+struct VirialDensityAccumulator0493x7a {
+    unsigned long long pressureCells = 0ull;
+    unsigned long long activeBulkCells = 0ull;
+    double activeMass = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+    double fillDefectSq = 0.0;
+    double pressureSq = 0.0;
+    double kickMassSq = 0.0;
+};
+
 const char* q6_postapply_region_name_0493x6h_b0(int region) {
     switch (region) {
         case Q6PostApplyBulk0493x6hB0: return "bulk";
@@ -420,6 +435,11 @@ struct IndependentMaskedSpeciesAudit0493w5 {
     double correctionMaxAbs = 0.0;
     double momentumX = 0.0;
     double momentumY = 0.0;
+    // 0493x7c: RMS of the non-zero divergence target imposed by the density
+    // relaxation RHS.  divAfterProjectedFaceFlux* remains the residual with
+    // respect to the active projection constraint; for beta=0 this is exactly
+    // the historical projected divergence.
+    double densityRelaxationTargetDivRms = 0.0;
 };
 
 void append_independent_masked_species_audit_0493w5(
@@ -446,7 +466,8 @@ void append_independent_masked_species_audit_0493w5(
                "divAfterMaxAbs,divAfterProjectedFaceFluxRms,"
                "divAfterProjectedFaceFluxMaxAbs,divAfterAppliedCellVelocityRms,"
                "divAfterAppliedCellVelocityMaxAbs,correctionRms,correctionMaxAbs,"
-               "momentumX,momentumY\n";
+               "momentumX,momentumY,q6DensityRelaxationBeta,"
+               "q6DensityRelaxationTime,densityRelaxationTargetDivRms\n";
     }
     for (const IndependentMaskedSpeciesAudit0493w5& r : rows) {
         out << std::setprecision(17)
@@ -462,7 +483,16 @@ void append_independent_masked_species_audit_0493w5(
             << r.divAfterAppliedCellVelocityRms << ','
             << r.divAfterAppliedCellVelocityMaxAbs << ','
             << r.correctionRms << ',' << r.correctionMaxAbs << ','
-            << r.momentumX << ',' << r.momentumY << '\n';
+            << r.momentumX << ',' << r.momentumY << ',';
+        const double densityRelaxationBeta0493x7d =
+            params.q6DensityRelaxationTime > 0.0
+                ? params.dt / params.q6DensityRelaxationTime
+                : params.q6DensityRelaxationBeta;
+        out << densityRelaxationBeta0493x7d << ','
+            << (densityRelaxationBeta0493x7d > 0.0
+                    ? params.dt / densityRelaxationBeta0493x7d
+                    : 0.0) << ','
+            << r.densityRelaxationTargetDivRms << '\n';
     }
 }
 
@@ -517,6 +547,85 @@ void append_q6_postapply_region_audit_0493x6h_b0(
             << reconstructed << ',' << (interfaceGeometryAvailable ? 1 : 0) << ','
             << diagnosticSeconds << '\n';
     }
+}
+
+// 0493x7a audit is intentionally sparse (step 1 and summary cadence only).
+// Execution never depends on this host copy: the momentum correction consumes
+// the resident accumulator directly on device.
+void append_virial_density_audit_0493x7a(
+    const SimulationParams& params,
+    int step,
+    double time,
+    double dx,
+    double dy,
+    const VirialDensityAccumulator0493x7a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_virial_density_0493x7a.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x7a failed to open resident virial density audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,kVirial,betaEOS,momentumCorrectionEnable,"
+               "pressureCells,activeBulkCells,activeMass,fillDefectRms,"
+               "virialPressureRms,rawKickMassWeightedRms,"
+               "correctedKickMassWeightedRms,momentumResidualBefore,"
+               "momentumCorrectionVx,momentumCorrectionVy,"
+               "effectiveVirialSpeed,dx,dy,virialCFLx,virialCFLy,"
+               "pressureDefinition,gradientDefinition,stiffnessUnits,scope\n";
+    }
+    const double n = static_cast<double>(std::max<unsigned long long>(
+        1ull, a.activeBulkCells));
+    const double fillRms = std::sqrt(std::max(0.0, a.fillDefectSq) / n);
+    const double pressureRms = std::sqrt(std::max(0.0, a.pressureSq) / n);
+    const double mass = std::max(0.0, a.activeMass);
+    const double rawKickRms = mass > 0.0
+        ? std::sqrt(std::max(0.0, a.kickMassSq) / mass) : 0.0;
+    const double cvx =
+        params.virialMomentumCorrectionEnable && mass > 0.0
+            ? a.momentumX / mass : 0.0;
+    const double cvy =
+        params.virialMomentumCorrectionEnable && mass > 0.0
+            ? a.momentumY / mass : 0.0;
+    const double correctedKickSq = params.virialMomentumCorrectionEnable &&
+                                   mass > 0.0
+        ? std::max(0.0, a.kickMassSq -
+            (a.momentumX * a.momentumX + a.momentumY * a.momentumY) / mass)
+        : std::max(0.0, a.kickMassSq);
+    const double correctedKickRms = mass > 0.0
+        ? std::sqrt(correctedKickSq / mass) : 0.0;
+    const double momentumResidual =
+        std::sqrt(a.momentumX * a.momentumX + a.momentumY * a.momentumY);
+    // 0493x7b: expose the continuum stiffness semantics and the explicit
+    // virial Courant numbers.  These are diagnostics only; x7b intentionally
+    // leaves the x7a/K32 numerical update bit-for-bit unchanged when the same
+    // parameters are supplied.
+    const double effectiveVirialSpeed =
+        std::sqrt(std::max(0.0, params.betaEOS * params.kVirial));
+    const double virialCFLx = dx > 0.0
+        ? effectiveVirialSpeed * params.dt / dx : 0.0;
+    const double virialCFLy = dy > 0.0
+        ? effectiveVirialSpeed * params.dt / dy : 0.0;
+
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << params.kVirial << ',' << params.betaEOS
+        << ',' << (params.virialMomentumCorrectionEnable ? 1 : 0) << ','
+        << a.pressureCells << ',' << a.activeBulkCells << ',' << a.activeMass << ','
+        << fillRms << ',' << pressureRms << ',' << rawKickRms << ','
+        << correctedKickRms << ',' << momentumResidual << ','
+        << cvx << ',' << cvy << ','
+        << effectiveVirialSpeed << ',' << dx << ',' << dy << ','
+        << virialCFLx << ',' << virialCFLy << ','
+        << "Pvir/rhoRef=Kvirial*(rawFill-1)" << ','
+        << "physical_FV_gradient_1_over_dx_dy" << ','
+        << "code_velocity_squared" << ','
+        << "liquid_bulk_only_no_interface" << '\n';
 }
 
 struct PhaseInterfacePressureAudit0493x6a {
@@ -1199,6 +1308,10 @@ struct ResidentWorkspace0400 {
     // allocation nor a kernel launch unless the diagnostic gate is enabled.
     DeviceBuffer0400<Q6PostApplyRegionAccumulator0493x6hB0>
         postApplyRegionAccum0493x6hB0;
+    // 0493x7a uses the existing temporary cell correction buffers (dux/duy)
+    // for the virial kick and only adds this O(1) resident accumulator.
+    DeviceBuffer0400<VirialDensityAccumulator0493x7a>
+        virialDensityAccum0493x7a;
     bool phaseInterfaceStencilValid0493x6f = false;
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
@@ -3124,7 +3237,7 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                     const double alphaLow = cHigh ? alphaE : alphaC;
                     const int gasSideCell = cHigh ? east : c;
                     const double denom = alphaHigh - alphaLow;
-                    if (denom > 1.0e-14) {
+                    if (denom > 0.0) {
                         const double theta = (alphaHigh - 0.5) / denom;
                         coeffX = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
                         if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
@@ -3186,7 +3299,7 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                     const double alphaLow = cHigh ? alphaN : alphaC;
                     const int gasSideCell = cHigh ? north : c;
                     const double denom = alphaHigh - alphaLow;
-                    if (denom > 1.0e-14) {
+                    if (denom > 0.0) {
                         const double theta = (alphaHigh - 0.5) / denom;
                         coeffY = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
                         if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
@@ -3519,6 +3632,54 @@ __global__ void q6_phase_geometry_resident_audit_0493x6c(
     }
 }
 
+// 0493x7c: target divergence for a first-order density-error relaxation.
+// The target is deliberately bulk-only: a pressure cell must have every
+// existing face-neighbour inside the x6f pressure domain.  Missing neighbours
+// at non-periodic physical walls are not phase interfaces and therefore do not
+// disable the source.  This is the same geometric scope used by the x7a bulk
+// virial experiment, but the correction is now consumed by the Q6 solve itself
+// instead of being applied as a post-projection velocity kick.
+__device__ double q6_density_relaxation_target_divergence_0493x7c(
+    const double* rawFill,
+    const unsigned char* pressureMask,
+    int c,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    double beta,
+    double dt,
+    int enabled) {
+    if (!enabled || rawFill == nullptr || pressureMask == nullptr ||
+        !(beta > 0.0) || !(dt > 0.0) || pressureMask[c] == 0u) {
+        return 0.0;
+    }
+
+    const int ix = c % nx;
+    const int iy = c / nx;
+    bool bulk = true;
+    if (periodicX || ix > 0) {
+        const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+        bulk = bulk && pressureMask[iy * nx + xw] != 0u;
+    }
+    if (periodicX || ix < nx - 1) {
+        const int xe = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+        bulk = bulk && pressureMask[iy * nx + xe] != 0u;
+    }
+    if (periodicY || iy > 0) {
+        const int ys = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+        bulk = bulk && pressureMask[ys * nx + ix] != 0u;
+    }
+    if (periodicY || iy < ny - 1) {
+        const int yn = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+        bulk = bulk && pressureMask[yn * nx + ix] != 0u;
+    }
+    if (!bulk) return 0.0;
+
+    const double defect = rawFill[c] - 1.0;
+    return isfinite(defect) ? beta * defect / dt : 0.0;
+}
+
 __global__ void q6_build_independent_rhs_after_mask_0493w5(
     CudaSpeciesCellDeviceView0490h species,
     int speciesIndex,
@@ -3546,6 +3707,10 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     const double* preparedFacePhiGammaX0493x6g,
     const double* preparedFacePhiGammaY0493x6g,
     int usePreparedInterfacePressure0493x6g,
+    const double* densityRelaxationRawFill0493x7c,
+    double densityRelaxationBeta0493x7c,
+    double densityRelaxationDt0493x7c,
+    int densityRelaxationEnable0493x7c,
     int fullDomain) {
     extern __shared__ double sh[];
     double* shSum = sh;
@@ -3648,6 +3813,12 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
                 rhsValue += preparedFaceCoeffY0493x6g[south] *
                             preparedFacePhiGammaY0493x6g[south] * invDy2Local;
             }
+        }
+        if (densityRelaxationEnable0493x7c) {
+            rhsValue += q6_density_relaxation_target_divergence_0493x7c(
+                densityRelaxationRawFill0493x7c, mask, c, nx, ny,
+                periodicX, periodicY, densityRelaxationBeta0493x7c,
+                densityRelaxationDt0493x7c, 1);
         }
         rhs[c] = rhsValue;
         sum += rhs[c];
@@ -4045,15 +4216,22 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     Q6SegmentedIo0409 segmentedIo,
     std::uint32_t speciesType,
     int exclusiveProjectedSpecies,
+    const double* densityRelaxationRawFill0493x7c,
+    double densityRelaxationBeta0493x7c,
+    double densityRelaxationDt0493x7c,
+    int densityRelaxationEnable0493x7c,
+    double* partialTargetSq0493x7c,
     int fullDomain) {
     extern __shared__ double sh[];
     double* shSq = sh;
     double* shMax = sh + blockDim.x;
+    double* shTargetSq = sh + 2 * blockDim.x;
     const int tid = threadIdx.x;
     (void)xHighFlux;
     (void)yHighFlux;
     double sq = 0.0;
     double mx = 0.0;
+    double targetSq = 0.0;
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -4115,22 +4293,35 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
         const double fyNorth = fyNorthBase + faceDUy[c];
         const double fySouth = hasSouth ? fySouthBase + faceDUy[south] : fySouthBase;
         const double div = (fxEast - fxWest) / dx + (fyNorth - fySouth) / dy;
-        sq += div * div;
-        mx = fmax(mx, fabs(div));
+        double residual = div;
+        double targetDiv0493x7c = 0.0;
+        if (densityRelaxationEnable0493x7c) {
+            targetDiv0493x7c = q6_density_relaxation_target_divergence_0493x7c(
+                densityRelaxationRawFill0493x7c, mask, c, nx, ny,
+                periodicX, periodicY, densityRelaxationBeta0493x7c,
+                densityRelaxationDt0493x7c, 1);
+            residual -= targetDiv0493x7c;
+        }
+        sq += residual * residual;
+        mx = fmax(mx, fabs(residual));
+        targetSq += targetDiv0493x7c * targetDiv0493x7c;
     }
     shSq[tid] = sq;
     shMax[tid] = mx;
+    shTargetSq[tid] = targetSq;
     __syncthreads();
     for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if (tid < offset) {
             shSq[tid] += shSq[tid + offset];
             shMax[tid] = fmax(shMax[tid], shMax[tid + offset]);
+            shTargetSq[tid] += shTargetSq[tid + offset];
         }
         __syncthreads();
     }
     if (tid == 0) {
         partialSq[blockIdx.x] = shSq[0];
         partialMax[blockIdx.x] = shMax[0];
+        partialTargetSq0493x7c[blockIdx.x] = shTargetSq[0];
     }
 }
 
@@ -4184,6 +4375,181 @@ __global__ void q6_apply_independent_species_correction_0493w5(
         partialPy[blockIdx.x] = shY[0];
     }
 }
+
+// 0493x7a: first CUDA-resident port of the historical weak virial density
+// restoring term.  The pressure variable is normalized by the declared liquid
+// reference density, so Pvir/rhoRef = Kvirial*(rawFill-1) and
+// du = -betaEOS*dt*grad(Pvir/rhoRef).  rawFill is the unbounded x6c liquid
+// mass/reference-cell-mass field; no clamp is allowed here because overfill is
+// precisely the quantity being restored.
+//
+// The kick is deliberately bulk-only.  A pressure cell is excluded when any
+// existing face-neighbour is outside the x6f pressure domain.  Non-periodic
+// external boundaries are not treated as phase interfaces: the historical
+// one-sided gradient is retained there.  This keeps the first port away from
+// gas/interface traction while remaining compatible with closed-box walls.
+__global__ void q6_prepare_virial_density_kick_0493x7a(
+    CudaSpeciesCellDeviceView0490h species,
+    int liquidSpeciesIndex,
+    const double* rawFill,
+    const unsigned char* pressureMask,
+    unsigned char* bulkMask,
+    double* kickVx,
+    double* kickVy,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double kVirial,
+    double betaEOS,
+    double dt,
+    VirialDensityAccumulator0493x7a* accum,
+    int auditEnabled) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool pressureC = pressureMask != nullptr && pressureMask[c] != 0u;
+        if (auditEnabled && pressureC) {
+            atomicAdd(&accum->pressureCells, 1ull);
+        }
+
+        bool bulk = pressureC;
+        int west = c;
+        int east = c;
+        int south = c;
+        int north = c;
+
+        if (periodicX || ix > 0) {
+            const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+            west = iy * nx + xw;
+            bulk = bulk && pressureMask[west] != 0u;
+        }
+        if (periodicX || ix < nx - 1) {
+            const int xe = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+            east = iy * nx + xe;
+            bulk = bulk && pressureMask[east] != 0u;
+        }
+        if (periodicY || iy > 0) {
+            const int ys = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+            south = ys * nx + ix;
+            bulk = bulk && pressureMask[south] != 0u;
+        }
+        if (periodicY || iy < ny - 1) {
+            const int yn = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+            north = yn * nx + ix;
+            bulk = bulk && pressureMask[north] != 0u;
+        }
+
+        const int k = liquidSpeciesIndex * species.numCells + c;
+        const double cellMass =
+            species.mass != nullptr && k >= 0 ? species.mass[k] : 0.0;
+        bulk = bulk && cellMass > 0.0 && isfinite(cellMass);
+
+        if (!bulk) {
+            bulkMask[c] = 0u;
+            kickVx[c] = 0.0;
+            kickVy[c] = 0.0;
+            continue;
+        }
+
+        const double fillC = rawFill[c];
+        const double pC = kVirial * (fillC - 1.0);
+        const double pW = (west == c) ? pC :
+            kVirial * (rawFill[west] - 1.0);
+        const double pE = (east == c) ? pC :
+            kVirial * (rawFill[east] - 1.0);
+        const double pS = (south == c) ? pC :
+            kVirial * (rawFill[south] - 1.0);
+        const double pN = (north == c) ? pC :
+            kVirial * (rawFill[north] - 1.0);
+
+        const bool twoSidedX = (periodicX || ix > 0) &&
+                               (periodicX || ix < nx - 1);
+        const bool twoSidedY = (periodicY || iy > 0) &&
+                               (periodicY || iy < ny - 1);
+        const double denomX = nx > 1 ? (twoSidedX ? 2.0 * dx : dx) : 1.0;
+        const double denomY = ny > 1 ? (twoSidedY ? 2.0 * dy : dy) : 1.0;
+        const double dpdx = nx > 1 ? (pE - pW) / denomX : 0.0;
+        const double dpdy = ny > 1 ? (pN - pS) / denomY : 0.0;
+        const double dvx = -betaEOS * dt * dpdx;
+        const double dvy = -betaEOS * dt * dpdy;
+
+        bulkMask[c] = 1u;
+        kickVx[c] = isfinite(dvx) ? dvx : 0.0;
+        kickVy[c] = isfinite(dvy) ? dvy : 0.0;
+
+        // These three sums are part of the production algorithm: the global
+        // momentum correction is consumed directly on device by the particle
+        // apply/deposit kernel below.
+        atomic_add_double_0400(&accum->activeMass, cellMass);
+        atomic_add_double_0400(&accum->momentumX, cellMass * kickVx[c]);
+        atomic_add_double_0400(&accum->momentumY, cellMass * kickVy[c]);
+
+        if (auditEnabled) {
+            atomicAdd(&accum->activeBulkCells, 1ull);
+            const double defect = fillC - 1.0;
+            atomic_add_double_0400(&accum->fillDefectSq, defect * defect);
+            atomic_add_double_0400(&accum->pressureSq, pC * pC);
+            atomic_add_double_0400(
+                &accum->kickMassSq,
+                cellMass * (kickVx[c] * kickVx[c] + kickVy[c] * kickVy[c]));
+        }
+    }
+}
+
+
+// 0493x7a is applied after the existing q6Applied diagnostic, so that q6A
+// keeps its established meaning (Q6/B1 only).  The kick is fused into the
+// mandatory final resident cell-moment refresh; therefore x7a adds no new
+// O(Np) particle pass.  The global correction is exact for this cell-constant
+// kick because the same deposited liquid cell masses were used above.
+__global__ void q6_apply_virial_and_deposit_moments_0493x7a(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const unsigned char* bulkMask,
+    const double* kickVx,
+    const double* kickVy,
+    std::uint32_t liquidType,
+    std::uint64_t nParticles,
+    const VirialDensityAccumulator0493x7a* accum,
+    int momentumCorrectionEnable) {
+    double cvx = 0.0;
+    double cvy = 0.0;
+    if (momentumCorrectionEnable && accum != nullptr && accum->activeMass > 0.0) {
+        cvx = accum->momentumX / accum->activeMass;
+        cvy = accum->momentumY / accum->activeMass;
+    }
+
+    const std::uint64_t idx =
+        static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride =
+        static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+
+        if (particles.type != nullptr && particles.type[i] == liquidType &&
+            bulkMask[c] != 0u) {
+            particles.vx[i] += kickVx[c] - cvx;
+            particles.vy[i] += kickVy[c] - cvy;
+        }
+
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        atomicAdd(&cells.count[c], 1u);
+        atomic_add_double_0400(&cells.cellMass[c], m);
+        atomic_add_double_0400(&cells.cellPx[c], m * particles.vx[i]);
+        atomic_add_double_0400(&cells.cellPy[c], m * particles.vy[i]);
+    }
+}
+
 
 // 0493x6h-B1: affine RT0/MAC-to-particle reconstruction for the gated
 // free-surface path.  q6_compute_masked_cell_correction_stats_0493w5 stores
@@ -4878,6 +5244,15 @@ bool apply_independent_masked_species_q6_0493w5(
         cuda_q6_postapply_region_diagnostics_0493x6h_b0_requested();
     const bool faceToParticleRt0Requested0493x6hB1 =
         cuda_q6_face_to_particle_rt0_0493x6h_b1_requested();
+    const bool virialDensityKickRequested0493x7a =
+        params.virialDensityKickEnable && params.kVirial > 0.0 &&
+        params.betaEOS > 0.0;
+    const double densityRelaxationBeta0493x7d =
+        params.q6DensityRelaxationTime > 0.0
+            ? params.dt / params.q6DensityRelaxationTime
+            : params.q6DensityRelaxationBeta;
+    const bool densityRelaxationRequested0493x7c =
+        densityRelaxationBeta0493x7d > 0.0;
     if (faceToParticleRt0Requested0493x6hB1 &&
         (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b)) {
         diag.reason =
@@ -4918,6 +5293,27 @@ bool apply_independent_masked_species_q6_0493w5(
     }
     if (phaseGasPressure0493x6g && !(phaseGasPressureScale0493x6g >= 0.0)) {
         diag.reason = "0493x6g gas-pressure scale must be finite and non-negative";
+        return false;
+    }
+    if (virialDensityKickRequested0493x7a &&
+        (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b ||
+         !faceToParticleRt0Requested0493x6hB1 ||
+         !phaseGeometryResident0493x6c || !phaseInterfaceStencil0493x6f)) {
+        diag.reason =
+            "0493x7b virial requires x6c+x6f free_surface_masked, fused force Q6 and B1";
+        return false;
+    }
+    if (densityRelaxationRequested0493x7c &&
+        (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b ||
+         !faceToParticleRt0Requested0493x6hB1 ||
+         !phaseGeometryResident0493x6c || !phaseInterfaceStencil0493x6f)) {
+        diag.reason =
+            "0493x7c density RHS requires x6c+x6f free_surface_masked, fused force Q6 and B1";
+        return false;
+    }
+    if (densityRelaxationRequested0493x7c && virialDensityKickRequested0493x7a) {
+        diag.reason =
+            "0493x7c density RHS and x7b explicit virial kick are mutually exclusive";
         return false;
     }
     if (phaseGeometryResident0493x6c) {
@@ -4964,8 +5360,20 @@ bool apply_independent_masked_species_q6_0493w5(
     const bool tgForceActive0493x5a = params.taylorGreenForcingEnable &&
                                       params.taylorGreenForcingAmplitude > 0.0;
     int projectedSpeciesCount = 0;
-    for (const SpeciesDefinition& def : params.speciesDefinitions) {
-        if (def.q6StrengthDeclared > 0.0) ++projectedSpeciesCount;
+    int projectedSpeciesIndex0493x7a = -1;
+    std::uint32_t projectedSpeciesType0493x7a = 0u;
+    int liquidPhaseSpeciesCount0493x7a = 0;
+    for (int s = 0; s < speciesCount; ++s) {
+        const SpeciesDefinition& def =
+            params.speciesDefinitions[static_cast<std::size_t>(s)];
+        if (def.phaseFamily == SpeciesPhaseFamily::Liquid) {
+            ++liquidPhaseSpeciesCount0493x7a;
+        }
+        if (def.q6StrengthDeclared > 0.0) {
+            ++projectedSpeciesCount;
+            projectedSpeciesIndex0493x7a = s;
+            projectedSpeciesType0493x7a = def.type;
+        }
     }
     const int exclusiveProjectedSpecies = projectedSpeciesCount == 1 ? 1 : 0;
     if (faceToParticleRt0Requested0493x6hB1 && !exclusiveProjectedSpecies) {
@@ -4978,6 +5386,21 @@ bool apply_independent_masked_species_q6_0493w5(
     }
     const bool faceToParticleRt00493x6hB1 =
         faceToParticleRt0Requested0493x6hB1 && exclusiveProjectedSpecies;
+    if (virialDensityKickRequested0493x7a || densityRelaxationRequested0493x7c) {
+        if (!exclusiveProjectedSpecies || projectedSpeciesIndex0493x7a < 0 ||
+            liquidPhaseSpeciesCount0493x7a != 1 ||
+            params.speciesDefinitions[
+                static_cast<std::size_t>(projectedSpeciesIndex0493x7a)].phaseFamily !=
+                SpeciesPhaseFamily::Liquid) {
+            diag.reason = virialDensityKickRequested0493x7a
+                ? "0493x7b virial currently requires exactly one liquid phase and one projected liquid species"
+                : "0493x7c density RHS currently requires exactly one liquid phase and one projected liquid species";
+            return false;
+        }
+        if (virialDensityKickRequested0493x7a) {
+            ws.virialDensityAccum0493x7a.ensure(1u);
+        }
+    }
 
     for (int s = 0; s < speciesCount; ++s) {
         IndependentMaskedSpeciesAudit0493w5 audit{};
@@ -5722,6 +6145,9 @@ bool apply_independent_masked_species_q6_0493w5(
             phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
             phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
             phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+            densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
+            densityRelaxationBeta0493x7d, params.dt,
+            densityRelaxationRequested0493x7c ? 1 : 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
         const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
@@ -6737,21 +7163,31 @@ bool apply_independent_masked_species_q6_0493w5(
             correctionSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
 
         q6_masked_projected_divergence_stats_0493w5<<<
-            cellBlocks, threads, pairShared>>>(
+            cellBlocks, threads, tripleShared>>>(
             species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
             ws.r.data(), ws.p.data(),
             ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
             periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
             segmentedIo, audit.type, exclusiveProjectedSpecies,
-            audit.fullDomain ? 1 : 0);
+            densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
+            densityRelaxationBeta0493x7d, params.dt,
+            densityRelaxationRequested0493x7c ? 1 : 0,
+            ws.partial2.data(), audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(),
                         "independent masked projected divergence launch");
         const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
         audit.divAfterProjectedFaceFluxMaxAbs =
             reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+        const double densityTargetDivSq0493x7c =
+            reduce_host_sum_0400(ws.partial2.data(), cellBlocks);
         audit.divAfterProjectedFaceFluxRms = std::sqrt(
             divAfterSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
-        // Preserve the 0493w5 column meaning while exposing an unambiguous name.
+        audit.densityRelaxationTargetDivRms = std::sqrt(
+            densityTargetDivSq0493x7c /
+            static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+        // Preserve the 0493w5 zero-target meaning.  With x7c enabled these
+        // columns become the residual to the non-zero divergence constraint;
+        // beta=0 is bit-for-bit the historical projected divergence path.
         audit.divAfterMaxAbs = audit.divAfterProjectedFaceFluxMaxAbs;
         audit.divAfterRms = audit.divAfterProjectedFaceFluxRms;
 
@@ -6905,6 +7341,7 @@ bool apply_independent_masked_species_q6_0493w5(
             xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
             audit.type, exclusiveProjectedSpecies,
             nullptr, nullptr, nullptr, nullptr, 0,
+            nullptr, 0.0, params.dt, 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(),
                         "independent masked post-apply divergence launch");
@@ -6964,15 +7401,62 @@ bool apply_independent_masked_species_q6_0493w5(
     }
     diag.divAfterCellVelocityMaxAbs = maxAppliedCellDiv0493w6;
 
+    // 0493x7a: prepare the weak virial density-restoring field only after the
+    // established q6Applied diagnostic has been evaluated.  The density itself
+    // is unchanged by Q6, so x6c rawFill remains authoritative.  Reuse the
+    // temporary species mask and dux/duy buffers: no new O(numCells) storage.
+    const bool virialAuditThisStep0493x7a =
+        virialDensityKickRequested0493x7a &&
+        (step <= 1 || step % std::max(1, params.summaryEvery) == 0);
+    if (virialDensityKickRequested0493x7a) {
+        check_cuda_0400(cudaMemset(
+            ws.virialDensityAccum0493x7a.data(), 0,
+            sizeof(VirialDensityAccumulator0493x7a)),
+            "0493x7a virial accumulator zero");
+        q6_prepare_virial_density_kick_0493x7a<<<cellBlocks, threads>>>(
+            species, projectedSpeciesIndex0493x7a,
+            ws.phaseFillRaw0493x6c.data(),
+            ws.phasePressureMask0493x6f.data(),
+            ws.speciesMask0493w5.data(),
+            ws.dux.data(), ws.duy.data(),
+            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+            params.kVirial, params.betaEOS, params.dt,
+            ws.virialDensityAccum0493x7a.data(),
+            virialAuditThisStep0493x7a ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(),
+                        "0493x7a resident virial density preparation launch");
+    }
+
     check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
                     "independent masked cell refresh counter zero");
     q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
     check_cuda_0400(cudaGetLastError(), "independent masked cell moments reset launch");
-    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
-        particles, cells, nParticles);
-    check_cuda_0400(cudaGetLastError(), "independent masked cell moments redeposit launch");
+    if (virialDensityKickRequested0493x7a) {
+        q6_apply_virial_and_deposit_moments_0493x7a<<<particleBlocks, threads>>>(
+            particles, cells, ws.speciesMask0493w5.data(),
+            ws.dux.data(), ws.duy.data(), projectedSpeciesType0493x7a,
+            nParticles, ws.virialDensityAccum0493x7a.data(),
+            params.virialMomentumCorrectionEnable ? 1 : 0);
+        check_cuda_0400(cudaGetLastError(),
+                        "0493x7a virial apply plus cell moments redeposit launch");
+    } else {
+        q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+            particles, cells, nParticles);
+        check_cuda_0400(cudaGetLastError(),
+                        "independent masked cell moments redeposit launch");
+    }
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "independent masked cell moments finalize launch");
+
+    if (virialAuditThisStep0493x7a) {
+        VirialDensityAccumulator0493x7a virialAudit0493x7a{};
+        check_cuda_0400(cudaMemcpy(
+            &virialAudit0493x7a, ws.virialDensityAccum0493x7a.data(),
+            sizeof(virialAudit0493x7a), cudaMemcpyDeviceToHost),
+            "0493x7a virial audit download");
+        append_virial_density_audit_0493x7a(
+            params, step, time, dx, dy, virialAudit0493x7a);
+    }
 
     append_independent_masked_species_audit_0493w5(params, step, time, audits);
     diag.speciesQ6IndependentMasked = true;
