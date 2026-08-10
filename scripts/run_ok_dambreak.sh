@@ -81,7 +81,11 @@ PY_VALIDATE
 write_params_dambreak_0493x7h() {
   local mode=$1 state=$2 out=$3 params=$4
   local species_q6_enable=false species_q6_mode=independent_masked
+  local species_diagnostics_enable=true
   if suite_path_has_q6_0434 "$mode"; then species_q6_enable=true; fi
+  # 0493x7l: production Q6-g-f no longer writes the generic per-species
+  # telemetry CSV. Keep it for the historical SRC / previous-Q6 comparators.
+  if suite_path_has_q6_g_f_0493x7h "$mode"; then species_diagnostics_enable=false; fi
   # src-q6 is intentionally the previous Q6 comparator. Q6-g-f overrides this
   # mode and the force ordering through the common helper below.
   local liquid_ref gas_ref
@@ -121,7 +125,7 @@ species0ResamplingEnable = false
 species1 = $GAS_TYPE compressible_gas gas $GAS_Q6_STRENGTH 0.0 $gas_ref
 species1ResamplingEnable = false
 speciesRequireRegisteredTypes = true
-speciesDiagnosticsEnable = true
+speciesDiagnosticsEnable = $species_diagnostics_enable
 speciesDiagnosticsFilename = species_runtime_run_ok_dambreak.csv
 speciesCellDiagnosticsEnable = false
 speciesQ6Enable = $species_q6_enable

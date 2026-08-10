@@ -162,6 +162,18 @@ bool cuda_q6_face_to_particle_rt0_0493x6h_b1_requested() {
         std::getenv("MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1"));
 }
 
+// 0493x7k: Q6-g-f production diagnostics run only at the first step and at
+// summary cadence.  Failure diagnostics remain unconditional.  This is not a
+// new runtime option: summaryEvery already defines the cadence at which the
+// surrounding solver reports its state.
+bool q6_g_f_diagnostics_this_step_0493x7k(
+    const SimulationParams& params,
+    std::uint64_t step) {
+    const std::uint64_t every = static_cast<std::uint64_t>(
+        std::max(1, params.summaryEvery));
+    return step <= 1u || (step % every) == 0u;
+}
+
 enum class PhaseGasPressureMode0493x6g : int {
     Eos = 0,
     Constant = 1
@@ -952,7 +964,7 @@ void append_phase_interface_stencil_audit_0493x6f(
         << a.thetaGuard << ',' << a.thetaMin << ',' << a.thetaMean << ','
         << a.thetaMax << ',' << a.prepareSeconds << ',' << a.residentBytes << ','
         << "pressureMask=carrier&&alpha>=0.5;"
-           "faceCoeff=1(interior),1/theta(interface),2(small-theta),0(no-pressure-coupling);"
+           "faceCoeff=1(interior);1/theta(interface);2(small-theta);0(no-pressure-coupling);"
            "pGamma=optional-prepared-face-value(zero-in-x6f);external-domain-BC-unchanged" << '\n';
 }
 
@@ -4146,7 +4158,8 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     double yLowFlux,
     Q6SegmentedIo0409 segmentedIo,
     std::uint32_t speciesType,
-    int exclusiveProjectedSpecies) {
+    int exclusiveProjectedSpecies,
+    int collectStats0493x7k) {
     extern __shared__ double sh[];
     double* shSq = sh;
     double* shMax = sh + blockDim.x;
@@ -4206,10 +4219,13 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
             : 0.5 * (faceDUy[c] + southCorrection);
         cellDUx[c] = cx;
         cellDUy[c] = cy;
-        const double q = cx * cx + cy * cy;
-        sq += q;
-        mx = fmax(mx, sqrt(q));
+        if (collectStats0493x7k) {
+            const double q = cx * cx + cy * cy;
+            sq += q;
+            mx = fmax(mx, sqrt(q));
+        }
     }
+    if (!collectStats0493x7k) return;
     shSq[tid] = sq;
     shMax[tid] = mx;
     __syncthreads();
@@ -4367,7 +4383,8 @@ __global__ void q6_apply_independent_species_correction_0493w5(
     std::uint64_t nParticles,
     double* partialPx,
     double* partialPy,
-    unsigned long long* correctedCounter) {
+    unsigned long long* correctedCounter,
+    int collectDiagnostics0493x7k) {
     extern __shared__ double sh[];
     double* shX = sh;
     double* shY = sh + blockDim.x;
@@ -4386,11 +4403,14 @@ __global__ void q6_apply_independent_species_correction_0493w5(
         const double dvy = cellDUy[c];
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
-        const double m = particles.mass ? particles.mass[i] : 1.0;
-        px += m * dvx;
-        py += m * dvy;
-        ++correctedLocal;
+        if (collectDiagnostics0493x7k) {
+            const double m = particles.mass ? particles.mass[i] : 1.0;
+            px += m * dvx;
+            py += m * dvy;
+            ++correctedLocal;
+        }
     }
+    if (!collectDiagnostics0493x7k) return;
     if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
     shX[tid] = px;
     shY[tid] = py;
@@ -4615,7 +4635,8 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
     int tgModeY,
     double* partialPx,
     double* partialPy,
-    unsigned long long* correctedCounter) {
+    unsigned long long* correctedCounter,
+    int collectDiagnostics0493x7k) {
     extern __shared__ double sh[];
     double* shX = sh;
     double* shY = sh + blockDim.x;
@@ -4669,13 +4690,16 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
         const double dvy = cy + (2.0 * eta - 1.0) * (dVn - cy);
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
-        const double m = particles.mass ? particles.mass[i] : 1.0;
-        // As in x5a, audit only the pressure correction.  The physical force
-        // momentum is deliberately not folded into the Q6 momentum residual.
-        px += m * dvx;
-        py += m * dvy;
-        ++correctedLocal;
+        if (collectDiagnostics0493x7k) {
+            const double m = particles.mass ? particles.mass[i] : 1.0;
+            // As in x5a, audit only the pressure correction.  The physical force
+            // momentum is deliberately not folded into the Q6 momentum residual.
+            px += m * dvx;
+            py += m * dvy;
+            ++correctedLocal;
+        }
     }
+    if (!collectDiagnostics0493x7k) return;
     if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
     shX[tid] = px;
     shY[tid] = py;
@@ -4712,7 +4736,8 @@ __global__ void q6_apply_free_surface_force_and_correction_0493x5a(
     int tgModeY,
     double* partialPx,
     double* partialPy,
-    unsigned long long* correctedCounter) {
+    unsigned long long* correctedCounter,
+    int collectDiagnostics0493x7k) {
     extern __shared__ double sh[];
     double* shX = sh;
     double* shY = sh + blockDim.x;
@@ -4739,13 +4764,16 @@ __global__ void q6_apply_free_surface_force_and_correction_0493x5a(
         const double dvy = cellDUy[c];
         particles.vx[i] += dvx;
         particles.vy[i] += dvy;
-        const double m = particles.mass ? particles.mass[i] : 1.0;
-        // Keep the momentum audit restricted to the pressure correction.  The
-        // physical force momentum must not be removed by a global correction.
-        px += m * dvx;
-        py += m * dvy;
-        ++correctedLocal;
+        if (collectDiagnostics0493x7k) {
+            const double m = particles.mass ? particles.mass[i] : 1.0;
+            // Keep the momentum audit restricted to the pressure correction.  The
+            // physical force momentum must not be removed by a global correction.
+            px += m * dvx;
+            py += m * dvy;
+            ++correctedLocal;
+        }
     }
+    if (!collectDiagnostics0493x7k) return;
     if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
     shX[tid] = px;
     shY[tid] = py;
@@ -5739,6 +5767,9 @@ bool apply_independent_masked_species_q6_0493w5(
     bool fuseForceKick0493x4b,
     CudaQ6Resident0400Diagnostics& diag) {
     const auto tSolveAll = Clock0400::now();
+    const bool q6GfDiagnosticsThisStep0493x7k =
+        !freeSurfaceMode0493x5a ||
+        q6_g_f_diagnostics_this_step_0493x7k(params, static_cast<std::uint64_t>(step));
     const bool phaseGeometryResident0493x6c =
         freeSurfaceMode0493x5a &&
         cuda_q6_phase_geometry_resident_0493x6c_requested();
@@ -7678,47 +7709,53 @@ bool apply_independent_masked_species_q6_0493w5(
         // can therefore receive the interface-face gradient without becoming
         // pressure unknowns themselves.
         q6_compute_masked_cell_correction_stats_0493w5<<<
-            cellBlocks, threads, pairShared>>>(
+            cellBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
             species, s, ws.speciesMask0493w5.data(), q6SolveMask0493x6f,
             ws.r.data(), ws.p.data(), ws.dux.data(), ws.duy.data(),
             ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny,
             periodicX, periodicY, audit.fullDomain ? 1 : 0,
             effectiveStrength, xLowFlux, yLowFlux, segmentedIo, audit.type,
-            exclusiveProjectedSpecies);
+            exclusiveProjectedSpecies, q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked cell correction launch");
-        const double correctionSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-        audit.correctionMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
-        audit.correctionRms = std::sqrt(
-            correctionSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+        double correctionSq = 0.0;
+        double divAfterSq = 0.0;
+        if (q6GfDiagnosticsThisStep0493x7k) {
+            correctionSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            audit.correctionMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+            audit.correctionRms = std::sqrt(
+                correctionSq /
+                static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
 
-        q6_masked_projected_divergence_stats_0493w5<<<
-            cellBlocks, threads, tripleShared>>>(
-            species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
-            ws.r.data(), ws.p.data(),
-            ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
-            periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
-            segmentedIo, audit.type, exclusiveProjectedSpecies,
-            densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
-            densityRelaxationBeta0493x7d, params.dt,
-            densityRelaxationRequested0493x7c ? 1 : 0,
-            ws.partial2.data(), audit.fullDomain ? 1 : 0);
-        check_cuda_0400(cudaGetLastError(),
-                        "independent masked projected divergence launch");
-        const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-        audit.divAfterProjectedFaceFluxMaxAbs =
-            reduce_host_max_0400(ws.partial1.data(), cellBlocks);
-        const double densityTargetDivSq0493x7c =
-            reduce_host_sum_0400(ws.partial2.data(), cellBlocks);
-        audit.divAfterProjectedFaceFluxRms = std::sqrt(
-            divAfterSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
-        audit.densityRelaxationTargetDivRms = std::sqrt(
-            densityTargetDivSq0493x7c /
-            static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
-        // Preserve the 0493w5 zero-target meaning.  With x7c enabled these
-        // columns become the residual to the non-zero divergence constraint;
-        // beta=0 is bit-for-bit the historical projected divergence path.
-        audit.divAfterMaxAbs = audit.divAfterProjectedFaceFluxMaxAbs;
-        audit.divAfterRms = audit.divAfterProjectedFaceFluxRms;
+            q6_masked_projected_divergence_stats_0493w5<<<
+                cellBlocks, threads, tripleShared>>>(
+                species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
+                ws.r.data(), ws.p.data(),
+                ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
+                periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
+                segmentedIo, audit.type, exclusiveProjectedSpecies,
+                densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
+                densityRelaxationBeta0493x7d, params.dt,
+                densityRelaxationRequested0493x7c ? 1 : 0,
+                ws.partial2.data(), audit.fullDomain ? 1 : 0);
+            check_cuda_0400(cudaGetLastError(),
+                            "independent masked projected divergence launch");
+            divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            audit.divAfterProjectedFaceFluxMaxAbs =
+                reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+            const double densityTargetDivSq0493x7c =
+                reduce_host_sum_0400(ws.partial2.data(), cellBlocks);
+            audit.divAfterProjectedFaceFluxRms = std::sqrt(
+                divAfterSq /
+                static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+            audit.densityRelaxationTargetDivRms = std::sqrt(
+                densityTargetDivSq0493x7c /
+                static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+            // Preserve the 0493w5 zero-target meaning.  With x7c enabled these
+            // columns become the residual to the non-zero divergence constraint;
+            // beta=0 is bit-for-bit the historical projected divergence path.
+            audit.divAfterMaxAbs = audit.divAfterProjectedFaceFluxMaxAbs;
+            audit.divAfterRms = audit.divAfterProjectedFaceFluxRms;
+        }
 
         double* denseDUx = ws.speciesDUx0493w5.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
@@ -7734,12 +7771,14 @@ bool apply_independent_masked_species_q6_0493w5(
                         "independent masked duy store");
 
         totalDivBeforeSq += divBeforeSq;
-        totalDivAfterSq += divAfterSq;
-        totalCorrectionSq += correctionSq;
+        if (q6GfDiagnosticsThisStep0493x7k) {
+            totalDivAfterSq += divAfterSq;
+            totalCorrectionSq += correctionSq;
+            maxDivAfter = std::max(maxDivAfter, audit.divAfterProjectedFaceFluxMaxAbs);
+            maxCorrection = std::max(maxCorrection, audit.correctionMaxAbs);
+        }
         totalActiveCells += audit.activeCells;
         maxDivBefore = std::max(maxDivBefore, audit.divBeforeMaxAbs);
-        maxDivAfter = std::max(maxDivAfter, audit.divAfterProjectedFaceFluxMaxAbs);
-        maxCorrection = std::max(maxCorrection, audit.correctionMaxAbs);
         ++diag.speciesQ6IndependentSolves;
         diag.speciesQ6IndependentActiveCells += audit.activeCells;
         audits.push_back(audit);
@@ -7752,12 +7791,16 @@ bool apply_independent_masked_species_q6_0493w5(
     if (totalActiveCells > 0u) {
         const double denom = static_cast<double>(totalActiveCells);
         diag.divBeforeRms = std::sqrt(totalDivBeforeSq / denom);
-        diag.divAfterProjectedFluxRms = std::sqrt(totalDivAfterSq / denom);
-        diag.correctionVelocityRms = std::sqrt(totalCorrectionSq / denom);
+        if (q6GfDiagnosticsThisStep0493x7k) {
+            diag.divAfterProjectedFluxRms = std::sqrt(totalDivAfterSq / denom);
+            diag.correctionVelocityRms = std::sqrt(totalCorrectionSq / denom);
+        }
     }
     diag.divBeforeMaxAbs = maxDivBefore;
-    diag.divAfterProjectedFluxMaxAbs = maxDivAfter;
-    diag.correctionVelocityMaxAbs = maxCorrection;
+    if (q6GfDiagnosticsThisStep0493x7k) {
+        diag.divAfterProjectedFluxMaxAbs = maxDivAfter;
+        diag.correctionVelocityMaxAbs = maxCorrection;
+    }
     if (freeSurfaceMode0493x5a && totalActiveCells == 0u) {
         diag.reason = "free_surface_masked has no active liquid support";
         return false;
@@ -7773,8 +7816,10 @@ bool apply_independent_masked_species_q6_0493w5(
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
         const double* denseDUy = ws.speciesDUy0493w5.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
-        check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
-                        "independent masked corrected counter zero");
+        if (q6GfDiagnosticsThisStep0493x7k) {
+            check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                            "independent masked corrected counter zero");
+        }
         const unsigned char* denseMask = ws.speciesMasks0493w6.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
         if (faceToParticleRt00493x6hB1) {
@@ -7783,7 +7828,7 @@ bool apply_independent_masked_species_q6_0493w5(
             // in the fused resident particle kernel: no dense face copy, no
             // extra allocation and no additional particle pass.
             q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1<<<
-                particleBlocks, threads, pairShared>>>(
+                particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
                 particles, cells, denseMask, denseDUx, denseDUy,
                 ws.r.data(), ws.p.data(), audit.type, nParticles,
                 grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
@@ -7791,40 +7836,44 @@ bool apply_independent_masked_species_q6_0493w5(
                 tgForceActive0493x5a ? 1 : 0,
                 params.taylorGreenForcingAmplitude,
                 params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
-                ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+                ws.partial0.data(), ws.partial1.data(), ws.counter.data(),
+                q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
         } else if (freeSurfaceMode0493x5a && fuseForceKick0493x4b) {
             q6_apply_free_surface_force_and_correction_0493x5a<<<
-                particleBlocks, threads, pairShared>>>(
+                particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
                 particles, cells, denseMask, denseDUx, denseDUy, audit.type,
                 nParticles, params.dt, params.Lx, params.Ly,
                 params.bodyAccelerationX, params.bodyAccelerationY,
                 tgForceActive0493x5a ? 1 : 0,
                 params.taylorGreenForcingAmplitude,
                 params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
-                ws.partial0.data(), ws.partial1.data(), ws.counter.data());
+                ws.partial0.data(), ws.partial1.data(), ws.counter.data(),
+                q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "0493x5a fused free-surface force and Q6 apply launch");
         } else {
             q6_apply_independent_species_correction_0493w5<<<
-                particleBlocks, threads, pairShared>>>(
+                particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
                 particles, cells, denseMask, denseDUx, denseDUy, audit.type,
                 nParticles, ws.partial0.data(), ws.partial1.data(),
-                ws.counter.data());
+                ws.counter.data(), q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "independent masked particle apply launch");
         }
-        audit.momentumX = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
-        audit.momentumY = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
-        unsigned long long corrected = 0ull;
-        check_cuda_0400(cudaMemcpy(&corrected, ws.counter.data(), sizeof(corrected),
-                                   cudaMemcpyDeviceToHost),
-                        "independent masked corrected counter download");
-        audit.correctedParticles = static_cast<std::uint64_t>(corrected);
-        diag.speciesQ6IndependentCorrectedParticles += audit.correctedParticles;
-        totalDpx += audit.momentumX;
-        totalDpy += audit.momentumY;
+        if (q6GfDiagnosticsThisStep0493x7k) {
+            audit.momentumX = reduce_host_sum_0400(ws.partial0.data(), particleBlocks);
+            audit.momentumY = reduce_host_sum_0400(ws.partial1.data(), particleBlocks);
+            unsigned long long corrected = 0ull;
+            check_cuda_0400(cudaMemcpy(&corrected, ws.counter.data(), sizeof(corrected),
+                                       cudaMemcpyDeviceToHost),
+                            "independent masked corrected counter download");
+            audit.correctedParticles = static_cast<std::uint64_t>(corrected);
+            diag.speciesQ6IndependentCorrectedParticles += audit.correctedParticles;
+            totalDpx += audit.momentumX;
+            totalDpy += audit.momentumY;
+        }
     }
     diag.speciesQ6ParticleApplySeconds = seconds_since_0400(tApplyAll);
     diag.applySeconds = diag.speciesQ6ParticleApplySeconds;
@@ -7836,99 +7885,106 @@ bool apply_independent_masked_species_q6_0493w5(
     diag.momentumCorrectionVx = 0.0;
     diag.momentumCorrectionVy = 0.0;
 
-    // 0493w6: rebuild each species mass and momentum directly from the corrected
-    // resident particle state.  No particle or dense cell array is downloaded.
-    // Only the already-established scalar block reductions cross to the host.
-    const int speciesResetBlocks0493w6 = std::max(
-        1, std::min(1024,
-            (std::max(grid.numCells, grid.numCells * speciesCount) + threads - 1) / threads));
-    q6_reset_species_mass_0491c<<<speciesResetBlocks0493w6, threads>>>(species);
-    check_cuda_0400(cudaGetLastError(),
-                    "independent masked post-apply species reset launch");
-    q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
-        particles, cells, species, nParticles);
-    check_cuda_0400(cudaGetLastError(),
-                    "independent masked post-apply species deposit launch");
-    q6_finalize_species_occupancy_0493w5<<<cellBlocks, threads>>>(species);
-    check_cuda_0400(cudaGetLastError(),
-                    "independent masked post-apply occupancy finalize launch");
-
-    double totalAppliedCellDivSq0493w6 = 0.0;
-    double maxAppliedCellDiv0493w6 = 0.0;
-    std::uint64_t totalAppliedActiveCells0493w6 = 0u;
-    for (IndependentMaskedSpeciesAudit0493w5& audit : audits) {
-        if (!(audit.strength > 0.0) || audit.activeCells == 0u) continue;
-        const unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
-            static_cast<std::size_t>(audit.speciesIndex) *
-                static_cast<std::size_t>(grid.numCells);
-        q6_build_independent_rhs_after_mask_0493w5<<<
-            cellBlocks, threads, tripleShared>>>(
-            species, audit.speciesIndex, denseMask0493w6, denseMask0493w6,
-            ws.rhs.data(),
-            ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
-            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
-            xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
-            audit.type, exclusiveProjectedSpecies,
-            nullptr, nullptr, nullptr, nullptr, 0,
-            nullptr, 0.0, params.dt, 0,
-            audit.fullDomain ? 1 : 0);
+    // 0493x7k: the 0493w6 post-application species rebuild existed to measure
+    // the applied-cell divergence.  Positions and masses are unchanged by Q6,
+    // and the general cell moments are rebuilt below for the production path.
+    // Therefore skip this complete diagnostic redeposit between summary steps.
+    // Preserve it when the legacy virial experiment is requested so that path
+    // keeps its historical observation point.
+    const bool postApplyDiagnosticsThisStep0493x7k =
+        q6GfDiagnosticsThisStep0493x7k || virialDensityKickRequested0493x7a;
+    if (postApplyDiagnosticsThisStep0493x7k) {
+        const int speciesResetBlocks0493w6 = std::max(
+            1, std::min(1024,
+                (std::max(grid.numCells, grid.numCells * speciesCount) + threads - 1) / threads));
+        q6_reset_species_mass_0491c<<<speciesResetBlocks0493w6, threads>>>(species);
         check_cuda_0400(cudaGetLastError(),
-                        "independent masked post-apply divergence launch");
-        const double divAppliedSq0493w6 =
-            reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
-        audit.divAfterAppliedCellVelocityMaxAbs =
-            reduce_host_max_0400(ws.partial2.data(), cellBlocks);
-        audit.divAfterAppliedCellVelocityRms = std::sqrt(
-            divAppliedSq0493w6 /
-            static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+                        "independent masked post-apply species reset launch");
+        q6_deposit_species_mass_from_cell_ids_0491c<<<particleBlocks, threads>>>(
+            particles, cells, species, nParticles);
+        check_cuda_0400(cudaGetLastError(),
+                        "independent masked post-apply species deposit launch");
+        q6_finalize_species_occupancy_0493w5<<<cellBlocks, threads>>>(species);
+        check_cuda_0400(cudaGetLastError(),
+                        "independent masked post-apply occupancy finalize launch");
 
-        if (postApplyRegionAuditThisStep0493x6hB0) {
-            const auto tRegion0493x6hB0 = Clock0400::now();
-            check_cuda_0400(cudaMemset(
-                ws.postApplyRegionAccum0493x6hB0.data(), 0,
-                sizeof(Q6PostApplyRegionAccumulator0493x6hB0)),
-                "0493x6h-B0 post-apply region accumulator zero");
-            const bool interfaceGeometryAvailable0493x6hB0 =
-                phaseGeometryResident0493x6c &&
-                ws.phaseGeometryResidentValid0493x6c &&
-                ws.phaseGeometryResidentStep0493x6c == step;
-            q6_postapply_region_stats_0493x6h_b0<<<cellBlocks, threads>>>(
-                species, audit.speciesIndex, denseMask0493w6,
-                interfaceGeometryAvailable0493x6hB0
-                    ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
-                interfaceGeometryAvailable0493x6hB0 ? 1 : 0,
-                ws.postApplyRegionAccum0493x6hB0.data(),
+        double totalAppliedCellDivSq0493w6 = 0.0;
+        double maxAppliedCellDiv0493w6 = 0.0;
+        std::uint64_t totalAppliedActiveCells0493w6 = 0u;
+        for (IndependentMaskedSpeciesAudit0493w5& audit : audits) {
+            if (!(audit.strength > 0.0) || audit.activeCells == 0u) continue;
+            const unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
+                static_cast<std::size_t>(audit.speciesIndex) *
+                    static_cast<std::size_t>(grid.numCells);
+            q6_build_independent_rhs_after_mask_0493w5<<<
+                cellBlocks, threads, tripleShared>>>(
+                species, audit.speciesIndex, denseMask0493w6, denseMask0493w6,
+                ws.rhs.data(),
+                ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
                 grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
-                xLowFlux, yLowFlux, segmentedIo,
-                audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0,
-                q6_wall_like_0409(params.bcLeft) ? 1 : 0,
-                q6_wall_like_0409(params.bcRight) ? 1 : 0,
-                q6_wall_like_0409(params.bcBottom) ? 1 : 0,
-                q6_wall_like_0409(params.bcTop) ? 1 : 0);
+                xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
+                audit.type, exclusiveProjectedSpecies,
+                nullptr, nullptr, nullptr, nullptr, 0,
+                nullptr, 0.0, params.dt, 0,
+                audit.fullDomain ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
-                            "0493x6h-B0 post-apply region stats launch");
-            Q6PostApplyRegionAccumulator0493x6hB0 regionAccum0493x6hB0{};
-            check_cuda_0400(cudaMemcpy(
-                &regionAccum0493x6hB0, ws.postApplyRegionAccum0493x6hB0.data(),
-                sizeof(regionAccum0493x6hB0), cudaMemcpyDeviceToHost),
-                "0493x6h-B0 post-apply region accumulator download");
-            append_q6_postapply_region_audit_0493x6h_b0(
-                params, step, time, audit, regionAccum0493x6hB0,
-                interfaceGeometryAvailable0493x6hB0,
-                seconds_since_0400(tRegion0493x6hB0));
-        }
+                            "independent masked post-apply divergence launch");
+            const double divAppliedSq0493w6 =
+                reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+            audit.divAfterAppliedCellVelocityMaxAbs =
+                reduce_host_max_0400(ws.partial2.data(), cellBlocks);
+            audit.divAfterAppliedCellVelocityRms = std::sqrt(
+                divAppliedSq0493w6 /
+                static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
 
-        totalAppliedCellDivSq0493w6 += divAppliedSq0493w6;
-        totalAppliedActiveCells0493w6 += audit.activeCells;
-        maxAppliedCellDiv0493w6 = std::max(
-            maxAppliedCellDiv0493w6, audit.divAfterAppliedCellVelocityMaxAbs);
+            if (postApplyRegionAuditThisStep0493x6hB0) {
+                const auto tRegion0493x6hB0 = Clock0400::now();
+                check_cuda_0400(cudaMemset(
+                    ws.postApplyRegionAccum0493x6hB0.data(), 0,
+                    sizeof(Q6PostApplyRegionAccumulator0493x6hB0)),
+                    "0493x6h-B0 post-apply region accumulator zero");
+                const bool interfaceGeometryAvailable0493x6hB0 =
+                    phaseGeometryResident0493x6c &&
+                    ws.phaseGeometryResidentValid0493x6c &&
+                    ws.phaseGeometryResidentStep0493x6c == step;
+                q6_postapply_region_stats_0493x6h_b0<<<cellBlocks, threads>>>(
+                    species, audit.speciesIndex, denseMask0493w6,
+                    interfaceGeometryAvailable0493x6hB0
+                        ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+                    interfaceGeometryAvailable0493x6hB0 ? 1 : 0,
+                    ws.postApplyRegionAccum0493x6hB0.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                    xLowFlux, yLowFlux, segmentedIo,
+                    audit.type, exclusiveProjectedSpecies, audit.fullDomain ? 1 : 0,
+                    q6_wall_like_0409(params.bcLeft) ? 1 : 0,
+                    q6_wall_like_0409(params.bcRight) ? 1 : 0,
+                    q6_wall_like_0409(params.bcBottom) ? 1 : 0,
+                    q6_wall_like_0409(params.bcTop) ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x6h-B0 post-apply region stats launch");
+                Q6PostApplyRegionAccumulator0493x6hB0 regionAccum0493x6hB0{};
+                check_cuda_0400(cudaMemcpy(
+                    &regionAccum0493x6hB0, ws.postApplyRegionAccum0493x6hB0.data(),
+                    sizeof(regionAccum0493x6hB0), cudaMemcpyDeviceToHost),
+                    "0493x6h-B0 post-apply region accumulator download");
+                append_q6_postapply_region_audit_0493x6h_b0(
+                    params, step, time, audit, regionAccum0493x6hB0,
+                    interfaceGeometryAvailable0493x6hB0,
+                    seconds_since_0400(tRegion0493x6hB0));
+            }
+
+            totalAppliedCellDivSq0493w6 += divAppliedSq0493w6;
+            totalAppliedActiveCells0493w6 += audit.activeCells;
+            maxAppliedCellDiv0493w6 = std::max(
+                maxAppliedCellDiv0493w6, audit.divAfterAppliedCellVelocityMaxAbs);
+        }
+        if (totalAppliedActiveCells0493w6 > 0u) {
+            diag.divAfterCellVelocityRms = std::sqrt(
+                totalAppliedCellDivSq0493w6 /
+                static_cast<double>(totalAppliedActiveCells0493w6));
+        }
+        diag.divAfterCellVelocityMaxAbs = maxAppliedCellDiv0493w6;
     }
-    if (totalAppliedActiveCells0493w6 > 0u) {
-        diag.divAfterCellVelocityRms = std::sqrt(
-            totalAppliedCellDivSq0493w6 /
-            static_cast<double>(totalAppliedActiveCells0493w6));
-    }
-    diag.divAfterCellVelocityMaxAbs = maxAppliedCellDiv0493w6;
 
     // 0493x7a: prepare the weak virial density-restoring field only after the
     // established q6Applied diagnostic has been evaluated.  The density itself
@@ -7987,7 +8043,9 @@ bool apply_independent_masked_species_q6_0493w5(
             params, step, time, dx, dy, virialAudit0493x7a);
     }
 
-    append_independent_masked_species_audit_0493w5(params, step, time, audits);
+    if (q6GfDiagnosticsThisStep0493x7k) {
+        append_independent_masked_species_audit_0493w5(params, step, time, audits);
+    }
     diag.speciesQ6IndependentMasked = true;
     diag.speciesQ6IndependentDisabledCorrectionMaxAbs = 0.0;
     diag.speciesQ6BarycentricResidualMaxAbs = 0.0;
@@ -8376,8 +8434,11 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
         diag.reason = speciesQ6FreeSurfaceMasked0493x5a
             ? "ok_free_surface_masked_0493x5a" : "ok";
         diag.totalSeconds = seconds_since_0400(tTotal);
-        append_species_q6_resident_audit_0491e(
-            params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);
+        if (!speciesQ6FreeSurfaceMasked0493x5a ||
+            q6_g_f_diagnostics_this_step_0493x7k(params, step)) {
+            append_species_q6_resident_audit_0491e(
+                params, step, time, static_cast<int>(params.speciesDefinitions.size()), diag);
+        }
         return diag;
     }
 
@@ -8721,14 +8782,28 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     check_cuda_0400(cudaGetLastError(), "thermostat kinetic launch");
     diag.kineticSeconds = seconds_since_0400(t0);
 
+    // 0493x7l: the resident thermostat is a physical CUDA stage every time it is
+    // due, but its 0491f telemetry is not.  On Q6-g-f production steps, keep
+    // deposit/kinetic/scale/apply unchanged and collect the expensive host-side
+    // thermostat audit only at the same first-step/summary cadence as x7k.
+    const bool q6GfThermostat0493x7l =
+        params.speciesQ6Enable && params.speciesQ6Mode == "free_surface_masked";
+    const bool collectThermostatDiagnostics0493x7l =
+        !q6GfThermostat0493x7l ||
+        q6_g_f_diagnostics_this_step_0493x7k(params, step);
+
     t0 = Clock0400::now();
     const int minParticles = std::max(1, params.thermostatMinParticles);
     const double epsilon = std::max(0.0, params.thermostatEpsilon);
     q6_thermostat_scale_0400<<<cellBlocks, threads, pairShared>>>(
         cells, targetKBT, minParticles, epsilon, ws.partial0.data(), ws.partial1.data());
     check_cuda_0400(cudaGetLastError(), "thermostat scale launch");
-    const double totalKBefore = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-    const double targetKTotal = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+    double totalKBefore0493x7l = 0.0;
+    double targetKTotal0493x7l = 0.0;
+    if (collectThermostatDiagnostics0493x7l) {
+        totalKBefore0493x7l = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+        targetKTotal0493x7l = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+    }
     diag.scaleSeconds = seconds_since_0400(t0);
 
     t0 = Clock0400::now();
@@ -8736,64 +8811,72 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     check_cuda_0400(cudaGetLastError(), "thermostat apply launch");
     diag.applySeconds = seconds_since_0400(t0);
 
-    t0 = Clock0400::now();
-    std::vector<std::uint32_t> hostCount(static_cast<std::size_t>(grid.numCells), 0u);
-    std::vector<double> hostKinetic(static_cast<std::size_t>(grid.numCells), 0.0);
-    std::vector<double> hostScale(static_cast<std::size_t>(grid.numCells), 1.0);
-    unsigned long long fluidCounter = 0ull;
-    check_cuda_0400(cudaMemcpy(hostCount.data(), cells.count,
-                               static_cast<std::size_t>(grid.numCells) * sizeof(std::uint32_t),
-                               cudaMemcpyDeviceToHost),
-                    "thermostat count download");
-    check_cuda_0400(cudaMemcpy(hostKinetic.data(), cells.cellKinetic,
-                               static_cast<std::size_t>(grid.numCells) * sizeof(double),
-                               cudaMemcpyDeviceToHost),
-                    "thermostat kinetic download");
-    check_cuda_0400(cudaMemcpy(hostScale.data(), cells.cellScale,
-                               static_cast<std::size_t>(grid.numCells) * sizeof(double),
-                               cudaMemcpyDeviceToHost),
-                    "thermostat scale download");
-    check_cuda_0400(cudaMemcpy(&fluidCounter, cells.fluidCounter, sizeof(unsigned long long),
-                               cudaMemcpyDeviceToHost),
-                    "thermostat fluid counter download");
-    diag.diagnosticsDownloadSeconds = seconds_since_0400(t0);
+    if (collectThermostatDiagnostics0493x7l) {
+        t0 = Clock0400::now();
+        std::vector<std::uint32_t> hostCount(static_cast<std::size_t>(grid.numCells), 0u);
+        std::vector<double> hostKinetic(static_cast<std::size_t>(grid.numCells), 0.0);
+        std::vector<double> hostScale(static_cast<std::size_t>(grid.numCells), 1.0);
+        unsigned long long fluidCounter = 0ull;
+        check_cuda_0400(cudaMemcpy(hostCount.data(), cells.count,
+                                   static_cast<std::size_t>(grid.numCells) * sizeof(std::uint32_t),
+                                   cudaMemcpyDeviceToHost),
+                        "thermostat count download");
+        check_cuda_0400(cudaMemcpy(hostKinetic.data(), cells.cellKinetic,
+                                   static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                                   cudaMemcpyDeviceToHost),
+                        "thermostat kinetic download");
+        check_cuda_0400(cudaMemcpy(hostScale.data(), cells.cellScale,
+                                   static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                                   cudaMemcpyDeviceToHost),
+                        "thermostat scale download");
+        check_cuda_0400(cudaMemcpy(&fluidCounter, cells.fluidCounter, sizeof(unsigned long long),
+                                   cudaMemcpyDeviceToHost),
+                        "thermostat fluid counter download");
+        diag.diagnosticsDownloadSeconds = seconds_since_0400(t0);
 
-    double scaleSum = 0.0;
-    double scaleMin = std::numeric_limits<double>::infinity();
-    double scaleMax = 0.0;
-    std::uint64_t dofTotal = 0u;
-    std::uint64_t cellsRescaled = 0u;
-    std::uint64_t particlesRescaled = 0u;
-    for (int c = 0; c < grid.numCells; ++c) {
-        const std::uint32_t count = hostCount[static_cast<std::size_t>(c)];
-        const double K = hostKinetic[static_cast<std::size_t>(c)];
-        const double scale = hostScale[static_cast<std::size_t>(c)];
-        if (count < static_cast<std::uint32_t>(minParticles) || !(K > epsilon)) {
-            continue;
+        double scaleSum = 0.0;
+        double scaleMin = std::numeric_limits<double>::infinity();
+        double scaleMax = 0.0;
+        std::uint64_t dofTotal = 0u;
+        std::uint64_t cellsRescaled = 0u;
+        std::uint64_t particlesRescaled = 0u;
+        for (int c = 0; c < grid.numCells; ++c) {
+            const std::uint32_t count = hostCount[static_cast<std::size_t>(c)];
+            const double K = hostKinetic[static_cast<std::size_t>(c)];
+            const double scale = hostScale[static_cast<std::size_t>(c)];
+            if (count < static_cast<std::uint32_t>(minParticles) || !(K > epsilon)) {
+                continue;
+            }
+            cellsRescaled += 1u;
+            particlesRescaled += static_cast<std::uint64_t>(count);
+            dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
+            scaleSum += scale;
+            scaleMin = std::min(scaleMin, scale);
+            scaleMax = std::max(scaleMax, scale);
         }
-        cellsRescaled += 1u;
-        particlesRescaled += static_cast<std::uint64_t>(count);
-        dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
-        scaleSum += scale;
-        scaleMin = std::min(scaleMin, scale);
-        scaleMax = std::max(scaleMax, scale);
+        diag.thermostat.applied = cellsRescaled > 0u;
+        diag.thermostat.cellsRescaled = cellsRescaled;
+        diag.thermostat.particlesRescaled = particlesRescaled;
+        diag.thermostat.kBTBefore =
+            dofTotal > 0u ? (2.0 * totalKBefore0493x7l / static_cast<double>(dofTotal)) : 0.0;
+        diag.thermostat.kBTAfter =
+            dofTotal > 0u ? (2.0 * targetKTotal0493x7l / static_cast<double>(dofTotal)) : 0.0;
+        diag.thermostat.scaleMean =
+            cellsRescaled > 0u ? scaleSum / static_cast<double>(cellsRescaled) : 1.0;
+        diag.thermostat.scaleMin = cellsRescaled > 0u ? scaleMin : 1.0;
+        diag.thermostat.scaleMax = cellsRescaled > 0u ? scaleMax : 1.0;
+        (void)fluidCounter;
     }
-    diag.thermostat.applied = cellsRescaled > 0u;
-    diag.thermostat.cellsRescaled = cellsRescaled;
-    diag.thermostat.particlesRescaled = particlesRescaled;
-    diag.thermostat.kBTBefore = dofTotal > 0u ? (2.0 * totalKBefore / static_cast<double>(dofTotal)) : 0.0;
-    diag.thermostat.kBTAfter = dofTotal > 0u ? (2.0 * targetKTotal / static_cast<double>(dofTotal)) : 0.0;
-    diag.thermostat.scaleMean = cellsRescaled > 0u ? scaleSum / static_cast<double>(cellsRescaled) : 1.0;
-    diag.thermostat.scaleMin = cellsRescaled > 0u ? scaleMin : 1.0;
-    diag.thermostat.scaleMax = cellsRescaled > 0u ? scaleMax : 1.0;
-    (void)fluidCounter;
+
     state.NactiveFluid = nParticles;
     cuda_shared_particle_state_0251_mark_fresh("cuda_q6_resident_thermostat_0400");
     diag.handled = true;
     diag.reason = "ok";
     diag.totalSeconds = seconds_since_0400(tTotal);
-    append_q6_resident_thermostat_audit_0491f(
-        params, step, targetKBT, cellIdH2DEntries0491f, diag);
+    if (collectThermostatDiagnostics0493x7l) {
+        append_q6_resident_thermostat_audit_0491f(
+            params, step, targetKBT, cellIdH2DEntries0491f, diag);
+    }
     return diag;
 }
 
