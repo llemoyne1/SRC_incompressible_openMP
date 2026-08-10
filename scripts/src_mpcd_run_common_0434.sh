@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Common helpers for homogeneous SRC/MPCD CUDA run scripts, 0434c + 0492.
 # Source this file from scripts/run_0434_*.sh.  It centralizes:
-#   - INTEG_PATH selection: src | src-resampling | src-q6 | src-q6-resampling
+#   - INTEG_PATH selection: src | src-resampling | src-q6 | src-q6-resampling | src-q6-g-f
 #   - CUDA resident/Q6/resampling flags
 #   - gamma-relative resampling thresholds
 #   - livevis + 0433a WYSIWYR filtered recording controls
@@ -15,7 +15,26 @@ suite_truthy_0434() {
 }
 
 suite_path_has_q6_0434() {
-  case "${1:-src}" in src-q6|q6|src-q6-resampling|q6-resampling) return 0 ;; *) return 1 ;; esac
+  case "${1:-src}" in
+    src-q6|q6|src-q6-resampling|q6-resampling|src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 0493x7h comparison mode.  This is deliberately distinct from src-q6:
+# src-q6 retains the previously validated Q6 path, while src-q6-g-f selects
+# the current free-surface/density-restoration Q6-g-f architecture.
+suite_path_has_q6_g_f_0493x7h() {
+  case "${1:-src}" in src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;; *) return 1 ;; esac
+}
+
+suite_mode_set_has_q6_g_f_0493x7h() {
+  local mode
+  while IFS= read -r mode; do
+    [[ -n "$mode" ]] || continue
+    if suite_path_has_q6_g_f_0493x7h "$mode"; then return 0; fi
+  done < <(suite_mode_list_0434)
+  return 1
 }
 
 suite_path_has_resampling_0434() {
@@ -65,7 +84,7 @@ suite_species_resident_mode_0492a() {
 
 suite_validate_path_0434() {
   case "${1:-src}" in
-    src|classic|src-resampling|resampling|src-q6|q6|src-q6-resampling|q6-resampling) return 0 ;;
+    src|classic|src-resampling|resampling|src-q6|q6|src-q6-resampling|q6-resampling|src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;;
     *) echo "[0434-suite] ERROR unsupported INTEG_PATH/RUN_MODE=$1" >&2; exit 2 ;;
   esac
 }
@@ -194,6 +213,21 @@ suite_clear_cuda_flags_0434() {
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
   export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=0
   export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+  # 0493x7h: clear every Q6-g-f opt-in so a preceding src-q6-g-f run cannot
+  # contaminate the legacy src/src-q6 comparison that follows it.
+  export MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C=0
+  export MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D=0
+  export MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E=0
+  export MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos
+  export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=0
+  export MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A=0
+  export MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B=0
+  export MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0=0
+  export MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1=0
   export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
   export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
 }
@@ -272,6 +306,28 @@ suite_export_cuda_flags_0434() {
     export MPCD_CUDA_Q6_RESIDENT_0400=0
     export MPCD_CUDA_Q6_RESIDENT_STRICT_0400=0
     export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+  fi
+
+  if suite_path_has_q6_g_f_0493x7h "$mode"; then
+    export MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C=1
+    export MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D=0
+    export MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E=1
+    export MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F=1
+    export MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A=0
+    export MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B=0
+    export MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0=0
+    export MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1=1
+
+    if suite_truthy_0434 "${Q6_GF_HAS_GAS_PHASE:-0}"; then
+      local cell_area gas_pressure_reference
+      cell_area="$(awk -v lx="$Lx" -v ly="$Ly" -v nx="$NX" -v ny="$NY" 'BEGIN{printf "%.17g",(lx/nx)*(ly/ny)}')"
+      gas_pressure_reference="${Q6_GF_GAS_PRESSURE_REFERENCE:-$(awk -v g="$GAMMA" -v t="$KBT" -v a="$cell_area" 'BEGIN{printf "%.17g",g*t/a}')}"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=1
+      export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos
+      export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G="$gas_pressure_reference"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G="$gas_pressure_reference"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=1
+    fi
   fi
 
   if suite_path_has_resampling_0434 "$mode"; then
@@ -441,6 +497,59 @@ suite_export_livevis_0434() {
   export LIVE_PROGRESS
 }
 
+# 0493x7h writes only parameters that distinguish Q6-g-f from the historical
+# src-q6 path.  Existing run_ok physics stays untouched in src and src-q6.
+suite_write_q6_g_f_params_0493x7h() {
+  local mode=$1
+  suite_path_has_q6_g_f_0493x7h "$mode" || return 0
+
+  local tau="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
+  local min_fill="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
+  cat <<PARAMS
+q6ForceProjectionMode = prestream_single_fused
+projectionMomentumCorrectionEnable = false
+virialDensityKickEnable = false
+kVirial = 0.0
+betaEOS = 0.0
+virialMomentumCorrectionEnable = false
+q6DensityRelaxationBeta = 0.0
+q6DensityRelaxationTime = ${tau}
+keepMeanFlowEnable = false
+PARAMS
+
+  if suite_truthy_0434 "${Q6_GF_EXTERNAL_SPECIES:-0}"; then
+    # The caller owns the species registry (two-phase injection/dam-break).
+    # Override only the Q6 mode and support threshold.
+    cat <<PARAMS
+speciesQ6Enable = true
+speciesQ6Mode = free_surface_masked
+speciesQ6MinOccupancyFraction = ${min_fill}
+PARAMS
+    return 0
+  fi
+
+  local q6_type="${Q6_GF_SINGLE_PHASE_TYPE:-${BACKGROUND_TYPE:-0}}"
+  local q6_mass="${Q6_GF_SINGLE_PHASE_PARTICLE_MASS:-${PARTICLE_MASS}}"
+  local q6_ref
+  q6_ref="$(awk -v g="$GAMMA" -v m="$q6_mass" 'BEGIN{printf "%.17g",g*m}')"
+  cat <<PARAMS
+speciesRegistryEnable = true
+speciesCount = 1
+species0 = ${q6_type} q6_g_f_liquid liquid 1.0 1.0 ${q6_ref}
+species0ResamplingEnable = false
+speciesRequireRegisteredTypes = true
+speciesDiagnosticsEnable = ${Q6_GF_SPECIES_DIAGNOSTICS_ENABLE:-false}
+speciesDiagnosticsFilename = species_runtime_q6_g_f_0493x7h.csv
+speciesCellDiagnosticsEnable = false
+speciesQ6Enable = true
+speciesQ6Mode = free_surface_masked
+speciesQ6Sensitivity = 1.0
+speciesQ6FallbackMode = common
+speciesQ6ComparisonTolerance = 1.0e-11
+speciesQ6MinOccupancyFraction = ${min_fill}
+PARAMS
+}
+
 suite_write_common_params_0434() {
   local mode=$1
   local path_resampling species_resampling=false
@@ -538,10 +647,15 @@ dumpRoleFilter = ${DUMP_ROLE_FILTER}
 initialInactiveSlots = ${INACTIVE_SLOTS}
 numThreads = ${THREADS}
 PARAMS
+  suite_write_q6_g_f_params_0493x7h "$mode"
 }
 
 suite_write_darcy_params_0434() {
-  local chi=$1
+  local chi=$1 mode="${2:-${SUITE_ACTIVE_MODE_0434:-src}}"
+  local darcy_initial_deactivate="$DARCY_INITIAL_DEACTIVATE_BELOW_CHI"
+  if suite_path_has_q6_g_f_0493x7h "$mode" || suite_truthy_0434 "${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"; then
+    darcy_initial_deactivate=-1
+  fi
   cat <<PARAMS
 darcyBrinkmanEnable = true
 darcyChiMode = file
@@ -557,7 +671,7 @@ darcyUSolidY = ${DARCY_USOLID_Y}
 darcyCostEvery = ${DARCY_COST_EVERY}
 darcyCostFilename = darcy_cost_0343.csv
 darcyThreadsPerBlock = ${DARCY_THREADS_PER_BLOCK}
-darcyInitialDeactivateBelowChi = ${DARCY_INITIAL_DEACTIVATE_BELOW_CHI}
+darcyInitialDeactivateBelowChi = ${darcy_initial_deactivate}
 darcyBrinkmanForcingMode = ${DARCY_BRINKMAN_FORCING_MODE}
 darcyChiCollisionVpEnable = ${DARCY_CHI_COLLISION_VP_ENABLE}
 darcyChiCollisionVpMode = ${DARCY_CHI_COLLISION_VP_MODE}
@@ -596,6 +710,24 @@ suite_generate_case_0434() {
     --naca-chord "$NACA_CHORD" --naca-cx "$NACA_CX" --naca-cy "$NACA_CY" --naca-alpha-deg "$NACA_ALPHA_DEG" --naca-thickness "$NACA_THICKNESS"
 }
 
+# 0493x7h Darcy comparison generator.  Historical src/src-q6 keep the runner's
+# original solid-particle initialization.  Q6-g-f needs a filled fictitious
+# Brinkman domain so chi does not create a false liquid/gas free surface.
+# RUN_OK_DARCY_COMMON_FILLED_STATE=1 optionally forces the same filled state in
+# every mode for a second, projection-isolation comparison.
+suite_generate_case_for_mode_0493x7h() {
+  local mode=$1 state=$2 chi=${3:-}
+  local saved_skip_cells="$SKIP_SOLID_CELLS"
+  local saved_skip_particles="$SKIP_SOLID_PARTICLES"
+  if [[ -n "$chi" ]] && { suite_path_has_q6_g_f_0493x7h "$mode" || suite_truthy_0434 "${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"; }; then
+    SKIP_SOLID_CELLS=false
+    SKIP_SOLID_PARTICLES=false
+  fi
+  suite_generate_case_0434 "$state" "$chi"
+  SKIP_SOLID_CELLS="$saved_skip_cells"
+  SKIP_SOLID_PARTICLES="$saved_skip_particles"
+}
+
 suite_preflight_run_ok_0492() {
   local params=$1
   local mode="${SUITE_ACTIVE_MODE_0434:-unknown}"
@@ -606,6 +738,23 @@ suite_preflight_run_ok_0492() {
     [[ -f "$LIVE_VIS_CONTROL_FILE" ]] || { echo "[0492-run-ok] ERROR missing LiveVis control: $LIVE_VIS_CONTROL_FILE" >&2; return 2; }
     grep -Eq '^[[:space:]]*field[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis field missing" >&2; return 2; }
     grep -Eq '^[[:space:]]*particleTypeFilter[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis particleTypeFilter missing" >&2; return 2; }
+  fi
+
+  if suite_path_has_q6_g_f_0493x7h "$mode"; then
+    [[ "${MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C:-0}" == 1 &&
+       "${MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F:-0}" == 1 &&
+       "${MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1:-0}" == 1 ]] || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires x6c+x6f+B1 resident flags" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6ForceProjectionMode[[:space:]]*=[[:space:]]*prestream_single_fused([[:space:]]|$)' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires q6ForceProjectionMode=prestream_single_fused" >&2; return 2; }
+    grep -Eq '^[[:space:]]*speciesQ6Mode[[:space:]]*=[[:space:]]*free_surface_masked([[:space:]]|$)' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires speciesQ6Mode=free_surface_masked" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTime[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f density-restoration time missing" >&2; return 2; }
+    if grep -Eq '^[[:space:]]*darcyBrinkmanEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params"; then
+      grep -Eq '^[[:space:]]*darcyInitialDeactivateBelowChi[[:space:]]*=[[:space:]]*-[0-9.eE+]+' "$params" || {
+        echo "[0493x7h-run-ok] ERROR Q6-g-f Darcy requires darcyInitialDeactivateBelowChi<0" >&2; return 2; }
+    fi
   fi
 
   if [[ "$topology" == closed_box ]]; then
@@ -727,7 +876,7 @@ suite_run_binary_0434() {
 suite_write_env_file_0434() {
   local file=$1 mode=$2
   mkdir -p "$(dirname "$file")"
-  env | grep -E '^(MPCD_CUDA_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|LIVE_PROGRESS=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
+  env | grep -E '^(MPCD_CUDA_|MPCD_Q6_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|LIVE_PROGRESS=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
   cat >> "$file" <<META
 mode=${mode}
 GUARD_NMIN=${GUARD_NMIN}
@@ -744,6 +893,12 @@ SPECIES_RESAMPLING_ENABLE=${SPECIES_RESAMPLING_ENABLE}
 SPECIES_RESIDENT_MODE=${SPECIES_RESIDENT_MODE}
 SPECIES_RESIDENT_MODE_RESOLVED=$(suite_species_resident_mode_0492a "$mode" "${SUITE_ACTIVE_TOPOLOGY_0434:-${TOPOLOGY:-unknown}}")
 SPECIES_VALIDATION_MATERIALIZE_EVERY=${SPECIES_VALIDATION_MATERIALIZE_EVERY}
+Q6_GF_ACTIVE=$(suite_path_has_q6_g_f_0493x7h "$mode" && printf 1 || printf 0)
+Q6_GF_DENSITY_RELAXATION_TIME=${Q6_GF_DENSITY_RELAXATION_TIME}
+Q6_GF_MIN_FILL_FRACTION=${Q6_GF_MIN_FILL_FRACTION}
+Q6_GF_HAS_GAS_PHASE=${Q6_GF_HAS_GAS_PHASE}
+Q6_GF_EXTERNAL_SPECIES=${Q6_GF_EXTERNAL_SPECIES}
+RUN_OK_DARCY_COMMON_FILLED_STATE=${RUN_OK_DARCY_COMMON_FILLED_STATE}
 META
 }
 
@@ -787,6 +942,11 @@ suite_defaults_common_0434() {
   PROJECTION_MOMENTUM_CORRECTION_ENABLE="${PROJECTION_MOMENTUM_CORRECTION_ENABLE:-true}"
   Q6_PROJECTION_STRENGTH="${Q6_PROJECTION_STRENGTH:-1.0}"
   Q6_STRICT="${Q6_STRICT:-1}"
+  Q6_GF_DENSITY_RELAXATION_TIME="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
+  Q6_GF_MIN_FILL_FRACTION="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
+  Q6_GF_HAS_GAS_PHASE="${Q6_GF_HAS_GAS_PHASE:-0}"
+  Q6_GF_EXTERNAL_SPECIES="${Q6_GF_EXTERNAL_SPECIES:-0}"
+  RUN_OK_DARCY_COMMON_FILLED_STATE="${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"
 
   ROTATION_ANGLE="${ROTATION_ANGLE:-1.5}"
   RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"

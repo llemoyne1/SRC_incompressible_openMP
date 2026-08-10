@@ -21,10 +21,10 @@ BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_li
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
-# Path choice: set RUN_MODES/MODES="src" or INTEG_PATH=src-q6-resampling.
-# Default runs one robust path selected below. To compare all paths, set:
-#   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src-q6-resampling}}}}"
+# Path choice: RUN_MODES defaults to the 0493x7h three-way comparison.
+# 0493x7h comparison default: historical SRC, previous SRC-Q6, current Q6-g-f.
+# Resampling paths remain available through an explicit RUN_MODES override.
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6 src-q6-g-f}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-Ux}"

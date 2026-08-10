@@ -8,6 +8,7 @@
 #include "open_boundary_segments.h"
 
 #include <cuda_runtime.h>
+#include <cooperative_groups.h>
 #include <iostream>
 
 #include <algorithm>
@@ -65,6 +66,14 @@ bool cuda_q6_single_block_cg_0407_enabled(int numCells) {
 
 bool cuda_q6_warm_start_0408_requested() {
     return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_WARM_START_0408"));
+}
+
+// 0493x7j: Q6-g-f must remain CUDA-resident through the elliptic solve.
+// The legacy masked CG is retained only as an explicit/debug fallback or on
+// devices that cannot launch a cooperative grid.  Default is ON.
+bool cuda_q6_g_f_resident_cg_0493x7j_requested() {
+    const char* value = std::getenv("MPCD_Q6_G_F_RESIDENT_CG_0493X7J");
+    return value == nullptr || *value == '\0' || truthy_0400(value);
 }
 
 bool cuda_q6_segmented_io_0409_requested() {
@@ -390,6 +399,21 @@ struct VirialDensityAccumulator0493x7a {
     double kickMassSq = 0.0;
 };
 
+// 0493x7j: O(1) state shared by all blocks of the cooperative masked CG.
+// Per-block reduction scratch continues to reuse partial0/partial1.
+struct Q6GfResidentCgState0493x7j {
+    double rhsSum = 0.0;
+    double divBeforeSq = 0.0;
+    double divBeforeMaxAbs = 0.0;
+    double rr = 0.0;
+    double rhsNormSafe = 1.0;
+    double residualRel = 0.0;
+    double reduce0 = 0.0;
+    double reduce1 = 0.0;
+    int iterations = 0;
+    int status = 0; // 1 converged, 0 max-iteration/not-yet, -1 non-positive pAp
+};
+
 const char* q6_postapply_region_name_0493x6h_b0(int region) {
     switch (region) {
         case Q6PostApplyBulk0493x6hB0: return "bulk";
@@ -440,6 +464,10 @@ struct IndependentMaskedSpeciesAudit0493w5 {
     // respect to the active projection constraint; for beta=0 this is exactly
     // the historical projected divergence.
     double densityRelaxationTargetDivRms = 0.0;
+    // 0493x7j: audit only; the production default is one cooperative,
+    // device-resident CG kernel for the complete Q6-g-f solve.
+    int residentCg0493x7j = 0;
+    int residentCgBlocks0493x7j = 0;
 };
 
 void append_independent_masked_species_audit_0493w5(
@@ -467,7 +495,8 @@ void append_independent_masked_species_audit_0493w5(
                "divAfterProjectedFaceFluxMaxAbs,divAfterAppliedCellVelocityRms,"
                "divAfterAppliedCellVelocityMaxAbs,correctionRms,correctionMaxAbs,"
                "momentumX,momentumY,q6DensityRelaxationBeta,"
-               "q6DensityRelaxationTime,densityRelaxationTargetDivRms\n";
+               "q6DensityRelaxationTime,densityRelaxationTargetDivRms,"
+               "residentCg0493x7j,residentCgBlocks0493x7j\n";
     }
     for (const IndependentMaskedSpeciesAudit0493w5& r : rows) {
         out << std::setprecision(17)
@@ -492,7 +521,8 @@ void append_independent_masked_species_audit_0493w5(
             << (densityRelaxationBeta0493x7d > 0.0
                     ? params.dt / densityRelaxationBeta0493x7d
                     : 0.0) << ','
-            << r.densityRelaxationTargetDivRms << '\n';
+            << r.densityRelaxationTargetDivRms << ','
+            << r.residentCg0493x7j << ',' << r.residentCgBlocks0493x7j << '\n';
     }
 }
 
@@ -1312,6 +1342,7 @@ struct ResidentWorkspace0400 {
     // for the virial kick and only adds this O(1) resident accumulator.
     DeviceBuffer0400<VirialDensityAccumulator0493x7a>
         virialDensityAccum0493x7a;
+    DeviceBuffer0400<Q6GfResidentCgState0493x7j> q6GfResidentCgState0493x7j;
     bool phaseInterfaceStencilValid0493x6f = false;
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
@@ -1347,6 +1378,7 @@ struct ResidentWorkspace0400 {
         phaseGeometryAccum0493x6b.ensure(1u);
         phaseGeometryResidentAccum0493x6c.ensure(1u);
         phaseInterfaceStencilAccum0493x6f.ensure(1u);
+        q6GfResidentCgState0493x7j.ensure(1u);
         partial0.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial1.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial2.ensure(static_cast<std::size_t>(std::max(1, blocks)));
@@ -5170,6 +5202,487 @@ __global__ void q6_cg_single_block_0407(double* rhs,
     }
 }
 
+// 0493x7j -------------------------------------------------------------------
+// Fully device-resident CG for Q6-g-f.  The former free_surface_masked loop
+// launched several kernels and copied pAp / r.r to the host at every iteration.
+// This cooperative kernel keeps the complete Krylov recurrence on the GPU and
+// synchronizes blocks with cooperative_groups::grid_group.  It has two uniform
+// modes:
+//   fullDomain=1 : exact standard FV Laplacian, including the historical
+//                  25-iteration null-space mean removal;
+//   fullDomain=0 : x6f prepared pressure mask + east/north face coefficients.
+// No Q6-g-f physics, RHS, tolerance, interface coefficient or application rule
+// is changed by this kernel.
+
+__device__ __forceinline__ double q6_warp_sum_0493x7j(double v) {
+    constexpr unsigned int mask = 0xffffffffu;
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        v += __shfl_down_sync(mask, v, offset);
+    }
+    return v;
+}
+
+__device__ __forceinline__ double q6_block_sum_0493x7j(double v, double* warpSums) {
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    const int warps = (blockDim.x + 31) >> 5;
+    v = q6_warp_sum_0493x7j(v);
+    if (lane == 0) warpSums[warp] = v;
+    __syncthreads();
+    double total = (warp == 0 && lane < warps) ? warpSums[lane] : 0.0;
+    if (warp == 0) total = q6_warp_sum_0493x7j(total);
+    __syncthreads();
+    return total;
+}
+
+__device__ __forceinline__ double q6_warp_max_0493x7j(double v) {
+    constexpr unsigned int mask = 0xffffffffu;
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        v = fmax(v, __shfl_down_sync(mask, v, offset));
+    }
+    return v;
+}
+
+__device__ __forceinline__ double q6_block_max_0493x7j(double v, double* warpValues) {
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    const int warps = (blockDim.x + 31) >> 5;
+    v = q6_warp_max_0493x7j(v);
+    if (lane == 0) warpValues[warp] = v;
+    __syncthreads();
+    double total = (warp == 0 && lane < warps) ? warpValues[lane] : 0.0;
+    if (warp == 0) total = q6_warp_max_0493x7j(total);
+    __syncthreads();
+    return total;
+}
+
+__device__ __forceinline__ void q6_grid_barrier_0493x7j(
+    cooperative_groups::grid_group& grid) {
+    // The historical 0407 heuristic deliberately uses one persistent block
+    // for modest cell counts.  In that case avoid the cooperative-grid barrier
+    // machinery entirely: __syncthreads() is sufficient and materially cheaper.
+    if (gridDim.x == 1) {
+        __syncthreads();
+    } else {
+        grid.sync();
+    }
+}
+
+__device__ __forceinline__ double q6_grid_sum_0493x7j(
+    double local,
+    double* blockPartials,
+    double* warpSums,
+    cooperative_groups::grid_group& grid,
+    Q6GfResidentCgState0493x7j* state) {
+    const double block = q6_block_sum_0493x7j(local, warpSums);
+    if (gridDim.x == 1) {
+        if (threadIdx.x == 0) state->reduce0 = block;
+        __syncthreads();
+        return state->reduce0;
+    }
+    if (threadIdx.x == 0) blockPartials[blockIdx.x] = block;
+    grid.sync();
+    if (blockIdx.x == 0) {
+        double v = 0.0;
+        for (int i = threadIdx.x; i < gridDim.x; i += blockDim.x) {
+            v += blockPartials[i];
+        }
+        const double total = q6_block_sum_0493x7j(v, warpSums);
+        if (threadIdx.x == 0) state->reduce0 = total;
+    }
+    grid.sync();
+    return state->reduce0;
+}
+
+__device__ __forceinline__ void q6_grid_sum_pair_0493x7j(
+    double local0,
+    double local1,
+    double* blockPartials0,
+    double* blockPartials1,
+    double* warpSums,
+    cooperative_groups::grid_group& grid,
+    Q6GfResidentCgState0493x7j* state) {
+    const double block0 = q6_block_sum_0493x7j(local0, warpSums);
+    const double block1 = q6_block_sum_0493x7j(local1, warpSums);
+    if (gridDim.x == 1) {
+        if (threadIdx.x == 0) {
+            state->reduce0 = block0;
+            state->reduce1 = block1;
+        }
+        __syncthreads();
+        return;
+    }
+    if (threadIdx.x == 0) {
+        blockPartials0[blockIdx.x] = block0;
+        blockPartials1[blockIdx.x] = block1;
+    }
+    grid.sync();
+    if (blockIdx.x == 0) {
+        double v0 = 0.0;
+        double v1 = 0.0;
+        for (int i = threadIdx.x; i < gridDim.x; i += blockDim.x) {
+            v0 += blockPartials0[i];
+            v1 += blockPartials1[i];
+        }
+        const double total0 = q6_block_sum_0493x7j(v0, warpSums);
+        const double total1 = q6_block_sum_0493x7j(v1, warpSums);
+        if (threadIdx.x == 0) {
+            state->reduce0 = total0;
+            state->reduce1 = total1;
+        }
+    }
+    grid.sync();
+}
+
+__device__ __forceinline__ double q6_full_operator_cell_0493x7j(
+    const double* p,
+    int c,
+    int nx,
+    int ny,
+    double invDx2,
+    double invDy2,
+    int periodicX,
+    int periodicY) {
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const double center = p[c];
+    double value = 0.0;
+    if (periodicX || ix > 0) {
+        const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
+        value += (center - p[west]) * invDx2;
+    }
+    if (periodicX || ix < nx - 1) {
+        const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+        value += (center - p[east]) * invDx2;
+    }
+    if (periodicY || iy > 0) {
+        const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
+        value += (center - p[south]) * invDy2;
+    }
+    if (periodicY || iy < ny - 1) {
+        const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+        value += (center - p[north]) * invDy2;
+    }
+    return value;
+}
+
+__device__ __forceinline__ double q6_prepared_masked_operator_cell_0493x7j(
+    const double* p,
+    const unsigned char* mask,
+    const double* faceCoeffX,
+    const double* faceCoeffY,
+    int c,
+    int nx,
+    int ny,
+    double invDx2,
+    double invDy2,
+    int periodicX,
+    int periodicY) {
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const double center = p[c];
+    double value = 0.0;
+    if (periodicX || ix < nx - 1) {
+        const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+        value += faceCoeffX[c] * invDx2 * (center - (mask[east] ? p[east] : 0.0));
+    }
+    if (periodicX || ix > 0) {
+        const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
+        value += faceCoeffX[west] * invDx2 * (center - (mask[west] ? p[west] : 0.0));
+    }
+    if (periodicY || iy < ny - 1) {
+        const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+        value += faceCoeffY[c] * invDy2 * (center - (mask[north] ? p[north] : 0.0));
+    }
+    if (periodicY || iy > 0) {
+        const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
+        value += faceCoeffY[south] * invDy2 * (center - (mask[south] ? p[south] : 0.0));
+    }
+    return value;
+}
+
+__global__ void q6_cg_g_f_resident_0493x7j(
+    double* rhs,
+    double* phi,
+    double* r,
+    double* p,
+    double* Ap,
+    const unsigned char* mask,
+    const double* faceCoeffX,
+    const double* faceCoeffY,
+    double* blockPartials0,
+    double* blockPartials1,
+    double* blockPartials2,
+    Q6GfResidentCgState0493x7j* state,
+    int rhsPartialBlocks,
+    int nx,
+    int ny,
+    int n,
+    int maxIterations,
+    double tolerance,
+    double invDx2,
+    double invDy2,
+    int periodicX,
+    int periodicY,
+    int fullDomain) {
+    cooperative_groups::grid_group grid = cooperative_groups::this_grid();
+    extern __shared__ double warpSums[];
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    // Consume the RHS diagnostics produced by the immediately preceding RHS
+    // kernel before partial0/1/2 are reused as CG reduction scratch.  Keeping
+    // this reduction inside the cooperative kernel removes the last pre-CG
+    // host synchronization from the Q6-g-f solve path.
+    if (blockIdx.x == 0) {
+        double rhsSum = 0.0;
+        double divSq = 0.0;
+        double divMax = 0.0;
+        for (int i = threadIdx.x; i < rhsPartialBlocks; i += blockDim.x) {
+            rhsSum += blockPartials0[i];
+            divSq += blockPartials1[i];
+            divMax = fmax(divMax, blockPartials2[i]);
+        }
+        const double totalRhs = q6_block_sum_0493x7j(rhsSum, warpSums);
+        const double totalDivSq = q6_block_sum_0493x7j(divSq, warpSums);
+        const double totalDivMax = q6_block_max_0493x7j(divMax, warpSums);
+        if (threadIdx.x == 0) {
+            state->rhsSum = totalRhs;
+            state->divBeforeSq = totalDivSq;
+            state->divBeforeMaxAbs = totalDivMax;
+        }
+    }
+    q6_grid_barrier_0493x7j(grid);
+
+    const double rhsMean = fullDomain
+        ? state->rhsSum / static_cast<double>(n)
+        : 0.0;
+
+    double localRr = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        if (!fullDomain && mask[c] == 0u) {
+            rhs[c] = 0.0;
+            phi[c] = 0.0;
+            r[c] = 0.0;
+            p[c] = 0.0;
+            Ap[c] = 0.0;
+            continue;
+        }
+        const double v = rhs[c] - (fullDomain ? rhsMean : 0.0);
+        rhs[c] = v;
+        phi[c] = 0.0;
+        r[c] = v;
+        p[c] = v;
+        localRr += v * v;
+    }
+
+    const double rr0 = q6_grid_sum_0493x7j(
+        localRr, blockPartials0, warpSums, grid, state);
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        const double rhsNorm = sqrt(fmax(0.0, rr0));
+        state->rr = rr0;
+        state->rhsNormSafe = fmax(rhsNorm, 1.0e-300);
+        state->residualRel = rhsNorm <= tolerance ? 0.0 : 1.0;
+        state->iterations = 0;
+        state->status = rhsNorm <= tolerance ? 1 : 0;
+    }
+    q6_grid_barrier_0493x7j(grid);
+
+    if (state->status == 1 || maxIterations <= 0) return;
+
+    for (int it = 0; it < maxIterations; ++it) {
+        double localPAp = 0.0;
+        for (int c = idx; c < n; c += stride) {
+            if (!fullDomain && mask[c] == 0u) {
+                Ap[c] = 0.0;
+                continue;
+            }
+            const double value = fullDomain
+                ? q6_full_operator_cell_0493x7j(
+                      p, c, nx, ny, invDx2, invDy2, periodicX, periodicY)
+                : q6_prepared_masked_operator_cell_0493x7j(
+                      p, mask, faceCoeffX, faceCoeffY, c, nx, ny,
+                      invDx2, invDy2, periodicX, periodicY);
+            Ap[c] = value;
+            localPAp += p[c] * value;
+        }
+        const double pAp = q6_grid_sum_0493x7j(
+            localPAp, blockPartials0, warpSums, grid, state);
+        if (!(pAp > 0.0) || !isfinite(pAp)) {
+            if (blockIdx.x == 0 && threadIdx.x == 0) {
+                state->status = -1;
+                state->residualRel = CUDART_INF;
+            }
+            q6_grid_barrier_0493x7j(grid);
+            return;
+        }
+
+        const double alpha = state->rr / pAp;
+        double localRrNew = 0.0;
+        for (int c = idx; c < n; c += stride) {
+            if (!fullDomain && mask[c] == 0u) continue;
+            phi[c] += alpha * p[c];
+            const double rv = r[c] - alpha * Ap[c];
+            r[c] = rv;
+            localRrNew += rv * rv;
+        }
+        double rrNew = q6_grid_sum_0493x7j(
+            localRrNew, blockPartials0, warpSums, grid, state);
+        double residualRel = sqrt(fmax(0.0, rrNew)) / state->rhsNormSafe;
+        if (residualRel <= tolerance) {
+            if (blockIdx.x == 0 && threadIdx.x == 0) {
+                state->rr = rrNew;
+                state->residualRel = residualRel;
+                state->iterations = it + 1;
+                state->status = 1;
+            }
+            q6_grid_barrier_0493x7j(grid);
+            return;
+        }
+
+        if (fullDomain && ((it + 1) % 25) == 0) {
+            double localPhi = 0.0;
+            double localR = 0.0;
+            for (int c = idx; c < n; c += stride) {
+                localPhi += phi[c];
+                localR += r[c];
+            }
+            q6_grid_sum_pair_0493x7j(
+                localPhi, localR, blockPartials0, blockPartials1,
+                warpSums, grid, state);
+            const double phiMean = state->reduce0 / static_cast<double>(n);
+            const double rMean = state->reduce1 / static_cast<double>(n);
+            localRrNew = 0.0;
+            for (int c = idx; c < n; c += stride) {
+                phi[c] -= phiMean;
+                const double rv = r[c] - rMean;
+                r[c] = rv;
+                localRrNew += rv * rv;
+            }
+            rrNew = q6_grid_sum_0493x7j(
+                localRrNew, blockPartials0, warpSums, grid, state);
+        }
+
+        const double beta = rrNew / fmax(state->rr, 1.0e-300);
+        for (int c = idx; c < n; c += stride) {
+            if (!fullDomain && mask[c] == 0u) continue;
+            p[c] = r[c] + beta * p[c];
+        }
+        if (blockIdx.x == 0 && threadIdx.x == 0) {
+            state->rr = rrNew;
+            state->residualRel = residualRel;
+            state->iterations = it + 1;
+        }
+        q6_grid_barrier_0493x7j(grid);
+    }
+}
+
+struct Q6GfResidentCgLaunch0493x7j {
+    int device = -1;
+    int threads = 256;
+    int maxBlocks = 0;
+    bool cooperative = false;
+    bool initialized = false;
+};
+
+Q6GfResidentCgLaunch0493x7j& q6_g_f_resident_cg_launch_0493x7j() {
+    static Q6GfResidentCgLaunch0493x7j cfg;
+    int device = 0;
+    check_cuda_0400(cudaGetDevice(&device), "0493x7j cudaGetDevice");
+    if (cfg.initialized && cfg.device == device) return cfg;
+
+    cfg = Q6GfResidentCgLaunch0493x7j{};
+    cfg.device = device;
+    cfg.initialized = true;
+    int cooperative = 0;
+    check_cuda_0400(cudaDeviceGetAttribute(
+                        &cooperative, cudaDevAttrCooperativeLaunch, device),
+                    "0493x7j cooperative launch attribute");
+    if (!cooperative) return cfg;
+
+    int smCount = 0;
+    check_cuda_0400(cudaDeviceGetAttribute(
+                        &smCount, cudaDevAttrMultiProcessorCount, device),
+                    "0493x7j multiprocessor count");
+    const int warpCount = (cfg.threads + 31) / 32;
+    const std::size_t sharedBytes = static_cast<std::size_t>(warpCount) * sizeof(double);
+    int blocksPerSm = 0;
+    check_cuda_0400(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                        &blocksPerSm, q6_cg_g_f_resident_0493x7j,
+                        cfg.threads, sharedBytes),
+                    "0493x7j cooperative occupancy");
+    cfg.maxBlocks = std::max(0, blocksPerSm * smCount);
+    cfg.cooperative = cfg.maxBlocks > 0;
+    return cfg;
+}
+
+bool launch_q6_g_f_resident_cg_0493x7j(
+    ResidentWorkspace0400& ws,
+    const unsigned char* solveMask,
+    const double* faceCoeffX,
+    const double* faceCoeffY,
+    int cellBlocks,
+    int nx,
+    int ny,
+    int numCells,
+    int maxIterations,
+    double tolerance,
+    double invDx2,
+    double invDy2,
+    int periodicX,
+    int periodicY,
+    bool fullDomain,
+    IndependentMaskedSpeciesAudit0493w5& audit) {
+    if (!cuda_q6_g_f_resident_cg_0493x7j_requested()) return false;
+    Q6GfResidentCgLaunch0493x7j& cfg = q6_g_f_resident_cg_launch_0493x7j();
+    if (!cfg.cooperative) return false;
+    const bool singleBlockFast0493x7j = cuda_q6_single_block_cg_0407_enabled(numCells);
+    const int gridBlocks = singleBlockFast0493x7j
+        ? 1
+        : std::max(1, std::min(cellBlocks, cfg.maxBlocks));
+    const int warpCount = (cfg.threads + 31) / 32;
+    const std::size_t sharedBytes = static_cast<std::size_t>(warpCount) * sizeof(double);
+
+    double* rhs = ws.rhs.data();
+    double* phi = ws.phi.data();
+    double* r = ws.r.data();
+    double* p = ws.p.data();
+    double* Ap = ws.Ap.data();
+    double* partial0 = ws.partial0.data();
+    double* partial1 = ws.partial1.data();
+    double* partial2 = ws.partial2.data();
+    Q6GfResidentCgState0493x7j* state = ws.q6GfResidentCgState0493x7j.data();
+    const unsigned char* mask = solveMask;
+    const double* coeffX = faceCoeffX;
+    const double* coeffY = faceCoeffY;
+    const int full = fullDomain ? 1 : 0;
+
+    void* args[] = {
+        &rhs, &phi, &r, &p, &Ap, &mask, &coeffX, &coeffY,
+        &partial0, &partial1, &partial2, &state, &cellBlocks,
+        &nx, &ny, &numCells, &maxIterations, &tolerance,
+        &invDx2, &invDy2, &periodicX, &periodicY, &full
+    };
+    check_cuda_0400(cudaLaunchCooperativeKernel(
+                        reinterpret_cast<const void*>(q6_cg_g_f_resident_0493x7j),
+                        dim3(gridBlocks), dim3(cfg.threads), args, sharedBytes, nullptr),
+                    "0493x7j cooperative resident CG launch");
+
+    Q6GfResidentCgState0493x7j hostState{};
+    check_cuda_0400(cudaMemcpy(&hostState, state, sizeof(hostState), cudaMemcpyDeviceToHost),
+                    "0493x7j resident CG state download");
+    audit.divBeforeMaxAbs = hostState.divBeforeMaxAbs;
+    audit.divBeforeRms = std::sqrt(
+        hostState.divBeforeSq /
+        static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+    audit.iterations = hostState.iterations;
+    audit.residualRel = hostState.residualRel;
+    audit.converged = hostState.status == 1;
+    audit.residentCg0493x7j = 1;
+    audit.residentCgBlocks0493x7j = gridBlocks;
+    return true;
+}
+
 double reduce_host_sum_0400(double* devicePartials, int blocks) {
     std::vector<double> host(static_cast<std::size_t>(blocks), 0.0);
     check_cuda_0400(cudaMemcpy(host.data(), devicePartials,
@@ -6150,90 +6663,103 @@ bool apply_independent_masked_species_q6_0493w5(
             densityRelaxationRequested0493x7c ? 1 : 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
-        const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-        const double divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
-        audit.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
-        audit.divBeforeRms = std::sqrt(
-            divBeforeSq / static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
-        const double rhsMean = audit.fullDomain
-            ? rhsSum / static_cast<double>(grid.numCells)
-            : 0.0;
 
-        q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
-            ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
-            q6SolveMask0493x6f, rhsMean, audit.fullDomain ? 1 : 0,
-            grid.numCells);
-        check_cuda_0400(cudaGetLastError(), "independent masked cg init launch");
-        q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
-            ws.r.data(), ws.partial0.data(), grid.numCells);
-        check_cuda_0400(cudaGetLastError(), "independent masked initial rr launch");
-        double rr = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-        const double rhsNorm = std::sqrt(std::max(0.0, rr));
-        const double rhsNormSafe = std::max(rhsNorm, 1.0e-300);
-        audit.converged = rhsNorm <= tol;
-        audit.residualRel = audit.converged ? 0.0 : 1.0;
-
-        for (int it = 0; it < params.projectionMaxIterations && !audit.converged; ++it) {
-            q6_apply_masked_operator_and_dot_0493w5<<<cellBlocks, threads, scalarShared>>>(
-                ws.p.data(), ws.Ap.data(), q6SolveMask0493x6f,
-                ws.partial0.data(), grid.Nx, grid.Ny, invDx2, invDy2,
-                periodicX, periodicY,
-                cutFaceGeometry0493x6d ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
-                cutFaceGeometry0493x6d ? 1 : 0,
-                kPhaseCutFaceThetaMin0493x6d,
-                phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
-                phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
-                phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
-                inactiveNeighborFactor0493x5a);
-            check_cuda_0400(cudaGetLastError(), "independent masked operator launch");
-            const double pAp = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-            if (!(pAp > 0.0) || !std::isfinite(pAp)) {
-                audit.converged = false;
-                audit.residualRel = std::numeric_limits<double>::infinity();
-                break;
-            }
-            const double alpha = rr / pAp;
-            q6_axpy_residual_0400<<<cellBlocks, threads>>>(
-                ws.phi.data(), ws.r.data(), ws.p.data(), ws.Ap.data(), alpha,
+        const bool residentCgUsed0493x7j =
+            phaseInterfaceStencilSpecies0493x6f &&
+            launch_q6_g_f_resident_cg_0493x7j(
+                ws, q6SolveMask0493x6f,
+                ws.phaseFaceCoeffX0493x6f.data(),
+                ws.phaseFaceCoeffY0493x6f.data(),
+                cellBlocks, grid.Nx, grid.Ny, grid.numCells,
+                params.projectionMaxIterations, tol, invDx2, invDy2,
+                periodicX, periodicY, audit.fullDomain, audit);
+        if (!residentCgUsed0493x7j) {
+            const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            const double divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+            audit.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
+            audit.divBeforeRms = std::sqrt(
+                divBeforeSq /
+                static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
+            const double rhsMean = audit.fullDomain
+                ? rhsSum / static_cast<double>(grid.numCells)
+                : 0.0;
+            q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
+                ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
+                q6SolveMask0493x6f, rhsMean, audit.fullDomain ? 1 : 0,
                 grid.numCells);
-            check_cuda_0400(cudaGetLastError(), "independent masked axpy launch");
+            check_cuda_0400(cudaGetLastError(), "independent masked cg init launch");
             q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
                 ws.r.data(), ws.partial0.data(), grid.numCells);
-            check_cuda_0400(cudaGetLastError(), "independent masked rr launch");
-            double rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-            audit.iterations = it + 1;
-            audit.residualRel = std::sqrt(std::max(0.0, rrNew)) / rhsNormSafe;
-            if (audit.residualRel <= tol) {
-                rr = rrNew;
-                audit.converged = true;
-                break;
-            }
-            if (audit.fullDomain && (it + 1) % 25 == 0) {
-                q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
-                    ws.phi.data(), ws.partial0.data(), grid.numCells);
-                q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
-                    ws.r.data(), ws.partial1.data(), grid.numCells);
-                check_cuda_0400(cudaGetLastError(),
-                                "independent masked mean reduction launch");
-                const double phiMean = reduce_host_sum_0400(ws.partial0.data(), cellBlocks) /
-                                       static_cast<double>(grid.numCells);
-                const double rMean = reduce_host_sum_0400(ws.partial1.data(), cellBlocks) /
-                                     static_cast<double>(grid.numCells);
-                q6_subtract_mean_pair_0400<<<cellBlocks, threads>>>(
-                    ws.phi.data(), ws.r.data(), phiMean, rMean, grid.numCells);
-                check_cuda_0400(cudaGetLastError(),
-                                "independent masked mean subtract launch");
+            check_cuda_0400(cudaGetLastError(), "independent masked initial rr launch");
+            double rr = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            const double rhsNorm = std::sqrt(std::max(0.0, rr));
+            const double rhsNormSafe = std::max(rhsNorm, 1.0e-300);
+            audit.converged = rhsNorm <= tol;
+            audit.residualRel = audit.converged ? 0.0 : 1.0;
+
+            for (int it = 0; it < params.projectionMaxIterations && !audit.converged; ++it) {
+                q6_apply_masked_operator_and_dot_0493w5<<<cellBlocks, threads, scalarShared>>>(
+                    ws.p.data(), ws.Ap.data(), q6SolveMask0493x6f,
+                    ws.partial0.data(), grid.Nx, grid.Ny, invDx2, invDy2,
+                    periodicX, periodicY,
+                    cutFaceGeometry0493x6d ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+                    cutFaceGeometry0493x6d ? 1 : 0,
+                    kPhaseCutFaceThetaMin0493x6d,
+                    phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+                    phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
+                    phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
+                    inactiveNeighborFactor0493x5a);
+                check_cuda_0400(cudaGetLastError(), "independent masked operator launch");
+                const double pAp = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                if (!(pAp > 0.0) || !std::isfinite(pAp)) {
+                    audit.converged = false;
+                    audit.residualRel = std::numeric_limits<double>::infinity();
+                    break;
+                }
+                const double alpha = rr / pAp;
+                q6_axpy_residual_0400<<<cellBlocks, threads>>>(
+                    ws.phi.data(), ws.r.data(), ws.p.data(), ws.Ap.data(), alpha,
+                    grid.numCells);
+                check_cuda_0400(cudaGetLastError(), "independent masked axpy launch");
                 q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
                     ws.r.data(), ws.partial0.data(), grid.numCells);
-                check_cuda_0400(cudaGetLastError(),
-                                "independent masked rr after mean launch");
-                rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                check_cuda_0400(cudaGetLastError(), "independent masked rr launch");
+                double rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                audit.iterations = it + 1;
+                audit.residualRel = std::sqrt(std::max(0.0, rrNew)) / rhsNormSafe;
+                if (audit.residualRel <= tol) {
+                    rr = rrNew;
+                    audit.converged = true;
+                    break;
+                }
+                if (audit.fullDomain && (it + 1) % 25 == 0) {
+                    q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                        ws.phi.data(), ws.partial0.data(), grid.numCells);
+                    q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                        ws.r.data(), ws.partial1.data(), grid.numCells);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "independent masked mean reduction launch");
+                    const double phiMean = reduce_host_sum_0400(ws.partial0.data(), cellBlocks) /
+                                           static_cast<double>(grid.numCells);
+                    const double rMean = reduce_host_sum_0400(ws.partial1.data(), cellBlocks) /
+                                         static_cast<double>(grid.numCells);
+                    q6_subtract_mean_pair_0400<<<cellBlocks, threads>>>(
+                        ws.phi.data(), ws.r.data(), phiMean, rMean, grid.numCells);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "independent masked mean subtract launch");
+                    q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                        ws.r.data(), ws.partial0.data(), grid.numCells);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "independent masked rr after mean launch");
+                    rrNew = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                }
+                const double beta = rrNew / std::max(rr, 1.0e-300);
+                q6_update_p_0400<<<cellBlocks, threads>>>(
+                    ws.p.data(), ws.r.data(), beta, grid.numCells);
+                check_cuda_0400(cudaGetLastError(), "independent masked p update launch");
+                rr = rrNew;
             }
-            const double beta = rrNew / std::max(rr, 1.0e-300);
-            q6_update_p_0400<<<cellBlocks, threads>>>(
-                ws.p.data(), ws.r.data(), beta, grid.numCells);
-            check_cuda_0400(cudaGetLastError(), "independent masked p update launch");
-            rr = rrNew;
+
         }
 
         allConverged = allConverged && audit.converged;

@@ -12,7 +12,8 @@ suite_root_cd_0434
 #   Lx=1.5, Ly=0.4, Nx=1200, Ny=640, gamma=6
 #   periodic left/right, solid top/bottom
 #   circular chi obstacle: xc=0.2, yc=0.205, r=0.04
-#   initial state homogeneous at U0=0.9, no active particles inside the circle
+#   initial state homogeneous at U0=0.9; historical SRC/Q6 skip active particles
+#   inside the circle, while Q6-g-f fills the fictitious Darcy domain as required.
 CASE_LABEL="vk_darcy_chi_periodic"
 GEN_CASE="vk"
 TOPOLOGY="wall"
@@ -28,9 +29,9 @@ BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_li
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-./livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
-# Path choice. Default is one robust path. To compare all paths, set:
-#   RUN_MODES="src src-resampling src-q6 src-q6-resampling"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src}}}}"
+# 0493x7h comparison default: historical SRC, previous SRC-Q6, current Q6-g-f.
+# Resampling paths remain available through an explicit RUN_MODES override.
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6 src-q6-g-f}}}}"
 
 # Livevis + 0433a WYSIWYR filtered recording. LIVE_VIS_CONTROL_FILE defaults to
 # ./livevis_control.kv in common code so every script uses the same runtime file.
@@ -101,7 +102,7 @@ wallKBT = -1.0
 wallThermalNoise = 0.0
 PARAMS
   suite_write_common_params_0434 "$mode" >> "$params"
-  suite_write_darcy_params_0434 "$chi" >> "$params"
+  suite_write_darcy_params_0434 "$chi" "$mode" >> "$params"
 }
 
 run_one_mode_0434() {
@@ -116,7 +117,7 @@ run_one_mode_0434() {
   local log="$run_root/logs/${CASE_LABEL}.log"
   local time="$run_root/logs/${CASE_LABEL}.time"
   mkdir -p "$out"
-  suite_generate_case_0434 "$state" "$chi"
+  suite_generate_case_for_mode_0493x7h "$mode" "$state" "$chi"
   write_params_0434 "$mode" "$state" "$out" "$chi" "$params"
   suite_export_cuda_flags_0434 "$mode" "$TOPOLOGY"
   suite_prepare_livevis_control_0434 "$run_root" "$mode"

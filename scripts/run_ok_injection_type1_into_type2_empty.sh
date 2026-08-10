@@ -21,11 +21,11 @@ LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
 LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
-# Baseline validation intentionally excludes resampling so SRC and SRC+Q6 can
-# be compared before any population mutation is introduced. Resampling paths
-# remain available only through an explicit override such as:
-#   RUN_MODES="src-resampling src-q6-resampling" SPECIES_RESAMPLING_ENABLE=true
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}" 
+# Baseline validation intentionally excludes resampling.  The public wrapper
+# selects SRC / previous Q6 / Q6-g-f; direct use of this backend retains the
+# historical SRC + SRC-Q6 default unless RUN_MODES is explicitly overridden.
+# Resampling paths remain available explicitly.
+RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"
  
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
@@ -247,6 +247,24 @@ INJECT_REFERENCE_CELL_MASS="${INJECT_REFERENCE_CELL_MASS:-${LIQUID_REFERENCE_CEL
 BACKGROUND_REFERENCE_CELL_MASS="${BACKGROUND_REFERENCE_CELL_MASS:-${GAS_REFERENCE_CELL_MASS:-$(awk -v g="$GAMMA" -v m="$BACKGROUND_PARTICLE_MASS" 'BEGIN{printf "%.17g", g*m}')}}"
 ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO="$(awk -v mi="$INJECT_MASS" -v mb="$BACKGROUND_PARTICLE_MASS" 'BEGIN{printf "%.17g", mi/mb}')"
 
+# 0493x7h: when Q6-g-f is selected, keep this runner's explicit two-species
+# registry and enable x6g only when one of those species is a gas phase.
+if suite_mode_set_has_q6_g_f_0493x7h; then
+  Q6_GF_EXTERNAL_SPECIES=1
+  if [[ "$INJECT_PHASE" == gas || "$BACKGROUND_PHASE" == gas ]]; then
+    Q6_GF_HAS_GAS_PHASE=1
+  else
+    Q6_GF_HAS_GAS_PHASE=0
+  fi
+  projected_liquid_count=0
+  [[ "$INJECT_PHASE" == liquid ]] && awk -v a="$INJECT_Q6_STRENGTH" 'BEGIN{exit !(a>0)}' && projected_liquid_count=$((projected_liquid_count+1))
+  [[ "$BACKGROUND_PHASE" == liquid ]] && awk -v a="$BACKGROUND_Q6_STRENGTH" 'BEGIN{exit !(a>0)}' && projected_liquid_count=$((projected_liquid_count+1))
+  if [[ "$projected_liquid_count" != 1 ]]; then
+    echo "[0493x7h] ERROR src-q6-g-f injection requires exactly one liquid species with q6Strength>0; got $projected_liquid_count" >&2
+    exit 2
+  fi
+fi
+
 write_params_0434() {
   local mode=$1 state=$2 out=$3 chi=$4 params=$5
   local species_q6_enable_for_mode=false
@@ -448,7 +466,12 @@ META_0493W4
     echo "[0434-suite] inject(type=$INJECT_TYPE,phase=$INJECT_PHASE,mass=$INJECT_MASS,q6Alpha=$INJECT_Q6_STRENGTH,closure=$INJECT_MASS_CLOSURE_STRENGTH) into empty domain; inactiveSlotType=$BACKGROUND_TYPE inactiveSlotPhase=$BACKGROUND_PHASE inactiveSlotMass=$BACKGROUND_PARTICLE_MASS"
   fi
   if suite_path_has_q6_0434 "$mode" && suite_truthy_0434 "$SPECIES_Q6_ENABLE"; then
-    echo "[0434-suite] speciesQ6=on mode=$SPECIES_Q6_MODE sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE minOcc=$SPECIES_Q6_MIN_OCCUPANCY_FRACTION"
+    local effective_q6_mode="$SPECIES_Q6_MODE" effective_min_occ="$SPECIES_Q6_MIN_OCCUPANCY_FRACTION"
+    if suite_path_has_q6_g_f_0493x7h "$mode"; then
+      effective_q6_mode=free_surface_masked
+      effective_min_occ="$Q6_GF_MIN_FILL_FRACTION"
+    fi
+    echo "[0434-suite] speciesQ6=on mode=$effective_q6_mode sensitivity=$SPECIES_Q6_SENSITIVITY fallback=$SPECIES_Q6_FALLBACK_MODE tolerance=$SPECIES_Q6_COMPARISON_TOLERANCE minOcc=$effective_min_occ"
   else
     echo "[0434-suite] speciesQ6=off for mode=$mode"
   fi
