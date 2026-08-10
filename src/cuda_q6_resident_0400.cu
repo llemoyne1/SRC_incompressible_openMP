@@ -5511,7 +5511,7 @@ __global__ void q6_cg_g_f_resident_0493x7j(
         if (!(pAp > 0.0) || !isfinite(pAp)) {
             if (blockIdx.x == 0 && threadIdx.x == 0) {
                 state->status = -1;
-                state->residualRel = CUDART_INF;
+                state->residualRel = __longlong_as_double(0x7ff0000000000000LL);
             }
             q6_grid_barrier_0493x7j(grid);
             return;
@@ -5632,6 +5632,7 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     int periodicX,
     int periodicY,
     bool fullDomain,
+    double& divBeforeSqOut0493x7j,
     IndependentMaskedSpeciesAudit0493w5& audit) {
     if (!cuda_q6_g_f_resident_cg_0493x7j_requested()) return false;
     Q6GfResidentCgLaunch0493x7j& cfg = q6_g_f_resident_cg_launch_0493x7j();
@@ -5655,7 +5656,7 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     const unsigned char* mask = solveMask;
     const double* coeffX = faceCoeffX;
     const double* coeffY = faceCoeffY;
-    const int full = fullDomain ? 1 : 0;
+    int full = fullDomain ? 1 : 0;
 
     void* args[] = {
         &rhs, &phi, &r, &p, &Ap, &mask, &coeffX, &coeffY,
@@ -5671,6 +5672,7 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     Q6GfResidentCgState0493x7j hostState{};
     check_cuda_0400(cudaMemcpy(&hostState, state, sizeof(hostState), cudaMemcpyDeviceToHost),
                     "0493x7j resident CG state download");
+    divBeforeSqOut0493x7j = hostState.divBeforeSq;
     audit.divBeforeMaxAbs = hostState.divBeforeMaxAbs;
     audit.divBeforeRms = std::sqrt(
         hostState.divBeforeSq /
@@ -6663,6 +6665,7 @@ bool apply_independent_masked_species_q6_0493w5(
             densityRelaxationRequested0493x7c ? 1 : 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
+        double divBeforeSq = 0.0;
 
         const bool residentCgUsed0493x7j =
             phaseInterfaceStencilSpecies0493x6f &&
@@ -6672,10 +6675,10 @@ bool apply_independent_masked_species_q6_0493w5(
                 ws.phaseFaceCoeffY0493x6f.data(),
                 cellBlocks, grid.Nx, grid.Ny, grid.numCells,
                 params.projectionMaxIterations, tol, invDx2, invDy2,
-                periodicX, periodicY, audit.fullDomain, audit);
+                periodicX, periodicY, audit.fullDomain, divBeforeSq, audit);
         if (!residentCgUsed0493x7j) {
             const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-            const double divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+            divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
             audit.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
             audit.divBeforeRms = std::sqrt(
                 divBeforeSq /
