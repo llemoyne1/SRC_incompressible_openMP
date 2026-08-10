@@ -474,7 +474,14 @@ def analyze_tg(a):
         # Excellent linearity dominates, then prefer a long log-amplitude span.
         chosen = max(candidates, key=lambda c: (c["fit"]["r2"], min(c["logSpan"], 3.0), c["fit"]["points"]))
         stable = [c for c in candidates if c["fit"]["r2"] >= max(0.97, chosen["fit"]["r2"] - 0.01)]
-    nus = np.array([c["nu"] for c in stable], float)
+
+        # 0493x7n-fix4c: candidates may exist while none reaches the
+        # strict R2>=0.97 stable-window floor. Preserve that diagnostic,
+        # but use chosen only for range statistics so analysis cannot crash.
+        stable_window_count = len(stable)
+        stable_window_fallback = stable_window_count == 0
+        stats_windows = stable if stable else [chosen]
+        nus = np.array([c["nu"] for c in stats_windows], float)
     for index, row in enumerate(series):
         row["fitWindow"] = bool(chosen["start"] <= index < chosen["end"] and ratio[index] > 0.025)
     return series, {
@@ -484,6 +491,8 @@ def analyze_tg(a):
         "fitStartIndex": chosen["start"],
         "fitEndIndex": chosen["end"],
         "fitWindowCandidates": len(candidates),
+        "fitStableWindows": stable_window_count,
+        "fitStableFallback": stable_window_fallback,
         "nuWindowStd": float(np.std(nus, ddof=1)) if len(nus) > 1 else 0.0,
         "nuWindowMin": float(np.min(nus)),
         "nuWindowMax": float(np.max(nus)),

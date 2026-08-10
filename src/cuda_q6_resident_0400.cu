@@ -3225,6 +3225,7 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     double* facePhiGammaX0493x6g,
     double* facePhiGammaY0493x6g,
     int useGasPressure0493x6g,
+    int usePhaseInterface0493x7m,
     int nx,
     int ny,
     int periodicX,
@@ -3252,7 +3253,14 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
 
     for (int c = idx; c < n; c += stride) {
         const double alphaC = alpha[c];
-        const bool pressureC = carrierMask[c] != 0u && alphaC >= 0.5;
+        // 0493x7m-fix1: alpha=0.5 is a phase boundary only when the registry
+        // actually contains a gas phase. In an explicitly monophase liquid
+        // registry the pressure domain is the full computational grid:
+        // particle-density fluctuations or transient empty carrier cells are
+        // sampling defects, not physical pressure boundaries.
+        const bool pressureC =
+            !usePhaseInterface0493x7m ||
+            (carrierMask[c] != 0u && alphaC >= 0.5);
         pressureMask[c] = pressureC ? 1u : 0u;
         if (pressureC) ++activeLocal;
 
@@ -3268,10 +3276,13 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
             const int east = iy * nx +
                 (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
             const double alphaE = alpha[east];
-            const bool pressureE = carrierMask[east] != 0u && alphaE >= 0.5;
+            const bool pressureE =
+                !usePhaseInterface0493x7m ||
+                (carrierMask[east] != 0u && alphaE >= 0.5);
             const bool cHigh = alphaC >= 0.5 && alphaE < 0.5;
             const bool eHigh = alphaE >= 0.5 && alphaC < 0.5;
-            const bool crossing = cHigh || eHigh;
+            const bool crossing =
+                usePhaseInterface0493x7m && (cHigh || eHigh);
             if (pressureC && pressureE) {
                 coeffX = 1.0;
                 if (auditEnabled) ++interiorLocal;
@@ -3330,10 +3341,13 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
             const int north =
                 (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
             const double alphaN = alpha[north];
-            const bool pressureN = carrierMask[north] != 0u && alphaN >= 0.5;
+            const bool pressureN =
+                !usePhaseInterface0493x7m ||
+                (carrierMask[north] != 0u && alphaN >= 0.5);
             const bool cHigh = alphaC >= 0.5 && alphaN < 0.5;
             const bool nHigh = alphaN >= 0.5 && alphaC < 0.5;
-            const bool crossing = cHigh || nHigh;
+            const bool crossing =
+                usePhaseInterface0493x7m && (cHigh || nHigh);
             if (pressureC && pressureN) {
                 coeffY = 1.0;
                 if (auditEnabled) ++interiorLocal;
@@ -5871,6 +5885,14 @@ bool apply_independent_masked_species_q6_0493w5(
         ws.phaseInterfaceStencilStep0493x6f = -1;
     }
     const int speciesCount = static_cast<int>(params.speciesDefinitions.size());
+    // 0493x7m: the registered phase families are authoritative for topology.
+    // x5a deliberately registers an absent gas species, so its liquid/vacuum
+    // free surface remains alpha-defined.
+    const bool registeredGasPhase0493x7m = std::any_of(
+        params.speciesDefinitions.begin(), params.speciesDefinitions.end(),
+        [](const SpeciesDefinition& d) {
+            return d.phaseFamily == SpeciesPhaseFamily::Gas;
+        });
     const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
                               static_cast<std::size_t>(speciesCount);
     if (postApplyRegionAuditThisStep0493x6hB0) {
@@ -6343,6 +6365,7 @@ bool apply_independent_masked_species_q6_0493w5(
                     phaseGasPressureApplySpecies0493x6g
                         ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
                     phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+                    registeredGasPhase0493x7m ? 1 : 0,
                     grid.Nx, grid.Ny, periodicX, periodicY,
                     kPhaseCutFaceThetaMin0493x6d,
                     ws.counter.data(),
