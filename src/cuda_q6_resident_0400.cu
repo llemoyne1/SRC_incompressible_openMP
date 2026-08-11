@@ -411,6 +411,17 @@ struct VirialDensityAccumulator0493x7a {
     double kickMassSq = 0.0;
 };
 
+// 0493x7d-v2-fix2: the full-domain B1 path applies a cell-constant Q6
+// correction to the projected species.  In periodic directions an internal
+// pressure projection must not change the projected-species total momentum.
+// Keep the exact mass-weighted residual resident so B1 can remove only that
+// k=0 velocity mode without an additional particle pass.
+struct Q6PeriodicMomentumAccumulator0493x7dv2fix2 {
+    double activeMass = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+};
+
 // 0493x7j: O(1) state shared by all blocks of the cooperative masked CG.
 // Per-block reduction scratch continues to reuse partial0/partial1.
 struct Q6GfResidentCgState0493x7j {
@@ -1354,6 +1365,8 @@ struct ResidentWorkspace0400 {
     // for the virial kick and only adds this O(1) resident accumulator.
     DeviceBuffer0400<VirialDensityAccumulator0493x7a>
         virialDensityAccum0493x7a;
+    DeviceBuffer0400<Q6PeriodicMomentumAccumulator0493x7dv2fix2>
+        periodicMomentumAccum0493x7dv2fix2;
     DeviceBuffer0400<Q6GfResidentCgState0493x7j> q6GfResidentCgState0493x7j;
     bool phaseInterfaceStencilValid0493x6f = false;
     int phaseInterfaceStencilStep0493x6f = -1;
@@ -1390,6 +1403,7 @@ struct ResidentWorkspace0400 {
         phaseGeometryAccum0493x6b.ensure(1u);
         phaseGeometryResidentAccum0493x6c.ensure(1u);
         phaseInterfaceStencilAccum0493x6f.ensure(1u);
+        periodicMomentumAccum0493x7dv2fix2.ensure(1u);
         q6GfResidentCgState0493x7j.ensure(1u);
         partial0.ensure(static_cast<std::size_t>(std::max(1, blocks)));
         partial1.ensure(static_cast<std::size_t>(std::max(1, blocks)));
@@ -1895,19 +1909,45 @@ __global__ void q6_build_rhs_and_stats_0400(CudaCellWorkspaceDeviceView cells,
     for (int c = idx; c < cells.numCells; c += stride) {
         const int ix = c % nx;
         const int iy = c / nx;
-        const int west = (periodicX || ix > 0) ? (iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1))) : c;
-        const int south = (periodicY || iy > 0) ? ((periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix) : c;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
         const double localXLowFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 0, ix, iy, nx, ny, xLowFlux);
         const double localXHighFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 1, ix, iy, nx, ny, xHighFlux);
         const double localYLowFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 2, ix, iy, nx, ny, yLowFlux);
         const double localYHighFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 3, ix, iy, nx, ny, yHighFlux);
-        const double fxWest = (periodicX || ix > 0) ? cells.cellUx[west] : localXLowFlux;
-        const double fxEastBefore = cells.cellUx[c];
-        const double fxEastSolve = (periodicX || ix < nx - 1) ? cells.cellUx[c] : localXHighFlux;
-        const double fySouth = (periodicY || iy > 0) ? cells.cellUy[south] : localYLowFlux;
+
+        // 0493x7p: common Q6 now uses the same reflection-equivariant FV
+        // convention validated by 0493x7o for independent_masked Q6.  Cell
+        // velocities are cell-centred quantities; an interior face therefore
+        // carries the arithmetic average of its two adjacent cells instead of
+        // inheriting the east/north owner value.  This removes the historical
+        // backward-difference orientation from the common-Q6 RHS.
+        const double fxEastInterior = 0.5 * (cells.cellUx[c] + cells.cellUx[east]);
+        const double fxWestInterior = 0.5 * (cells.cellUx[west] + cells.cellUx[c]);
+        const double fyNorthInterior = 0.5 * (cells.cellUy[c] + cells.cellUy[north]);
+        const double fySouthInterior = 0.5 * (cells.cellUy[south] + cells.cellUy[c]);
+        const double fxWest = hasWest ? fxWestInterior : localXLowFlux;
+        const double fxEastBefore = hasEast ? fxEastInterior : localXHighFlux;
+        const double fxEastSolve = hasEast ? fxEastInterior : localXHighFlux;
+        const double fySouth = hasSouth ? fySouthInterior : localYLowFlux;
+        const double fyNorthBefore = hasNorth ? fyNorthInterior : localYHighFlux;
+        const double fyNorthSolve = hasNorth ? fyNorthInterior : localYHighFlux;
         const double divBefore = (fxEastBefore - fxWest) / dx +
-                                 (cells.cellUy[c] - fySouth) / dy;
-        const double fyNorthSolve = (periodicY || iy < ny - 1) ? cells.cellUy[c] : localYHighFlux;
+                                 (fyNorthBefore - fySouth) / dy;
         const double divSolve = (fxEastSolve - fxWest) / dx +
                                 (fyNorthSolve - fySouth) / dy;
         rhs[c] = -divSolve;
@@ -2079,22 +2119,69 @@ __global__ void q6_subtract_mean_pair_0400(double* a,
     }
 }
 
-__global__ void q6_compute_corrections_0400(CudaCellWorkspaceDeviceView cells,
-                                            const double* phi,
-                                            double* dux,
-                                            double* duy,
-                                            double* partialSq,
-                                            double* partialMax,
-                                            int nx,
-                                            int ny,
-                                            double dx,
-                                            double dy,
-                                            double strength,
-                                            int periodicX,
-                                            int periodicY,
-                                            double xHighFlux,
-                                            double yHighFlux,
-                                            Q6SegmentedIo0409 segmentedIo) {
+__global__ void q6_compute_face_corrections_0493x7p(
+    CudaCellWorkspaceDeviceView cells,
+    const double* phi,
+    double* faceDUx,
+    double* faceDUy,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    double strength,
+    int periodicX,
+    int periodicY,
+    double xHighFlux,
+    double yHighFlux,
+    Q6SegmentedIo0409 segmentedIo) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const double localXHighFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 1, ix, iy, nx, ny, xHighFlux);
+        const double localYHighFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 3, ix, iy, nx, ny, yHighFlux);
+
+        // East/north-owned face corrections.  Interior faces are the discrete
+        // pressure gradient.  On a physical high boundary the existing Q6
+        // target-before convention is retained; the symmetric low-boundary
+        // counterpart is reconstructed in q6_reconstruct_cell_corrections_0493x7p.
+        faceDUx[c] = hasEast
+            ? -strength * (phi[east] - phi[c]) / dx
+            : strength * (localXHighFlux - cells.cellUx[c]);
+        faceDUy[c] = hasNorth
+            ? -strength * (phi[north] - phi[c]) / dy
+            : strength * (localYHighFlux - cells.cellUy[c]);
+    }
+}
+
+__global__ void q6_reconstruct_cell_corrections_0493x7p(
+    CudaCellWorkspaceDeviceView cells,
+    const double* faceDUx,
+    const double* faceDUy,
+    double* cellDUx,
+    double* cellDUy,
+    double* partialSq,
+    double* partialMax,
+    int nx,
+    int ny,
+    double strength,
+    int periodicX,
+    int periodicY,
+    double xLowFlux,
+    double yLowFlux,
+    Q6SegmentedIo0409 segmentedIo) {
     extern __shared__ double sh[];
     double* shSq = sh;
     double* shMax = sh + blockDim.x;
@@ -2107,18 +2194,36 @@ __global__ void q6_compute_corrections_0400(CudaCellWorkspaceDeviceView cells,
     for (int c = idx; c < n; c += stride) {
         const int ix = c % nx;
         const int iy = c / nx;
-        const int east = (periodicX || ix < nx - 1) ? (iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : (ix + 1))) : c;
-        const int north = (periodicY || iy < ny - 1) ? ((periodicY ? wrap_cell_index_0400(iy + 1, ny) : (iy + 1)) * nx + ix) : c;
-        const double localXHighFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 1, ix, iy, nx, ny, xHighFlux);
-        const double localYHighFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 3, ix, iy, nx, ny, yHighFlux);
-        const double cx = (periodicX || ix < nx - 1) ?
-            (-strength * (phi[east] - phi[c]) / dx) :
-            (strength * (localXHighFlux - cells.cellUx[c]));
-        const double cy = (periodicY || iy < ny - 1) ?
-            (-strength * (phi[north] - phi[c]) / dy) :
-            (strength * (localYHighFlux - cells.cellUy[c]));
-        dux[c] = cx;
-        duy[c] = cy;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasSouth = periodicY || iy > 0;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+
+        double westCorrection = hasWest ? faceDUx[west] : 0.0;
+        double southCorrection = hasSouth ? faceDUy[south] : 0.0;
+        if (!hasWest) {
+            const double target = q6_segmented_flux_for_cell_0409(
+                segmentedIo, 0, ix, iy, nx, ny, xLowFlux);
+            westCorrection = strength * (target - cells.cellUx[c]);
+        }
+        if (!hasSouth) {
+            const double target = q6_segmented_flux_for_cell_0409(
+                segmentedIo, 2, ix, iy, nx, ny, yLowFlux);
+            southCorrection = strength * (target - cells.cellUy[c]);
+        }
+
+        // 0493x7p: a cell receives the mean of its two opposite face
+        // corrections.  This is the common-Q6 analogue of the 0493x7o
+        // independent_masked reconstruction and removes the east/north-owner
+        // bias from the particle correction itself.
+        const double cx = 0.5 * (faceDUx[c] + westCorrection);
+        const double cy = 0.5 * (faceDUy[c] + southCorrection);
+        cellDUx[c] = cx;
+        cellDUy[c] = cy;
         sq += cx * cx + cy * cy;
         mx = fmax(mx, sqrt(cx * cx + cy * cy));
     }
@@ -3707,6 +3812,10 @@ __device__ double q6_density_relaxation_target_divergence_0493x7c(
     int periodicY,
     double beta,
     double dt,
+    double compressionThresholdFill0493x7dv2,
+    int compressionGateEnable0493x7dv2,
+    double tractionThresholdFill0493x7dv2signed1,
+    double tractionGain0493x7dv2signed1,
     int enabled) {
     if (!enabled || rawFill == nullptr || pressureMask == nullptr ||
         !(beta > 0.0) || !(dt > 0.0) || pressureMask[c] == 0u) {
@@ -3735,7 +3844,84 @@ __device__ double q6_density_relaxation_target_divergence_0493x7c(
     if (!bulk) return 0.0;
 
     const double defect = rawFill[c] - 1.0;
-    return isfinite(defect) ? beta * defect / dt : 0.0;
+    if (!isfinite(defect)) return 0.0;
+
+    // 0493x7d-v2: classify positive coherent compression before applying the
+    // historical x7d target. Once classified, keep the full defect: this is a
+    // gate, not a dead-band subtraction.
+    if (compressionGateEnable0493x7dv2) {
+        if (compressionThresholdFill0493x7dv2 > 0.0 &&
+            defect >= compressionThresholdFill0493x7dv2) {
+            bool coherent0493x7dv2 = false;
+            if (periodicX || ix > 0) {
+                const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+                const double nd = rawFill[iy * nx + xw] - 1.0;
+                coherent0493x7dv2 =
+                    isfinite(nd) && nd >= compressionThresholdFill0493x7dv2;
+            }
+            if (!coherent0493x7dv2 && (periodicX || ix < nx - 1)) {
+                const int xe = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+                const double nd = rawFill[iy * nx + xe] - 1.0;
+                coherent0493x7dv2 =
+                    isfinite(nd) && nd >= compressionThresholdFill0493x7dv2;
+            }
+            if (!coherent0493x7dv2 && (periodicY || iy > 0)) {
+                const int ys = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+                const double nd = rawFill[ys * nx + ix] - 1.0;
+                coherent0493x7dv2 =
+                    isfinite(nd) && nd >= compressionThresholdFill0493x7dv2;
+            }
+            if (!coherent0493x7dv2 && (periodicY || iy < ny - 1)) {
+                const int yn = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+                const double nd = rawFill[yn * nx + ix] - 1.0;
+                coherent0493x7dv2 =
+                    isfinite(nd) && nd >= compressionThresholdFill0493x7dv2;
+            }
+            if (!coherent0493x7dv2) return 0.0;
+            return beta * defect / dt;
+        }
+
+        // 0493x7d-v2-signed1: coherent traction/depression response.  The
+        // material law is intentionally topology-independent: free-surface
+        // exclusion remains the responsibility of the existing bulk contract
+        // above.  Like the positive branch, this is a classifier only; after
+        // admission the full negative defect is retained.
+        if (tractionGain0493x7dv2signed1 > 0.0 &&
+            tractionThresholdFill0493x7dv2signed1 > 0.0 &&
+            defect <= -tractionThresholdFill0493x7dv2signed1) {
+            bool coherentTraction0493x7dv2signed1 = false;
+            if (periodicX || ix > 0) {
+                const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+                const double nd = rawFill[iy * nx + xw] - 1.0;
+                coherentTraction0493x7dv2signed1 =
+                    isfinite(nd) && nd <= -tractionThresholdFill0493x7dv2signed1;
+            }
+            if (!coherentTraction0493x7dv2signed1 && (periodicX || ix < nx - 1)) {
+                const int xe = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+                const double nd = rawFill[iy * nx + xe] - 1.0;
+                coherentTraction0493x7dv2signed1 =
+                    isfinite(nd) && nd <= -tractionThresholdFill0493x7dv2signed1;
+            }
+            if (!coherentTraction0493x7dv2signed1 && (periodicY || iy > 0)) {
+                const int ys = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+                const double nd = rawFill[ys * nx + ix] - 1.0;
+                coherentTraction0493x7dv2signed1 =
+                    isfinite(nd) && nd <= -tractionThresholdFill0493x7dv2signed1;
+            }
+            if (!coherentTraction0493x7dv2signed1 && (periodicY || iy < ny - 1)) {
+                const int yn = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+                const double nd = rawFill[yn * nx + ix] - 1.0;
+                coherentTraction0493x7dv2signed1 =
+                    isfinite(nd) && nd <= -tractionThresholdFill0493x7dv2signed1;
+            }
+            if (!coherentTraction0493x7dv2signed1) return 0.0;
+            return tractionGain0493x7dv2signed1 * beta * defect / dt;
+        }
+
+        return 0.0;
+    }
+
+    return beta * defect / dt;
 }
 
 __global__ void q6_build_independent_rhs_after_mask_0493w5(
@@ -3768,6 +3954,10 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     const double* densityRelaxationRawFill0493x7c,
     double densityRelaxationBeta0493x7c,
     double densityRelaxationDt0493x7c,
+    double densityRelaxationCompressionThresholdFill0493x7dv2,
+    int densityRelaxationCompressionGateEnable0493x7dv2,
+    double densityRelaxationTractionThresholdFill0493x7dv2signed1,
+    double densityRelaxationTractionGain0493x7dv2signed1,
     int densityRelaxationEnable0493x7c,
     int fullDomain) {
     extern __shared__ double sh[];
@@ -3778,6 +3968,9 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     double sum = 0.0;
     double sq = 0.0;
     double mx = 0.0;
+    // 0493x7o keeps the historical ABI/call sites while removing the
+    // directional fullDomain shortcut from the discretization itself.
+    (void)fullDomain;
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -3818,34 +4011,28 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
             segmentedIo, 3, ix, iy, nx, ny, yHighFlux, species, speciesIndex,
             speciesType, c, exclusiveProjectedSpecies);
 
-        const double uxC = q6_species_cell_velocity_component_0493w5(
-            species, speciesIndex, c, 0);
-        const double uyC = q6_species_cell_velocity_component_0493w5(
-            species, speciesIndex, c, 1);
-        const double fxEastInterior = fullDomain
-            ? uxC
-            : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, c, east, 0);
-        const double fxWestInterior = fullDomain
-            ? q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, west, 0)
-            : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, west, c, 0);
-        const double fyNorthInterior = fullDomain
-            ? uyC
-            : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, c, north, 1);
-        const double fySouthInterior = fullDomain
-            ? q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, south, 1)
-            : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, south, c, 1);
+        // 0493x7o: use reflection-equivariant finite-volume face velocities in
+        // the full-domain path as well.  The historical fullDomain shortcut
+        // treated the cell-centered value as the east/north face and the
+        // west/south neighbour as the opposite face, which is a directional
+        // backward difference and is not equivariant under x/y reflection.
+        // q6_species_face_velocity_0493w5 reduces to the centered arithmetic
+        // face average when both full-domain cells are active, while preserving
+        // the existing masked/free-surface semantics outside fullDomain.
+        const double fxEastInterior = q6_species_face_velocity_0493w5(
+            species, velocityMask, speciesIndex, c, east, 0);
+        const double fxWestInterior = q6_species_face_velocity_0493w5(
+            species, velocityMask, speciesIndex, west, c, 0);
+        const double fyNorthInterior = q6_species_face_velocity_0493w5(
+            species, velocityMask, speciesIndex, c, north, 1);
+        const double fySouthInterior = q6_species_face_velocity_0493w5(
+            species, velocityMask, speciesIndex, south, c, 1);
 
         const double fxWest = hasWest ? fxWestInterior : localXLowFlux;
-        const double fxEastBefore = hasEast ? fxEastInterior : uxC;
+        const double fxEastBefore = hasEast ? fxEastInterior : localXHighFlux;
         const double fxEastSolve = hasEast ? fxEastInterior : localXHighFlux;
         const double fySouth = hasSouth ? fySouthInterior : localYLowFlux;
-        const double fyNorthBefore = hasNorth ? fyNorthInterior : uyC;
+        const double fyNorthBefore = hasNorth ? fyNorthInterior : localYHighFlux;
         const double fyNorthSolve = hasNorth ? fyNorthInterior : localYHighFlux;
         const double divBefore = (fxEastBefore - fxWest) / dx +
                                  (fyNorthBefore - fySouth) / dy;
@@ -3876,7 +4063,11 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
             rhsValue += q6_density_relaxation_target_divergence_0493x7c(
                 densityRelaxationRawFill0493x7c, mask, c, nx, ny,
                 periodicX, periodicY, densityRelaxationBeta0493x7c,
-                densityRelaxationDt0493x7c, 1);
+                densityRelaxationDt0493x7c,
+                densityRelaxationCompressionThresholdFill0493x7dv2,
+                densityRelaxationCompressionGateEnable0493x7dv2,
+                densityRelaxationTractionThresholdFill0493x7dv2signed1,
+                densityRelaxationTractionGain0493x7dv2signed1, 1);
         }
         rhs[c] = rhsValue;
         sum += rhs[c];
@@ -4173,6 +4364,10 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     Q6SegmentedIo0409 segmentedIo,
     std::uint32_t speciesType,
     int exclusiveProjectedSpecies,
+    Q6PeriodicMomentumAccumulator0493x7dv2fix2* periodicMomentumAccum0493x7dv2fix2,
+    int periodicMomentumCorrectionEnable0493x7dv2fix2,
+    int periodicMomentumCorrectX0493x7dv2fix2,
+    int periodicMomentumCorrectY0493x7dv2fix2,
     int collectStats0493x7k) {
     extern __shared__ double sh[];
     double* shSq = sh;
@@ -4180,6 +4375,9 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     const int tid = threadIdx.x;
     double sq = 0.0;
     double mx = 0.0;
+    // 0493x7o: fullDomain is retained in the kernel signature for call-site
+    // stability; both full and masked paths now use the same symmetric face-to-cell reconstruction.
+    (void)fullDomain;
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -4209,7 +4407,7 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
         // carrier-only interface-band cells do not acquire a spurious wall kick.
         double westCorrection = hasWest ? faceDUx[west] : 0.0;
         double southCorrection = hasSouth ? faceDUy[south] : 0.0;
-        if (!fullDomain && !hasWest && pressureMask[c] != 0u) {
+        if (!hasWest && pressureMask[c] != 0u) {
             const double target = q6_species_boundary_flux_for_cell_0493w7(
                 segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
                 speciesType, c, exclusiveProjectedSpecies);
@@ -4217,7 +4415,7 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
                 species, speciesIndex, c, 0);
             westCorrection = strength * (target - before);
         }
-        if (!fullDomain && !hasSouth && pressureMask[c] != 0u) {
+        if (!hasSouth && pressureMask[c] != 0u) {
             const double target = q6_species_boundary_flux_for_cell_0493w7(
                 segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
                 speciesType, c, exclusiveProjectedSpecies);
@@ -4225,14 +4423,32 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
                 species, speciesIndex, c, 1);
             southCorrection = strength * (target - before);
         }
-        const double cx = fullDomain
-            ? faceDUx[c]
-            : 0.5 * (faceDUx[c] + westCorrection);
-        const double cy = fullDomain
-            ? faceDUy[c]
-            : 0.5 * (faceDUy[c] + southCorrection);
+        // 0493x7o: reconstruct the cell correction from both opposite FV
+        // faces in every mode.  For fullDomain this removes the historical
+        // east/north-owner bias.  At low physical boundaries the missing
+        // west/south face increment is reconstructed with exactly the same
+        // target-before convention already used for the stored high face.
+        const double cx = 0.5 * (faceDUx[c] + westCorrection);
+        const double cy = 0.5 * (faceDUy[c] + southCorrection);
         cellDUx[c] = cx;
         cellDUy[c] = cy;
+        if (periodicMomentumCorrectionEnable0493x7dv2fix2 &&
+            periodicMomentumAccum0493x7dv2fix2 != nullptr) {
+            const int k = speciesIndex * species.numCells + c;
+            const double cellMass = species.mass != nullptr ? species.mass[k] : 0.0;
+            if (cellMass > 0.0 && isfinite(cellMass)) {
+                atomic_add_double_0400(
+                    &periodicMomentumAccum0493x7dv2fix2->activeMass, cellMass);
+                if (periodicMomentumCorrectX0493x7dv2fix2) {
+                    atomic_add_double_0400(
+                        &periodicMomentumAccum0493x7dv2fix2->momentumX, cellMass * cx);
+                }
+                if (periodicMomentumCorrectY0493x7dv2fix2) {
+                    atomic_add_double_0400(
+                        &periodicMomentumAccum0493x7dv2fix2->momentumY, cellMass * cy);
+                }
+            }
+        }
         if (collectStats0493x7k) {
             const double q = cx * cx + cy * cy;
             sq += q;
@@ -4281,6 +4497,10 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     const double* densityRelaxationRawFill0493x7c,
     double densityRelaxationBeta0493x7c,
     double densityRelaxationDt0493x7c,
+    double densityRelaxationCompressionThresholdFill0493x7dv2,
+    int densityRelaxationCompressionGateEnable0493x7dv2,
+    double densityRelaxationTractionThresholdFill0493x7dv2signed1,
+    double densityRelaxationTractionGain0493x7dv2signed1,
     int densityRelaxationEnable0493x7c,
     double* partialTargetSq0493x7c,
     int fullDomain) {
@@ -4294,6 +4514,9 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     double sq = 0.0;
     double mx = 0.0;
     double targetSq = 0.0;
+    // 0493x7o: retain the parameter for ABI/call-site stability; diagnostics
+    // now use the same reflection-equivariant face semantics in every mode.
+    (void)fullDomain;
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -4329,25 +4552,24 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
             species, speciesIndex, c, 0);
         const double uyC = q6_species_cell_velocity_component_0493w5(
             species, speciesIndex, c, 1);
+        // 0493x7o: diagnostics must use the same centered FV face semantics
+        // as the RHS, otherwise a mirrored full-domain state reports a different
+        // projected divergence even when the solve itself converges.
         const double fxEastBase = hasEast
-            ? (fullDomain ? uxC : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, c, east, 0))
+            ? q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, c, east, 0)
             : uxC;
         const double fxWestBase = hasWest
-            ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
-                    species, speciesIndex, west, 0)
-                : q6_species_face_velocity_0493w5(
-                    species, velocityMask, speciesIndex, west, c, 0))
+            ? q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, west, c, 0)
             : localXLowFlux;
         const double fyNorthBase = hasNorth
-            ? (fullDomain ? uyC : q6_species_face_velocity_0493w5(
-                species, velocityMask, speciesIndex, c, north, 1))
+            ? q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, c, north, 1)
             : uyC;
         const double fySouthBase = hasSouth
-            ? (fullDomain ? q6_species_cell_velocity_component_0493w5(
-                    species, speciesIndex, south, 1)
-                : q6_species_face_velocity_0493w5(
-                    species, velocityMask, speciesIndex, south, c, 1))
+            ? q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, south, c, 1)
             : localYLowFlux;
 
         const double fxEast = fxEastBase + faceDUx[c];
@@ -4361,7 +4583,11 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
             targetDiv0493x7c = q6_density_relaxation_target_divergence_0493x7c(
                 densityRelaxationRawFill0493x7c, mask, c, nx, ny,
                 periodicX, periodicY, densityRelaxationBeta0493x7c,
-                densityRelaxationDt0493x7c, 1);
+                densityRelaxationDt0493x7c,
+                densityRelaxationCompressionThresholdFill0493x7dv2,
+                densityRelaxationCompressionGateEnable0493x7dv2,
+                densityRelaxationTractionThresholdFill0493x7dv2signed1,
+                densityRelaxationTractionGain0493x7dv2signed1, 1);
             residual -= targetDiv0493x7c;
         }
         sq += residual * residual;
@@ -4650,6 +4876,10 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
     double* partialPx,
     double* partialPy,
     unsigned long long* correctedCounter,
+    const Q6PeriodicMomentumAccumulator0493x7dv2fix2* periodicMomentumAccum0493x7dv2fix2,
+    int periodicMomentumCorrectionEnable0493x7dv2fix2,
+    int periodicMomentumCorrectX0493x7dv2fix2,
+    int periodicMomentumCorrectY0493x7dv2fix2,
     int collectDiagnostics0493x7k) {
     extern __shared__ double sh[];
     double* shX = sh;
@@ -4658,6 +4888,21 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
     double px = 0.0;
     double py = 0.0;
     unsigned long long correctedLocal = 0ull;
+    double periodicCvx0493x7dv2fix2 = 0.0;
+    double periodicCvy0493x7dv2fix2 = 0.0;
+    if (periodicMomentumCorrectionEnable0493x7dv2fix2 &&
+        periodicMomentumAccum0493x7dv2fix2 != nullptr &&
+        periodicMomentumAccum0493x7dv2fix2->activeMass > 0.0) {
+        const double invMass = 1.0 / periodicMomentumAccum0493x7dv2fix2->activeMass;
+        if (periodicMomentumCorrectX0493x7dv2fix2) {
+            periodicCvx0493x7dv2fix2 =
+                periodicMomentumAccum0493x7dv2fix2->momentumX * invMass;
+        }
+        if (periodicMomentumCorrectY0493x7dv2fix2) {
+            periodicCvy0493x7dv2fix2 =
+                periodicMomentumAccum0493x7dv2fix2->momentumY * invMass;
+        }
+    }
     const double invDx = static_cast<double>(nx) / lx;
     const double invDy = static_cast<double>(ny) / ly;
     const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -4702,8 +4947,8 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
         // interpolation between Fminus=2*C-Fplus and Fplus.
         const double dvx = cx + (2.0 * xi - 1.0) * (dUe - cx);
         const double dvy = cy + (2.0 * eta - 1.0) * (dVn - cy);
-        particles.vx[i] += dvx;
-        particles.vy[i] += dvy;
+        particles.vx[i] += dvx - periodicCvx0493x7dv2fix2;
+        particles.vy[i] += dvy - periodicCvy0493x7dv2fix2;
         if (collectDiagnostics0493x7k) {
             const double m = particles.mass ? particles.mass[i] : 1.0;
             // As in x5a, audit only the pressure correction.  The physical force
@@ -4956,8 +5201,8 @@ __global__ void q6_thermostat_apply_0400(CudaParticleDeviceView particles,
 }
 
 __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView cells,
-                                                   const double* dux,
-                                                   const double* duy,
+                                                   const double* faceDUx,
+                                                   const double* faceDUy,
                                                    double* partialSq,
                                                    double* partialMax,
                                                    int nx,
@@ -4967,7 +5212,9 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
                                                    int periodicX,
                                                    int periodicY,
                                                    double xLowFlux,
+                                                   double xHighFlux,
                                                    double yLowFlux,
+                                                   double yHighFlux,
                                                    Q6SegmentedIo0409 segmentedIo) {
     extern __shared__ double sh[];
     double* shSq = sh;
@@ -4981,15 +5228,48 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
     for (int c = idx; c < n; c += stride) {
         const int ix = c % nx;
         const int iy = c / nx;
-        const int west = (periodicX || ix > 0) ? (iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : (ix - 1))) : c;
-        const int south = (periodicY || iy > 0) ? ((periodicY ? wrap_cell_index_0400(iy - 1, ny) : (iy - 1)) * nx + ix) : c;
-        const double fx = cells.cellUx[c] + dux[c];
-        const double localXLowFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 0, ix, iy, nx, ny, xLowFlux);
-        const double localYLowFlux = q6_segmented_flux_for_cell_0409(segmentedIo, 2, ix, iy, nx, ny, yLowFlux);
-        const double fxW = (periodicX || ix > 0) ? (cells.cellUx[west] + dux[west]) : localXLowFlux;
-        const double fy = cells.cellUy[c] + duy[c];
-        const double fyS = (periodicY || iy > 0) ? (cells.cellUy[south] + duy[south]) : localYLowFlux;
-        const double div = (fx - fxW) / dx + (fy - fyS) / dy;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const double localXLowFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 0, ix, iy, nx, ny, xLowFlux);
+        const double localXHighFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 1, ix, iy, nx, ny, xHighFlux);
+        const double localYLowFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 2, ix, iy, nx, ny, yLowFlux);
+        const double localYHighFlux = q6_segmented_flux_for_cell_0409(
+            segmentedIo, 3, ix, iy, nx, ny, yHighFlux);
+
+        // Diagnose the same face field that enters the FV solve.  Internal
+        // base velocities are centred arithmetic face averages.  At physical
+        // boundaries, the imposed target is the projected face value; this is
+        // exactly the convention used by 0493x7o in the validated species path.
+        const double fxEast = hasEast
+            ? 0.5 * (cells.cellUx[c] + cells.cellUx[east]) + faceDUx[c]
+            : localXHighFlux;
+        const double fxWest = hasWest
+            ? 0.5 * (cells.cellUx[west] + cells.cellUx[c]) + faceDUx[west]
+            : localXLowFlux;
+        const double fyNorth = hasNorth
+            ? 0.5 * (cells.cellUy[c] + cells.cellUy[north]) + faceDUy[c]
+            : localYHighFlux;
+        const double fySouth = hasSouth
+            ? 0.5 * (cells.cellUy[south] + cells.cellUy[c]) + faceDUy[south]
+            : localYLowFlux;
+        const double div = (fxEast - fxWest) / dx + (fyNorth - fySouth) / dy;
         sq += div * div;
         mx = fmax(mx, fabs(div));
     }
@@ -5008,7 +5288,6 @@ __global__ void q6_projected_divergence_stats_0400(CudaCellWorkspaceDeviceView c
         partialMax[blockIdx.x] = shMax[0];
     }
 }
-
 
 __global__ void q6_cg_single_block_0407(double* rhs,
                                         double* phi,
@@ -5970,6 +6249,8 @@ bool apply_independent_masked_species_q6_0493w5(
         }
     }
 
+    bool periodicProjectedMomentumCorrection0493x7dv2fix2 = false;
+
     for (int s = 0; s < speciesCount; ++s) {
         IndependentMaskedSpeciesAudit0493w5 audit{};
         audit.speciesIndex = s;
@@ -6716,6 +6997,10 @@ bool apply_independent_masked_species_q6_0493w5(
             phaseGasPressureApplySpecies0493x6g ? 1 : 0,
             densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
             densityRelaxationBeta0493x7d, params.dt,
+            params.q6DensityRelaxationCompressionThresholdFill,
+            params.q6DensityRelaxationCompressionGateEnable ? 1 : 0,
+            params.q6DensityRelaxationTractionThresholdFill,
+            params.q6DensityRelaxationTractionGain,
             densityRelaxationRequested0493x7c ? 1 : 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
@@ -7731,6 +8016,16 @@ bool apply_independent_masked_species_q6_0493w5(
         // remains the correction/application band.  Exterior-side mixed cells
         // can therefore receive the interface-face gradient without becoming
         // pressure unknowns themselves.
+        const bool periodicMomentumCorrectionThisSpecies0493x7dv2fix2 =
+            faceToParticleRt00493x6hB1 && audit.fullDomain &&
+            !virialDensityKickRequested0493x7a && (periodicX || periodicY);
+        if (periodicMomentumCorrectionThisSpecies0493x7dv2fix2) {
+            check_cuda_0400(cudaMemset(
+                ws.periodicMomentumAccum0493x7dv2fix2.data(), 0,
+                sizeof(Q6PeriodicMomentumAccumulator0493x7dv2fix2)),
+                "0493x7d-v2-fix2 periodic momentum accumulator zero");
+            periodicProjectedMomentumCorrection0493x7dv2fix2 = true;
+        }
         q6_compute_masked_cell_correction_stats_0493w5<<<
             cellBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
             species, s, ws.speciesMask0493w5.data(), q6SolveMask0493x6f,
@@ -7738,7 +8033,12 @@ bool apply_independent_masked_species_q6_0493w5(
             ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny,
             periodicX, periodicY, audit.fullDomain ? 1 : 0,
             effectiveStrength, xLowFlux, yLowFlux, segmentedIo, audit.type,
-            exclusiveProjectedSpecies, q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
+            exclusiveProjectedSpecies,
+            periodicMomentumCorrectionThisSpecies0493x7dv2fix2
+                ? ws.periodicMomentumAccum0493x7dv2fix2.data() : nullptr,
+            periodicMomentumCorrectionThisSpecies0493x7dv2fix2 ? 1 : 0,
+            periodicX ? 1 : 0, periodicY ? 1 : 0,
+            q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked cell correction launch");
         double correctionSq = 0.0;
         double divAfterSq = 0.0;
@@ -7758,6 +8058,10 @@ bool apply_independent_masked_species_q6_0493w5(
                 segmentedIo, audit.type, exclusiveProjectedSpecies,
                 densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
                 densityRelaxationBeta0493x7d, params.dt,
+                params.q6DensityRelaxationCompressionThresholdFill,
+                params.q6DensityRelaxationCompressionGateEnable ? 1 : 0,
+                params.q6DensityRelaxationTractionThresholdFill,
+                params.q6DensityRelaxationTractionGain,
                 densityRelaxationRequested0493x7c ? 1 : 0,
                 ws.partial2.data(), audit.fullDomain ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
@@ -7860,6 +8164,10 @@ bool apply_independent_masked_species_q6_0493w5(
                 params.taylorGreenForcingAmplitude,
                 params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
                 ws.partial0.data(), ws.partial1.data(), ws.counter.data(),
+                periodicProjectedMomentumCorrection0493x7dv2fix2
+                    ? ws.periodicMomentumAccum0493x7dv2fix2.data() : nullptr,
+                periodicProjectedMomentumCorrection0493x7dv2fix2 ? 1 : 0,
+                periodicX ? 1 : 0, periodicY ? 1 : 0,
                 q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
@@ -7902,11 +8210,35 @@ bool apply_independent_masked_species_q6_0493w5(
     diag.applySeconds = diag.speciesQ6ParticleApplySeconds;
     diag.momentumResidualBeforeCorrection = std::sqrt(totalDpx * totalDpx + totalDpy * totalDpy);
     // A masked free-surface pressure solve may legitimately change the momentum
-    // of the projected species through its Dirichlet interface.  Do not apply
-    // the legacy all-particle uniform momentum correction, which would directly
-    // modify species declared compressible.
+    // of the projected species through its Dirichlet interface.  Therefore the
+    // legacy all-particle correction remains forbidden.  For the monophase
+    // full-domain B1 path only, an internal pressure gradient cannot change the
+    // projected-species k=0 momentum in a periodic direction.  x7d-v2-fix2
+    // removes exactly that component inside B1 and leaves non-periodic traction
+    // components untouched.
     diag.momentumCorrectionVx = 0.0;
     diag.momentumCorrectionVy = 0.0;
+    if (periodicProjectedMomentumCorrection0493x7dv2fix2 &&
+        q6GfDiagnosticsThisStep0493x7k) {
+        Q6PeriodicMomentumAccumulator0493x7dv2fix2 periodicMomentumAudit0493x7dv2fix2{};
+        check_cuda_0400(cudaMemcpy(
+            &periodicMomentumAudit0493x7dv2fix2,
+            ws.periodicMomentumAccum0493x7dv2fix2.data(),
+            sizeof(periodicMomentumAudit0493x7dv2fix2), cudaMemcpyDeviceToHost),
+            "0493x7d-v2-fix2 periodic momentum accumulator download");
+        if (periodicMomentumAudit0493x7dv2fix2.activeMass > 0.0) {
+            if (periodicX) {
+                diag.momentumCorrectionVx =
+                    periodicMomentumAudit0493x7dv2fix2.momentumX /
+                    periodicMomentumAudit0493x7dv2fix2.activeMass;
+            }
+            if (periodicY) {
+                diag.momentumCorrectionVy =
+                    periodicMomentumAudit0493x7dv2fix2.momentumY /
+                    periodicMomentumAudit0493x7dv2fix2.activeMass;
+            }
+        }
+    }
 
     // 0493x7k: the 0493w6 post-application species rebuild existed to measure
     // the applied-cell divergence.  Positions and masses are unchanged by Q6,
@@ -7948,7 +8280,7 @@ bool apply_independent_masked_species_q6_0493w5(
                 xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
                 audit.type, exclusiveProjectedSpecies,
                 nullptr, nullptr, nullptr, nullptr, 0,
-                nullptr, 0.0, params.dt, 0,
+                nullptr, 0.0, params.dt, 0.0, 0, 0.0, 0.0, 0,
                 audit.fullDomain ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "independent masked post-apply divergence launch");
@@ -8584,21 +8916,38 @@ CudaQ6Resident0400Diagnostics try_apply_cuda_q6_resident_0400(ParticleState& sta
     }
 
     const auto tApply = Clock0400::now();
-    q6_compute_corrections_0400<<<cellBlocks, threads, pairShared>>>(
-        cells, ws.phi.data(), ws.dux.data(), ws.duy.data(), ws.partial0.data(), ws.partial1.data(),
-        grid.Nx, grid.Ny, dx, dy, params.q6ProjectionStrength, periodicX, periodicY, xHighFlux, yHighFlux, segmentedIo0409);
-    check_cuda_0400(cudaGetLastError(), "compute correction launch");
+    // 0493x7p reuses the post-CG r/p work arrays as transient east/north
+    // face-correction storage.  No additional O(Ncell) allocation is needed:
+    // warm-start state lives in phi, while r/p are dead once the solve ends.
+    q6_compute_face_corrections_0493x7p<<<cellBlocks, threads>>>(
+        cells, ws.phi.data(), ws.r.data(), ws.p.data(), grid.Nx, grid.Ny, dx, dy,
+        params.q6ProjectionStrength, periodicX, periodicY, xHighFlux, yHighFlux,
+        segmentedIo0409);
+    check_cuda_0400(cudaGetLastError(), "0493x7p compute face correction launch");
+
+    q6_projected_divergence_stats_0400<<<cellBlocks, threads, pairShared>>>(
+        cells, ws.r.data(), ws.p.data(), ws.partial0.data(), ws.partial1.data(),
+        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+        xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo0409);
+    check_cuda_0400(cudaGetLastError(), "0493x7p projected face divergence stats launch");
+    const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+    diag.divAfterProjectedFluxMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
+    diag.divAfterProjectedFluxRms = std::sqrt(divAfterSq / static_cast<double>(grid.numCells));
+
+    q6_reconstruct_cell_corrections_0493x7p<<<cellBlocks, threads, pairShared>>>(
+        cells, ws.r.data(), ws.p.data(), ws.dux.data(), ws.duy.data(),
+        ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny,
+        params.q6ProjectionStrength, periodicX, periodicY, xLowFlux, yLowFlux,
+        segmentedIo0409);
+    check_cuda_0400(cudaGetLastError(), "0493x7p reconstruct cell correction launch");
     const double corrSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
     diag.correctionVelocityMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
     diag.correctionVelocityRms = std::sqrt(corrSq / static_cast<double>(grid.numCells));
 
-    q6_projected_divergence_stats_0400<<<cellBlocks, threads, pairShared>>>(
-        cells, ws.dux.data(), ws.duy.data(), ws.partial0.data(), ws.partial1.data(),
-        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY, xLowFlux, yLowFlux, segmentedIo0409);
-    check_cuda_0400(cudaGetLastError(), "projected divergence stats launch");
-    const double divAfterSq = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-    diag.divAfterProjectedFluxMaxAbs = reduce_host_max_0400(ws.partial1.data(), cellBlocks);
-    diag.divAfterProjectedFluxRms = std::sqrt(divAfterSq / static_cast<double>(grid.numCells));
+    // The common path historically reported one post-projection divergence for
+    // both fields.  Keep that diagnostic ABI: the strict FV constraint remains
+    // the face-flux residual, while ws.dux/ws.duy now correctly denote the
+    // cell-centred correction that is actually applied to particles.
     diag.divAfterCellVelocityRms = diag.divAfterProjectedFluxRms;
     diag.divAfterCellVelocityMaxAbs = diag.divAfterProjectedFluxMaxAbs;
 

@@ -58,10 +58,34 @@ fprintf('\n=== 0493x7i Q6-g-f physical qualification ===\n');
 fprintf('root: %s\n', rootDir);
 fprintf('modes: %s\n\n', strjoin(modes, ', '));
 
-out.tg = local_analyze_tg(fullfile(rootDir, 'tg'), modes, opt);
-out.poiseuille = local_analyze_poiseuille(fullfile(rootDir, 'poiseuille'), modes, opt);
-out.bendPipe = local_analyze_startup(fullfile(rootDir, 'bend_pipe'), modes, 'bend_pipe', opt);
-out.ioBox = local_analyze_startup(fullfile(rootDir, 'io_box'), modes, 'io_box', opt);
+tgRoot = fullfile(rootDir, 'tg');
+poiseuilleRoot = fullfile(rootDir, 'poiseuille');
+bendRoot = fullfile(rootDir, 'bend_pipe');
+ioRoot = fullfile(rootDir, 'io_box');
+
+if isfolder(tgRoot)
+    out.tg = local_analyze_tg(tgRoot, modes, opt);
+else
+    out.tg = struct('metrics', table(), 'summary', table());
+end
+
+if isfolder(poiseuilleRoot)
+    out.poiseuille = local_analyze_poiseuille(poiseuilleRoot, modes, opt);
+else
+    out.poiseuille = struct('summary', table(), 'profileComparison', table());
+end
+
+if isfolder(bendRoot)
+    out.bendPipe = local_analyze_startup(bendRoot, modes, 'bend_pipe', opt);
+else
+    out.bendPipe = struct('metrics', table(), 'summary', table());
+end
+
+if isfolder(ioRoot)
+    out.ioBox = local_analyze_startup(ioRoot, modes, 'io_box', opt);
+else
+    out.ioBox = struct('metrics', table(), 'summary', table());
+end
 
 if logical(opt.writeCsv)
     writetable(out.tg.metrics, fullfile(analysisDir, '0493x7i_tg_vortex_core_metrics.csv'));

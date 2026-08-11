@@ -466,6 +466,23 @@ struct SimulationParams {
     double q6DensityRelaxationBeta = 0.0;
     double q6DensityRelaxationTime = 0.0;
 
+    // 0493x7d-v2 experimental compression/noise discriminator. Disabled by
+    // default: false preserves the historical rawFill x7d target bit-for-bit.
+    // When enabled, positive density relaxation is admitted only when the
+    // center defect and at least one direct face-neighbour exceed the same
+    // fill threshold. The Q6-G-F runner writes thetaN/GAMMA here.
+    bool q6DensityRelaxationCompressionGateEnable = false;
+    double q6DensityRelaxationCompressionThresholdFill = 0.0;
+
+    // 0493x7d-v2-signed1 experimental traction/depression branch.  No extra
+    // enable flag: gain=0 is an exact no-op.  When gain>0, a negative density
+    // defect is admitted only when the center and at least one direct
+    // face-neighbour are below -q6DensityRelaxationTractionThresholdFill.
+    // Once classified, the full negative defect is used and multiplied by
+    // q6DensityRelaxationTractionGain.
+    double q6DensityRelaxationTractionThresholdFill = 0.0;
+    double q6DensityRelaxationTractionGain = 0.0;
+
     bool projectionImmersedSolidMaskEnable = false;
     bool projectionAllowUnmaskedImmersedSolid = false;
     double projectionImmersedSolidFluidFractionThreshold = 0.5;

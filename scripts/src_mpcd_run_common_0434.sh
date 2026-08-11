@@ -505,6 +505,29 @@ suite_write_q6_g_f_params_0493x7h() {
 
   local tau="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
   local min_fill="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
+  local compression_gate=false
+  if suite_truthy_0434 "${Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE:-0}"; then
+    compression_gate=true
+  fi
+  local compression_threshold_particles="${Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES:-3.0}"
+  local compression_threshold_fill
+  compression_threshold_fill="$(awk -v n="$compression_threshold_particles" -v g="$GAMMA" 'BEGIN{
+    if (!(n>0) || !(g>0)) exit 2;
+    printf "%.17g", n/g
+  }')" || {
+    echo "[0493x7d-v2] ERROR compression threshold requires positive particle threshold and GAMMA" >&2
+    return 2
+  }
+  local traction_gain="${Q6_GF_DENSITY_TRACTION_GAIN:-0.0}"
+  local traction_threshold_particles="${Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES:-6.0}"
+  local traction_threshold_fill
+  traction_threshold_fill="$(awk -v n="$traction_threshold_particles" -v g="$GAMMA" 'BEGIN{
+    if (!(n>0) || !(g>0)) exit 2;
+    printf "%.17g", n/g
+  }')" || {
+    echo "[0493x7d-v2-signed1] ERROR traction threshold requires positive particle threshold and GAMMA" >&2
+    return 2
+  }
   cat <<PARAMS
 q6ForceProjectionMode = prestream_single_fused
 projectionMomentumCorrectionEnable = false
@@ -514,6 +537,10 @@ betaEOS = 0.0
 virialMomentumCorrectionEnable = false
 q6DensityRelaxationBeta = 0.0
 q6DensityRelaxationTime = ${tau}
+q6DensityRelaxationCompressionGateEnable = ${compression_gate}
+q6DensityRelaxationCompressionThresholdFill = ${compression_threshold_fill}
+q6DensityRelaxationTractionThresholdFill = ${traction_threshold_fill}
+q6DensityRelaxationTractionGain = ${traction_gain}
 keepMeanFlowEnable = false
 PARAMS
 
@@ -751,6 +778,16 @@ suite_preflight_run_ok_0492() {
       echo "[0493x7h-run-ok] ERROR src-q6-g-f requires speciesQ6Mode=free_surface_masked" >&2; return 2; }
     grep -Eq '^[[:space:]]*q6DensityRelaxationTime[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
       echo "[0493x7h-run-ok] ERROR src-q6-g-f density-restoration time missing" >&2; return 2; }
+    if suite_truthy_0434 "${Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE:-0}"; then
+      grep -Eq '^[[:space:]]*q6DensityRelaxationCompressionGateEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+        echo "[0493x7d-v2-run-ok] ERROR compression gate enable missing" >&2; return 2; }
+      grep -Eq '^[[:space:]]*q6DensityRelaxationCompressionThresholdFill[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+        echo "[0493x7d-v2-run-ok] ERROR compression threshold fill missing" >&2; return 2; }
+    fi
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTractionThresholdFill[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7d-v2-signed1-run-ok] ERROR traction threshold fill missing" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTractionGain[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7d-v2-signed1-run-ok] ERROR traction gain missing" >&2; return 2; }
     if grep -Eq '^[[:space:]]*darcyBrinkmanEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params"; then
       grep -Eq '^[[:space:]]*darcyInitialDeactivateBelowChi[[:space:]]*=[[:space:]]*-[0-9.eE+]+' "$params" || {
         echo "[0493x7h-run-ok] ERROR Q6-g-f Darcy requires darcyInitialDeactivateBelowChi<0" >&2; return 2; }

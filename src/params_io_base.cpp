@@ -500,6 +500,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "q6DensityRelaxationBeta" || key == "densityRelaxationBeta") p.q6DensityRelaxationBeta = parse_double(value, key);
         else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
+        else if (key == "q6DensityRelaxationCompressionGateEnable" || key == "densityRelaxationCompressionGateEnable") p.q6DensityRelaxationCompressionGateEnable = parse_bool(value, key);
+        else if (key == "q6DensityRelaxationCompressionThresholdFill" || key == "densityRelaxationCompressionThresholdFill") p.q6DensityRelaxationCompressionThresholdFill = parse_double(value, key);
+        else if (key == "q6DensityRelaxationTractionThresholdFill" || key == "densityRelaxationTractionThresholdFill") p.q6DensityRelaxationTractionThresholdFill = parse_double(value, key);
+        else if (key == "q6DensityRelaxationTractionGain" || key == "densityRelaxationTractionGain") p.q6DensityRelaxationTractionGain = parse_double(value, key);
         else if (key == "closedCapacityResponseEnable") p.closedCapacityResponseEnable = parse_bool(value, key);
         else if (key == "closedCapacityReferenceCellMass") p.closedCapacityReferenceCellMass = parse_double(value, key);
         else if (key == "closedCapacityReferenceParticleMass") p.closedCapacityReferenceParticleMass = parse_double(value, key);
@@ -1329,6 +1333,46 @@ void validate_simulation_params(const SimulationParams& p) {
         !std::isfinite(q6DensityRelaxationEffectiveBeta0493x7d)) {
         throw std::runtime_error(
             "0493x7d effective density relaxation beta=dt/tau must be finite and lie in [0,1]");
+    }
+    if (!(p.q6DensityRelaxationCompressionThresholdFill >= 0.0) ||
+        !std::isfinite(p.q6DensityRelaxationCompressionThresholdFill)) {
+        throw std::runtime_error(
+            "0493x7d-v2 compression threshold fill must be finite and non-negative");
+    }
+    if (p.q6DensityRelaxationCompressionGateEnable &&
+        !(p.q6DensityRelaxationCompressionThresholdFill > 0.0)) {
+        throw std::runtime_error(
+            "0493x7d-v2 compression gate requires q6DensityRelaxationCompressionThresholdFill>0");
+    }
+    if (p.q6DensityRelaxationCompressionGateEnable &&
+        !(q6DensityRelaxationEffectiveBeta0493x7d > 0.0)) {
+        throw std::runtime_error(
+            "0493x7d-v2 compression gate requires active density relaxation");
+    }
+    if (!(p.q6DensityRelaxationTractionThresholdFill >= 0.0) ||
+        !std::isfinite(p.q6DensityRelaxationTractionThresholdFill)) {
+        throw std::runtime_error(
+            "0493x7d-v2-signed1 traction threshold fill must be finite and non-negative");
+    }
+    if (!(p.q6DensityRelaxationTractionGain >= 0.0) ||
+        !std::isfinite(p.q6DensityRelaxationTractionGain)) {
+        throw std::runtime_error(
+            "0493x7d-v2-signed1 traction gain must be finite and non-negative");
+    }
+    if (p.q6DensityRelaxationTractionGain > 0.0 &&
+        !(p.q6DensityRelaxationTractionThresholdFill > 0.0)) {
+        throw std::runtime_error(
+            "0493x7d-v2-signed1 traction gain requires q6DensityRelaxationTractionThresholdFill>0");
+    }
+    if (p.q6DensityRelaxationTractionGain > 0.0 &&
+        !p.q6DensityRelaxationCompressionGateEnable) {
+        throw std::runtime_error(
+            "0493x7d-v2-signed1 traction branch requires the coherent x7d-v2 compression gate");
+    }
+    if (p.q6DensityRelaxationTractionGain > 0.0 &&
+        !(q6DensityRelaxationEffectiveBeta0493x7d > 0.0)) {
+        throw std::runtime_error(
+            "0493x7d-v2-signed1 traction branch requires active density relaxation");
     }
     if (q6DensityRelaxationEffectiveBeta0493x7d > 0.0 &&
         (classicSrcCudaMode || !q6OrProjectionRequested || p.projectionBackend != "cuda")) {
