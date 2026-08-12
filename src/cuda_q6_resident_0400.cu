@@ -411,15 +411,20 @@ struct VirialDensityAccumulator0493x7a {
     double kickMassSq = 0.0;
 };
 
-// 0493x7d-v2-fix2: the full-domain B1 path applies a cell-constant Q6
-// correction to the projected species.  In periodic directions an internal
-// pressure projection must not change the projected-species total momentum.
-// Keep the exact mass-weighted residual resident so B1 can remove only that
-// k=0 velocity mode without an additional particle pass.
+// 0493x7d-v2-fix2 / 0493x7q: full-domain B1 periodic momentum closure.
+// x7d-v2-fix2 stores the mass-weighted cell-centred correction used as a cheap
+// first k=0 estimate.  x7q additionally reduces the correction actually
+// reconstructed at particle locations and removes its remaining k=0 mode in a
+// second resident particle pass.  The x7q fields are touched only for
+// full-domain B1 solves with at least one periodic direction; partial-domain
+// free-surface (dam-break) launches keep the historical B1 kernel unchanged.
 struct Q6PeriodicMomentumAccumulator0493x7dv2fix2 {
     double activeMass = 0.0;
     double momentumX = 0.0;
     double momentumY = 0.0;
+    double appliedMass0493x7q = 0.0;
+    double residualVelocityX0493x7q = 0.0;
+    double residualVelocityY0493x7q = 0.0;
 };
 
 // 0493x7j: O(1) state shared by all blocks of the cooperative masked CG.
@@ -4976,6 +4981,211 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
     }
 }
 
+// 0493x7q: full-domain periodic specialization of B1.  Keep the historical
+// q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1 kernel untouched
+// so partial-domain free-surface/dam-break runs retain exactly their qualified
+// GPU kernel.  This specialization additionally reduces the mass and the raw
+// RT0 correction actually sampled at particle locations.
+__global__ void q6_apply_full_domain_periodic_rt0_0493x7q(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const unsigned char* mask,
+    const double* cellDUx,
+    const double* cellDUy,
+    const double* faceDUxEast,
+    const double* faceDUyNorth,
+    std::uint32_t projectedType,
+    std::uint64_t nParticles,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    int periodicX,
+    int periodicY,
+    double dt,
+    double bodyAx,
+    double bodyAy,
+    int tgEnable,
+    double tgAmplitude,
+    int tgModeX,
+    int tgModeY,
+    double* partialPx,
+    double* partialPy,
+    double* partialMass,
+    unsigned long long* correctedCounter,
+    const Q6PeriodicMomentumAccumulator0493x7dv2fix2* periodicMomentumAccum,
+    int collectDiagnostics0493x7k) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    double* shM = shY + blockDim.x;
+    const int tid = threadIdx.x;
+    double px = 0.0;
+    double py = 0.0;
+    double pm = 0.0;
+    unsigned long long correctedLocal = 0ull;
+
+    double periodicCvx = 0.0;
+    double periodicCvy = 0.0;
+    if (periodicMomentumAccum != nullptr && periodicMomentumAccum->activeMass > 0.0) {
+        const double invMass = 1.0 / periodicMomentumAccum->activeMass;
+        if (periodicX) periodicCvx = periodicMomentumAccum->momentumX * invMass;
+        if (periodicY) periodicCvy = periodicMomentumAccum->momentumY * invMass;
+    }
+
+    const double invDx = static_cast<double>(nx) / lx;
+    const double invDy = static_cast<double>(ny) / ly;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+
+        double ax = 0.0;
+        double ay = 0.0;
+        q6_force_acceleration_0493x4b(
+            particles.x[i], particles.y[i], lx, ly, bodyAx, bodyAy,
+            tgEnable, tgAmplitude, tgModeX, tgModeY, &ax, &ay);
+        particles.vx[i] += ax * dt;
+        particles.vy[i] += ay * dt;
+
+        if (particles.type == nullptr || particles.type[i] != projectedType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells || mask[c] == 0u) continue;
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+        double x = particles.x[i];
+        double y = particles.y[i];
+        if (periodicX) {
+            x -= floor(x / lx) * lx;
+        } else {
+            x = fmin(fmax(x, 0.0), nextafter(lx, 0.0));
+        }
+        if (periodicY) {
+            y -= floor(y / ly) * ly;
+        } else {
+            y = fmin(fmax(y, 0.0), nextafter(ly, 0.0));
+        }
+        const double xi = fmin(fmax(x * invDx - static_cast<double>(ix), 0.0), 1.0);
+        const double eta = fmin(fmax(y * invDy - static_cast<double>(iy), 0.0), 1.0);
+
+        const double cx = cellDUx[c];
+        const double cy = cellDUy[c];
+        const double dUe = faceDUxEast[c];
+        const double dVn = faceDUyNorth[c];
+        const double dvx = cx + (2.0 * xi - 1.0) * (dUe - cx);
+        const double dvy = cy + (2.0 * eta - 1.0) * (dVn - cy);
+        particles.vx[i] += dvx - periodicCvx;
+        particles.vy[i] += dvy - periodicCvy;
+
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        // Raw RT0 momentum only: do not include the physical force or the
+        // x7d-v2 uniform pre-closure.  This lets x7q compute the exact residual.
+        px += m * dvx;
+        py += m * dvy;
+        pm += m;
+        if (collectDiagnostics0493x7k) ++correctedLocal;
+    }
+
+    if (collectDiagnostics0493x7k && correctedLocal != 0ull) {
+        atomicAdd(correctedCounter, correctedLocal);
+    }
+    shX[tid] = px;
+    shY[tid] = py;
+    shM[tid] = pm;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+            shM[tid] += shM[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partialPx[blockIdx.x] = shX[0];
+        partialPy[blockIdx.x] = shY[0];
+        partialMass[blockIdx.x] = shM[0];
+    }
+}
+
+// Collapse the per-block particle reduction on device.  The first B1 pass has
+// already removed the cell-centred x7d-v2 estimate.  Store only the remaining
+// uniform velocity required to make the applied Q6 correction exactly momentum
+// neutral in each periodic direction.
+__global__ void q6_finalize_exact_periodic_b1_closure_0493x7q(
+    const double* partialPx,
+    const double* partialPy,
+    const double* partialMass,
+    int blocks,
+    Q6PeriodicMomentumAccumulator0493x7dv2fix2* accum,
+    int correctX,
+    int correctY) {
+    extern __shared__ double sh[];
+    double* shX = sh;
+    double* shY = sh + blockDim.x;
+    double* shM = shY + blockDim.x;
+    const int tid = threadIdx.x;
+    double sx = 0.0;
+    double sy = 0.0;
+    double sm = 0.0;
+    for (int b = tid; b < blocks; b += blockDim.x) {
+        sx += partialPx[b];
+        sy += partialPy[b];
+        sm += partialMass[b];
+    }
+    shX[tid] = sx;
+    shY[tid] = sy;
+    shM[tid] = sm;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            shX[tid] += shX[tid + offset];
+            shY[tid] += shY[tid + offset];
+            shM[tid] += shM[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        accum->appliedMass0493x7q = shM[0];
+        accum->residualVelocityX0493x7q = 0.0;
+        accum->residualVelocityY0493x7q = 0.0;
+        if (shM[0] > 0.0 && isfinite(shM[0])) {
+            const double preCvx = accum->activeMass > 0.0
+                ? accum->momentumX / accum->activeMass : 0.0;
+            const double preCvy = accum->activeMass > 0.0
+                ? accum->momentumY / accum->activeMass : 0.0;
+            if (correctX) accum->residualVelocityX0493x7q = shX[0] / shM[0] - preCvx;
+            if (correctY) accum->residualVelocityY0493x7q = shY[0] / shM[0] - preCvy;
+        }
+    }
+}
+
+// Second resident particle pass.  It is never launched for partial-domain
+// free-surface runs, so dam-break keeps the exact pre-x7q GPU path and cost.
+__global__ void q6_apply_exact_periodic_b1_closure_0493x7q(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const unsigned char* mask,
+    std::uint32_t projectedType,
+    std::uint64_t nParticles,
+    const Q6PeriodicMomentumAccumulator0493x7dv2fix2* accum,
+    int correctX,
+    int correctY) {
+    const double cvx = correctX ? accum->residualVelocityX0493x7q : 0.0;
+    const double cvy = correctY ? accum->residualVelocityY0493x7q : 0.0;
+    const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+        if (particles.type == nullptr || particles.type[i] != projectedType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells || mask[c] == 0u) continue;
+        if (correctX) particles.vx[i] -= cvx;
+        if (correctY) particles.vy[i] -= cvy;
+    }
+}
+
 __global__ void q6_apply_free_surface_force_and_correction_0493x5a(
     CudaParticleDeviceView particles,
     CudaCellWorkspaceDeviceView cells,
@@ -8150,27 +8360,62 @@ bool apply_independent_masked_species_q6_0493w5(
         const unsigned char* denseMask = ws.speciesMasks0493w6.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
         if (faceToParticleRt00493x6hB1) {
-            // With exactly one projected species, ws.r/ws.p still hold that
-            // solve's east/north face corrections here.  Consume them directly
-            // in the fused resident particle kernel: no dense face copy, no
-            // extra allocation and no additional particle pass.
-            q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1<<<
-                particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
-                particles, cells, denseMask, denseDUx, denseDUy,
-                ws.r.data(), ws.p.data(), audit.type, nParticles,
-                grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
-                params.dt, params.bodyAccelerationX, params.bodyAccelerationY,
-                tgForceActive0493x5a ? 1 : 0,
-                params.taylorGreenForcingAmplitude,
-                params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
-                ws.partial0.data(), ws.partial1.data(), ws.counter.data(),
-                periodicProjectedMomentumCorrection0493x7dv2fix2
-                    ? ws.periodicMomentumAccum0493x7dv2fix2.data() : nullptr,
-                periodicProjectedMomentumCorrection0493x7dv2fix2 ? 1 : 0,
-                periodicX ? 1 : 0, periodicY ? 1 : 0,
-                q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
-            check_cuda_0400(cudaGetLastError(),
-                            "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
+            if (periodicProjectedMomentumCorrection0493x7dv2fix2) {
+                // 0493x7q is intentionally a separate kernel path.  Only the
+                // monophase full-domain B1 case enters here; partial-domain
+                // free-surface/dam-break runs execute the historical B1 launch
+                // below byte-for-byte unchanged.
+                q6_apply_full_domain_periodic_rt0_0493x7q<<<
+                    particleBlocks, threads, tripleShared>>>(
+                    particles, cells, denseMask, denseDUx, denseDUy,
+                    ws.r.data(), ws.p.data(), audit.type, nParticles,
+                    grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
+                    params.dt, params.bodyAccelerationX, params.bodyAccelerationY,
+                    tgForceActive0493x5a ? 1 : 0,
+                    params.taylorGreenForcingAmplitude,
+                    params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
+                    ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+                    ws.counter.data(), ws.periodicMomentumAccum0493x7dv2fix2.data(),
+                    q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x7q full-domain periodic RT0 apply launch");
+
+                q6_finalize_exact_periodic_b1_closure_0493x7q<<<
+                    1, threads, tripleShared>>>(
+                    ws.partial0.data(), ws.partial1.data(), ws.partial2.data(),
+                    particleBlocks, ws.periodicMomentumAccum0493x7dv2fix2.data(),
+                    periodicX ? 1 : 0, periodicY ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x7q exact periodic B1 reduction launch");
+
+                q6_apply_exact_periodic_b1_closure_0493x7q<<<
+                    particleBlocks, threads>>>(
+                    particles, cells, denseMask, audit.type, nParticles,
+                    ws.periodicMomentumAccum0493x7dv2fix2.data(),
+                    periodicX ? 1 : 0, periodicY ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x7q exact periodic B1 closure launch");
+            } else {
+                // Historical B1 path: keep this launch unchanged for all
+                // partial-domain free-surface cases, including dam-break.
+                q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1<<<
+                    particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
+                    particles, cells, denseMask, denseDUx, denseDUy,
+                    ws.r.data(), ws.p.data(), audit.type, nParticles,
+                    grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
+                    params.dt, params.bodyAccelerationX, params.bodyAccelerationY,
+                    tgForceActive0493x5a ? 1 : 0,
+                    params.taylorGreenForcingAmplitude,
+                    params.taylorGreenForcingModeX, params.taylorGreenForcingModeY,
+                    ws.partial0.data(), ws.partial1.data(), ws.counter.data(),
+                    periodicProjectedMomentumCorrection0493x7dv2fix2
+                        ? ws.periodicMomentumAccum0493x7dv2fix2.data() : nullptr,
+                    periodicProjectedMomentumCorrection0493x7dv2fix2 ? 1 : 0,
+                    periodicX ? 1 : 0, periodicY ? 1 : 0,
+                    q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
+            }
         } else if (freeSurfaceMode0493x5a && fuseForceKick0493x4b) {
             q6_apply_free_surface_force_and_correction_0493x5a<<<
                 particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
@@ -8214,8 +8459,8 @@ bool apply_independent_masked_species_q6_0493w5(
     // legacy all-particle correction remains forbidden.  For the monophase
     // full-domain B1 path only, an internal pressure gradient cannot change the
     // projected-species k=0 momentum in a periodic direction.  x7d-v2-fix2
-    // removes exactly that component inside B1 and leaves non-periodic traction
-    // components untouched.
+    // removes the cell-centred estimate inside B1; x7q then removes the exact
+    // particle-level residual.  Non-periodic traction components remain untouched.
     diag.momentumCorrectionVx = 0.0;
     diag.momentumCorrectionVy = 0.0;
     if (periodicProjectedMomentumCorrection0493x7dv2fix2 &&
@@ -8230,12 +8475,14 @@ bool apply_independent_masked_species_q6_0493w5(
             if (periodicX) {
                 diag.momentumCorrectionVx =
                     periodicMomentumAudit0493x7dv2fix2.momentumX /
-                    periodicMomentumAudit0493x7dv2fix2.activeMass;
+                    periodicMomentumAudit0493x7dv2fix2.activeMass +
+                    periodicMomentumAudit0493x7dv2fix2.residualVelocityX0493x7q;
             }
             if (periodicY) {
                 diag.momentumCorrectionVy =
                     periodicMomentumAudit0493x7dv2fix2.momentumY /
-                    periodicMomentumAudit0493x7dv2fix2.activeMass;
+                    periodicMomentumAudit0493x7dv2fix2.activeMass +
+                    periodicMomentumAudit0493x7dv2fix2.residualVelocityY0493x7q;
             }
         }
     }
