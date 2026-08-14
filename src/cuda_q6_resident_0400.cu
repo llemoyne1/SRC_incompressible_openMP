@@ -76,6 +76,30 @@ bool cuda_q6_g_f_resident_cg_0493x7j_requested() {
     return value == nullptr || *value == '\0' || truthy_0400(value);
 }
 
+// 0493x7y: controlled physics ablation of x7q only.
+//
+// Default ON preserves the qualified production path. OFF does NOT disable B1
+// and does NOT disable the preceding x7d-v2-fix2 periodic projected-species
+// momentum correction. It only bypasses the x7q exact particle-level residual
+// reduction and second closure pass, returning full-domain periodic B1 to the
+// immediately pre-x7q implementation.
+bool cuda_q6_exact_periodic_b1_closure_0493x7y_requested() {
+    const char* value =
+        std::getenv("MPCD_Q6_EXACT_PERIODIC_B1_CLOSURE_0493X7Y");
+    const bool requested =
+        value == nullptr || *value == '\0' || truthy_0400(value);
+    static bool reported = false;
+    if (!reported) {
+        std::cout << "[0493x7y] exactPeriodicB1Closure="
+                  << (requested ? 1 : 0)
+                  << " env="
+                  << ((value == nullptr || *value == '\0') ? "<default>" : value)
+                  << std::endl;
+        reported = true;
+    }
+    return requested;
+}
+
 bool cuda_q6_segmented_io_0409_requested() {
     return truthy_0400(std::getenv("MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409"));
 }
@@ -8360,7 +8384,8 @@ bool apply_independent_masked_species_q6_0493w5(
         const unsigned char* denseMask = ws.speciesMasks0493w6.data() +
             static_cast<std::size_t>(s) * static_cast<std::size_t>(grid.numCells);
         if (faceToParticleRt00493x6hB1) {
-            if (periodicProjectedMomentumCorrection0493x7dv2fix2) {
+            if (periodicProjectedMomentumCorrection0493x7dv2fix2 &&
+                cuda_q6_exact_periodic_b1_closure_0493x7y_requested()) {
                 // 0493x7q is intentionally a separate kernel path.  Only the
                 // monophase full-domain B1 case enters here; partial-domain
                 // free-surface/dam-break runs execute the historical B1 launch

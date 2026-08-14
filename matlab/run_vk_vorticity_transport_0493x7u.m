@@ -1,0 +1,36 @@
+%RUN_VK_VORTICITY_TRANSPORT_0493X7U Launcher for existing VK dumps.
+%
+% Run this script FROM the repository matlab/ directory.  All run paths are
+% deliberately written as ../runs/... so no working-directory change is needed.
+%
+% The broad default '../runs/*' is safe: the analyzer keeps only directories
+% that contain state_step_*.smpcd dumps and VK-like circle parameters.  For a
+% faster directory scan, replace it with one or more precise patterns.
+
+clear runPatterns analysisOutput
+
+% Broad discovery requested for execution from matlab/.
+runPatterns = {'../runs/*'};
+
+% Examples for restricting discovery if desired:
+% runPatterns = {'../runs/0434_vk_darcy_chi_periodic_*'};
+% runPatterns = { ...
+%     '../runs/0434_vk_darcy_chi_periodic_1200x480_*', ...
+%     '../runs/0434_vk_darcy_chi_periodic_750x200_*'};
+
+analysisOutput = '../runs/vk_vorticity_transport_0493x7u_analysis';
+
+suite = analyze_vk_vorticity_transport_0493x7u( ...
+    'RunPatterns', runPatterns, ...
+    'OutputDir', analysisOutput, ...
+    'AnalysisCellsPerDiameter', 20, ...   % D/20 => 375x100 for L=1.5x0.4, D=0.08
+    'SensitivityCheck', true, ...
+    'SensitivityCellsPerDiameter', 16, ...
+    'DumpStride', 1, ...                  % use every dump (currently every 100 steps)
+    'FirstPassStartDiameters', 4.0, ...
+    'WrapLimitDomainTransits', 0.80, ...
+    'MakePlots', true, ...
+    'ShowFigures', true, ...
+    'WriteFieldCsv', true);
+
+disp(suite.summary)

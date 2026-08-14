@@ -32,7 +32,14 @@ struct DarcyWorkspace0343 {
     double* d_mass = nullptr;
     double* d_mx = nullptr;
     double* d_my = nullptr;
-    double* d_sums = nullptr; // 10 doubles: legacy 0..7 plus force 8..9
+    // 0493x8a: 0..7 legacy, 8..9 continuous Darcy reaction proxy,
+    // 10..11 exact deterministic mean-kick momentum increment.
+    double* d_sums = nullptr;
+    double cumulativeMeanKickImpulseX0493x8a = 0.0;
+    double cumulativeMeanKickImpulseY0493x8a = 0.0;
+    std::uint64_t cumulativeMeanKickCalls0493x8a = 0u;
+    std::uint64_t cumulativeMeanKickLastStep0493x8a = 0u;
+    bool cumulativeMeanKickHasStep0493x8a = false;
     float* d_chi = nullptr;
     float* d_alpha = nullptr;
     float* d_lambda = nullptr;
@@ -77,7 +84,7 @@ bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_mass, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_mx, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_my, ncell * sizeof(double)) == cudaSuccess;
-    ok = ok && cudaMalloc(&w.d_sums, 10u * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_sums, 12u * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_chi, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_alpha, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_lambda, ncell * sizeof(float)) == cudaSuccess;
@@ -330,7 +337,7 @@ __global__ void reset_darcy_cells_kernel_0343(double* mass, double* mx, double* 
         mx[i] = 0.0;
         my[i] = 0.0;
     }
-    if (i < 10) sums[i] = 0.0;
+    if (i < 12) sums[i] = 0.0;
 }
 
 __global__ void deposit_darcy_moments_kernel_0343(CudaParticleDeviceView pv,
@@ -368,9 +375,11 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
                                                     int nx, int ny,
                                                     const float* chiField,
                                                     const float* alphaField,
+                                                    const float* lambdaField,
                                                     double uSolidX,
                                                     double uSolidY,
-                                                    int forceEnable) {
+                                                    int forceEnable,
+                                                    int exactMomentumEnable0493x8a) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     const int ncell = nx * ny;
     if (c >= ncell) return;
@@ -396,6 +405,16 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
             // is the integrated load proxy on the obstacle/material.
             atomicAdd(&sums[8], m * alpha * rx);
             atomicAdd(&sums[9], m * alpha * ry);
+        }
+        if (exactMomentumEnable0493x8a) {
+            // Exact momentum increment of apply_darcy_kick_kernel_0343.
+            // Every fluid particle in cell c receives the same
+            // dv=-lambda_c*(u_cell-u_s), hence sum_i m_i*dv equals
+            // -M_cell*lambda_c*(u_cell-u_s), up to reduction roundoff.
+            const double lambda =
+                lambdaField ? static_cast<double>(lambdaField[c]) : 0.0;
+            atomicAdd(&sums[10], -m * lambda * rx);
+            atomicAdd(&sums[11], -m * lambda * ry);
         }
     }
     atomicAdd(&sums[6], chi);
@@ -615,6 +634,58 @@ void append_topo_benchmark_csv_0348(const SimulationParams& params,
 }
 
 
+std::string exact_darcy_momentum_csv_path_0493x8a(
+    const SimulationParams& params) {
+    return (std::filesystem::path(params.outputDir) /
+            "darcy_exact_momentum_0493x8a.csv").string();
+}
+
+void append_exact_darcy_momentum_csv_0493x8a(
+    const SimulationParams& params,
+    std::uint64_t step,
+    double time,
+    const CudaDarcyBrinkman0343Diagnostics& d,
+    bool meanKickApplied,
+    bool wholeDarcyApply,
+    double meanKickImpulseX,
+    double meanKickImpulseY,
+    double cumulativeMeanKickImpulseX,
+    double cumulativeMeanKickImpulseY,
+    std::uint64_t cumulativeCalls) {
+    if (!topo_benchmark_write_step_0348(params, step)) return;
+    const std::string path = exact_darcy_momentum_csv_path_0493x8a(params);
+    const std::filesystem::path p(path);
+    if (!p.parent_path().empty()) {
+        std::filesystem::create_directories(p.parent_path());
+    }
+    const bool writeHeader =
+        !std::filesystem::exists(p) || std::filesystem::file_size(p) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) return;
+    const double invDt = params.dt > 0.0 ? 1.0 / params.dt : 0.0;
+    const double invMassDt =
+        (d.mass > 0.0 && params.dt > 0.0) ? 1.0 / (d.mass * params.dt) : 0.0;
+    out << std::setprecision(17);
+    if (writeHeader) {
+        out << "step,time,forcingMode,meanKickApplied,wholeDarcyApply,mass,dt,"
+               "meanKickImpulseX,meanKickImpulseY,"
+               "meanKickEquivalentForceX,meanKickEquivalentForceY,"
+               "meanKickEquivalentAccelerationX,meanKickEquivalentAccelerationY,"
+               "cumulativeMeanKickImpulseX,cumulativeMeanKickImpulseY,"
+               "cumulativeCalls,darcyReactionProxyX,darcyReactionProxyY,"
+               "darcyPower,solidLeakRms,q6GfPrestream\n";
+    }
+    out << step << ',' << time << ',' << params.darcyBrinkmanForcingMode << ','
+        << (meanKickApplied ? 1 : 0) << ',' << (wholeDarcyApply ? 1 : 0) << ','
+        << d.mass << ',' << params.dt << ','
+        << meanKickImpulseX << ',' << meanKickImpulseY << ','
+        << meanKickImpulseX * invDt << ',' << meanKickImpulseY * invDt << ','
+        << meanKickImpulseX * invMassDt << ',' << meanKickImpulseY * invMassDt << ','
+        << cumulativeMeanKickImpulseX << ',' << cumulativeMeanKickImpulseY << ','
+        << cumulativeCalls << ',' << d.darcyForceX << ',' << d.darcyForceY << ','
+        << d.darcyPower << ',' << d.solidLeakRms << ',' << d.q6GfPrestream << '\n';
+}
+
 void append_darcy_csv_0343(const SimulationParams& params,
                            std::uint64_t step,
                            double time,
@@ -681,6 +752,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     if (!params.darcyBrinkmanEnable) return d;
     d.supported = true;
     d.speciesQ6Enable = params.speciesQ6Enable ? 1 : 0;
+    const bool exactMomentumDiag0493x8a =
+        env_truthy_0343("MPCD_DARCY_EXACT_MOMENTUM_DIAG_0493X8A");
     const int nx = params.Nx;
     const int ny = params.Ny;
     const int ncell = nx * ny;
@@ -739,11 +812,12 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
 
     t0 = Clock0343::now();
     diagnostics_darcy_cells_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_mx, w.d_my, w.d_sums,
-                                                                 nx, ny, w.d_chi, w.d_alpha,
+                                                                 nx, ny, w.d_chi, w.d_alpha, w.d_lambda,
                                                                  params.darcyUSolidX, params.darcyUSolidY,
-                                                                 topoBenchForceThisStep ? 1 : 0);
+                                                                 topoBenchForceThisStep ? 1 : 0,
+                                                                 exactMomentumDiag0493x8a ? 1 : 0);
     check_cuda_0343(cudaDeviceSynchronize(), "diagnostics cells");
-    double hSums[10]{};
+    double hSums[12]{};
     check_cuda_0343(cudaMemcpy(hSums, w.d_sums, sizeof(hSums), cudaMemcpyDeviceToHost), "copy diagnostics sums");
     d.diagnosticsSeconds = seconds_since_0343(t0);
 
@@ -759,6 +833,24 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     const bool meanOutwardBath0420 = (params.darcyBrinkmanForcingMode == "mean_outward_bath" ||
                                       params.darcyBrinkmanForcingMode == "mean_oriented_bath" ||
                                       params.darcyBrinkmanForcingMode == "brinkman_outward_bath");
+    const bool meanOnly0493x8a =
+        !thermalBath0418 && !outwardBath0419 && !meanOutwardBath0420;
+    const bool meanKickApplied0493x8a = meanOnly0493x8a || meanOutwardBath0420;
+    const bool wholeDarcyApply0493x8a = meanOnly0493x8a;
+    if (exactMomentumDiag0493x8a && meanKickApplied0493x8a) {
+        if (w.cumulativeMeanKickHasStep0493x8a &&
+            step < w.cumulativeMeanKickLastStep0493x8a) {
+            w.cumulativeMeanKickImpulseX0493x8a = 0.0;
+            w.cumulativeMeanKickImpulseY0493x8a = 0.0;
+            w.cumulativeMeanKickCalls0493x8a = 0u;
+            w.cumulativeMeanKickHasStep0493x8a = false;
+        }
+        w.cumulativeMeanKickImpulseX0493x8a += hSums[10];
+        w.cumulativeMeanKickImpulseY0493x8a += hSums[11];
+        w.cumulativeMeanKickCalls0493x8a += 1u;
+        w.cumulativeMeanKickLastStep0493x8a = step;
+        w.cumulativeMeanKickHasStep0493x8a = true;
+    }
     if (meanOutwardBath0420) {
         const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
                                    (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
@@ -840,6 +932,15 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.csvPath = darcy_csv_path_0343(params);
     append_darcy_csv_0343(params, step, time, d);
     append_topo_benchmark_csv_0348(params, step, time, d);
+    if (exactMomentumDiag0493x8a) {
+        append_exact_darcy_momentum_csv_0493x8a(
+            params, step, time, d, meanKickApplied0493x8a, wholeDarcyApply0493x8a,
+            meanKickApplied0493x8a ? hSums[10] : 0.0,
+            meanKickApplied0493x8a ? hSums[11] : 0.0,
+            w.cumulativeMeanKickImpulseX0493x8a,
+            w.cumulativeMeanKickImpulseY0493x8a,
+            w.cumulativeMeanKickCalls0493x8a);
+    }
     if (env_truthy_0343("MPCD_CUDA_DARCY_BRINKMAN_LOG_0343") &&
         (params.darcyCostEvery <= 0 || step % static_cast<std::uint64_t>(std::max(1, params.darcyCostEvery)) == 0u)) {
         std::cerr << "\n[darcy0343] step=" << step

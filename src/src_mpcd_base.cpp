@@ -52,6 +52,100 @@ bool env_truthy_src_base_0475a(const char* name) {
 
 namespace {
 
+// 0493x8c TEMPORARY stage-resolved global Px diagnostic.
+// Gate OFF by default. Remove immediately after the short x8c campaign.
+bool x8c_stage_diag_enabled_0493x8c() {
+    static const bool enabled = []() {
+        const char* v = std::getenv("MPCD_MOMENTUM_STAGE_DIAG_0493X8C");
+        if (v == nullptr || *v == '\0') return false;
+        const std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" ||
+                 s == "off" || s == "OFF" || s == "no" || s == "NO");
+    }();
+    return enabled;
+}
+
+int x8c_stage_diag_env_int_0493x8c(const char* name, int fallback) {
+    const char* v = std::getenv(name);
+    if (v == nullptr || *v == '\0') return fallback;
+    try { return std::stoi(v); } catch (...) { return fallback; }
+}
+
+bool x8c_stage_diag_sample_0493x8c(std::uint64_t step) {
+    if (!x8c_stage_diag_enabled_0493x8c()) return false;
+    static const int every = std::max(
+        1, x8c_stage_diag_env_int_0493x8c(
+            "MPCD_MOMENTUM_STAGE_DIAG_EVERY_0493X8C", 20));
+    static const int maxStep = std::max(
+        1, x8c_stage_diag_env_int_0493x8c(
+            "MPCD_MOMENTUM_STAGE_DIAG_MAX_STEP_0493X8C", 200));
+    return step <= static_cast<std::uint64_t>(maxStep) &&
+           (step % static_cast<std::uint64_t>(every) == 0u);
+}
+
+void x8c_stage_diag_append_0493x8c(ParticleState& liveState,
+                                   const SimulationParams& params,
+                                   std::uint64_t step,
+                                   double time,
+                                   const char* stage) {
+    if (!x8c_stage_diag_sample_0493x8c(step)) return;
+    if (params.resamplingEnable) {
+        throw std::runtime_error(
+            "0493x8c is restricted to the resampling-off VK diagnostic");
+    }
+
+    const ParticleState* measured = &liveState;
+#if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE)
+    static ParticleState scratch;
+    static bool scratchInitialized = false;
+    if (cuda_shared_particle_state_0251_is_fresh()) {
+        if (!scratchInitialized || scratch.Np != liveState.Np) {
+            scratch = liveState;
+            scratchInitialized = true;
+        }
+        // Diagnostic-only copy into private scratch: live host state and device
+        // state are not modified.
+        cuda_shared_particle_state_0251().download_velocities(scratch);
+        measured = &scratch;
+    }
+#endif
+
+    const std::size_t n = active_fluid_count_size(*measured);
+    double mass = 0.0;
+    double px = 0.0;
+#pragma omp parallel for reduction(+:mass,px) if(n > 10000)
+    for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+        const std::size_t i = static_cast<std::size_t>(ii);
+        if (!is_fluid_particle(*measured, i)) continue;
+        const double m = measured->mass[i];
+        mass += m;
+        px += m * measured->vx[i];
+    }
+
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) /
+        "momentum_stages_0493x8c.csv";
+    const bool writeHeader =
+        !std::filesystem::exists(path) ||
+        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x8c cannot open momentum_stages_0493x8c.csv");
+    }
+    out << std::setprecision(17);
+    if (writeHeader) {
+        out << "step,time,stage,mass,Px,UglobalX,sharedFresh,lastWriter\n";
+    }
+    const bool fresh = cuda_shared_particle_state_0251_is_fresh();
+    const char* writer = cuda_shared_particle_state_0251_last_writer();
+    out << step << ',' << time << ',' << stage << ','
+        << mass << ',' << px << ','
+        << (mass > 0.0 ? px / mass : 0.0) << ','
+        << (fresh ? 1 : 0) << ','
+        << (writer != nullptr ? writer : "null") << '\n';
+}
+
 using ProfileClock = std::chrono::steady_clock;
 
 struct StepProfilePhaseIndex {
@@ -1203,6 +1297,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const std::size_t n = active_fluid_count_size(state);
     const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const double time = static_cast<double>(step) * params.dt;
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "step_start");
     const bool forceFieldActive0493x3 =
         params.bodyAccelerationX != 0.0 || params.bodyAccelerationY != 0.0 ||
         (params.taylorGreenForcingEnable && params.taylorGreenForcingAmplitude > 0.0);
@@ -1297,6 +1392,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         forceStreamParamsStorage0493x3->taylorGreenForcingAmplitude = 0.0;
         forceStreamParamsPtr0493x3 = &*forceStreamParamsStorage0493x3;
     }
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_q6_prestream");
     const SimulationParams& forceStreamParams0493x3 =
         *forceStreamParamsPtr0493x3;
 
@@ -1448,6 +1544,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
     }
 
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_force_stream");
     {
         MPCD_PROFILE_PHASE(result.profile, Domain);
         result.domain = make_fluid_domain_bounds(params, time);
@@ -1534,6 +1631,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_boundary");
     // 0315e: synchronize the active host prefix only when an immediate
     // downstream CPU/host particle consumer is actually present.  In the
     // validated resident IO classic path, collision and the due thermostat can
@@ -1601,6 +1699,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     }
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_collision");
     bool q6ResidentHandled0400 = false;
     bool thermostatHandledByQ6Resident0400 = false;
     {
@@ -1642,6 +1741,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_q6_post");
     {
         MPCD_PROFILE_PHASE(result.profile, ClosedCapacity);
         if (!params.srcClassicCudaModeEnable) {
@@ -1685,6 +1785,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_thermostat");
     {
         MPCD_PROFILE_PHASE(result.profile, KeepMeanFlow);
         if (q6ResidentHandled0400 && params.keepMeanFlowEnable) {
@@ -1708,6 +1809,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             state, params, grid, result.domain, step, time);
     }
 
+    x8c_stage_diag_append_0493x8c(state, params, step, time, "after_darcy_post");
     // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally
     // placed at the same post-SRC/post-thermostat physical-grid point as the
     // survey and future guard/refill decisions.  It deposits only enough cell

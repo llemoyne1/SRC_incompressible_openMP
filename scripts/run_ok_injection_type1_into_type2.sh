@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT"
 
+# 0493x7r: the backend embeds the qualified signed Q6-g-f/x7q/x7j profile,
+# so this public wrapper needs no PROJECTION_* or Q6_GF_* command-line settings.
+# Its phase-compatibility routing below is intentionally preserved.
 # 0493w4 true two-species profile: type 1 enters a domain initially filled
 # with type 2. INJECT_PHASE and BACKGROUND_PHASE independently select liquid
 # or gas; implementation remains in the shared runner so flags cannot drift.
@@ -41,4 +44,4 @@ export SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false
 export POSTCHECK_SPECIES_ENABLE="${POSTCHECK_SPECIES_ENABLE:-true}"
 export REQUIRE_MIXED_CELL_AT_END="${REQUIRE_MIXED_CELL_AT_END:-false}"
 
-exec "$ROOT/scripts/run_ok_injection_type1_into_type2_empty.sh" "$@"
+exec bash "$ROOT/scripts/run_ok_injection_type1_into_type2_empty.sh" "$@"
