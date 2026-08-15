@@ -1489,7 +1489,10 @@ void validate_simulation_params(const SimulationParams& p) {
             wallLike(p.bcLeft) && wallLike(p.bcRight) &&
             wallLike(p.bcBottom) && wallLike(p.bcTop) &&
             hard_inlet_reservoir_requested(p) &&
-            p.inletVelocitySpatialProfile == "uniform" &&
+            (p.inletVelocitySpatialProfile == "uniform" ||
+             p.inletVelocitySpatialProfile == "poiseuille_y_max" ||
+             p.inletVelocitySpatialProfile == "poiseuille_y" ||
+             p.inletVelocitySpatialProfile == "poiseuille_y_mean") &&
             segmentedOutletModeSupported0493x7f;
 
         const bool freeSurfaceMasked0493x5a =

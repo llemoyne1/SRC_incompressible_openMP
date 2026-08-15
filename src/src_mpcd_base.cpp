@@ -266,7 +266,10 @@ bool cuda_q6_resident_src_io_segmented_0409_supported(const SimulationParams& pa
            cuda_q6_wall_like_0409(params.bcBottom) && cuda_q6_wall_like_0409(params.bcTop) &&
            params.inletReservoirMode == "hard_cell_density" &&
            params.inletInjectionMode == "hard_cell_density" &&
-           params.inletVelocitySpatialProfile == "uniform" &&
+           (params.inletVelocitySpatialProfile == "uniform" ||
+            params.inletVelocitySpatialProfile == "poiseuille_y_max" ||
+            params.inletVelocitySpatialProfile == "poiseuille_y" ||
+            params.inletVelocitySpatialProfile == "poiseuille_y_mean") &&
            (params.openBoundaryOutletMode == "neumann" || params.openBoundaryOutletMode == "balanced_flux" ||
             params.openBoundaryOutletMode == "balanced" || params.openBoundaryOutletMode == "hybrid") &&
            (params.projectionOperator == "elliptic_fv_cg" || params.projectionOperator == "auto_fv_cg");

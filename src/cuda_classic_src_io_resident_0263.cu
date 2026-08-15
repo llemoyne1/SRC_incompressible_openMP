@@ -511,6 +511,60 @@ __device__ double inlet_y_profile_factor_device_0263(const CudaClassicSrcIoFullf
     return 1.0;
 }
 
+// 0493x8k: segmented Poiseuille is local to the open segment.
+// xi=0/1 are segment endpoints; xi=1/2 is the midpoint.
+__device__ double segmented_inlet_profile_factor_device_0493x8k(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int segmentIndex,
+    double x,
+    double y) {
+    if (segmentIndex < 0 || segmentIndex >= cfg.segmentCount) return 1.0;
+    if (cfg.profileCode != 1 && cfg.profileCode != 2) return 1.0;
+
+    const int face = cfg.segmentFace[segmentIndex];
+    double s = 0.0;
+    if (face == 0 || face == 1) {
+        const double h = cfg.yMax - cfg.yMin;
+        if (!(h > 0.0)) return 1.0;
+        s = (y - cfg.yMin) / h;
+    } else {
+        const double w = cfg.xMax - cfg.xMin;
+        if (!(w > 0.0)) return 1.0;
+        s = (x - cfg.xMin) / w;
+    }
+
+    const double sMin = cfg.segmentSMin[segmentIndex];
+    const double sMax = cfg.segmentSMax[segmentIndex];
+    const double span = sMax - sMin;
+    if (!(span > 0.0)) return 0.0;
+
+    const double xi = clamp_device_0263((s - sMin) / span, 0.0, 1.0);
+    const double shape = xi * (1.0 - xi);
+    return cfg.profileCode == 1 ? 4.0 * shape : 6.0 * shape;
+}
+
+__device__ void segmented_inlet_velocity_device_0493x8k(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int segmentIndex,
+    double x,
+    double y,
+    double time,
+    double& ux,
+    double& uy) {
+    const double fRamp = ramp_factor_device_0263(cfg, time);
+    ux = fRamp * cfg.segmentUx[segmentIndex];
+    uy = fRamp * cfg.segmentUy[segmentIndex];
+
+    // Preserve historical uniform segmented inlet exactly.
+    if (cfg.profileCode != 1 && cfg.profileCode != 2) return;
+
+    const double factor =
+        segmented_inlet_profile_factor_device_0493x8k(cfg, segmentIndex, x, y);
+    const int face = cfg.segmentFace[segmentIndex];
+    if (face == 0 || face == 1) ux *= factor;
+    else uy *= factor;
+}
+
 __device__ void inlet_velocity_device_0263(const CudaClassicSrcIoFullfaceConfig0263& cfg,
                                            int face,
                                            double x,
@@ -791,9 +845,8 @@ __device__ void insert_reservoir_cell_device_0263(
         double ux = 0.0, uy = 0.0;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
-            const double fRamp = ramp_factor_device_0263(cfg, time);
-            ux = fRamp * cfg.segmentUx[segmentIndex];
-            uy = fRamp * cfg.segmentUy[segmentIndex];
+            segmented_inlet_velocity_device_0493x8k(
+                cfg, segmentIndex, xp, yp, time, ux, uy);
             particleType = cfg.segmentType[segmentIndex];
         } else {
             inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
@@ -2117,9 +2170,8 @@ __device__ void insert_reservoir_cell_pool_device_0268(
         double ux = 0.0, uy = 0.0;
         std::uint32_t particleType = cfg.refType;
         if (segmentIndex >= 0 && segmentIndex < cfg.segmentCount) {
-            const double fRamp = ramp_factor_device_0263(cfg, time);
-            ux = fRamp * cfg.segmentUx[segmentIndex];
-            uy = fRamp * cfg.segmentUy[segmentIndex];
+            segmented_inlet_velocity_device_0493x8k(
+                cfg, segmentIndex, xp, yp, time, ux, uy);
             particleType = cfg.segmentType[segmentIndex];
         } else {
             inlet_velocity_device_0263(cfg, inletFace, xp, yp, time, ux, uy);
@@ -2741,7 +2793,10 @@ bool supported_segmented_0264(const SimulationParams& params) {
     if (q6ResidentIo0409) {
         if (!params.projectionEnable || params.projectionBackend != "cuda") return false;
         if (!env_truthy_0263("MPCD_CUDA_Q6_RESIDENT_0400")) return false;
-        if (params.inletVelocitySpatialProfile != "uniform") return false;
+        if (!(params.inletVelocitySpatialProfile == "uniform" ||
+              params.inletVelocitySpatialProfile == "poiseuille_y_max" ||
+              params.inletVelocitySpatialProfile == "poiseuille_y" ||
+              params.inletVelocitySpatialProfile == "poiseuille_y_mean")) return false;
     } else {
         // 0264 is still restricted to the classic SRC resident subset when the
         // explicit Q6 continuation is not requested.

@@ -234,6 +234,7 @@ constexpr double kPhaseGeometryFilterLambda0493x6c = 0.125;
 struct Q6SegmentedIo0409 {
     int enabled = 0;
     int count = 0;
+    int inletProfileCode = 0; // 0 uniform, 1 local Poiseuille Umax, 2 local Poiseuille Umean
     int face[kOpenBoundaryMaxSegments]{}; // 0 left, 1 right, 2 bottom, 3 top
     int mode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
     std::uint32_t type[kOpenBoundaryMaxSegments]{};
@@ -1188,6 +1189,13 @@ void q6_open_fullface_flux_0404(const SimulationParams& params,
     }
 }
 
+int q6_segmented_profile_code_0493x8k(const SimulationParams& params) {
+    if (params.inletVelocitySpatialProfile == "poiseuille_y_max") return 1;
+    if (params.inletVelocitySpatialProfile == "poiseuille_y" ||
+        params.inletVelocitySpatialProfile == "poiseuille_y_mean") return 2;
+    return 0;
+}
+
 bool q6_open_segmented_0409_supported(const SimulationParams& params) {
     if (!cuda_q6_segmented_io_0409_requested()) return false;
     if (!params.openBoundarySegmentsEnable || params.openBoundarySegmentCount <= 0) return false;
@@ -1195,7 +1203,10 @@ bool q6_open_segmented_0409_supported(const SimulationParams& params) {
     if (params.openBoundarySegmentCount > kOpenBoundaryMaxSegments) return false;
     if (!q6_wall_like_0409(params.bcLeft) || !q6_wall_like_0409(params.bcRight) ||
         !q6_wall_like_0409(params.bcBottom) || !q6_wall_like_0409(params.bcTop)) return false;
-    if (params.inletVelocitySpatialProfile != "uniform") return false;
+    if (!(params.inletVelocitySpatialProfile == "uniform" ||
+          params.inletVelocitySpatialProfile == "poiseuille_y_max" ||
+          params.inletVelocitySpatialProfile == "poiseuille_y" ||
+          params.inletVelocitySpatialProfile == "poiseuille_y_mean")) return false;
     if (!(params.openBoundaryOutletMode == "neumann" ||
           params.openBoundaryOutletMode == "balanced_flux" ||
           params.openBoundaryOutletMode == "balanced" ||
@@ -1221,6 +1232,7 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
     const double ramp = inlet_velocity_ramp_factor_0400(params, time);
     cfg.enabled = 1;
     cfg.count = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
+    cfg.inletProfileCode = q6_segmented_profile_code_0493x8k(params);
     for (int k = 0; k < cfg.count; ++k) {
         const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
         cfg.face[k] = q6_face_code_0409(seg.face);
@@ -1237,7 +1249,14 @@ double q6_segmented_flux_integral_0409(const Q6SegmentedIo0409& cfg, int face, d
     if (!cfg.enabled || !(length > 0.0)) return 0.0;
     double flux = 0.0;
     for (int k = 0; k < cfg.count; ++k) {
-        if (cfg.face[k] == face) flux += cfg.flux[k] * std::max(0.0, cfg.sMax[k] - cfg.sMin[k]) * length;
+        if (cfg.face[k] != face) continue;
+        double value =
+            cfg.flux[k] * std::max(0.0, cfg.sMax[k] - cfg.sMin[k]) * length;
+        if (cfg.mode[k] == 1 && cfg.inletProfileCode == 1) {
+            value *= 2.0 / 3.0; // mean of 4*xi*(1-xi)
+        }
+        // profileCode 2 has unit mean; outlets are unchanged in x8k.
+        flux += value;
     }
     return flux;
 }
@@ -1650,6 +1669,27 @@ __global__ void q6_finalize_cells_0400(CudaCellWorkspaceDeviceView cells,
     }
 }
 
+__device__ double q6_segmented_profiled_flux_0493x8k(
+    const Q6SegmentedIo0409& cfg,
+    int segmentIndex,
+    double tangent) {
+    if (segmentIndex < 0 || segmentIndex >= cfg.count) return 0.0;
+    if (cfg.mode[segmentIndex] != 1 || cfg.inletProfileCode == 0) {
+        return cfg.flux[segmentIndex];
+    }
+
+    const double sMin = cfg.sMin[segmentIndex];
+    const double sMax = cfg.sMax[segmentIndex];
+    const double span = sMax - sMin;
+    if (!(span > 0.0)) return 0.0;
+
+    const double xi = fmin(1.0, fmax(0.0, (tangent - sMin) / span));
+    const double shape = xi * (1.0 - xi);
+    const double factor =
+        cfg.inletProfileCode == 1 ? 4.0 * shape : 6.0 * shape;
+    return cfg.flux[segmentIndex] * factor;
+}
+
 __device__ double q6_segmented_flux_for_cell_0409(const Q6SegmentedIo0409& cfg,
                                                         int face,
                                                         int ix,
@@ -1663,7 +1703,7 @@ __device__ double q6_segmented_flux_for_cell_0409(const Q6SegmentedIo0409& cfg,
         : ((static_cast<double>(ix) + 0.5) / static_cast<double>(nx > 0 ? nx : 1));
     for (int k = 0; k < cfg.count; ++k) {
         if (cfg.face[k] == face && s >= cfg.sMin[k] && s <= cfg.sMax[k]) {
-            return cfg.flux[k];
+            return q6_segmented_profiled_flux_0493x8k(cfg, k, s);
         }
     }
     return 0.0;
@@ -1710,18 +1750,20 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
         if (cfg.face[k] != face || tangent < cfg.sMin[k] || tangent > cfg.sMax[k]) {
             continue;
         }
+        const double targetFlux =
+            q6_segmented_profiled_flux_0493x8k(cfg, k, tangent);
         if (cfg.mode[k] == 1) {
             // A typed reservoir injects only its declared species.  Untyped
             // legacy inlets fall back to the local occupancy split.
             if (cfg.type[k] != 0u) {
-                return cfg.type[k] == speciesType ? cfg.flux[k] : 0.0;
+                return cfg.type[k] == speciesType ? targetFlux : 0.0;
             }
-            return cfg.flux[k] * fraction;
+            return targetFlux * fraction;
         }
         // Outlet flux is shared only when several species are independently
         // projected.  With the liquid-only target configuration, the sole
         // projected species retains the full prescribed outlet flux.
-        return cfg.flux[k] * fraction;
+        return targetFlux * fraction;
     }
     // The complement of a segmented face remains an impermeable wall.
     return 0.0;
