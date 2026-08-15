@@ -235,6 +235,7 @@ struct Q6SegmentedIo0409 {
     int enabled = 0;
     int count = 0;
     int inletProfileCode = 0; // 0 uniform, 1 local Poiseuille Umax, 2 local Poiseuille Umean
+    int passiveNeumannRightOutlet0493x8l = 0;
     int face[kOpenBoundaryMaxSegments]{}; // 0 left, 1 right, 2 bottom, 3 top
     int mode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
     std::uint32_t type[kOpenBoundaryMaxSegments]{};
@@ -1233,6 +1234,7 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
     cfg.enabled = 1;
     cfg.count = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
     cfg.inletProfileCode = q6_segmented_profile_code_0493x8k(params);
+    cfg.passiveNeumannRightOutlet0493x8l = params.openBoundaryOutletMode == "neumann" ? 1 : 0;
     for (int k = 0; k < cfg.count; ++k) {
         const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
         cfg.face[k] = q6_face_code_0409(seg.face);
@@ -1750,6 +1752,22 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
         if (cfg.face[k] != face || tangent < cfg.sMin[k] || tangent > cfg.sMax[k]) {
             continue;
         }
+        // 0493x8l: Zovatto-style passive right outlet.
+        // Discrete zero-normal-gradient: copy the current boundary-cell ux
+        // to the boundary face. The Q6-G-F boundary correction is therefore
+        // target-before = 0 instead of imposing segmentUx.
+        if (cfg.mode[k] == 2 && cfg.passiveNeumannRightOutlet0493x8l && face == 1) {
+            if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
+                cell < 0 || cell >= species.numCells) {
+                return 0.0;
+            }
+            const int sk = speciesIndex * species.numCells + cell;
+            const double m = species.mass[sk];
+            if (!(m > 0.0)) return 0.0;
+            const double localUx = species.px[sk] / m;
+            return localUx * fraction;
+        }
+
         const double targetFlux =
             q6_segmented_profiled_flux_0493x8k(cfg, k, tangent);
         if (cfg.mode[k] == 1) {
