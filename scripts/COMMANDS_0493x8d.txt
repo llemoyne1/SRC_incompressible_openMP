@@ -1,0 +1,29 @@
+cd /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF
+
+# Installer uniquement les runners/analyseur : aucune modification du solveur.
+cp run_0493x8d_q6gf_poiseuille_solid.sh scripts/
+cp run_0493x8d_q6gf_poiseuille_chi.sh scripts/
+cp run_0493x8d_q6gf_poiseuille_qualification.sh scripts/
+cp analyze_0493x8d_q6gf_poiseuille_qualification.m matlab/
+chmod +x scripts/run_0493x8d_q6gf_poiseuille_*.sh
+
+# 1. Préflight des deux cas.
+PREFLIGHT_ONLY=1 LIVE_PROGRESS=1 \
+  bash scripts/run_0493x8d_q6gf_poiseuille_qualification.sh
+
+# 2. Smoke court des deux cas, sans écraser les futurs runs longs.
+STEPS=20 SUMMARY_EVERY=1 DUMP_STATE_EVERY=10 LIVE_PROGRESS=1 \
+BASE=runs/0493x8d_q6gf_poiseuille_smoke \
+  bash scripts/run_0493x8d_q6gf_poiseuille_qualification.sh
+
+# 3. Si les deux smokes terminent normalement : qualification longue.
+LIVE_PROGRESS=1 \
+  bash scripts/run_0493x8d_q6gf_poiseuille_qualification.sh
+
+# 4. MATLAB offline, depuis la racine du dépôt.
+# addpath('matlab');
+# out = analyze_0493x8d_q6gf_poiseuille_qualification( ...
+#   'runs/0493x8d_q6gf_poiseuille_qualification');
+
+# Renvoyer le bloc :
+# ===== 0493x8d Q6-G-F INDEPENDENT POISEUILLE QUALIFICATION =====

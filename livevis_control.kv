@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power
-field = ux    
+field = uy    
 
 # colormap:
 #   blue_red, gray, thermal
@@ -38,11 +38,11 @@ colormap = blue_red
 # clip:
 #   >0 fixes color saturation scale.
 #   <=0 lets the renderer use its default/auto behavior.
-clip = 1.35
+clip = -27
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
-gain = 1
+gain = 10
 
 # smoothPasses:
 #   spatial smoothing of the scalar field.
@@ -57,8 +57,8 @@ smoothPasses = 5
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
-liveGridNx = 300
-liveGridNy = 120
+liveGridNx = 600
+liveGridNy = 200
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -112,7 +112,7 @@ recordSession = livevis_0436
 #   or comma-separated list:
 #     rho,density,mass,rho1,rho2,y1,y2,ux,uy,speed,n,n1,n2
 #   For comparisons, rho,ux,uy is the robust default.
-recordFields = rho,ux,uy
+recordFields = ux,uy
 
 # recordFormat:
 #   f32 or float32. Current supported binary dump format is float32 raw field.
@@ -121,7 +121,7 @@ recordFormat = f32
 # recordEvery:
 #   <=0 or absent: follow liveEvery, WYSIWYR default.
 #   >0: explicit absolute dump cadence in solver steps.
-recordEvery = 0
+recordEvery = 100
 
 # recordStride:
 #   relative WYSIWYR override.
