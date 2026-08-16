@@ -323,10 +323,13 @@ struct SimulationParams {
     // Q6 outlet treatment for inlet/outlet pairs.
     //   balanced_flux : validated 0062/0063 policy; the outlet projection flux
     //                   is prescribed equal to the ramped inlet flux.
-    //   neumann       : outlet correction has zero normal gradient in practice:
-    //                   the outlet boundary flux used by Q6 is the current
-    //                   local base face flux, while the inlet remains prescribed.
-    //                   Segmented aperture complements stay impermeable.
+    //   neumann       : passive pressure outlet.  Q6-G-F extrapolates the
+    //                   current boundary-cell normal velocity to the base
+    //                   outlet face (zero normal gradient of predictor velocity),
+    //                   while the projection uses phi=0 at that open face and
+    //                   is therefore free to adjust the final outlet flux.
+    //                   The inlet remains prescribed; segmented aperture
+    //                   complements remain impermeable.
     //   hybrid        : starts from the local Neumann outlet profile, optionally
     //                   blends it toward the balanced-flux profile, then applies
     //                   a weak global outlet-only flux-balance feedback.  This
@@ -338,8 +341,12 @@ struct SimulationParams {
     // CUDA SRC classic outlet regimes for particle reservoirs. These options
     // only affect the particle-level inlet/outlet path; Q6 outlet handling keeps
     // its own projection semantics.
-    //   neumann          : passive outlet; only particles that actually cross
-    //                      the outlet boundary are deleted.
+    //   neumann          : zero-normal-gradient open boundary. Particles that
+    //                      cross outward are deleted, while the resident CUDA
+    //                      path supplies the inward kinetic half-space flux by
+    //                      sampling an independent local kinetic bath reconstructed from adjacent interior moments.
+    //                      This is the particle counterpart of the local Q6/Q6-G-F
+    //                      Neumann face extrapolation, not an absorbing vacuum.
     //   equilibrium_flux : after natural outlet deletion, delete extra particles
     //                      in the outlet layer to cancel the current net inlet
     //                      particle gain. This is convenient, but coupled to inlet.

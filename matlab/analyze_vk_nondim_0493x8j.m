@@ -30,16 +30,18 @@ function out = analyze_vk_nondim_0493x8j(varargin)
 
 p = inputParser;
 p.FunctionName = 'analyze_vk_nondim_0493x8j';
-addParameter(p,'FieldsFile','../runs/0493x8i_vk_established_analysis/vk_established_fields_0493x8i.mat');
-addParameter(p,'SummaryFile','../runs/0493x8i_vk_established_analysis/vk_established_summary_0493x8i.csv');
-addParameter(p,'OutputDir','../runs/0493x8j_vk_nondim_analysis');
+addParameter(p,'FieldsFile','../runs/0493x8i_vk_established_analysis2/vk_established_fields_0493x8i.mat');
+addParameter(p,'SummaryFile','../runs/0493x8i_vk_established_analysis2/vk_established_summary_0493x8i.csv');
+addParameter(p,'OutputDir','../runs/0493x8j_vk_nondim_analysis2');
 addParameter(p,'CylinderCx',0.9375);
 addParameter(p,'CylinderD',0.3125);
 addParameter(p,'SectionXD',[-2.0 -1.5 -1.0]);
 addParameter(p,'ReferenceSectionXD',-1.5);
 addParameter(p,'SectionHalfWidthD',0.05);
 addParameter(p,'MakePlots',true);
-addParameter(p,'ShowFigures',false);
+addParameter(p,'ShowFigures',true);
+addParameter(p,'MinLocalStep',-inf);
+addParameter(p,'MaxLocalStep',inf);
 parse(p,varargin{:});
 opt = p.Results;
 

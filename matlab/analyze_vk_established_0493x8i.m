@@ -33,7 +33,7 @@ p = inputParser;
 p.FunctionName = 'analyze_vk_established_0493x8i';
 addParameter(p,'RecordingDir', ...
     '../runs/0493x8h_vk_sat_restart27000_dense/src-q6-g-f/output/recordings/0493x8f_q6gf_vk_re65_src-q6-g-f');
-addParameter(p,'OutputDir','../runs/0493x8i_vk_established_analysis');
+addParameter(p,'OutputDir','../runs/0493x8i_vk_established_analysis2');
 addParameter(p,'RestartStepOffset',27000);
 addParameter(p,'Dt',0.002);
 addParameter(p,'URef',0.18);
@@ -54,6 +54,8 @@ addParameter(p,'PhaseBins',8);
 addParameter(p,'VorticitySmoothPasses',1);
 addParameter(p,'MakePlots',true);
 addParameter(p,'ShowFigures',false);
+addParameter(p,'MinLocalStep',-inf);
+addParameter(p,'MaxLocalStep',inf);
 parse(p,varargin{:});
 opt = p.Results;
 
@@ -98,6 +100,7 @@ end
 stepsUx = local_list_steps_0493x8i(recordDir,'ux');
 stepsUy = local_list_steps_0493x8i(recordDir,'uy');
 steps = intersect(stepsUx,stepsUy,'stable');
+
 if isempty(steps)
     error('0493x8i:noFrames','No matching ux/uy .f32 frame pairs found in %s',recordDir);
 end
@@ -107,6 +110,11 @@ if numel(steps) ~= numel(stepsUx) || numel(steps) ~= numel(stepsUy)
 end
 
 steps = local_keep_complete_frames_0493x8i(recordDir,steps,nx,ny);
+minLocalStep = double(opt.MinLocalStep);
+maxLocalStep = double(opt.MaxLocalStep);
+
+steps = steps(double(steps) >= minLocalStep & double(steps) <= maxLocalStep);
+
 if numel(steps) < 10
     error('0493x8i:tooFewFrames','Only %d complete ux/uy frame pairs remain.',numel(steps));
 elseif numel(steps) < 40

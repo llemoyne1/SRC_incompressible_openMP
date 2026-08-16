@@ -25,7 +25,7 @@ suite_root_cd_0434
 CASE_LABEL="0493x8f_q6gf_vk_re65"
 GEN_CASE="vk"
 TOPOLOGY="segmented"
-RUN_MODES="src"
+RUN_MODES="src-q6-g-f"
 
 # ---------------------------------------------------------------------------
 # Qualified microscopic fluid: do not change in the reference x8f run.
@@ -263,7 +263,7 @@ PARAMS
 }
 
 run_one_0493x8f() {
-  local mode="src"
+  local mode="src-q6-g-f"
   suite_validate_path_0434 "$mode"
 
   local run_root="$BASE_RUN_ROOT/$mode"

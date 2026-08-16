@@ -457,6 +457,7 @@ struct Q6PeriodicMomentumAccumulator0493x7dv2fix2 {
 // Per-block reduction scratch continues to reuse partial0/partial1.
 struct Q6GfResidentCgState0493x7j {
     double rhsSum = 0.0;
+    double densityRelaxationTargetDivMeanRemoved0493x8t = 0.0;
     double divBeforeSq = 0.0;
     double divBeforeMaxAbs = 0.0;
     double rr = 0.0;
@@ -518,6 +519,9 @@ struct IndependentMaskedSpeciesAudit0493w5 {
     // respect to the active projection constraint; for beta=0 this is exactly
     // the historical projected divergence.
     double densityRelaxationTargetDivRms = 0.0;
+    // 0493x8t: raw spatial mean removed from the x7d density-divergence
+    // target when a full-domain x8r pressure outlet is active.
+    double densityRelaxationTargetDivMeanRemoved0493x8t = 0.0;
     // 0493x7j: audit only; the production default is one cooperative,
     // device-resident CG kernel for the complete Q6-g-f solve.
     int residentCg0493x7j = 0;
@@ -550,6 +554,7 @@ void append_independent_masked_species_audit_0493w5(
                "divAfterAppliedCellVelocityMaxAbs,correctionRms,correctionMaxAbs,"
                "momentumX,momentumY,q6DensityRelaxationBeta,"
                "q6DensityRelaxationTime,densityRelaxationTargetDivRms,"
+               "densityRelaxationTargetDivMeanRemoved0493x8t,"
                "residentCg0493x7j,residentCgBlocks0493x7j\n";
     }
     for (const IndependentMaskedSpeciesAudit0493w5& r : rows) {
@@ -576,6 +581,7 @@ void append_independent_masked_species_audit_0493w5(
                     ? params.dt / densityRelaxationBeta0493x7d
                     : 0.0) << ','
             << r.densityRelaxationTargetDivRms << ','
+            << r.densityRelaxationTargetDivMeanRemoved0493x8t << ','
             << r.residentCg0493x7j << ',' << r.residentCgBlocks0493x7j << '\n';
     }
 }
@@ -1247,6 +1253,31 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
     return cfg;
 }
 
+bool q6_has_passive_pressure_outlet_right_0493x8r(
+    const Q6SegmentedIo0409& cfg) {
+    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l) return false;
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
+            cfg.sMax[k] > cfg.sMin[k]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool q6_has_fullheight_passive_pressure_outlet_right_0493x8s(
+    const Q6SegmentedIo0409& cfg) {
+    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l) return false;
+    constexpr double eps = 1.0e-12;
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
+            cfg.sMin[k] <= eps && cfg.sMax[k] >= 1.0 - eps) {
+            return true;
+        }
+    }
+    return false;
+}
+
 double q6_segmented_flux_integral_0409(const Q6SegmentedIo0409& cfg, int face, double length) {
     if (!cfg.enabled || !(length > 0.0)) return 0.0;
     double flux = 0.0;
@@ -1727,6 +1758,27 @@ __device__ double q6_species_boundary_fraction_0493w7(
     return fmin(1.0, fmax(0.0, species.occupancyFraction[k]));
 }
 
+__device__ bool q6_passive_pressure_outlet_right_cell_0493x8r(
+    const Q6SegmentedIo0409& cfg,
+    int ix,
+    int iy,
+    int nx,
+    int ny) {
+    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l ||
+        ix != nx - 1 || ny <= 0) {
+        return false;
+    }
+    const double tangent =
+        (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
+            tangent >= cfg.sMin[k] && tangent <= cfg.sMax[k]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 __device__ double q6_species_boundary_flux_for_cell_0493w7(
     const Q6SegmentedIo0409& cfg,
     int face,
@@ -1752,10 +1804,12 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
         if (cfg.face[k] != face || tangent < cfg.sMin[k] || tangent > cfg.sMax[k]) {
             continue;
         }
-        // 0493x8l: Zovatto-style passive right outlet.
-        // Discrete zero-normal-gradient: copy the current boundary-cell ux
-        // to the boundary face. The Q6-G-F boundary correction is therefore
-        // target-before = 0 instead of imposing segmentUx.
+        // 0493x8l + 0493x8r passive right outlet.
+        // Extrapolate the current boundary-cell ux to the BASE outlet face:
+        // u*_out = u*_cell, i.e. zero normal gradient of the predictor
+        // velocity.  x8r no longer treats this value as a prescribed final
+        // flux: the pressure solve uses phi=0 at the outlet face and is free
+        // to add the normal pressure correction required by continuity.
         if (cfg.mode[k] == 2 && cfg.passiveNeumannRightOutlet0493x8l && face == 1) {
             if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
                 cell < 0 || cell >= species.numCells) {
@@ -2119,6 +2173,20 @@ __global__ void q6_apply_operator_and_dot_0400(const double* p,
     }
     if (tid == 0) {
         partialDot[blockIdx.x] = sh[0];
+    }
+}
+
+// 0493x8t host-fallback helper: remove only the constant component of
+// the density-relaxation target from the already assembled RHS.
+__global__ void q6_subtract_density_target_mean_from_rhs_0493x8t(
+    double* rhs,
+    const unsigned char* mask,
+    double mean,
+    int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        if (mask[c] != 0u) rhs[c] -= mean;
     }
 }
 
@@ -4048,6 +4116,7 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     double densityRelaxationTractionThresholdFill0493x7dv2signed1,
     double densityRelaxationTractionGain0493x7dv2signed1,
     int densityRelaxationEnable0493x7c,
+    int densityRelaxationCenterMean0493x8t,
     int fullDomain) {
     extern __shared__ double sh[];
     double* shSum = sh;
@@ -4148,18 +4217,26 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
                             preparedFacePhiGammaY0493x6g[south] * invDy2Local;
             }
         }
+        double densityTarget0493x8t = 0.0;
         if (densityRelaxationEnable0493x7c) {
-            rhsValue += q6_density_relaxation_target_divergence_0493x7c(
-                densityRelaxationRawFill0493x7c, mask, c, nx, ny,
-                periodicX, periodicY, densityRelaxationBeta0493x7c,
-                densityRelaxationDt0493x7c,
-                densityRelaxationCompressionThresholdFill0493x7dv2,
-                densityRelaxationCompressionGateEnable0493x7dv2,
-                densityRelaxationTractionThresholdFill0493x7dv2signed1,
-                densityRelaxationTractionGain0493x7dv2signed1, 1);
+            densityTarget0493x8t =
+                q6_density_relaxation_target_divergence_0493x7c(
+                    densityRelaxationRawFill0493x7c, mask, c, nx, ny,
+                    periodicX, periodicY, densityRelaxationBeta0493x7c,
+                    densityRelaxationDt0493x7c,
+                    densityRelaxationCompressionThresholdFill0493x7dv2,
+                    densityRelaxationCompressionGateEnable0493x7dv2,
+                    densityRelaxationTractionThresholdFill0493x7dv2signed1,
+                    densityRelaxationTractionGain0493x7dv2signed1, 1);
+            rhsValue += densityTarget0493x8t;
         }
         rhs[c] = rhsValue;
-        sum += rhs[c];
+        // 0493x8t: in the pressure-outlet centering path partialSum carries
+        // the raw density-target integral. Otherwise preserve historical
+        // total-RHS reduction semantics exactly.
+        sum += densityRelaxationCenterMean0493x8t
+            ? densityTarget0493x8t
+            : rhs[c];
         sq += divBefore * divBefore;
         mx = fmax(mx, fabs(divBefore));
     }
@@ -4179,6 +4256,105 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
         partialSum[blockIdx.x] = shSum[0];
         partialSq[blockIdx.x] = shSq[0];
         partialMax[blockIdx.x] = shMax[0];
+    }
+}
+
+// 0493x8s exact pressure-outlet low-mode deflation.
+__host__ __device__ __forceinline__ double q6_pressure_outlet_mode_0493x8s(
+    int ix,
+    int nx,
+    int mode) {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double theta =
+        (static_cast<double>(mode) + 0.5) * pi / static_cast<double>(nx);
+    return cos(theta * (static_cast<double>(ix) + 0.5));
+}
+
+__host__ __device__ __forceinline__ double q6_pressure_outlet_mode_lambda_0493x8s(
+    int nx,
+    int mode,
+    double invDx2) {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double theta =
+        (static_cast<double>(mode) + 0.5) * pi / static_cast<double>(nx);
+    const double s = sin(0.5 * theta);
+    return 4.0 * s * s * invDx2;
+}
+
+__global__ void q6_reduce_pressure_outlet_modes_0493x8s(
+    const double* rhs,
+    double* partial0,
+    double* partial1,
+    double* partial2,
+    int nx,
+    int ny) {
+    extern __shared__ double sh[];
+    double* sh0 = sh;
+    double* sh1 = sh + blockDim.x;
+    double* sh2 = sh + 2 * blockDim.x;
+    const int tid = threadIdx.x;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    double b0 = 0.0;
+    double b1 = 0.0;
+    double b2 = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const double v = rhs[c];
+        b0 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
+        b1 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
+        b2 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
+    }
+    sh0[tid] = b0;
+    sh1[tid] = b1;
+    sh2[tid] = b2;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if (tid < offset) {
+            sh0[tid] += sh0[tid + offset];
+            sh1[tid] += sh1[tid + offset];
+            sh2[tid] += sh2[tid + offset];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        partial0[blockIdx.x] = sh0[0];
+        partial1[blockIdx.x] = sh1[0];
+        partial2[blockIdx.x] = sh2[0];
+    }
+}
+
+__global__ void q6_init_pressure_outlet_deflated_cg_0493x8s(
+    const double* rhs,
+    double* phi,
+    double* r,
+    double* p,
+    double rhsMode0,
+    double rhsMode1,
+    double rhsMode2,
+    double lambda0,
+    double lambda1,
+    double lambda2,
+    int nx,
+    int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const double e0 = q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
+        const double e1 = q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
+        const double e2 = q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
+        const double lowRhs =
+            rhsMode0 * e0 + rhsMode1 * e1 + rhsMode2 * e2;
+        const double lowPhi =
+            (rhsMode0 / lambda0) * e0 +
+            (rhsMode1 / lambda1) * e1 +
+            (rhsMode2 / lambda2) * e2;
+        const double rv = rhs[c] - lowRhs;
+        phi[c] = lowPhi;
+        r[c] = rv;
+        p[c] = rv;
     }
 }
 
@@ -4262,7 +4438,8 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
     const double* preparedFaceCoeffX,
     const double* preparedFaceCoeffY,
     int usePreparedPhaseStencil,
-    double inactiveNeighborFactor) {
+    double inactiveNeighborFactor,
+    Q6SegmentedIo0409 segmentedIo) {
     extern __shared__ double sh[];
     const int tid = threadIdx.x;
     double dot = 0.0;
@@ -4287,6 +4464,11 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
                     useCutFaceGeometry, cutFaceThetaMinGuard);
             a += factor * invDx2 *
                  (p[c] - (mask[east] ? p[east] : 0.0));
+        } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
+                       segmentedIo, ix, iy, nx, ny)) {
+            // 0493x8r passive pressure outlet: phi=0 at the physical face,
+            // whose distance from this cell centre is dx/2.
+            a += 2.0 * invDx2 * p[c];
         }
         if (periodicX || ix > 0) {
             const int west = iy * nx +
@@ -4393,12 +4575,19 @@ __global__ void q6_compute_masked_face_correction_0493w5(
                 faceDUx[c] = 0.0;
             }
         } else if (mask[c]) {
-            const double target = q6_species_boundary_flux_for_cell_0493w7(
-                segmentedIo, 1, ix, iy, nx, ny, xHighFlux, species, speciesIndex,
-                speciesType, c, exclusiveProjectedSpecies);
-            const double before = q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, c, 0);
-            faceDUx[c] = strength * (target - before);
+            if (q6_passive_pressure_outlet_right_cell_0493x8r(
+                    segmentedIo, ix, iy, nx, ny)) {
+                // 0493x8r: correction = -grad(phi), phi_out=0 and
+                // distance(cell centre, outlet face)=dx/2.
+                faceDUx[c] = strength * (2.0 * phi[c] / dx);
+            } else {
+                const double target = q6_species_boundary_flux_for_cell_0493w7(
+                    segmentedIo, 1, ix, iy, nx, ny, xHighFlux, species, speciesIndex,
+                    speciesType, c, exclusiveProjectedSpecies);
+                const double before = q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, c, 0);
+                faceDUx[c] = strength * (target - before);
+            }
         } else {
             faceDUx[c] = 0.0;
         }
@@ -4591,6 +4780,7 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     double densityRelaxationTractionThresholdFill0493x7dv2signed1,
     double densityRelaxationTractionGain0493x7dv2signed1,
     int densityRelaxationEnable0493x7c,
+    double densityRelaxationTargetDivMean0493x8t,
     double* partialTargetSq0493x7c,
     int fullDomain) {
     extern __shared__ double sh[];
@@ -4677,6 +4867,7 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
                 densityRelaxationCompressionGateEnable0493x7dv2,
                 densityRelaxationTractionThresholdFill0493x7dv2signed1,
                 densityRelaxationTractionGain0493x7dv2signed1, 1);
+            targetDiv0493x7c -= densityRelaxationTargetDivMean0493x8t;
             residual -= targetDiv0493x7c;
         }
         sq += residual * residual;
@@ -5957,7 +6148,8 @@ __device__ __forceinline__ double q6_full_operator_cell_0493x7j(
     double invDx2,
     double invDy2,
     int periodicX,
-    int periodicY) {
+    int periodicY,
+    Q6SegmentedIo0409 segmentedIo) {
     const int ix = c % nx;
     const int iy = c / nx;
     const double center = p[c];
@@ -5969,6 +6161,9 @@ __device__ __forceinline__ double q6_full_operator_cell_0493x7j(
     if (periodicX || ix < nx - 1) {
         const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
         value += (center - p[east]) * invDx2;
+    } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
+                   segmentedIo, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDx2;
     }
     if (periodicY || iy > 0) {
         const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
@@ -5992,7 +6187,8 @@ __device__ __forceinline__ double q6_prepared_masked_operator_cell_0493x7j(
     double invDx2,
     double invDy2,
     int periodicX,
-    int periodicY) {
+    int periodicY,
+    Q6SegmentedIo0409 segmentedIo) {
     const int ix = c % nx;
     const int iy = c / nx;
     const double center = p[c];
@@ -6000,6 +6196,9 @@ __device__ __forceinline__ double q6_prepared_masked_operator_cell_0493x7j(
     if (periodicX || ix < nx - 1) {
         const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
         value += faceCoeffX[c] * invDx2 * (center - (mask[east] ? p[east] : 0.0));
+    } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
+                   segmentedIo, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDx2;
     }
     if (periodicX || ix > 0) {
         const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
@@ -6039,6 +6238,10 @@ __global__ void q6_cg_g_f_resident_0493x7j(
     double invDy2,
     int periodicX,
     int periodicY,
+    Q6SegmentedIo0409 segmentedIo,
+    int densityRelaxationCenterMean0493x8t,
+    int pressureOutletDirichlet0493x8r,
+    int pressureOutletDeflation0493x8s,
     int fullDomain) {
     cooperative_groups::grid_group grid = cooperative_groups::this_grid();
     extern __shared__ double warpSums[];
@@ -6062,16 +6265,81 @@ __global__ void q6_cg_g_f_resident_0493x7j(
         const double totalDivSq = q6_block_sum_0493x7j(divSq, warpSums);
         const double totalDivMax = q6_block_max_0493x7j(divMax, warpSums);
         if (threadIdx.x == 0) {
-            state->rhsSum = totalRhs;
+            state->densityRelaxationTargetDivMeanRemoved0493x8t =
+                densityRelaxationCenterMean0493x8t
+                    ? totalRhs / static_cast<double>(n)
+                    : 0.0;
+            state->rhsSum =
+                densityRelaxationCenterMean0493x8t ? 0.0 : totalRhs;
             state->divBeforeSq = totalDivSq;
             state->divBeforeMaxAbs = totalDivMax;
         }
     }
     q6_grid_barrier_0493x7j(grid);
 
-    const double rhsMean = fullDomain
+    if (densityRelaxationCenterMean0493x8t) {
+        const double mean0493x8t =
+            state->densityRelaxationTargetDivMeanRemoved0493x8t;
+        double localCenteredRhsSum0493x8t = 0.0;
+        for (int c = idx; c < n; c += stride) {
+            if (!fullDomain && mask[c] == 0u) continue;
+            rhs[c] -= mean0493x8t;
+            localCenteredRhsSum0493x8t += rhs[c];
+        }
+        const double centeredRhsSum0493x8t = q6_grid_sum_0493x7j(
+            localCenteredRhsSum0493x8t,
+            blockPartials0, warpSums, grid, state);
+        if (blockIdx.x == 0 && threadIdx.x == 0) {
+            state->rhsSum = centeredRhsSum0493x8t;
+        }
+        q6_grid_barrier_0493x7j(grid);
+    }
+
+    const bool removeConstantNullspace0493x8r =
+        fullDomain && !pressureOutletDirichlet0493x8r;
+    const bool deflatePressureOutlet0493x8s =
+        pressureOutletDeflation0493x8s != 0;
+    const double rhsMean = removeConstantNullspace0493x8r
         ? state->rhsSum / static_cast<double>(n)
         : 0.0;
+
+    double rhsMode0 = 0.0;
+    double rhsMode1 = 0.0;
+    double rhsMode2 = 0.0;
+    double rhsNormSq0493x8s = 0.0;
+    if (deflatePressureOutlet0493x8s) {
+        double local0 = 0.0;
+        double local1 = 0.0;
+        double local2 = 0.0;
+        double localSq = 0.0;
+        for (int c = idx; c < n; c += stride) {
+            const int ix = c % nx;
+            const double v = rhs[c];
+            local0 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
+            local1 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
+            local2 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
+            localSq += v * v;
+        }
+        const double dot0 = q6_grid_sum_0493x7j(
+            local0, blockPartials0, warpSums, grid, state);
+        const double dot1 = q6_grid_sum_0493x7j(
+            local1, blockPartials0, warpSums, grid, state);
+        const double dot2 = q6_grid_sum_0493x7j(
+            local2, blockPartials0, warpSums, grid, state);
+        rhsNormSq0493x8s = q6_grid_sum_0493x7j(
+            localSq, blockPartials0, warpSums, grid, state);
+        const double modeNorm = 0.5 * static_cast<double>(n);
+        rhsMode0 = dot0 / modeNorm;
+        rhsMode1 = dot1 / modeNorm;
+        rhsMode2 = dot2 / modeNorm;
+    }
+
+    const double lambda0 = deflatePressureOutlet0493x8s
+        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 0, invDx2) : 1.0;
+    const double lambda1 = deflatePressureOutlet0493x8s
+        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 1, invDx2) : 1.0;
+    const double lambda2 = deflatePressureOutlet0493x8s
+        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 2, invDx2) : 1.0;
 
     double localRr = 0.0;
     for (int c = idx; c < n; c += stride) {
@@ -6083,23 +6351,46 @@ __global__ void q6_cg_g_f_resident_0493x7j(
             Ap[c] = 0.0;
             continue;
         }
-        const double v = rhs[c] - (fullDomain ? rhsMean : 0.0);
+        const double v =
+            rhs[c] - (removeConstantNullspace0493x8r ? rhsMean : 0.0);
         rhs[c] = v;
-        phi[c] = 0.0;
-        r[c] = v;
-        p[c] = v;
-        localRr += v * v;
+        if (deflatePressureOutlet0493x8s) {
+            const int ix = c % nx;
+            const double e0 = q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
+            const double e1 = q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
+            const double e2 = q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
+            const double lowRhs =
+                rhsMode0 * e0 + rhsMode1 * e1 + rhsMode2 * e2;
+            phi[c] =
+                (rhsMode0 / lambda0) * e0 +
+                (rhsMode1 / lambda1) * e1 +
+                (rhsMode2 / lambda2) * e2;
+            const double rv = v - lowRhs;
+            r[c] = rv;
+            p[c] = rv;
+            localRr += rv * rv;
+        } else {
+            phi[c] = 0.0;
+            r[c] = v;
+            p[c] = v;
+            localRr += v * v;
+        }
     }
 
     const double rr0 = q6_grid_sum_0493x7j(
         localRr, blockPartials0, warpSums, grid, state);
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-        const double rhsNorm = sqrt(fmax(0.0, rr0));
+        const double rhsNorm = deflatePressureOutlet0493x8s
+            ? sqrt(fmax(0.0, rhsNormSq0493x8s))
+            : sqrt(fmax(0.0, rr0));
+        const double residualRel0 =
+            sqrt(fmax(0.0, rr0)) / fmax(rhsNorm, 1.0e-300);
         state->rr = rr0;
         state->rhsNormSafe = fmax(rhsNorm, 1.0e-300);
-        state->residualRel = rhsNorm <= tolerance ? 0.0 : 1.0;
+        state->residualRel = rhsNorm <= tolerance ? 0.0 : residualRel0;
         state->iterations = 0;
-        state->status = rhsNorm <= tolerance ? 1 : 0;
+        state->status =
+            (rhsNorm <= tolerance || residualRel0 <= tolerance) ? 1 : 0;
     }
     q6_grid_barrier_0493x7j(grid);
 
@@ -6114,10 +6405,11 @@ __global__ void q6_cg_g_f_resident_0493x7j(
             }
             const double value = fullDomain
                 ? q6_full_operator_cell_0493x7j(
-                      p, c, nx, ny, invDx2, invDy2, periodicX, periodicY)
+                      p, c, nx, ny, invDx2, invDy2, periodicX, periodicY,
+                      segmentedIo)
                 : q6_prepared_masked_operator_cell_0493x7j(
                       p, mask, faceCoeffX, faceCoeffY, c, nx, ny,
-                      invDx2, invDy2, periodicX, periodicY);
+                      invDx2, invDy2, periodicX, periodicY, segmentedIo);
             Ap[c] = value;
             localPAp += p[c] * value;
         }
@@ -6155,7 +6447,7 @@ __global__ void q6_cg_g_f_resident_0493x7j(
             return;
         }
 
-        if (fullDomain && ((it + 1) % 25) == 0) {
+        if (removeConstantNullspace0493x8r && ((it + 1) % 25) == 0) {
             double localPhi = 0.0;
             double localR = 0.0;
             for (int c = idx; c < n; c += stride) {
@@ -6246,6 +6538,10 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     double invDy2,
     int periodicX,
     int periodicY,
+    Q6SegmentedIo0409 segmentedIo,
+    bool densityRelaxationCenterMean0493x8t,
+    bool pressureOutletDirichlet0493x8r,
+    bool pressureOutletDeflation0493x8s,
     bool fullDomain,
     double& divBeforeSqOut0493x7j,
     IndependentMaskedSpeciesAudit0493w5& audit) {
@@ -6271,13 +6567,19 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     const unsigned char* mask = solveMask;
     const double* coeffX = faceCoeffX;
     const double* coeffY = faceCoeffY;
+    int densityRelaxationCenterMean =
+        densityRelaxationCenterMean0493x8t ? 1 : 0;
+    int pressureOutlet = pressureOutletDirichlet0493x8r ? 1 : 0;
+    int pressureOutletDeflation = pressureOutletDeflation0493x8s ? 1 : 0;
     int full = fullDomain ? 1 : 0;
 
     void* args[] = {
         &rhs, &phi, &r, &p, &Ap, &mask, &coeffX, &coeffY,
         &partial0, &partial1, &partial2, &state, &cellBlocks,
         &nx, &ny, &numCells, &maxIterations, &tolerance,
-        &invDx2, &invDy2, &periodicX, &periodicY, &full
+        &invDx2, &invDy2, &periodicX, &periodicY,
+        &segmentedIo, &densityRelaxationCenterMean,
+        &pressureOutlet, &pressureOutletDeflation, &full
     };
     check_cuda_0400(cudaLaunchCooperativeKernel(
                         reinterpret_cast<const void*>(q6_cg_g_f_resident_0493x7j),
@@ -6295,6 +6597,8 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     audit.iterations = hostState.iterations;
     audit.residualRel = hostState.residualRel;
     audit.converged = hostState.status == 1;
+    audit.densityRelaxationTargetDivMeanRemoved0493x8t =
+        hostState.densityRelaxationTargetDivMeanRemoved0493x8t;
     audit.residentCg0493x7j = 1;
     audit.residentCgBlocks0493x7j = gridBlocks;
     return true;
@@ -6544,6 +6848,15 @@ bool apply_independent_masked_species_q6_0493w5(
     }
 
     bool periodicProjectedMomentumCorrection0493x7dv2fix2 = false;
+    // 0493x8r passive pressure outlet
+    // A phi=0 outlet face removes the constant pressure-correction nullspace
+    // even when every pressure cell is active.
+    const bool pressureOutletDirichlet0493x8r =
+        q6_has_passive_pressure_outlet_right_0493x8r(segmentedIo);
+    // 0493x8s exact pressure-outlet low-mode deflation
+    const bool pressureOutletDeflation0493x8s =
+        pressureOutletDirichlet0493x8r && !periodicX &&
+        q6_has_fullheight_passive_pressure_outlet_right_0493x8s(segmentedIo);
 
     for (int s = 0; s < speciesCount; ++s) {
         IndependentMaskedSpeciesAudit0493w5 audit{};
@@ -7277,6 +7590,14 @@ bool apply_independent_masked_species_q6_0493w5(
                 params, step, time, geometryAudit);
         }
 
+        // 0493x8t pressure-outlet density target mean removal
+        // x7d remains active locally, but its constant divergence mode may not
+        // act as a second global flow controller beside the x8r pressure outlet.
+        const bool densityRelaxationCenterMean0493x8t =
+            densityRelaxationRequested0493x7c &&
+            pressureOutletDirichlet0493x8r &&
+            audit.fullDomain;
+
         q6_build_independent_rhs_after_mask_0493w5<<<cellBlocks, threads, tripleShared>>>(
             species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
             ws.rhs.data(),
@@ -7296,6 +7617,7 @@ bool apply_independent_masked_species_q6_0493w5(
             params.q6DensityRelaxationTractionThresholdFill,
             params.q6DensityRelaxationTractionGain,
             densityRelaxationRequested0493x7c ? 1 : 0,
+            densityRelaxationCenterMean0493x8t ? 1 : 0,
             audit.fullDomain ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked rhs launch");
         double divBeforeSq = 0.0;
@@ -7308,30 +7630,108 @@ bool apply_independent_masked_species_q6_0493w5(
                 ws.phaseFaceCoeffY0493x6f.data(),
                 cellBlocks, grid.Nx, grid.Ny, grid.numCells,
                 params.projectionMaxIterations, tol, invDx2, invDy2,
-                periodicX, periodicY, audit.fullDomain, divBeforeSq, audit);
+                periodicX, periodicY, segmentedIo,
+                densityRelaxationCenterMean0493x8t,
+                pressureOutletDirichlet0493x8r,
+                pressureOutletDeflation0493x8s && audit.fullDomain,
+                audit.fullDomain, divBeforeSq, audit);
         if (!residentCgUsed0493x7j) {
-            const double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            if (densityRelaxationCenterMean0493x8t) {
+                const double densityTargetMean0493x8t =
+                    rhsSum / static_cast<double>(
+                        std::max<std::uint64_t>(1u, audit.activeCells));
+                audit.densityRelaxationTargetDivMeanRemoved0493x8t =
+                    densityTargetMean0493x8t;
+                q6_subtract_density_target_mean_from_rhs_0493x8t<<<
+                    cellBlocks, threads>>>(
+                    ws.rhs.data(), q6SolveMask0493x6f,
+                    densityTargetMean0493x8t, grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x8t centered density RHS launch");
+                q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                    ws.rhs.data(), ws.partial0.data(), grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x8t centered RHS sum launch");
+                rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+            }
             divBeforeSq = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
             audit.divBeforeMaxAbs = reduce_host_max_0400(ws.partial2.data(), cellBlocks);
             audit.divBeforeRms = std::sqrt(
                 divBeforeSq /
                 static_cast<double>(std::max<std::uint64_t>(1u, audit.activeCells)));
-            const double rhsMean = audit.fullDomain
+            const bool removeConstantNullspace0493x8r =
+                audit.fullDomain && !pressureOutletDirichlet0493x8r;
+            const double rhsMean = removeConstantNullspace0493x8r
                 ? rhsSum / static_cast<double>(grid.numCells)
                 : 0.0;
-            q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
-                ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
-                q6SolveMask0493x6f, rhsMean, audit.fullDomain ? 1 : 0,
-                grid.numCells);
-            check_cuda_0400(cudaGetLastError(), "independent masked cg init launch");
+            const bool deflatePressureOutlet0493x8s =
+                pressureOutletDeflation0493x8s && audit.fullDomain;
+            double rhsNorm = 0.0;
+            if (deflatePressureOutlet0493x8s) {
+                q6_reduce_pressure_outlet_modes_0493x8s<<<
+                    cellBlocks, threads, tripleShared>>>(
+                    ws.rhs.data(), ws.partial0.data(), ws.partial1.data(),
+                    ws.partial2.data(), grid.Nx, grid.Ny);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x8s pressure outlet mode reduction launch");
+                const double dot0 = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                const double dot1 = reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+                const double dot2 = reduce_host_sum_0400(ws.partial2.data(), cellBlocks);
+                const double modeNorm =
+                    0.5 * static_cast<double>(grid.numCells);
+                const double rhsMode0 = dot0 / modeNorm;
+                const double rhsMode1 = dot1 / modeNorm;
+                const double rhsMode2 = dot2 / modeNorm;
+                const double lambda0 =
+                    q6_pressure_outlet_mode_lambda_0493x8s(
+                        grid.Nx, 0, invDx2);
+                const double lambda1 =
+                    q6_pressure_outlet_mode_lambda_0493x8s(
+                        grid.Nx, 1, invDx2);
+                const double lambda2 =
+                    q6_pressure_outlet_mode_lambda_0493x8s(
+                        grid.Nx, 2, invDx2);
+
+                q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
+                    ws.rhs.data(), ws.partial0.data(), grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x8s pressure outlet rhs norm launch");
+                const double rhsSq =
+                    reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                rhsNorm = std::sqrt(std::max(0.0, rhsSq));
+
+                q6_init_pressure_outlet_deflated_cg_0493x8s<<<
+                    cellBlocks, threads>>>(
+                    ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
+                    rhsMode0, rhsMode1, rhsMode2,
+                    lambda0, lambda1, lambda2,
+                    grid.Nx, grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x8s pressure outlet deflated cg init launch");
+            } else {
+                q6_init_masked_cg_0493w5<<<cellBlocks, threads>>>(
+                    ws.rhs.data(), ws.phi.data(), ws.r.data(), ws.p.data(),
+                    q6SolveMask0493x6f, rhsMean,
+                    removeConstantNullspace0493x8r ? 1 : 0,
+                    grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "independent masked cg init launch");
+            }
+
             q6_reduce_square_sum_0400<<<cellBlocks, threads, scalarShared>>>(
                 ws.r.data(), ws.partial0.data(), grid.numCells);
             check_cuda_0400(cudaGetLastError(), "independent masked initial rr launch");
             double rr = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
-            const double rhsNorm = std::sqrt(std::max(0.0, rr));
+            if (!deflatePressureOutlet0493x8s) {
+                rhsNorm = std::sqrt(std::max(0.0, rr));
+            }
             const double rhsNormSafe = std::max(rhsNorm, 1.0e-300);
-            audit.converged = rhsNorm <= tol;
-            audit.residualRel = audit.converged ? 0.0 : 1.0;
+            audit.residualRel =
+                std::sqrt(std::max(0.0, rr)) / rhsNormSafe;
+            audit.converged =
+                rhsNorm <= tol || audit.residualRel <= tol;
+            if (rhsNorm <= tol) audit.residualRel = 0.0;
 
             for (int it = 0; it < params.projectionMaxIterations && !audit.converged; ++it) {
                 q6_apply_masked_operator_and_dot_0493w5<<<cellBlocks, threads, scalarShared>>>(
@@ -7344,7 +7744,7 @@ bool apply_independent_masked_species_q6_0493w5(
                     phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
                     phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
                     phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
-                    inactiveNeighborFactor0493x5a);
+                    inactiveNeighborFactor0493x5a, segmentedIo);
                 check_cuda_0400(cudaGetLastError(), "independent masked operator launch");
                 const double pAp = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
                 if (!(pAp > 0.0) || !std::isfinite(pAp)) {
@@ -7368,7 +7768,7 @@ bool apply_independent_masked_species_q6_0493w5(
                     audit.converged = true;
                     break;
                 }
-                if (audit.fullDomain && (it + 1) % 25 == 0) {
+                if (removeConstantNullspace0493x8r && (it + 1) % 25 == 0) {
                     q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
                         ws.phi.data(), ws.partial0.data(), grid.numCells);
                     q6_reduce_sum_0400<<<cellBlocks, threads, scalarShared>>>(
@@ -8357,6 +8757,7 @@ bool apply_independent_masked_species_q6_0493w5(
                 params.q6DensityRelaxationTractionThresholdFill,
                 params.q6DensityRelaxationTractionGain,
                 densityRelaxationRequested0493x7c ? 1 : 0,
+                audit.densityRelaxationTargetDivMeanRemoved0493x8t,
                 ws.partial2.data(), audit.fullDomain ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "independent masked projected divergence launch");
@@ -8612,7 +9013,7 @@ bool apply_independent_masked_species_q6_0493w5(
                 xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
                 audit.type, exclusiveProjectedSpecies,
                 nullptr, nullptr, nullptr, nullptr, 0,
-                nullptr, 0.0, params.dt, 0.0, 0, 0.0, 0.0, 0,
+                nullptr, 0.0, params.dt, 0.0, 0, 0.0, 0.0, 0, 0,
                 audit.fullDomain ? 1 : 0);
             check_cuda_0400(cudaGetLastError(),
                             "independent masked post-apply divergence launch");

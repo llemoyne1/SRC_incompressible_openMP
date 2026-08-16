@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power
-field = uy    
+field = ux    
 
 # colormap:
 #   blue_red, gray, thermal
@@ -38,11 +38,11 @@ colormap = blue_red
 # clip:
 #   >0 fixes color saturation scale.
 #   <=0 lets the renderer use its default/auto behavior.
-clip = -27
+clip = 0.25
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
-gain = 10
+gain = 0.75
 
 # smoothPasses:
 #   spatial smoothing of the scalar field.
@@ -57,8 +57,8 @@ smoothPasses = 5
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
-liveGridNx = 1200
-liveGridNy = 400
+liveGridNx = 400
+liveGridNy = 100
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -148,7 +148,7 @@ filterTau = 0.0
 # filterSampleEvery:
 #   internal sampling cadence for the recorder filter. Can be more frequent than
 #   recordEvery to smooth without dumping every sample.
-filterSampleEvery = -0
+filterSampleEvery = -1
 
 
 # =============================================================================

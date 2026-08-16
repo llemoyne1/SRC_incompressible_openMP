@@ -26,10 +26,10 @@ TOPOLOGY="segmented"
 RUN_MODES="${RUN_MODES:-src src-q6-g-f}"
 
 # Small but non-pathological qualification box.
-Lx="${Lx:-1.0}"
+Lx="${Lx:-4.0}"
 Ly="${Ly:-1.0}"
-NX="${NX:-96}"
-NY="${NY:-96}"
+NX="${NX:-400}"
+NY="${NY:-100}"
 GAMMA="${GAMMA:-20}"
 DT="${DT:-0.002}"
 KBT="${KBT:-0.125}"
@@ -86,7 +86,7 @@ WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=false
 CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-1.0}"
 
-STEPS="${STEPS:-120}"
+STEPS="${STEPS:-1200}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-10}"
 DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493x8k_segmented_local_poiseuille}"
@@ -96,7 +96,7 @@ THREADS="${THREADS:-8}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 
 # No heavy visual/recording diagnostics for this first qualification.
-LIVE_VIS_ENABLE=0
+LIVE_VIS_ENABLE=1
 FILTERED_RECORDING_ENABLE=0
 RECORD_ENABLE=false
 

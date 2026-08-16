@@ -25,6 +25,7 @@ struct BoundaryDiagnostics {
     std::uint64_t inletReservoirDeleted = 0;
     std::uint64_t inletBackflowDeleted = 0;
     std::uint64_t outletParticlesDeleted = 0;
+    std::uint64_t outletParticlesInserted = 0;
     std::uint64_t inletParticlesInserted = 0;
     std::int64_t inletNetParticleDelta = 0;
     double inletReservoirMeanN = 0.0;
