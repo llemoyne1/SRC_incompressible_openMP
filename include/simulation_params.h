@@ -483,11 +483,15 @@ struct SimulationParams {
     // canonicalized by the parser and may be:
     //   family:liquid | family:gas | family:dispersed | family:unspecified
     //   type:<uint32> | vacuum | wall
-    // `wall` is reserved for the later wall/wetting geometry adapter; x9g
-    // deliberately does not invent wall geometry from the particle phase field.
+    // 0493x9h activates `wall` as a geometry-provider selector.  It does not
+    // reinterpret a wall as an x6f pressure Dirichlet boundary and does not yet
+    // apply a liquid/solid capillary jump: surfaceTensionSigma must remain zero
+    // for B=wall until the contact-angle/interfacial-energy closure is added.
+    // The wall provider automatically composes (i) static domain wall faces and
+    // (ii) an existing Darcy chi field only when chi collision wallVP is enabled.
+    // Darcy convention is chi=1 fluid, chi=0 solid, hence solidFraction=1-chi.
     // Phase A owns alpha>=0.5, curvature orientation and the projected Q6 side.
-    // Phase B is the exterior side and is also the species source for x6g EOS
-    // pressure when that provider is enabled.
+    // Particle phase B remains the exterior pressure source for x6g EOS.
     std::string phaseInterfaceASelector = "family:liquid";
     std::string phaseInterfaceBSelector = "family:gas";
 

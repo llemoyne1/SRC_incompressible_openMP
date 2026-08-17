@@ -1435,11 +1435,22 @@ void validate_simulation_params(const SimulationParams& p) {
                 "0493x9g explicit phase B type selector must match exactly one registered species");
         }
         if (phaseBSelector0493x9g == "wall") {
-            // Intentionally accepted by the selector grammar so the future
-            // wallVP/contact-angle adapter can use the same pair contract, but
-            // x9g itself has no wall alpha provider.
-            throw std::runtime_error(
-                "0493x9g phaseInterfaceBSelector=wall is reserved; wall geometry adapter not implemented yet");
+            const bool domainWallGeometry0493x9h =
+                is_wall_mode(p.bcLeft) || is_wall_mode(p.bcRight) ||
+                is_wall_mode(p.bcBottom) || is_wall_mode(p.bcTop);
+            // Do not silently reinterpret every Darcy/porous design field as a
+            // material wall.  The existing chi-collision wallVP opt-in is the
+            // declaration that this chi field supplies solid-wall geometry.
+            const bool chiWallGeometry0493x9h =
+                p.darcyBrinkmanEnable && p.darcyChiCollisionVpEnable;
+            if (!domainWallGeometry0493x9h && !chiWallGeometry0493x9h) {
+                throw std::runtime_error(
+                    "0493x9h phaseInterfaceBSelector=wall requires a static domain wall or darcyChiCollisionVpEnable=true");
+            }
+            if (p.surfaceTensionSigma > 0.0) {
+                throw std::runtime_error(
+                    "0493x9h phaseInterfaceBSelector=wall is geometry-only; surfaceTensionSigma must be 0 until the wall/contact-angle closure");
+            }
         }
         (void)phaseBAllGas0493x9g;
     }

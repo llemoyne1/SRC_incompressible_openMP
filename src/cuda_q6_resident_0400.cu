@@ -3,6 +3,7 @@
 #if defined(MPCD_ENABLE_CUDA_Q6_RESIDENT_0400)
 
 #include "cuda_cell_workspace.h"
+#include "cuda_darcy_brinkman_0343.h"
 #include "cuda_shared_particle_state_0251.h"
 #include "cuda_species_cell_fields_0490h.h"
 #include "open_boundary_segments.h"
@@ -1996,6 +1997,15 @@ struct PhaseInterfaceStencilAccumulator0493x6f {
     double pressurePotentialSqSum0493x6g = 0.0;
 };
 
+struct WallGeometryAccumulator0493x9h {
+    unsigned long long solidCells = 0ull;
+    unsigned long long mixedCells = 0ull;
+    unsigned long long wallBandCells = 0ull;
+    unsigned long long normalValidCells = 0ull;
+    double solidFractionSum = 0.0;
+    double normalUnitErrorSqSum = 0.0;
+};
+
 struct ResidentWorkspace0400 {
     CudaCellWorkspace cells;
     DeviceBuffer0400<double> rhs;
@@ -2027,6 +2037,13 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> phaseAlphaFiltered0493x6c;
     DeviceBuffer0400<PhaseGeometryResidentAccumulator0493x6c>
         phaseGeometryResidentAccum0493x6c;
+    // 0493x9h wall geometry is deliberately separate from physical x6c alpha.
+    // Domain walls live in ghost geometry; chi-backed walls use 1-chi in cells.
+    // These fields are passive in x9h and become the future contact-angle input.
+    DeviceBuffer0400<double> phaseWallFraction0493x9h;
+    DeviceBuffer0400<double> phaseWallNormalX0493x9h;
+    DeviceBuffer0400<double> phaseWallNormalY0493x9h;
+    DeviceBuffer0400<WallGeometryAccumulator0493x9h> phaseWallGeometryAccum0493x9h;
     // 0493x9a passive capillary geometry.  These arrays are allocated only
     // behind the x9a gate and are not consumed by the projection in this patch.
     DeviceBuffer0400<double> phaseNormalX0493x9a;
@@ -2099,6 +2116,8 @@ struct ResidentWorkspace0400 {
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
     int phaseGeometryResidentStep0493x6c = -1;
+    bool phaseWallGeometryValid0493x9h = false;
+    int phaseWallGeometryStep0493x9h = -1;
     double phaseGeometryReferenceCellMass0493x6c = 0.0;
     int phaseGeometryLiquidSpeciesCount0493x6c = 0;
     DeviceBuffer0400<double> partial0;
@@ -2129,6 +2148,7 @@ struct ResidentWorkspace0400 {
         phaseGasPressurePotential0493x6a.ensure(c);
         phaseGeometryAccum0493x6b.ensure(1u);
         phaseGeometryResidentAccum0493x6c.ensure(1u);
+        phaseWallGeometryAccum0493x9h.ensure(1u);
         phaseCurvatureAccum0493x9a.ensure(1u);
         phaseCurvatureAccum0493x9b.ensure(1u);
         phaseInterfaceStencilAccum0493x6f.ensure(1u);
@@ -4005,7 +4025,63 @@ void append_phase_pair_audit_0493x9g(
         << (phaseB.allMatchedGas ? 1 : 0) << ',' << (phaseInterfaceEnabled ? 1 : 0) << ','
         << (phaseBPressureEnabled ? 1 : 0) << ',' << params.surfaceTensionSigma << ','
         << "A=alphaHigh/projectedSide;B=alphaLow/exteriorSide;"
-           "legacyDefaults=family:liquid/family:gas;wall=reserved" << '\n';
+           "legacyDefaults=family:liquid/family:gas;"
+           "wall=geometryProviderOnly/noPressureDirichlet" << '\n';
+}
+
+struct WallGeometryAudit0493x9h {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    int domainWallLeft = 0;
+    int domainWallRight = 0;
+    int domainWallBottom = 0;
+    int domainWallTop = 0;
+    int chiProviderEnabled = 0;
+    int chiCollisionWallVpEnabled = 0;
+    std::uint64_t numCells = 0u;
+    std::uint64_t solidCells = 0u;
+    std::uint64_t mixedCells = 0u;
+    std::uint64_t wallBandCells = 0u;
+    std::uint64_t normalValidCells = 0u;
+    double solidFractionMean = 0.0;
+    double normalValidFraction = 0.0;
+    double normalUnitErrorRms = 0.0;
+};
+
+void append_wall_geometry_audit_0493x9h(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const WallGeometryAudit0493x9h& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_wall_geometry_0493x9h.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9h failed to open wall-geometry audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,"
+               "domainWallLeft,domainWallRight,domainWallBottom,domainWallTop,"
+               "chiProviderEnabled,chiCollisionWallVpEnabled,numCells,solidCells,"
+               "mixedCells,wallBandCells,normalValidCells,solidFractionMean,"
+               "normalValidFraction,normalUnitErrorRms,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.domainWallLeft << ',' << a.domainWallRight << ','
+        << a.domainWallBottom << ',' << a.domainWallTop << ','
+        << a.chiProviderEnabled << ',' << a.chiCollisionWallVpEnabled << ','
+        << a.numCells << ',' << a.solidCells << ',' << a.mixedCells << ','
+        << a.wallBandCells << ',' << a.normalValidCells << ','
+        << a.solidFractionMean << ',' << a.normalValidFraction << ','
+        << a.normalUnitErrorRms << ','
+        << "wall=union(domainWallGhostFaces,chiWallVp);chiConvention=1fluid/0solid;"
+           "solidFraction=1-chi;normal=fluidToSolid;passiveGeometryOnly" << '\n';
 }
 
 __global__ void q6_phase_interface_geometry_stats_0493x6b(
@@ -4187,6 +4263,173 @@ __global__ void q6_phase_interface_geometry_stats_0493x6b(
     if (halfThetaSumLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSum, halfThetaSumLocal);
     if (halfThetaSqLocal != 0.0) atomic_add_double_0400(&accum->halfIsoThetaSqSum, halfThetaSqLocal);
     if (normalDotSumLocal != 0.0) atomic_add_double_0400(&accum->normalFaceAlignmentSum, normalDotSumLocal);
+}
+
+// 0493x9h passive solid-geometry provider.  The resident scalar is a solid
+// fraction S in [0,1].  An optional Darcy field uses the repository convention
+// chi=1 fluid / chi=0 solid, hence S=1-chi.  Static domain walls are represented
+// as S=1 ghost samples outside the computational box rather than by contaminating
+// the first fluid cell.  This keeps the geometry independent of the kinetic wall
+// mechanism (specular/solid/bounceback) and of wallVP particle bookkeeping.
+__global__ void q6_build_wall_fraction_0493x9h(
+    const float* chi,
+    int useChi,
+    double* solidFraction,
+    int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        double s = 0.0;
+        if (useChi && chi != nullptr) {
+            const double ch = fmin(1.0, fmax(0.0, static_cast<double>(chi[c])));
+            s = 1.0 - ch;
+        }
+        solidFraction[c] = s;
+    }
+}
+
+__device__ __forceinline__ double q6_wall_fraction_sample_0493x9h(
+    const double* solidFraction,
+    int ix,
+    int iy,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop) {
+    if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+    else if (ix < 0) return wallLeft ? 1.0 : 0.0;
+    else if (ix >= nx) return wallRight ? 1.0 : 0.0;
+    if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+    else if (iy < 0) return wallBottom ? 1.0 : 0.0;
+    else if (iy >= ny) return wallTop ? 1.0 : 0.0;
+    return solidFraction[iy * nx + ix];
+}
+
+__global__ void q6_build_wall_normals_0493x9h(
+    const double* solidFraction,
+    double* normalX,
+    double* normalY,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+#define WALLSAMPLE(DX,DY) q6_wall_fraction_sample_0493x9h( \
+            solidFraction, ix + (DX), iy + (DY), nx, ny, periodicX, periodicY, \
+            wallLeft, wallRight, wallBottom, wallTop)
+        const double nw = WALLSAMPLE(-1, +1);
+        const double nn = WALLSAMPLE( 0, +1);
+        const double ne = WALLSAMPLE(+1, +1);
+        const double ww = WALLSAMPLE(-1,  0);
+        const double ee = WALLSAMPLE(+1,  0);
+        const double sw = WALLSAMPLE(-1, -1);
+        const double ss = WALLSAMPLE( 0, -1);
+        const double se = WALLSAMPLE(+1, -1);
+#undef WALLSAMPLE
+        // grad(S) points from fluid toward solid because S increases into B.
+        const double gx = (3.0 * (ne - nw) + 10.0 * (ee - ww) +
+                           3.0 * (se - sw)) / (32.0 * dx);
+        const double gy = (3.0 * (nw - sw) + 10.0 * (nn - ss) +
+                           3.0 * (ne - se)) / (32.0 * dy);
+        const double g = sqrt(gx * gx + gy * gy);
+        if (g * fmin(dx, dy) > 1.0e-12) {
+            normalX[c] = gx / g;
+            normalY[c] = gy / g;
+        } else {
+            normalX[c] = 0.0;
+            normalY[c] = 0.0;
+        }
+    }
+}
+
+__global__ void q6_wall_geometry_audit_0493x9h(
+    const double* solidFraction,
+    const double* normalX,
+    const double* normalY,
+    WallGeometryAccumulator0493x9h* accum,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long solidLocal = 0ull;
+    unsigned long long mixedLocal = 0ull;
+    unsigned long long bandLocal = 0ull;
+    unsigned long long normalLocal = 0ull;
+    double solidSumLocal = 0.0;
+    double unitErrSqLocal = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double sc = fmin(1.0, fmax(0.0, solidFraction[c]));
+        solidSumLocal += sc;
+        if (sc >= 0.5) ++solidLocal;
+        if (sc > 1.0e-12 && sc < 1.0 - 1.0e-12) ++mixedLocal;
+        double sMin = sc;
+        double sMax = sc;
+        const double sW = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix - 1, iy, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sE = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix + 1, iy, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sS = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix, iy - 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sN = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix, iy + 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sNW = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix - 1, iy + 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sNE = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix + 1, iy + 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sSW = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix - 1, iy - 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        const double sSE = q6_wall_fraction_sample_0493x9h(
+            solidFraction, ix + 1, iy - 1, nx, ny, periodicX, periodicY,
+            wallLeft, wallRight, wallBottom, wallTop);
+        sMin = fmin(sMin, fmin(fmin(fmin(sW, sE), fmin(sS, sN)),
+                                  fmin(fmin(sNW, sNE), fmin(sSW, sSE))));
+        sMax = fmax(sMax, fmax(fmax(fmax(sW, sE), fmax(sS, sN)),
+                                  fmax(fmax(sNW, sNE), fmax(sSW, sSE))));
+        if (sMax - sMin > 1.0e-12) ++bandLocal;
+        const double norm = sqrt(normalX[c] * normalX[c] + normalY[c] * normalY[c]);
+        if (norm > 0.25) {
+            ++normalLocal;
+            const double e = norm - 1.0;
+            unitErrSqLocal += e * e;
+        }
+    }
+    if (solidLocal) atomicAdd(&accum->solidCells, solidLocal);
+    if (mixedLocal) atomicAdd(&accum->mixedCells, mixedLocal);
+    if (bandLocal) atomicAdd(&accum->wallBandCells, bandLocal);
+    if (normalLocal) atomicAdd(&accum->normalValidCells, normalLocal);
+    if (solidSumLocal != 0.0) atomic_add_double_0400(&accum->solidFractionSum, solidSumLocal);
+    if (unitErrSqLocal != 0.0) atomic_add_double_0400(&accum->normalUnitErrorSqSum, unitErrSqLocal);
 }
 
 __global__ void q6_build_phase_fill_resident_0493x6c(
@@ -8398,6 +8641,8 @@ bool apply_independent_masked_species_q6_0493w5(
     if (phaseGeometryResident0493x6c) {
         ws.phaseGeometryResidentValid0493x6c = false;
         ws.phaseGeometryResidentStep0493x6c = -1;
+        ws.phaseWallGeometryValid0493x9h = false;
+        ws.phaseWallGeometryStep0493x9h = -1;
     }
     if (phaseInterfaceStencil0493x6f) {
         ws.phaseInterfaceStencilValid0493x6f = false;
@@ -8421,10 +8666,6 @@ bool apply_independent_masked_species_q6_0493w5(
             diag.reason = "0493x9g phase A selector does not resolve to positive-reference particle species";
             return false;
         }
-        if (phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Wall) {
-            diag.reason = "0493x9g phase B wall selector reserved: wall geometry adapter not implemented";
-            return false;
-        }
         bool overlap0493x9g = false;
         for (const SpeciesDefinition& d : params.speciesDefinitions) {
             overlap0493x9g = overlap0493x9g ||
@@ -8436,13 +8677,54 @@ bool apply_independent_masked_species_q6_0493w5(
             return false;
         }
     }
-    // x7m topology becomes a generic B-side contract.  A registered B species
-    // or explicit vacuum means alpha=0.5 is a physical phase boundary.  A
-    // family selector with no registered member preserves the historical
-    // monophase behaviour (full pressure domain).
+    const bool phaseBWall0493x9h =
+        phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Wall;
+    const int wallLeft0493x9h = q6_wall_like_0409(params.bcLeft) ? 1 : 0;
+    const int wallRight0493x9h = q6_wall_like_0409(params.bcRight) ? 1 : 0;
+    const int wallBottom0493x9h = q6_wall_like_0409(params.bcBottom) ? 1 : 0;
+    const int wallTop0493x9h = q6_wall_like_0409(params.bcTop) ? 1 : 0;
+    const bool domainWallGeometry0493x9h =
+        wallLeft0493x9h || wallRight0493x9h || wallBottom0493x9h || wallTop0493x9h;
+    const bool chiWallGeometryRequested0493x9h =
+        phaseBWall0493x9h && params.darcyBrinkmanEnable &&
+        params.darcyChiCollisionVpEnable;
+    const float* wallChi0493x9h = nullptr;
+    int wallChiNx0493x9h = 0;
+    int wallChiNy0493x9h = 0;
+    bool chiWallGeometry0493x9h = false;
+    if (chiWallGeometryRequested0493x9h) {
+        chiWallGeometry0493x9h = cuda_darcy_brinkman_0343_device_chi_field(
+            params, &wallChi0493x9h, &wallChiNx0493x9h, &wallChiNy0493x9h);
+        if (!chiWallGeometry0493x9h || wallChi0493x9h == nullptr ||
+            wallChiNx0493x9h != grid.Nx || wallChiNy0493x9h != grid.Ny) {
+            diag.reason = "0493x9h wall chi geometry provider unavailable or grid-mismatched";
+            return false;
+        }
+    }
+    if (phaseBWall0493x9h && !domainWallGeometry0493x9h &&
+        !chiWallGeometry0493x9h) {
+        diag.reason = "0493x9h B=wall resolved without domain-wall or chi-wallVP geometry";
+        return false;
+    }
+    if (phaseBWall0493x9h && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x9h B=wall requires x6c resident geometry so the wall provider has a resident lifecycle";
+        return false;
+    }
+    if (phaseBWall0493x9h && surfaceTensionActive0493x9d) {
+        diag.reason = "0493x9h B=wall is passive geometry only; surface tension/contact-angle closure is not implemented";
+        return false;
+    }
+    if (phaseBWall0493x9h &&
+        (virialDensityKickRequested0493x7a || densityRelaxationRequested0493x7c)) {
+        diag.reason = "0493x9h B=wall passive geometry excludes x7b/x7d density closure until wall pressure coupling is defined";
+        return false;
+    }
+    // x7m particle-phase topology remains unchanged.  A wall is deliberately
+    // NOT registered as an alpha-low pressure side in x9h: static-wall Q6 BCs
+    // stay authoritative and the wall geometry is passive/resident only.
     const bool registeredPhaseB0493x9g =
         phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Vacuum ||
-        phaseB0493x9g.matchedSpecies > 0;
+        (!phaseBWall0493x9h && phaseB0493x9g.matchedSpecies > 0);
     const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
                               static_cast<std::size_t>(speciesCount);
     if (postApplyRegionAuditThisStep0493x6hB0) {
@@ -8537,7 +8819,7 @@ bool apply_independent_masked_species_q6_0493w5(
         audit.type = params.speciesDefinitions[static_cast<std::size_t>(s)].type;
         audit.strength = params.speciesDefinitions[static_cast<std::size_t>(s)].q6StrengthDeclared;
         const bool phaseInterfaceStencilSpecies0493x6f =
-            phaseInterfaceStencil0493x6f &&
+            phaseInterfaceStencil0493x6f && !phaseBWall0493x9h &&
             phase_selector_matches_definition_0493x9g(
                 phaseA0493x9g,
                 params.speciesDefinitions[static_cast<std::size_t>(s)]);
@@ -8635,6 +8917,89 @@ bool apply_independent_masked_species_q6_0493w5(
                                 "0493x6c geometry audit event create");
                 check_cuda_0400(cudaEventRecord(geometryStart0493x6c),
                                 "0493x6c geometry start event record");
+            }
+
+            if (phaseBWall0493x9h) {
+                ws.phaseWallFraction0493x9h.ensure(geometryCells0493x6c);
+                ws.phaseWallNormalX0493x9h.ensure(geometryCells0493x6c);
+                ws.phaseWallNormalY0493x9h.ensure(geometryCells0493x6c);
+                q6_build_wall_fraction_0493x9h<<<cellBlocks, threads>>>(
+                    chiWallGeometry0493x9h ? wallChi0493x9h : nullptr,
+                    chiWallGeometry0493x9h ? 1 : 0,
+                    ws.phaseWallFraction0493x9h.data(), grid.numCells);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9h wall solid-fraction build launch");
+                q6_build_wall_normals_0493x9h<<<cellBlocks, threads>>>(
+                    ws.phaseWallFraction0493x9h.data(),
+                    ws.phaseWallNormalX0493x9h.data(),
+                    ws.phaseWallNormalY0493x9h.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                    wallLeft0493x9h, wallRight0493x9h,
+                    wallBottom0493x9h, wallTop0493x9h);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9h wall normal build launch");
+                ws.phaseWallGeometryValid0493x9h = true;
+                ws.phaseWallGeometryStep0493x9h = step;
+
+                if (geometryAuditThisStep0493x6c) {
+                    check_cuda_0400(cudaMemset(
+                                        ws.phaseWallGeometryAccum0493x9h.data(), 0,
+                                        sizeof(WallGeometryAccumulator0493x9h)),
+                                    "0493x9h wall geometry accumulator zero");
+                    q6_wall_geometry_audit_0493x9h<<<cellBlocks, threads>>>(
+                        ws.phaseWallFraction0493x9h.data(),
+                        ws.phaseWallNormalX0493x9h.data(),
+                        ws.phaseWallNormalY0493x9h.data(),
+                        ws.phaseWallGeometryAccum0493x9h.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h,
+                        wallBottom0493x9h, wallTop0493x9h);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9h wall geometry audit launch");
+                    WallGeometryAccumulator0493x9h wallAccum0493x9h{};
+                    check_cuda_0400(cudaMemcpy(
+                                        &wallAccum0493x9h,
+                                        ws.phaseWallGeometryAccum0493x9h.data(),
+                                        sizeof(wallAccum0493x9h), cudaMemcpyDeviceToHost),
+                                    "0493x9h wall geometry audit download");
+                    WallGeometryAudit0493x9h wallAudit0493x9h{};
+                    wallAudit0493x9h.projectedSpeciesIndex = s;
+                    wallAudit0493x9h.projectedType = audit.type;
+                    wallAudit0493x9h.domainWallLeft = wallLeft0493x9h;
+                    wallAudit0493x9h.domainWallRight = wallRight0493x9h;
+                    wallAudit0493x9h.domainWallBottom = wallBottom0493x9h;
+                    wallAudit0493x9h.domainWallTop = wallTop0493x9h;
+                    wallAudit0493x9h.chiProviderEnabled = chiWallGeometry0493x9h ? 1 : 0;
+                    wallAudit0493x9h.chiCollisionWallVpEnabled =
+                        params.darcyChiCollisionVpEnable ? 1 : 0;
+                    wallAudit0493x9h.numCells =
+                        static_cast<std::uint64_t>(grid.numCells);
+                    wallAudit0493x9h.solidCells =
+                        static_cast<std::uint64_t>(wallAccum0493x9h.solidCells);
+                    wallAudit0493x9h.mixedCells =
+                        static_cast<std::uint64_t>(wallAccum0493x9h.mixedCells);
+                    wallAudit0493x9h.wallBandCells =
+                        static_cast<std::uint64_t>(wallAccum0493x9h.wallBandCells);
+                    wallAudit0493x9h.normalValidCells =
+                        static_cast<std::uint64_t>(wallAccum0493x9h.normalValidCells);
+                    if (grid.numCells > 0) {
+                        wallAudit0493x9h.solidFractionMean =
+                            wallAccum0493x9h.solidFractionSum /
+                            static_cast<double>(grid.numCells);
+                    }
+                    if (wallAccum0493x9h.wallBandCells > 0ull) {
+                        wallAudit0493x9h.normalValidFraction =
+                            static_cast<double>(wallAccum0493x9h.normalValidCells) /
+                            static_cast<double>(wallAccum0493x9h.wallBandCells);
+                    }
+                    if (wallAccum0493x9h.normalValidCells > 0ull) {
+                        wallAudit0493x9h.normalUnitErrorRms = std::sqrt(
+                            std::max(0.0, wallAccum0493x9h.normalUnitErrorSqSum /
+                                              static_cast<double>(wallAccum0493x9h.normalValidCells)));
+                    }
+                    append_wall_geometry_audit_0493x9h(
+                        params, step, time, wallAudit0493x9h);
+                }
             }
 
             const int phaseBSpeciesCount0493x9g = phaseB0493x9g.matchedSpecies;
