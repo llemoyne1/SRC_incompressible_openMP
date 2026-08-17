@@ -75,6 +75,58 @@ std::uint64_t parse_u64(const std::string& value, const std::string& key) {
     return static_cast<std::uint64_t>(out);
 }
 
+std::string canonical_phase_selector_0493x9g(
+    const std::string& value, const std::string& key) {
+    std::string v = lower(trim(value));
+    if (v == "liquid" || v == "gas" || v == "dispersed" || v == "unspecified") {
+        v = "family:" + v;
+    }
+    if (v == "none") v = "vacuum";
+    if (v == "vacuum" || v == "wall") return v;
+    const std::string familyPrefix = "family:";
+    if (v.rfind(familyPrefix, 0) == 0) {
+        const std::string family = v.substr(familyPrefix.size());
+        if (family == "liquid" || family == "gas" ||
+            family == "dispersed" || family == "unspecified") {
+            return familyPrefix + family;
+        }
+        throw std::runtime_error(
+            key + ": phase family selector must be liquid, gas, dispersed or unspecified");
+    }
+    const std::string typePrefix = "type:";
+    if (v.rfind(typePrefix, 0) == 0) {
+        const std::string typeText = v.substr(typePrefix.size());
+        if (typeText.empty() ||
+            !std::all_of(typeText.begin(), typeText.end(),
+                         [](unsigned char c) { return std::isdigit(c); })) {
+            throw std::runtime_error(key + ": type selector must use type:<uint32>");
+        }
+        std::size_t pos = 0u;
+        const unsigned long long typeValue = std::stoull(typeText, &pos);
+        if (pos != typeText.size() ||
+            typeValue > static_cast<unsigned long long>(
+                std::numeric_limits<std::uint32_t>::max())) {
+            throw std::runtime_error(key + ": type selector exceeds uint32 range");
+        }
+        return typePrefix + std::to_string(typeValue);
+    }
+    throw std::runtime_error(
+        key + ": selector must be family:<phase>, type:<uint32>, vacuum or wall");
+}
+
+bool phase_selector_matches_definition_0493x9g(
+    const std::string& selector, const SpeciesDefinition& d) {
+    if (selector == "family:liquid") return d.phaseFamily == SpeciesPhaseFamily::Liquid;
+    if (selector == "family:gas") return d.phaseFamily == SpeciesPhaseFamily::Gas;
+    if (selector == "family:dispersed") return d.phaseFamily == SpeciesPhaseFamily::Dispersed;
+    if (selector == "family:unspecified") return d.phaseFamily == SpeciesPhaseFamily::Unspecified;
+    const std::string prefix = "type:";
+    if (selector.rfind(prefix, 0) == 0) {
+        return d.type == static_cast<std::uint32_t>(std::stoull(selector.substr(prefix.size())));
+    }
+    return false;
+}
+
 bool has_key(const std::unordered_map<std::string, std::string>& kv, const std::string& key) {
     return kv.find(key) != kv.end();
 }
@@ -501,6 +553,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q6DensityRelaxationBeta" || key == "densityRelaxationBeta") p.q6DensityRelaxationBeta = parse_double(value, key);
         else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
         else if (key == "surfaceTensionSigma" || key == "q6GfSurfaceTensionSigma") p.surfaceTensionSigma = parse_double(value, key);
+        else if (key == "phaseInterfaceASelector" || key == "capillaryPhaseASelector")
+            p.phaseInterfaceASelector = canonical_phase_selector_0493x9g(value, key);
+        else if (key == "phaseInterfaceBSelector" || key == "capillaryPhaseBSelector")
+            p.phaseInterfaceBSelector = canonical_phase_selector_0493x9g(value, key);
         else if (key == "q6DensityRelaxationCompressionGateEnable" || key == "densityRelaxationCompressionGateEnable") p.q6DensityRelaxationCompressionGateEnable = parse_bool(value, key);
         else if (key == "q6DensityRelaxationCompressionThresholdFill" || key == "densityRelaxationCompressionThresholdFill") p.q6DensityRelaxationCompressionThresholdFill = parse_double(value, key);
         else if (key == "q6DensityRelaxationTractionThresholdFill" || key == "densityRelaxationTractionThresholdFill") p.q6DensityRelaxationTractionThresholdFill = parse_double(value, key);
@@ -1328,6 +1384,64 @@ void validate_simulation_params(const SimulationParams& p) {
     if (!(p.surfaceTensionSigma >= 0.0) || !std::isfinite(p.surfaceTensionSigma)) {
         throw std::runtime_error(
             "0493x9d surfaceTensionSigma must be finite and non-negative");
+    }
+    // Validate/canonicalize through local values too: SimulationParams may be
+    // assembled directly by tests instead of passing through the key parser.
+    const std::string phaseASelector0493x9g = canonical_phase_selector_0493x9g(
+        p.phaseInterfaceASelector, "phaseInterfaceASelector");
+    const std::string phaseBSelector0493x9g = canonical_phase_selector_0493x9g(
+        p.phaseInterfaceBSelector, "phaseInterfaceBSelector");
+    if (phaseASelector0493x9g == "vacuum" ||
+        phaseASelector0493x9g == "wall") {
+        throw std::runtime_error(
+            "0493x9g phaseInterfaceASelector must select registered particle species");
+    }
+    const bool phasePairRelevant0493x9g =
+        p.speciesQ6Mode == "free_surface_masked" || p.surfaceTensionSigma > 0.0;
+    if (phasePairRelevant0493x9g && p.speciesRegistryEnable) {
+        int phaseACount0493x9g = 0;
+        int phaseBCount0493x9g = 0;
+        double phaseARef0493x9g = 0.0;
+        bool overlap0493x9g = false;
+        bool phaseBAllGas0493x9g = true;
+        for (const SpeciesDefinition& d : p.speciesDefinitions) {
+            const bool a = phase_selector_matches_definition_0493x9g(
+                phaseASelector0493x9g, d);
+            const bool b = phase_selector_matches_definition_0493x9g(
+                phaseBSelector0493x9g, d);
+            if (a) {
+                ++phaseACount0493x9g;
+                phaseARef0493x9g += d.referenceCellMassDeclared;
+            }
+            if (b) {
+                ++phaseBCount0493x9g;
+                phaseBAllGas0493x9g =
+                    phaseBAllGas0493x9g && d.phaseFamily == SpeciesPhaseFamily::Gas;
+            }
+            overlap0493x9g = overlap0493x9g || (a && b);
+        }
+        if (phaseACount0493x9g == 0 || !(phaseARef0493x9g > 0.0) ||
+            !std::isfinite(phaseARef0493x9g)) {
+            throw std::runtime_error(
+                "0493x9g phase A selector must match species with positive total referenceCellMassDeclared");
+        }
+        if (overlap0493x9g) {
+            throw std::runtime_error(
+                "0493x9g phase A and phase B selectors must not overlap registered species");
+        }
+        if (phaseBSelector0493x9g.rfind("type:", 0) == 0 &&
+            phaseBCount0493x9g != 1) {
+            throw std::runtime_error(
+                "0493x9g explicit phase B type selector must match exactly one registered species");
+        }
+        if (phaseBSelector0493x9g == "wall") {
+            // Intentionally accepted by the selector grammar so the future
+            // wallVP/contact-angle adapter can use the same pair contract, but
+            // x9g itself has no wall alpha provider.
+            throw std::runtime_error(
+                "0493x9g phaseInterfaceBSelector=wall is reserved; wall geometry adapter not implemented yet");
+        }
+        (void)phaseBAllGas0493x9g;
     }
     const double q6DensityRelaxationEffectiveBeta0493x7d =
         p.q6DensityRelaxationTime > 0.0

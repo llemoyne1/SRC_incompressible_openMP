@@ -20,6 +20,10 @@ RY_CELLS="${RY_CELLS:-32}"
 ELLIPSE_ANGLE_DEG="${ELLIPSE_ANGLE_DEG:-0.0}"
 CENTER_X="${CENTER_X:-0.78125}"; CENTER_Y="${CENTER_Y:-0.78125}"
 SIGMA="${SIGMA:-256.0}"
+# x9g optional explicit pair selectors. Empty keeps parser defaults and therefore
+# the exact historical family:liquid/family:gas configuration.
+PHASE_A_SELECTOR="${PHASE_A_SELECTOR:-}"
+PHASE_B_SELECTOR="${PHASE_B_SELECTOR:-}"
 LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"
 LIQUID_MASS="${LIQUID_MASS:-1.0}"; GAS_MASS="${GAS_MASS:-1.0}"
 LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
@@ -160,6 +164,12 @@ speciesQ6FallbackMode = common
 speciesQ6ComparisonTolerance = 1.0e-11
 speciesQ6MinOccupancyFraction = $SPECIES_Q6_MIN_FILL_FRACTION
 PARAMS_EOF
+if [[ -n "$PHASE_A_SELECTOR" ]]; then
+  printf 'phaseInterfaceASelector = %s\n' "$PHASE_A_SELECTOR" >> "$PARAMS"
+fi
+if [[ -n "$PHASE_B_SELECTOR" ]]; then
+  printf 'phaseInterfaceBSelector = %s\n' "$PHASE_B_SELECTOR" >> "$PARAMS"
+fi
 suite_write_common_params_0434 "$RUN_MODE" >> "$PARAMS"
 
 suite_export_cuda_flags_0434 "$RUN_MODE" "$TOPOLOGY"
@@ -193,6 +203,8 @@ SIGMA=$SIGMA
 THERMAL_PRESSURE=$THERMAL_PRESSURE
 NOMINAL_LAPLACE=$NOMINAL_LAPLACE
 surfaceTensionSigma=$SIGMA
+PHASE_A_SELECTOR=${PHASE_A_SELECTOR:-<default:family:liquid>}
+PHASE_B_SELECTOR=${PHASE_B_SELECTOR:-<default:family:gas>}
 Q6_GF_HAS_GAS_PHASE=$Q6_GF_HAS_GAS_PHASE
 META
 

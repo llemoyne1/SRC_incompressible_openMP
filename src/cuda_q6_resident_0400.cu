@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -1005,7 +1006,7 @@ void append_phase_geometry_resident_audit_0493x6c(
         << a.alphaHalfCrossingAIActiveExteriorSideFaces << ','
         << a.alphaHalfThetaMin << ',' << a.alphaHalfThetaMean << ','
         << a.alphaHalfThetaStd << ',' << a.alphaHalfThetaMax << ','
-        << "raw=sum_liquid_mass/sum_liquid_reference_mass;"
+        << "raw=sum_phaseA_mass/sum_phaseA_reference_mass;"
            "geom0=clamp01(raw);"
            "alpha=geom0+lambda*sum_face_neighbours(geom0_nb-geom0);"
            "no_flux_at_nonperiodic_domain_boundary;halfIso=0.5" << '\n';
@@ -3832,21 +3833,179 @@ __global__ void q6_phase_interface_pressure_stats_0493x6a(
     if (faces != 0ull) atomicAdd(interfaceFaceCounter, faces);
 }
 
-__device__ double q6_phase_fill_0493x6b(
+enum class PhaseSelectorKind0493x9g : int {
+    Family = 0,
+    Type = 1,
+    Vacuum = 2,
+    Wall = 3
+};
+
+struct ResolvedPhaseSelector0493x9g {
+    PhaseSelectorKind0493x9g kind = PhaseSelectorKind0493x9g::Family;
+    std::uint32_t value = 0u;
+    int matchedSpecies = 0;
+    double referenceCellMass = 0.0;
+    bool allMatchedGas = false;
+    std::string canonical;
+};
+
+std::string lower_trim_phase_selector_0493x9g(std::string v) {
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    v.erase(v.begin(), std::find_if(v.begin(), v.end(), notSpace));
+    v.erase(std::find_if(v.rbegin(), v.rend(), notSpace).base(), v.end());
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return v;
+}
+
+ResolvedPhaseSelector0493x9g resolve_phase_selector_0493x9g(
+    const std::string& input,
+    const std::vector<SpeciesDefinition>& definitions) {
+    ResolvedPhaseSelector0493x9g out{};
+    std::string v = lower_trim_phase_selector_0493x9g(input);
+    if (v == "liquid" || v == "gas" || v == "dispersed" || v == "unspecified") {
+        v = "family:" + v;
+    }
+    if (v == "none") v = "vacuum";
+    out.canonical = v;
+    if (v == "vacuum") {
+        out.kind = PhaseSelectorKind0493x9g::Vacuum;
+        return out;
+    }
+    if (v == "wall") {
+        out.kind = PhaseSelectorKind0493x9g::Wall;
+        return out;
+    }
+    const std::string familyPrefix = "family:";
+    if (v.rfind(familyPrefix, 0) == 0) {
+        const std::string f = v.substr(familyPrefix.size());
+        out.kind = PhaseSelectorKind0493x9g::Family;
+        if (f == "unspecified") out.value = static_cast<std::uint32_t>(SpeciesPhaseFamily::Unspecified);
+        else if (f == "gas") out.value = static_cast<std::uint32_t>(SpeciesPhaseFamily::Gas);
+        else if (f == "liquid") out.value = static_cast<std::uint32_t>(SpeciesPhaseFamily::Liquid);
+        else if (f == "dispersed") out.value = static_cast<std::uint32_t>(SpeciesPhaseFamily::Dispersed);
+        else throw std::runtime_error("0493x9g invalid family selector: " + input);
+    } else {
+        const std::string typePrefix = "type:";
+        if (v.rfind(typePrefix, 0) != 0) {
+            throw std::runtime_error("0493x9g invalid phase selector: " + input);
+        }
+        out.kind = PhaseSelectorKind0493x9g::Type;
+        out.value = static_cast<std::uint32_t>(std::stoull(v.substr(typePrefix.size())));
+    }
+    out.allMatchedGas = true;
+    for (const SpeciesDefinition& d : definitions) {
+        const bool match = out.kind == PhaseSelectorKind0493x9g::Family
+            ? static_cast<std::uint32_t>(d.phaseFamily) == out.value
+            : d.type == out.value;
+        if (!match) continue;
+        ++out.matchedSpecies;
+        out.referenceCellMass += d.referenceCellMassDeclared;
+        out.allMatchedGas = out.allMatchedGas && d.phaseFamily == SpeciesPhaseFamily::Gas;
+    }
+    if (out.matchedSpecies == 0) out.allMatchedGas = false;
+    return out;
+}
+
+bool phase_selector_matches_definition_0493x9g(
+    const ResolvedPhaseSelector0493x9g& selector,
+    const SpeciesDefinition& d) {
+    if (selector.kind == PhaseSelectorKind0493x9g::Family) {
+        return static_cast<std::uint32_t>(d.phaseFamily) == selector.value;
+    }
+    if (selector.kind == PhaseSelectorKind0493x9g::Type) {
+        return d.type == selector.value;
+    }
+    return false;
+}
+
+__device__ __forceinline__ bool q6_phase_selector_matches_0493x9g(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    int selectorKind,
+    unsigned int selectorValue) {
+    if (speciesIndex < 0 || speciesIndex >= species.speciesCount) return false;
+    if (selectorKind == static_cast<int>(PhaseSelectorKind0493x9g::Family)) {
+        return species.phaseFamily != nullptr &&
+               species.phaseFamily[speciesIndex] == static_cast<unsigned char>(selectorValue);
+    }
+    if (selectorKind == static_cast<int>(PhaseSelectorKind0493x9g::Type)) {
+        return species.speciesTypes != nullptr &&
+               species.speciesTypes[speciesIndex] == selectorValue;
+    }
+    return false;
+}
+
+__device__ double q6_phase_fill_selector_0493x9g(
     CudaSpeciesCellDeviceView0490h species,
     int cell,
-    unsigned char phaseFamily,
+    int selectorKind,
+    unsigned int selectorValue,
     double phaseReferenceCellMass) {
     if (cell < 0 || cell >= species.numCells || !(phaseReferenceCellMass > 0.0)) {
         return 0.0;
     }
     double mass = 0.0;
     for (int s = 0; s < species.speciesCount; ++s) {
-        if (species.phaseFamily[s] == phaseFamily) {
+        if (q6_phase_selector_matches_0493x9g(
+                species, s, selectorKind, selectorValue)) {
             mass += species.mass[s * species.numCells + cell];
         }
     }
     return mass / phaseReferenceCellMass;
+}
+
+// Historical x6b helper retained for old diagnostics.  Production x9g
+// geometry uses q6_phase_fill_selector_0493x9g instead.
+__device__ double q6_phase_fill_0493x6b(
+    CudaSpeciesCellDeviceView0490h species,
+    int cell,
+    unsigned char phaseFamily,
+    double phaseReferenceCellMass) {
+    return q6_phase_fill_selector_0493x9g(
+        species, cell, static_cast<int>(PhaseSelectorKind0493x9g::Family),
+        static_cast<unsigned int>(phaseFamily), phaseReferenceCellMass);
+}
+
+void append_phase_pair_audit_0493x9g(
+    const SimulationParams& params,
+    int step,
+    double time,
+    int projectedSpeciesIndex,
+    std::uint32_t projectedType,
+    const ResolvedPhaseSelector0493x9g& phaseA,
+    const ResolvedPhaseSelector0493x9g& phaseB,
+    bool phaseInterfaceEnabled,
+    bool phaseBPressureEnabled) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_pair_0493x9g.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9g failed to open phase-pair audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,phaseASelector,"
+               "phaseAKind,phaseAValue,phaseASpeciesCount,phaseAReferenceCellMass,"
+               "phaseBSelector,phaseBKind,phaseBValue,phaseBSpeciesCount,"
+               "phaseBReferenceCellMass,phaseBAllGas,phaseInterfaceEnabled,"
+               "phaseBPressureEnabled,surfaceTensionSigma,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << projectedSpeciesIndex << ',' << projectedType << ','
+        << phaseA.canonical << ',' << static_cast<int>(phaseA.kind) << ',' << phaseA.value << ','
+        << phaseA.matchedSpecies << ',' << phaseA.referenceCellMass << ','
+        << phaseB.canonical << ',' << static_cast<int>(phaseB.kind) << ',' << phaseB.value << ','
+        << phaseB.matchedSpecies << ',' << phaseB.referenceCellMass << ','
+        << (phaseB.allMatchedGas ? 1 : 0) << ',' << (phaseInterfaceEnabled ? 1 : 0) << ','
+        << (phaseBPressureEnabled ? 1 : 0) << ',' << params.surfaceTensionSigma << ','
+        << "A=alphaHigh/projectedSide;B=alphaLow/exteriorSide;"
+           "legacyDefaults=family:liquid/family:gas;wall=reserved" << '\n';
 }
 
 __global__ void q6_phase_interface_geometry_stats_0493x6b(
@@ -4032,8 +4191,11 @@ __global__ void q6_phase_interface_geometry_stats_0493x6b(
 
 __global__ void q6_build_phase_fill_resident_0493x6c(
     CudaSpeciesCellDeviceView0490h species,
-    unsigned char phaseFamily,
-    double phaseReferenceCellMass,
+    int phaseASelectorKind0493x9g,
+    unsigned int phaseASelectorValue0493x9g,
+    double phaseAReferenceCellMass0493x9g,
+    int phaseBSelectorKind0493x9g,
+    unsigned int phaseBSelectorValue0493x9g,
     double* rawFill,
     int n,
     double* gasPressurePotential0493x6g,
@@ -4048,15 +4210,17 @@ __global__ void q6_build_phase_fill_resident_0493x6c(
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int c = idx; c < n; c += stride) {
-        rawFill[c] = q6_phase_fill_0493x6b(
-            species, c, phaseFamily, phaseReferenceCellMass);
+        rawFill[c] = q6_phase_fill_selector_0493x9g(
+            species, c, phaseASelectorKind0493x9g,
+            phaseASelectorValue0493x9g, phaseAReferenceCellMass0493x9g);
         if (buildGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
             double pressure = constantPressure0493x6g;
             if (gasPressureMode0493x6g == static_cast<int>(PhaseGasPressureMode0493x6g::Eos)) {
                 unsigned long long gasCount = 0ull;
                 for (int s = 0; s < species.speciesCount; ++s) {
-                    if (species.phaseFamily[s] ==
-                        static_cast<unsigned char>(SpeciesPhaseFamily::Gas)) {
+                    if (q6_phase_selector_matches_0493x9g(
+                            species, s, phaseBSelectorKind0493x9g,
+                            phaseBSelectorValue0493x9g)) {
                         gasCount += static_cast<unsigned long long>(
                             species.count[s * species.numCells + c]);
                     }
@@ -4069,10 +4233,10 @@ __global__ void q6_build_phase_fill_resident_0493x6c(
             // pressure potential.  This keeps the matrix independent of p_g
             // and avoids carrying a large uniform ambient pressure through CG.
             gasPressurePotential0493x6g[c] =
-                phaseReferenceCellMass > 0.0
+                phaseAReferenceCellMass0493x9g > 0.0
                     ? dt0493x6g * pressureScale0493x6g *
                           (pressure - pressureReference0493x6g) * cellArea0493x6g /
-                          phaseReferenceCellMass
+                          phaseAReferenceCellMass0493x9g
                     : 0.0;
         }
     }
@@ -8240,14 +8404,45 @@ bool apply_independent_masked_species_q6_0493w5(
         ws.phaseInterfaceStencilStep0493x6f = -1;
     }
     const int speciesCount = static_cast<int>(params.speciesDefinitions.size());
-    // 0493x7m: the registered phase families are authoritative for topology.
-    // x5a deliberately registers an absent gas species, so its liquid/vacuum
-    // free surface remains alpha-defined.
-    const bool registeredGasPhase0493x7m = std::any_of(
-        params.speciesDefinitions.begin(), params.speciesDefinitions.end(),
-        [](const SpeciesDefinition& d) {
-            return d.phaseFamily == SpeciesPhaseFamily::Gas;
-        });
+    // 0493x9g: resolve the phase pair once on the host.  Defaults are the exact
+    // historical liquid/gas selectors.  The same contract can later attach a
+    // wall alpha provider without changing curvature or the Laplace jump.
+    const ResolvedPhaseSelector0493x9g phaseA0493x9g =
+        resolve_phase_selector_0493x9g(
+            params.phaseInterfaceASelector, params.speciesDefinitions);
+    const ResolvedPhaseSelector0493x9g phaseB0493x9g =
+        resolve_phase_selector_0493x9g(
+            params.phaseInterfaceBSelector, params.speciesDefinitions);
+    if (freeSurfaceMode0493x5a) {
+        if (phaseA0493x9g.kind == PhaseSelectorKind0493x9g::Vacuum ||
+            phaseA0493x9g.kind == PhaseSelectorKind0493x9g::Wall ||
+            phaseA0493x9g.matchedSpecies == 0 ||
+            !(phaseA0493x9g.referenceCellMass > 0.0)) {
+            diag.reason = "0493x9g phase A selector does not resolve to positive-reference particle species";
+            return false;
+        }
+        if (phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Wall) {
+            diag.reason = "0493x9g phase B wall selector reserved: wall geometry adapter not implemented";
+            return false;
+        }
+        bool overlap0493x9g = false;
+        for (const SpeciesDefinition& d : params.speciesDefinitions) {
+            overlap0493x9g = overlap0493x9g ||
+                (phase_selector_matches_definition_0493x9g(phaseA0493x9g, d) &&
+                 phase_selector_matches_definition_0493x9g(phaseB0493x9g, d));
+        }
+        if (overlap0493x9g) {
+            diag.reason = "0493x9g phase A and B selectors overlap registered species";
+            return false;
+        }
+    }
+    // x7m topology becomes a generic B-side contract.  A registered B species
+    // or explicit vacuum means alpha=0.5 is a physical phase boundary.  A
+    // family selector with no registered member preserves the historical
+    // monophase behaviour (full pressure domain).
+    const bool registeredPhaseB0493x9g =
+        phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Vacuum ||
+        phaseB0493x9g.matchedSpecies > 0;
     const std::size_t dense = static_cast<std::size_t>(grid.numCells) *
                               static_cast<std::size_t>(speciesCount);
     if (postApplyRegionAuditThisStep0493x6hB0) {
@@ -8343,8 +8538,9 @@ bool apply_independent_masked_species_q6_0493w5(
         audit.strength = params.speciesDefinitions[static_cast<std::size_t>(s)].q6StrengthDeclared;
         const bool phaseInterfaceStencilSpecies0493x6f =
             phaseInterfaceStencil0493x6f &&
-            params.speciesDefinitions[static_cast<std::size_t>(s)].phaseFamily ==
-                SpeciesPhaseFamily::Liquid;
+            phase_selector_matches_definition_0493x9g(
+                phaseA0493x9g,
+                params.speciesDefinitions[static_cast<std::size_t>(s)]);
         const bool phaseGasPressureSpecies0493x6g =
             phaseGasPressure0493x6g && phaseInterfaceStencilSpecies0493x6f;
         // A zero scale is a strict physical no-op.  Keep the x6g audit enabled,
@@ -8406,18 +8602,13 @@ bool apply_independent_masked_species_q6_0493w5(
         const unsigned char* q6SolveMask0493x6f = ws.speciesMask0493w5.data();
 
         if (phaseGeometryResident0493x6c) {
-            double liquidPhaseReferenceCellMass0493x6c = 0.0;
-            int liquidPhaseSpeciesCount0493x6c = 0;
-            for (const SpeciesDefinition& d : params.speciesDefinitions) {
-                if (d.phaseFamily == SpeciesPhaseFamily::Liquid) {
-                    liquidPhaseReferenceCellMass0493x6c += d.referenceCellMassDeclared;
-                    ++liquidPhaseSpeciesCount0493x6c;
-                }
-            }
-            if (!(liquidPhaseReferenceCellMass0493x6c > 0.0) ||
-                liquidPhaseSpeciesCount0493x6c == 0) {
+            const double phaseAReferenceCellMass0493x9g =
+                phaseA0493x9g.referenceCellMass;
+            const int phaseASpeciesCount0493x9g = phaseA0493x9g.matchedSpecies;
+            if (!(phaseAReferenceCellMass0493x9g > 0.0) ||
+                phaseASpeciesCount0493x9g == 0) {
                 diag.reason =
-                    "0493x6c resident phase geometry requires a positive liquid phase reference mass";
+                    "0493x9g resident phase geometry requires a positive phase-A reference mass";
                 append_independent_masked_species_audit_0493w5(params, step, time, audits);
                 return false;
             }
@@ -8446,14 +8637,18 @@ bool apply_independent_masked_species_q6_0493w5(
                                 "0493x6c geometry start event record");
             }
 
-            int gasSpeciesCount0493x6g = 0;
-            if (phaseGasPressureApplySpecies0493x6g) {
-                for (const SpeciesDefinition& d : params.speciesDefinitions) {
-                    if (d.phaseFamily == SpeciesPhaseFamily::Gas) ++gasSpeciesCount0493x6g;
+            const int phaseBSpeciesCount0493x9g = phaseB0493x9g.matchedSpecies;
+            if (phaseGasPressureApplySpecies0493x6g &&
+                phaseGasPressureMode0493x6g == PhaseGasPressureMode0493x6g::Eos) {
+                if (phaseBSpeciesCount0493x9g == 0) {
+                    diag.reason = "0493x9g EOS phase-B pressure requires registered phase-B species";
+                    append_independent_masked_species_audit_0493w5(
+                        params, step, time, audits);
+                    return false;
                 }
-                if (gasSpeciesCount0493x6g == 0 &&
-                    phaseGasPressureMode0493x6g == PhaseGasPressureMode0493x6g::Eos) {
-                    diag.reason = "0493x6g EOS gas pressure requires at least one gas species";
+                if (!phaseB0493x9g.allMatchedGas) {
+                    diag.reason =
+                        "0493x9g x6g EOS provider is ideal-gas only; non-gas phase B requires constant/off pressure provider";
                     append_independent_masked_species_audit_0493w5(
                         params, step, time, audits);
                     return false;
@@ -8462,8 +8657,9 @@ bool apply_independent_masked_species_q6_0493w5(
 
             q6_build_phase_fill_resident_0493x6c<<<cellBlocks, threads>>>(
                 species,
-                static_cast<unsigned char>(SpeciesPhaseFamily::Liquid),
-                liquidPhaseReferenceCellMass0493x6c,
+                static_cast<int>(phaseA0493x9g.kind), phaseA0493x9g.value,
+                phaseAReferenceCellMass0493x9g,
+                static_cast<int>(phaseB0493x9g.kind), phaseB0493x9g.value,
                 ws.phaseFillRaw0493x6c.data(), grid.numCells,
                 phaseGasPressureApplySpecies0493x6g ? ws.phaseGasPressurePotential0493x6a.data() : nullptr,
                 phaseGasPressureApplySpecies0493x6g ? 1 : 0,
@@ -9016,7 +9212,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         static_cast<double>(capAccum.curvatureAbsMaxScaled) /
                         kPhaseCurvatureAbsScale0493x9a;
                     const double rhoLiquidRef0493x9d =
-                        liquidPhaseReferenceCellMass0493x6c / (dx * dy);
+                        phaseAReferenceCellMass0493x9g / (dx * dy);
                     const double capillaryPotentialScale0493x9d =
                         params.dt * params.surfaceTensionSigma / rhoLiquidRef0493x9d;
                     append_surface_tension_audit_0493x9d(
@@ -9027,12 +9223,18 @@ bool apply_independent_masked_species_q6_0493w5(
 
             ws.phaseGeometryResidentValid0493x6c = true;
             ws.phaseGeometryResidentStep0493x6c = step;
+            // Historical workspace field names are retained for ABI/locality;
+            // under x9g they carry phase-A reference/count semantics.
             ws.phaseGeometryReferenceCellMass0493x6c =
-                liquidPhaseReferenceCellMass0493x6c;
+                phaseAReferenceCellMass0493x9g;
             ws.phaseGeometryLiquidSpeciesCount0493x6c =
-                liquidPhaseSpeciesCount0493x6c;
+                phaseASpeciesCount0493x9g;
 
             if (geometryAuditThisStep0493x6c) {
+                append_phase_pair_audit_0493x9g(
+                    params, step, time, s, audit.type,
+                    phaseA0493x9g, phaseB0493x9g,
+                    registeredPhaseB0493x9g, phaseGasPressureApplySpecies0493x6g);
                 check_cuda_0400(cudaMemset(
                                     ws.phaseGeometryResidentAccum0493x6c.data(), 0,
                                     sizeof(PhaseGeometryResidentAccumulator0493x6c)),
@@ -9082,9 +9284,9 @@ bool apply_independent_masked_species_q6_0493w5(
                 geometryAudit0493x6c.projectedSpeciesIndex = s;
                 geometryAudit0493x6c.projectedType = audit.type;
                 geometryAudit0493x6c.liquidPhaseSpeciesCount =
-                    liquidPhaseSpeciesCount0493x6c;
+                    phaseASpeciesCount0493x9g;
                 geometryAudit0493x6c.liquidPhaseReferenceCellMass =
-                    liquidPhaseReferenceCellMass0493x6c;
+                    phaseAReferenceCellMass0493x9g;
                 geometryAudit0493x6c.numCells =
                     static_cast<std::uint64_t>(grid.numCells);
                 geometryAudit0493x6c.filterLambda =
@@ -9268,7 +9470,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         ? ws.phaseCurvature3Pass0493x9c.data() : nullptr,
                     surfaceTensionApplySpecies0493x9d
                         ? params.dt * params.surfaceTensionSigma * (dx * dy) /
-                              liquidPhaseReferenceCellMass0493x6c
+                              phaseAReferenceCellMass0493x9g
                         : 0.0,
                     interfaceDirichletApplySpecies0493x9d
                         ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
@@ -9276,7 +9478,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
                     phaseGasPressureApplySpecies0493x6g ? 1 : 0,
                     surfaceTensionApplySpecies0493x9d ? 1 : 0,
-                    registeredGasPhase0493x7m ? 1 : 0,
+                    registeredPhaseB0493x9g ? 1 : 0,
                     grid.Nx, grid.Ny, periodicX, periodicY,
                     kPhaseCutFaceThetaMin0493x6d,
                     ws.counter.data(),
@@ -9362,12 +9564,7 @@ bool apply_independent_masked_species_q6_0493w5(
                     append_phase_interface_stencil_audit_0493x6f(
                         params, step, time, stencilAudit0493x6f);
                     if (phaseGasPressureSpecies0493x6g) {
-                        int gasSpeciesCount0493x6g = 0;
-                        for (const SpeciesDefinition& d : params.speciesDefinitions) {
-                            if (d.phaseFamily == SpeciesPhaseFamily::Gas) {
-                                ++gasSpeciesCount0493x6g;
-                            }
-                        }
+                        const int gasSpeciesCount0493x6g = phaseB0493x9g.matchedSpecies;
                         PhaseInterfaceGasPressureAudit0493x6g gasAudit0493x6g{};
                         gasAudit0493x6g.projectedSpeciesIndex = s;
                         gasAudit0493x6g.projectedType = audit.type;
@@ -9377,7 +9574,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         gasAudit0493x6g.nonzeroPressureFaces =
                             static_cast<std::uint64_t>(accum0493x6f.nonzeroPressureFaces0493x6g);
                         gasAudit0493x6g.liquidReferenceCellMass =
-                            liquidPhaseReferenceCellMass0493x6c;
+                            phaseAReferenceCellMass0493x9g;
                         gasAudit0493x6g.cellArea = dx * dy;
                         gasAudit0493x6g.pressureReference =
                             phaseGasPressureReference0493x6g;
@@ -9406,7 +9603,7 @@ bool apply_independent_masked_species_q6_0493w5(
                                     gasAudit0493x6g.pressurePotentialMean *
                                         gasAudit0493x6g.pressurePotentialMean));
                             const double rhoLiquidRef =
-                                liquidPhaseReferenceCellMass0493x6c / (dx * dy);
+                                phaseAReferenceCellMass0493x9g / (dx * dy);
                             if (params.dt > 0.0) {
                                 const double pressurePerPhi = rhoLiquidRef / params.dt;
                                 gasAudit0493x6g.pressureDeltaMean =

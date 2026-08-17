@@ -474,9 +474,22 @@ struct SimulationParams {
     double q6DensityRelaxationTime = 0.0;
 
     // 0493x9d: physical 2-D surface tension used only by the Q6-G-F
-    // free-surface Dirichlet jump p_l - p_g = sigma*kappa.  Code units are
+    // free-surface Dirichlet jump p_A - p_B = sigma*kappa.  Code units are
     // pressure*length.  Zero is an exact no-op and preserves the pre-x9d path.
     double surfaceTensionSigma = 0.0;
+
+    // 0493x9g: phase-pair abstraction for the resident interface geometry.
+    // Defaults reproduce the qualified liquid/gas path exactly.  Selectors are
+    // canonicalized by the parser and may be:
+    //   family:liquid | family:gas | family:dispersed | family:unspecified
+    //   type:<uint32> | vacuum | wall
+    // `wall` is reserved for the later wall/wetting geometry adapter; x9g
+    // deliberately does not invent wall geometry from the particle phase field.
+    // Phase A owns alpha>=0.5, curvature orientation and the projected Q6 side.
+    // Phase B is the exterior side and is also the species source for x6g EOS
+    // pressure when that provider is enabled.
+    std::string phaseInterfaceASelector = "family:liquid";
+    std::string phaseInterfaceBSelector = "family:gas";
 
     // 0493x7d-v2 experimental compression/noise discriminator. Disabled by
     // default: false preserves the historical rawFill x7d target bit-for-bit.
