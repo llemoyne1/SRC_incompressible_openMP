@@ -166,6 +166,57 @@ bool cuda_q6_phase_gas_pressure_0493x6g_requested() {
     return truthy_0400(std::getenv("MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G"));
 }
 
+// 0493x9a: passive capillary geometry.  Build outward normals and curvature
+// from the already-qualified x6c alpha field, but do not feed either field to
+// x6f/x6g or to particle velocities.  This isolates the only new numerical
+// ingredient needed by a later Young--Laplace jump.
+bool cuda_q6_phase_curvature_diagnostics_0493x9a_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9A"));
+}
+
+// 0493x9b: second passive estimator.  It deliberately owns a curvature-only
+// geometry field distinct from the x6c physical alpha: one isotropic 3x3
+// binomial pass reduces MPCD occupancy quantization, then Scharr 3x3
+// derivatives build n and div(n).  Nothing from x9b enters x6f/x6g/RHS/B1.
+bool cuda_q6_phase_curvature_diagnostics_0493x9b_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9B"));
+}
+
+// 0493x9c: passive smoothing-support qualification.  It keeps the x9b Scharr
+// operator fixed and evaluates two additional alphaK supports (2 and 3 total
+// binomial 3x3 passes).  The candidates are summary-cadence diagnostics only.
+bool cuda_q6_phase_curvature_diagnostics_0493x9c_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9C"));
+}
+
+// 0493x9e: static-drop qualification diagnostics.  This gate is strictly
+// observational: no geometry, RHS, pressure boundary value or particle state
+// is modified.  It runs only at the ordinary Q6 summary cadence.
+bool cuda_q6_static_drop_diagnostics_0493x9e_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_STATIC_DROP_DIAGNOSTICS_0493X9E"));
+}
+
+// 0493x9f: diagnostic-only ellipse/shape qualification layered on x9e.
+// It adds no force, pressure term, geometry smoothing or particle update.
+// The runner enables it together with x9e so pressure/curvature and shape
+// histories share the same summary cadence.
+bool cuda_q6_ellipse_diagnostics_0493x9f_requested() {
+    return truthy_0400(
+        std::getenv("MPCD_Q6_ELLIPSE_DIAGNOSTICS_0493X9F"));
+}
+
+// 0493x9b-audit2: diagnostic-only exclusion band used to separate free
+// interface curvature from wall-intersection artefacts.  Periodic directions
+// have no wall and therefore do not participate in the exclusion test.
+int cuda_q6_phase_curvature_audit_wall_margin_0493x9b() {
+    return std::max(0, env_int_0400(
+        "MPCD_Q6_PHASE_CURVATURE_AUDIT_WALL_MARGIN_CELLS_0493X9B", 8));
+}
+
 // 0493x6h-B0: diagnostic-only localization of the divergence that remains
 // after the face-projected Q6 correction has been applied to resident
 // particles and redeposited.  The extra pass is summary-cadence only and is
@@ -961,6 +1012,529 @@ void append_phase_geometry_resident_audit_0493x6c(
 }
 
 
+struct PhaseCurvatureAudit0493x9a {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    std::uint64_t numCells = 0u;
+    std::uint64_t crossingFaces = 0u;
+    std::uint64_t validCurvatureFaces = 0u;
+    std::uint64_t outwardNormalFaces = 0u;
+    std::uint64_t positiveCurvatureFaces = 0u;
+    std::uint64_t negativeCurvatureFaces = 0u;
+    double validFraction = 0.0;
+    double normalOutwardFraction = 0.0;
+    double normalFaceAlignmentMean = 0.0;
+    double curvatureMean = 0.0;
+    double curvatureRms = 0.0;
+    double curvatureStd = 0.0;
+    double curvatureAbsMean = 0.0;
+    double curvatureAbsMax = 0.0;
+    int wallMarginCells = 0;
+    std::uint64_t interiorCrossingFaces = 0u;
+    std::uint64_t interiorValidCurvatureFaces = 0u;
+    double interiorCurvatureMean = 0.0;
+    double interiorCurvatureRms = 0.0;
+    double interiorCurvatureStd = 0.0;
+    double interiorCurvatureAbsMean = 0.0;
+    double interiorCurvatureAbsMax = 0.0;
+    std::uint64_t nearWallCrossingFaces = 0u;
+    std::uint64_t nearWallValidCurvatureFaces = 0u;
+    double nearWallCurvatureMean = 0.0;
+    double nearWallCurvatureRms = 0.0;
+    double nearWallCurvatureStd = 0.0;
+    double nearWallCurvatureAbsMean = 0.0;
+    double nearWallCurvatureAbsMax = 0.0;
+    double normalBuildSeconds = 0.0;
+    double curvatureBuildSeconds = 0.0;
+    double faceAuditSeconds = 0.0;
+    std::uint64_t residentBytes = 0u;
+};
+
+void append_phase_curvature_audit_0493x9a(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseCurvatureAudit0493x9a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_curvature_0493x9a.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9a failed to open passive curvature audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,numCells,"
+               "crossingFaces,validCurvatureFaces,outwardNormalFaces,"
+               "positiveCurvatureFaces,negativeCurvatureFaces,validFraction,"
+               "normalOutwardFraction,normalFaceAlignmentMean,curvatureMean,"
+               "curvatureRms,curvatureStd,curvatureAbsMean,curvatureAbsMax,"
+               "wallMarginCells,interiorCrossingFaces,interiorValidCurvatureFaces,"
+               "interiorCurvatureMean,interiorCurvatureRms,interiorCurvatureStd,"
+               "interiorCurvatureAbsMean,interiorCurvatureAbsMax,"
+               "nearWallCrossingFaces,nearWallValidCurvatureFaces,"
+               "nearWallCurvatureMean,nearWallCurvatureRms,nearWallCurvatureStd,"
+               "nearWallCurvatureAbsMean,nearWallCurvatureAbsMax,"
+               "normalBuildSeconds,curvatureBuildSeconds,faceAuditSeconds,"
+               "residentBytes,curvatureDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.numCells << ',' << a.crossingFaces << ','
+        << a.validCurvatureFaces << ',' << a.outwardNormalFaces << ','
+        << a.positiveCurvatureFaces << ',' << a.negativeCurvatureFaces << ','
+        << a.validFraction << ',' << a.normalOutwardFraction << ','
+        << a.normalFaceAlignmentMean << ',' << a.curvatureMean << ','
+        << a.curvatureRms << ',' << a.curvatureStd << ','
+        << a.curvatureAbsMean << ',' << a.curvatureAbsMax << ','
+        << a.wallMarginCells << ',' << a.interiorCrossingFaces << ','
+        << a.interiorValidCurvatureFaces << ',' << a.interiorCurvatureMean << ','
+        << a.interiorCurvatureRms << ',' << a.interiorCurvatureStd << ','
+        << a.interiorCurvatureAbsMean << ',' << a.interiorCurvatureAbsMax << ','
+        << a.nearWallCrossingFaces << ',' << a.nearWallValidCurvatureFaces << ','
+        << a.nearWallCurvatureMean << ',' << a.nearWallCurvatureRms << ','
+        << a.nearWallCurvatureStd << ',' << a.nearWallCurvatureAbsMean << ','
+        << a.nearWallCurvatureAbsMax << ',' << a.normalBuildSeconds << ','
+        << a.curvatureBuildSeconds << ',' << a.faceAuditSeconds << ','
+        << a.residentBytes << ','
+        << "n=-grad(alpha)/|grad(alpha)|;kappa=div(n);"
+           "kappaGamma=linear_cell_interpolation_at_alpha0.5;passive_only"
+        << '\n';
+}
+
+void append_phase_curvature_audit_0493x9b(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const PhaseCurvatureAudit0493x9a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_curvature_0493x9b.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9b failed to open passive curvature audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,numCells,"
+               "crossingFaces,validCurvatureFaces,outwardNormalFaces,"
+               "positiveCurvatureFaces,negativeCurvatureFaces,validFraction,"
+               "normalOutwardFraction,normalFaceAlignmentMean,curvatureMean,"
+               "curvatureRms,curvatureStd,curvatureAbsMean,curvatureAbsMax,"
+               "wallMarginCells,interiorCrossingFaces,interiorValidCurvatureFaces,"
+               "interiorCurvatureMean,interiorCurvatureRms,interiorCurvatureStd,"
+               "interiorCurvatureAbsMean,interiorCurvatureAbsMax,"
+               "nearWallCrossingFaces,nearWallValidCurvatureFaces,"
+               "nearWallCurvatureMean,nearWallCurvatureRms,nearWallCurvatureStd,"
+               "nearWallCurvatureAbsMean,nearWallCurvatureAbsMax,"
+               "normalBuildSeconds,curvatureBuildSeconds,faceAuditSeconds,"
+               "residentBytes,curvatureDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ','
+        << a.projectedType << ',' << a.numCells << ',' << a.crossingFaces << ','
+        << a.validCurvatureFaces << ',' << a.outwardNormalFaces << ','
+        << a.positiveCurvatureFaces << ',' << a.negativeCurvatureFaces << ','
+        << a.validFraction << ',' << a.normalOutwardFraction << ','
+        << a.normalFaceAlignmentMean << ',' << a.curvatureMean << ','
+        << a.curvatureRms << ',' << a.curvatureStd << ','
+        << a.curvatureAbsMean << ',' << a.curvatureAbsMax << ','
+        << a.wallMarginCells << ',' << a.interiorCrossingFaces << ','
+        << a.interiorValidCurvatureFaces << ',' << a.interiorCurvatureMean << ','
+        << a.interiorCurvatureRms << ',' << a.interiorCurvatureStd << ','
+        << a.interiorCurvatureAbsMean << ',' << a.interiorCurvatureAbsMax << ','
+        << a.nearWallCrossingFaces << ',' << a.nearWallValidCurvatureFaces << ','
+        << a.nearWallCurvatureMean << ',' << a.nearWallCurvatureRms << ','
+        << a.nearWallCurvatureStd << ',' << a.nearWallCurvatureAbsMean << ','
+        << a.nearWallCurvatureAbsMax << ',' << a.normalBuildSeconds << ','
+        << a.curvatureBuildSeconds << ',' << a.faceAuditSeconds << ','
+        << a.residentBytes << ','
+        << "alphaK=binomial3x3(alpha_x6c,1pass);"
+           "n=-scharr3x3_grad(alphaK)/|grad|;kappa=scharr3x3_div(n);"
+           "kappaGamma=linear_cell_interpolation_at_alpha0.5;passive_only"
+        << '\n';
+}
+
+
+void append_phase_curvature_audit_0493x9c(
+    const SimulationParams& params,
+    int step,
+    double time,
+    int smoothingPasses,
+    const PhaseCurvatureAudit0493x9a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_curvature_0493x9c.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9c failed to open passive curvature audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,smoothingPasses,projectedSpeciesIndex,projectedType,numCells,"
+               "crossingFaces,validCurvatureFaces,outwardNormalFaces,"
+               "positiveCurvatureFaces,negativeCurvatureFaces,validFraction,"
+               "normalOutwardFraction,normalFaceAlignmentMean,curvatureMean,"
+               "curvatureRms,curvatureStd,curvatureAbsMean,curvatureAbsMax,"
+               "wallMarginCells,interiorCrossingFaces,interiorValidCurvatureFaces,"
+               "interiorCurvatureMean,interiorCurvatureRms,interiorCurvatureStd,"
+               "interiorCurvatureAbsMean,interiorCurvatureAbsMax,"
+               "nearWallCrossingFaces,nearWallValidCurvatureFaces,"
+               "nearWallCurvatureMean,nearWallCurvatureRms,nearWallCurvatureStd,"
+               "nearWallCurvatureAbsMean,nearWallCurvatureAbsMax,"
+               "normalBuildSeconds,curvatureBuildSeconds,faceAuditSeconds,"
+               "residentBytes,curvatureDefinition\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << smoothingPasses << ','
+        << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.numCells << ',' << a.crossingFaces << ','
+        << a.validCurvatureFaces << ',' << a.outwardNormalFaces << ','
+        << a.positiveCurvatureFaces << ',' << a.negativeCurvatureFaces << ','
+        << a.validFraction << ',' << a.normalOutwardFraction << ','
+        << a.normalFaceAlignmentMean << ',' << a.curvatureMean << ','
+        << a.curvatureRms << ',' << a.curvatureStd << ','
+        << a.curvatureAbsMean << ',' << a.curvatureAbsMax << ','
+        << a.wallMarginCells << ',' << a.interiorCrossingFaces << ','
+        << a.interiorValidCurvatureFaces << ',' << a.interiorCurvatureMean << ','
+        << a.interiorCurvatureRms << ',' << a.interiorCurvatureStd << ','
+        << a.interiorCurvatureAbsMean << ',' << a.interiorCurvatureAbsMax << ','
+        << a.nearWallCrossingFaces << ',' << a.nearWallValidCurvatureFaces << ','
+        << a.nearWallCurvatureMean << ',' << a.nearWallCurvatureRms << ','
+        << a.nearWallCurvatureStd << ',' << a.nearWallCurvatureAbsMean << ','
+        << a.nearWallCurvatureAbsMax << ',' << a.normalBuildSeconds << ','
+        << a.curvatureBuildSeconds << ',' << a.faceAuditSeconds << ','
+        << a.residentBytes << ','
+        << "alphaK=binomial3x3(alpha_x6c," << smoothingPasses << "passes);"
+           "n=-scharr3x3_grad(alphaK)/|grad|;kappa=scharr3x3_div(n);"
+           "kappaGamma=linear_cell_interpolation_at_alpha0.5;passive_only"
+        << '\n';
+}
+
+
+void append_surface_tension_audit_0493x9d(
+    const SimulationParams& params,
+    int step,
+    double time,
+    double rhoLiquidRef,
+    double capillaryPotentialScale,
+    const PhaseCurvatureAudit0493x9a& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_surface_tension_0493x9d.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9d failed to open surface-tension audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,sigma,rhoLiquidRef,capillaryPotentialScale,crossingFaces,"
+               "validCurvatureFaces,curvatureMean,curvatureStd,curvatureAbsMax,"
+               "laplacePressureMean,laplacePressureStd,capillaryPhiMean,"
+               "capillaryPhiStd,definition\n";
+    }
+    const double pressureMean = params.surfaceTensionSigma * a.curvatureMean;
+    const double pressureStd = params.surfaceTensionSigma * a.curvatureStd;
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << params.surfaceTensionSigma << ','
+        << rhoLiquidRef << ',' << capillaryPotentialScale << ','
+        << a.crossingFaces << ',' << a.validCurvatureFaces << ','
+        << a.curvatureMean << ',' << a.curvatureStd << ',' << a.curvatureAbsMax << ','
+        << pressureMean << ',' << pressureStd << ','
+        << capillaryPotentialScale * a.curvatureMean << ','
+        << capillaryPotentialScale * a.curvatureStd << ','
+        << "p_l-p_g=sigma*kappa_p3;phiGamma_cap=dt*sigma*kappa_p3/rhoLiquidRef;"
+           "kappa_p3=binomial3x3(3)+Scharr"
+        << '\n';
+}
+
+
+struct StaticDropCellAccumulator0493x9e {
+    unsigned long long deepLiquidCells = 0ull;
+    unsigned long long deepGasCells = 0ull;
+    double alphaSum = 0.0;
+    double liquidPhiSum = 0.0;
+    double liquidPhiSqSum = 0.0;
+    double gasPhiSum = 0.0;
+    double gasPhiSqSum = 0.0;
+};
+
+struct StaticDropFaceAccumulator0493x9e {
+    unsigned long long crossingFaces = 0ull;
+    unsigned long long validFaces = 0ull;
+    double curvatureSum = 0.0;
+    double curvatureSqSum = 0.0;
+    double discreteResultantX = 0.0;
+    double discreteResultantY = 0.0;
+    double discreteAbsTraction = 0.0;
+    double axisBoundaryMeasure = 0.0;
+};
+
+struct StaticDropVelocityAccumulator0493x9e {
+    unsigned long long liquidCells = 0ull;
+    unsigned long long coreCells = 0ull;
+    unsigned long long interfaceCells = 0ull;
+    unsigned long long liquidSpeedMaxScaled = 0ull;
+    unsigned long long coreSpeedMaxScaled = 0ull;
+    unsigned long long interfaceSpeedMaxScaled = 0ull;
+    double liquidVxSum = 0.0;
+    double liquidVySum = 0.0;
+    double liquidSpeedSqSum = 0.0;
+    double coreVxSum = 0.0;
+    double coreVySum = 0.0;
+    double coreSpeedSqSum = 0.0;
+    double interfaceVxSum = 0.0;
+    double interfaceVySum = 0.0;
+    double interfaceSpeedSqSum = 0.0;
+};
+
+struct EllipseParticleMomentAccumulator0493x9f {
+    unsigned long long particles = 0ull;
+    double massSum = 0.0;
+    double massXSum = 0.0;
+    double massYSum = 0.0;
+    double massXXSum = 0.0;
+    double massYYSum = 0.0;
+    double massXYSum = 0.0;
+};
+
+struct EllipseInterfaceRadiusAccumulator0493x9f {
+    unsigned long long crossingPoints = 0ull;
+    unsigned long long radiusMinScaled = 0ull;
+    unsigned long long radiusMaxScaled = 0ull;
+    double radiusSum = 0.0;
+    double radiusSqSum = 0.0;
+};
+
+void append_ellipse_shape_audit_0493x9f(
+    const SimulationParams& params,
+    int step,
+    double time,
+    std::uint32_t liquidType,
+    const EllipseParticleMomentAccumulator0493x9f& m,
+    const EllipseInterfaceRadiusAccumulator0493x9f& r) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_ellipse_shape_0493x9f.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9f failed to open ellipse-shape CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,liquidType,liquidParticles,liquidMass,xCM,yCM,"
+               "Mxx,Mxy,Myy,lambdaMajor,lambdaMinor,momentRadiusMajor,"
+               "momentRadiusMinor,axisRatio,ellipticity,principalAngleRad,"
+               "principalAngleDeg,interfaceCrossingPoints,interfaceRadiusMin,"
+               "interfaceRadiusMax,interfaceRadiusMean,interfaceRadiusStd,"
+               "interfaceRadialSpan,definition\n";
+    }
+    const double invMass = m.massSum > 0.0 ? 1.0 / m.massSum : 0.0;
+    const double xcm = m.massXSum * invMass;
+    const double ycm = m.massYSum * invMass;
+    const double mxx = std::max(0.0, m.massXXSum * invMass - xcm * xcm);
+    const double myy = std::max(0.0, m.massYYSum * invMass - ycm * ycm);
+    const double mxy = m.massXYSum * invMass - xcm * ycm;
+    const double tr = mxx + myy;
+    const double disc = std::sqrt(std::max(0.0,
+        (mxx - myy) * (mxx - myy) + 4.0 * mxy * mxy));
+    const double lambdaMajor = 0.5 * (tr + disc);
+    const double lambdaMinor = std::max(0.0, 0.5 * (tr - disc));
+    // For a uniform filled ellipse, covariance eigenvalues are a^2/4,b^2/4.
+    const double radiusMajor = 2.0 * std::sqrt(std::max(0.0, lambdaMajor));
+    const double radiusMinor = 2.0 * std::sqrt(std::max(0.0, lambdaMinor));
+    const double axisRatio = radiusMinor > 0.0 ? radiusMajor / radiusMinor : 0.0;
+    const double ellipticity = (radiusMajor + radiusMinor) > 0.0
+        ? (radiusMajor - radiusMinor) / (radiusMajor + radiusMinor) : 0.0;
+    const double angle = 0.5 * std::atan2(2.0 * mxy, mxx - myy);
+    constexpr double radToDeg = 57.295779513082320876798154814105;
+    constexpr double radiusScale = 1000000000.0;
+    const double rmin = (r.crossingPoints > 0ull &&
+                         r.radiusMinScaled != std::numeric_limits<unsigned long long>::max())
+        ? static_cast<double>(r.radiusMinScaled) / radiusScale : 0.0;
+    const double rmax = r.crossingPoints > 0ull
+        ? static_cast<double>(r.radiusMaxScaled) / radiusScale : 0.0;
+    const double invR = r.crossingPoints > 0ull
+        ? 1.0 / static_cast<double>(r.crossingPoints) : 0.0;
+    const double rmean = r.radiusSum * invR;
+    const double rstd = r.crossingPoints > 0ull
+        ? std::sqrt(std::max(0.0, r.radiusSqSum * invR - rmean * rmean)) : 0.0;
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << liquidType << ',' << m.particles << ','
+        << m.massSum << ',' << xcm << ',' << ycm << ','
+        << mxx << ',' << mxy << ',' << myy << ','
+        << lambdaMajor << ',' << lambdaMinor << ','
+        << radiusMajor << ',' << radiusMinor << ',' << axisRatio << ','
+        << ellipticity << ',' << angle << ',' << angle * radToDeg << ','
+        << r.crossingPoints << ',' << rmin << ',' << rmax << ',' << rmean << ','
+        << rstd << ',' << (rmax - rmin) << ','
+        << "particleCOM=mass-weighted liquid fluid particles;"
+           "secondMoment=mass-weighted central covariance;"
+           "momentRadii=2*sqrt(eigenvalues);"
+           "interfaceRadii=alpha0.5 crossing-point distance from particle COM"
+        << '\n';
+}
+
+void append_static_drop_pressure_audit_0493x9e(
+    const SimulationParams& params,
+    int step,
+    double time,
+    double rhoLiquidRef,
+    double pressureReference,
+    double pressureScale,
+    double cellArea,
+    const StaticDropCellAccumulator0493x9e& c,
+    const StaticDropFaceAccumulator0493x9e& f) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_static_drop_pressure_0493x9e.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9e failed to open static-drop pressure CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,sigma,rhoLiquidRef,pressureReference,pressureScale,"
+               "alphaArea,effectiveRadius,equivalentCurvature,deepLiquidCells,"
+               "deepGasCells,liquidPhiMean,liquidPhiStd,gasPhiMean,gasPhiStd,"
+               "liquidProjectionPressureGaugeMean,liquidProjectionPressureGaugeStd,"
+               "gasEosPressureGaugeMean,gasEosPressureGaugeStd,"
+               "measuredPressureJump,laplaceTargetCurrent,pressureJumpError,"
+               "crossingFaces,validCurvatureFaces,curvatureMean,curvatureStd,"
+               "discreteCurvatureResultantX,discreteCurvatureResultantY,"
+               "discreteCurvatureResultantNorm,discreteAbsTraction,"
+               "normalizedDiscreteResultant,capillaryResultantX,capillaryResultantY,"
+               "capillaryResultantNorm,axisBoundaryMeasure,definition\n";
+    }
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double alphaArea = c.alphaSum * cellArea;
+    const double rEff = alphaArea > 0.0 ? std::sqrt(alphaArea / pi) : 0.0;
+    const double kEq = rEff > 0.0 ? 1.0 / rEff : 0.0;
+    const double invL = c.deepLiquidCells > 0ull
+        ? 1.0 / static_cast<double>(c.deepLiquidCells) : 0.0;
+    const double invG = c.deepGasCells > 0ull
+        ? 1.0 / static_cast<double>(c.deepGasCells) : 0.0;
+    const double phiL = c.liquidPhiSum * invL;
+    const double phiG = c.gasPhiSum * invG;
+    const double phiLStd = c.deepLiquidCells > 0ull
+        ? std::sqrt(std::max(0.0, c.liquidPhiSqSum * invL - phiL * phiL)) : 0.0;
+    const double phiGStd = c.deepGasCells > 0ull
+        ? std::sqrt(std::max(0.0, c.gasPhiSqSum * invG - phiG * phiG)) : 0.0;
+    const double phiToPressure = params.dt > 0.0 ? rhoLiquidRef / params.dt : 0.0;
+    const double pL = phiL * phiToPressure;
+    const double pLStd = phiLStd * phiToPressure;
+    const double pG = phiG * phiToPressure;
+    const double pGStd = phiGStd * phiToPressure;
+    const double measuredJump = pL - pG;
+    const double laplaceTarget = rEff > 0.0 ? params.surfaceTensionSigma / rEff : 0.0;
+    const double pressureJumpError = measuredJump - laplaceTarget;
+    const double invF = f.validFaces > 0ull
+        ? 1.0 / static_cast<double>(f.validFaces) : 0.0;
+    const double kMean = f.curvatureSum * invF;
+    const double kStd = f.validFaces > 0ull
+        ? std::sqrt(std::max(0.0, f.curvatureSqSum * invF - kMean * kMean)) : 0.0;
+    const double resultNorm = std::hypot(f.discreteResultantX, f.discreteResultantY);
+    const double resultRel = f.discreteAbsTraction > 0.0
+        ? resultNorm / f.discreteAbsTraction : 0.0;
+    const double capFx = params.surfaceTensionSigma * f.discreteResultantX;
+    const double capFy = params.surfaceTensionSigma * f.discreteResultantY;
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << params.surfaceTensionSigma << ','
+        << rhoLiquidRef << ',' << pressureReference << ',' << pressureScale << ','
+        << alphaArea << ',' << rEff << ',' << kEq << ','
+        << c.deepLiquidCells << ',' << c.deepGasCells << ','
+        << phiL << ',' << phiLStd << ',' << phiG << ',' << phiGStd << ','
+        << pL << ',' << pLStd << ',' << pG << ',' << pGStd << ','
+        << measuredJump << ',' << laplaceTarget << ',' << pressureJumpError << ','
+        << f.crossingFaces << ',' << f.validFaces << ',' << kMean << ',' << kStd << ','
+        << f.discreteResultantX << ',' << f.discreteResultantY << ',' << resultNorm << ','
+        << f.discreteAbsTraction << ',' << resultRel << ','
+        << capFx << ',' << capFy << ',' << std::hypot(capFx, capFy) << ','
+        << f.axisBoundaryMeasure << ','
+        << "pProjectionGauge=rhoLiquidRef*phi/dt;"
+           "pGasGauge=rhoLiquidRef*phiGasEOS/dt;"
+           "deepLiquid=alpha>=0.9;deepGas=alpha<=0.1;"
+           "Reff=sqrt(sum(alpha)*cellArea/pi);"
+           "discreteResultant=sum(kappaGamma*n_axis*faceMeasure)"
+        << '\n';
+}
+
+void append_static_drop_velocity_audit_0493x9e(
+    const SimulationParams& params,
+    int step,
+    double time,
+    std::uint32_t liquidType,
+    const StaticDropVelocityAccumulator0493x9e& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_static_drop_velocity_0493x9e.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9e failed to open static-drop velocity CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,liquidType,liquidCells,liquidMeanVx,liquidMeanVy,"
+               "liquidSpeedRms,liquidFluctuationRms,liquidSpeedMax,"
+               "coreCells,coreMeanVx,coreMeanVy,coreSpeedRms,coreFluctuationRms,coreSpeedMax,"
+               "interfaceCells,interfaceMeanVx,interfaceMeanVy,interfaceSpeedRms,"
+               "interfaceFluctuationRms,interfaceSpeedMax,definition\n";
+    }
+    constexpr double speedScale = 1000000000.0;
+    auto stats = [](unsigned long long n, double sx, double sy, double ssq) {
+        struct Result { double mx, my, rms, fluct; } r{0,0,0,0};
+        if (n == 0ull) return r;
+        const double inv = 1.0 / static_cast<double>(n);
+        r.mx = sx * inv;
+        r.my = sy * inv;
+        r.rms = std::sqrt(std::max(0.0, ssq * inv));
+        r.fluct = std::sqrt(std::max(0.0,
+            ssq * inv - r.mx * r.mx - r.my * r.my));
+        return r;
+    };
+    const auto l = stats(a.liquidCells, a.liquidVxSum, a.liquidVySum, a.liquidSpeedSqSum);
+    const auto c = stats(a.coreCells, a.coreVxSum, a.coreVySum, a.coreSpeedSqSum);
+    const auto i = stats(a.interfaceCells, a.interfaceVxSum, a.interfaceVySum,
+                         a.interfaceSpeedSqSum);
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << liquidType << ','
+        << a.liquidCells << ',' << l.mx << ',' << l.my << ',' << l.rms << ',' << l.fluct << ','
+        << static_cast<double>(a.liquidSpeedMaxScaled) / speedScale << ','
+        << a.coreCells << ',' << c.mx << ',' << c.my << ',' << c.rms << ',' << c.fluct << ','
+        << static_cast<double>(a.coreSpeedMaxScaled) / speedScale << ','
+        << a.interfaceCells << ',' << i.mx << ',' << i.my << ',' << i.rms << ',' << i.fluct << ','
+        << static_cast<double>(a.interfaceSpeedMaxScaled) / speedScale << ','
+        << "postQ6 cell-mean velocity;liquid=alpha>=0.5;core=alpha>=0.9;"
+           "interface=trueBand(cell adjacent to face straddling alpha=0.5);"
+           "cells require positive projected-liquid mass"
+        << '\n';
+}
+
+
 struct PhaseInterfaceStencilAudit0493x6f {
     int projectedSpeciesIndex = -1;
     std::uint32_t projectedType = 0u;
@@ -1379,6 +1953,33 @@ struct PhaseGeometryResidentAccumulator0493x6c {
 };
 
 
+struct PhaseCurvatureAccumulator0493x9a {
+    unsigned long long crossingFaces = 0ull;
+    unsigned long long validCurvatureFaces = 0ull;
+    unsigned long long outwardNormalFaces = 0ull;
+    unsigned long long positiveCurvatureFaces = 0ull;
+    unsigned long long negativeCurvatureFaces = 0ull;
+    unsigned long long curvatureAbsMaxScaled = 0ull;
+    double normalFaceAlignmentSum = 0.0;
+    double curvatureSum = 0.0;
+    double curvatureSqSum = 0.0;
+    double curvatureAbsSum = 0.0;
+
+    // 0493x9b-audit2: same face statistics split by distance to physical wall.
+    unsigned long long interiorCrossingFaces = 0ull;
+    unsigned long long interiorValidCurvatureFaces = 0ull;
+    unsigned long long interiorCurvatureAbsMaxScaled = 0ull;
+    double interiorCurvatureSum = 0.0;
+    double interiorCurvatureSqSum = 0.0;
+    double interiorCurvatureAbsSum = 0.0;
+    unsigned long long nearWallCrossingFaces = 0ull;
+    unsigned long long nearWallValidCurvatureFaces = 0ull;
+    unsigned long long nearWallCurvatureAbsMaxScaled = 0ull;
+    double nearWallCurvatureSum = 0.0;
+    double nearWallCurvatureSqSum = 0.0;
+    double nearWallCurvatureAbsSum = 0.0;
+};
+
 struct PhaseInterfaceStencilAccumulator0493x6f {
     unsigned long long pressureActiveCells = 0ull;
     unsigned long long interiorPressureFaces = 0ull;
@@ -1425,6 +2026,50 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> phaseAlphaFiltered0493x6c;
     DeviceBuffer0400<PhaseGeometryResidentAccumulator0493x6c>
         phaseGeometryResidentAccum0493x6c;
+    // 0493x9a passive capillary geometry.  These arrays are allocated only
+    // behind the x9a gate and are not consumed by the projection in this patch.
+    DeviceBuffer0400<double> phaseNormalX0493x9a;
+    DeviceBuffer0400<double> phaseNormalY0493x9a;
+    DeviceBuffer0400<double> phaseCurvature0493x9a;
+    DeviceBuffer0400<PhaseCurvatureAccumulator0493x9a>
+        phaseCurvatureAccum0493x9a;
+    // 0493x9b keeps a curvature-specific smoothed alpha separate from x6c.
+    // This is diagnostic geometry only: x6f continues to consume x6c alpha.
+    DeviceBuffer0400<double> phaseAlphaCurvature0493x9b;
+    DeviceBuffer0400<double> phaseNormalX0493x9b;
+    DeviceBuffer0400<double> phaseNormalY0493x9b;
+    DeviceBuffer0400<double> phaseCurvature0493x9b;
+    DeviceBuffer0400<PhaseCurvatureAccumulator0493x9a>
+        phaseCurvatureAccum0493x9b;
+    bool phaseCurvatureValid0493x9b = false;
+    int phaseCurvatureNx0493x9b = 0;
+    int phaseCurvatureNy0493x9b = 0;
+    int phaseCurvatureStep0493x9b = -1;
+    // 0493x9c passive support sweep: S2 and S3 alpha fields plus their final
+    // curvatures.  x9b normals are reused sequentially because x9c is
+    // summary-cadence only and no production path consumes those normals.
+    DeviceBuffer0400<double> phaseAlphaCurvature2Pass0493x9c;
+    DeviceBuffer0400<double> phaseAlphaCurvature3Pass0493x9c;
+    DeviceBuffer0400<double> phaseCurvature2Pass0493x9c;
+    DeviceBuffer0400<double> phaseCurvature3Pass0493x9c;
+    DeviceBuffer0400<PhaseCurvatureAccumulator0493x9a>
+        phaseCurvatureAccum2Pass0493x9c;
+    DeviceBuffer0400<PhaseCurvatureAccumulator0493x9a>
+        phaseCurvatureAccum3Pass0493x9c;
+    // 0493x9d promotes the x9c p3 candidate to the production capillary field.
+    bool phaseCurvature3PassValid0493x9d = false;
+    int phaseCurvature3PassNx0493x9d = 0;
+    int phaseCurvature3PassNy0493x9d = 0;
+    int phaseCurvature3PassStep0493x9d = -1;
+    // 0493x9e summary-cadence scalar accumulators only; no O(Ncell) diagnostic
+    // storage is added.  They observe p3/x6c/phi and the existing species deposit.
+    DeviceBuffer0400<StaticDropCellAccumulator0493x9e> staticDropCellAccum0493x9e;
+    DeviceBuffer0400<StaticDropFaceAccumulator0493x9e> staticDropFaceAccum0493x9e;
+    DeviceBuffer0400<StaticDropVelocityAccumulator0493x9e> staticDropVelocityAccum0493x9e;
+    // 0493x9f keeps only scalar accumulators: no persistent diagnostic mask is
+    // allocated.  The true interface band is tested directly from x6c alpha.
+    DeviceBuffer0400<EllipseParticleMomentAccumulator0493x9f> ellipseParticleMomentAccum0493x9f;
+    DeviceBuffer0400<EllipseInterfaceRadiusAccumulator0493x9f> ellipseInterfaceRadiusAccum0493x9f;
     // 0493x6f resident pressure-domain stencil.  These are allocated lazily
     // only when the x6f path is requested.  X/Y coefficients are stored on the
     // east/north face owned by each cell and are reused by every CG iteration.
@@ -1483,6 +2128,8 @@ struct ResidentWorkspace0400 {
         phaseGasPressurePotential0493x6a.ensure(c);
         phaseGeometryAccum0493x6b.ensure(1u);
         phaseGeometryResidentAccum0493x6c.ensure(1u);
+        phaseCurvatureAccum0493x9a.ensure(1u);
+        phaseCurvatureAccum0493x9b.ensure(1u);
         phaseInterfaceStencilAccum0493x6f.ensure(1u);
         periodicMomentumAccum0493x7dv2fix2.ensure(1u);
         q6GfResidentCgState0493x7j.ensure(1u);
@@ -3477,6 +4124,753 @@ __global__ void q6_filter_phase_fill_conservative_0493x6c(
 }
 
 
+// 0493x9a outward normal: alpha~1 in liquid and alpha~0 in gas, therefore
+// -grad(alpha) points from liquid to gas.  Boundary differencing deliberately
+// matches the x6c resident-geometry diagnostic convention.
+__global__ void q6_build_phase_normals_0493x9a(
+    const double* alpha,
+    double* normalX,
+    double* normalY,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const double alphaC = alpha[c];
+        const double gradX = hasWest && hasEast
+            ? (alpha[east] - alpha[west]) / (2.0 * dx)
+            : (hasEast ? (alpha[east] - alphaC) / dx
+                       : (hasWest ? (alphaC - alpha[west]) / dx : 0.0));
+        const double gradY = hasSouth && hasNorth
+            ? (alpha[north] - alpha[south]) / (2.0 * dy)
+            : (hasNorth ? (alpha[north] - alphaC) / dy
+                        : (hasSouth ? (alphaC - alpha[south]) / dy : 0.0));
+        const double norm = sqrt(gradX * gradX + gradY * gradY);
+        if (norm > 1.0e-14) {
+            normalX[c] = -gradX / norm;
+            normalY[c] = -gradY / norm;
+        } else {
+            normalX[c] = 0.0;
+            normalY[c] = 0.0;
+        }
+    }
+}
+
+__global__ void q6_build_phase_curvature_0493x9a(
+    const double* normalX,
+    const double* normalY,
+    double* curvature,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasWest = periodicX || ix > 0;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasSouth = periodicY || iy > 0;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        const int west = hasWest
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1)
+            : c;
+        const int east = hasEast
+            ? iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1)
+            : c;
+        const int south = hasSouth
+            ? (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix
+            : c;
+        const int north = hasNorth
+            ? (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix
+            : c;
+        const double nxC = normalX[c];
+        const double nyC = normalY[c];
+        const double dnxDx = hasWest && hasEast
+            ? (normalX[east] - normalX[west]) / (2.0 * dx)
+            : (hasEast ? (normalX[east] - nxC) / dx
+                       : (hasWest ? (nxC - normalX[west]) / dx : 0.0));
+        const double dnyDy = hasSouth && hasNorth
+            ? (normalY[north] - normalY[south]) / (2.0 * dy)
+            : (hasNorth ? (normalY[north] - nyC) / dy
+                        : (hasSouth ? (nyC - normalY[south]) / dy : 0.0));
+        curvature[c] = dnxDx + dnyDy;
+    }
+}
+
+// 0493x9b curvature-only alpha filter and rotationally improved 3x3
+// derivatives.  Nonperiodic boundaries use constant extension; this field is
+// not the physical x6c alpha and therefore cannot move the x6f interface.
+__device__ __forceinline__ int q6_phase_index_0493x9b(
+    int ix, int iy, int nx, int ny, int periodicX, int periodicY) {
+    if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+    else ix = max(0, min(nx - 1, ix));
+    if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+    else iy = max(0, min(ny - 1, iy));
+    return iy * nx + ix;
+}
+
+__global__ void q6_filter_phase_alpha_curvature_0493x9b(
+    const double* alpha, double* alphaK, int nx, int ny,
+    int periodicX, int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double nw = alpha[q6_phase_index_0493x9b(ix - 1, iy + 1, nx, ny, periodicX, periodicY)];
+        const double nn = alpha[q6_phase_index_0493x9b(ix,     iy + 1, nx, ny, periodicX, periodicY)];
+        const double ne = alpha[q6_phase_index_0493x9b(ix + 1, iy + 1, nx, ny, periodicX, periodicY)];
+        const double ww = alpha[q6_phase_index_0493x9b(ix - 1, iy,     nx, ny, periodicX, periodicY)];
+        const double cc = alpha[c];
+        const double ee = alpha[q6_phase_index_0493x9b(ix + 1, iy,     nx, ny, periodicX, periodicY)];
+        const double sw = alpha[q6_phase_index_0493x9b(ix - 1, iy - 1, nx, ny, periodicX, periodicY)];
+        const double ss = alpha[q6_phase_index_0493x9b(ix,     iy - 1, nx, ny, periodicX, periodicY)];
+        const double se = alpha[q6_phase_index_0493x9b(ix + 1, iy - 1, nx, ny, periodicX, periodicY)];
+        alphaK[c] = (nw + 2.0 * nn + ne +
+                     2.0 * ww + 4.0 * cc + 2.0 * ee +
+                     sw + 2.0 * ss + se) * (1.0 / 16.0);
+    }
+}
+
+__global__ void q6_build_phase_normals_scharr_0493x9b(
+    const double* alphaK, double* normalX, double* normalY,
+    int nx, int ny, double dx, double dy, int periodicX, int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double nw = alphaK[q6_phase_index_0493x9b(ix - 1, iy + 1, nx, ny, periodicX, periodicY)];
+        const double nn = alphaK[q6_phase_index_0493x9b(ix,     iy + 1, nx, ny, periodicX, periodicY)];
+        const double ne = alphaK[q6_phase_index_0493x9b(ix + 1, iy + 1, nx, ny, periodicX, periodicY)];
+        const double ww = alphaK[q6_phase_index_0493x9b(ix - 1, iy,     nx, ny, periodicX, periodicY)];
+        const double ee = alphaK[q6_phase_index_0493x9b(ix + 1, iy,     nx, ny, periodicX, periodicY)];
+        const double sw = alphaK[q6_phase_index_0493x9b(ix - 1, iy - 1, nx, ny, periodicX, periodicY)];
+        const double ss = alphaK[q6_phase_index_0493x9b(ix,     iy - 1, nx, ny, periodicX, periodicY)];
+        const double se = alphaK[q6_phase_index_0493x9b(ix + 1, iy - 1, nx, ny, periodicX, periodicY)];
+        const double gradX = (3.0 * (ne - nw) + 10.0 * (ee - ww) +
+                              3.0 * (se - sw)) / (32.0 * dx);
+        const double gradY = (3.0 * (nw - sw) + 10.0 * (nn - ss) +
+                              3.0 * (ne - se)) / (32.0 * dy);
+        const double norm = sqrt(gradX * gradX + gradY * gradY);
+        if (norm * fmin(dx, dy) > 1.0e-12) {
+            normalX[c] = -gradX / norm;
+            normalY[c] = -gradY / norm;
+        } else {
+            normalX[c] = 0.0;
+            normalY[c] = 0.0;
+        }
+    }
+}
+
+__global__ void q6_build_phase_curvature_scharr_0493x9b(
+    const double* normalX, const double* normalY, double* curvature,
+    int nx, int ny, double dx, double dy, int periodicX, int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const int nw = q6_phase_index_0493x9b(ix - 1, iy + 1, nx, ny, periodicX, periodicY);
+        const int nn = q6_phase_index_0493x9b(ix,     iy + 1, nx, ny, periodicX, periodicY);
+        const int ne = q6_phase_index_0493x9b(ix + 1, iy + 1, nx, ny, periodicX, periodicY);
+        const int ww = q6_phase_index_0493x9b(ix - 1, iy,     nx, ny, periodicX, periodicY);
+        const int ee = q6_phase_index_0493x9b(ix + 1, iy,     nx, ny, periodicX, periodicY);
+        const int sw = q6_phase_index_0493x9b(ix - 1, iy - 1, nx, ny, periodicX, periodicY);
+        const int ss = q6_phase_index_0493x9b(ix,     iy - 1, nx, ny, periodicX, periodicY);
+        const int se = q6_phase_index_0493x9b(ix + 1, iy - 1, nx, ny, periodicX, periodicY);
+        const double dnxDx = (3.0 * (normalX[ne] - normalX[nw]) +
+                               10.0 * (normalX[ee] - normalX[ww]) +
+                               3.0 * (normalX[se] - normalX[sw])) / (32.0 * dx);
+        const double dnyDy = (3.0 * (normalY[nw] - normalY[sw]) +
+                               10.0 * (normalY[nn] - normalY[ss]) +
+                               3.0 * (normalY[ne] - normalY[se])) / (32.0 * dy);
+        curvature[c] = dnxDx + dnyDy;
+    }
+}
+
+constexpr double kPhaseCurvatureAbsScale0493x9a = 1000000.0;
+
+void populate_phase_curvature_region_metrics_0493x9b(
+    const PhaseCurvatureAccumulator0493x9a& accum,
+    int wallMarginCells,
+    PhaseCurvatureAudit0493x9a* audit) {
+    if (audit == nullptr) return;
+    audit->wallMarginCells = wallMarginCells;
+    audit->interiorCrossingFaces =
+        static_cast<std::uint64_t>(accum.interiorCrossingFaces);
+    audit->interiorValidCurvatureFaces =
+        static_cast<std::uint64_t>(accum.interiorValidCurvatureFaces);
+    if (accum.interiorValidCurvatureFaces > 0ull) {
+        const double inv = 1.0 /
+            static_cast<double>(accum.interiorValidCurvatureFaces);
+        audit->interiorCurvatureMean = accum.interiorCurvatureSum * inv;
+        const double meanSq = accum.interiorCurvatureSqSum * inv;
+        audit->interiorCurvatureRms = std::sqrt(std::max(0.0, meanSq));
+        audit->interiorCurvatureStd = std::sqrt(std::max(
+            0.0, meanSq - audit->interiorCurvatureMean *
+                              audit->interiorCurvatureMean));
+        audit->interiorCurvatureAbsMean = accum.interiorCurvatureAbsSum * inv;
+    }
+    audit->interiorCurvatureAbsMax =
+        static_cast<double>(accum.interiorCurvatureAbsMaxScaled) /
+        kPhaseCurvatureAbsScale0493x9a;
+
+    audit->nearWallCrossingFaces =
+        static_cast<std::uint64_t>(accum.nearWallCrossingFaces);
+    audit->nearWallValidCurvatureFaces =
+        static_cast<std::uint64_t>(accum.nearWallValidCurvatureFaces);
+    if (accum.nearWallValidCurvatureFaces > 0ull) {
+        const double inv = 1.0 /
+            static_cast<double>(accum.nearWallValidCurvatureFaces);
+        audit->nearWallCurvatureMean = accum.nearWallCurvatureSum * inv;
+        const double meanSq = accum.nearWallCurvatureSqSum * inv;
+        audit->nearWallCurvatureRms = std::sqrt(std::max(0.0, meanSq));
+        audit->nearWallCurvatureStd = std::sqrt(std::max(
+            0.0, meanSq - audit->nearWallCurvatureMean *
+                              audit->nearWallCurvatureMean));
+        audit->nearWallCurvatureAbsMean = accum.nearWallCurvatureAbsSum * inv;
+    }
+    audit->nearWallCurvatureAbsMax =
+        static_cast<double>(accum.nearWallCurvatureAbsMaxScaled) /
+        kPhaseCurvatureAbsScale0493x9a;
+}
+
+// Summary-cadence audit only.  Each physical east/north alpha=0.5 crossing is
+// visited once.  Curvature is linearly interpolated to the same sub-cell
+// interface position theta used by x6f; no x6f buffer is modified here.
+__global__ void q6_phase_curvature_face_audit_0493x9a(
+    const double* alpha,
+    const double* normalX,
+    const double* normalY,
+    const double* curvature,
+    PhaseCurvatureAccumulator0493x9a* accum,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    int wallMarginCells) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    unsigned long long crossingLocal = 0ull;
+    unsigned long long validLocal = 0ull;
+    unsigned long long outwardLocal = 0ull;
+    unsigned long long positiveLocal = 0ull;
+    unsigned long long negativeLocal = 0ull;
+    unsigned long long absMaxScaledLocal = 0ull;
+    double alignmentSumLocal = 0.0;
+    double kappaSumLocal = 0.0;
+    double kappaSqSumLocal = 0.0;
+    double kappaAbsSumLocal = 0.0;
+
+    unsigned long long interiorCrossingLocal = 0ull;
+    unsigned long long interiorValidLocal = 0ull;
+    unsigned long long interiorAbsMaxScaledLocal = 0ull;
+    double interiorKappaSumLocal = 0.0;
+    double interiorKappaSqSumLocal = 0.0;
+    double interiorKappaAbsSumLocal = 0.0;
+    unsigned long long nearWallCrossingLocal = 0ull;
+    unsigned long long nearWallValidLocal = 0ull;
+    unsigned long long nearWallAbsMaxScaledLocal = 0ull;
+    double nearWallKappaSumLocal = 0.0;
+    double nearWallKappaSqSumLocal = 0.0;
+    double nearWallKappaAbsSumLocal = 0.0;
+
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double alphaC = alpha[c];
+
+        int neighbours[2];
+        double faceX[2];
+        double faceY[2];
+        int count = 0;
+        if (periodicX || ix < nx - 1) {
+            neighbours[count] = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            faceX[count] = 1.0;
+            faceY[count] = 0.0;
+            ++count;
+        }
+        if (periodicY || iy < ny - 1) {
+            neighbours[count] =
+                (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            faceX[count] = 0.0;
+            faceY[count] = 1.0;
+            ++count;
+        }
+
+        for (int k = 0; k < count; ++k) {
+            const int nb = neighbours[k];
+            const double alphaNb = alpha[nb];
+            const bool cHigh = alphaC >= 0.5 && alphaNb < 0.5;
+            const bool nbHigh = alphaNb >= 0.5 && alphaC < 0.5;
+            if (!(cHigh || nbHigh)) continue;
+            ++crossingLocal;
+
+            const int high = cHigh ? c : nb;
+            const int low = cHigh ? nb : c;
+            const int highIx = high % nx;
+            const int highIy = high / nx;
+            const int lowIx = low % nx;
+            const int lowIy = low / nx;
+            const bool interiorX = periodicX ||
+                (highIx >= wallMarginCells && highIx < nx - wallMarginCells &&
+                 lowIx >= wallMarginCells && lowIx < nx - wallMarginCells);
+            const bool interiorY = periodicY ||
+                (highIy >= wallMarginCells && highIy < ny - wallMarginCells &&
+                 lowIy >= wallMarginCells && lowIy < ny - wallMarginCells);
+            const bool interiorFace = interiorX && interiorY;
+            if (interiorFace) ++interiorCrossingLocal;
+            else ++nearWallCrossingLocal;
+
+            const double alphaHigh = alpha[high];
+            const double alphaLow = alpha[low];
+            const double denom = alphaHigh - alphaLow;
+            if (!(denom > 0.0)) continue;
+            const double theta = (alphaHigh - 0.5) / denom;
+            if (!(theta >= 0.0 && theta <= 1.0)) continue;
+
+            const double oneMinusTheta = 1.0 - theta;
+            const double nxFace = oneMinusTheta * normalX[high] + theta * normalX[low];
+            const double nyFace = oneMinusTheta * normalY[high] + theta * normalY[low];
+            const double nNorm = sqrt(nxFace * nxFace + nyFace * nyFace);
+            const double kappa = oneMinusTheta * curvature[high] + theta * curvature[low];
+            if (!(nNorm > 0.25) || !isfinite(kappa)) continue;
+
+            const double outwardX = cHigh ? faceX[k] : -faceX[k];
+            const double outwardY = cHigh ? faceY[k] : -faceY[k];
+            const double alignment = (nxFace * outwardX + nyFace * outwardY) / nNorm;
+            ++validLocal;
+            if (alignment > 0.0) ++outwardLocal;
+            alignmentSumLocal += alignment;
+            kappaSumLocal += kappa;
+            kappaSqSumLocal += kappa * kappa;
+            const double absKappa = fabs(kappa);
+            kappaAbsSumLocal += absKappa;
+            if (kappa > 0.0) ++positiveLocal;
+            if (kappa < 0.0) ++negativeLocal;
+            const double capped = fmin(absKappa, 1.0e9);
+            const unsigned long long scaled = static_cast<unsigned long long>(
+                capped * kPhaseCurvatureAbsScale0493x9a + 0.5);
+            absMaxScaledLocal = absMaxScaledLocal > scaled ? absMaxScaledLocal : scaled;
+
+            if (interiorFace) {
+                ++interiorValidLocal;
+                interiorKappaSumLocal += kappa;
+                interiorKappaSqSumLocal += kappa * kappa;
+                interiorKappaAbsSumLocal += absKappa;
+                interiorAbsMaxScaledLocal = interiorAbsMaxScaledLocal > scaled
+                    ? interiorAbsMaxScaledLocal : scaled;
+            } else {
+                ++nearWallValidLocal;
+                nearWallKappaSumLocal += kappa;
+                nearWallKappaSqSumLocal += kappa * kappa;
+                nearWallKappaAbsSumLocal += absKappa;
+                nearWallAbsMaxScaledLocal = nearWallAbsMaxScaledLocal > scaled
+                    ? nearWallAbsMaxScaledLocal : scaled;
+            }
+        }
+    }
+
+    if (crossingLocal) atomicAdd(&accum->crossingFaces, crossingLocal);
+    if (validLocal) atomicAdd(&accum->validCurvatureFaces, validLocal);
+    if (outwardLocal) atomicAdd(&accum->outwardNormalFaces, outwardLocal);
+    if (positiveLocal) atomicAdd(&accum->positiveCurvatureFaces, positiveLocal);
+    if (negativeLocal) atomicAdd(&accum->negativeCurvatureFaces, negativeLocal);
+    if (absMaxScaledLocal) atomicMax(&accum->curvatureAbsMaxScaled, absMaxScaledLocal);
+    if (alignmentSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->normalFaceAlignmentSum, alignmentSumLocal);
+    }
+    if (kappaSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->curvatureSum, kappaSumLocal);
+    }
+    if (kappaSqSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->curvatureSqSum, kappaSqSumLocal);
+    }
+    if (kappaAbsSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->curvatureAbsSum, kappaAbsSumLocal);
+    }
+
+    if (interiorCrossingLocal) atomicAdd(&accum->interiorCrossingFaces, interiorCrossingLocal);
+    if (interiorValidLocal) atomicAdd(&accum->interiorValidCurvatureFaces, interiorValidLocal);
+    if (interiorAbsMaxScaledLocal) {
+        atomicMax(&accum->interiorCurvatureAbsMaxScaled, interiorAbsMaxScaledLocal);
+    }
+    if (interiorKappaSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->interiorCurvatureSum, interiorKappaSumLocal);
+    }
+    if (interiorKappaSqSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->interiorCurvatureSqSum, interiorKappaSqSumLocal);
+    }
+    if (interiorKappaAbsSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->interiorCurvatureAbsSum, interiorKappaAbsSumLocal);
+    }
+
+    if (nearWallCrossingLocal) atomicAdd(&accum->nearWallCrossingFaces, nearWallCrossingLocal);
+    if (nearWallValidLocal) atomicAdd(&accum->nearWallValidCurvatureFaces, nearWallValidLocal);
+    if (nearWallAbsMaxScaledLocal) {
+        atomicMax(&accum->nearWallCurvatureAbsMaxScaled, nearWallAbsMaxScaledLocal);
+    }
+    if (nearWallKappaSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->nearWallCurvatureSum, nearWallKappaSumLocal);
+    }
+    if (nearWallKappaSqSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->nearWallCurvatureSqSum, nearWallKappaSqSumLocal);
+    }
+    if (nearWallKappaAbsSumLocal != 0.0) {
+        atomic_add_double_0400(&accum->nearWallCurvatureAbsSum, nearWallKappaAbsSumLocal);
+    }
+}
+
+
+__global__ void q6_static_drop_pressure_cells_0493x9e(
+    const double* alpha,
+    const unsigned char* pressureMask,
+    const double* phi,
+    const double* gasPressurePotential,
+    StaticDropCellAccumulator0493x9e* accum,
+    int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long liquidLocal = 0ull;
+    unsigned long long gasLocal = 0ull;
+    double alphaLocal = 0.0;
+    double lSum = 0.0, lSq = 0.0, gSum = 0.0, gSq = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const double a = fmin(1.0, fmax(0.0, alpha[c]));
+        alphaLocal += a;
+        if (a >= 0.9 && pressureMask[c] != 0u) {
+            const double v = phi[c];
+            if (isfinite(v)) {
+                ++liquidLocal;
+                lSum += v;
+                lSq += v * v;
+            }
+        }
+        if (a <= 0.1 && gasPressurePotential != nullptr) {
+            const double v = gasPressurePotential[c];
+            if (isfinite(v)) {
+                ++gasLocal;
+                gSum += v;
+                gSq += v * v;
+            }
+        }
+    }
+    if (liquidLocal) atomicAdd(&accum->deepLiquidCells, liquidLocal);
+    if (gasLocal) atomicAdd(&accum->deepGasCells, gasLocal);
+    if (alphaLocal != 0.0) atomic_add_double_0400(&accum->alphaSum, alphaLocal);
+    if (lSum != 0.0) atomic_add_double_0400(&accum->liquidPhiSum, lSum);
+    if (lSq != 0.0) atomic_add_double_0400(&accum->liquidPhiSqSum, lSq);
+    if (gSum != 0.0) atomic_add_double_0400(&accum->gasPhiSum, gSum);
+    if (gSq != 0.0) atomic_add_double_0400(&accum->gasPhiSqSum, gSq);
+}
+
+__global__ void q6_static_drop_capillary_resultant_0493x9e(
+    const double* alpha,
+    const double* curvature,
+    StaticDropFaceAccumulator0493x9e* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long crossingLocal = 0ull, validLocal = 0ull;
+    double kSum = 0.0, kSq = 0.0, fx = 0.0, fy = 0.0, absT = 0.0, measure = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double aC = alpha[c];
+        int nb[2];
+        double nxAxis[2], nyAxis[2], faceMeasure[2];
+        int count = 0;
+        if (periodicX || ix < nx - 1) {
+            nb[count] = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            nxAxis[count] = 1.0; nyAxis[count] = 0.0; faceMeasure[count] = dy; ++count;
+        }
+        if (periodicY || iy < ny - 1) {
+            nb[count] = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            nxAxis[count] = 0.0; nyAxis[count] = 1.0; faceMeasure[count] = dx; ++count;
+        }
+        for (int j = 0; j < count; ++j) {
+            const int b = nb[j];
+            const double aB = alpha[b];
+            const bool cHigh = aC >= 0.5 && aB < 0.5;
+            const bool bHigh = aB >= 0.5 && aC < 0.5;
+            if (!(cHigh || bHigh)) continue;
+            ++crossingLocal;
+            const int high = cHigh ? c : b;
+            const int low = cHigh ? b : c;
+            const double denom = alpha[high] - alpha[low];
+            if (!(denom > 0.0)) continue;
+            const double theta = (alpha[high] - 0.5) / denom;
+            if (!(theta >= 0.0 && theta <= 1.0)) continue;
+            const double kappa = (1.0 - theta) * curvature[high] + theta * curvature[low];
+            if (!isfinite(kappa)) continue;
+            const double ox = cHigh ? nxAxis[j] : -nxAxis[j];
+            const double oy = cHigh ? nyAxis[j] : -nyAxis[j];
+            const double dsAxis = faceMeasure[j];
+            ++validLocal;
+            kSum += kappa;
+            kSq += kappa * kappa;
+            fx += kappa * ox * dsAxis;
+            fy += kappa * oy * dsAxis;
+            absT += fabs(kappa) * dsAxis;
+            measure += dsAxis;
+        }
+    }
+    if (crossingLocal) atomicAdd(&accum->crossingFaces, crossingLocal);
+    if (validLocal) atomicAdd(&accum->validFaces, validLocal);
+    if (kSum != 0.0) atomic_add_double_0400(&accum->curvatureSum, kSum);
+    if (kSq != 0.0) atomic_add_double_0400(&accum->curvatureSqSum, kSq);
+    if (fx != 0.0) atomic_add_double_0400(&accum->discreteResultantX, fx);
+    if (fy != 0.0) atomic_add_double_0400(&accum->discreteResultantY, fy);
+    if (absT != 0.0) atomic_add_double_0400(&accum->discreteAbsTraction, absT);
+    if (measure != 0.0) atomic_add_double_0400(&accum->axisBoundaryMeasure, measure);
+}
+
+__device__ __forceinline__ bool q6_cell_adjacent_to_alpha05_crossing_0493x9f(
+    const double* alpha, int c, int nx, int ny, int periodicX, int periodicY) {
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const bool high = alpha[c] >= 0.5;
+    if (periodicX || ix > 0) {
+        const int jx = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
+        if ((alpha[iy * nx + jx] >= 0.5) != high) return true;
+    }
+    if (periodicX || ix < nx - 1) {
+        const int jx = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+        if ((alpha[iy * nx + jx] >= 0.5) != high) return true;
+    }
+    if (periodicY || iy > 0) {
+        const int jy = periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1;
+        if ((alpha[jy * nx + ix] >= 0.5) != high) return true;
+    }
+    if (periodicY || iy < ny - 1) {
+        const int jy = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+        if ((alpha[jy * nx + ix] >= 0.5) != high) return true;
+    }
+    return false;
+}
+
+__global__ void q6_ellipse_particle_moments_0493x9f(
+    CudaParticleDeviceView particles,
+    std::uint64_t nParticles,
+    std::uint32_t liquidType,
+    EllipseParticleMomentAccumulator0493x9f* accum) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    unsigned long long count = 0ull;
+    double sm=0.0,sx=0.0,sy=0.0,sxx=0.0,syy=0.0,sxy=0.0;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.type == nullptr || particles.type[i] != liquidType) continue;
+        if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+        const double mass = particles.mass ? particles.mass[i] : 1.0;
+        const double x = particles.x[i];
+        const double y = particles.y[i];
+        if (!(mass > 0.0) || !isfinite(mass) || !isfinite(x) || !isfinite(y)) continue;
+        ++count;
+        sm += mass;
+        sx += mass * x;
+        sy += mass * y;
+        sxx += mass * x * x;
+        syy += mass * y * y;
+        sxy += mass * x * y;
+    }
+    if (count) atomicAdd(&accum->particles, count);
+    if (sm!=0.0) atomic_add_double_0400(&accum->massSum, sm);
+    if (sx!=0.0) atomic_add_double_0400(&accum->massXSum, sx);
+    if (sy!=0.0) atomic_add_double_0400(&accum->massYSum, sy);
+    if (sxx!=0.0) atomic_add_double_0400(&accum->massXXSum, sxx);
+    if (syy!=0.0) atomic_add_double_0400(&accum->massYYSum, syy);
+    if (sxy!=0.0) atomic_add_double_0400(&accum->massXYSum, sxy);
+}
+
+__global__ void q6_ellipse_interface_radii_0493x9f(
+    const double* alpha,
+    double xcm,
+    double ycm,
+    EllipseInterfaceRadiusAccumulator0493x9f* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY) {
+    constexpr double radiusScale = 1000000000.0;
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long count=0ull,rmin=~0ull,rmax=0ull;
+    double rsum=0.0,rsq=0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double aC = alpha[c];
+        const double xC = (static_cast<double>(ix) + 0.5) * dx;
+        const double yC = (static_cast<double>(iy) + 0.5) * dy;
+        // Diagnostic shape runner uses a closed box.  Periodic neighbours are
+        // supported algebraically, but droplets spanning a periodic seam need
+        // an unwrapped COM and are outside this x9f qualification contract.
+        if (periodicX || ix < nx - 1) {
+            const int jx = periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1;
+            const int b = iy * nx + jx;
+            const double aB = alpha[b];
+            const bool cHigh = aC >= 0.5 && aB < 0.5;
+            const bool bHigh = aB >= 0.5 && aC < 0.5;
+            if (cHigh || bHigh) {
+                const int high = cHigh ? c : b;
+                const int low = cHigh ? b : c;
+                const double denom = alpha[high] - alpha[low];
+                if (denom > 0.0) {
+                    const double theta = (alpha[high] - 0.5) / denom;
+                    if (theta >= 0.0 && theta <= 1.0) {
+                        const double xB = (static_cast<double>(jx) + 0.5) * dx;
+                        const double xH = cHigh ? xC : xB;
+                        const double xL = cHigh ? xB : xC;
+                        const double xp = (1.0 - theta) * xH + theta * xL;
+                        const double rp = hypot(xp - xcm, yC - ycm);
+                        if (isfinite(rp)) {
+                            const unsigned long long rr = static_cast<unsigned long long>(
+                                fmin(rp, 1.0e6) * radiusScale + 0.5);
+                            ++count; rsum += rp; rsq += rp*rp;
+                            rmin = rmin < rr ? rmin : rr; rmax = rmax > rr ? rmax : rr;
+                        }
+                    }
+                }
+            }
+        }
+        if (periodicY || iy < ny - 1) {
+            const int jy = periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1;
+            const int b = jy * nx + ix;
+            const double aB = alpha[b];
+            const bool cHigh = aC >= 0.5 && aB < 0.5;
+            const bool bHigh = aB >= 0.5 && aC < 0.5;
+            if (cHigh || bHigh) {
+                const int high = cHigh ? c : b;
+                const int low = cHigh ? b : c;
+                const double denom = alpha[high] - alpha[low];
+                if (denom > 0.0) {
+                    const double theta = (alpha[high] - 0.5) / denom;
+                    if (theta >= 0.0 && theta <= 1.0) {
+                        const double yB = (static_cast<double>(jy) + 0.5) * dy;
+                        const double yH = cHigh ? yC : yB;
+                        const double yL = cHigh ? yB : yC;
+                        const double yp = (1.0 - theta) * yH + theta * yL;
+                        const double rp = hypot(xC - xcm, yp - ycm);
+                        if (isfinite(rp)) {
+                            const unsigned long long rr = static_cast<unsigned long long>(
+                                fmin(rp, 1.0e6) * radiusScale + 0.5);
+                            ++count; rsum += rp; rsq += rp*rp;
+                            rmin = rmin < rr ? rmin : rr; rmax = rmax > rr ? rmax : rr;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (count) atomicAdd(&accum->crossingPoints,count);
+    if (count) atomicMin(&accum->radiusMinScaled,rmin);
+    if (rmax) atomicMax(&accum->radiusMaxScaled,rmax);
+    if (rsum!=0.0) atomic_add_double_0400(&accum->radiusSum,rsum);
+    if (rsq!=0.0) atomic_add_double_0400(&accum->radiusSqSum,rsq);
+}
+
+__global__ void q6_static_drop_velocity_cells_0493x9e(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const double* alpha,
+    StaticDropVelocityAccumulator0493x9e* accum,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    constexpr double speedScale = 1000000000.0;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long nL=0ull,nC=0ull,nI=0ull,mL=0ull,mC=0ull,mI=0ull;
+    double lx=0.0,ly=0.0,ls=0.0,cx=0.0,cy=0.0,cs=0.0,ixs=0.0,iys=0.0,is=0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int sk = speciesIndex * species.numCells + c;
+        const double m = species.mass[sk];
+        if (!(m > 0.0)) continue;
+        const double vx = species.px[sk] / m;
+        const double vy = species.py[sk] / m;
+        if (!isfinite(vx) || !isfinite(vy)) continue;
+        const double speedSq = vx * vx + vy * vy;
+        const double speed = sqrt(speedSq);
+        const unsigned long long scaled = static_cast<unsigned long long>(
+            fmin(speed, 1.0e6) * speedScale + 0.5);
+        const double a = fmin(1.0, fmax(0.0, alpha[c]));
+        if (a >= 0.5) {
+            ++nL; lx += vx; ly += vy; ls += speedSq; mL = mL > scaled ? mL : scaled;
+        }
+        if (a >= 0.9) {
+            ++nC; cx += vx; cy += vy; cs += speedSq; mC = mC > scaled ? mC : scaled;
+        }
+        // 0493x9f: a true interface cell is adjacent to at least one grid
+        // face whose two x6c alpha values straddle alpha=0.5.  This replaces
+        // the old 0.1<=alpha<=0.9 occupancy band, which admitted bulk cells.
+        if (q6_cell_adjacent_to_alpha05_crossing_0493x9f(
+                alpha, c, nx, ny, periodicX, periodicY)) {
+            ++nI; ixs += vx; iys += vy; is += speedSq; mI = mI > scaled ? mI : scaled;
+        }
+    }
+    if (nL) atomicAdd(&accum->liquidCells,nL);
+    if (nC) atomicAdd(&accum->coreCells,nC);
+    if (nI) atomicAdd(&accum->interfaceCells,nI);
+    if (mL) atomicMax(&accum->liquidSpeedMaxScaled,mL);
+    if (mC) atomicMax(&accum->coreSpeedMaxScaled,mC);
+    if (mI) atomicMax(&accum->interfaceSpeedMaxScaled,mI);
+    if (lx!=0.0) atomic_add_double_0400(&accum->liquidVxSum,lx);
+    if (ly!=0.0) atomic_add_double_0400(&accum->liquidVySum,ly);
+    if (ls!=0.0) atomic_add_double_0400(&accum->liquidSpeedSqSum,ls);
+    if (cx!=0.0) atomic_add_double_0400(&accum->coreVxSum,cx);
+    if (cy!=0.0) atomic_add_double_0400(&accum->coreVySum,cy);
+    if (cs!=0.0) atomic_add_double_0400(&accum->coreSpeedSqSum,cs);
+    if (ixs!=0.0) atomic_add_double_0400(&accum->interfaceVxSum,ixs);
+    if (iys!=0.0) atomic_add_double_0400(&accum->interfaceVySum,iys);
+    if (is!=0.0) atomic_add_double_0400(&accum->interfaceSpeedSqSum,is);
+}
+
 __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     const unsigned char* carrierMask,
     const double* alpha,
@@ -3484,9 +4878,12 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     double* faceCoeffX,
     double* faceCoeffY,
     const double* gasPressurePotential0493x6g,
+    const double* capillaryCurvature0493x9d,
+    double capillaryPotentialScale0493x9d,
     double* facePhiGammaX0493x6g,
     double* facePhiGammaY0493x6g,
     int useGasPressure0493x6g,
+    int useSurfaceTension0493x9d,
     int usePhaseInterface0493x7m,
     int nx,
     int ny,
@@ -3557,12 +4954,25 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                     if (denom > 0.0) {
                         const double theta = (alphaHigh - 0.5) / denom;
                         coeffX = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
+                        double gasPhiGammaX0493x6g = 0.0;
                         if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
                             // First-order exterior trace: use the alpha<0.5
                             // cell value.  It remains well-defined for AA and
                             // AI carrier topologies and does not dilute p_g
                             // with the liquid-side cell where gas may be absent.
-                            phiGammaX0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            gasPhiGammaX0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            phiGammaX0493x6g += gasPhiGammaX0493x6g;
+                        }
+                        if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
+                            const int highCell = cHigh ? c : east;
+                            const int lowCell = cHigh ? east : c;
+                            const double kappaGamma =
+                                (1.0 - theta) * capillaryCurvature0493x9d[highCell] +
+                                theta * capillaryCurvature0493x9d[lowCell];
+                            if (isfinite(kappaGamma)) {
+                                phiGammaX0493x6g +=
+                                    capillaryPotentialScale0493x9d * kappaGamma;
+                            }
                         }
                         if (auditEnabled) {
                             ++representedLocal;
@@ -3571,12 +4981,12 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                             thetaMaxLocal = fmax(thetaMaxLocal, theta);
                             thetaSumLocal += theta;
                             if (useGasPressure0493x6g) {
-                                if (fabs(phiGammaX0493x6g) > 0.0) {
+                                if (fabs(gasPhiGammaX0493x6g) > 0.0) {
                                     ++nonzeroPressureLocal0493x6g;
                                 }
-                                pressurePotentialSumLocal0493x6g += phiGammaX0493x6g;
+                                pressurePotentialSumLocal0493x6g += gasPhiGammaX0493x6g;
                                 pressurePotentialSqSumLocal0493x6g +=
-                                    phiGammaX0493x6g * phiGammaX0493x6g;
+                                    gasPhiGammaX0493x6g * gasPhiGammaX0493x6g;
                             }
                         }
                     }
@@ -3622,8 +5032,21 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                     if (denom > 0.0) {
                         const double theta = (alphaHigh - 0.5) / denom;
                         coeffY = theta >= thetaMinGuard ? 1.0 / theta : 2.0;
+                        double gasPhiGammaY0493x6g = 0.0;
                         if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
-                            phiGammaY0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            gasPhiGammaY0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            phiGammaY0493x6g += gasPhiGammaY0493x6g;
+                        }
+                        if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
+                            const int highCell = cHigh ? c : north;
+                            const int lowCell = cHigh ? north : c;
+                            const double kappaGamma =
+                                (1.0 - theta) * capillaryCurvature0493x9d[highCell] +
+                                theta * capillaryCurvature0493x9d[lowCell];
+                            if (isfinite(kappaGamma)) {
+                                phiGammaY0493x6g +=
+                                    capillaryPotentialScale0493x9d * kappaGamma;
+                            }
                         }
                         if (auditEnabled) {
                             ++representedLocal;
@@ -3632,12 +5055,12 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                             thetaMaxLocal = fmax(thetaMaxLocal, theta);
                             thetaSumLocal += theta;
                             if (useGasPressure0493x6g) {
-                                if (fabs(phiGammaY0493x6g) > 0.0) {
+                                if (fabs(gasPhiGammaY0493x6g) > 0.0) {
                                     ++nonzeroPressureLocal0493x6g;
                                 }
-                                pressurePotentialSumLocal0493x6g += phiGammaY0493x6g;
+                                pressurePotentialSumLocal0493x6g += gasPhiGammaY0493x6g;
                                 pressurePotentialSqSumLocal0493x6g +=
-                                    phiGammaY0493x6g * phiGammaY0493x6g;
+                                    gasPhiGammaY0493x6g * gasPhiGammaY0493x6g;
                             }
                         }
                     }
@@ -6676,6 +8099,32 @@ bool apply_independent_masked_species_q6_0493w5(
     const bool phaseGasPressure0493x6g =
         freeSurfaceMode0493x5a &&
         cuda_q6_phase_gas_pressure_0493x6g_requested();
+    const bool surfaceTensionActive0493x9d =
+        freeSurfaceMode0493x5a && params.surfaceTensionSigma > 0.0;
+    const bool phaseCurvatureDiagnostics0493x9a =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_curvature_diagnostics_0493x9a_requested();
+    const bool phaseCurvatureDiagnostics0493x9b =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_curvature_diagnostics_0493x9b_requested();
+    const bool phaseCurvatureDiagnostics0493x9c =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_phase_curvature_diagnostics_0493x9c_requested();
+    const bool staticDropDiagnostics0493x9e =
+        freeSurfaceMode0493x5a &&
+        cuda_q6_static_drop_diagnostics_0493x9e_requested();
+    const bool ellipseDiagnostics0493x9f =
+        staticDropDiagnostics0493x9e &&
+        cuda_q6_ellipse_diagnostics_0493x9f_requested();
+    const bool staticDropDiagnosticsThisStep0493x9e =
+        staticDropDiagnostics0493x9e && q6GfDiagnosticsThisStep0493x7k;
+    const bool ellipseDiagnosticsThisStep0493x9f =
+        ellipseDiagnostics0493x9f && q6GfDiagnosticsThisStep0493x7k;
+    const int curvatureAuditWallMarginCells0493x9b =
+        (phaseCurvatureDiagnostics0493x9a || phaseCurvatureDiagnostics0493x9b ||
+         phaseCurvatureDiagnostics0493x9c)
+            ? cuda_q6_phase_curvature_audit_wall_margin_0493x9b()
+            : 0;
     const bool postApplyRegionDiagnostics0493x6hB0 =
         freeSurfaceMode0493x5a &&
         cuda_q6_postapply_region_diagnostics_0493x6h_b0_requested();
@@ -6724,13 +8173,42 @@ bool apply_independent_masked_species_q6_0493w5(
         diag.reason = "0493x6f interface stencil requires 0493x6c resident geometry";
         return false;
     }
+    if (phaseCurvatureDiagnostics0493x9a && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x9a passive curvature requires 0493x6c resident geometry";
+        return false;
+    }
+    if (phaseCurvatureDiagnostics0493x9b && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x9b passive curvature requires 0493x6c resident geometry";
+        return false;
+    }
+    if (phaseCurvatureDiagnostics0493x9c &&
+        (!phaseCurvatureDiagnostics0493x9b || !phaseGeometryResident0493x6c)) {
+        diag.reason = "0493x9c passive smoothing sweep requires x9b and x6c";
+        return false;
+    }
     if (phaseGasPressure0493x6g && !phaseInterfaceStencil0493x6f) {
         diag.reason = "0493x6g gas pressure requires the x6f prepared interface stencil";
+        return false;
+    }
+    if (surfaceTensionActive0493x9d &&
+        (!phaseGeometryResident0493x6c || !phaseInterfaceStencil0493x6f ||
+         !faceToParticleRt0Requested0493x6hB1 || !fuseForceKick0493x4b)) {
+        diag.reason =
+            "0493x9d surface tension requires x6c+x6f, B1 and fused prestream Q6-G-F";
         return false;
     }
     if (phaseGasPressure0493x6g && !(phaseGasPressureScale0493x6g >= 0.0)) {
         diag.reason = "0493x6g gas-pressure scale must be finite and non-negative";
         return false;
+    }
+    if (staticDropDiagnostics0493x9e) {
+        ws.staticDropCellAccum0493x9e.ensure(1u);
+        ws.staticDropFaceAccum0493x9e.ensure(1u);
+        ws.staticDropVelocityAccum0493x9e.ensure(1u);
+    }
+    if (ellipseDiagnostics0493x9f) {
+        ws.ellipseParticleMomentAccum0493x9f.ensure(1u);
+        ws.ellipseInterfaceRadiusAccum0493x9f.ensure(1u);
     }
     if (virialDensityKickRequested0493x7a &&
         (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b ||
@@ -6874,6 +8352,10 @@ bool apply_independent_masked_species_q6_0493w5(
         // arithmetic contribution so the trajectory is exactly the x6f path.
         const bool phaseGasPressureApplySpecies0493x6g =
             phaseGasPressureSpecies0493x6g && phaseGasPressureScale0493x6g != 0.0;
+        const bool surfaceTensionApplySpecies0493x9d =
+            surfaceTensionActive0493x9d && phaseInterfaceStencilSpecies0493x6f;
+        const bool interfaceDirichletApplySpecies0493x9d =
+            phaseGasPressureApplySpecies0493x6g || surfaceTensionApplySpecies0493x9d;
         if (!(audit.strength > 0.0)) {
             audits.push_back(audit);
             continue;
@@ -7007,6 +8489,540 @@ bool apply_independent_masked_species_q6_0493w5(
             if (geometryAuditThisStep0493x6c) {
                 check_cuda_0400(cudaEventRecord(geometryFilterDone0493x6c),
                                 "0493x6c geometry filter event record");
+            }
+
+            if (phaseCurvatureDiagnostics0493x9a) {
+                ws.phaseNormalX0493x9a.ensure(geometryCells0493x6c);
+                ws.phaseNormalY0493x9a.ensure(geometryCells0493x6c);
+                ws.phaseCurvature0493x9a.ensure(geometryCells0493x6c);
+                const bool curvatureAuditThisStep0493x9a =
+                    geometryAuditThisStep0493x6c;
+
+                cudaEvent_t curvatureStart0493x9a{};
+                cudaEvent_t normalDone0493x9a{};
+                cudaEvent_t curvatureDone0493x9a{};
+                cudaEvent_t faceAuditDone0493x9a{};
+                if (curvatureAuditThisStep0493x9a) {
+                    check_cuda_0400(cudaEventCreate(&curvatureStart0493x9a),
+                                    "0493x9a curvature start event create");
+                    check_cuda_0400(cudaEventCreate(&normalDone0493x9a),
+                                    "0493x9a normal event create");
+                    check_cuda_0400(cudaEventCreate(&curvatureDone0493x9a),
+                                    "0493x9a curvature event create");
+                    check_cuda_0400(cudaEventCreate(&faceAuditDone0493x9a),
+                                    "0493x9a face audit event create");
+                    check_cuda_0400(cudaEventRecord(curvatureStart0493x9a),
+                                    "0493x9a curvature start event record");
+                }
+
+                q6_build_phase_normals_0493x9a<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.phaseNormalX0493x9a.data(),
+                    ws.phaseNormalY0493x9a.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9a phase normal build launch");
+                if (curvatureAuditThisStep0493x9a) {
+                    check_cuda_0400(cudaEventRecord(normalDone0493x9a),
+                                    "0493x9a normal event record");
+                }
+
+                q6_build_phase_curvature_0493x9a<<<cellBlocks, threads>>>(
+                    ws.phaseNormalX0493x9a.data(),
+                    ws.phaseNormalY0493x9a.data(),
+                    ws.phaseCurvature0493x9a.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9a phase curvature build launch");
+                if (curvatureAuditThisStep0493x9a) {
+                    check_cuda_0400(cudaEventRecord(curvatureDone0493x9a),
+                                    "0493x9a curvature event record");
+                    check_cuda_0400(cudaMemset(
+                                        ws.phaseCurvatureAccum0493x9a.data(), 0,
+                                        sizeof(PhaseCurvatureAccumulator0493x9a)),
+                                    "0493x9a curvature accumulator zero");
+                    q6_phase_curvature_face_audit_0493x9a<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseNormalX0493x9a.data(),
+                        ws.phaseNormalY0493x9a.data(),
+                        ws.phaseCurvature0493x9a.data(),
+                        ws.phaseCurvatureAccum0493x9a.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY,
+                        curvatureAuditWallMarginCells0493x9b);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9a curvature face audit launch");
+                    check_cuda_0400(cudaEventRecord(faceAuditDone0493x9a),
+                                    "0493x9a face audit event record");
+
+                    PhaseCurvatureAccumulator0493x9a accum0493x9a{};
+                    check_cuda_0400(cudaMemcpy(
+                                        &accum0493x9a,
+                                        ws.phaseCurvatureAccum0493x9a.data(),
+                                        sizeof(accum0493x9a), cudaMemcpyDeviceToHost),
+                                    "0493x9a curvature audit download");
+
+                    float normalMs0493x9a = 0.0f;
+                    float curvatureMs0493x9a = 0.0f;
+                    float faceAuditMs0493x9a = 0.0f;
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &normalMs0493x9a, curvatureStart0493x9a,
+                                        normalDone0493x9a),
+                                    "0493x9a normal elapsed time");
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &curvatureMs0493x9a, normalDone0493x9a,
+                                        curvatureDone0493x9a),
+                                    "0493x9a curvature elapsed time");
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &faceAuditMs0493x9a, curvatureDone0493x9a,
+                                        faceAuditDone0493x9a),
+                                    "0493x9a face audit elapsed time");
+                    cudaEventDestroy(curvatureStart0493x9a);
+                    cudaEventDestroy(normalDone0493x9a);
+                    cudaEventDestroy(curvatureDone0493x9a);
+                    cudaEventDestroy(faceAuditDone0493x9a);
+
+                    PhaseCurvatureAudit0493x9a audit0493x9a{};
+                    audit0493x9a.projectedSpeciesIndex = s;
+                    audit0493x9a.projectedType = audit.type;
+                    audit0493x9a.numCells =
+                        static_cast<std::uint64_t>(grid.numCells);
+                    audit0493x9a.crossingFaces = static_cast<std::uint64_t>(
+                        accum0493x9a.crossingFaces);
+                    audit0493x9a.validCurvatureFaces = static_cast<std::uint64_t>(
+                        accum0493x9a.validCurvatureFaces);
+                    audit0493x9a.outwardNormalFaces = static_cast<std::uint64_t>(
+                        accum0493x9a.outwardNormalFaces);
+                    audit0493x9a.positiveCurvatureFaces = static_cast<std::uint64_t>(
+                        accum0493x9a.positiveCurvatureFaces);
+                    audit0493x9a.negativeCurvatureFaces = static_cast<std::uint64_t>(
+                        accum0493x9a.negativeCurvatureFaces);
+                    if (accum0493x9a.crossingFaces > 0ull) {
+                        audit0493x9a.validFraction =
+                            static_cast<double>(accum0493x9a.validCurvatureFaces) /
+                            static_cast<double>(accum0493x9a.crossingFaces);
+                    }
+                    if (accum0493x9a.validCurvatureFaces > 0ull) {
+                        const double inv = 1.0 /
+                            static_cast<double>(accum0493x9a.validCurvatureFaces);
+                        audit0493x9a.normalOutwardFraction =
+                            static_cast<double>(accum0493x9a.outwardNormalFaces) * inv;
+                        audit0493x9a.normalFaceAlignmentMean =
+                            accum0493x9a.normalFaceAlignmentSum * inv;
+                        audit0493x9a.curvatureMean = accum0493x9a.curvatureSum * inv;
+                        const double meanSq = accum0493x9a.curvatureSqSum * inv;
+                        audit0493x9a.curvatureRms = std::sqrt(std::max(0.0, meanSq));
+                        audit0493x9a.curvatureStd = std::sqrt(std::max(
+                            0.0, meanSq - audit0493x9a.curvatureMean *
+                                              audit0493x9a.curvatureMean));
+                        audit0493x9a.curvatureAbsMean =
+                            accum0493x9a.curvatureAbsSum * inv;
+                    }
+                    audit0493x9a.curvatureAbsMax =
+                        static_cast<double>(accum0493x9a.curvatureAbsMaxScaled) /
+                        kPhaseCurvatureAbsScale0493x9a;
+                    populate_phase_curvature_region_metrics_0493x9b(
+                        accum0493x9a, curvatureAuditWallMarginCells0493x9b,
+                        &audit0493x9a);
+                    audit0493x9a.normalBuildSeconds =
+                        1.0e-3 * static_cast<double>(normalMs0493x9a);
+                    audit0493x9a.curvatureBuildSeconds =
+                        1.0e-3 * static_cast<double>(curvatureMs0493x9a);
+                    audit0493x9a.faceAuditSeconds =
+                        1.0e-3 * static_cast<double>(faceAuditMs0493x9a);
+                    audit0493x9a.residentBytes = static_cast<std::uint64_t>(
+                        3u * geometryCells0493x6c * sizeof(double));
+                    append_phase_curvature_audit_0493x9a(
+                        params, step, time, audit0493x9a);
+                }
+            }
+
+            if (phaseCurvatureDiagnostics0493x9b) {
+                ws.phaseAlphaCurvature0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseNormalX0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseNormalY0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseCurvature0493x9b.ensure(geometryCells0493x6c);
+                const bool curvatureAuditThisStep0493x9b =
+                    geometryAuditThisStep0493x6c;
+
+                cudaEvent_t curvatureStart0493x9b{};
+                cudaEvent_t normalDone0493x9b{};
+                cudaEvent_t curvatureDone0493x9b{};
+                cudaEvent_t faceAuditDone0493x9b{};
+                if (curvatureAuditThisStep0493x9b) {
+                    check_cuda_0400(cudaEventCreate(&curvatureStart0493x9b),
+                                    "0493x9b curvature start event create");
+                    check_cuda_0400(cudaEventCreate(&normalDone0493x9b),
+                                    "0493x9b normal event create");
+                    check_cuda_0400(cudaEventCreate(&curvatureDone0493x9b),
+                                    "0493x9b curvature event create");
+                    check_cuda_0400(cudaEventCreate(&faceAuditDone0493x9b),
+                                    "0493x9b face audit event create");
+                    check_cuda_0400(cudaEventRecord(curvatureStart0493x9b),
+                                    "0493x9b curvature start event record");
+                }
+
+                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.phaseAlphaCurvature0493x9b.data(),
+                    grid.Nx, grid.Ny, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9b curvature alpha filter launch");
+                q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaCurvature0493x9b.data(),
+                    ws.phaseNormalX0493x9b.data(),
+                    ws.phaseNormalY0493x9b.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9b phase normal build launch");
+                if (curvatureAuditThisStep0493x9b) {
+                    check_cuda_0400(cudaEventRecord(normalDone0493x9b),
+                                    "0493x9b normal event record");
+                }
+
+                q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseNormalX0493x9b.data(),
+                    ws.phaseNormalY0493x9b.data(),
+                    ws.phaseCurvature0493x9b.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9b phase curvature build launch");
+                ws.phaseCurvatureValid0493x9b = true;
+                ws.phaseCurvatureNx0493x9b = grid.Nx;
+                ws.phaseCurvatureNy0493x9b = grid.Ny;
+                ws.phaseCurvatureStep0493x9b = step;
+                if (curvatureAuditThisStep0493x9b) {
+                    check_cuda_0400(cudaEventRecord(curvatureDone0493x9b),
+                                    "0493x9b curvature event record");
+                    check_cuda_0400(cudaMemset(
+                                        ws.phaseCurvatureAccum0493x9b.data(), 0,
+                                        sizeof(PhaseCurvatureAccumulator0493x9a)),
+                                    "0493x9b curvature accumulator zero");
+                    q6_phase_curvature_face_audit_0493x9a<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseNormalX0493x9b.data(),
+                        ws.phaseNormalY0493x9b.data(),
+                        ws.phaseCurvature0493x9b.data(),
+                        ws.phaseCurvatureAccum0493x9b.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY,
+                        curvatureAuditWallMarginCells0493x9b);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9b curvature face audit launch");
+                    check_cuda_0400(cudaEventRecord(faceAuditDone0493x9b),
+                                    "0493x9b face audit event record");
+
+                    PhaseCurvatureAccumulator0493x9a accum0493x9b{};
+                    check_cuda_0400(cudaMemcpy(
+                                        &accum0493x9b,
+                                        ws.phaseCurvatureAccum0493x9b.data(),
+                                        sizeof(accum0493x9b), cudaMemcpyDeviceToHost),
+                                    "0493x9b curvature audit download");
+
+                    float normalMs0493x9b = 0.0f;
+                    float curvatureMs0493x9b = 0.0f;
+                    float faceAuditMs0493x9b = 0.0f;
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &normalMs0493x9b, curvatureStart0493x9b,
+                                        normalDone0493x9b),
+                                    "0493x9b normal elapsed time");
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &curvatureMs0493x9b, normalDone0493x9b,
+                                        curvatureDone0493x9b),
+                                    "0493x9b curvature elapsed time");
+                    check_cuda_0400(cudaEventElapsedTime(
+                                        &faceAuditMs0493x9b, curvatureDone0493x9b,
+                                        faceAuditDone0493x9b),
+                                    "0493x9b face audit elapsed time");
+                    cudaEventDestroy(curvatureStart0493x9b);
+                    cudaEventDestroy(normalDone0493x9b);
+                    cudaEventDestroy(curvatureDone0493x9b);
+                    cudaEventDestroy(faceAuditDone0493x9b);
+
+                    PhaseCurvatureAudit0493x9a audit0493x9b{};
+                    audit0493x9b.projectedSpeciesIndex = s;
+                    audit0493x9b.projectedType = audit.type;
+                    audit0493x9b.numCells = static_cast<std::uint64_t>(grid.numCells);
+                    audit0493x9b.crossingFaces = static_cast<std::uint64_t>(accum0493x9b.crossingFaces);
+                    audit0493x9b.validCurvatureFaces = static_cast<std::uint64_t>(accum0493x9b.validCurvatureFaces);
+                    audit0493x9b.outwardNormalFaces = static_cast<std::uint64_t>(accum0493x9b.outwardNormalFaces);
+                    audit0493x9b.positiveCurvatureFaces = static_cast<std::uint64_t>(accum0493x9b.positiveCurvatureFaces);
+                    audit0493x9b.negativeCurvatureFaces = static_cast<std::uint64_t>(accum0493x9b.negativeCurvatureFaces);
+                    if (accum0493x9b.crossingFaces > 0ull) {
+                        audit0493x9b.validFraction =
+                            static_cast<double>(accum0493x9b.validCurvatureFaces) /
+                            static_cast<double>(accum0493x9b.crossingFaces);
+                    }
+                    if (accum0493x9b.validCurvatureFaces > 0ull) {
+                        const double inv = 1.0 /
+                            static_cast<double>(accum0493x9b.validCurvatureFaces);
+                        audit0493x9b.normalOutwardFraction =
+                            static_cast<double>(accum0493x9b.outwardNormalFaces) * inv;
+                        audit0493x9b.normalFaceAlignmentMean = accum0493x9b.normalFaceAlignmentSum * inv;
+                        audit0493x9b.curvatureMean = accum0493x9b.curvatureSum * inv;
+                        const double meanSq = accum0493x9b.curvatureSqSum * inv;
+                        audit0493x9b.curvatureRms = std::sqrt(std::max(0.0, meanSq));
+                        audit0493x9b.curvatureStd = std::sqrt(std::max(
+                            0.0, meanSq - audit0493x9b.curvatureMean * audit0493x9b.curvatureMean));
+                        audit0493x9b.curvatureAbsMean = accum0493x9b.curvatureAbsSum * inv;
+                    }
+                    audit0493x9b.curvatureAbsMax =
+                        static_cast<double>(accum0493x9b.curvatureAbsMaxScaled) /
+                        kPhaseCurvatureAbsScale0493x9a;
+                    populate_phase_curvature_region_metrics_0493x9b(
+                        accum0493x9b, curvatureAuditWallMarginCells0493x9b,
+                        &audit0493x9b);
+                    audit0493x9b.normalBuildSeconds = 1.0e-3 * static_cast<double>(normalMs0493x9b);
+                    audit0493x9b.curvatureBuildSeconds = 1.0e-3 * static_cast<double>(curvatureMs0493x9b);
+                    audit0493x9b.faceAuditSeconds = 1.0e-3 * static_cast<double>(faceAuditMs0493x9b);
+                    audit0493x9b.residentBytes = static_cast<std::uint64_t>(
+                        4u * geometryCells0493x6c * sizeof(double));
+                    append_phase_curvature_audit_0493x9b(params, step, time, audit0493x9b);
+
+                    // 0493x9c: evaluate two larger curvature-only supports while
+                    // keeping the x9b Scharr operator unchanged.  These kernels
+                    // run only on summary/audit steps and never enter Q6 physics.
+                    if (phaseCurvatureDiagnostics0493x9c) {
+                        ws.phaseAlphaCurvature2Pass0493x9c.ensure(geometryCells0493x6c);
+                        ws.phaseAlphaCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
+                        ws.phaseCurvature2Pass0493x9c.ensure(geometryCells0493x6c);
+                        ws.phaseCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
+                        ws.phaseCurvatureAccum2Pass0493x9c.ensure(1u);
+                        ws.phaseCurvatureAccum3Pass0493x9c.ensure(1u);
+
+                        // Two total binomial passes: S2 = B(B(alpha_x6c)).
+                        q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaCurvature0493x9b.data(),
+                            ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 2pass alpha filter launch");
+                        q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 2pass normal launch");
+                        q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature2Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 2pass curvature launch");
+                        check_cuda_0400(cudaMemset(ws.phaseCurvatureAccum2Pass0493x9c.data(), 0,
+                                                  sizeof(PhaseCurvatureAccumulator0493x9a)),
+                                        "0493x9c 2pass accumulator zero");
+                        q6_phase_curvature_face_audit_0493x9a<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaFiltered0493x6c.data(),
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature2Pass0493x9c.data(),
+                            ws.phaseCurvatureAccum2Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, periodicX, periodicY,
+                            curvatureAuditWallMarginCells0493x9b);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 2pass face audit launch");
+                        PhaseCurvatureAccumulator0493x9a accum2{};
+                        check_cuda_0400(cudaMemcpy(&accum2,
+                                                  ws.phaseCurvatureAccum2Pass0493x9c.data(),
+                                                  sizeof(accum2), cudaMemcpyDeviceToHost),
+                                        "0493x9c 2pass audit download");
+                        PhaseCurvatureAudit0493x9a audit2{};
+                        audit2.projectedSpeciesIndex = s;
+                        audit2.projectedType = audit.type;
+                        audit2.numCells = static_cast<std::uint64_t>(grid.numCells);
+                        audit2.crossingFaces = static_cast<std::uint64_t>(accum2.crossingFaces);
+                        audit2.validCurvatureFaces = static_cast<std::uint64_t>(accum2.validCurvatureFaces);
+                        audit2.outwardNormalFaces = static_cast<std::uint64_t>(accum2.outwardNormalFaces);
+                        audit2.positiveCurvatureFaces = static_cast<std::uint64_t>(accum2.positiveCurvatureFaces);
+                        audit2.negativeCurvatureFaces = static_cast<std::uint64_t>(accum2.negativeCurvatureFaces);
+                        if (accum2.crossingFaces > 0ull) {
+                            audit2.validFraction = static_cast<double>(accum2.validCurvatureFaces) /
+                                                   static_cast<double>(accum2.crossingFaces);
+                        }
+                        if (accum2.validCurvatureFaces > 0ull) {
+                            const double inv = 1.0 / static_cast<double>(accum2.validCurvatureFaces);
+                            audit2.normalOutwardFraction = static_cast<double>(accum2.outwardNormalFaces) * inv;
+                            audit2.normalFaceAlignmentMean = accum2.normalFaceAlignmentSum * inv;
+                            audit2.curvatureMean = accum2.curvatureSum * inv;
+                            const double meanSq = accum2.curvatureSqSum * inv;
+                            audit2.curvatureRms = std::sqrt(std::max(0.0, meanSq));
+                            audit2.curvatureStd = std::sqrt(std::max(
+                                0.0, meanSq - audit2.curvatureMean * audit2.curvatureMean));
+                            audit2.curvatureAbsMean = accum2.curvatureAbsSum * inv;
+                        }
+                        audit2.curvatureAbsMax = static_cast<double>(accum2.curvatureAbsMaxScaled) /
+                                                 kPhaseCurvatureAbsScale0493x9a;
+                        populate_phase_curvature_region_metrics_0493x9b(
+                            accum2, curvatureAuditWallMarginCells0493x9b, &audit2);
+                        audit2.residentBytes = static_cast<std::uint64_t>(
+                            4u * geometryCells0493x6c * sizeof(double));
+                        append_phase_curvature_audit_0493x9c(params, step, time, 2, audit2);
+
+                        // Three total passes: one more binomial pass from S2.
+                        q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                            ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 3pass alpha filter launch");
+                        q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 3pass normal launch");
+                        q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature3Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 3pass curvature launch");
+                        ws.phaseCurvature3PassValid0493x9d = true;
+                        ws.phaseCurvature3PassNx0493x9d = grid.Nx;
+                        ws.phaseCurvature3PassNy0493x9d = grid.Ny;
+                        ws.phaseCurvature3PassStep0493x9d = step;
+                        check_cuda_0400(cudaMemset(ws.phaseCurvatureAccum3Pass0493x9c.data(), 0,
+                                                  sizeof(PhaseCurvatureAccumulator0493x9a)),
+                                        "0493x9c 3pass accumulator zero");
+                        q6_phase_curvature_face_audit_0493x9a<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaFiltered0493x6c.data(),
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature3Pass0493x9c.data(),
+                            ws.phaseCurvatureAccum3Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, periodicX, periodicY,
+                            curvatureAuditWallMarginCells0493x9b);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9c 3pass face audit launch");
+                        PhaseCurvatureAccumulator0493x9a accum3{};
+                        check_cuda_0400(cudaMemcpy(&accum3,
+                                                  ws.phaseCurvatureAccum3Pass0493x9c.data(),
+                                                  sizeof(accum3), cudaMemcpyDeviceToHost),
+                                        "0493x9c 3pass audit download");
+                        PhaseCurvatureAudit0493x9a audit3{};
+                        audit3.projectedSpeciesIndex = s;
+                        audit3.projectedType = audit.type;
+                        audit3.numCells = static_cast<std::uint64_t>(grid.numCells);
+                        audit3.crossingFaces = static_cast<std::uint64_t>(accum3.crossingFaces);
+                        audit3.validCurvatureFaces = static_cast<std::uint64_t>(accum3.validCurvatureFaces);
+                        audit3.outwardNormalFaces = static_cast<std::uint64_t>(accum3.outwardNormalFaces);
+                        audit3.positiveCurvatureFaces = static_cast<std::uint64_t>(accum3.positiveCurvatureFaces);
+                        audit3.negativeCurvatureFaces = static_cast<std::uint64_t>(accum3.negativeCurvatureFaces);
+                        if (accum3.crossingFaces > 0ull) {
+                            audit3.validFraction = static_cast<double>(accum3.validCurvatureFaces) /
+                                                   static_cast<double>(accum3.crossingFaces);
+                        }
+                        if (accum3.validCurvatureFaces > 0ull) {
+                            const double inv = 1.0 / static_cast<double>(accum3.validCurvatureFaces);
+                            audit3.normalOutwardFraction = static_cast<double>(accum3.outwardNormalFaces) * inv;
+                            audit3.normalFaceAlignmentMean = accum3.normalFaceAlignmentSum * inv;
+                            audit3.curvatureMean = accum3.curvatureSum * inv;
+                            const double meanSq = accum3.curvatureSqSum * inv;
+                            audit3.curvatureRms = std::sqrt(std::max(0.0, meanSq));
+                            audit3.curvatureStd = std::sqrt(std::max(
+                                0.0, meanSq - audit3.curvatureMean * audit3.curvatureMean));
+                            audit3.curvatureAbsMean = accum3.curvatureAbsSum * inv;
+                        }
+                        audit3.curvatureAbsMax = static_cast<double>(accum3.curvatureAbsMaxScaled) /
+                                                 kPhaseCurvatureAbsScale0493x9a;
+                        populate_phase_curvature_region_metrics_0493x9b(
+                            accum3, curvatureAuditWallMarginCells0493x9b, &audit3);
+                        audit3.residentBytes = static_cast<std::uint64_t>(
+                            4u * geometryCells0493x6c * sizeof(double));
+                        append_phase_curvature_audit_0493x9c(params, step, time, 3, audit3);
+                    }
+                }
+            }
+
+            // 0493x9d production curvature: promote the x9c p3 support to a
+            // per-step field only when capillarity is physically active.  This
+            // does not alter alpha_x6c, x6f geometry or any sigma=0 trajectory.
+            if (surfaceTensionApplySpecies0493x9d) {
+                ws.phaseAlphaCurvature0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseAlphaCurvature2Pass0493x9c.ensure(geometryCells0493x6c);
+                ws.phaseAlphaCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
+                ws.phaseNormalX0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseNormalY0493x9b.ensure(geometryCells0493x6c);
+                ws.phaseCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
+
+                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.phaseAlphaCurvature0493x9b.data(),
+                    grid.Nx, grid.Ny, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9d p3 pass1 alpha filter launch");
+                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaCurvature0493x9b.data(),
+                    ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                    grid.Nx, grid.Ny, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9d p3 pass2 alpha filter launch");
+                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                    ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                    grid.Nx, grid.Ny, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9d p3 pass3 alpha filter launch");
+                q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                    ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9d p3 normal build launch");
+                q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                    ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                    ws.phaseCurvature3Pass0493x9c.data(),
+                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9d p3 curvature build launch");
+                ws.phaseCurvature3PassValid0493x9d = true;
+                ws.phaseCurvature3PassNx0493x9d = grid.Nx;
+                ws.phaseCurvature3PassNy0493x9d = grid.Ny;
+                ws.phaseCurvature3PassStep0493x9d = step;
+
+                if (geometryAuditThisStep0493x6c) {
+                    ws.phaseCurvatureAccum3Pass0493x9c.ensure(1u);
+                    check_cuda_0400(cudaMemset(
+                                        ws.phaseCurvatureAccum3Pass0493x9c.data(), 0,
+                                        sizeof(PhaseCurvatureAccumulator0493x9a)),
+                                    "0493x9d capillary curvature accumulator zero");
+                    q6_phase_curvature_face_audit_0493x9a<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                        ws.phaseCurvature3Pass0493x9c.data(),
+                        ws.phaseCurvatureAccum3Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY,
+                        curvatureAuditWallMarginCells0493x9b);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9d capillary curvature audit launch");
+                    PhaseCurvatureAccumulator0493x9a capAccum{};
+                    check_cuda_0400(cudaMemcpy(
+                                        &capAccum,
+                                        ws.phaseCurvatureAccum3Pass0493x9c.data(),
+                                        sizeof(capAccum), cudaMemcpyDeviceToHost),
+                                    "0493x9d capillary curvature audit download");
+                    PhaseCurvatureAudit0493x9a capAudit{};
+                    capAudit.projectedSpeciesIndex = s;
+                    capAudit.projectedType = audit.type;
+                    capAudit.numCells = static_cast<std::uint64_t>(grid.numCells);
+                    capAudit.crossingFaces = static_cast<std::uint64_t>(capAccum.crossingFaces);
+                    capAudit.validCurvatureFaces = static_cast<std::uint64_t>(capAccum.validCurvatureFaces);
+                    if (capAccum.validCurvatureFaces > 0ull) {
+                        const double inv = 1.0 / static_cast<double>(capAccum.validCurvatureFaces);
+                        capAudit.curvatureMean = capAccum.curvatureSum * inv;
+                        const double meanSq = capAccum.curvatureSqSum * inv;
+                        capAudit.curvatureRms = std::sqrt(std::max(0.0, meanSq));
+                        capAudit.curvatureStd = std::sqrt(std::max(
+                            0.0, meanSq - capAudit.curvatureMean * capAudit.curvatureMean));
+                    }
+                    capAudit.curvatureAbsMax =
+                        static_cast<double>(capAccum.curvatureAbsMaxScaled) /
+                        kPhaseCurvatureAbsScale0493x9a;
+                    const double rhoLiquidRef0493x9d =
+                        liquidPhaseReferenceCellMass0493x6c / (dx * dy);
+                    const double capillaryPotentialScale0493x9d =
+                        params.dt * params.surfaceTensionSigma / rhoLiquidRef0493x9d;
+                    append_surface_tension_audit_0493x9d(
+                        params, step, time, rhoLiquidRef0493x9d,
+                        capillaryPotentialScale0493x9d, capAudit);
+                }
             }
 
             ws.phaseGeometryResidentValid0493x6c = true;
@@ -7217,7 +9233,7 @@ bool apply_independent_masked_species_q6_0493w5(
                 ws.phasePressureMask0493x6f.ensure(geometryCells0493x6c);
                 ws.phaseFaceCoeffX0493x6f.ensure(geometryCells0493x6c);
                 ws.phaseFaceCoeffY0493x6f.ensure(geometryCells0493x6c);
-                if (phaseGasPressureApplySpecies0493x6g) {
+                if (interfaceDirichletApplySpecies0493x9d) {
                     ws.phaseFacePhiGammaX0493x6g.ensure(geometryCells0493x6c);
                     ws.phaseFacePhiGammaY0493x6g.ensure(geometryCells0493x6c);
                 }
@@ -7248,11 +9264,18 @@ bool apply_independent_masked_species_q6_0493w5(
                     ws.phaseFaceCoeffY0493x6f.data(),
                     phaseGasPressureApplySpecies0493x6g
                         ? ws.phaseGasPressurePotential0493x6a.data() : nullptr,
-                    phaseGasPressureApplySpecies0493x6g
+                    surfaceTensionApplySpecies0493x9d
+                        ? ws.phaseCurvature3Pass0493x9c.data() : nullptr,
+                    surfaceTensionApplySpecies0493x9d
+                        ? params.dt * params.surfaceTensionSigma * (dx * dy) /
+                              liquidPhaseReferenceCellMass0493x6c
+                        : 0.0,
+                    interfaceDirichletApplySpecies0493x9d
                         ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
-                    phaseGasPressureApplySpecies0493x6g
+                    interfaceDirichletApplySpecies0493x9d
                         ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
                     phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+                    surfaceTensionApplySpecies0493x9d ? 1 : 0,
                     registeredGasPhase0493x7m ? 1 : 0,
                     grid.Nx, grid.Ny, periodicX, periodicY,
                     kPhaseCutFaceThetaMin0493x6d,
@@ -7605,11 +9628,11 @@ bool apply_independent_masked_species_q6_0493w5(
             grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
             xLowFlux, xHighFlux, yLowFlux, yHighFlux, segmentedIo,
             audit.type, exclusiveProjectedSpecies,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? 1 : 0,
             densityRelaxationRequested0493x7c ? ws.phaseFillRaw0493x6c.data() : nullptr,
             densityRelaxationBeta0493x7d, params.dt,
             params.q6DensityRelaxationCompressionThresholdFill,
@@ -7801,6 +9824,58 @@ bool apply_independent_masked_species_q6_0493w5(
         allConverged = allConverged && audit.converged;
         maxIterations = std::max(maxIterations, audit.iterations);
         maxResidualRel = std::max(maxResidualRel, audit.residualRel);
+
+        // 0493x9e: observe the solved Q6 pressure potential in deep liquid and
+        // the x6g EOS potential in deep gas using the same gauge.  Also compute
+        // a discrete face-normal capillary resultant from the p3 curvature.
+        if (staticDropDiagnosticsThisStep0493x9e && audit.converged &&
+            phaseInterfaceStencilSpecies0493x6f &&
+            ws.phaseCurvature3PassValid0493x9d &&
+            ws.phaseCurvature3PassStep0493x9d == step) {
+            check_cuda_0400(cudaMemset(ws.staticDropCellAccum0493x9e.data(), 0,
+                                      sizeof(StaticDropCellAccumulator0493x9e)),
+                            "0493x9e pressure accumulator zero");
+            check_cuda_0400(cudaMemset(ws.staticDropFaceAccum0493x9e.data(), 0,
+                                      sizeof(StaticDropFaceAccumulator0493x9e)),
+                            "0493x9e face resultant accumulator zero");
+            q6_static_drop_pressure_cells_0493x9e<<<cellBlocks, threads>>>(
+                ws.phaseAlphaFiltered0493x6c.data(), q6SolveMask0493x6f,
+                ws.phi.data(),
+                phaseGasPressureApplySpecies0493x6g
+                    ? ws.phaseGasPressurePotential0493x6a.data() : nullptr,
+                ws.staticDropCellAccum0493x9e.data(), grid.numCells);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x9e pressure cells launch");
+            q6_static_drop_capillary_resultant_0493x9e<<<cellBlocks, threads>>>(
+                ws.phaseAlphaFiltered0493x6c.data(),
+                ws.phaseCurvature3Pass0493x9c.data(),
+                ws.staticDropFaceAccum0493x9e.data(),
+                grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x9e capillary resultant launch");
+            StaticDropCellAccumulator0493x9e cellAudit0493x9e{};
+            StaticDropFaceAccumulator0493x9e faceAudit0493x9e{};
+            check_cuda_0400(cudaMemcpy(&cellAudit0493x9e,
+                                      ws.staticDropCellAccum0493x9e.data(),
+                                      sizeof(cellAudit0493x9e), cudaMemcpyDeviceToHost),
+                            "0493x9e pressure accumulator download");
+            check_cuda_0400(cudaMemcpy(&faceAudit0493x9e,
+                                      ws.staticDropFaceAccum0493x9e.data(),
+                                      sizeof(faceAudit0493x9e), cudaMemcpyDeviceToHost),
+                            "0493x9e face accumulator download");
+            double liquidReferenceMass0493x9e = 0.0;
+            for (const SpeciesDefinition& d : params.speciesDefinitions) {
+                if (d.phaseFamily == SpeciesPhaseFamily::Liquid) {
+                    liquidReferenceMass0493x9e += d.referenceCellMassDeclared;
+                }
+            }
+            const double rhoLiquidRef0493x9e =
+                liquidReferenceMass0493x9e / (dx * dy);
+            append_static_drop_pressure_audit_0493x9e(
+                params, step, time, rhoLiquidRef0493x9e,
+                phaseGasPressureReference0493x6g, phaseGasPressureScale0493x6g,
+                dx * dy, cellAudit0493x9e, faceAudit0493x9e);
+        }
         if (!audit.converged) {
             // 0493x6f-d1: failure-only algebraic/topology audit for the
             // alpha-defined free-surface pressure domain.
@@ -8698,9 +10773,9 @@ bool apply_independent_masked_species_q6_0493w5(
             kPhaseCutFaceThetaMin0493x6d,
             phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
             phaseInterfaceStencilSpecies0493x6f ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
-            phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
+            interfaceDirichletApplySpecies0493x9d ? 1 : 0,
             phaseInterfaceStencilSpecies0493x6f ? 1 : 0,
             inactiveNeighborFactor0493x5a,
             xHighFlux, yHighFlux,
@@ -9004,6 +11079,69 @@ bool apply_independent_masked_species_q6_0493w5(
             const unsigned char* denseMask0493w6 = ws.speciesMasks0493w6.data() +
                 static_cast<std::size_t>(audit.speciesIndex) *
                     static_cast<std::size_t>(grid.numCells);
+            if (staticDropDiagnosticsThisStep0493x9e &&
+                params.speciesDefinitions[static_cast<std::size_t>(audit.speciesIndex)].phaseFamily ==
+                    SpeciesPhaseFamily::Liquid &&
+                ws.phaseGeometryResidentValid0493x6c &&
+                ws.phaseGeometryResidentStep0493x6c == step) {
+                check_cuda_0400(cudaMemset(ws.staticDropVelocityAccum0493x9e.data(), 0,
+                                          sizeof(StaticDropVelocityAccumulator0493x9e)),
+                                "0493x9e velocity accumulator zero");
+                q6_static_drop_velocity_cells_0493x9e<<<cellBlocks, threads>>>(
+                    species, audit.speciesIndex,
+                    ws.phaseAlphaFiltered0493x6c.data(),
+                    ws.staticDropVelocityAccum0493x9e.data(),
+                    grid.Nx, grid.Ny, periodicX, periodicY);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x9e post-Q6 velocity cells launch");
+                StaticDropVelocityAccumulator0493x9e velocityAudit0493x9e{};
+                check_cuda_0400(cudaMemcpy(&velocityAudit0493x9e,
+                                          ws.staticDropVelocityAccum0493x9e.data(),
+                                          sizeof(velocityAudit0493x9e), cudaMemcpyDeviceToHost),
+                                "0493x9e velocity accumulator download");
+                append_static_drop_velocity_audit_0493x9e(
+                    params, step, time, audit.type, velocityAudit0493x9e);
+                if (ellipseDiagnosticsThisStep0493x9f) {
+                    check_cuda_0400(cudaMemset(ws.ellipseParticleMomentAccum0493x9f.data(), 0,
+                                              sizeof(EllipseParticleMomentAccumulator0493x9f)),
+                                    "0493x9f particle moment accumulator zero");
+                    q6_ellipse_particle_moments_0493x9f<<<particleBlocks, threads>>>(
+                        particles, nParticles, audit.type,
+                        ws.ellipseParticleMomentAccum0493x9f.data());
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9f particle moment launch");
+                    EllipseParticleMomentAccumulator0493x9f momentAudit0493x9f{};
+                    check_cuda_0400(cudaMemcpy(&momentAudit0493x9f,
+                                              ws.ellipseParticleMomentAccum0493x9f.data(),
+                                              sizeof(momentAudit0493x9f), cudaMemcpyDeviceToHost),
+                                    "0493x9f particle moment download");
+                    const double invMass0493x9f = momentAudit0493x9f.massSum > 0.0
+                        ? 1.0 / momentAudit0493x9f.massSum : 0.0;
+                    const double xcm0493x9f = momentAudit0493x9f.massXSum * invMass0493x9f;
+                    const double ycm0493x9f = momentAudit0493x9f.massYSum * invMass0493x9f;
+                    EllipseInterfaceRadiusAccumulator0493x9f radiusInit0493x9f{};
+                    radiusInit0493x9f.radiusMinScaled =
+                        std::numeric_limits<unsigned long long>::max();
+                    check_cuda_0400(cudaMemcpy(ws.ellipseInterfaceRadiusAccum0493x9f.data(),
+                                              &radiusInit0493x9f,
+                                              sizeof(radiusInit0493x9f), cudaMemcpyHostToDevice),
+                                    "0493x9f interface radius accumulator init");
+                    q6_ellipse_interface_radii_0493x9f<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(), xcm0493x9f, ycm0493x9f,
+                        ws.ellipseInterfaceRadiusAccum0493x9f.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9f interface radius launch");
+                    EllipseInterfaceRadiusAccumulator0493x9f radiusAudit0493x9f{};
+                    check_cuda_0400(cudaMemcpy(&radiusAudit0493x9f,
+                                              ws.ellipseInterfaceRadiusAccum0493x9f.data(),
+                                              sizeof(radiusAudit0493x9f), cudaMemcpyDeviceToHost),
+                                    "0493x9f interface radius download");
+                    append_ellipse_shape_audit_0493x9f(
+                        params, step, time, audit.type,
+                        momentAudit0493x9f, radiusAudit0493x9f);
+                }
+            }
             q6_build_independent_rhs_after_mask_0493w5<<<
                 cellBlocks, threads, tripleShared>>>(
                 species, audit.speciesIndex, denseMask0493w6, denseMask0493w6,
@@ -9195,6 +11333,40 @@ bool supported_subset_0400(const SimulationParams& params,
 }
 
 } // namespace
+
+CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
+    CudaQ6PhaseCurvatureView0493x9b view{};
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.phaseCurvatureValid0493x9b ||
+        ws.phaseCurvature0493x9b.data() == nullptr ||
+        ws.phaseCurvatureNx0493x9b <= 0 || ws.phaseCurvatureNy0493x9b <= 0) {
+        return view;
+    }
+    view.deviceCurvature = ws.phaseCurvature0493x9b.data();
+    view.nx = ws.phaseCurvatureNx0493x9b;
+    view.ny = ws.phaseCurvatureNy0493x9b;
+    view.step = ws.phaseCurvatureStep0493x9b;
+    view.valid = true;
+    return view;
+}
+
+CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d() {
+    CudaQ6PhaseCurvatureView0493x9d view{};
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.phaseCurvature3PassValid0493x9d ||
+        ws.phaseCurvature3Pass0493x9c.data() == nullptr ||
+        ws.phaseCurvature3PassNx0493x9d <= 0 || ws.phaseCurvature3PassNy0493x9d <= 0) {
+        return view;
+    }
+    view.deviceCurvature = ws.phaseCurvature3Pass0493x9c.data();
+    view.deviceAlpha = ws.phaseAlphaFiltered0493x6c.data();
+    view.nx = ws.phaseCurvature3PassNx0493x9d;
+    view.ny = ws.phaseCurvature3PassNy0493x9d;
+    view.step = ws.phaseCurvature3PassStep0493x9d;
+    view.valid = true;
+    return view;
+}
+
 
 CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
     ParticleState& state,

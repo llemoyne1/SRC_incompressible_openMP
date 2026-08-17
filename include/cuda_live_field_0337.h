@@ -21,6 +21,7 @@ struct CudaLiveField0337Diagnostics {
     int attempted = 0;
     int supported = 0;
     int rendered = 0;
+    int residentOnly = 0;
     std::uint64_t particles = 0u;
     std::uint64_t activeFluid = 0u;
     int nx = 0;

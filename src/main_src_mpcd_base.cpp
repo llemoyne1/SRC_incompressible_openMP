@@ -769,6 +769,7 @@ int main(int argc, char** argv) {
                 const mpcd::LiveVisualization0335RuntimeControls liveControls0337 =
                     liveVisualization0335.current_controls();
                 bool drawnByCudaField0337 = false;
+                bool residentOnlyLiveField0337 = false;
                 if (env_truthy_0260("SRC_LIVE_VIS_CUDA_FIELD")) {
                     const int liveNx0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NX", 300));
                     const int liveNy0337 = std::max(16, env_int_0337("SRC_LIVE_VIS_NY", 80));
@@ -791,6 +792,7 @@ int main(int argc, char** argv) {
                             liveControls0337.particleTypeFilter,
                             &liveDiag0337,
                         liveQuiverEnabled0337 ? &cudaQuiver0337 : nullptr);
+                    residentOnlyLiveField0337 = (liveDiag0337.residentOnly != 0);
                     if (drawnByCudaField0337) {
                         std::ostringstream liveSourceLabel0337;
                         liveSourceLabel0337 << "cuda_field_0337";
@@ -844,7 +846,16 @@ int main(int argc, char** argv) {
                                   << std::flush;
                     }
                 }
-                if (!drawnByCudaField0337) {
+                if (!drawnByCudaField0337 && residentOnlyLiveField0337) {
+                    static bool warnedResidentLiveField0493x9b = false;
+                    if (!warnedResidentLiveField0493x9b) {
+                        std::cerr << "\n[livevis0335] resident curvature unavailable; "
+                                     "enable MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9B=1 "
+                                     "with src-q6-g-f. CPU density fallback is intentionally disabled.\n";
+                        warnedResidentLiveField0493x9b = true;
+                    }
+                }
+                if (!drawnByCudaField0337 && !residentOnlyLiveField0337) {
                     mpcd::ParticleState liveState;
                     mpcd::ParticleRoleCounts liveRoleCounts{};
                     bool compactLive0335 = mpcd::cuda_shared_particle_state_0251_download_role_filtered_if_fresh(liveState, mpcd::kParticleRoleFluid, &liveRoleCounts);

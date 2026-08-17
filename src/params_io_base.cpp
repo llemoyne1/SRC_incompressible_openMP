@@ -500,6 +500,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "virialMomentumCorrectionEnable") p.virialMomentumCorrectionEnable = parse_bool(value, key);
         else if (key == "q6DensityRelaxationBeta" || key == "densityRelaxationBeta") p.q6DensityRelaxationBeta = parse_double(value, key);
         else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
+        else if (key == "surfaceTensionSigma" || key == "q6GfSurfaceTensionSigma") p.surfaceTensionSigma = parse_double(value, key);
         else if (key == "q6DensityRelaxationCompressionGateEnable" || key == "densityRelaxationCompressionGateEnable") p.q6DensityRelaxationCompressionGateEnable = parse_bool(value, key);
         else if (key == "q6DensityRelaxationCompressionThresholdFill" || key == "densityRelaxationCompressionThresholdFill") p.q6DensityRelaxationCompressionThresholdFill = parse_double(value, key);
         else if (key == "q6DensityRelaxationTractionThresholdFill" || key == "densityRelaxationTractionThresholdFill") p.q6DensityRelaxationTractionThresholdFill = parse_double(value, key);
@@ -1324,6 +1325,10 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error(
             "0493x7d q6DensityRelaxationTime and q6DensityRelaxationBeta are mutually exclusive when positive");
     }
+    if (!(p.surfaceTensionSigma >= 0.0) || !std::isfinite(p.surfaceTensionSigma)) {
+        throw std::runtime_error(
+            "0493x9d surfaceTensionSigma must be finite and non-negative");
+    }
     const double q6DensityRelaxationEffectiveBeta0493x7d =
         p.q6DensityRelaxationTime > 0.0
             ? p.dt / p.q6DensityRelaxationTime
@@ -1432,6 +1437,13 @@ void validate_simulation_params(const SimulationParams& p) {
         p.q6ForceProjectionMode != "prestream_single_fused") {
         throw std::runtime_error(
             "q6ForceProjectionMode supports: legacy, prestream, prestream_single, prestream_single_fused");
+    }
+    if (p.surfaceTensionSigma > 0.0 &&
+        (p.q6ForceProjectionMode != "prestream_single_fused" ||
+         p.speciesQ6Mode != "free_surface_masked" ||
+         p.projectionBackend != "cuda")) {
+        throw std::runtime_error(
+            "0493x9d surfaceTensionSigma>0 requires CUDA free_surface_masked + prestream_single_fused Q6-G-F");
     }
     if (p.q6ForceProjectionMode != "legacy") {
         const bool periodicBox = is_x_periodic(p) && is_y_periodic(p);
@@ -1550,6 +1562,10 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error(
                 "non-legacy q6ForceProjectionMode currently requires speciesQ6Mode=common "
                 "or free_surface_masked");
+        }
+        if (p.surfaceTensionSigma > 0.0 && !freeSurfaceMasked0493x5a) {
+            throw std::runtime_error(
+                "0493x9d surfaceTensionSigma>0 requires speciesQ6Mode=free_surface_masked");
         }
         if (freeSurfaceMasked0493x5a) {
             if (p.q6ForceProjectionMode != "prestream_single_fused") {

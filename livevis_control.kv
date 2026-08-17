@@ -15,7 +15,7 @@
 # They do not change streaming, collision, thermostat, Q6, virial closure,
 # resampling, or boundary-condition physics.
 
-
+ 
 # =============================================================================
 # 1. Live scalar field
 # =============================================================================
@@ -25,29 +25,29 @@
 #   rho, density, mass
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
-#   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power
-field = ux    
+#   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
+field = kappa    
 
 # colormap:
 #   blue_red, gray, thermal
 # Aliases generally accepted by recent builds:
 #   grey/grayscale/greyscale -> gray
 #   heat/hot                 -> thermal
-colormap = blue_red
+colormap = hot
 
 # clip:
 #   >0 fixes color saturation scale.
 #   <=0 lets the renderer use its default/auto behavior.
-clip = 0.25
+clip = -0.25
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
-gain = 0.75
+gain = 1.
 
 # smoothPasses:
 #   spatial smoothing of the scalar field.
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
-smoothPasses = 5
+smoothPasses = 0
 
 # =============================================================================
 # 2. Live grid and cadence
@@ -57,8 +57,8 @@ smoothPasses = 5
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
-liveGridNx = 400
-liveGridNy = 100
+liveGridNx = 800
+liveGridNy = 800
 
 # liveEvery:
 #   live frame cadence in solver steps.

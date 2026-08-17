@@ -24,6 +24,30 @@ struct CudaQ6ResidentThermostat0400Diagnostics {
     const char* reason = "";
 };
 
+// 0493x9b: read-only resident view for diagnostics/LiveVis.  The pointer
+// remains owned by the Q6 workspace and must never be freed or written by the
+// consumer.  valid is true only after the passive x9b curvature stage ran.
+struct CudaQ6PhaseCurvatureView0493x9b {
+    const double* deviceCurvature = nullptr;
+    int nx = 0;
+    int ny = 0;
+    int step = -1;
+    bool valid = false;
+};
+
+// 0493x9d production-selected curvature view: three binomial 3x3 passes
+// followed by the validated Scharr normal/divergence operator (x9c p3).
+struct CudaQ6PhaseCurvatureView0493x9d {
+    const double* deviceCurvature = nullptr;
+    // 0493x9e: physical x6c alpha, exposed read-only so LiveVis can mask the
+    // bulk without recomputing or smoothing the interface geometry.
+    const double* deviceAlpha = nullptr;
+    int nx = 0;
+    int ny = 0;
+    int step = -1;
+    bool valid = false;
+};
+
 struct CudaQ6ForceKick0493x3Diagnostics {
     bool requested = false;
     bool handled = false;
@@ -87,6 +111,9 @@ struct CudaQ6Resident0400Diagnostics {
 };
 
 #if defined(MPCD_ENABLE_CUDA_Q6_RESIDENT_0400)
+CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b();
+CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d();
+
 CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
     ParticleState& state,
     const SimulationParams& params);
@@ -107,6 +134,12 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     const std::vector<int>& collisionCellId,
     std::uint64_t step);
 #else
+inline CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
+    return {};
+}
+inline CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d() {
+    return {};
+}
 inline CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
     ParticleState&, const SimulationParams&) {
     return {};

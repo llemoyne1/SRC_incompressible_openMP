@@ -473,6 +473,11 @@ struct SimulationParams {
     double q6DensityRelaxationBeta = 0.0;
     double q6DensityRelaxationTime = 0.0;
 
+    // 0493x9d: physical 2-D surface tension used only by the Q6-G-F
+    // free-surface Dirichlet jump p_l - p_g = sigma*kappa.  Code units are
+    // pressure*length.  Zero is an exact no-op and preserves the pre-x9d path.
+    double surfaceTensionSigma = 0.0;
+
     // 0493x7d-v2 experimental compression/noise discriminator. Disabled by
     // default: false preserves the historical rawFill x7d target bit-for-bit.
     // When enabled, positive density relaxation is admitted only when the
