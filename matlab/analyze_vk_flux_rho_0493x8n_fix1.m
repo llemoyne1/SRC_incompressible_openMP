@@ -1,4 +1,4 @@
-function out = analyze_vk_flux_rho_0493x8n(varargin)
+function out = analyze_vk_flux_rho_0493x8n_fix1(varargin)
 %ANALYZE_VK_FLUX_RHO_0493X8N Diagnose upstream volume and density-weighted flux.
 %
 % Purpose
@@ -46,9 +46,9 @@ function out = analyze_vk_flux_rho_0493x8n(varargin)
 
 p = inputParser;
 p.FunctionName = 'analyze_vk_flux_rho_0493x8n';
-addParameter(p,'RecordingDir','../runs/0493x8m_zovatto_re280_prod60k/segment_000/src-q6-g-f/output/recordings');
-addParameter(p,'OutputDir','../runs/0493x8n_flux_rho_analysis');
-addParameter(p,'RestartStepOffset',12000);
+addParameter(p,'RecordingDir','E:\SRC_MPCD_dev\SRC_GPU-SURF\runs\0493x8u_zovatto_re280_q6-g-f_smoke5000\segment_001\src-q6-g-f\output\recordings\0493x8m_zovatto_re280_seg001_src-q6-g-f');
+addParameter(p,'OutputDir','E:\SRC_MPCD_dev\SRC_GPU-SURF\runs\0493x8u_zovatto_re280_q6-g-f_smoke5000\segment_001\src-q6-g-f\output\recordings\0493x8m_zovatto_re280_seg001_src-q6-g-f');
+addParameter(p,'RestartStepOffset',5000);
 addParameter(p,'Dt',0.002);
 addParameter(p,'MinLocalStep',12000);
 addParameter(p,'MaxLocalStep',inf);

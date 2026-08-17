@@ -6,7 +6,7 @@ set -euo pipefail
 #   blockage d=D/H=0.2; centered cylinder -> gamma_gap=2
 #   Re_H = Umean*H/nu = 280
 #   inlet: fully developed plane Poiseuille
-#   outlet: passive segmented Neumann from 0493x8l
+#   outlet: passive segmented Neumann kinetic-pressure closure from 0493x8q-x8t
 #   no-slip upper/lower walls
 #   Zovatto paper domain: upstream=15D, downstream=40D.
 #   Present 1200x400 benchmark keeps the exact H/D and Re_H physics but uses
@@ -29,7 +29,7 @@ suite_root_cd_0434
 CASE_LABEL="0493x8m_zovatto_re280"
 GEN_CASE="vk"
 TOPOLOGY="segmented"
-RUN_MODES="src-q6-g-f"
+RUN_MODES="${RUN_MODES:-src-q6-g-f}"
 
 # ---------------------------------------------------------------------------
 # Segmented production / restart controls.
@@ -106,6 +106,7 @@ OUTLET_SMAX="1.0"
 INLET_PROFILE="poiseuille_y_max"
 OUTLET_MODE="neumann"
 INLET_RESERVOIR_CELLS="${INLET_RESERVOIR_CELLS:-6}"
+INLET_THERMAL_NOISE="${INLET_THERMAL_NOISE:-1.0}"
 
 # Filled Brinkman cylinder, as already qualified for Q6-G-F.
 RUN_OK_DARCY_COMMON_FILLED_STATE=1
@@ -243,7 +244,7 @@ print(f"Re_H={ReH:.8g} Re_D(Umax)={ReDmax:.8g} MaMaxProxy={Ma:.6g}")
 print(f"literature centered gammaGap=2 target: Re_H=280, T*=T*Umean/H=0.83")
 print(f"literature expected physical period={period_phys:.8g}, periodSteps={period_steps:.1f}")
 print(f"run steps={steps} tEnd={steps*dt:.8g} tauH=t*Umean/H={tauH_end:.5f} expectedPeriods~{nperiod:.3f}")
-print("BC inlet=local Poiseuille full-height; outlet=0493x8l passive right Neumann")
+print("BC inlet=local Poiseuille full-height; outlet=0493x8q-x8t passive kinetic-pressure Neumann")
 print("initialState=Poiseuille (generator remove_mean_drift=false)")
 PY
 
@@ -269,7 +270,7 @@ bcY = solid
 openBoundarySegmentsEnable = true
 openBoundarySegmentCount = 2
 openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${UIN} 0.0 0 ${PARTICLE_MASS}
-# x8l ignores this nominal outlet velocity as a physical Q6-G-F target when
+# x8q-x8t ignores this nominal outlet velocity as a physical final target when
 # OUTLET_MODE=neumann; keep Umean only for legacy metadata/diagnostic balance.
 openBoundarySegment1 = ${OUTLET_FACE} outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${UOUT_NOMINAL} 0.0 0 ${PARTICLE_MASS}
 
@@ -282,7 +283,7 @@ inletVelocityRampProfile = smoothstep
 inletVelocitySpatialProfile = ${INLET_PROFILE}
 
 inletKBT = ${KBT}
-inletThermalNoise = 0.0
+inletThermalNoise = ${INLET_THERMAL_NOISE}
 inletInjectionMode = hard_cell_density
 inletReservoirMode = hard_cell_density
 inletReservoirCells = ${INLET_RESERVOIR_CELLS}
@@ -386,7 +387,7 @@ resolve_restart_0493x8m() {
 }
 
 run_one_0493x8m() {
-  local mode="src-q6-g-f"
+  local mode="${RUN_MODES:-src-q6-g-f}"
   suite_validate_path_0434 "$mode"
 
   local run_root="$BASE_RUN_ROOT/segment_${SEGMENT_TAG}/$mode"
@@ -445,7 +446,8 @@ X8M_ZOVATTO_PAPER_UPSTREAM_D=15
 X8M_ZOVATTO_PAPER_DOWNSTREAM_D=40
 X8M_DOMAIN_STATUS=reduced_axial_domain
 X8M_INLET_PROFILE=${INLET_PROFILE}
-X8M_OUTLET=${OUTLET_FACE}:${OUTLET_SMIN}:${OUTLET_SMAX}:${OUTLET_MODE}:passive_x8l
+X8M_INLET_THERMAL_NOISE=${INLET_THERMAL_NOISE}
+X8M_OUTLET=${OUTLET_FACE}:${OUTLET_SMIN}:${OUTLET_SMAX}:${OUTLET_MODE}:kinetic_pressure_x8t
 X8M_RECORD_EVERY=${RECORD_EVERY}
 X8M_RECORD_STRIDE=${RECORD_STRIDE}
 X8M_SEGMENT_INDEX=${SEGMENT_INDEX}
@@ -463,7 +465,7 @@ META
   echo "===== 0493x8m ZOVATTO RUN ====="
   echo "[0493x8m] mode=$mode segment=$SEGMENT_INDEX globalSteps=${GLOBAL_STEP_OFFSET}->${GLOBAL_STEP_END} root=$run_root"
   echo "[0493x8m] inputState=$state seed=$SEED"
-  echo "[0493x8m] inlet Poiseuille Umax=$UMAX Umean=$UMEAN -> passive right Neumann"
+  echo "[0493x8m] inlet Poiseuille Umax=$UMAX Umean=$UMEAN thermalNoise=$INLET_THERMAL_NOISE -> passive kinetic-pressure Neumann"
   echo "[0493x8m] geometry H/D=5 upstream=4D downstream=11D (reduced axial domain; Zovatto paper=15D/40D)"
   echo "[0493x8m] recording fields=$RECORD_FIELDS every=$RECORD_EVERY stride=$RECORD_STRIDE"
   echo "[0493x8m] forces every=$TOPO_BENCHMARK_EVERY Darcy cost every=$DARCY_COST_EVERY"
