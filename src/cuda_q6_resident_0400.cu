@@ -1226,6 +1226,44 @@ void append_phase_curvature_audit_0493x9c(
 }
 
 
+void append_surface_tension_limiter_audit_0493x9r(
+    const SimulationParams& params,
+    int step,
+    double time,
+    double kappaLimit,
+    unsigned long long capillaryFaces,
+    unsigned long long clippedFaces,
+    double rawKappaAbsMax,
+    double effectiveKappaAbsMax) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_surface_tension_limiter_0493x9r.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9r failed to open capillary-resolution audit CSV: " +
+            path.string());
+    }
+    if (header) {
+        out << "step,time,sigma,minRadiusCells,kappaLimit,capillaryFaces,"
+               "clippedFaces,clipFraction,capillaryKappaRawAbsMax,"
+               "capillaryKappaEffectiveAbsMax,definition\n";
+    }
+    const double clipFraction = capillaryFaces > 0ull
+        ? static_cast<double>(clippedFaces) / static_cast<double>(capillaryFaces)
+        : 0.0;
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << params.surfaceTensionSigma << ','
+        << params.surfaceTensionMinRadiusCells << ',' << kappaLimit << ','
+        << capillaryFaces << ',' << clippedFaces << ',' << clipFraction << ','
+        << rawKappaAbsMax << ',' << effectiveKappaAbsMax << ','
+        << "face-kappa=interp(p3/x9m);limit-only-in-sigma*kappa;"
+           "raw-curvature-and-LiveVis-unchanged" << '\n';
+}
+
 void append_surface_tension_audit_0493x9d(
     const SimulationParams& params,
     int step,
@@ -1992,6 +2030,11 @@ struct PhaseInterfaceStencilAccumulator0493x6f {
     unsigned long long thetaMaxScaled = 0ull;
     unsigned long long thetaMinComplementScaled = 0ull;
     unsigned long long nonzeroPressureFaces0493x6g = 0ull;
+    // 0493x9r: summary-cadence diagnostics of the face-level limiter.
+    unsigned long long capillaryFaces0493x9r = 0ull;
+    unsigned long long capillaryClippedFaces0493x9r = 0ull;
+    unsigned long long capillaryKappaRawAbsMaxScaled0493x9r = 0ull;
+    unsigned long long capillaryKappaEffectiveAbsMaxScaled0493x9r = 0ull;
     double thetaSum = 0.0;
     double pressurePotentialSum0493x6g = 0.0;
     double pressurePotentialSqSum0493x6g = 0.0;
@@ -2004,6 +2047,18 @@ struct WallGeometryAccumulator0493x9h {
     unsigned long long normalValidCells = 0ull;
     double solidFractionSum = 0.0;
     double normalUnitErrorSqSum = 0.0;
+};
+
+struct ContactAngleAccumulator0493x9i {
+    unsigned long long candidateCells = 0ull;
+    unsigned long long correctedCells = 0ull;
+    unsigned long long curvatureCells = 0ull;
+    double rawAngleSum = 0.0;
+    double correctedAngleSum = 0.0;
+    double correctedAngleErrorSqSum = 0.0;
+    double correctedDotErrorSqSum = 0.0;
+    double curvatureSum = 0.0;
+    double curvatureSqSum = 0.0;
 };
 
 struct ResidentWorkspace0400 {
@@ -2044,6 +2099,9 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> phaseWallNormalX0493x9h;
     DeviceBuffer0400<double> phaseWallNormalY0493x9h;
     DeviceBuffer0400<WallGeometryAccumulator0493x9h> phaseWallGeometryAccum0493x9h;
+    // x9i keeps only one scalar accumulator; corrected normals reuse the
+    // production p3 normal arrays and do not allocate another cell field.
+    DeviceBuffer0400<ContactAngleAccumulator0493x9i> contactAngleAccum0493x9i;
     // 0493x9a passive capillary geometry.  These arrays are allocated only
     // behind the x9a gate and are not consumed by the projection in this patch.
     DeviceBuffer0400<double> phaseNormalX0493x9a;
@@ -2149,6 +2207,7 @@ struct ResidentWorkspace0400 {
         phaseGeometryAccum0493x6b.ensure(1u);
         phaseGeometryResidentAccum0493x6c.ensure(1u);
         phaseWallGeometryAccum0493x9h.ensure(1u);
+        contactAngleAccum0493x9i.ensure(1u);
         phaseCurvatureAccum0493x9a.ensure(1u);
         phaseCurvatureAccum0493x9b.ensure(1u);
         phaseInterfaceStencilAccum0493x6f.ensure(1u);
@@ -4084,6 +4143,220 @@ void append_wall_geometry_audit_0493x9h(
            "solidFraction=1-chi;normal=fluidToSolid;passiveGeometryOnly" << '\n';
 }
 
+struct ContactAngleAudit0493x9i {
+    int projectedSpeciesIndex = -1;
+    std::uint32_t projectedType = 0u;
+    double prescribedAngleDegrees = -1.0;
+    double targetNormalWallDot = 0.0;
+    std::uint64_t candidateCells = 0u;
+    std::uint64_t correctedCells = 0u;
+    std::uint64_t curvatureCells = 0u;
+    double rawAngleMean = 0.0;
+    double correctedAngleMean = 0.0;
+    double correctedAngleErrorRms = 0.0;
+    double correctedDotErrorRms = 0.0;
+    double contactCurvatureMean = 0.0;
+    double contactCurvatureRms = 0.0;
+    double contactCurvatureStd = 0.0;
+};
+
+void append_contact_angle_audit_0493x9i(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const ContactAngleAudit0493x9i& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_contact_angle_0493x9i.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9i failed to open contact-angle audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
+               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
+               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
+               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
+               "contactCurvatureStd,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
+        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
+        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
+        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
+        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
+        << a.contactCurvatureStd << ','
+        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
+           "normalOnly/p3;physicalAlphaUnchanged" << '\n';
+}
+
+// 0493x9j audits the ghost-alpha closure separately from the x9i hard-normal
+// experiment.  The scalar schema is intentionally identical so the two
+// closures can be compared without changing the physical x6c interface.
+void append_contact_angle_ghost_audit_0493x9j(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const ContactAngleAudit0493x9i& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_contact_angle_ghost_0493x9j.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9j failed to open ghost-alpha contact-angle audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
+               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
+               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
+               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
+               "contactCurvatureStd,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
+        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
+        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
+        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
+        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
+        << a.contactCurvatureStd << ','
+        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
+           "ghostAlphaDuringP3AndScharr;physicalAlphaUnchanged;domainWallsOnly_x9j" << '\n';
+}
+
+
+// 0493x9k: sheared-mirror ghost-alpha closure.  The scalar schema matches
+// x9i/x9j so existing contact-angle diagnostics remain directly comparable.
+void append_contact_angle_mirror_audit_0493x9k(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const ContactAngleAudit0493x9i& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_contact_angle_mirror_0493x9k.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9k failed to open sheared-mirror contact-angle audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
+               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
+               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
+               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
+               "contactCurvatureStd,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
+        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
+        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
+        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
+        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
+        << a.contactCurvatureStd << ','
+        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
+           "shearedMirrorGhostAlphaDuringP3AndScharr;physicalAlphaUnchanged;"
+           "0<theta<180;domainWallsOnly_x9k" << '\n';
+}
+
+
+// 0493x9l: wall-face normal closure audit.  The prescribed Young angle lives
+// at the physical wall face; cell-centred and ghost normals are reconstructed
+// symmetrically in angle space around that face value before div(n).
+void append_contact_angle_wallface_audit_0493x9l(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const ContactAngleAudit0493x9i& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_contact_angle_wallface_0493x9l.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9l failed to open wall-face contact-angle audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
+               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
+               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
+               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
+               "contactCurvatureStd,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
+        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
+        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
+        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
+        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
+        << a.contactCurvatureStd << ','
+        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
+           "wallFaceAngleClosure;cellAndGhostNormalsInterpolatedInAngleSpace;"
+           "physicalAlphaAndP3AlphaUnchanged;0<theta<180;domainWallsOnly_x9l" << '\n';
+}
+
+
+// 0493x9m: off-support secant-curvature contact closure.  The prescribed
+// Young normal lives at the wall face; the second normal is sampled on the
+// actual A/B interface in the first layer whose p3+Scharr support is entirely
+// physical (j=4, centre 4.5h).  Their normal rotation and geometric chord give
+// a direct local curvature estimate without modifying alphaK or near-wall
+// normals.  The scalar schema matches x9i-x9l for direct comparison.
+void append_contact_angle_offsupport_audit_0493x9m(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const ContactAngleAudit0493x9i& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_contact_angle_offsupport_0493x9m.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9m failed to open off-support contact-angle audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
+               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
+               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
+               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
+               "contactCurvatureStd,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
+        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
+        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
+        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
+        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
+        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
+        << a.contactCurvatureStd << ','
+        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
+           "wallFaceYoungNormal;offSupportSecantCurvature;anchorLayer=4;anchorCenter=4.5h;"
+           "p3Radius=3;normalScharrRadius=1;physicalAlphaAndP3NormalsUnchanged;"
+           "0<theta<180;domainWallsOnly_x9m" << '\n';
+}
+
+
 __global__ void q6_phase_interface_geometry_stats_0493x6b(
     CudaSpeciesCellDeviceView0490h species,
     const unsigned char* liquidMask,
@@ -4430,6 +4703,1182 @@ __global__ void q6_wall_geometry_audit_0493x9h(
     if (normalLocal) atomicAdd(&accum->normalValidCells, normalLocal);
     if (solidSumLocal != 0.0) atomic_add_double_0400(&accum->solidFractionSum, solidSumLocal);
     if (unitErrSqLocal != 0.0) atomic_add_double_0400(&accum->normalUnitErrorSqSum, unitErrSqLocal);
+}
+
+// 0493x9i prescribed contact angle.  The physical x6c alpha field is never
+// changed.  Only the curvature-only p3 normal is replaced in cells that are
+// simultaneously in the x9h wall-normal band and in a 3x3 alpha=0.5 interface
+// neighbourhood.  theta is measured through phase A.  Since nAB points A->B
+// while nWall points fluid->solid, Young geometry is nAB.nWall=-cos(theta).
+__device__ __forceinline__ int q6_contact_index_0493x9i(
+    int ix, int iy, int nx, int ny, int periodicX, int periodicY) {
+    if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+    else ix = max(0, min(nx - 1, ix));
+    if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+    else iy = max(0, min(ny - 1, iy));
+    return iy * nx + ix;
+}
+
+__device__ __forceinline__ bool q6_contact_interface_band_0493x9i(
+    const double* alpha,
+    int ix,
+    int iy,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    double amin = 1.0;
+    double amax = 0.0;
+    for (int oy = -1; oy <= 1; ++oy) {
+        for (int ox = -1; ox <= 1; ++ox) {
+            const int q = q6_contact_index_0493x9i(
+                ix + ox, iy + oy, nx, ny, periodicX, periodicY);
+            const double a = fmin(1.0, fmax(0.0, alpha[q]));
+            amin = fmin(amin, a);
+            amax = fmax(amax, a);
+        }
+    }
+    return amin < 0.5 && amax >= 0.5;
+}
+
+// 0493x9j ghost-alpha contact-angle closure for static domain walls.  The
+    // physical x6c alpha and its alpha=0.5 interface remain untouched.  Only the
+    // curvature-support field samples virtual alpha values behind wall faces.  The
+    // ghost normal derivative follows |grad_t| cot(theta), which is the scalar-
+    // field form of nAB.nWall=-cos(theta) for nAB=-grad(alpha)/|grad(alpha)|.
+    __device__ __forceinline__ double q6_contact_alpha_inside_0493x9j(
+        const double* alpha,
+        int ix,
+        int iy,
+        int nx,
+        int ny,
+        int periodicX,
+        int periodicY) {
+        if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+        else ix = max(0, min(nx - 1, ix));
+        if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+        else iy = max(0, min(ny - 1, iy));
+        return alpha[iy * nx + ix];
+    }
+
+    __device__ __forceinline__ double q6_contact_tangent_grad_x_0493x9j(
+        const double* alpha, int ix, int iy, int nx, int ny,
+        double dx, int periodicX, int periodicY) {
+        if (periodicX || (ix > 0 && ix < nx - 1)) {
+            const double aW = q6_contact_alpha_inside_0493x9j(
+                alpha, ix - 1, iy, nx, ny, periodicX, periodicY);
+            const double aE = q6_contact_alpha_inside_0493x9j(
+                alpha, ix + 1, iy, nx, ny, periodicX, periodicY);
+            return (aE - aW) / (2.0 * dx);
+        }
+        const double aC = q6_contact_alpha_inside_0493x9j(
+            alpha, ix, iy, nx, ny, periodicX, periodicY);
+        if (ix <= 0) {
+            const double aE = q6_contact_alpha_inside_0493x9j(
+                alpha, ix + 1, iy, nx, ny, periodicX, periodicY);
+            return (aE - aC) / dx;
+        }
+        const double aW = q6_contact_alpha_inside_0493x9j(
+            alpha, ix - 1, iy, nx, ny, periodicX, periodicY);
+        return (aC - aW) / dx;
+    }
+
+    __device__ __forceinline__ double q6_contact_tangent_grad_y_0493x9j(
+        const double* alpha, int ix, int iy, int nx, int ny,
+        double dy, int periodicX, int periodicY) {
+        if (periodicY || (iy > 0 && iy < ny - 1)) {
+            const double aS = q6_contact_alpha_inside_0493x9j(
+                alpha, ix, iy - 1, nx, ny, periodicX, periodicY);
+            const double aN = q6_contact_alpha_inside_0493x9j(
+                alpha, ix, iy + 1, nx, ny, periodicX, periodicY);
+            return (aN - aS) / (2.0 * dy);
+        }
+        const double aC = q6_contact_alpha_inside_0493x9j(
+            alpha, ix, iy, nx, ny, periodicX, periodicY);
+        if (iy <= 0) {
+            const double aN = q6_contact_alpha_inside_0493x9j(
+                alpha, ix, iy + 1, nx, ny, periodicX, periodicY);
+            return (aN - aC) / dy;
+        }
+        const double aS = q6_contact_alpha_inside_0493x9j(
+            alpha, ix, iy - 1, nx, ny, periodicX, periodicY);
+        return (aC - aS) / dy;
+    }
+
+    __device__ __forceinline__ double q6_contact_ghost_normal_gradient_0493x9j(
+        double tangentialGradient,
+        double rawNormalGradient,
+        double contactAngleDegrees) {
+        constexpr double pi = 3.141592653589793238462643383279502884;
+        const double theta = contactAngleDegrees * (pi / 180.0);
+        const double st = sin(theta);
+        const double ct = cos(theta);
+        const double rawMag = sqrt(tangentialGradient * tangentialGradient +
+                                   rawNormalGradient * rawNormalGradient);
+        // Away from the degenerate 0/180 limits, retain the measured tangential
+        // derivative and solve exactly for the normal derivative.  Near those
+        // limits, use the local raw gradient magnitude to avoid cot(theta) blow-up.
+        const double gradMag = fabs(st) > 5.0e-2
+            ? fabs(tangentialGradient) / fabs(st)
+            : rawMag;
+        return gradMag * ct;
+    }
+
+    __device__ __forceinline__ double q6_contact_alpha_sample_0493x9j(
+        const double* alpha,
+        int ix,
+        int iy,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees) {
+        if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+        if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+        if (ix >= 0 && ix < nx && iy >= 0 && iy < ny) {
+            return alpha[iy * nx + ix];
+        }
+
+        // Corners are not part of the x9j qualification.  Prefer the y-wall when
+        // both coordinates are outside; this keeps the operation deterministic and
+        // leaves a later corner/contact-line patch free to add a two-wall closure.
+        if (!periodicY && iy < 0 && wallBottom) {
+            const int bx = max(0, min(nx - 1, ix));
+            const int by = 0;
+            const double a0 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, by, nx, ny, periodicX, periodicY);
+            const double gt = q6_contact_tangent_grad_x_0493x9j(
+                alpha, bx, by, nx, ny, dx, periodicX, periodicY);
+            const double a1 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, min(1, ny - 1), nx, ny, periodicX, periodicY);
+            const double gnRaw = ny > 1 ? (a0 - a1) / dy : 0.0;
+            const double gn = q6_contact_ghost_normal_gradient_0493x9j(
+                gt, gnRaw, contactAngleDegrees);
+            return a0 + gn * (static_cast<double>(-iy) * dy);
+        }
+        if (!periodicY && iy >= ny && wallTop) {
+            const int bx = max(0, min(nx - 1, ix));
+            const int by = ny - 1;
+            const double a0 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, by, nx, ny, periodicX, periodicY);
+            const double gt = q6_contact_tangent_grad_x_0493x9j(
+                alpha, bx, by, nx, ny, dx, periodicX, periodicY);
+            const double a1 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, max(0, ny - 2), nx, ny, periodicX, periodicY);
+            const double gnRaw = ny > 1 ? (a0 - a1) / dy : 0.0;
+            const double gn = q6_contact_ghost_normal_gradient_0493x9j(
+                gt, gnRaw, contactAngleDegrees);
+            return a0 + gn * (static_cast<double>(iy - (ny - 1)) * dy);
+        }
+        if (!periodicX && ix < 0 && wallLeft) {
+            const int bx = 0;
+            const int by = max(0, min(ny - 1, iy));
+            const double a0 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, by, nx, ny, periodicX, periodicY);
+            const double gt = q6_contact_tangent_grad_y_0493x9j(
+                alpha, bx, by, nx, ny, dy, periodicX, periodicY);
+            const double a1 = q6_contact_alpha_inside_0493x9j(
+                alpha, min(1, nx - 1), by, nx, ny, periodicX, periodicY);
+            const double gnRaw = nx > 1 ? (a0 - a1) / dx : 0.0;
+            const double gn = q6_contact_ghost_normal_gradient_0493x9j(
+                gt, gnRaw, contactAngleDegrees);
+            return a0 + gn * (static_cast<double>(-ix) * dx);
+        }
+        if (!periodicX && ix >= nx && wallRight) {
+            const int bx = nx - 1;
+            const int by = max(0, min(ny - 1, iy));
+            const double a0 = q6_contact_alpha_inside_0493x9j(
+                alpha, bx, by, nx, ny, periodicX, periodicY);
+            const double gt = q6_contact_tangent_grad_y_0493x9j(
+                alpha, bx, by, nx, ny, dy, periodicX, periodicY);
+            const double a1 = q6_contact_alpha_inside_0493x9j(
+                alpha, max(0, nx - 2), by, nx, ny, periodicX, periodicY);
+            const double gnRaw = nx > 1 ? (a0 - a1) / dx : 0.0;
+            const double gn = q6_contact_ghost_normal_gradient_0493x9j(
+                gt, gnRaw, contactAngleDegrees);
+            return a0 + gn * (static_cast<double>(ix - (nx - 1)) * dx);
+        }
+
+        // Non-wall nonperiodic edges keep the pre-x9j constant-extension contract.
+        return q6_contact_alpha_inside_0493x9j(
+            alpha, ix, iy, nx, ny, periodicX, periodicY);
+    }
+
+    // 0493x9k: sheared-mirror ghost-alpha extension for static domain walls.
+// For a ghost cell center, reflect the point across the physical wall into the
+// fluid and shift that mirror point tangentially so a locally planar alpha
+// level set satisfies nAB.nWall=-cos(theta).  Unlike x9j linear extrapolation,
+// every ghost depth samples a real interior p3 value, preserving the second-
+// derivative geometry needed by kappa=div(n).  Endpoints theta=0/180 are
+// deliberately outside the x9k contract.
+__device__ __forceinline__ double q6_contact_alpha_interp_0493x9k(
+    const double* alpha,
+    double fx,
+    double fy,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    if (nx <= 0 || ny <= 0) return 0.0;
+
+    double x = fx;
+    double y = fy;
+    if (!periodicX) x = fmax(0.0, fmin(static_cast<double>(nx - 1), x));
+    if (!periodicY) y = fmax(0.0, fmin(static_cast<double>(ny - 1), y));
+
+    const int ix0raw = static_cast<int>(floor(x));
+    const int iy0raw = static_cast<int>(floor(y));
+    const double tx = x - floor(x);
+    const double ty = y - floor(y);
+
+    const int ix0 = periodicX ? wrap_cell_index_0400(ix0raw, nx)
+                              : max(0, min(nx - 1, ix0raw));
+    const int iy0 = periodicY ? wrap_cell_index_0400(iy0raw, ny)
+                              : max(0, min(ny - 1, iy0raw));
+    const int ix1 = periodicX ? wrap_cell_index_0400(ix0raw + 1, nx)
+                              : max(0, min(nx - 1, ix0raw + 1));
+    const int iy1 = periodicY ? wrap_cell_index_0400(iy0raw + 1, ny)
+                              : max(0, min(ny - 1, iy0raw + 1));
+
+    const double a00 = alpha[iy0 * nx + ix0];
+    const double a10 = alpha[iy0 * nx + ix1];
+    const double a01 = alpha[iy1 * nx + ix0];
+    const double a11 = alpha[iy1 * nx + ix1];
+    const double ax0 = a00 + tx * (a10 - a00);
+    const double ax1 = a01 + tx * (a11 - a01);
+    return ax0 + ty * (ax1 - ax0);
+}
+
+__device__ __forceinline__ double q6_contact_shear_ratio_0493x9k(
+    double tangentialGradient,
+    double contactAngleDegrees) {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double theta = contactAngleDegrees * (pi / 180.0);
+    const double st = sin(theta);
+    const double ct = cos(theta);
+    if (!(contactAngleDegrees > 0.0 && contactAngleDegrees < 180.0) ||
+        fabs(st) < 1.0e-12 || fabs(tangentialGradient) < 1.0e-14) {
+        return 0.0;
+    }
+    const double signT = tangentialGradient > 0.0 ? 1.0 : -1.0;
+    // nAB=-grad(alpha)/|grad| and nAB.nWall=-cos(theta) imply
+    // g_n/|g|=cos(theta), while the raw tangent selects the branch sign.
+    return signT * (ct / st);
+}
+
+__device__ __forceinline__ double q6_contact_alpha_sample_0493x9k(
+    const double* alpha,
+    int ix,
+    int iy,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop,
+    double contactAngleDegrees) {
+    if (periodicX) ix = wrap_cell_index_0400(ix, nx);
+    if (periodicY) iy = wrap_cell_index_0400(iy, ny);
+    if (ix >= 0 && ix < nx && iy >= 0 && iy < ny) {
+        return alpha[iy * nx + ix];
+    }
+
+    // Corners remain outside the qualification scope.  As in x9j, prefer the
+    // y-wall if both coordinates are outside, then clamp/interpolate the
+    // tangential mirror coordinate deterministically.
+    if (!periodicY && iy < 0 && wallBottom) {
+        const int bx = max(0, min(nx - 1, ix));
+        const double gt = q6_contact_tangent_grad_x_0493x9j(
+            alpha, bx, 0, nx, ny, dx, periodicX, periodicY);
+        const double ratio = q6_contact_shear_ratio_0493x9k(gt, contactAngleDegrees);
+        const int layers = -iy;
+        const double normalSeparation = static_cast<double>(2 * layers - 1) * dy;
+        const double mirrorX = static_cast<double>(ix) + normalSeparation * ratio / dx;
+        const double mirrorY = static_cast<double>(-iy - 1);
+        return q6_contact_alpha_interp_0493x9k(
+            alpha, mirrorX, mirrorY, nx, ny, periodicX, periodicY);
+    }
+    if (!periodicY && iy >= ny && wallTop) {
+        const int bx = max(0, min(nx - 1, ix));
+        const double gt = q6_contact_tangent_grad_x_0493x9j(
+            alpha, bx, ny - 1, nx, ny, dx, periodicX, periodicY);
+        const double ratio = q6_contact_shear_ratio_0493x9k(gt, contactAngleDegrees);
+        const int layers = iy - ny + 1;
+        const double normalSeparation = static_cast<double>(2 * layers - 1) * dy;
+        const double mirrorX = static_cast<double>(ix) + normalSeparation * ratio / dx;
+        const double mirrorY = static_cast<double>(2 * ny - 1 - iy);
+        return q6_contact_alpha_interp_0493x9k(
+            alpha, mirrorX, mirrorY, nx, ny, periodicX, periodicY);
+    }
+    if (!periodicX && ix < 0 && wallLeft) {
+        const int by = max(0, min(ny - 1, iy));
+        const double gt = q6_contact_tangent_grad_y_0493x9j(
+            alpha, 0, by, nx, ny, dy, periodicX, periodicY);
+        const double ratio = q6_contact_shear_ratio_0493x9k(gt, contactAngleDegrees);
+        const int layers = -ix;
+        const double normalSeparation = static_cast<double>(2 * layers - 1) * dx;
+        const double mirrorX = static_cast<double>(-ix - 1);
+        const double mirrorY = static_cast<double>(iy) + normalSeparation * ratio / dy;
+        return q6_contact_alpha_interp_0493x9k(
+            alpha, mirrorX, mirrorY, nx, ny, periodicX, periodicY);
+    }
+    if (!periodicX && ix >= nx && wallRight) {
+        const int by = max(0, min(ny - 1, iy));
+        const double gt = q6_contact_tangent_grad_y_0493x9j(
+            alpha, nx - 1, by, nx, ny, dy, periodicX, periodicY);
+        const double ratio = q6_contact_shear_ratio_0493x9k(gt, contactAngleDegrees);
+        const int layers = ix - nx + 1;
+        const double normalSeparation = static_cast<double>(2 * layers - 1) * dx;
+        const double mirrorX = static_cast<double>(2 * nx - 1 - ix);
+        const double mirrorY = static_cast<double>(iy) + normalSeparation * ratio / dy;
+        return q6_contact_alpha_interp_0493x9k(
+            alpha, mirrorX, mirrorY, nx, ny, periodicX, periodicY);
+    }
+
+    return q6_contact_alpha_inside_0493x9j(
+        alpha, ix, iy, nx, ny, periodicX, periodicY);
+}
+
+__global__ void q6_filter_phase_alpha_curvature_contact_0493x9j(
+        const double* alpha,
+        double* alphaK,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees) {
+        const int n = nx * ny;
+        const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        const int stride = blockDim.x * gridDim.x;
+        for (int c = idx; c < n; c += stride) {
+            const int ix = c % nx;
+            const int iy = c / nx;
+            const double nw = q6_contact_alpha_sample_0493x9k(alpha, ix-1, iy+1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double nn = q6_contact_alpha_sample_0493x9k(alpha, ix,   iy+1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double ne = q6_contact_alpha_sample_0493x9k(alpha, ix+1, iy+1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double ww = q6_contact_alpha_sample_0493x9k(alpha, ix-1, iy, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double cc = alpha[c];
+            const double ee = q6_contact_alpha_sample_0493x9k(alpha, ix+1, iy, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double sw = q6_contact_alpha_sample_0493x9k(alpha, ix-1, iy-1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double ss = q6_contact_alpha_sample_0493x9k(alpha, ix,   iy-1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            const double se = q6_contact_alpha_sample_0493x9k(alpha, ix+1, iy-1, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+            alphaK[c] = (nw + 2.0*nn + ne + 2.0*ww + 4.0*cc + 2.0*ee +
+                         sw + 2.0*ss + se) * (1.0/16.0);
+        }
+    }
+
+    __device__ __forceinline__ void q6_contact_normal_from_alpha_0493x9j(
+        const double* alphaK,
+        int ix,
+        int iy,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees,
+        double* nxOut,
+        double* nyOut) {
+        const double nw = q6_contact_alpha_sample_0493x9k(alphaK, ix-1, iy+1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double nn = q6_contact_alpha_sample_0493x9k(alphaK, ix,   iy+1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double ne = q6_contact_alpha_sample_0493x9k(alphaK, ix+1, iy+1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double ww = q6_contact_alpha_sample_0493x9k(alphaK, ix-1, iy, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double ee = q6_contact_alpha_sample_0493x9k(alphaK, ix+1, iy, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double sw = q6_contact_alpha_sample_0493x9k(alphaK, ix-1, iy-1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double ss = q6_contact_alpha_sample_0493x9k(alphaK, ix,   iy-1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double se = q6_contact_alpha_sample_0493x9k(alphaK, ix+1, iy-1, nx, ny, dx, dy,
+            periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop, contactAngleDegrees);
+        const double gradX = (3.0*(ne-nw) + 10.0*(ee-ww) + 3.0*(se-sw)) / (32.0*dx);
+        const double gradY = (3.0*(nw-sw) + 10.0*(nn-ss) + 3.0*(ne-se)) / (32.0*dy);
+        const double g = sqrt(gradX*gradX + gradY*gradY);
+        if (g * fmin(dx,dy) > 1.0e-12) {
+            *nxOut = -gradX/g;
+            *nyOut = -gradY/g;
+        } else {
+            *nxOut = 0.0;
+            *nyOut = 0.0;
+        }
+    }
+
+    __global__ void q6_build_phase_normals_scharr_contact_0493x9j(
+        const double* alphaK,
+        double* normalX,
+        double* normalY,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees) {
+        const int n = nx * ny;
+        const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        const int stride = blockDim.x * gridDim.x;
+        for (int c=idx; c<n; c+=stride) {
+            const int ix=c%nx, iy=c/nx;
+            q6_contact_normal_from_alpha_0493x9j(alphaK, ix, iy, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop,
+                contactAngleDegrees, &normalX[c], &normalY[c]);
+        }
+    }
+
+    __device__ __forceinline__ void q6_contact_normal_sample_0493x9j(
+        const double* alphaK,
+        const double* normalX,
+        const double* normalY,
+        int ix,
+        int iy,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees,
+        double* nxOut,
+        double* nyOut) {
+        int qx=ix, qy=iy;
+        if (periodicX) qx=wrap_cell_index_0400(qx,nx);
+        if (periodicY) qy=wrap_cell_index_0400(qy,ny);
+        if (qx>=0 && qx<nx && qy>=0 && qy<ny) {
+            const int q=qy*nx+qx;
+            *nxOut=normalX[q]; *nyOut=normalY[q];
+            return;
+        }
+        const bool ghostWall = (!periodicX && ((qx<0 && wallLeft) || (qx>=nx && wallRight))) ||
+                               (!periodicY && ((qy<0 && wallBottom) || (qy>=ny && wallTop)));
+        if (ghostWall) {
+            q6_contact_normal_from_alpha_0493x9j(alphaK, qx, qy, nx, ny, dx, dy,
+                periodicX, periodicY, wallLeft, wallRight, wallBottom, wallTop,
+                contactAngleDegrees, nxOut, nyOut);
+            return;
+        }
+        qx=max(0,min(nx-1,qx)); qy=max(0,min(ny-1,qy));
+        const int q=qy*nx+qx;
+        *nxOut=normalX[q]; *nyOut=normalY[q];
+    }
+
+    __global__ void q6_build_phase_curvature_scharr_contact_0493x9j(
+        const double* alphaK,
+        const double* normalX,
+        const double* normalY,
+        double* curvature,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        int wallLeft,
+        int wallRight,
+        int wallBottom,
+        int wallTop,
+        double contactAngleDegrees) {
+        const int n=nx*ny;
+        const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+        const int stride=blockDim.x*gridDim.x;
+        for (int c=idx;c<n;c+=stride) {
+            const int ix=c%nx, iy=c/nx;
+            double nxNW,nyNW,nxN,nyN,nxNE,nyNE,nxW,nyW,nxE,nyE,nxSW,nySW,nxS,nyS,nxSE,nySE;
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix-1,iy+1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxNW,&nyNW);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix,iy+1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxN,&nyN);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix+1,iy+1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxNE,&nyNE);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix-1,iy,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxW,&nyW);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix+1,iy,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxE,&nyE);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix-1,iy-1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxSW,&nySW);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix,iy-1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxS,&nyS);
+            q6_contact_normal_sample_0493x9j(alphaK,normalX,normalY,ix+1,iy-1,nx,ny,dx,dy,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&nxSE,&nySE);
+            const double dnxDx=(3.0*(nxNE-nxNW)+10.0*(nxE-nxW)+3.0*(nxSE-nxSW))/(32.0*dx);
+            const double dnyDy=(3.0*(nyNW-nySW)+10.0*(nyN-nyS)+3.0*(nyNE-nySE))/(32.0*dy);
+            curvature[c]=dnxDx+dnyDy;
+        }
+    }
+
+    __device__ __forceinline__ void q6_contact_standard_normal_0493x9j(
+        const double* alphaK, int ix, int iy, int nx, int ny, double dx, double dy,
+        int periodicX, int periodicY, double* nxOut, double* nyOut) {
+        const double nw=alphaK[q6_contact_index_0493x9i(ix-1,iy+1,nx,ny,periodicX,periodicY)];
+        const double nn=alphaK[q6_contact_index_0493x9i(ix,iy+1,nx,ny,periodicX,periodicY)];
+        const double ne=alphaK[q6_contact_index_0493x9i(ix+1,iy+1,nx,ny,periodicX,periodicY)];
+        const double ww=alphaK[q6_contact_index_0493x9i(ix-1,iy,nx,ny,periodicX,periodicY)];
+        const double ee=alphaK[q6_contact_index_0493x9i(ix+1,iy,nx,ny,periodicX,periodicY)];
+        const double sw=alphaK[q6_contact_index_0493x9i(ix-1,iy-1,nx,ny,periodicX,periodicY)];
+        const double ss=alphaK[q6_contact_index_0493x9i(ix,iy-1,nx,ny,periodicX,periodicY)];
+        const double se=alphaK[q6_contact_index_0493x9i(ix+1,iy-1,nx,ny,periodicX,periodicY)];
+        const double gx=(3.0*(ne-nw)+10.0*(ee-ww)+3.0*(se-sw))/(32.0*dx);
+        const double gy=(3.0*(nw-sw)+10.0*(nn-ss)+3.0*(ne-se))/(32.0*dy);
+        const double g=sqrt(gx*gx+gy*gy);
+        if (g*fmin(dx,dy)>1.0e-12) {*nxOut=-gx/g; *nyOut=-gy/g;}
+        else {*nxOut=0.0; *nyOut=0.0;}
+    }
+
+    __global__ void q6_contact_angle_ghost_normal_audit_0493x9j(
+        const double* alphaPhysical,
+        const double* alphaK,
+        const double* wallNormalX,
+        const double* wallNormalY,
+        const double* phaseNormalX,
+        const double* phaseNormalY,
+        ContactAngleAccumulator0493x9i* accum,
+        int nx,
+        int ny,
+        double dx,
+        double dy,
+        int periodicX,
+        int periodicY,
+        double contactAngleDegrees) {
+        const int n=nx*ny;
+        const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+        const int stride=blockDim.x*gridDim.x;
+        constexpr double pi=3.141592653589793238462643383279502884;
+        const double targetDot=-cos(contactAngleDegrees*(pi/180.0));
+        unsigned long long candidateLocal=0ull, correctedLocal=0ull;
+        double rawAngleSumLocal=0.0, correctedAngleSumLocal=0.0, angleErrSqLocal=0.0, dotErrSqLocal=0.0;
+        for (int c=idx;c<n;c+=stride) {
+            const int ix=c%nx, iy=c/nx;
+            const double nwx=wallNormalX[c], nwy=wallNormalY[c];
+            const double wg=sqrt(nwx*nwx+nwy*nwy);
+            if (!(wg>0.5)) continue;
+            if (!q6_contact_interface_band_0493x9i(alphaPhysical,ix,iy,nx,ny,periodicX,periodicY)) continue;
+            double rx=0.0, ry=0.0;
+            q6_contact_standard_normal_0493x9j(alphaK,ix,iy,nx,ny,dx,dy,periodicX,periodicY,&rx,&ry);
+            const double rg=sqrt(rx*rx+ry*ry);
+            const double gx=phaseNormalX[c], gy=phaseNormalY[c];
+            const double gg=sqrt(gx*gx+gy*gy);
+            if (!(rg>0.5) || !(gg>0.5)) continue;
+            ++candidateLocal; ++correctedLocal;
+            const double wx=nwx/wg, wy=nwy/wg;
+            const double rawDot=fmax(-1.0,fmin(1.0,(rx*wx+ry*wy)/rg));
+            const double ghostDot=fmax(-1.0,fmin(1.0,(gx*wx+gy*wy)/gg));
+            const double rawAngle=acos(fmax(-1.0,fmin(1.0,-rawDot)))*(180.0/pi);
+            const double ghostAngle=acos(fmax(-1.0,fmin(1.0,-ghostDot)))*(180.0/pi);
+            rawAngleSumLocal+=rawAngle; correctedAngleSumLocal+=ghostAngle;
+            const double ae=ghostAngle-contactAngleDegrees;
+            const double de=ghostDot-targetDot;
+            angleErrSqLocal+=ae*ae; dotErrSqLocal+=de*de;
+        }
+        if (candidateLocal) atomicAdd(&accum->candidateCells,candidateLocal);
+        if (correctedLocal) atomicAdd(&accum->correctedCells,correctedLocal);
+        if (rawAngleSumLocal!=0.0) atomic_add_double_0400(&accum->rawAngleSum,rawAngleSumLocal);
+        if (correctedAngleSumLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleSum,correctedAngleSumLocal);
+        if (angleErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleErrorSqSum,angleErrSqLocal);
+        if (dotErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedDotErrorSqSum,dotErrSqLocal);
+    }
+
+    // 0493x9l: impose the Young angle at the physical wall face, not at the
+// first cell centre.  Let n2 be the unmodified p3 normal one full cell farther
+// into the fluid (s=3h/2).  The target wall-face normal is nWface at s=0.
+// Interpolate the normal angle linearly: n0 at s=h/2 uses +1/3 of the signed
+// rotation nWface->n2, while the ghost at s=-h/2 uses -1/3.  This keeps |n|=1
+// and makes the face value exactly the prescribed contact angle without
+// shearing or extrapolating the scalar alpha field.
+__device__ __forceinline__ bool q6_contact_wall_frame_0493x9l(
+    const double* wallNormalX,
+    const double* wallNormalY,
+    int bx,
+    int by,
+    int nx,
+    int ny,
+    double* wx,
+    double* wy,
+    int* sxIn,
+    int* syIn) {
+    if (bx < 0 || bx >= nx || by < 0 || by >= ny) return false;
+    const int c = by*nx + bx;
+    const double x = wallNormalX[c], y = wallNormalY[c];
+    const double g = sqrt(x*x + y*y);
+    if (!(g > 0.5)) return false;
+    const double ux=x/g, uy=y/g;
+    int sx=0, sy=0;
+    if (fabs(ux) > 0.9 && fabs(uy) < 0.2) sx = ux > 0.0 ? -1 : 1;
+    else if (fabs(uy) > 0.9 && fabs(ux) < 0.2) sy = uy > 0.0 ? -1 : 1;
+    else return false; // domain-wall corners are outside the qualification scope
+    const int ix2=bx+sx, iy2=by+sy;
+    if (ix2 < 0 || ix2 >= nx || iy2 < 0 || iy2 >= ny) return false;
+    *wx=ux; *wy=uy; *sxIn=sx; *syIn=sy;
+    return true;
+}
+
+__device__ __forceinline__ bool q6_contact_wall_target_0493x9l(
+    double wx,
+    double wy,
+    double refx,
+    double refy,
+    double contactAngleDegrees,
+    double* txOut,
+    double* tyOut) {
+    constexpr double pi=3.141592653589793238462643383279502884;
+    if (!(contactAngleDegrees > 0.0 && contactAngleDegrees < 180.0)) return false;
+    const double rg=sqrt(refx*refx+refy*refy);
+    if (!(rg > 0.5)) return false;
+    refx/=rg; refy/=rg;
+    const double theta=contactAngleDegrees*(pi/180.0);
+    const double targetDot=-cos(theta);
+    const double tangentMagnitude=sin(theta);
+    const double tx=-wy, ty=wx;
+    const double tangential=refx*tx+refy*ty;
+    const double signT=tangential < 0.0 ? -1.0 : 1.0;
+    double nx=targetDot*wx+signT*tangentMagnitude*tx;
+    double ny=targetDot*wy+signT*tangentMagnitude*ty;
+    const double ng=sqrt(nx*nx+ny*ny);
+    if (!(ng > 1.0e-14)) return false;
+    *txOut=nx/ng; *tyOut=ny/ng;
+    return true;
+}
+
+__device__ __forceinline__ void q6_contact_rotate_fraction_0493x9l(
+    double baseX,
+    double baseY,
+    double refX,
+    double refY,
+    double fraction,
+    double* nxOut,
+    double* nyOut) {
+    const double rg=sqrt(refX*refX+refY*refY);
+    if (!(rg > 0.5)) { *nxOut=baseX; *nyOut=baseY; return; }
+    refX/=rg; refY/=rg;
+    const double dot=fmax(-1.0,fmin(1.0,baseX*refX+baseY*refY));
+    const double cross=baseX*refY-baseY*refX;
+    const double delta=atan2(cross,dot);
+    const double a=fraction*delta;
+    const double ca=cos(a), sa=sin(a);
+    *nxOut=ca*baseX-sa*baseY;
+    *nyOut=sa*baseX+ca*baseY;
+}
+
+__global__ void q6_apply_contact_angle_wallface_normals_0493x9l(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    double* phaseNormalX,
+    double* phaseNormalY,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    double contactAngleDegrees) {
+    const int n=nx*ny;
+    const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+    const int stride=blockDim.x*gridDim.x;
+    for (int c=idx;c<n;c+=stride) {
+        const int ix=c%nx, iy=c/nx;
+        if (!q6_contact_interface_band_0493x9i(alphaPhysical,ix,iy,nx,ny,periodicX,periodicY)) continue;
+        double wx=0.0,wy=0.0; int sx=0,sy=0;
+        if (!q6_contact_wall_frame_0493x9l(wallNormalX,wallNormalY,ix,iy,nx,ny,&wx,&wy,&sx,&sy)) continue;
+        const int c2=(iy+sy)*nx+(ix+sx);
+        const double n2x=phaseNormalX[c2], n2y=phaseNormalY[c2];
+        double wallX=0.0,wallY=0.0;
+        if (!q6_contact_wall_target_0493x9l(wx,wy,n2x,n2y,contactAngleDegrees,&wallX,&wallY)) continue;
+        double n0x=0.0,n0y=0.0;
+        q6_contact_rotate_fraction_0493x9l(wallX,wallY,n2x,n2y,1.0/3.0,&n0x,&n0y);
+        phaseNormalX[c]=n0x; phaseNormalY[c]=n0y;
+    }
+}
+
+__device__ __forceinline__ void q6_contact_wallface_normal_sample_0493x9l(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    const double* normalX,
+    const double* normalY,
+    int ix,
+    int iy,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop,
+    double contactAngleDegrees,
+    double* nxOut,
+    double* nyOut) {
+    int qx=ix,qy=iy;
+    if (periodicX) qx=wrap_cell_index_0400(qx,nx);
+    if (periodicY) qy=wrap_cell_index_0400(qy,ny);
+    if (qx>=0 && qx<nx && qy>=0 && qy<ny) {
+        const int q=qy*nx+qx; *nxOut=normalX[q]; *nyOut=normalY[q]; return;
+    }
+    int bx=qx,by=qy;
+    if (!periodicY && qy<0 && wallBottom) by=0;
+    else if (!periodicY && qy>=ny && wallTop) by=ny-1;
+    else if (!periodicX && qx<0 && wallLeft) bx=0;
+    else if (!periodicX && qx>=nx && wallRight) bx=nx-1;
+    else {
+        bx=max(0,min(nx-1,bx)); by=max(0,min(ny-1,by));
+        const int q=by*nx+bx; *nxOut=normalX[q]; *nyOut=normalY[q]; return;
+    }
+    bx=max(0,min(nx-1,bx)); by=max(0,min(ny-1,by));
+    const int b=by*nx+bx;
+    if (!q6_contact_interface_band_0493x9i(alphaPhysical,bx,by,nx,ny,periodicX,periodicY)) {
+        *nxOut=normalX[b]; *nyOut=normalY[b]; return;
+    }
+    double wx=0.0,wy=0.0; int sx=0,sy=0;
+    if (!q6_contact_wall_frame_0493x9l(wallNormalX,wallNormalY,bx,by,nx,ny,&wx,&wy,&sx,&sy)) {
+        *nxOut=normalX[b]; *nyOut=normalY[b]; return;
+    }
+    const int c2=(by+sy)*nx+(bx+sx);
+    const double n2x=normalX[c2], n2y=normalY[c2];
+    double wallX=0.0,wallY=0.0;
+    if (!q6_contact_wall_target_0493x9l(wx,wy,n2x,n2y,contactAngleDegrees,&wallX,&wallY)) {
+        *nxOut=normalX[b]; *nyOut=normalY[b]; return;
+    }
+    q6_contact_rotate_fraction_0493x9l(wallX,wallY,n2x,n2y,-1.0/3.0,nxOut,nyOut);
+}
+
+__global__ void q6_build_phase_curvature_wallface_0493x9l(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    const double* normalX,
+    const double* normalY,
+    double* curvature,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    int wallLeft,
+    int wallRight,
+    int wallBottom,
+    int wallTop,
+    double contactAngleDegrees) {
+    const int n=nx*ny;
+    const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+    const int stride=blockDim.x*gridDim.x;
+    for (int c=idx;c<n;c+=stride) {
+        const int ix=c%nx, iy=c/nx;
+        double nxNW,nyNW,nxN,nyN,nxNE,nyNE,nxW,nyW,nxE,nyE,nxSW,nySW,nxS,nyS,nxSE,nySE;
+#define X9L_NS(X,Y,NX,NY) q6_contact_wallface_normal_sample_0493x9l(alphaPhysical,wallNormalX,wallNormalY,normalX,normalY,(X),(Y),nx,ny,periodicX,periodicY,wallLeft,wallRight,wallBottom,wallTop,contactAngleDegrees,&(NX),&(NY))
+        X9L_NS(ix-1,iy+1,nxNW,nyNW); X9L_NS(ix,iy+1,nxN,nyN); X9L_NS(ix+1,iy+1,nxNE,nyNE);
+        X9L_NS(ix-1,iy,nxW,nyW);                                   X9L_NS(ix+1,iy,nxE,nyE);
+        X9L_NS(ix-1,iy-1,nxSW,nySW); X9L_NS(ix,iy-1,nxS,nyS); X9L_NS(ix+1,iy-1,nxSE,nySE);
+#undef X9L_NS
+        const double dnxDx=(3.0*(nxNE-nxNW)+10.0*(nxE-nxW)+3.0*(nxSE-nxSW))/(32.0*dx);
+        const double dnyDy=(3.0*(nyNW-nySW)+10.0*(nyN-nyS)+3.0*(nyNE-nySE))/(32.0*dy);
+        curvature[c]=dnxDx+dnyDy;
+    }
+}
+
+__global__ void q6_contact_angle_wallface_audit_0493x9l(
+    const double* alphaPhysical,
+    const double* alphaK,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    const double* phaseNormalX,
+    const double* phaseNormalY,
+    ContactAngleAccumulator0493x9i* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double contactAngleDegrees) {
+    const int n=nx*ny;
+    const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+    const int stride=blockDim.x*gridDim.x;
+    constexpr double pi=3.141592653589793238462643383279502884;
+    const double targetDot=-cos(contactAngleDegrees*(pi/180.0));
+    unsigned long long candidateLocal=0ull, correctedLocal=0ull;
+    double rawAngleSumLocal=0.0, correctedAngleSumLocal=0.0, angleErrSqLocal=0.0, dotErrSqLocal=0.0;
+    for (int c=idx;c<n;c+=stride) {
+        const int ix=c%nx, iy=c/nx;
+        if (!q6_contact_interface_band_0493x9i(alphaPhysical,ix,iy,nx,ny,periodicX,periodicY)) continue;
+        double wx=0.0,wy=0.0; int sx=0,sy=0;
+        if (!q6_contact_wall_frame_0493x9l(wallNormalX,wallNormalY,ix,iy,nx,ny,&wx,&wy,&sx,&sy)) continue;
+        double rx=0.0,ry=0.0;
+        q6_contact_standard_normal_0493x9j(alphaK,ix,iy,nx,ny,dx,dy,periodicX,periodicY,&rx,&ry);
+        const double rg=sqrt(rx*rx+ry*ry);
+        if (!(rg>0.5)) continue;
+        ++candidateLocal;
+        const double rawDot=fmax(-1.0,fmin(1.0,(rx*wx+ry*wy)/rg));
+        rawAngleSumLocal+=acos(fmax(-1.0,fmin(1.0,-rawDot)))*(180.0/pi);
+        const int c2=(iy+sy)*nx+(ix+sx);
+        const double n2x=phaseNormalX[c2], n2y=phaseNormalY[c2];
+        double wallX=0.0,wallY=0.0;
+        if (!q6_contact_wall_target_0493x9l(wx,wy,n2x,n2y,contactAngleDegrees,&wallX,&wallY)) continue;
+        double ghostX=0.0,ghostY=0.0;
+        q6_contact_rotate_fraction_0493x9l(wallX,wallY,n2x,n2y,-1.0/3.0,&ghostX,&ghostY);
+        const double n0x=phaseNormalX[c], n0y=phaseNormalY[c];
+        double fx=n0x+ghostX, fy=n0y+ghostY;
+        const double fg=sqrt(fx*fx+fy*fy);
+        if (!(fg>1.0e-14)) continue;
+        fx/=fg; fy/=fg;
+        const double dot=fmax(-1.0,fmin(1.0,fx*wx+fy*wy));
+        const double measured=acos(fmax(-1.0,fmin(1.0,-dot)))*(180.0/pi);
+        ++correctedLocal;
+        correctedAngleSumLocal+=measured;
+        const double ae=measured-contactAngleDegrees, de=dot-targetDot;
+        angleErrSqLocal+=ae*ae; dotErrSqLocal+=de*de;
+    }
+    if (candidateLocal) atomicAdd(&accum->candidateCells,candidateLocal);
+    if (correctedLocal) atomicAdd(&accum->correctedCells,correctedLocal);
+    if (rawAngleSumLocal!=0.0) atomic_add_double_0400(&accum->rawAngleSum,rawAngleSumLocal);
+    if (correctedAngleSumLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleSum,correctedAngleSumLocal);
+    if (angleErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleErrorSqSum,angleErrSqLocal);
+    if (dotErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedDotErrorSqSum,dotErrSqLocal);
+}
+
+// 0493x9m off-support anchor.  Three binomial 3x3 passes plus the
+// Scharr normal use a radius-four scalar support, so layer j=4 (centre 4.5h)
+// is the first raw p3 normal independent of virtual samples behind the wall.
+// For a circular arc, two endpoint normals separated by chord length L obey
+// kappa = 2 sin(DeltaPhi/2)/L.  x9m uses this as the wall-contact curvature
+// closure; no scalar or normal field is overwritten.
+__device__ __forceinline__ bool q6_contact_find_tangent_crossing_0493x9m(
+    const double* alphaPhysical,
+    int bx,
+    int by,
+    int sx,
+    int sy,
+    int layer,
+    double predictedOffset,
+    int searchRadius,
+    int nx,
+    int ny,
+    double* crossingOffsetOut) {
+    const int txi=sy, tyi=-sx; // t_w=(-nWall_y,nWall_x)
+    bool found=false;
+    double best=1.0e300, bestOffset=0.0;
+    for (int off=-searchRadius; off<searchRadius; ++off) {
+        const int x0=bx+layer*sx+off*txi;
+        const int y0=by+layer*sy+off*tyi;
+        const int x1=bx+layer*sx+(off+1)*txi;
+        const int y1=by+layer*sy+(off+1)*tyi;
+        if (x0<0 || x0>=nx || y0<0 || y0>=ny ||
+            x1<0 || x1>=nx || y1<0 || y1>=ny) continue;
+        const double a0=fmin(1.0,fmax(0.0,alphaPhysical[y0*nx+x0]));
+        const double a1=fmin(1.0,fmax(0.0,alphaPhysical[y1*nx+x1]));
+        const bool crossing=(a0<0.5 && a1>=0.5) || (a1<0.5 && a0>=0.5);
+        if (!crossing || fabs(a1-a0)<1.0e-14) continue;
+        const double f=(0.5-a0)/(a1-a0);
+        if (!(f>=0.0 && f<=1.0)) continue;
+        const double pos=static_cast<double>(off)+f;
+        const double score=fabs(pos-predictedOffset);
+        if (!found || score<best) { found=true; best=score; bestOffset=pos; }
+    }
+    if (!found) return false;
+    *crossingOffsetOut=bestOffset;
+    return true;
+}
+
+__device__ __forceinline__ bool q6_contact_interp_anchor_normal_0493x9m(
+    const double* normalX,
+    const double* normalY,
+    int bx,
+    int by,
+    int sx,
+    int sy,
+    int layer,
+    double crossingOffset,
+    int nx,
+    int ny,
+    double* nxOut,
+    double* nyOut) {
+    const int txi=sy, tyi=-sx;
+    const int off0=static_cast<int>(floor(crossingOffset));
+    const double f=crossingOffset-static_cast<double>(off0);
+    const int x0=bx+layer*sx+off0*txi;
+    const int y0=by+layer*sy+off0*tyi;
+    const int x1=bx+layer*sx+(off0+1)*txi;
+    const int y1=by+layer*sy+(off0+1)*tyi;
+    if (x0<0 || x0>=nx || y0<0 || y0>=ny ||
+        x1<0 || x1>=nx || y1<0 || y1>=ny) return false;
+    double vx=(1.0-f)*normalX[y0*nx+x0]+f*normalX[y1*nx+x1];
+    double vy=(1.0-f)*normalY[y0*nx+x0]+f*normalY[y1*nx+x1];
+    const double g=sqrt(vx*vx+vy*vy);
+    if (!(g>0.5)) return false;
+    *nxOut=vx/g; *nyOut=vy/g;
+    return true;
+}
+
+__device__ __forceinline__ bool q6_contact_offsupport_secant_0493x9m(
+    const double* alphaPhysical,
+    const double* normalX,
+    const double* normalY,
+    double wx,
+    double wy,
+    int sx,
+    int sy,
+    int bx,
+    int by,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    double contactAngleDegrees,
+    double* wallNXOut,
+    double* wallNYOut,
+    double* curvatureOut) {
+    constexpr int anchorLayer=4;
+    constexpr double pi=3.141592653589793238462643383279502884;
+    if (!(contactAngleDegrees>0.0 && contactAngleDegrees<180.0)) return false;
+    const int b=by*nx+bx;
+    const double brx=normalX[b], bry=normalY[b];
+    if (!(sqrt(brx*brx+bry*bry)>0.5)) return false;
+    double wallNX=0.0,wallNY=0.0;
+    if (!q6_contact_wall_target_0493x9l(
+            wx,wy,brx,bry,contactAngleDegrees,&wallNX,&wallNY)) return false;
+    const double theta=contactAngleDegrees*(pi/180.0);
+    const double st=sin(theta), ct=cos(theta);
+    if (!(fabs(st)>1.0e-12)) return false;
+    const double hNormal=(sx!=0) ? dx : dy;
+    const double hTangent=(sx!=0) ? dy : dx;
+    if (!(hNormal>0.0) || !(hTangent>0.0)) return false;
+    const int txi=sy, tyi=-sx;
+    const double signT=(wallNX*static_cast<double>(txi)+wallNY*static_cast<double>(tyi))<0.0 ? -1.0 : 1.0;
+    const double cotTheta=ct/st;
+    const double ratio=hNormal/hTangent;
+
+    // First locate the alpha=0.5 crossing in the boundary cell-centre layer.
+    // Project that crossing by half a normal cell back to the physical wall face.
+    double row0Cross=0.0;
+    if (!q6_contact_find_tangent_crossing_0493x9m(
+            alphaPhysical,bx,by,sx,sy,0,0.0,6,nx,ny,&row0Cross)) return false;
+    const double wallCross=row0Cross+signT*0.5*ratio*cotTheta;
+
+    // Predict the interface position at the clean anchor layer and snap to the
+    // nearest physical alpha=0.5 crossing there.  This avoids anchoring in bulk
+    // for shallow angles such as 30/150 degrees.
+    const double anchorPred=wallCross-signT*(anchorLayer+0.5)*ratio*cotTheta;
+    const int searchRadius=min(48,max(8,static_cast<int>(ceil(fabs(anchorPred)))+8));
+    double anchorCross=0.0;
+    if (!q6_contact_find_tangent_crossing_0493x9m(
+            alphaPhysical,bx,by,sx,sy,anchorLayer,anchorPred,searchRadius,
+            nx,ny,&anchorCross)) return false;
+    double anchorNX=0.0,anchorNY=0.0;
+    if (!q6_contact_interp_anchor_normal_0493x9m(
+            normalX,normalY,bx,by,sx,sy,anchorLayer,anchorCross,
+            nx,ny,&anchorNX,&anchorNY)) return false;
+
+    const double dt=(anchorCross-wallCross)*hTangent;
+    const double dn=(anchorLayer+0.5)*hNormal;
+    const double chordX=dt*static_cast<double>(txi)+dn*static_cast<double>(sx);
+    const double chordY=dt*static_cast<double>(tyi)+dn*static_cast<double>(sy);
+    const double chord=sqrt(chordX*chordX+chordY*chordY);
+    if (!(chord>1.0e-14)) return false;
+    const double dot=fmax(-1.0,fmin(1.0,wallNX*anchorNX+wallNY*anchorNY));
+    const double cross=wallNX*anchorNY-wallNY*anchorNX;
+    const double delta=atan2(cross,dot);
+    const double tangent0X=-wallNY, tangent0Y=wallNX;
+    const double orientDot=chordX*tangent0X+chordY*tangent0Y;
+    if (!(fabs(orientDot)>1.0e-14)) return false;
+    const double orient=orientDot>=0.0 ? 1.0 : -1.0;
+    const double kappa=2.0*sin(0.5*delta)/(orient*chord);
+    if (!isfinite(kappa)) return false;
+    *wallNXOut=wallNX; *wallNYOut=wallNY; *curvatureOut=kappa;
+    return true;
+}
+
+__global__ void q6_apply_contact_angle_offsupport_curvature_0493x9m(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    const double* phaseNormalX,
+    const double* phaseNormalY,
+    double* curvature,
+    ContactAngleAccumulator0493x9i* accum,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double contactAngleDegrees) {
+    const int n=nx*ny;
+    const int idx=blockIdx.x*blockDim.x+threadIdx.x;
+    const int stride=blockDim.x*gridDim.x;
+    constexpr double pi=3.141592653589793238462643383279502884;
+    const double targetDot=-cos(contactAngleDegrees*(pi/180.0));
+    unsigned long long candidateLocal=0ull, correctedLocal=0ull;
+    double rawAngleSumLocal=0.0, correctedAngleSumLocal=0.0, angleErrSqLocal=0.0, dotErrSqLocal=0.0;
+    for (int c=idx;c<n;c+=stride) {
+        const int ix=c%nx, iy=c/nx;
+        if (!q6_contact_interface_band_0493x9i(
+                alphaPhysical,ix,iy,nx,ny,periodicX,periodicY)) continue;
+        double wx=0.0,wy=0.0; int sx=0,sy=0;
+        if (!q6_contact_wall_frame_0493x9l(
+                wallNormalX,wallNormalY,ix,iy,nx,ny,&wx,&wy,&sx,&sy)) continue;
+        const double rx=phaseNormalX[c], ry=phaseNormalY[c];
+        const double rg=sqrt(rx*rx+ry*ry);
+        if (!(rg>0.5)) continue;
+        ++candidateLocal;
+        const double rawDot=fmax(-1.0,fmin(1.0,(rx*wx+ry*wy)/rg));
+        rawAngleSumLocal+=acos(fmax(-1.0,fmin(1.0,-rawDot)))*(180.0/pi);
+        double wallNX=0.0,wallNY=0.0,kappa=0.0;
+        if (!q6_contact_offsupport_secant_0493x9m(
+                alphaPhysical,phaseNormalX,phaseNormalY,wx,wy,sx,sy,ix,iy,
+                nx,ny,dx,dy,contactAngleDegrees,&wallNX,&wallNY,&kappa)) continue;
+        curvature[c]=kappa;
+        const double dot=fmax(-1.0,fmin(1.0,wallNX*wx+wallNY*wy));
+        const double measured=acos(fmax(-1.0,fmin(1.0,-dot)))*(180.0/pi);
+        ++correctedLocal;
+        correctedAngleSumLocal+=measured;
+        const double ae=measured-contactAngleDegrees, de=dot-targetDot;
+        angleErrSqLocal+=ae*ae; dotErrSqLocal+=de*de;
+    }
+    if (candidateLocal) atomicAdd(&accum->candidateCells,candidateLocal);
+    if (correctedLocal) atomicAdd(&accum->correctedCells,correctedLocal);
+    if (rawAngleSumLocal!=0.0) atomic_add_double_0400(&accum->rawAngleSum,rawAngleSumLocal);
+    if (correctedAngleSumLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleSum,correctedAngleSumLocal);
+    if (angleErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedAngleErrorSqSum,angleErrSqLocal);
+    if (dotErrSqLocal!=0.0) atomic_add_double_0400(&accum->correctedDotErrorSqSum,dotErrSqLocal);
+}
+
+__global__ void q6_apply_contact_angle_normals_0493x9i(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    double* phaseNormalX,
+    double* phaseNormalY,
+    ContactAngleAccumulator0493x9i* accum,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY,
+    double contactAngleDegrees) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    const double theta = contactAngleDegrees * (pi / 180.0);
+    const double targetDot = -cos(theta);
+    const double tangentMagnitude = sqrt(fmax(0.0, 1.0 - targetDot * targetDot));
+    unsigned long long candidateLocal = 0ull;
+    unsigned long long correctedLocal = 0ull;
+    double rawAngleSumLocal = 0.0;
+    double correctedAngleSumLocal = 0.0;
+    double angleErrSqLocal = 0.0;
+    double dotErrSqLocal = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double nwx = wallNormalX[c];
+        const double nwy = wallNormalY[c];
+        const double wg = sqrt(nwx*nwx + nwy*nwy);
+        if (!(wg > 0.5)) continue;
+        if (!q6_contact_interface_band_0493x9i(
+                alphaPhysical, ix, iy, nx, ny, periodicX, periodicY)) continue;
+        const double rx = phaseNormalX[c];
+        const double ry = phaseNormalY[c];
+        const double rg = sqrt(rx*rx + ry*ry);
+        if (!(rg > 0.5)) continue;
+        ++candidateLocal;
+        const double wx = nwx / wg;
+        const double wy = nwy / wg;
+        const double rnx = rx / rg;
+        const double rny = ry / rg;
+        const double rawDot = fmax(-1.0, fmin(1.0, rnx*wx + rny*wy));
+        const double rawAngle = acos(fmax(-1.0, fmin(1.0, -rawDot))) * (180.0/pi);
+        rawAngleSumLocal += rawAngle;
+        const double tx = -wy;
+        const double ty = wx;
+        const double tangentialRaw = rnx*tx + rny*ty;
+        const double signT = tangentialRaw < 0.0 ? -1.0 : 1.0;
+        double nxNew = targetDot*wx + signT*tangentMagnitude*tx;
+        double nyNew = targetDot*wy + signT*tangentMagnitude*ty;
+        const double ng = sqrt(nxNew*nxNew + nyNew*nyNew);
+        if (!(ng > 1.0e-14)) continue;
+        nxNew /= ng;
+        nyNew /= ng;
+        phaseNormalX[c] = nxNew;
+        phaseNormalY[c] = nyNew;
+        ++correctedLocal;
+        const double dot = fmax(-1.0, fmin(1.0, nxNew*wx + nyNew*wy));
+        const double measuredAngle = acos(fmax(-1.0, fmin(1.0, -dot))) * (180.0/pi);
+        correctedAngleSumLocal += measuredAngle;
+        const double ae = measuredAngle - contactAngleDegrees;
+        const double de = dot - targetDot;
+        angleErrSqLocal += ae*ae;
+        dotErrSqLocal += de*de;
+    }
+    if (candidateLocal) atomicAdd(&accum->candidateCells, candidateLocal);
+    if (correctedLocal) atomicAdd(&accum->correctedCells, correctedLocal);
+    if (rawAngleSumLocal != 0.0) atomic_add_double_0400(&accum->rawAngleSum, rawAngleSumLocal);
+    if (correctedAngleSumLocal != 0.0) atomic_add_double_0400(&accum->correctedAngleSum, correctedAngleSumLocal);
+    if (angleErrSqLocal != 0.0) atomic_add_double_0400(&accum->correctedAngleErrorSqSum, angleErrSqLocal);
+    if (dotErrSqLocal != 0.0) atomic_add_double_0400(&accum->correctedDotErrorSqSum, dotErrSqLocal);
+}
+
+__global__ void q6_contact_angle_curvature_audit_0493x9i(
+    const double* alphaPhysical,
+    const double* wallNormalX,
+    const double* wallNormalY,
+    const double* curvature,
+    ContactAngleAccumulator0493x9i* accum,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    unsigned long long countLocal = 0ull;
+    double sumLocal = 0.0;
+    double sqLocal = 0.0;
+    for (int c = idx; c < n; c += stride) {
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const double wg = sqrt(wallNormalX[c]*wallNormalX[c] + wallNormalY[c]*wallNormalY[c]);
+        if (!(wg > 0.5)) continue;
+        if (!q6_contact_interface_band_0493x9i(
+                alphaPhysical, ix, iy, nx, ny, periodicX, periodicY)) continue;
+        const double k = curvature[c];
+        if (!isfinite(k)) continue;
+        ++countLocal;
+        sumLocal += k;
+        sqLocal += k*k;
+    }
+    if (countLocal) atomicAdd(&accum->curvatureCells, countLocal);
+    if (sumLocal != 0.0) atomic_add_double_0400(&accum->curvatureSum, sumLocal);
+    if (sqLocal != 0.0) atomic_add_double_0400(&accum->curvatureSqSum, sqLocal);
 }
 
 __global__ void q6_build_phase_fill_resident_0493x6c(
@@ -5287,6 +6736,7 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     const double* gasPressurePotential0493x6g,
     const double* capillaryCurvature0493x9d,
     double capillaryPotentialScale0493x9d,
+    double capillaryKappaMax0493x9r,
     double* facePhiGammaX0493x6g,
     double* facePhiGammaY0493x6g,
     int useGasPressure0493x6g,
@@ -5311,6 +6761,10 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     unsigned long long truncationLocal = 0ull;
     unsigned long long uncoveredLocal = 0ull;
     unsigned long long nonzeroPressureLocal0493x6g = 0ull;
+    unsigned long long capillaryFacesLocal0493x9r = 0ull;
+    unsigned long long capillaryClippedLocal0493x9r = 0ull;
+    double capillaryKappaRawAbsMaxLocal0493x9r = 0.0;
+    double capillaryKappaEffectiveAbsMaxLocal0493x9r = 0.0;
     double thetaMinLocal = 1.0;
     double thetaMaxLocal = 0.0;
     double thetaSumLocal = 0.0;
@@ -5373,12 +6827,30 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                         if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
                             const int highCell = cHigh ? c : east;
                             const int lowCell = cHigh ? east : c;
-                            const double kappaGamma =
+                            const double kappaGammaRaw0493x9r =
                                 (1.0 - theta) * capillaryCurvature0493x9d[highCell] +
                                 theta * capillaryCurvature0493x9d[lowCell];
-                            if (isfinite(kappaGamma)) {
-                                phiGammaX0493x6g +=
-                                    capillaryPotentialScale0493x9d * kappaGamma;
+                            if (isfinite(kappaGammaRaw0493x9r)) {
+                                double kappaGammaEffective0493x9r = kappaGammaRaw0493x9r;
+                                bool clipped0493x9r = false;
+                                if (capillaryKappaMax0493x9r > 0.0 &&
+                                    fabs(kappaGammaRaw0493x9r) > capillaryKappaMax0493x9r) {
+                                    kappaGammaEffective0493x9r = copysign(
+                                        capillaryKappaMax0493x9r, kappaGammaRaw0493x9r);
+                                    clipped0493x9r = true;
+                                }
+                                phiGammaX0493x6g += capillaryPotentialScale0493x9d *
+                                    kappaGammaEffective0493x9r;
+                                if (auditEnabled) {
+                                    ++capillaryFacesLocal0493x9r;
+                                    if (clipped0493x9r) ++capillaryClippedLocal0493x9r;
+                                    capillaryKappaRawAbsMaxLocal0493x9r = fmax(
+                                        capillaryKappaRawAbsMaxLocal0493x9r,
+                                        fabs(kappaGammaRaw0493x9r));
+                                    capillaryKappaEffectiveAbsMaxLocal0493x9r = fmax(
+                                        capillaryKappaEffectiveAbsMaxLocal0493x9r,
+                                        fabs(kappaGammaEffective0493x9r));
+                                }
                             }
                         }
                         if (auditEnabled) {
@@ -5447,12 +6919,30 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                         if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
                             const int highCell = cHigh ? c : north;
                             const int lowCell = cHigh ? north : c;
-                            const double kappaGamma =
+                            const double kappaGammaRaw0493x9r =
                                 (1.0 - theta) * capillaryCurvature0493x9d[highCell] +
                                 theta * capillaryCurvature0493x9d[lowCell];
-                            if (isfinite(kappaGamma)) {
-                                phiGammaY0493x6g +=
-                                    capillaryPotentialScale0493x9d * kappaGamma;
+                            if (isfinite(kappaGammaRaw0493x9r)) {
+                                double kappaGammaEffective0493x9r = kappaGammaRaw0493x9r;
+                                bool clipped0493x9r = false;
+                                if (capillaryKappaMax0493x9r > 0.0 &&
+                                    fabs(kappaGammaRaw0493x9r) > capillaryKappaMax0493x9r) {
+                                    kappaGammaEffective0493x9r = copysign(
+                                        capillaryKappaMax0493x9r, kappaGammaRaw0493x9r);
+                                    clipped0493x9r = true;
+                                }
+                                phiGammaY0493x6g += capillaryPotentialScale0493x9d *
+                                    kappaGammaEffective0493x9r;
+                                if (auditEnabled) {
+                                    ++capillaryFacesLocal0493x9r;
+                                    if (clipped0493x9r) ++capillaryClippedLocal0493x9r;
+                                    capillaryKappaRawAbsMaxLocal0493x9r = fmax(
+                                        capillaryKappaRawAbsMaxLocal0493x9r,
+                                        fabs(kappaGammaRaw0493x9r));
+                                    capillaryKappaEffectiveAbsMaxLocal0493x9r = fmax(
+                                        capillaryKappaEffectiveAbsMaxLocal0493x9r,
+                                        fabs(kappaGammaEffective0493x9r));
+                                }
                             }
                         }
                         if (auditEnabled) {
@@ -5510,6 +7000,19 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     }
     if (nonzeroPressureLocal0493x6g) {
         atomicAdd(&accum->nonzeroPressureFaces0493x6g, nonzeroPressureLocal0493x6g);
+    }
+    if (capillaryFacesLocal0493x9r) {
+        atomicAdd(&accum->capillaryFaces0493x9r, capillaryFacesLocal0493x9r);
+        if (capillaryClippedLocal0493x9r) {
+            atomicAdd(&accum->capillaryClippedFaces0493x9r, capillaryClippedLocal0493x9r);
+        }
+        constexpr double kKappaScale0493x9r = 1000000.0;
+        const auto rawMaxScaled0493x9r = static_cast<unsigned long long>(
+            fmin(1.0e12, capillaryKappaRawAbsMaxLocal0493x9r) * kKappaScale0493x9r + 0.5);
+        const auto effectiveMaxScaled0493x9r = static_cast<unsigned long long>(
+            fmin(1.0e12, capillaryKappaEffectiveAbsMaxLocal0493x9r) * kKappaScale0493x9r + 0.5);
+        atomicMax(&accum->capillaryKappaRawAbsMaxScaled0493x9r, rawMaxScaled0493x9r);
+        atomicMax(&accum->capillaryKappaEffectiveAbsMaxScaled0493x9r, effectiveMaxScaled0493x9r);
     }
     if (pressurePotentialSumLocal0493x6g != 0.0) {
         atomic_add_double_0400(&accum->pressurePotentialSum0493x6g,
@@ -8508,6 +10011,27 @@ bool apply_independent_masked_species_q6_0493w5(
         cuda_q6_phase_gas_pressure_0493x6g_requested();
     const bool surfaceTensionActive0493x9d =
         freeSurfaceMode0493x5a && params.surfaceTensionSigma > 0.0;
+    const bool contactAngleActive0493x9i =
+        freeSurfaceMode0493x5a && params.phaseInterfaceContactAngleDegrees >= 0.0;
+    // x9j replaces the x9i hard-normal production closure.  Keep the old
+    // closure only behind an explicit test-only environment gate so the x9i
+    // baseline runner remains reproducible for A/B comparison.
+    const bool contactAngleHardNormalLegacy0493x9i =
+        contactAngleActive0493x9i &&
+        truthy_0400(std::getenv("MPCD_Q6_CONTACT_ANGLE_HARD_NORMAL_0493X9I"));
+    // 0493x9m: use the first p3 normal outside the wall-contaminated support
+    // to close contact curvature geometrically.  x9m has precedence over x9l
+    // if both experimental gates are accidentally enabled.
+    const bool contactAngleOffSupport0493x9m =
+        contactAngleActive0493x9i && !contactAngleHardNormalLegacy0493x9i &&
+        truthy_0400(std::getenv("MPCD_Q6_CONTACT_ANGLE_OFFSUPPORT_0493X9M"));
+    const bool contactAngleWallFace0493x9l =
+        contactAngleActive0493x9i && !contactAngleHardNormalLegacy0493x9i &&
+        !contactAngleOffSupport0493x9m &&
+        truthy_0400(std::getenv("MPCD_Q6_CONTACT_ANGLE_WALL_FACE_0493X9L"));
+    const bool contactAngleGhostAlpha0493x9j =
+        contactAngleActive0493x9i && !contactAngleHardNormalLegacy0493x9i &&
+        !contactAngleOffSupport0493x9m && !contactAngleWallFace0493x9l;
     const bool phaseCurvatureDiagnostics0493x9a =
         freeSurfaceMode0493x5a &&
         cuda_q6_phase_curvature_diagnostics_0493x9a_requested();
@@ -8679,6 +10203,16 @@ bool apply_independent_masked_species_q6_0493w5(
     }
     const bool phaseBWall0493x9h =
         phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Wall;
+    if (contactAngleActive0493x9i && phaseBWall0493x9h) {
+        diag.reason = "0493x9i contact angle requires A/B fluid phases plus a separate wall provider";
+        return false;
+    }
+    if (contactAngleActive0493x9i && !surfaceTensionActive0493x9d) {
+        diag.reason = "0493x9i contact angle requires active surface tension";
+        return false;
+    }
+    const bool wallGeometryRequested0493x9i =
+        phaseBWall0493x9h || contactAngleActive0493x9i;
     const int wallLeft0493x9h = q6_wall_like_0409(params.bcLeft) ? 1 : 0;
     const int wallRight0493x9h = q6_wall_like_0409(params.bcRight) ? 1 : 0;
     const int wallBottom0493x9h = q6_wall_like_0409(params.bcBottom) ? 1 : 0;
@@ -8686,7 +10220,7 @@ bool apply_independent_masked_species_q6_0493w5(
     const bool domainWallGeometry0493x9h =
         wallLeft0493x9h || wallRight0493x9h || wallBottom0493x9h || wallTop0493x9h;
     const bool chiWallGeometryRequested0493x9h =
-        phaseBWall0493x9h && params.darcyBrinkmanEnable &&
+        wallGeometryRequested0493x9i && params.darcyBrinkmanEnable &&
         params.darcyChiCollisionVpEnable;
     const float* wallChi0493x9h = nullptr;
     int wallChiNx0493x9h = 0;
@@ -8701,17 +10235,61 @@ bool apply_independent_masked_species_q6_0493w5(
             return false;
         }
     }
-    if (phaseBWall0493x9h && !domainWallGeometry0493x9h &&
-        !chiWallGeometry0493x9h) {
-        diag.reason = "0493x9h B=wall resolved without domain-wall or chi-wallVP geometry";
+    if (contactAngleGhostAlpha0493x9j && !domainWallGeometry0493x9h) {
+        diag.reason = "0493x9j ghost-alpha contact-angle closure currently requires at least one static domain wall; chi-only extension follows later";
         return false;
     }
-    if (phaseBWall0493x9h && !phaseGeometryResident0493x6c) {
-        diag.reason = "0493x9h B=wall requires x6c resident geometry so the wall provider has a resident lifecycle";
+    if (contactAngleGhostAlpha0493x9j && chiWallGeometry0493x9h) {
+        diag.reason = "0493x9j ghost-alpha contact-angle closure does not yet combine domain-wall and chi-wall geometry";
+        return false;
+    }
+    if (contactAngleGhostAlpha0493x9j &&
+        !(params.phaseInterfaceContactAngleDegrees > 0.0 &&
+          params.phaseInterfaceContactAngleDegrees < 180.0)) {
+        diag.reason = "0493x9k sheared-mirror ghost-alpha requires 0 < phaseInterfaceContactAngleDegrees < 180; endpoints are deliberately unsupported";
+        return false;
+    }
+    if (contactAngleOffSupport0493x9m && !domainWallGeometry0493x9h) {
+        diag.reason = "0493x9m off-support curvature closure currently requires at least one static domain wall";
+        return false;
+    }
+    if (contactAngleOffSupport0493x9m && chiWallGeometry0493x9h) {
+        diag.reason = "0493x9m off-support curvature closure does not yet combine domain-wall and chi-wall geometry";
+        return false;
+    }
+    if (contactAngleOffSupport0493x9m &&
+        !(params.phaseInterfaceContactAngleDegrees > 0.0 &&
+          params.phaseInterfaceContactAngleDegrees < 180.0)) {
+        diag.reason = "0493x9m off-support curvature closure requires 0 < phaseInterfaceContactAngleDegrees < 180";
+        return false;
+    }
+    if (contactAngleWallFace0493x9l && !domainWallGeometry0493x9h) {
+        diag.reason = "0493x9l wall-face normal closure currently requires at least one static domain wall";
+        return false;
+    }
+    if (contactAngleWallFace0493x9l && chiWallGeometry0493x9h) {
+        diag.reason = "0493x9l wall-face normal closure does not yet combine domain-wall and chi-wall geometry";
+        return false;
+    }
+    if (contactAngleWallFace0493x9l &&
+        !(params.phaseInterfaceContactAngleDegrees > 0.0 &&
+          params.phaseInterfaceContactAngleDegrees < 180.0)) {
+        diag.reason = "0493x9l wall-face normal closure requires 0 < phaseInterfaceContactAngleDegrees < 180";
+        return false;
+    }
+    if (wallGeometryRequested0493x9i && !domainWallGeometry0493x9h &&
+        !chiWallGeometry0493x9h) {
+        diag.reason = phaseBWall0493x9h
+            ? "0493x9h B=wall resolved without domain-wall or chi-wallVP geometry"
+            : "0493x9i contact angle resolved without domain-wall or chi-wallVP geometry";
+        return false;
+    }
+    if (wallGeometryRequested0493x9i && !phaseGeometryResident0493x6c) {
+        diag.reason = "0493x9i wall/contact geometry requires x6c resident geometry";
         return false;
     }
     if (phaseBWall0493x9h && surfaceTensionActive0493x9d) {
-        diag.reason = "0493x9h B=wall is passive geometry only; surface tension/contact-angle closure is not implemented";
+        diag.reason = "0493x9i B=wall remains passive geometry; wetting uses A/B plus separate wall geometry";
         return false;
     }
     if (phaseBWall0493x9h &&
@@ -8919,7 +10497,7 @@ bool apply_independent_masked_species_q6_0493w5(
                                 "0493x6c geometry start event record");
             }
 
-            if (phaseBWall0493x9h) {
+            if (wallGeometryRequested0493x9i) {
                 ws.phaseWallFraction0493x9h.ensure(geometryCells0493x6c);
                 ws.phaseWallNormalX0493x9h.ensure(geometryCells0493x6c);
                 ws.phaseWallNormalY0493x9h.ensure(geometryCells0493x6c);
@@ -9503,36 +11081,236 @@ bool apply_independent_masked_species_q6_0493w5(
                 ws.phaseNormalY0493x9b.ensure(geometryCells0493x6c);
                 ws.phaseCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
 
-                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
-                    ws.phaseAlphaFiltered0493x6c.data(),
-                    ws.phaseAlphaCurvature0493x9b.data(),
-                    grid.Nx, grid.Ny, periodicX, periodicY);
+                if (contactAngleGhostAlpha0493x9j) {
+                    q6_filter_phase_alpha_curvature_contact_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseAlphaCurvature0493x9b.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                        params.phaseInterfaceContactAngleDegrees);
+                } else {
+                    q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseAlphaCurvature0493x9b.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY);
+                }
                 check_cuda_0400(cudaGetLastError(),
-                                "0493x9d p3 pass1 alpha filter launch");
-                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
-                    ws.phaseAlphaCurvature0493x9b.data(),
-                    ws.phaseAlphaCurvature2Pass0493x9c.data(),
-                    grid.Nx, grid.Ny, periodicX, periodicY);
+                                "0493x9j/x9d p3 pass1 alpha filter launch");
+                if (contactAngleGhostAlpha0493x9j) {
+                    q6_filter_phase_alpha_curvature_contact_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature0493x9b.data(),
+                        ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                        params.phaseInterfaceContactAngleDegrees);
+                } else {
+                    q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature0493x9b.data(),
+                        ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY);
+                }
                 check_cuda_0400(cudaGetLastError(),
-                                "0493x9d p3 pass2 alpha filter launch");
-                q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
-                    ws.phaseAlphaCurvature2Pass0493x9c.data(),
-                    ws.phaseAlphaCurvature3Pass0493x9c.data(),
-                    grid.Nx, grid.Ny, periodicX, periodicY);
+                                "0493x9j/x9d p3 pass2 alpha filter launch");
+                if (contactAngleGhostAlpha0493x9j) {
+                    q6_filter_phase_alpha_curvature_contact_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                        params.phaseInterfaceContactAngleDegrees);
+                } else {
+                    q6_filter_phase_alpha_curvature_0493x9b<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature2Pass0493x9c.data(),
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY);
+                }
                 check_cuda_0400(cudaGetLastError(),
-                                "0493x9d p3 pass3 alpha filter launch");
-                q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
-                    ws.phaseAlphaCurvature3Pass0493x9c.data(),
-                    ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
-                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
-                check_cuda_0400(cudaGetLastError(),
-                                "0493x9d p3 normal build launch");
-                q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
-                    ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
-                    ws.phaseCurvature3Pass0493x9c.data(),
-                    grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
-                check_cuda_0400(cudaGetLastError(),
-                                "0493x9d p3 curvature build launch");
+                                "0493x9j/x9d p3 pass3 alpha filter launch");
+                if (contactAngleGhostAlpha0493x9j) {
+                    if (!ws.phaseWallGeometryValid0493x9h ||
+                        ws.phaseWallGeometryStep0493x9h != step) {
+                        diag.reason = "0493x9j ghost-alpha contact angle requested without current wall geometry";
+                        append_independent_masked_species_audit_0493w5(params, step, time, audits);
+                        return false;
+                    }
+                    check_cuda_0400(cudaMemset(
+                                        ws.contactAngleAccum0493x9i.data(), 0,
+                                        sizeof(ContactAngleAccumulator0493x9i)),
+                                    "0493x9j ghost-alpha contact accumulator zero");
+                    q6_build_phase_normals_scharr_contact_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                        params.phaseInterfaceContactAngleDegrees);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9j ghost-alpha p3 normal build launch");
+                    q6_contact_angle_ghost_normal_audit_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                        ws.contactAngleAccum0493x9i.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        params.phaseInterfaceContactAngleDegrees);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9j ghost-alpha contact-angle normal audit launch");
+                    q6_build_phase_curvature_scharr_contact_0493x9j<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                        ws.phaseCurvature3Pass0493x9c.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                        wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                        params.phaseInterfaceContactAngleDegrees);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9j ghost-alpha p3 curvature build launch");
+                } else {
+                    q6_build_phase_normals_scharr_0493x9b<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                        grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9d p3 normal build launch");
+                    if (contactAngleHardNormalLegacy0493x9i || contactAngleWallFace0493x9l ||
+                        contactAngleOffSupport0493x9m) {
+                        if (!ws.phaseWallGeometryValid0493x9h ||
+                            ws.phaseWallGeometryStep0493x9h != step) {
+                            diag.reason = contactAngleOffSupport0493x9m
+                                ? "0493x9m off-support contact curvature requested without current wall geometry"
+                                : (contactAngleWallFace0493x9l
+                                    ? "0493x9l wall-face contact angle requested without current wall geometry"
+                                    : "0493x9i legacy hard-normal contact angle requested without current wall geometry");
+                            append_independent_masked_species_audit_0493w5(params, step, time, audits);
+                            return false;
+                        }
+                        check_cuda_0400(cudaMemset(
+                                            ws.contactAngleAccum0493x9i.data(), 0,
+                                            sizeof(ContactAngleAccumulator0493x9i)),
+                                        contactAngleOffSupport0493x9m
+                                            ? "0493x9m off-support contact accumulator zero"
+                                            : (contactAngleWallFace0493x9l
+                                                ? "0493x9l wall-face contact accumulator zero"
+                                                : "0493x9i legacy contact-angle accumulator zero"));
+                        if (contactAngleWallFace0493x9l) {
+                            q6_apply_contact_angle_wallface_normals_0493x9l<<<cellBlocks, threads>>>(
+                                ws.phaseAlphaFiltered0493x6c.data(),
+                                ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                                ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                                grid.Nx, grid.Ny, periodicX, periodicY,
+                                params.phaseInterfaceContactAngleDegrees);
+                            check_cuda_0400(cudaGetLastError(),
+                                            "0493x9l wall-face normal closure launch");
+                            q6_contact_angle_wallface_audit_0493x9l<<<cellBlocks, threads>>>(
+                                ws.phaseAlphaFiltered0493x6c.data(),
+                                ws.phaseAlphaCurvature3Pass0493x9c.data(),
+                                ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                                ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                                ws.contactAngleAccum0493x9i.data(),
+                                grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                                params.phaseInterfaceContactAngleDegrees);
+                            check_cuda_0400(cudaGetLastError(),
+                                            "0493x9l wall-face contact-angle audit launch");
+                        } else if (contactAngleHardNormalLegacy0493x9i) {
+                            q6_apply_contact_angle_normals_0493x9i<<<cellBlocks, threads>>>(
+                                ws.phaseAlphaFiltered0493x6c.data(),
+                                ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                                ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                                ws.contactAngleAccum0493x9i.data(),
+                                grid.Nx, grid.Ny, periodicX, periodicY,
+                                params.phaseInterfaceContactAngleDegrees);
+                            check_cuda_0400(cudaGetLastError(),
+                                            "0493x9i legacy hard-normal closure launch");
+                        }
+                    }
+                    if (contactAngleWallFace0493x9l) {
+                        q6_build_phase_curvature_wallface_0493x9l<<<cellBlocks, threads>>>(
+                            ws.phaseAlphaFiltered0493x6c.data(),
+                            ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature3Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                            wallLeft0493x9h, wallRight0493x9h, wallBottom0493x9h, wallTop0493x9h,
+                            params.phaseInterfaceContactAngleDegrees);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9l wall-face curvature build launch");
+                    } else {
+                        q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                            ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                            ws.phaseCurvature3Pass0493x9c.data(),
+                            grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                        check_cuda_0400(cudaGetLastError(),
+                                        "0493x9d p3 curvature build launch");
+                        if (contactAngleOffSupport0493x9m) {
+                            q6_apply_contact_angle_offsupport_curvature_0493x9m<<<cellBlocks, threads>>>(
+                                ws.phaseAlphaFiltered0493x6c.data(),
+                                ws.phaseWallNormalX0493x9h.data(), ws.phaseWallNormalY0493x9h.data(),
+                                ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                                ws.phaseCurvature3Pass0493x9c.data(),
+                                ws.contactAngleAccum0493x9i.data(),
+                                grid.Nx, grid.Ny, dx, dy, periodicX, periodicY,
+                                params.phaseInterfaceContactAngleDegrees);
+                            check_cuda_0400(cudaGetLastError(),
+                                            "0493x9m off-support contact-curvature closure launch");
+                        }
+                    }
+                }
+                if (contactAngleActive0493x9i) {
+                    q6_contact_angle_curvature_audit_0493x9i<<<cellBlocks, threads>>>(
+                        ws.phaseAlphaFiltered0493x6c.data(),
+                        ws.phaseWallNormalX0493x9h.data(),
+                        ws.phaseWallNormalY0493x9h.data(),
+                        ws.phaseCurvature3Pass0493x9c.data(),
+                        ws.contactAngleAccum0493x9i.data(),
+                        grid.Nx, grid.Ny, periodicX, periodicY);
+                    check_cuda_0400(cudaGetLastError(),
+                                    "0493x9i contact-angle curvature audit launch");
+                    if (geometryAuditThisStep0493x6c) {
+                        ContactAngleAccumulator0493x9i ca{};
+                        check_cuda_0400(cudaMemcpy(
+                                            &ca, ws.contactAngleAccum0493x9i.data(),
+                                            sizeof(ca), cudaMemcpyDeviceToHost),
+                                        "0493x9i contact-angle audit download");
+                        ContactAngleAudit0493x9i a{};
+                        a.projectedSpeciesIndex = s;
+                        a.projectedType = audit.type;
+                        a.prescribedAngleDegrees = params.phaseInterfaceContactAngleDegrees;
+                        constexpr double pi0493x9i = 3.141592653589793238462643383279502884;
+                        a.targetNormalWallDot = -std::cos(
+                            params.phaseInterfaceContactAngleDegrees * (pi0493x9i / 180.0));
+                        a.candidateCells = static_cast<std::uint64_t>(ca.candidateCells);
+                        a.correctedCells = static_cast<std::uint64_t>(ca.correctedCells);
+                        a.curvatureCells = static_cast<std::uint64_t>(ca.curvatureCells);
+                        if (ca.candidateCells > 0ull) {
+                            a.rawAngleMean = ca.rawAngleSum /
+                                static_cast<double>(ca.candidateCells);
+                        }
+                        if (ca.correctedCells > 0ull) {
+                            const double inv = 1.0 / static_cast<double>(ca.correctedCells);
+                            a.correctedAngleMean = ca.correctedAngleSum * inv;
+                            a.correctedAngleErrorRms = std::sqrt(
+                                std::max(0.0, ca.correctedAngleErrorSqSum * inv));
+                            a.correctedDotErrorRms = std::sqrt(
+                                std::max(0.0, ca.correctedDotErrorSqSum * inv));
+                        }
+                        if (ca.curvatureCells > 0ull) {
+                            const double inv = 1.0 / static_cast<double>(ca.curvatureCells);
+                            a.contactCurvatureMean = ca.curvatureSum * inv;
+                            const double ms = ca.curvatureSqSum * inv;
+                            a.contactCurvatureRms = std::sqrt(std::max(0.0, ms));
+                            a.contactCurvatureStd = std::sqrt(std::max(
+                                0.0, ms - a.contactCurvatureMean*a.contactCurvatureMean));
+                        }
+                        if (contactAngleOffSupport0493x9m) {
+                            append_contact_angle_offsupport_audit_0493x9m(params, step, time, a);
+                        } else if (contactAngleWallFace0493x9l) {
+                            append_contact_angle_wallface_audit_0493x9l(params, step, time, a);
+                        } else if (contactAngleGhostAlpha0493x9j) {
+                            append_contact_angle_mirror_audit_0493x9k(params, step, time, a);
+                        } else {
+                            append_contact_angle_audit_0493x9i(params, step, time, a);
+                        }
+                    }
+                }
                 ws.phaseCurvature3PassValid0493x9d = true;
                 ws.phaseCurvature3PassNx0493x9d = grid.Nx;
                 ws.phaseCurvature3PassNy0493x9d = grid.Ny;
@@ -9823,6 +11601,11 @@ bool apply_independent_masked_species_q6_0493w5(
                                     "0493x6f stencil start event record");
                 }
 
+                const double capillaryKappaMax0493x9r =
+                    surfaceTensionApplySpecies0493x9d && params.surfaceTensionMinRadiusCells > 0.0
+                        ? 1.0 / (params.surfaceTensionMinRadiusCells * fmin(dx, dy))
+                        : 0.0;
+
                 q6_prepare_phase_interface_stencil_0493x6f<<<cellBlocks, threads>>>(
                     ws.speciesMask0493w5.data(),
                     ws.phaseAlphaFiltered0493x6c.data(),
@@ -9837,6 +11620,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         ? params.dt * params.surfaceTensionSigma * (dx * dy) /
                               phaseAReferenceCellMass0493x9g
                         : 0.0,
+                    capillaryKappaMax0493x9r,
                     interfaceDirichletApplySpecies0493x9d
                         ? ws.phaseFacePhiGammaX0493x6g.data() : nullptr,
                     interfaceDirichletApplySpecies0493x9d
@@ -9928,6 +11712,15 @@ bool apply_independent_masked_species_q6_0493w5(
                                                    2u * sizeof(double));
                     append_phase_interface_stencil_audit_0493x6f(
                         params, step, time, stencilAudit0493x6f);
+                    if (surfaceTensionApplySpecies0493x9d) {
+                        constexpr double kKappaScale0493x9r = 1000000.0;
+                        append_surface_tension_limiter_audit_0493x9r(
+                            params, step, time, capillaryKappaMax0493x9r,
+                            accum0493x6f.capillaryFaces0493x9r,
+                            accum0493x6f.capillaryClippedFaces0493x9r,
+                            static_cast<double>(accum0493x6f.capillaryKappaRawAbsMaxScaled0493x9r) / kKappaScale0493x9r,
+                            static_cast<double>(accum0493x6f.capillaryKappaEffectiveAbsMaxScaled0493x9r) / kKappaScale0493x9r);
+                    }
                     if (phaseGasPressureSpecies0493x6g) {
                         const int gasSpeciesCount0493x6g = phaseB0493x9g.matchedSpecies;
                         PhaseInterfaceGasPressureAudit0493x6g gasAudit0493x6g{};

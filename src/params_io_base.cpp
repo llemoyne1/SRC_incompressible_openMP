@@ -553,10 +553,13 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q6DensityRelaxationBeta" || key == "densityRelaxationBeta") p.q6DensityRelaxationBeta = parse_double(value, key);
         else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
         else if (key == "surfaceTensionSigma" || key == "q6GfSurfaceTensionSigma") p.surfaceTensionSigma = parse_double(value, key);
+        else if (key == "surfaceTensionMinRadiusCells" || key == "q6GfSurfaceTensionMinRadiusCells") p.surfaceTensionMinRadiusCells = parse_double(value, key);
         else if (key == "phaseInterfaceASelector" || key == "capillaryPhaseASelector")
             p.phaseInterfaceASelector = canonical_phase_selector_0493x9g(value, key);
         else if (key == "phaseInterfaceBSelector" || key == "capillaryPhaseBSelector")
             p.phaseInterfaceBSelector = canonical_phase_selector_0493x9g(value, key);
+        else if (key == "phaseInterfaceContactAngleDegrees" || key == "contactAngleDegrees" || key == "capillaryContactAngleDegrees")
+            p.phaseInterfaceContactAngleDegrees = parse_double(value, key);
         else if (key == "q6DensityRelaxationCompressionGateEnable" || key == "densityRelaxationCompressionGateEnable") p.q6DensityRelaxationCompressionGateEnable = parse_bool(value, key);
         else if (key == "q6DensityRelaxationCompressionThresholdFill" || key == "densityRelaxationCompressionThresholdFill") p.q6DensityRelaxationCompressionThresholdFill = parse_double(value, key);
         else if (key == "q6DensityRelaxationTractionThresholdFill" || key == "densityRelaxationTractionThresholdFill") p.q6DensityRelaxationTractionThresholdFill = parse_double(value, key);
@@ -1385,6 +1388,20 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error(
             "0493x9d surfaceTensionSigma must be finite and non-negative");
     }
+    if (!(p.surfaceTensionMinRadiusCells >= 0.0) ||
+        !std::isfinite(p.surfaceTensionMinRadiusCells)) {
+        throw std::runtime_error(
+            "0493x9r surfaceTensionMinRadiusCells must be finite and non-negative");
+    }
+    if (!std::isfinite(p.phaseInterfaceContactAngleDegrees) ||
+        !(p.phaseInterfaceContactAngleDegrees == -1.0 ||
+          (p.phaseInterfaceContactAngleDegrees >= 0.0 &&
+           p.phaseInterfaceContactAngleDegrees <= 180.0))) {
+        throw std::runtime_error(
+            "0493x9i phaseInterfaceContactAngleDegrees must be -1 (disabled) or lie in [0,180]");
+    }
+    const bool contactAngleActive0493x9i =
+        p.phaseInterfaceContactAngleDegrees >= 0.0;
     // Validate/canonicalize through local values too: SimulationParams may be
     // assembled directly by tests instead of passing through the key parser.
     const std::string phaseASelector0493x9g = canonical_phase_selector_0493x9g(
@@ -1397,7 +1414,8 @@ void validate_simulation_params(const SimulationParams& p) {
             "0493x9g phaseInterfaceASelector must select registered particle species");
     }
     const bool phasePairRelevant0493x9g =
-        p.speciesQ6Mode == "free_surface_masked" || p.surfaceTensionSigma > 0.0;
+        p.speciesQ6Mode == "free_surface_masked" || p.surfaceTensionSigma > 0.0 ||
+        contactAngleActive0493x9i;
     if (phasePairRelevant0493x9g && p.speciesRegistryEnable) {
         int phaseACount0493x9g = 0;
         int phaseBCount0493x9g = 0;
@@ -1434,22 +1452,40 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error(
                 "0493x9g explicit phase B type selector must match exactly one registered species");
         }
+        const bool domainWallGeometry0493x9h =
+            is_wall_mode(p.bcLeft) || is_wall_mode(p.bcRight) ||
+            is_wall_mode(p.bcBottom) || is_wall_mode(p.bcTop);
+        // Do not silently reinterpret every Darcy/porous design field as a
+        // material wall.  The existing chi-collision wallVP opt-in is the
+        // declaration that this chi field supplies solid-wall geometry.
+        const bool chiWallGeometry0493x9h =
+            p.darcyBrinkmanEnable && p.darcyChiCollisionVpEnable;
         if (phaseBSelector0493x9g == "wall") {
-            const bool domainWallGeometry0493x9h =
-                is_wall_mode(p.bcLeft) || is_wall_mode(p.bcRight) ||
-                is_wall_mode(p.bcBottom) || is_wall_mode(p.bcTop);
-            // Do not silently reinterpret every Darcy/porous design field as a
-            // material wall.  The existing chi-collision wallVP opt-in is the
-            // declaration that this chi field supplies solid-wall geometry.
-            const bool chiWallGeometry0493x9h =
-                p.darcyBrinkmanEnable && p.darcyChiCollisionVpEnable;
             if (!domainWallGeometry0493x9h && !chiWallGeometry0493x9h) {
                 throw std::runtime_error(
                     "0493x9h phaseInterfaceBSelector=wall requires a static domain wall or darcyChiCollisionVpEnable=true");
             }
             if (p.surfaceTensionSigma > 0.0) {
                 throw std::runtime_error(
-                    "0493x9h phaseInterfaceBSelector=wall is geometry-only; surfaceTensionSigma must be 0 until the wall/contact-angle closure");
+                    "0493x9i B=wall remains a geometry-only phase pair; capillary wetting uses particle/vacuum A/B plus the separate wall provider");
+            }
+            if (contactAngleActive0493x9i) {
+                throw std::runtime_error(
+                    "0493x9i contact angle is a three-medium A/B/wall closure; phaseInterfaceBSelector must not be wall");
+            }
+        }
+        if (contactAngleActive0493x9i) {
+            if (!(p.surfaceTensionSigma > 0.0)) {
+                throw std::runtime_error(
+                    "0493x9i active contact angle requires surfaceTensionSigma>0");
+            }
+            if (!domainWallGeometry0493x9h && !chiWallGeometry0493x9h) {
+                throw std::runtime_error(
+                    "0493x9i active contact angle requires a static domain wall or darcyChiCollisionVpEnable=true");
+            }
+            if (phaseBSelector0493x9g == "wall") {
+                throw std::runtime_error(
+                    "0493x9i active contact angle requires a particle/vacuum phase B distinct from wall");
             }
         }
         (void)phaseBAllGas0493x9g;

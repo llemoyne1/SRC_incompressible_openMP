@@ -478,6 +478,12 @@ struct SimulationParams {
     // pressure*length.  Zero is an exact no-op and preserves the pre-x9d path.
     double surfaceTensionSigma = 0.0;
 
+    // 0493x9r: optional numerical resolution limit for the Laplace jump only.
+    // 0 is an exact no-op. When positive, face-interpolated capillary
+    // curvature is limited to |kappa| <= 1/(surfaceTensionMinRadiusCells*h),
+    // h=min(dx,dy). The resident/raw curvature field is never modified.
+    double surfaceTensionMinRadiusCells = 0.0;
+
     // 0493x9g: phase-pair abstraction for the resident interface geometry.
     // Defaults reproduce the qualified liquid/gas path exactly.  Selectors are
     // canonicalized by the parser and may be:
@@ -494,6 +500,16 @@ struct SimulationParams {
     // Particle phase B remains the exterior pressure source for x6g EOS.
     std::string phaseInterfaceASelector = "family:liquid";
     std::string phaseInterfaceBSelector = "family:gas";
+
+    // 0493x9i: prescribed static contact angle for an A/B interface meeting
+    // the independent wall geometry provider from x9h.  -1 disables wetting
+    // and preserves the qualified free-interface path exactly.  Values in
+    // [0,180] are degrees measured through phase A.  With the conventions
+    // nAB=A->B and nWall=fluid->solid, the enforced relation is
+    //     nAB . nWall = -cos(thetaA).
+    // A and B remain the two capillary fluid phases; `wall` is the third
+    // geometry provider and therefore B=wall is not a contact-angle pair.
+    double phaseInterfaceContactAngleDegrees = -1.0;
 
     // 0493x7d-v2 experimental compression/noise discriminator. Disabled by
     // default: false preserves the historical rawFill x7d target bit-for-bit.
