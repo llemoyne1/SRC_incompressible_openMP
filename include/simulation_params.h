@@ -484,6 +484,15 @@ struct SimulationParams {
     // h=min(dx,dy). The resident/raw curvature field is never modified.
     double surfaceTensionMinRadiusCells = 0.0;
 
+    // 0493x9t: kinetic liquid/vacuum retention closure.  Zero is an exact
+    // no-op.  For 0<r<=1, an outward A-particle crossing of the physical
+    // alpha=0.5 interface is internally reflected with probability r.
+    // Reflection is conservative against the non-crossing A bath in the
+    // same cell; tangential motion is untouched.  A non-reflected crossing
+    // may optionally be relabelled to an unprojected registered type.
+    double phaseInterfaceKineticReflectionFraction = 0.0;
+    int phaseInterfaceEvaporationTargetType = -1;
+
     // 0493x9g: phase-pair abstraction for the resident interface geometry.
     // Defaults reproduce the qualified liquid/gas path exactly.  Selectors are
     // canonicalized by the parser and may be:

@@ -554,6 +554,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "q6DensityRelaxationTime" || key == "densityRelaxationTime" || key == "densityRelaxationTau") p.q6DensityRelaxationTime = parse_double(value, key);
         else if (key == "surfaceTensionSigma" || key == "q6GfSurfaceTensionSigma") p.surfaceTensionSigma = parse_double(value, key);
         else if (key == "surfaceTensionMinRadiusCells" || key == "q6GfSurfaceTensionMinRadiusCells") p.surfaceTensionMinRadiusCells = parse_double(value, key);
+        else if (key == "phaseInterfaceKineticReflectionFraction" || key == "kineticReflectionFraction") p.phaseInterfaceKineticReflectionFraction = parse_double(value, key);
+        else if (key == "phaseInterfaceEvaporationTargetType" || key == "evaporationTargetType") p.phaseInterfaceEvaporationTargetType = parse_int(value, key);
         else if (key == "phaseInterfaceASelector" || key == "capillaryPhaseASelector")
             p.phaseInterfaceASelector = canonical_phase_selector_0493x9g(value, key);
         else if (key == "phaseInterfaceBSelector" || key == "capillaryPhaseBSelector")
@@ -1392,6 +1394,60 @@ void validate_simulation_params(const SimulationParams& p) {
         !std::isfinite(p.surfaceTensionMinRadiusCells)) {
         throw std::runtime_error(
             "0493x9r surfaceTensionMinRadiusCells must be finite and non-negative");
+    }
+    if (!std::isfinite(p.phaseInterfaceKineticReflectionFraction) ||
+        p.phaseInterfaceKineticReflectionFraction < 0.0 ||
+        p.phaseInterfaceKineticReflectionFraction > 1.0) {
+        throw std::runtime_error(
+            "0493x9t phaseInterfaceKineticReflectionFraction must lie in [0,1]");
+    }
+    if (p.phaseInterfaceEvaporationTargetType < -1) {
+        throw std::runtime_error(
+            "0493x9t phaseInterfaceEvaporationTargetType must be -1 or a non-negative registered type");
+    }
+    if (p.phaseInterfaceKineticReflectionFraction > 0.0) {
+        if (!p.speciesQ6Enable || p.speciesQ6Mode != "free_surface_masked") {
+            throw std::runtime_error(
+                "0493x9t kinetic reflection requires speciesQ6Mode=free_surface_masked");
+        }
+        if (p.q6ForceProjectionMode != "prestream_single_fused") {
+            throw std::runtime_error(
+                "0493x9t kinetic reflection requires q6ForceProjectionMode=prestream_single_fused");
+        }
+        if (p.phaseInterfaceBSelector != "vacuum") {
+            throw std::runtime_error(
+                "0493x9t kinetic reflection is currently restricted to phaseInterfaceBSelector=vacuum");
+        }
+        int projectedCount0493x9t = 0;
+        std::uint32_t projectedType0493x9t = 0u;
+        for (const auto& def0493x9t : p.speciesDefinitions) {
+            if (def0493x9t.q6StrengthDeclared > 0.0) {
+                ++projectedCount0493x9t;
+                projectedType0493x9t = def0493x9t.type;
+            }
+        }
+        if (projectedCount0493x9t != 1) {
+            throw std::runtime_error(
+                "0493x9t kinetic reflection currently requires exactly one projected A species");
+        }
+        if (p.phaseInterfaceEvaporationTargetType >= 0) {
+            const auto target0493x9t = static_cast<std::uint32_t>(
+                p.phaseInterfaceEvaporationTargetType);
+            bool foundTarget0493x9t = false;
+            for (const auto& def0493x9t : p.speciesDefinitions) {
+                if (def0493x9t.type != target0493x9t) continue;
+                foundTarget0493x9t = true;
+                if (def0493x9t.q6StrengthDeclared > 0.0 ||
+                    def0493x9t.type == projectedType0493x9t) {
+                    throw std::runtime_error(
+                        "0493x9t evaporation target must be an unprojected non-A species");
+                }
+            }
+            if (!foundTarget0493x9t) {
+                throw std::runtime_error(
+                    "0493x9t evaporation target type is not registered");
+            }
+        }
     }
     if (!std::isfinite(p.phaseInterfaceContactAngleDegrees) ||
         !(p.phaseInterfaceContactAngleDegrees == -1.0 ||

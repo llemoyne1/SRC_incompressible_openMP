@@ -2061,6 +2061,356 @@ struct ContactAngleAccumulator0493x9i {
     double curvatureSqSum = 0.0;
 };
 
+
+// 0493x9t: summary-cadence audit of the kinetic retention operator.
+// All physical corrections remain CUDA resident; only this O(1) accumulator is
+// downloaded when a normal Q6-g-f summary is requested.
+struct KineticInterfaceAccumulator0493x9t {
+    unsigned long long crossings = 0ull;
+    unsigned long long selectedReflections = 0ull;
+    unsigned long long transmittedCrossings = 0ull;
+    unsigned long long appliedReflections = 0ull;
+    unsigned long long unsupportedReflections = 0ull;
+    unsigned long long convertedParticles = 0ull;
+    double reflectedMass = 0.0;
+    double transmittedMass = 0.0;
+    double outwardRelativeNormalSpeedSum = 0.0;
+    double deltaPx = 0.0;
+    double deltaPy = 0.0;
+    double deltaKineticEnergy = 0.0;
+};
+
+
+// 0493x9u: support-edge extension of the x9t kinetic reflection audit.
+// Runtime physics remains CUDA resident; only this O(1) accumulator is copied
+// on the normal summary cadence.
+struct KineticInterfaceAccumulator0493x9u {
+    unsigned long long phaseAParticlesInOuterSupport = 0ull;
+    unsigned long long crossings = 0ull;
+    unsigned long long legacyHalfIsoCrossings = 0ull;
+    unsigned long long supportExitCrossings = 0ull;
+    unsigned long long selectedReflections = 0ull;
+    unsigned long long transmittedCrossings = 0ull;
+    unsigned long long appliedReflections = 0ull;
+    unsigned long long unsupportedReflections = 0ull;
+    unsigned long long bathSearchFailures = 0ull;
+    unsigned long long bathDepth0 = 0ull;
+    unsigned long long bathDepth1 = 0ull;
+    unsigned long long bathDepth2 = 0ull;
+    unsigned long long normalFallbacks = 0ull;
+    unsigned long long convertedParticles = 0ull;
+    // 0493x9v diagnostic-only counters. They are accumulated only when the
+    // x9u audit pointer is non-null (step 1 / summary cadence), so the normal
+    // production steps pay no additional geometric diagnostic work.
+    unsigned long long outerSupportCellParticlesLT3 = 0ull;
+    unsigned long long detectorPredictedOuterTarget = 0ull;
+    unsigned long long missedOccupiedOuterTarget = 0ull;
+    unsigned long long missedSparseOuterTargetLT3 = 0ull;
+    unsigned long long absoluteSupportExitCandidates = 0ull;
+    unsigned long long missedRelativeButAbsoluteExit = 0ull;
+    unsigned long long bathSearchFailureWouldExitLocal = 0ull;
+    unsigned long long bathAlphaGEHalf = 0ull;
+    unsigned long long bathAlphaLTHalf = 0ull;
+    unsigned long long supportExitBathAlphaGEHalf = 0ull;
+    unsigned long long supportExitBathAlphaLTHalf = 0ull;
+    unsigned long long unsupportedInvalidBath = 0ull;
+    unsigned long long unsupportedInvalidDonorGroup = 0ull;
+    unsigned long long unsupportedNoReceiverMass = 0ull;
+    unsigned long long unsupportedNormalCancellation = 0ull;
+    unsigned long long unsupportedGroupNotOutward = 0ull;
+    unsigned long long appliedStillOutwardRelative = 0ull;
+    unsigned long long appliedStillRelativeExit = 0ull;
+    unsigned long long appliedStillAbsoluteExit = 0ull;
+    double postRelativeNormalSpeedSum = 0.0;
+    double postOutwardRelativeNormalSpeedSum = 0.0;
+    double reflectedMass = 0.0;
+    double transmittedMass = 0.0;
+    double outwardRelativeNormalSpeedSum = 0.0;
+    double deltaPx = 0.0;
+    double deltaPy = 0.0;
+    double deltaKineticEnergy = 0.0;
+};
+
+
+// 0493x9x: crossing-time kinetic reflection audit.
+// No O(Nparticle) state is stored. The production path reuses x9t/x9u
+// total/ref/receiver/normal cell buffers and keeps the three-particle-pass
+// structure.
+struct KineticCrossingAccumulator0493x9x {
+    unsigned long long phaseAOuterCellParticles = 0ull;
+    unsigned long long shellParticles = 0ull;
+    unsigned long long deepOuterParticles = 0ull;
+    unsigned long long interiorCrossings = 0ull;
+    unsigned long long shellGuardCrossings = 0ull;
+    unsigned long long startBelowHalf = 0ull;
+    unsigned long long pointwiseOuterRoutedToShell = 0ull;
+    unsigned long long pointwiseInteriorOuterCell = 0ull;
+    unsigned long long bisectionInteriorCrossings = 0ull;
+    unsigned long long bisectionFallbacks = 0ull;
+    unsigned long long selectedReflections = 0ull;
+    unsigned long long transmittedCrossings = 0ull;
+    unsigned long long appliedReflections = 0ull;
+    unsigned long long unsupportedReflections = 0ull;
+    unsigned long long unsupportedInvalidBath = 0ull;
+    unsigned long long unsupportedInvalidDonorGroup = 0ull;
+    unsigned long long unsupportedNoReceiverMass = 0ull;
+    unsigned long long unsupportedNormalCancellation = 0ull;
+    unsigned long long unsupportedGroupNotOutward = 0ull;
+    unsigned long long appliedStillOutwardRelative = 0ull;
+    unsigned long long appliedInteriorPredictedOutside = 0ull;
+    unsigned long long crossingPointNormalFallbacks = 0ull;
+    unsigned long long endpointSealCorrections = 0ull;
+    unsigned long long endpointSealSampleFallbacks = 0ull;
+    unsigned long long appliedInteriorFinalOutside = 0ull;
+    unsigned long long shellRecoverableParticles = 0ull;
+    unsigned long long shellHardRetentionCandidates = 0ull;
+    unsigned long long shellHardRetentionAlreadyInside = 0ull;
+    unsigned long long shellHardRetentionCorrections = 0ull;
+    unsigned long long shellHardRetentionFallbacks = 0ull;
+    unsigned long long shellHardRetentionFinalOutside = 0ull;
+    unsigned long long hardFinalEndpointChecks = 0ull;
+    unsigned long long hardFinalEndpointOutsideBefore = 0ull;
+    unsigned long long hardFinalReceiverOutsideBefore = 0ull;
+    unsigned long long hardFinalNeutralOutsideBefore = 0ull;
+    unsigned long long hardFinalEndpointCorrections = 0ull;
+    unsigned long long hardFinalMirrorAttempts = 0ull;
+    unsigned long long hardFinalMirrorAccepted = 0ull;
+    unsigned long long hardFinalMirrorNormalFallbacks = 0ull;
+    unsigned long long hardFinalMirrorHardFallbacks = 0ull;
+    unsigned long long hardFinalLocalAnchorCorrections = 0ull;
+    unsigned long long hardFinalLocalAnchorMisses = 0ull;
+    unsigned long long hardFinalEndpointOutsideAfter = 0ull;
+    unsigned long long convertedParticles = 0ull;
+    unsigned long long individualDonorReflections = 0ull;
+    unsigned long long receiverCorrectedParticles = 0ull;
+    unsigned long long reactionActiveCells = 0ull;
+    unsigned long long reactionFeasibleCells = 0ull;
+    unsigned long long reactionNoReceiverCells = 0ull;
+    unsigned long long reactionEnergyFloorCells = 0ull;
+    unsigned long long reactionThermalDegenerateCells = 0ull;
+    unsigned long long analyticConservativeReactionCells = 0ull;
+    unsigned long long analyticPositiveScaleCells = 0ull;
+    unsigned long long analyticInwardCells = 0ull;
+    unsigned long long analyticNonInwardPositiveCells = 0ull;
+    unsigned long long analyticTrivialCells = 0ull;
+    unsigned long long analyticInvalidCells = 0ull;
+    double crossingFractionSum = 0.0;
+    double outwardRelativeNormalSpeedSum = 0.0;
+    double reflectedMass = 0.0;
+    double transmittedMass = 0.0;
+    double deltaPx = 0.0;
+    double deltaPy = 0.0;
+    double deltaKineticEnergy = 0.0;
+    double positionCorrectionAbsSum = 0.0;
+    double endpointSealCorrectionAbsSum = 0.0;
+    double shellHardRetentionCorrectionAbsSum = 0.0;
+    double hardFinalEndpointCorrectionAbsSum = 0.0;
+    double reactionEnergyResidualAbsSum = 0.0;
+    double reactionDeltaUMagnitudeSum = 0.0;
+    double reactionLambdaDeviationAbsSum = 0.0;
+    double analyticDonorScaleSum = 0.0;
+    double analyticDonorScaleAbsFromSpecularSum = 0.0;
+
+    // 0493x10f single-component/global-reservoir ablation diagnostics.
+    // This is deliberately NOT yet the production multi-liquid-domain model.
+    unsigned long long globalReactionActive = 0ull;
+    unsigned long long globalReactionTrivial = 0ull;
+    unsigned long long globalReactionInvalid = 0ull;
+    unsigned long long globalReactionDonorCells = 0ull;
+    unsigned long long globalReactionReceiverCells = 0ull;
+    double globalReactionA = 0.0;
+    double globalReactionH = 0.0;
+    double globalReactionSNorm = 0.0;
+    double globalReactionCellSNormSum = 0.0;
+    double globalReactionCancellationRatio = 0.0;
+    double globalReactionReceiverMass = 0.0;
+    double globalReactionScale = 0.0;
+    double globalReactionDeltaUMagnitude = 0.0;
+    double globalReactionFormulaResidual = 0.0;
+
+    // 0493x10i shifted mesoscopic exact-reaction diagnostics.
+    unsigned long long mesoReactionBlockCells = 0ull;
+    unsigned long long mesoReactionShiftX = 0ull;
+    unsigned long long mesoReactionShiftY = 0ull;
+    unsigned long long mesoReactionReservoirSlots = 0ull;
+    unsigned long long mesoReactionActiveReservoirs = 0ull;
+    unsigned long long mesoReactionTrivialReservoirs = 0ull;
+    unsigned long long mesoReactionInvalidReservoirs = 0ull;
+    unsigned long long mesoReactionNoReceiverReservoirs = 0ull;
+    unsigned long long mesoReactionDonorCells = 0ull;
+    unsigned long long mesoReactionReceiverCells = 0ull;
+    double mesoReactionReceiverMassSum = 0.0;
+    double mesoReactionScaleSum = 0.0;
+    double mesoReactionScaleAbsFromSpecularSum = 0.0;
+    double mesoReactionDeltaUMagnitudeSum = 0.0;
+    double mesoReactionCancellationSum = 0.0;
+    double mesoReactionFormulaResidualAbsSum = 0.0;
+
+    // 0493x10j deliberately simple laboratory-frame specular ablation.
+    unsigned long long simpleSpecularReflections = 0ull;
+    unsigned long long simpleSpecularInteriorCollisions = 0ull;
+    unsigned long long simpleSpecularShellReflections = 0ull;
+    unsigned long long simpleSpecularNonPositiveLabNormal = 0ull;
+    unsigned long long simpleSpecularInteriorFinalOutside = 0ull;
+    unsigned long long simpleSpecularShellFinalOutside = 0ull;
+    double simpleSpecularSpeedSqAbsErrorSum = 0.0;
+    double simpleSpecularSpeedSqReferenceSum = 0.0;
+    double simpleSpecularPositionShiftAbsSum = 0.0;
+
+    // 0493x10k local-liquid-frame specular ablation.
+    unsigned long long localFrameSpecularReflections = 0ull;
+    unsigned long long localFrameInteriorCollisions = 0ull;
+    unsigned long long localFrameShellReflections = 0ull;
+    unsigned long long localFrameRelativeStillOutward = 0ull;
+    unsigned long long localFrameInteriorEndpointOuter = 0ull;
+    unsigned long long localFrameShellEndpointOuter = 0ull;
+    double localFrameRelativeSpeedSqAbsErrorSum = 0.0;
+    double localFrameRelativeSpeedSqReferenceSum = 0.0;
+    double localFrameLabSpeedSqChangeSum = 0.0;
+    double localFrameLabSpeedSqAbsChangeSum = 0.0;
+    double localFramePositionShiftAbsSum = 0.0;
+
+    // 0493x10l passive pre-wall-interface diagnostics.
+    // Geometry: alpha=.5 interface cells. Velocity: post-Q6/B1 phase-A
+    // cell-mean velocity from the already-existing total moment deposit.
+    unsigned long long preWallInterfaceCells = 0ull;
+    unsigned long long preWallVelocityCells = 0ull;
+    unsigned long long preWallPositiveVnCells = 0ull;
+    unsigned long long preWallNegativeVnCells = 0ull;
+    unsigned long long preWallLowerTipScore = 0ull;
+    unsigned long long preWallLowerTipCells = 0ull;
+    unsigned long long preWallLowerTipPositiveVnCells = 0ull;
+    unsigned long long preWallLowerTipNegativeVnCells = 0ull;
+    double preWallVnSum = 0.0;
+    double preWallVnSqSum = 0.0;
+    double preWallAbsVnSum = 0.0;
+    double preWallVelocityMassSum = 0.0;
+    double preWallMassVnSum = 0.0;
+    double preWallNetNormalFluxProxy = 0.0;
+    double preWallInterfaceLengthProxy = 0.0;
+    double preWallAlphaArea = 0.0;
+    double preWallLowerTipY = 0.0;
+    double preWallLowerTipVnSum = 0.0;
+    double preWallLowerTipVnSqSum = 0.0;
+    double preWallLowerTipAbsVnSum = 0.0;
+    double preWallLowerTipMassSum = 0.0;
+    double preWallLowerTipMassVnSum = 0.0;
+
+    // 0493x10m local moving-interface-wall diagnostics.
+    unsigned long long movingWallInterfaceCellsBuilt = 0ull;
+    unsigned long long movingWallInterfaceVelocityFallbacks = 0ull;
+    unsigned long long movingWallInvalidInterfaceCells = 0ull;
+    unsigned long long movingWallParticlesWithCandidate = 0ull;
+    unsigned long long movingWallOldStationaryCrossingCandidates = 0ull;
+    unsigned long long movingWallOldStationaryCrossingReleased = 0ull;
+    unsigned long long movingWallCollisions = 0ull;
+    unsigned long long movingWallAdvanceCollisions = 0ull;
+    unsigned long long movingWallRecedeCollisions = 0ull;
+    unsigned long long movingWallStationaryCollisions = 0ull;
+    unsigned long long movingWallMultipleCollisionCandidates = 0ull;
+    unsigned long long movingWallRelativeStillOutward = 0ull;
+    unsigned long long movingWallFinalRelativeOutside = 0ull;
+    double movingWallCollisionTimeFractionSum = 0.0;
+    double movingWallWallVnSum = 0.0;
+    double movingWallWallVnSqSum = 0.0;
+    double movingWallWallVnAbsSum = 0.0;
+    double movingWallRelativeSpeedSqAbsErrorSum = 0.0;
+    double movingWallRelativeSpeedSqReferenceSum = 0.0;
+    double movingWallImpulseX = 0.0;
+    double movingWallImpulseY = 0.0;
+    double movingWallImpulseAbsSum = 0.0;
+    double movingWallPositionShiftAbsSum = 0.0;
+
+    // 0493x10n Q6-consistent continuous alpha=.5 polyline diagnostics.
+    unsigned long long continuousWallDualCellsVisited = 0ull;
+    unsigned long long continuousWallInterfaceDualCells = 0ull;
+    unsigned long long continuousWallSegmentsBuilt = 0ull;
+    unsigned long long continuousWallAmbiguousDualCells = 0ull;
+    unsigned long long continuousWallInvalidDualCells = 0ull;
+    unsigned long long continuousWallParticlesWithCandidate = 0ull;
+    unsigned long long continuousWallOldStationaryCrossingCandidates = 0ull;
+    unsigned long long continuousWallOldStationaryCrossingReleased = 0ull;
+    unsigned long long continuousWallNoNearbySegment = 0ull;
+    unsigned long long continuousWallCandidateNoHit = 0ull;
+    unsigned long long continuousWallCollisions = 0ull;
+    unsigned long long continuousWallSecondCollisions = 0ull;
+    unsigned long long continuousWallThirdCollisions = 0ull;
+    unsigned long long continuousWallCollisionLimitReached = 0ull;
+    unsigned long long continuousWallMultipleCollisionCandidates = 0ull;
+    unsigned long long continuousWallRelativeStillOutward = 0ull;
+    double continuousWallCollisionTimeFractionSum = 0.0;
+    double continuousWallWallVnSum = 0.0;
+    double continuousWallWallVnSqSum = 0.0;
+    double continuousWallWallVnAbsSum = 0.0;
+    double continuousWallRelativeSpeedSqAbsErrorSum = 0.0;
+    double continuousWallRelativeSpeedSqReferenceSum = 0.0;
+    double continuousWallImpulseX = 0.0;
+    double continuousWallImpulseY = 0.0;
+    double continuousWallImpulseAbsSum = 0.0;
+    double continuousWallPositionShiftAbsSum = 0.0;
+
+    // 0493x10o: Q6-hydrodynamic velocity + finite thermal interface layer.
+    unsigned long long q6ThermalHydroCapturedCells = 0ull;
+    unsigned long long q6ThermalInterfaceEndpointSamples = 0ull;
+    unsigned long long q6ThermalHydroFallbacks = 0ull;
+    double q6ThermalHydroVnSum = 0.0;
+    double q6ThermalHydroVnSqSum = 0.0;
+    double q6ThermalHydroAbsVnSum = 0.0;
+    double q6ThermalThicknessSum = 0.0;
+
+    // 0493x10p: resolve a particle which starts a step already on the
+    // vacuum side of the kinetic (thermally shifted) moving interface.
+    unsigned long long x10pInitialOutside = 0ull;
+    unsigned long long x10pInitialOverlapResolved = 0ull;
+    unsigned long long x10pInitialOverlapOutwardReflected = 0ull;
+    unsigned long long x10pInitialOverlapInwardReleased = 0ull;
+    unsigned long long x10pInitialOutsideTooDeep = 0ull;
+    double x10pInitialOverlapPenetrationSum = 0.0;
+    double x10pInitialOverlapMaxPenetration = 0.0;
+
+    // 0493x10q: rare broad-phase recovery when the normal 3x3 search cannot
+    // see the reconstructed kinetic interface from a vacuum-side cell.
+    unsigned long long x10qWideSearchTriggered = 0ull;
+    unsigned long long x10qWideSearchFoundSegment = 0ull;
+    unsigned long long x10qOrphanNoSegmentAfterWideSearch = 0ull;
+    unsigned long long x10qDeepOverlapResolved = 0ull;
+    unsigned long long x10qOverlapResolveFailure = 0ull;
+    double x10qResolvedNearestDistanceMax = 0.0;
+};
+
+struct KineticGlobalReaction0493x10f {
+    double A = 0.0;
+    double Sx = 0.0;
+    double Sy = 0.0;
+    double H = 0.0;
+    double receiverM = 0.0;
+    double receiverPx = 0.0;
+    double receiverPy = 0.0;
+    double cellSNormSum = 0.0;
+    unsigned long long donorCells = 0ull;
+    unsigned long long receiverCells = 0ull;
+
+    double a = 0.0;
+    double dux = 0.0;
+    double duy = 0.0;
+    int active = 0;
+    int trivial = 0;
+    int invalid = 0;
+};
+
+struct KineticGlobalReactionPartial0493x10g {
+    double A = 0.0;
+    double Sx = 0.0;
+    double Sy = 0.0;
+    double H = 0.0;
+    double receiverM = 0.0;
+    double receiverPx = 0.0;
+    double receiverPy = 0.0;
+    double cellSNormSum = 0.0;
+    unsigned long long donorCells = 0ull;
+    unsigned long long receiverCells = 0ull;
+};
+
 struct ResidentWorkspace0400 {
     CudaCellWorkspace cells;
     DeviceBuffer0400<double> rhs;
@@ -2170,6 +2520,67 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<Q6PeriodicMomentumAccumulator0493x7dv2fix2>
         periodicMomentumAccum0493x7dv2fix2;
     DeviceBuffer0400<Q6GfResidentCgState0493x7j> q6GfResidentCgState0493x7j;
+    // 0493x9t: nine scalar cell fields are allocated only when kinetic
+    // reflection is active.  They hold total-A, reflected-candidate and
+    // transmitted-candidate mass/momentum for an exactly conservative
+    // local group collision.
+    DeviceBuffer0400<double> kineticTotalM0493x9t;
+    DeviceBuffer0400<double> kineticTotalPx0493x9t;
+    DeviceBuffer0400<double> kineticTotalPy0493x9t;
+    DeviceBuffer0400<double> kineticRefM0493x9t;
+    DeviceBuffer0400<double> kineticRefPx0493x9t;
+    DeviceBuffer0400<double> kineticRefPy0493x9t;
+    DeviceBuffer0400<double> kineticTxM0493x9t;
+    DeviceBuffer0400<double> kineticTxPx0493x9t;
+    DeviceBuffer0400<double> kineticTxPy0493x9t;
+    DeviceBuffer0400<KineticInterfaceAccumulator0493x9t> kineticAccum0493x9t;
+    // 0493x9u adds only two O(Ncell) scalar arrays: mass-weighted
+    // interface-normal sums for donor groups sharing one inward bath.
+    DeviceBuffer0400<double> kineticRefNx0493x9u;
+    DeviceBuffer0400<double> kineticRefNy0493x9u;
+    DeviceBuffer0400<KineticInterfaceAccumulator0493x9u> kineticAccum0493x9u;
+    DeviceBuffer0400<KineticCrossingAccumulator0493x9x> kineticAccum0493x9x;
+    DeviceBuffer0400<KineticGlobalReaction0493x10f> kineticGlobalReaction0493x10f;
+    // 0493x10g performance-only: one atomics-free reduction record per cell block.
+    DeviceBuffer0400<KineticGlobalReactionPartial0493x10g> kineticGlobalReactionPartials0493x10g;
+
+    // 0493x10m one-step local moving interface. Geometry comes from alpha=.5;
+    // wallVn comes from the post-Q6/B1 phase-A velocity field.
+    DeviceBuffer0400<unsigned char> kineticMovingWallActive0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallNx0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallNy0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallQx0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallQy0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallVn0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallImpulseX0493x10m;
+    DeviceBuffer0400<double> kineticMovingWallImpulseY0493x10m;
+
+    // 0493x10n continuous interface on the cell-centre dual grid.  Every dual
+    // square owns 0, 1 or 2 segments; shared Q6-style edge crossings are
+    // computed from the same two alpha cell values, so neighboring segments
+    // have exactly matching endpoints.
+    DeviceBuffer0400<unsigned char> kineticContinuousSegCount0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegAx0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegAy0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegBx0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegBy0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegUax0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegUay0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegUbx0493x10n;
+    DeviceBuffer0400<double> kineticContinuousSegUby0493x10n;
+
+    // 0493x10o stores the projected liquid hydrodynamic field produced by Q6
+    // before r/p/dux/duy are reused.  Cell values are tentative liquid COM
+    // velocity + Q6 cell correction; east/north values carry the corresponding
+    // projected Q6 face component.
+    DeviceBuffer0400<unsigned char> kineticQ6HydroValid0493x10o;
+    DeviceBuffer0400<double> kineticQ6HydroCellUx0493x10o;
+    DeviceBuffer0400<double> kineticQ6HydroCellUy0493x10o;
+    DeviceBuffer0400<double> kineticQ6HydroFaceUxEast0493x10o;
+    DeviceBuffer0400<double> kineticQ6HydroFaceUyNorth0493x10o;
+    bool kineticQ6HydroFieldValid0493x10o = false;
+    int kineticQ6HydroFieldStep0493x10o = -1;
+    std::uint32_t kineticQ6HydroFieldType0493x10o = 0u;
     bool phaseInterfaceStencilValid0493x6f = false;
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
@@ -2187,6 +2598,51 @@ struct ResidentWorkspace0400 {
     int warmNy = 0;
     int warmPeriodicX = 0;
     int warmPeriodicY = 0;
+
+    void ensure_kinetic_interface_0493x9t(int numCells) {
+        const std::size_t c = static_cast<std::size_t>(std::max(1, numCells));
+        kineticTotalM0493x9t.ensure(c); kineticTotalPx0493x9t.ensure(c); kineticTotalPy0493x9t.ensure(c);
+        kineticRefM0493x9t.ensure(c); kineticRefPx0493x9t.ensure(c); kineticRefPy0493x9t.ensure(c);
+        kineticTxM0493x9t.ensure(c); kineticTxPx0493x9t.ensure(c); kineticTxPy0493x9t.ensure(c);
+        kineticAccum0493x9t.ensure(1u);
+    }
+
+    void ensure_kinetic_interface_0493x9u(int numCells) {
+        ensure_kinetic_interface_0493x9t(numCells);
+        const std::size_t c = static_cast<std::size_t>(std::max(1, numCells));
+        kineticRefNx0493x9u.ensure(c);
+        kineticRefNy0493x9u.ensure(c);
+        kineticAccum0493x9u.ensure(1u);
+    }
+
+    void ensure_kinetic_interface_0493x9x(
+        int numCells, int reactionBlocks = 1, int reactionReservoirs = 1) {
+        ensure_kinetic_interface_0493x9u(numCells);
+        kineticAccum0493x9x.ensure(1u);
+        kineticGlobalReaction0493x10f.ensure(
+            static_cast<std::size_t>(std::max(1, reactionReservoirs)));
+        kineticGlobalReactionPartials0493x10g.ensure(
+            static_cast<std::size_t>(std::max(1, reactionBlocks)));
+        const std::size_t c = static_cast<std::size_t>(std::max(1, numCells));
+        kineticMovingWallActive0493x10m.ensure(c);
+        kineticMovingWallNx0493x10m.ensure(c);
+        kineticMovingWallNy0493x10m.ensure(c);
+        kineticMovingWallQx0493x10m.ensure(c);
+        kineticMovingWallQy0493x10m.ensure(c);
+        kineticMovingWallVn0493x10m.ensure(c);
+        kineticMovingWallImpulseX0493x10m.ensure(c);
+        kineticMovingWallImpulseY0493x10m.ensure(c);
+        kineticContinuousSegCount0493x10n.ensure(c);
+        const std::size_t s2 = 2u * c;
+        kineticContinuousSegAx0493x10n.ensure(s2);
+        kineticContinuousSegAy0493x10n.ensure(s2);
+        kineticContinuousSegBx0493x10n.ensure(s2);
+        kineticContinuousSegBy0493x10n.ensure(s2);
+        kineticContinuousSegUax0493x10n.ensure(s2);
+        kineticContinuousSegUay0493x10n.ensure(s2);
+        kineticContinuousSegUbx0493x10n.ensure(s2);
+        kineticContinuousSegUby0493x10n.ensure(s2);
+    }
 
     void ensure(std::uint64_t particles, int numCells, int blocks, int speciesCount = 1) {
         cells.ensure_capacity(particles, numCells);
@@ -3124,6 +3580,4502 @@ __global__ void q6_reconstruct_cell_corrections_0493x7p(
     if (tid == 0) {
         partialSq[blockIdx.x] = shSq[0];
         partialMax[blockIdx.x] = shMax[0];
+    }
+}
+
+
+// =============================================================================
+// 0493x9t — kinetic liquid/vacuum retention / internal reflection
+// =============================================================================
+
+__device__ __forceinline__ unsigned long long q6_x9t_mix64(unsigned long long x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31;
+    return x;
+}
+
+__device__ __forceinline__ double q6_x9t_uniform01(
+    unsigned long long particle,
+    unsigned long long step,
+    unsigned long long seed) {
+    const unsigned long long h = q6_x9t_mix64(
+        seed ^ (particle + 0x9e3779b97f4a7c15ULL) ^
+        ((step + 0x632be59bd9b4e019ULL) * 0xd6e8feb86659fd93ULL));
+    return static_cast<double>(h >> 11) * (1.0 / 9007199254740992.0);
+}
+
+__device__ __forceinline__ int q6_x9t_wrap_index(int i, int n) {
+    if (i < 0) return i + n;
+    if (i >= n) return i - n;
+    return i;
+}
+
+__device__ __forceinline__ bool q6_x9t_cell_normal(
+    const double* alpha,
+    int c,
+    int nx,
+    int ny,
+    double dx,
+    double dy,
+    int periodicX,
+    int periodicY,
+    double* nxOut,
+    double* nyOut) {
+    if (!alpha || c < 0 || c >= nx * ny) return false;
+    const int ix = c % nx;
+    const int iy = c / nx;
+    int iw = ix - 1, ie = ix + 1, js = iy - 1, jn = iy + 1;
+    if (periodicX) { iw = q6_x9t_wrap_index(iw, nx); ie = q6_x9t_wrap_index(ie, nx); }
+    if (periodicY) { js = q6_x9t_wrap_index(js, ny); jn = q6_x9t_wrap_index(jn, ny); }
+    const double ac = alpha[c];
+    const double aw = (iw >= 0 && iw < nx) ? alpha[iy * nx + iw] : ac;
+    const double ae = (ie >= 0 && ie < nx) ? alpha[iy * nx + ie] : ac;
+    const double as = (js >= 0 && js < ny) ? alpha[js * nx + ix] : ac;
+    const double an = (jn >= 0 && jn < ny) ? alpha[jn * nx + ix] : ac;
+    const double denomX = ((periodicX || (ix > 0 && ix < nx - 1)) ? 2.0 : 1.0) * dx;
+    const double denomY = ((periodicY || (iy > 0 && iy < ny - 1)) ? 2.0 : 1.0) * dy;
+    // Existing x9 convention: n_AB points from alpha-high A to alpha-low B.
+    double gx = -(ae - aw) / denomX;
+    double gy = -(an - as) / denomY;
+    const double g = sqrt(gx * gx + gy * gy);
+    if (!(g > 1.0e-14) || !isfinite(g)) return false;
+    gx /= g; gy /= g;
+    *nxOut = gx; *nyOut = gy;
+    return true;
+}
+
+__device__ __forceinline__ bool q6_x9t_sample_alpha(
+    const double* alpha,
+    double x,
+    double y,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    int periodicX,
+    int periodicY,
+    double* valueOut) {
+    if (!alpha || nx < 1 || ny < 1 || !(lx > 0.0) || !(ly > 0.0)) return false;
+    if (periodicX) {
+        x -= floor(x / lx) * lx;
+        if (x >= lx) x = 0.0;
+    } else if (x < 0.0 || x > lx) {
+        return false;
+    }
+    if (periodicY) {
+        y -= floor(y / ly) * ly;
+        if (y >= ly) y = 0.0;
+    } else if (y < 0.0 || y > ly) {
+        return false;
+    }
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    double gx = x / dx - 0.5;
+    double gy = y / dy - 0.5;
+    int i0 = static_cast<int>(floor(gx));
+    int j0 = static_cast<int>(floor(gy));
+    double fx = gx - floor(gx);
+    double fy = gy - floor(gy);
+    int i1 = i0 + 1, j1 = j0 + 1;
+    if (periodicX) {
+        i0 = q6_x9t_wrap_index(i0, nx); i1 = q6_x9t_wrap_index(i1, nx);
+    } else {
+        if (i0 < 0) { i0 = 0; i1 = 0; fx = 0.0; }
+        if (i1 >= nx) { i0 = nx - 1; i1 = nx - 1; fx = 0.0; }
+    }
+    if (periodicY) {
+        j0 = q6_x9t_wrap_index(j0, ny); j1 = q6_x9t_wrap_index(j1, ny);
+    } else {
+        if (j0 < 0) { j0 = 0; j1 = 0; fy = 0.0; }
+        if (j1 >= ny) { j0 = ny - 1; j1 = ny - 1; fy = 0.0; }
+    }
+    const double a00 = alpha[j0 * nx + i0];
+    const double a10 = alpha[j0 * nx + i1];
+    const double a01 = alpha[j1 * nx + i0];
+    const double a11 = alpha[j1 * nx + i1];
+    const double a0 = (1.0 - fx) * a00 + fx * a10;
+    const double a1 = (1.0 - fx) * a01 + fx * a11;
+    *valueOut = (1.0 - fy) * a0 + fy * a1;
+    return isfinite(*valueOut);
+}
+
+
+// 0493x10a: value-consistent pointwise normal of the *physical* x6c alpha.
+// The interpolation is exactly the bilinear cell-centre interpolation used by
+// q6_x9t_sample_alpha.  n_AB points from alpha-high A toward alpha-low B.
+__device__ __forceinline__ bool q6_x10a_sample_alpha_normal(
+    const double* alpha,
+    double x,
+    double y,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    int periodicX,
+    int periodicY,
+    double* nxOut,
+    double* nyOut) {
+    if (!alpha || !nxOut || !nyOut || nx < 1 || ny < 1 || !(lx > 0.0) || !(ly > 0.0))
+        return false;
+    if (periodicX) {
+        x -= floor(x / lx) * lx;
+        if (x >= lx) x = 0.0;
+    } else if (x < 0.0 || x > lx) {
+        return false;
+    }
+    if (periodicY) {
+        y -= floor(y / ly) * ly;
+        if (y >= ly) y = 0.0;
+    } else if (y < 0.0 || y > ly) {
+        return false;
+    }
+
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    const double gx = x / dx - 0.5;
+    const double gy = y / dy - 0.5;
+    int i0 = static_cast<int>(floor(gx));
+    int j0 = static_cast<int>(floor(gy));
+    double fx = gx - floor(gx);
+    double fy = gy - floor(gy);
+    int i1 = i0 + 1;
+    int j1 = j0 + 1;
+
+    if (periodicX) {
+        i0 = q6_x9t_wrap_index(i0, nx);
+        i1 = q6_x9t_wrap_index(i1, nx);
+    } else {
+        if (i0 < 0) { i0 = 0; i1 = 0; fx = 0.0; }
+        if (i1 >= nx) { i0 = nx - 1; i1 = nx - 1; fx = 0.0; }
+    }
+    if (periodicY) {
+        j0 = q6_x9t_wrap_index(j0, ny);
+        j1 = q6_x9t_wrap_index(j1, ny);
+    } else {
+        if (j0 < 0) { j0 = 0; j1 = 0; fy = 0.0; }
+        if (j1 >= ny) { j0 = ny - 1; j1 = ny - 1; fy = 0.0; }
+    }
+
+    const double a00 = alpha[j0 * nx + i0];
+    const double a10 = alpha[j0 * nx + i1];
+    const double a01 = alpha[j1 * nx + i0];
+    const double a11 = alpha[j1 * nx + i1];
+    const double dadx = ((1.0 - fy) * (a10 - a00) + fy * (a11 - a01)) / dx;
+    const double dady = ((1.0 - fx) * (a01 - a00) + fx * (a11 - a10)) / dy;
+    double nxv = -dadx;
+    double nyv = -dady;
+    const double ng = sqrt(nxv * nxv + nyv * nyv);
+    if (!(ng > 1.0e-14) || !isfinite(ng)) return false;
+    nxv /= ng;
+    nyv /= ng;
+    *nxOut = nxv;
+    *nyOut = nyv;
+    return true;
+}
+
+struct KineticCrossingDecision0493x9t {
+    bool crossing = false;
+    bool reflect = false;
+    double nx = 0.0;
+    double ny = 0.0;
+    double outwardRelativeNormalSpeed = 0.0;
+};
+
+__device__ __forceinline__ KineticCrossingDecision0493x9t q6_x9t_decide_crossing(
+    std::uint64_t i,
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    std::uint32_t phaseAType,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    double dt,
+    int periodicX,
+    int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed) {
+    KineticCrossingDecision0493x9t d{};
+    if (particles.role && particles.role[i] != kParticleRoleFluid) return d;
+    if (!particles.type || particles.type[i] != phaseAType) return d;
+    const int c = cells.cellId[i];
+    if (c < 0 || c >= cells.numCells) return d;
+    const double mCell = totalM[c];
+    if (!(mCell > 0.0) || !isfinite(mCell)) return d;
+    if (!(alpha[c] >= 0.5)) return d;
+    if (!q6_x9t_cell_normal(alpha, c, nx, ny, lx / nx, ly / ny,
+                            periodicX, periodicY, &d.nx, &d.ny)) return d;
+    const double ux = totalPx[c] / mCell;
+    const double uy = totalPy[c] / mCell;
+    const double cx = particles.vx[i] - ux;
+    const double cy = particles.vy[i] - uy;
+    const double gn = cx * d.nx + cy * d.ny;
+    if (!(gn > 0.0) || !isfinite(gn)) return d;
+    const double xp = particles.x[i] + cx * dt;
+    const double yp = particles.y[i] + cy * dt;
+    double alphaPred = 1.0;
+    if (!q6_x9t_sample_alpha(alpha, xp, yp, nx, ny, lx, ly,
+                             periodicX, periodicY, &alphaPred)) {
+        // External-domain crossings belong to the existing wall/open BC path.
+        return d;
+    }
+    if (!(alphaPred < 0.5)) return d;
+    d.crossing = true;
+    d.outwardRelativeNormalSpeed = gn;
+    if (reflectionFraction >= 1.0) {
+        d.reflect = true;
+    } else if (reflectionFraction > 0.0) {
+        d.reflect = q6_x9t_uniform01(i, step, seed) < reflectionFraction;
+    }
+    return d;
+}
+
+__global__ void q6_x9t_deposit_total_a_moments(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    std::uint32_t phaseAType,
+    double* totalM,
+    double* totalPx,
+    double* totalPy) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        atomic_add_double_0400(&totalM[c], m);
+        atomic_add_double_0400(&totalPx[c], m * particles.vx[i]);
+        atomic_add_double_0400(&totalPy[c], m * particles.vy[i]);
+    }
+}
+
+__global__ void q6_x9t_classify_crossings(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    double* refM,
+    double* refPx,
+    double* refPy,
+    double* txM,
+    double* txPx,
+    double* txPy,
+    std::uint32_t phaseAType,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    double dt,
+    int periodicX,
+    int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed,
+    KineticInterfaceAccumulator0493x9t* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        const auto d = q6_x9t_decide_crossing(
+            i, particles, cells, alpha, totalM, totalPx, totalPy, phaseAType,
+            nx, ny, lx, ly, dt, periodicX, periodicY, reflectionFraction,
+            step, seed);
+        if (!d.crossing) continue;
+        const int c = cells.cellId[i];
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        if (d.reflect) {
+            atomic_add_double_0400(&refM[c], m);
+            atomic_add_double_0400(&refPx[c], m * particles.vx[i]);
+            atomic_add_double_0400(&refPy[c], m * particles.vy[i]);
+        } else {
+            atomic_add_double_0400(&txM[c], m);
+            atomic_add_double_0400(&txPx[c], m * particles.vx[i]);
+            atomic_add_double_0400(&txPy[c], m * particles.vy[i]);
+        }
+        if (audit) {
+            atomicAdd(&audit->crossings, 1ull);
+            if (d.reflect) atomicAdd(&audit->selectedReflections, 1ull);
+            else atomicAdd(&audit->transmittedCrossings, 1ull);
+            if (d.reflect) atomic_add_double_0400(&audit->reflectedMass, m);
+            else atomic_add_double_0400(&audit->transmittedMass, m);
+            atomic_add_double_0400(
+                &audit->outwardRelativeNormalSpeedSum,
+                d.outwardRelativeNormalSpeed);
+        }
+    }
+}
+
+__global__ void q6_x9t_apply_conservative_reflection(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    const double* refM,
+    const double* refPx,
+    const double* refPy,
+    const double* txM,
+    const double* txPx,
+    const double* txPy,
+    std::uint32_t phaseAType,
+    int evaporationTargetType,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    double dt,
+    int periodicX,
+    int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed,
+    KineticInterfaceAccumulator0493x9t* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+
+        const auto d = q6_x9t_decide_crossing(
+            i, particles, cells, alpha, totalM, totalPx, totalPy, phaseAType,
+            nx, ny, lx, ly, dt, periodicX, periodicY, reflectionFraction,
+            step, seed);
+
+        if (d.crossing && !d.reflect) {
+            if (evaporationTargetType >= 0) {
+                particles.type[i] = static_cast<std::uint32_t>(evaporationTargetType);
+                if (audit) atomicAdd(&audit->convertedParticles, 1ull);
+            }
+            continue;
+        }
+
+        const double mc = refM[c];
+        if (!(mc > 0.0)) continue;  // no reflected group in this cell
+        const double me = txM[c];
+        const double mt = totalM[c];
+        const double mr = mt - mc - me;
+        if (!(mr > 1.0e-14 * fmax(1.0, mt)) || !isfinite(mr)) {
+            if (d.crossing && d.reflect && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+            }
+            continue;
+        }
+
+        double nxCell = 0.0, nyCell = 0.0;
+        if (!q6_x9t_cell_normal(alpha, c, nx, ny, lx / nx, ly / ny,
+                                periodicX, periodicY, &nxCell, &nyCell)) {
+            if (d.crossing && d.reflect && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+            }
+            continue;
+        }
+
+        const double ucx = refPx[c] / mc;
+        const double ucy = refPy[c] / mc;
+        const double prx = totalPx[c] - refPx[c] - txPx[c];
+        const double pry = totalPy[c] - refPy[c] - txPy[c];
+        const double urx = prx / mr;
+        const double ury = pry / mr;
+        const double g = (ucx - urx) * nxCell + (ucy - ury) * nyCell;
+        if (!(g > 0.0) || !isfinite(g)) {
+            if (d.crossing && d.reflect && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+            }
+            continue;
+        }
+
+        const double denom = mc + mr;
+        const double dUc = -2.0 * mr / denom * g;
+        const double dUr =  2.0 * mc / denom * g;
+        const double oldVx = particles.vx[i];
+        const double oldVy = particles.vy[i];
+        double newVx = oldVx;
+        double newVy = oldVy;
+        bool changed = false;
+
+        if (d.crossing && d.reflect) {
+            // Reflect candidate internal normal velocity around the reflected
+            // subgroup mean, then apply the exact two-group recoil.  The sum of
+            // internal deviations is zero, so this preserves subgroup momentum;
+            // the sign flip preserves its internal kinetic energy.
+            const double devn = (oldVx - ucx) * nxCell + (oldVy - ucy) * nyCell;
+            newVx = oldVx + (-2.0 * devn + dUc) * nxCell;
+            newVy = oldVy + (-2.0 * devn + dUc) * nyCell;
+            changed = true;
+            if (audit) atomicAdd(&audit->appliedReflections, 1ull);
+        } else if (!d.crossing) {
+            // Non-crossing A particles form the receiving internal bath.
+            newVx = oldVx + dUr * nxCell;
+            newVy = oldVy + dUr * nyCell;
+            changed = true;
+        }
+
+        if (changed) {
+            particles.vx[i] = newVx;
+            particles.vy[i] = newVy;
+            if (audit) {
+                const double m = particles.mass ? particles.mass[i] : 1.0;
+                atomic_add_double_0400(&audit->deltaPx, m * (newVx - oldVx));
+                atomic_add_double_0400(&audit->deltaPy, m * (newVy - oldVy));
+                atomic_add_double_0400(
+                    &audit->deltaKineticEnergy,
+                    0.5 * m * ((newVx * newVx + newVy * newVy) -
+                               (oldVx * oldVx + oldVy * oldVy)));
+            }
+        }
+    }
+}
+
+
+// =============================================================================
+// 0493x9u — support-edge kinetic reflection with inward conservative bath
+// =============================================================================
+
+struct KineticSupportDecision0493x9u {
+    bool crossing = false;
+    bool reflect = false;
+    bool outerSupportParticle = false;
+    bool supportExitCrossing = false;
+    bool normalFallback = false;
+    bool bathSearchFailed = false;
+    int bathCell = -1;
+    int bathDepth = -1;
+    double nx = 0.0;
+    double ny = 0.0;
+    double outwardRelativeNormalSpeed = 0.0;
+};
+
+__device__ __forceinline__ bool q6_x9u_position_cell(
+    double x, double y, int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY, int* cellOut) {
+    if (!cellOut || nx < 1 || ny < 1 || !(lx > 0.0) || !(ly > 0.0)) return false;
+    if (periodicX) {
+        x -= floor(x / lx) * lx;
+        if (x >= lx) x = 0.0;
+    } else if (x < 0.0 || x > lx) return false;
+    if (periodicY) {
+        y -= floor(y / ly) * ly;
+        if (y >= ly) y = 0.0;
+    } else if (y < 0.0 || y > ly) return false;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    int ix = static_cast<int>(floor(x / dx));
+    int iy = static_cast<int>(floor(y / dy));
+    if (ix < 0) ix = 0; if (iy < 0) iy = 0;
+    if (ix >= nx) ix = nx - 1; if (iy >= ny) iy = ny - 1;
+    *cellOut = iy * nx + ix;
+    return true;
+}
+
+__device__ __forceinline__ bool q6_x9u_offset_cell(
+    int c, int ox, int oy, int nx, int ny, int periodicX, int periodicY, int* out) {
+    if (!out || c < 0 || c >= nx * ny) return false;
+    int ix = c % nx; int iy = c / nx;
+    ix += ox; iy += oy;
+    if (periodicX) ix = q6_x9t_wrap_index(ix, nx);
+    else if (ix < 0 || ix >= nx) return false;
+    if (periodicY) iy = q6_x9t_wrap_index(iy, ny);
+    else if (iy < 0 || iy >= ny) return false;
+    *out = iy * nx + ix;
+    return true;
+}
+
+// 0493x9w: a kinetic-recoil bath must belong to the physical liquid bulk.
+// Halo occupancy (massA>0 with alpha<0.5) is never allowed to become its own
+// cohesive reservoir. Search remains bounded to depth <=2 and returns as soon
+// as a valid nearest-depth bulk candidate is found.
+__device__ __forceinline__ bool q6_x9w_choose_strict_bulk_bath(
+    const double* alpha, const double* totalM, int c,
+    double nxOut, double nyOut, double particleMass,
+    int nx, int ny, int periodicX, int periodicY,
+    int* bathCellOut, int* bathDepthOut) {
+    if (!alpha || !totalM || !bathCellOut || !bathDepthOut) return false;
+    (void)particleMass;
+    const int sx = nxOut > 1.0e-14 ? -1 : (nxOut < -1.0e-14 ? 1 : 0);
+    const int sy = nyOut > 1.0e-14 ? -1 : (nyOut < -1.0e-14 ? 1 : 0);
+
+    // Efficiency: at most three candidates per depth and normally only depth 1
+    // is touched. Within the nearest valid depth, use the largest A mass.
+    for (int depth = 1; depth <= 2; ++depth) {
+        int cand[3]; int nCand = 0;
+        if (sx != 0) {
+            int k = -1;
+            if (q6_x9u_offset_cell(c, depth * sx, 0, nx, ny,
+                                   periodicX, periodicY, &k))
+                cand[nCand++] = k;
+        }
+        if (sy != 0) {
+            int k = -1;
+            if (q6_x9u_offset_cell(c, 0, depth * sy, nx, ny,
+                                   periodicX, periodicY, &k)) {
+                bool dup = false;
+                for (int q = 0; q < nCand; ++q) dup = dup || cand[q] == k;
+                if (!dup) cand[nCand++] = k;
+            }
+        }
+        if (sx != 0 && sy != 0) {
+            int k = -1;
+            if (q6_x9u_offset_cell(c, depth * sx, depth * sy, nx, ny,
+                                   periodicX, periodicY, &k)) {
+                bool dup = false;
+                for (int q = 0; q < nCand; ++q) dup = dup || cand[q] == k;
+                if (!dup) cand[nCand++] = k;
+            }
+        }
+
+        int best = -1;
+        double bestMass = 0.0;
+        for (int q = 0; q < nCand; ++q) {
+            const int k = cand[q];
+            if (!(alpha[k] >= 0.5)) continue;
+            const double mk = totalM[k];
+            if (!(mk > 0.0) || !isfinite(mk)) continue;
+            if (best < 0 || mk > bestMass) {
+                best = k;
+                bestMass = mk;
+            }
+        }
+        if (best >= 0) {
+            *bathCellOut = best;
+            *bathDepthOut = depth;
+            return true;
+        }
+    }
+    return false;
+}
+
+__device__ __forceinline__ KineticSupportDecision0493x9u q6_x9u_decide_support_exit(
+    std::uint64_t i, CudaParticleDeviceView particles, CudaCellWorkspaceDeviceView cells,
+    const double* alpha, const double* totalM, const double* totalPx, const double* totalPy,
+    std::uint32_t phaseAType, int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY, double reflectionFraction,
+    unsigned long long step, unsigned long long seed) {
+    KineticSupportDecision0493x9u d{};
+    if (particles.role && particles.role[i] != kParticleRoleFluid) return d;
+    if (!particles.type || particles.type[i] != phaseAType) return d;
+    const int c = cells.cellId[i];
+    if (c < 0 || c >= cells.numCells || !alpha || !totalM) return d;
+    const double mCell = totalM[c];
+    if (!(mCell > 0.0) || !isfinite(mCell)) return d;
+    const bool halfIsoInterior = alpha[c] >= 0.5;
+    d.outerSupportParticle = !halfIsoInterior;
+
+    if (!q6_x9t_cell_normal(alpha, c, nx, ny, lx / nx, ly / ny,
+                            periodicX, periodicY, &d.nx, &d.ny)) {
+        if (halfIsoInterior || !q6_x9t_cell_normal(totalM, c, nx, ny, lx / nx, ly / ny,
+                                                   periodicX, periodicY, &d.nx, &d.ny)) return d;
+        d.normalFallback = true;
+    }
+
+    int bath = c, bathDepth = 0;
+    const double mi = particles.mass ? particles.mass[i] : 1.0;
+    if (!halfIsoInterior) {
+        if (!q6_x9w_choose_strict_bulk_bath(alpha, totalM, c, d.nx, d.ny, mi, nx, ny,
+                                               periodicX, periodicY, &bath, &bathDepth)) {
+            d.bathSearchFailed = true; return d;
+        }
+    }
+    const double mb = totalM[bath];
+    if (!(mb > 0.0) || !isfinite(mb)) { d.bathSearchFailed = !halfIsoInterior; return d; }
+    d.bathCell = bath; d.bathDepth = bathDepth;
+    const double ux = totalPx[bath] / mb, uy = totalPy[bath] / mb;
+    const double cx = particles.vx[i] - ux, cy = particles.vy[i] - uy;
+    const double gn = cx * d.nx + cy * d.ny;
+    if (!(gn > 0.0) || !isfinite(gn)) return d;
+    const double xp = particles.x[i] + cx * dt, yp = particles.y[i] + cy * dt;
+
+    if (halfIsoInterior) {
+        double alphaPred = 1.0;
+        if (!q6_x9t_sample_alpha(alpha, xp, yp, nx, ny, lx, ly, periodicX, periodicY, &alphaPred)) return d;
+        if (!(alphaPred < 0.5)) return d;
+    } else {
+        int target = -1;
+        if (!q6_x9u_position_cell(xp, yp, nx, ny, lx, ly, periodicX, periodicY, &target)) return d;
+        if (target == c) return d;
+        // 0493x9w: an already occupied alpha<0.5 halo cell is still exterior.
+        // Occupancy must never bootstrap a new cohesive support layer.
+        if (!(alpha[target] < 0.5)) return d;
+        d.supportExitCrossing = true;
+    }
+
+    d.crossing = true; d.outwardRelativeNormalSpeed = gn;
+    if (reflectionFraction >= 1.0) d.reflect = true;
+    else if (reflectionFraction > 0.0) d.reflect = q6_x9t_uniform01(i, step, seed) < reflectionFraction;
+    return d;
+}
+
+
+// 0493x9v: diagnostic helpers. No physics uses these results.
+__device__ __forceinline__ bool q6_x9v_target_from_velocity(
+    double x, double y, double vx, double vy, double dt,
+    int currentCell, int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY, int* targetOut) {
+    if (!targetOut) return false;
+    int target = -1;
+    if (!q6_x9u_position_cell(x + vx * dt, y + vy * dt,
+                              nx, ny, lx, ly, periodicX, periodicY, &target)) return false;
+    *targetOut = target;
+    return target != currentCell;
+}
+
+__device__ __forceinline__ bool q6_x9v_cell_effectively_empty(
+    const double* totalM, int cell, double particleMass) {
+    if (!totalM || cell < 0) return false;
+    return !(totalM[cell] > 1.0e-14 * fmax(1.0, particleMass));
+}
+
+__global__ void q6_x9u_classify_support_exits(
+    CudaParticleDeviceView particles, CudaCellWorkspaceDeviceView cells, std::uint64_t nParticles,
+    const double* alpha, const double* totalM, const double* totalPx, const double* totalPy,
+    double* refM, double* refPx, double* refPy,
+    double* recvM, double* recvPx, double* recvPy,
+    double* refNx, double* refNy, std::uint32_t phaseAType,
+    int nx, int ny, double lx, double ly, double dt, int periodicX, int periodicY,
+    double reflectionFraction, unsigned long long step, unsigned long long seed,
+    KineticInterfaceAccumulator0493x9u* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i]; if (c < 0 || c >= cells.numCells) continue;
+        const auto d = q6_x9u_decide_support_exit(i, particles, cells, alpha, totalM, totalPx, totalPy,
+            phaseAType, nx, ny, lx, ly, dt, periodicX, periodicY, reflectionFraction, step, seed);
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        if (audit) {
+            if (d.outerSupportParticle) {
+                atomicAdd(&audit->phaseAParticlesInOuterSupport, 1ull);
+                if (totalM[c] < 3.0 * fmax(m, 1.0e-30))
+                    atomicAdd(&audit->outerSupportCellParticlesLT3, 1ull);
+            }
+            if (d.bathSearchFailed) atomicAdd(&audit->bathSearchFailures, 1ull);
+
+            // What target would the actual stream x+v*dt reach before the
+            // reflection operator? This is intentionally diagnostic only.
+            int targetAbs0493x9v = -1;
+            const bool absMove0493x9v = q6_x9v_target_from_velocity(
+                particles.x[i], particles.y[i], particles.vx[i], particles.vy[i], dt,
+                c, nx, ny, lx, ly, periodicX, periodicY, &targetAbs0493x9v);
+            const bool absExit0493x9v = absMove0493x9v &&
+                q6_x9v_cell_effectively_empty(totalM, targetAbs0493x9v, m);
+            if (absExit0493x9v) {
+                atomicAdd(&audit->absoluteSupportExitCandidates, 1ull);
+                if (!d.crossing) atomicAdd(&audit->missedRelativeButAbsoluteExit, 1ull);
+            }
+
+            // Reconstruct the x9u relative predictor even when it returns
+            // non-crossing because the target cell is already occupied. This
+            // directly tests whether the halo can bootstrap its own support.
+            int bath0493x9v = d.bathCell >= 0 ? d.bathCell : c;
+            const double mb0493x9v = (bath0493x9v >= 0 && bath0493x9v < cells.numCells)
+                ? totalM[bath0493x9v] : 0.0;
+            if (d.outerSupportParticle && mb0493x9v > 0.0 && isfinite(mb0493x9v)) {
+                const double ubx0493x9v = totalPx[bath0493x9v] / mb0493x9v;
+                const double uby0493x9v = totalPy[bath0493x9v] / mb0493x9v;
+                const double crx0493x9v = particles.vx[i] - ubx0493x9v;
+                const double cry0493x9v = particles.vy[i] - uby0493x9v;
+                const double gn0493x9v = crx0493x9v * d.nx + cry0493x9v * d.ny;
+                int targetRel0493x9v = -1;
+                if (gn0493x9v > 0.0 &&
+                    q6_x9v_target_from_velocity(particles.x[i], particles.y[i],
+                        crx0493x9v, cry0493x9v, dt, c, nx, ny, lx, ly,
+                        periodicX, periodicY, &targetRel0493x9v) &&
+                    alpha[targetRel0493x9v] < 0.5) {
+                    atomicAdd(&audit->detectorPredictedOuterTarget, 1ull);
+                    if (!d.crossing && totalM[targetRel0493x9v] > 1.0e-14 * fmax(1.0, m)) {
+                        atomicAdd(&audit->missedOccupiedOuterTarget, 1ull);
+                        if (totalM[targetRel0493x9v] < 3.0 * fmax(m, 1.0e-30))
+                            atomicAdd(&audit->missedSparseOuterTargetLT3, 1ull);
+                    }
+                }
+            }
+
+            // A bath-search failure currently returns before a crossing can
+            // be declared. Use only the local-cell mean to estimate how often
+            // such failures coincide with a genuine outward support exit.
+            if (d.bathSearchFailed && totalM[c] > 0.0 && isfinite(totalM[c])) {
+                const double ulx0493x9v = totalPx[c] / totalM[c];
+                const double uly0493x9v = totalPy[c] / totalM[c];
+                const double clx0493x9v = particles.vx[i] - ulx0493x9v;
+                const double cly0493x9v = particles.vy[i] - uly0493x9v;
+                const double gnLocal0493x9v = clx0493x9v * d.nx + cly0493x9v * d.ny;
+                int targetLocal0493x9v = -1;
+                if (gnLocal0493x9v > 0.0 &&
+                    q6_x9v_target_from_velocity(particles.x[i], particles.y[i],
+                        clx0493x9v, cly0493x9v, dt, c, nx, ny, lx, ly,
+                        periodicX, periodicY, &targetLocal0493x9v) &&
+                    q6_x9v_cell_effectively_empty(totalM, targetLocal0493x9v, m))
+                    atomicAdd(&audit->bathSearchFailureWouldExitLocal, 1ull);
+            }
+        }
+        if (!d.crossing) {
+            atomic_add_double_0400(&recvM[c], m);
+            atomic_add_double_0400(&recvPx[c], m * particles.vx[i]);
+            atomic_add_double_0400(&recvPy[c], m * particles.vy[i]);
+            continue;
+        }
+        if (d.reflect) {
+            const int b = d.bathCell;
+            if (b >= 0 && b < cells.numCells) {
+                atomic_add_double_0400(&refM[b], m);
+                atomic_add_double_0400(&refPx[b], m * particles.vx[i]);
+                atomic_add_double_0400(&refPy[b], m * particles.vy[i]);
+                atomic_add_double_0400(&refNx[b], m * d.nx);
+                atomic_add_double_0400(&refNy[b], m * d.ny);
+            }
+        }
+        if (audit) {
+            atomicAdd(&audit->crossings, 1ull);
+            if (d.supportExitCrossing) atomicAdd(&audit->supportExitCrossings, 1ull);
+            else atomicAdd(&audit->legacyHalfIsoCrossings, 1ull);
+            if (d.bathCell >= 0 && d.bathCell < cells.numCells) {
+                const bool bulkBath0493x9v = alpha[d.bathCell] >= 0.5;
+                if (bulkBath0493x9v) atomicAdd(&audit->bathAlphaGEHalf, 1ull);
+                else atomicAdd(&audit->bathAlphaLTHalf, 1ull);
+                if (d.supportExitCrossing) {
+                    if (bulkBath0493x9v) atomicAdd(&audit->supportExitBathAlphaGEHalf, 1ull);
+                    else atomicAdd(&audit->supportExitBathAlphaLTHalf, 1ull);
+                }
+            }
+            if (d.reflect) atomicAdd(&audit->selectedReflections, 1ull);
+            else atomicAdd(&audit->transmittedCrossings, 1ull);
+            if (d.bathDepth == 0) atomicAdd(&audit->bathDepth0, 1ull);
+            else if (d.bathDepth == 1) atomicAdd(&audit->bathDepth1, 1ull);
+            else if (d.bathDepth == 2) atomicAdd(&audit->bathDepth2, 1ull);
+            if (d.normalFallback) atomicAdd(&audit->normalFallbacks, 1ull);
+            if (d.reflect) atomic_add_double_0400(&audit->reflectedMass, m);
+            else atomic_add_double_0400(&audit->transmittedMass, m);
+            atomic_add_double_0400(&audit->outwardRelativeNormalSpeedSum, d.outwardRelativeNormalSpeed);
+        }
+    }
+}
+
+__global__ void q6_x9u_apply_conservative_reflection(
+    CudaParticleDeviceView particles, CudaCellWorkspaceDeviceView cells, std::uint64_t nParticles,
+    const double* alpha, const double* totalM, const double* totalPx, const double* totalPy,
+    const double* refM, const double* refPx, const double* refPy,
+    const double* recvM, const double* recvPx, const double* recvPy,
+    const double* refNx, const double* refNy, std::uint32_t phaseAType, int evaporationTargetType,
+    int nx, int ny, double lx, double ly, double dt, int periodicX, int periodicY,
+    double reflectionFraction, unsigned long long step, unsigned long long seed,
+    KineticInterfaceAccumulator0493x9u* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i]; if (c < 0 || c >= cells.numCells) continue;
+        const auto d = q6_x9u_decide_support_exit(i, particles, cells, alpha, totalM, totalPx, totalPy,
+            phaseAType, nx, ny, lx, ly, dt, periodicX, periodicY, reflectionFraction, step, seed);
+        if (d.crossing && !d.reflect) {
+            if (evaporationTargetType >= 0) {
+                particles.type[i] = static_cast<std::uint32_t>(evaporationTargetType);
+                if (audit) atomicAdd(&audit->convertedParticles, 1ull);
+            }
+            continue;
+        }
+        const bool donor = d.crossing && d.reflect;
+        const bool receiver = !d.crossing && refM[c] > 0.0;
+        if (!donor && !receiver) continue;
+        const int b = donor ? d.bathCell : c;
+        if (b < 0 || b >= cells.numCells) {
+            if (donor && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+                atomicAdd(&audit->unsupportedInvalidBath, 1ull);
+            }
+            continue;
+        }
+        const double mc = refM[b], mr = recvM[b];
+        if (!(mc > 0.0) || !isfinite(mc)) {
+            if (donor && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+                atomicAdd(&audit->unsupportedInvalidDonorGroup, 1ull);
+            }
+            continue;
+        }
+        if (!(mr > 1.0e-14 * fmax(1.0, mc)) || !isfinite(mr)) {
+            if (donor && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+                atomicAdd(&audit->unsupportedNoReceiverMass, 1ull);
+            }
+            continue;
+        }
+        double nxCell = refNx[b], nyCell = refNy[b];
+        const double ng = sqrt(nxCell * nxCell + nyCell * nyCell);
+        if (!(ng > 1.0e-14) || !isfinite(ng)) {
+            if (donor && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+                atomicAdd(&audit->unsupportedNormalCancellation, 1ull);
+            }
+            continue;
+        }
+        nxCell /= ng; nyCell /= ng;
+        const double ucx = refPx[b] / mc, ucy = refPy[b] / mc;
+        const double urx = recvPx[b] / mr, ury = recvPy[b] / mr;
+        const double g = (ucx - urx) * nxCell + (ucy - ury) * nyCell;
+        if (!(g > 0.0) || !isfinite(g)) {
+            if (donor && audit) {
+                atomicAdd(&audit->unsupportedReflections, 1ull);
+                atomicAdd(&audit->unsupportedGroupNotOutward, 1ull);
+            }
+            continue;
+        }
+        const double denom = mc + mr;
+        const double dUc = -2.0 * mr / denom * g;
+        const double dUr =  2.0 * mc / denom * g;
+        const double oldVx = particles.vx[i], oldVy = particles.vy[i];
+        double newVx = oldVx, newVy = oldVy;
+        if (donor) {
+            const double devn = (oldVx - ucx) * nxCell + (oldVy - ucy) * nyCell;
+            newVx += (-2.0 * devn + dUc) * nxCell;
+            newVy += (-2.0 * devn + dUc) * nyCell;
+            if (audit) {
+                atomicAdd(&audit->appliedReflections, 1ull);
+                const double urAfterX0493x9v = urx + dUr * nxCell;
+                const double urAfterY0493x9v = ury + dUr * nyCell;
+                const double postCx0493x9v = newVx - urAfterX0493x9v;
+                const double postCy0493x9v = newVy - urAfterY0493x9v;
+                const double postGn0493x9v = postCx0493x9v * nxCell + postCy0493x9v * nyCell;
+                atomic_add_double_0400(&audit->postRelativeNormalSpeedSum, postGn0493x9v);
+                if (postGn0493x9v > 0.0) {
+                    atomicAdd(&audit->appliedStillOutwardRelative, 1ull);
+                    atomic_add_double_0400(&audit->postOutwardRelativeNormalSpeedSum, postGn0493x9v);
+                }
+
+                bool postRelExit0493x9v = false;
+                if (d.supportExitCrossing) {
+                    int targetPostRel0493x9v = -1;
+                    postRelExit0493x9v = q6_x9v_target_from_velocity(
+                        particles.x[i], particles.y[i], postCx0493x9v, postCy0493x9v, dt,
+                        c, nx, ny, lx, ly, periodicX, periodicY, &targetPostRel0493x9v) &&
+                        q6_x9v_cell_effectively_empty(totalM, targetPostRel0493x9v,
+                            particles.mass ? particles.mass[i] : 1.0);
+                } else {
+                    double alphaPost0493x9v = 1.0;
+                    const bool sampled0493x9v = q6_x9t_sample_alpha(
+                        alpha, particles.x[i] + postCx0493x9v * dt,
+                        particles.y[i] + postCy0493x9v * dt,
+                        nx, ny, lx, ly, periodicX, periodicY, &alphaPost0493x9v);
+                    postRelExit0493x9v = sampled0493x9v && alphaPost0493x9v < 0.5;
+                }
+                if (postRelExit0493x9v) atomicAdd(&audit->appliedStillRelativeExit, 1ull);
+
+                int targetPostAbs0493x9v = -1;
+                if (q6_x9v_target_from_velocity(
+                        particles.x[i], particles.y[i], newVx, newVy, dt,
+                        c, nx, ny, lx, ly, periodicX, periodicY, &targetPostAbs0493x9v) &&
+                    q6_x9v_cell_effectively_empty(totalM, targetPostAbs0493x9v,
+                        particles.mass ? particles.mass[i] : 1.0))
+                    atomicAdd(&audit->appliedStillAbsoluteExit, 1ull);
+            }
+        } else {
+            newVx += dUr * nxCell; newVy += dUr * nyCell;
+        }
+        particles.vx[i] = newVx; particles.vy[i] = newVy;
+        if (audit) {
+            const double m = particles.mass ? particles.mass[i] : 1.0;
+            atomic_add_double_0400(&audit->deltaPx, m * (newVx - oldVx));
+            atomic_add_double_0400(&audit->deltaPy, m * (newVy - oldVy));
+            atomic_add_double_0400(&audit->deltaKineticEnergy,
+                0.5 * m * ((newVx * newVx + newVy * newVy) - (oldVx * oldVx + oldVy * oldVy)));
+        }
+    }
+}
+
+
+// =============================================================================
+// 0493x9x — pre-crossing / crossing-time kinetic reflection
+// =============================================================================
+
+struct KineticCrossingDecision0493x9x {
+    bool crossing = false;
+    bool reflect = false;
+    bool interiorCrossing = false;
+    bool shellGuard = false;
+    bool shellParticle = false;
+    bool shellRecoverable = false;
+    bool deepOuterParticle = false;
+    bool startBelowHalf = false;
+    bool pointwiseOuterRoutedToShell = false;
+    bool pointwiseInteriorOuterCell = false;
+    bool bisectionFallback = false;
+    bool crossingPointNormalFallback = false;
+    int bathCell = -1;
+    double nx = 0.0;
+    double ny = 0.0;
+    double outwardRelativeNormalSpeed = 0.0;
+    double crossingFraction = 0.0;
+};
+
+__device__ __forceinline__ bool q6_x9x_choose_direct_bulk_bath(
+    const double* alpha, const double* totalM, int c,
+    double nxOut, double nyOut,
+    int nx, int ny, int periodicX, int periodicY, int* bathCellOut) {
+    if (!alpha || !totalM || !bathCellOut) return false;
+    const int sx = nxOut > 1.0e-14 ? -1 : (nxOut < -1.0e-14 ? 1 : 0);
+    const int sy = nyOut > 1.0e-14 ? -1 : (nyOut < -1.0e-14 ? 1 : 0);
+    int cand[3]; int nCand = 0;
+    if (sx != 0) {
+        int k = -1;
+        if (q6_x9u_offset_cell(c, sx, 0, nx, ny, periodicX, periodicY, &k))
+            cand[nCand++] = k;
+    }
+    if (sy != 0) {
+        int k = -1;
+        if (q6_x9u_offset_cell(c, 0, sy, nx, ny, periodicX, periodicY, &k)) {
+            bool dup = false;
+            for (int q = 0; q < nCand; ++q) dup = dup || cand[q] == k;
+            if (!dup) cand[nCand++] = k;
+        }
+    }
+    if (sx != 0 && sy != 0) {
+        int k = -1;
+        if (q6_x9u_offset_cell(c, sx, sy, nx, ny, periodicX, periodicY, &k)) {
+            bool dup = false;
+            for (int q = 0; q < nCand; ++q) dup = dup || cand[q] == k;
+            if (!dup) cand[nCand++] = k;
+        }
+    }
+    int best = -1;
+    double bestMass = 0.0;
+    for (int q = 0; q < nCand; ++q) {
+        const int k = cand[q];
+        if (!(alpha[k] >= 0.5)) continue;
+        const double mk = totalM[k];
+        if (!(mk > 0.0) || !isfinite(mk)) continue;
+        if (best < 0 || mk > bestMass) {
+            best = k; bestMass = mk;
+        }
+    }
+    if (best < 0) return false;
+    *bathCellOut = best;
+    return true;
+}
+
+__device__ __forceinline__ KineticCrossingDecision0493x9x q6_x9y_decide_crossing(
+    std::uint64_t i,
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    std::uint32_t phaseAType,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed,
+    bool resolveCrossingFraction) {
+    KineticCrossingDecision0493x9x d{};
+    (void)resolveCrossingFraction; // x10a always resolves true interior crossings.
+    if (particles.role && particles.role[i] != kParticleRoleFluid) return d;
+    if (!particles.type || particles.type[i] != phaseAType) return d;
+    const int c = cells.cellId[i];
+    if (c < 0 || c >= cells.numCells || !alpha || !totalM || !totalPx || !totalPy) return d;
+    const double mc = totalM[c];
+    if (!(mc > 0.0) || !isfinite(mc)) return d;
+
+    const double x0 = particles.x[i];
+    const double y0 = particles.y[i];
+    const double x1 = x0 + particles.vx[i] * dt;
+    const double y1 = y0 + particles.vy[i] * dt;
+    const bool centerBulk = alpha[c] >= 0.5;
+
+    double a0 = alpha[c];
+    double a1 = 1.0;
+    bool pointInside = false;
+    bool shellSide = false;
+
+    if (centerBulk) {
+        if (!q6_x9t_sample_alpha(alpha, x1, y1,
+                                 nx, ny, lx, ly, periodicX, periodicY, &a1))
+            return d;
+        if (!(a1 < 0.5)) return d;
+        if (!q6_x9t_sample_alpha(alpha, x0, y0,
+                                 nx, ny, lx, ly, periodicX, periodicY, &a0))
+            return d;
+        if (a0 >= 0.5) pointInside = true;
+        else shellSide = true;
+    } else {
+        if (!q6_x9t_sample_alpha(alpha, x0, y0,
+                                 nx, ny, lx, ly, periodicX, periodicY, &a0))
+            return d;
+        if (a0 >= 0.5) {
+            d.pointwiseInteriorOuterCell = true;
+            if (!q6_x9t_sample_alpha(alpha, x1, y1,
+                                     nx, ny, lx, ly, periodicX, periodicY, &a1))
+                return d;
+            if (!(a1 < 0.5)) return d;
+            pointInside = true;
+        } else {
+            shellSide = true;
+        }
+    }
+
+    int bath = c;
+
+    if (pointInside) {
+        if (!(a0 >= 0.5) || !(a1 < 0.5)) {
+            d.startBelowHalf = true;
+            return d;
+        }
+
+        // Bracket the physical alpha=0.5 crossing.  lo is always a sampled
+        // inside point.  sGamma is a sub-bracket interpolation used only for
+        // the pointwise normal; sInside=lo remains the safe reflection anchor.
+        double lo = 0.0;
+        double hi = 1.0;
+        double aLo = a0;
+        double aHi = a1;
+        bool fallback = false;
+        for (int it = 0; it < 4; ++it) {
+            const double mid = 0.5 * (lo + hi);
+            double am = 0.5;
+            if (!q6_x9t_sample_alpha(
+                    alpha,
+                    x0 + mid * particles.vx[i] * dt,
+                    y0 + mid * particles.vy[i] * dt,
+                    nx, ny, lx, ly, periodicX, periodicY, &am) ||
+                !isfinite(am)) {
+                fallback = true;
+                break;
+            }
+            if (am >= 0.5) { lo = mid; aLo = am; }
+            else { hi = mid; aHi = am; }
+        }
+
+        double sInside = lo;
+        double sGamma = 0.5 * (lo + hi);
+        if (fallback) {
+            d.bisectionFallback = true;
+            // x0 was explicitly sampled inside.  Keep the safe anchor there;
+            // use the old endpoint interpolation only to estimate the normal.
+            sInside = 0.0;
+            const double den = a0 - a1;
+            if (den > 1.0e-14 && isfinite(den))
+                sGamma = fmin(fmax((a0 - 0.5) / den, 0.0), 1.0);
+            else
+                sGamma = 0.0;
+        } else {
+            const double den = aLo - aHi;
+            if (den > 1.0e-14 && isfinite(den)) {
+                const double f = fmin(fmax((aLo - 0.5) / den, 0.0), 1.0);
+                sGamma = lo + f * (hi - lo);
+            }
+        }
+
+        const double xGamma = x0 + sGamma * particles.vx[i] * dt;
+        const double yGamma = y0 + sGamma * particles.vy[i] * dt;
+        if (!q6_x10a_sample_alpha_normal(alpha, xGamma, yGamma,
+                                         nx, ny, lx, ly, periodicX, periodicY,
+                                         &d.nx, &d.ny)) {
+            d.crossingPointNormalFallback = true;
+            if (!q6_x9t_cell_normal(alpha, c, nx, ny, lx / nx, ly / ny,
+                                    periodicX, periodicY, &d.nx, &d.ny))
+                return d;
+        }
+
+        if (!centerBulk) {
+            if (!q6_x9x_choose_direct_bulk_bath(
+                    alpha, totalM, c, d.nx, d.ny,
+                    nx, ny, periodicX, periodicY, &bath))
+                return d;
+        }
+
+        const double mb = totalM[bath];
+        if (!(mb > 0.0) || !isfinite(mb)) return d;
+        const double ux = totalPx[bath] / mb;
+        const double uy = totalPy[bath] / mb;
+        const double crx = particles.vx[i] - ux;
+        const double cry = particles.vy[i] - uy;
+        const double gn = crx * d.nx + cry * d.ny;
+        if (!(gn > 0.0) || !isfinite(gn)) return d;
+
+        d.crossing = true;
+        d.interiorCrossing = true;
+        d.bathCell = bath;
+        d.crossingFraction = sInside;
+        d.outwardRelativeNormalSpeed = gn;
+    } else if (shellSide) {
+        d.shellParticle = true;
+        d.pointwiseOuterRoutedToShell = true;
+
+        // There is no current-step interior bracket for an already escaped
+        // shell particle.  Use its own pointwise alpha normal at x0, with the
+        // historical cell-gradient fallback only when the bilinear gradient is
+        // degenerate.
+        if (!q6_x10a_sample_alpha_normal(alpha, x0, y0,
+                                         nx, ny, lx, ly, periodicX, periodicY,
+                                         &d.nx, &d.ny)) {
+            d.crossingPointNormalFallback = true;
+            if (!q6_x9t_cell_normal(alpha, c, nx, ny, lx / nx, ly / ny,
+                                    periodicX, periodicY, &d.nx, &d.ny)) {
+                d.deepOuterParticle = true;
+                return d;
+            }
+        }
+
+        if (centerBulk) {
+            bath = c;
+        } else if (!q6_x9x_choose_direct_bulk_bath(
+                       alpha, totalM, c, d.nx, d.ny,
+                       nx, ny, periodicX, periodicY, &bath)) {
+            d.deepOuterParticle = true;
+            return d;
+        }
+
+        d.shellRecoverable = true;
+        d.bathCell = bath;
+
+        const double mb = totalM[bath];
+        if (!(mb > 0.0) || !isfinite(mb)) {
+            d.shellRecoverable = false;
+            d.deepOuterParticle = true;
+            return d;
+        }
+        const double ux = totalPx[bath] / mb;
+        const double uy = totalPy[bath] / mb;
+        const double crx = particles.vx[i] - ux;
+        const double cry = particles.vy[i] - uy;
+        const double gn = crx * d.nx + cry * d.ny;
+        if (!(gn > 0.0) || !isfinite(gn)) {
+            // Already pointwise outside, but not escaping thermally relative
+            // to the local bath. x10h requests neither velocity reflection nor
+            // positional recovery: this particle belongs to the advected
+            // mobile-interface population and enters the receiver pool.
+            return d;
+        }
+
+        d.crossing = true;
+        d.shellGuard = true;
+        d.bathCell = bath;
+        d.crossingFraction = 0.0;
+        d.outwardRelativeNormalSpeed = gn;
+    } else {
+        return d;
+    }
+
+    if (reflectionFraction >= 1.0) d.reflect = true;
+    else if (reflectionFraction > 0.0)
+        d.reflect = q6_x9t_uniform01(i, step, seed) < reflectionFraction;
+    return d;
+}
+
+__global__ void q6_x9z_classify_individual_reflections(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    double* donorDeltaE,
+    double* reactionJx,
+    double* reactionJy,
+    double* recvM,
+    double* recvPx,
+    double* recvPy,
+    double* recvK,
+    double* reactionLambda,
+    std::uint32_t phaseAType,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    (void)reactionLambda;
+
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+
+        const auto d = q6_x9y_decide_crossing(
+            i, particles, cells, alpha, totalM, totalPx, totalPy,
+            phaseAType, nx, ny, lx, ly, dt, periodicX, periodicY,
+            reflectionFraction, step, seed, false);
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        const double vx = particles.vx[i];
+        const double vy = particles.vy[i];
+
+        if (audit) {
+            if (alpha[c] < 0.5) atomicAdd(&audit->phaseAOuterCellParticles, 1ull);
+            if (d.shellParticle) atomicAdd(&audit->shellParticles, 1ull);
+            if (d.shellRecoverable) atomicAdd(&audit->shellRecoverableParticles, 1ull);
+            if (d.deepOuterParticle) atomicAdd(&audit->deepOuterParticles, 1ull);
+            if (d.startBelowHalf) atomicAdd(&audit->startBelowHalf, 1ull);
+            if (d.crossingPointNormalFallback)
+                atomicAdd(&audit->crossingPointNormalFallbacks, 1ull);
+            if (d.pointwiseOuterRoutedToShell)
+                atomicAdd(&audit->pointwiseOuterRoutedToShell, 1ull);
+            if (d.pointwiseInteriorOuterCell)
+                atomicAdd(&audit->pointwiseInteriorOuterCell, 1ull);
+        }
+
+        if (!d.crossing) {
+            // 0493x10h mobile-interface semantics:
+            //
+            // A particle is a kinetic donor only when its velocity is outward
+            // RELATIVE to its local liquid bath, g=(v-u_b).n > 0.  A particle
+            // that is not such a donor belongs to the receiver population even
+            // when its pointwise position is temporarily on the alpha<0.5 side.
+            //
+            // alpha=0.5 is a reconstructed mobile free surface, not a material
+            // wall.  Non-donor particles must be free to advect the interface
+            // into vacuum (jet growth, ligament extension, spreading, splash).
+            // Only thermal relative escape is reflected.
+            atomic_add_double_0400(&recvM[c], m);
+            atomic_add_double_0400(&recvPx[c], m * vx);
+            atomic_add_double_0400(&recvPy[c], m * vy);
+            // Hard r=1 x10f/x10g reuses recvK as donor-H scratch below.
+            // The global exact energy root does not need receiver K.
+            // Preserve the historical receiver thermal accumulator only for
+            // r<1 evaporation semantics.
+            if (reflectionFraction < 1.0)
+                atomic_add_double_0400(&recvK[c], 0.5 * m * (vx * vx + vy * vy));
+            continue;
+        }
+
+        if (d.reflect) {
+            const int b = d.bathCell;
+            if (b >= 0 && b < cells.numCells) {
+                const double mb = totalM[b];
+                if (mb > 0.0 && isfinite(mb)) {
+                    const double ubx = totalPx[b] / mb;
+                    const double uby = totalPy[b] / mb;
+                    const double gn = (vx - ubx) * d.nx + (vy - uby) * d.ny;
+                    if (gn > 0.0 && isfinite(gn)) {
+                        // Individual specular reflection relative to the local
+                        // bulk velocity and this donor's own interface normal.
+                        const double vrx = vx - 2.0 * gn * d.nx;
+                        const double vry = vy - 2.0 * gn * d.ny;
+                        const double dpx = m * (vrx - vx);
+                        const double dpy = m * (vry - vy);
+                        const double dE = 0.5 * m *
+                            ((vrx * vrx + vry * vry) - (vx * vx + vy * vy));
+
+                        if (reflectionFraction >= 1.0) {
+                            // 0493x10d hard-r1 analytic conservative mode.
+                            // Store the sufficient statistics
+                            //   A = sum m g_i^2,
+                            //   S = sum m g_i n_i.
+                            // They define, together with the receiver barycentre,
+                            // the exact non-trivial P/E-conserving reflection root.
+                            atomic_add_double_0400(&donorDeltaE[b], m * gn * gn);
+                            atomic_add_double_0400(&reactionJx[b], m * gn * d.nx);
+                            atomic_add_double_0400(&reactionJy[b], m * gn * d.ny);
+                            // x10f additionally accumulates
+                            //   H = sum m g_i (v_i . n_i).
+                            // recvK is unused by hard-r1 and gives this statistic
+                            // without adding another O(Ncell) buffer.
+                            atomic_add_double_0400(
+                                &recvK[b],
+                                m * gn * (vx * d.nx + vy * d.ny));
+                        } else {
+                            // Historical r<1 path retained for future evaporation:
+                            // J = -sum(delta p donor),
+                            // DeltaE_receiver = -sum(dE donor).
+                            atomic_add_double_0400(&reactionJx[b], -dpx);
+                            atomic_add_double_0400(&reactionJy[b], -dpy);
+                            atomic_add_double_0400(&donorDeltaE[b], dE);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (audit) {
+            if (d.interiorCrossing) atomicAdd(&audit->interiorCrossings, 1ull);
+            if (d.shellGuard) atomicAdd(&audit->shellGuardCrossings, 1ull);
+            if (d.reflect) {
+                atomicAdd(&audit->selectedReflections, 1ull);
+                atomic_add_double_0400(&audit->reflectedMass, m);
+            } else {
+                atomicAdd(&audit->transmittedCrossings, 1ull);
+                atomic_add_double_0400(&audit->transmittedMass, m);
+            }
+            atomic_add_double_0400(&audit->outwardRelativeNormalSpeedSum,
+                                   d.outwardRelativeNormalSpeed);
+        }
+    }
+}
+
+
+
+// 0493x10f: hard-r1 GLOBAL-RESERVOIR ABLATION.
+//
+// This tests whether the cardinal accumulation of x10d is caused by forcing
+// the counter-impulse into receivers from the same interface cell.  Every
+// donor keeps its own pointwise normal and local bath-relative g_i, while the
+// exact momentum/energy reaction is aggregated over the whole phase-A set of
+// this kinetic-interface call.
+//
+// IMPORTANT: this is a single-liquid-component ablation only.  A production
+// multi-drop/pool implementation must run the same reduction independently
+// per connected alpha>=0.5 liquid component.
+//
+// A = sum m g^2, S = sum m g n, H = sum m g (v.n)
+// receivers: M_R, P_R, u_R=P_R/M_R
+// donor dv=-a g n, receiver du=+a S/M_R
+// dE = a(u_R.S-H)+0.5 a^2(A+|S|^2/M_R)
+// a* = 2(H-u_R.S)/(A+|S|^2/M_R)
+// 0493x10i shifted mesoscopic reservoirs.
+//
+// blockCells is the linear side in cell units (4 or 5 in the first sweep).
+// For a shift s in [0,B-1], cells before s belong to edge reservoir 0 and the
+// remaining cells are grouped by B. +1 in blocksX/blocksY reserves that edge
+// slot without ever wrapping nonperiodic physical boundaries together.
+__device__ __forceinline__ int q6_x10i_meso_axis_index(
+    int i, int blockCells, int shift) {
+    if (i < shift) return 0;
+    return 1 + (i - shift) / blockCells;
+}
+
+__device__ __forceinline__ int q6_x10i_meso_reservoir_id(
+    int cell, int nx, int blockCells, int shiftX, int shiftY, int blocksX) {
+    const int i = cell % nx;
+    const int j = cell / nx;
+    const int bx = q6_x10i_meso_axis_index(i, blockCells, shiftX);
+    const int by = q6_x10i_meso_axis_index(j, blockCells, shiftY);
+    return by * blocksX + bx;
+}
+
+static inline std::uint64_t q6_x10i_mix64_host(std::uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+// 0493x10g hierarchical global reduction — PERFORMANCE ONLY.
+//
+// x10f physics is unchanged.  The x10f reducer used multiple atomicAdd(double)
+// operations from every active receiver cell into the same handful of global
+// scalars.  On the 800x400 single-drop qualification this produced heavy
+// contention.  x10g computes the identical sums hierarchically:
+//   cells -> one partial per CUDA block -> one final block -> x10f finalizer.
+// No particle pass, reaction equation, donor/receiver membership, a, du,
+// endpoint barrier, or surface-tension path is changed.
+__global__ void q6_x10g_reduce_global_reaction_blocks(
+    int numCells,
+    const double* donorA,
+    const double* donorSx,
+    const double* donorSy,
+    const double* donorH,
+    const double* recvM,
+    const double* recvPx,
+    const double* recvPy,
+    KineticGlobalReactionPartial0493x10g* partials) {
+    double A = 0.0, Sx = 0.0, Sy = 0.0, H = 0.0;
+    double receiverM = 0.0, receiverPx = 0.0, receiverPy = 0.0;
+    double cellSNormSum = 0.0;
+    unsigned long long donorCells = 0ull, receiverCells = 0ull;
+
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < numCells; c += stride) {
+        const double a = donorA[c];
+        const double sx = donorSx[c];
+        const double sy = donorSy[c];
+        const double h = donorH[c];
+        const double donorRequest = fabs(a) + fabs(sx) + fabs(sy) + fabs(h);
+        if (donorRequest > 1.0e-30 &&
+            isfinite(a) && isfinite(sx) && isfinite(sy) && isfinite(h)) {
+            A += a;
+            Sx += sx;
+            Sy += sy;
+            H += h;
+            cellSNormSum += sqrt(sx * sx + sy * sy);
+            ++donorCells;
+        }
+
+        const double mr = recvM[c];
+        const double px = recvPx[c];
+        const double py = recvPy[c];
+        if (mr > 1.0e-14 && isfinite(mr) && isfinite(px) && isfinite(py)) {
+            receiverM += mr;
+            receiverPx += px;
+            receiverPy += py;
+            ++receiverCells;
+        }
+    }
+
+    const unsigned mask = __activemask();
+    for (int off = 16; off > 0; off >>= 1) {
+        A += __shfl_down_sync(mask, A, off);
+        Sx += __shfl_down_sync(mask, Sx, off);
+        Sy += __shfl_down_sync(mask, Sy, off);
+        H += __shfl_down_sync(mask, H, off);
+        receiverM += __shfl_down_sync(mask, receiverM, off);
+        receiverPx += __shfl_down_sync(mask, receiverPx, off);
+        receiverPy += __shfl_down_sync(mask, receiverPy, off);
+        cellSNormSum += __shfl_down_sync(mask, cellSNormSum, off);
+        donorCells += __shfl_down_sync(mask, donorCells, off);
+        receiverCells += __shfl_down_sync(mask, receiverCells, off);
+    }
+
+    __shared__ double sA[32], sSx[32], sSy[32], sH[32];
+    __shared__ double sM[32], sPx[32], sPy[32], sNorm[32];
+    __shared__ unsigned long long sDonor[32], sReceiver[32];
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    const int nWarps = (blockDim.x + 31) >> 5;
+    if (lane == 0) {
+        sA[warp] = A; sSx[warp] = Sx; sSy[warp] = Sy; sH[warp] = H;
+        sM[warp] = receiverM; sPx[warp] = receiverPx; sPy[warp] = receiverPy;
+        sNorm[warp] = cellSNormSum;
+        sDonor[warp] = donorCells; sReceiver[warp] = receiverCells;
+    }
+    __syncthreads();
+
+    if (warp == 0) {
+        A = lane < nWarps ? sA[lane] : 0.0;
+        Sx = lane < nWarps ? sSx[lane] : 0.0;
+        Sy = lane < nWarps ? sSy[lane] : 0.0;
+        H = lane < nWarps ? sH[lane] : 0.0;
+        receiverM = lane < nWarps ? sM[lane] : 0.0;
+        receiverPx = lane < nWarps ? sPx[lane] : 0.0;
+        receiverPy = lane < nWarps ? sPy[lane] : 0.0;
+        cellSNormSum = lane < nWarps ? sNorm[lane] : 0.0;
+        donorCells = lane < nWarps ? sDonor[lane] : 0ull;
+        receiverCells = lane < nWarps ? sReceiver[lane] : 0ull;
+        for (int off = 16; off > 0; off >>= 1) {
+            A += __shfl_down_sync(mask, A, off);
+            Sx += __shfl_down_sync(mask, Sx, off);
+            Sy += __shfl_down_sync(mask, Sy, off);
+            H += __shfl_down_sync(mask, H, off);
+            receiverM += __shfl_down_sync(mask, receiverM, off);
+            receiverPx += __shfl_down_sync(mask, receiverPx, off);
+            receiverPy += __shfl_down_sync(mask, receiverPy, off);
+            cellSNormSum += __shfl_down_sync(mask, cellSNormSum, off);
+            donorCells += __shfl_down_sync(mask, donorCells, off);
+            receiverCells += __shfl_down_sync(mask, receiverCells, off);
+        }
+        if (lane == 0) {
+            KineticGlobalReactionPartial0493x10g& p = partials[blockIdx.x];
+            p.A = A; p.Sx = Sx; p.Sy = Sy; p.H = H;
+            p.receiverM = receiverM; p.receiverPx = receiverPx; p.receiverPy = receiverPy;
+            p.cellSNormSum = cellSNormSum;
+            p.donorCells = donorCells; p.receiverCells = receiverCells;
+        }
+    }
+}
+
+__global__ void q6_x10g_reduce_global_reaction_partials(
+    int numPartials,
+    const KineticGlobalReactionPartial0493x10g* partials,
+    KineticGlobalReaction0493x10f* global) {
+    double A = 0.0, Sx = 0.0, Sy = 0.0, H = 0.0;
+    double receiverM = 0.0, receiverPx = 0.0, receiverPy = 0.0;
+    double cellSNormSum = 0.0;
+    unsigned long long donorCells = 0ull, receiverCells = 0ull;
+
+    for (int pidx = threadIdx.x; pidx < numPartials; pidx += blockDim.x) {
+        const KineticGlobalReactionPartial0493x10g p = partials[pidx];
+        A += p.A; Sx += p.Sx; Sy += p.Sy; H += p.H;
+        receiverM += p.receiverM; receiverPx += p.receiverPx; receiverPy += p.receiverPy;
+        cellSNormSum += p.cellSNormSum;
+        donorCells += p.donorCells; receiverCells += p.receiverCells;
+    }
+
+    const unsigned mask = __activemask();
+    for (int off = 16; off > 0; off >>= 1) {
+        A += __shfl_down_sync(mask, A, off);
+        Sx += __shfl_down_sync(mask, Sx, off);
+        Sy += __shfl_down_sync(mask, Sy, off);
+        H += __shfl_down_sync(mask, H, off);
+        receiverM += __shfl_down_sync(mask, receiverM, off);
+        receiverPx += __shfl_down_sync(mask, receiverPx, off);
+        receiverPy += __shfl_down_sync(mask, receiverPy, off);
+        cellSNormSum += __shfl_down_sync(mask, cellSNormSum, off);
+        donorCells += __shfl_down_sync(mask, donorCells, off);
+        receiverCells += __shfl_down_sync(mask, receiverCells, off);
+    }
+
+    __shared__ double sA[32], sSx[32], sSy[32], sH[32];
+    __shared__ double sM[32], sPx[32], sPy[32], sNorm[32];
+    __shared__ unsigned long long sDonor[32], sReceiver[32];
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    const int nWarps = (blockDim.x + 31) >> 5;
+    if (lane == 0) {
+        sA[warp] = A; sSx[warp] = Sx; sSy[warp] = Sy; sH[warp] = H;
+        sM[warp] = receiverM; sPx[warp] = receiverPx; sPy[warp] = receiverPy;
+        sNorm[warp] = cellSNormSum;
+        sDonor[warp] = donorCells; sReceiver[warp] = receiverCells;
+    }
+    __syncthreads();
+
+    if (warp == 0) {
+        A = lane < nWarps ? sA[lane] : 0.0;
+        Sx = lane < nWarps ? sSx[lane] : 0.0;
+        Sy = lane < nWarps ? sSy[lane] : 0.0;
+        H = lane < nWarps ? sH[lane] : 0.0;
+        receiverM = lane < nWarps ? sM[lane] : 0.0;
+        receiverPx = lane < nWarps ? sPx[lane] : 0.0;
+        receiverPy = lane < nWarps ? sPy[lane] : 0.0;
+        cellSNormSum = lane < nWarps ? sNorm[lane] : 0.0;
+        donorCells = lane < nWarps ? sDonor[lane] : 0ull;
+        receiverCells = lane < nWarps ? sReceiver[lane] : 0ull;
+        for (int off = 16; off > 0; off >>= 1) {
+            A += __shfl_down_sync(mask, A, off);
+            Sx += __shfl_down_sync(mask, Sx, off);
+            Sy += __shfl_down_sync(mask, Sy, off);
+            H += __shfl_down_sync(mask, H, off);
+            receiverM += __shfl_down_sync(mask, receiverM, off);
+            receiverPx += __shfl_down_sync(mask, receiverPx, off);
+            receiverPy += __shfl_down_sync(mask, receiverPy, off);
+            cellSNormSum += __shfl_down_sync(mask, cellSNormSum, off);
+            donorCells += __shfl_down_sync(mask, donorCells, off);
+            receiverCells += __shfl_down_sync(mask, receiverCells, off);
+        }
+        if (lane == 0) {
+            global->A = A; global->Sx = Sx; global->Sy = Sy; global->H = H;
+            global->receiverM = receiverM;
+            global->receiverPx = receiverPx; global->receiverPy = receiverPy;
+            global->cellSNormSum = cellSNormSum;
+            global->donorCells = donorCells; global->receiverCells = receiverCells;
+        }
+    }
+}
+
+// =============================================================================
+// 0493x10m — implicit alpha=.5 as a LOCAL MOVING BOUNDARY
+// =============================================================================
+// The interface is reconstructed each step and lives only during the current
+// streaming interval.  This is deliberately NOT a persistent surface mesh.
+// Topology (pinch-off/coalescence) therefore remains entirely alpha-driven.
+//
+// The collision primitive below is generic enough for a future moving solid:
+// provide a local plane point q, outward normal n and normal wall velocity.
+// It returns the particle velocity after an elastic specular collision in the
+// wall frame plus the opposite impulse received by the boundary.
+struct LocalMovingPlane0493x10m {
+    double qx = 0.0;
+    double qy = 0.0;
+    double nx = 0.0;
+    double ny = 0.0;
+    double wallVn = 0.0;
+    int ownerCell = -1;
+};
+
+struct LocalMovingPlaneCollision0493x10m {
+    bool hit = false;
+    double tHit = 0.0;
+    double newVx = 0.0;
+    double newVy = 0.0;
+    double impulseWallX = 0.0;
+    double impulseWallY = 0.0;
+    double relativeNormalBefore = 0.0;
+};
+
+__device__ __forceinline__ double q6_x10m_minimum_image(
+    double d, double L, int periodic) {
+    if (periodic && L > 0.0) d -= nearbyint(d / L) * L;
+    return d;
+}
+
+// 0493x10m-fix1: x10m owns its alpha sampling helper.
+// This removes the compile-order dependency on the later x10l diagnostic
+// helper q6_x10l_alpha_cell.
+__device__ __forceinline__ int q6_x10m_wrap_or_clamp_index(
+    int i, int n, int periodic) {
+    if (periodic) {
+        i %= n;
+        if (i < 0) i += n;
+        return i;
+    }
+    if (i < 0) return 0;
+    if (i >= n) return n - 1;
+    return i;
+}
+
+__device__ __forceinline__ double q6_x10m_alpha_cell(
+    const double* alpha,
+    int i, int j, int nx, int ny,
+    int periodicX, int periodicY) {
+    i = q6_x10m_wrap_or_clamp_index(i, nx, periodicX);
+    j = q6_x10m_wrap_or_clamp_index(j, ny, periodicY);
+    return alpha[j * nx + i];
+}
+
+__device__ __forceinline__ bool q6_x10m_collide_local_moving_plane(
+    double x0, double y0,
+    double vx, double vy,
+    double mass,
+    double dt,
+    double dx, double dy,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    const LocalMovingPlane0493x10m& wall,
+    LocalMovingPlaneCollision0493x10m* out) {
+    if (!out || !(dt > 0.0)) return false;
+    const double h = fmin(dx, dy);
+    double rx0 = q6_x10m_minimum_image(x0 - wall.qx, lx, periodicX);
+    double ry0 = q6_x10m_minimum_image(y0 - wall.qy, ly, periodicY);
+    double s0 = rx0 * wall.nx + ry0 * wall.ny; // outside is positive
+
+    // Only liquid-side particles collide.  Tiny positive tolerance covers only
+    // floating point / plane-linearization noise; already-outer shell particles
+    // are not forcibly recalled by x10m.
+    const double sideTol = 1.0e-8 * fmax(1.0, h);
+    if (s0 > sideTol || s0 < -2.25 * h) return false;
+    if (s0 > 0.0) s0 = 0.0;
+
+    const double reln = vx * wall.nx + vy * wall.ny - wall.wallVn;
+    if (!(reln > 1.0e-14) || !isfinite(reln)) return false;
+
+    const double t = -s0 / reln;
+    if (!(t >= 0.0 && t <= dt) || !isfinite(t)) return false;
+
+    // Restrict the infinite plane to the local interface segment carried by
+    // its owner cell.  The projected half-width is the cell-box extent along
+    // the tangent, with a small geometric margin for the linearized alpha plane.
+    const double qtx = wall.qx + wall.wallVn * wall.nx * t;
+    const double qty = wall.qy + wall.wallVn * wall.ny * t;
+    const double xh = x0 + vx * t;
+    const double yh = y0 + vy * t;
+    const double rhx = q6_x10m_minimum_image(xh - qtx, lx, periodicX);
+    const double rhy = q6_x10m_minimum_image(yh - qty, ly, periodicY);
+    const double tangential = rhx * (-wall.ny) + rhy * wall.nx;
+    const double halfSegment =
+        0.5 * (fabs(wall.ny) * dx + fabs(wall.nx) * dy) + 0.35 * h;
+    if (fabs(tangential) > halfSegment) return false;
+
+    out->hit = true;
+    out->tHit = t;
+    out->relativeNormalBefore = reln;
+    out->newVx = vx - 2.0 * reln * wall.nx;
+    out->newVy = vy - 2.0 * reln * wall.ny;
+    const double impulse = 2.0 * mass * reln;
+    out->impulseWallX = impulse * wall.nx;
+    out->impulseWallY = impulse * wall.ny;
+    return isfinite(out->newVx) && isfinite(out->newVy);
+}
+
+__global__ void q6_x10m_build_moving_interface_cells(
+    int numCells,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    unsigned char* active,
+    double* wallNx,
+    double* wallNy,
+    double* wallQx,
+    double* wallQy,
+    double* wallVn,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    const double maxOffset = 1.25 * sqrt(dx * dx + dy * dy);
+
+    for (int c = idx; c < numCells; c += stride) {
+        active[c] = 0;
+        wallNx[c] = wallNy[c] = 0.0;
+        wallQx[c] = wallQy[c] = 0.0;
+        wallVn[c] = 0.0;
+
+        const int i = c % nx;
+        const int j = c / nx;
+        const double ac = q6_x10m_alpha_cell(
+            alpha, i, j, nx, ny, periodicX, periodicY);
+        // One interface plane is owned by the LIQUID-SIDE cell only.  This
+        // prevents duplicate planes on both sides of the same alpha=.5 sheet.
+        if (!(ac >= 0.5)) continue;
+
+        const double al = q6_x10m_alpha_cell(
+            alpha, i - 1, j, nx, ny, periodicX, periodicY);
+        const double ar = q6_x10m_alpha_cell(
+            alpha, i + 1, j, nx, ny, periodicX, periodicY);
+        const double ab = q6_x10m_alpha_cell(
+            alpha, i, j - 1, nx, ny, periodicX, periodicY);
+        const double at = q6_x10m_alpha_cell(
+            alpha, i, j + 1, nx, ny, periodicX, periodicY);
+        const double amin = fmin(fmin(al, ar), fmin(ab, at));
+        if (!(amin < 0.5)) continue;
+
+        const double gx = (ar - al) / (2.0 * dx);
+        const double gy = (at - ab) / (2.0 * dy);
+        const double g2 = gx * gx + gy * gy;
+        if (!(g2 > 1.0e-24) || !isfinite(g2)) {
+            if (audit) atomicAdd(&audit->movingWallInvalidInterfaceCells, 1ull);
+            continue;
+        }
+        const double gmag = sqrt(g2);
+        const double nxo = -gx / gmag;
+        const double nyo = -gy / gmag;
+
+        double offset = (ac - 0.5) / gmag; // center -> alpha=.5, outward
+        if (!isfinite(offset)) {
+            if (audit) atomicAdd(&audit->movingWallInvalidInterfaceCells, 1ull);
+            continue;
+        }
+        offset = fmin(fmax(offset, -maxOffset), maxOffset);
+        const double cx = (static_cast<double>(i) + 0.5) * dx;
+        const double cy = (static_cast<double>(j) + 0.5) * dy;
+        const double qx = cx + offset * nxo;
+        const double qy = cy + offset * nyo;
+
+        int bath = c;
+        bool fallback = false;
+        double m = totalM[c];
+        if (!(m > 1.0e-14) || !isfinite(m)) {
+            if (!q6_x9x_choose_direct_bulk_bath(
+                    alpha, totalM, c, nxo, nyo,
+                    nx, ny, periodicX, periodicY, &bath)) {
+                if (audit) atomicAdd(&audit->movingWallInvalidInterfaceCells, 1ull);
+                continue;
+            }
+            fallback = true;
+            m = totalM[bath];
+        }
+        const double px = totalPx[bath];
+        const double py = totalPy[bath];
+        if (!(m > 1.0e-14) || !isfinite(m) || !isfinite(px) || !isfinite(py)) {
+            if (audit) atomicAdd(&audit->movingWallInvalidInterfaceCells, 1ull);
+            continue;
+        }
+        const double ubx = px / m;
+        const double uby = py / m;
+        const double vn = ubx * nxo + uby * nyo;
+        if (!isfinite(vn)) {
+            if (audit) atomicAdd(&audit->movingWallInvalidInterfaceCells, 1ull);
+            continue;
+        }
+
+        wallNx[c] = nxo;
+        wallNy[c] = nyo;
+        wallQx[c] = qx;
+        wallQy[c] = qy;
+        wallVn[c] = vn;
+        active[c] = 1;
+        if (audit) {
+            atomicAdd(&audit->movingWallInterfaceCellsBuilt, 1ull);
+            if (fallback)
+                atomicAdd(&audit->movingWallInterfaceVelocityFallbacks, 1ull);
+        }
+    }
+}
+
+__global__ void q6_x10m_apply_moving_interface_wall(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const unsigned char* active,
+    const double* wallNx,
+    const double* wallNy,
+    const double* wallQx,
+    const double* wallQy,
+    const double* wallVn,
+    double* wallImpulseX,
+    double* wallImpulseY,
+    std::uint32_t phaseAType,
+    int nx, int ny,
+    double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const std::uint64_t idx =
+        static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride =
+        static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+
+    for (std::uint64_t p = idx; p < nParticles; p += stride) {
+        if (particles.role && particles.role[p] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[p] != phaseAType) continue;
+        const int c0 = cells.cellId[p];
+        if (c0 < 0 || c0 >= cells.numCells) continue;
+
+        const double x0 = particles.x[p];
+        const double y0 = particles.y[p];
+        const double vx0 = particles.vx[p];
+        const double vy0 = particles.vy[p];
+        const double mass = particles.mass ? particles.mass[p] : 1.0;
+
+        bool oldStationaryOuter = false;
+        if (audit) {
+            double a0 = 0.0, a1 = 0.0;
+            const bool ok0 = q6_x9t_sample_alpha(
+                alpha, x0, y0, nx, ny, lx, ly, periodicX, periodicY, &a0);
+            const bool ok1 = q6_x9t_sample_alpha(
+                alpha, x0 + vx0 * dt, y0 + vy0 * dt,
+                nx, ny, lx, ly, periodicX, periodicY, &a1);
+            oldStationaryOuter = ok0 && ok1 && a0 >= 0.5 && a1 < 0.5;
+            if (oldStationaryOuter)
+                atomicAdd(&audit->movingWallOldStationaryCrossingCandidates, 1ull);
+        }
+
+        LocalMovingPlane0493x10m bestWall{};
+        LocalMovingPlaneCollision0493x10m bestHit{};
+        double bestT = dt + 1.0;
+        int validHits = 0;
+        int candidatePlanes = 0;
+
+        for (int dj = -1; dj <= 1; ++dj) {
+            for (int di = -1; di <= 1; ++di) {
+                int wc = -1;
+                if (!q6_x9u_offset_cell(
+                        c0, di, dj, nx, ny,
+                        periodicX, periodicY, &wc))
+                    continue;
+                if (wc < 0 || wc >= cells.numCells || !active[wc]) continue;
+                ++candidatePlanes;
+
+                LocalMovingPlane0493x10m wall{};
+                wall.qx = wallQx[wc];
+                wall.qy = wallQy[wc];
+                wall.nx = wallNx[wc];
+                wall.ny = wallNy[wc];
+                wall.wallVn = wallVn[wc];
+                wall.ownerCell = wc;
+                LocalMovingPlaneCollision0493x10m hit{};
+                if (!q6_x10m_collide_local_moving_plane(
+                        x0, y0, vx0, vy0, mass, dt,
+                        dx, dy, lx, ly, periodicX, periodicY,
+                        wall, &hit))
+                    continue;
+                ++validHits;
+                if (hit.tHit < bestT) {
+                    bestT = hit.tHit;
+                    bestWall = wall;
+                    bestHit = hit;
+                }
+            }
+        }
+
+        if (audit && candidatePlanes > 0)
+            atomicAdd(&audit->movingWallParticlesWithCandidate, 1ull);
+        if (!bestHit.hit) {
+            if (audit && oldStationaryOuter)
+                atomicAdd(&audit->movingWallOldStationaryCrossingReleased, 1ull);
+            continue;
+        }
+        if (audit && validHits > 1)
+            atomicAdd(&audit->movingWallMultipleCollisionCandidates, 1ull);
+
+        // Standard event-driven streaming split: old velocity until collision,
+        // reflected velocity for the remaining interval.  Since the production
+        // streamer still advances v_new for the full dt, shift the pre-stream
+        // position by (v_old-v_new)*tHit so its final endpoint is identical.
+        const double newVx = bestHit.newVx;
+        const double newVy = bestHit.newVy;
+        const double corrX = (vx0 - newVx) * bestHit.tHit;
+        const double corrY = (vy0 - newVy) * bestHit.tHit;
+        particles.x[p] = x0 + corrX;
+        particles.y[p] = y0 + corrY;
+        particles.vx[p] = newVx;
+        particles.vy[p] = newVy;
+
+        atomic_add_double_0400(
+            &wallImpulseX[bestWall.ownerCell], bestHit.impulseWallX);
+        atomic_add_double_0400(
+            &wallImpulseY[bestWall.ownerCell], bestHit.impulseWallY);
+
+        if (audit) {
+            atomicAdd(&audit->movingWallCollisions, 1ull);
+            const double vnTol = 1.0e-12;
+            if (bestWall.wallVn > vnTol)
+                atomicAdd(&audit->movingWallAdvanceCollisions, 1ull);
+            else if (bestWall.wallVn < -vnTol)
+                atomicAdd(&audit->movingWallRecedeCollisions, 1ull);
+            else
+                atomicAdd(&audit->movingWallStationaryCollisions, 1ull);
+            atomic_add_double_0400(
+                &audit->movingWallCollisionTimeFractionSum,
+                bestHit.tHit / dt);
+            atomic_add_double_0400(
+                &audit->movingWallWallVnSum, bestWall.wallVn);
+            atomic_add_double_0400(
+                &audit->movingWallWallVnSqSum,
+                bestWall.wallVn * bestWall.wallVn);
+            atomic_add_double_0400(
+                &audit->movingWallWallVnAbsSum, fabs(bestWall.wallVn));
+
+            const double wallVx = bestWall.wallVn * bestWall.nx;
+            const double wallVy = bestWall.wallVn * bestWall.ny;
+            const double cbx = vx0 - wallVx;
+            const double cby = vy0 - wallVy;
+            const double cax = newVx - wallVx;
+            const double cay = newVy - wallVy;
+            const double eBefore = cbx * cbx + cby * cby;
+            const double eAfter = cax * cax + cay * cay;
+            atomic_add_double_0400(
+                &audit->movingWallRelativeSpeedSqAbsErrorSum,
+                fabs(eAfter - eBefore));
+            atomic_add_double_0400(
+                &audit->movingWallRelativeSpeedSqReferenceSum,
+                fabs(eBefore));
+            const double relAfter =
+                newVx * bestWall.nx + newVy * bestWall.ny - bestWall.wallVn;
+            if (!(relAfter < 1.0e-12 * fmax(1.0, fabs(bestHit.relativeNormalBefore))))
+                atomicAdd(&audit->movingWallRelativeStillOutward, 1ull);
+
+            const double xf = x0 + vx0 * bestHit.tHit +
+                              newVx * (dt - bestHit.tHit);
+            const double yf = y0 + vy0 * bestHit.tHit +
+                              newVy * (dt - bestHit.tHit);
+            const double qfx = bestWall.qx +
+                               bestWall.wallVn * bestWall.nx * dt;
+            const double qfy = bestWall.qy +
+                               bestWall.wallVn * bestWall.ny * dt;
+            const double rfx = q6_x10m_minimum_image(
+                xf - qfx, lx, periodicX);
+            const double rfy = q6_x10m_minimum_image(
+                yf - qfy, ly, periodicY);
+            const double sFinal = rfx * bestWall.nx + rfy * bestWall.ny;
+            if (sFinal > 1.0e-10 * fmax(1.0, fmin(dx, dy)))
+                atomicAdd(&audit->movingWallFinalRelativeOutside, 1ull);
+
+            atomic_add_double_0400(
+                &audit->movingWallImpulseX, bestHit.impulseWallX);
+            atomic_add_double_0400(
+                &audit->movingWallImpulseY, bestHit.impulseWallY);
+            atomic_add_double_0400(
+                &audit->movingWallImpulseAbsSum,
+                sqrt(bestHit.impulseWallX * bestHit.impulseWallX +
+                     bestHit.impulseWallY * bestHit.impulseWallY));
+            atomic_add_double_0400(
+                &audit->movingWallPositionShiftAbsSum,
+                sqrt(corrX * corrX + corrY * corrY));
+        }
+    }
+}
+
+// =============================================================================
+// 0493x10n — Q6-CONSISTENT CONTINUOUS MOVING alpha=.5 INTERFACE
+// =============================================================================
+// x10m proved the moving-boundary kinematics but approximated Gamma by one
+// independently truncated plane per liquid cell.  x10n instead reconstructs a
+// continuous polyline on the cell-centre dual grid.  Every edge crossing uses
+// exactly the Q6 cut fraction for a linearly interpolated alpha=.5 crossing:
+//
+//   theta = (0.5-alpha0)/(alpha1-alpha0).
+//
+// A dual square then connects its 2 (or, in a saddle, 4) shared edge crossings
+// with marching-squares topology.  Adjacent dual squares recompute a shared
+// edge endpoint from the same two alpha values and therefore meet exactly.
+// Endpoint velocities are taken from the liquid-side post-Q6/B1 cell velocity;
+// the same shared edge has the same liquid-side cell, so endpoint motion also
+// remains continuous during the streaming interval.
+//
+// The moving-segment collision primitive is intentionally generic: a future
+// mobile solid can provide persistent segment endpoints/velocities and consume
+// the same collision impulses for rigid-body translation/rotation.
+struct MovingSegment0493x10n {
+    double ax = 0.0, ay = 0.0;
+    double bx = 0.0, by = 0.0;
+    double uax = 0.0, uay = 0.0;
+    double ubx = 0.0, uby = 0.0;
+    int ownerCell = -1;
+};
+
+struct MovingSegmentCollision0493x10n {
+    bool hit = false;
+    double tau = 0.0;
+    double lambda = 0.0;
+    double newVx = 0.0, newVy = 0.0;
+    double wallVx = 0.0, wallVy = 0.0;
+    double nx = 0.0, ny = 0.0;
+    double relnBefore = 0.0;
+    double impulseWallX = 0.0, impulseWallY = 0.0;
+
+    // x10p generic initial-overlap response. Ordinary swept collisions leave
+    // these members at their zero/default values.
+    bool initialOverlap = false;
+    bool overlapOutwardReflected = false;
+    double penetration = 0.0;
+    double positionCorrectionX = 0.0;
+    double positionCorrectionY = 0.0;
+};
+
+struct IsoPoint0493x10n {
+    double x = 0.0, y = 0.0;
+    double ux = 0.0, uy = 0.0;
+    bool valid = false;
+};
+
+__device__ __forceinline__ double q6_x10n_cross2(
+    double ax, double ay, double bx, double by) {
+    return ax * by - ay * bx;
+}
+
+__device__ __forceinline__ int q6_x10n_cell_index(
+    int i, int j, int nx, int ny, int periodicX, int periodicY) {
+    if (periodicX) {
+        i %= nx; if (i < 0) i += nx;
+    } else if (i < 0 || i >= nx) return -1;
+    if (periodicY) {
+        j %= ny; if (j < 0) j += ny;
+    } else if (j < 0 || j >= ny) return -1;
+    return j * nx + i;
+}
+
+// =============================================================================
+// 0493x10o — Q6 HYDRODYNAMIC VELOCITY + THERMAL-THICKNESS INTERFACE WALL
+// =============================================================================
+// x10n made Gamma continuous, but moved each shared endpoint with an
+// instantaneous post-B1 particle-cell COM velocity.  x10o separates the two
+// scales:
+//   * hydrodynamic motion comes directly from the projected Q6 field;
+//   * the kinetic wall is displaced outward from alpha=.5 by a finite thermal
+//     thickness delta = min(C*dt*sqrt(kBT/m), deltaMax*h).
+//
+// The alpha=.5 centreline remains the capillary/Q6 interface.  The outer
+// thermal envelope is only the particle reflection surface.  A shared edge
+// crossing gets one shared interpolated alpha normal, one shared shifted point,
+// and one shared normal wall velocity, so neighboring marching-squares cells
+// remain watertight both geometrically and kinematically.
+
+__global__ void q6_x10o_capture_projected_q6_hydrodynamics(
+    CudaSpeciesCellDeviceView0490h species,
+    int speciesIndex,
+    const unsigned char* velocityMask,
+    const double* cellDUx,
+    const double* cellDUy,
+    const double* faceDUxEast,
+    const double* faceDUyNorth,
+    unsigned char* valid,
+    double* cellUx,
+    double* cellUy,
+    double* faceUxEast,
+    double* faceUyNorth,
+    int nx,
+    int ny,
+    int periodicX,
+    int periodicY) {
+    const int n = nx * ny;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < n; c += stride) {
+        const int k = speciesIndex * species.numCells + c;
+        const double m = species.mass[k];
+        const bool ok = m > 1.0e-14 && isfinite(m) &&
+                        isfinite(species.px[k]) && isfinite(species.py[k]);
+        valid[c] = ok ? 1u : 0u;
+        if (!ok) {
+            cellUx[c] = 0.0; cellUy[c] = 0.0;
+            faceUxEast[c] = 0.0; faceUyNorth[c] = 0.0;
+            continue;
+        }
+        const double ux0 = species.px[k] / m;
+        const double uy0 = species.py[k] / m;
+        cellUx[c] = ux0 + cellDUx[c];
+        cellUy[c] = uy0 + cellDUy[c];
+
+        const int ix = c % nx;
+        const int iy = c / nx;
+        const bool hasEast = periodicX || ix < nx - 1;
+        const bool hasNorth = periodicY || iy < ny - 1;
+        if (hasEast) {
+            const int east = iy * nx +
+                (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
+            const double base = q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, c, east, 0);
+            faceUxEast[c] = base + faceDUxEast[c];
+        } else {
+            faceUxEast[c] = cellUx[c];
+        }
+        if (hasNorth) {
+            const int north =
+                (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
+            const double base = q6_species_face_velocity_0493w5(
+                species, velocityMask, speciesIndex, c, north, 1);
+            faceUyNorth[c] = base + faceDUyNorth[c];
+        } else {
+            faceUyNorth[c] = cellUy[c];
+        }
+    }
+}
+
+__device__ __forceinline__ void q6_x10o_alpha_gradient_cell(
+    const double* alpha,
+    int c,
+    int nx, int ny,
+    double dx, double dy,
+    int periodicX, int periodicY,
+    double* gx, double* gy) {
+    const int ix = c % nx;
+    const int iy = c / nx;
+    const int west = q6_x10n_cell_index(ix - 1, iy, nx, ny, periodicX, periodicY);
+    const int east = q6_x10n_cell_index(ix + 1, iy, nx, ny, periodicX, periodicY);
+    const int south = q6_x10n_cell_index(ix, iy - 1, nx, ny, periodicX, periodicY);
+    const int north = q6_x10n_cell_index(ix, iy + 1, nx, ny, periodicX, periodicY);
+    const double ac = alpha[c];
+    const double aw = west >= 0 ? alpha[west] : ac;
+    const double ae = east >= 0 ? alpha[east] : ac;
+    const double as = south >= 0 ? alpha[south] : ac;
+    const double an = north >= 0 ? alpha[north] : ac;
+    const double denx = (west >= 0 && east >= 0) ? 2.0 * dx : dx;
+    const double deny = (south >= 0 && north >= 0) ? 2.0 * dy : dy;
+    *gx = nx > 1 ? (ae - aw) / denx : 0.0;
+    *gy = ny > 1 ? (an - as) / deny : 0.0;
+}
+
+// Shared thermal-envelope endpoint.  faceComponent: 0=x projected Q6 face
+// component, 1=y. faceOwner is the west/south owner of that Q6 face.
+__device__ __forceinline__ bool q6_x10o_edge_crossing_q6_thermal(
+    double a0, double a1,
+    double x0, double y0, double x1, double y1,
+    int c0, int c1,
+    int faceOwner,
+    int faceComponent,
+    const double* alpha,
+    int nx, int ny,
+    double dx, double dy,
+    int periodicX, int periodicY,
+    const unsigned char* hydroValid,
+    const double* hydroCellUx,
+    const double* hydroCellUy,
+    const double* hydroFaceUxEast,
+    const double* hydroFaceUyNorth,
+    double thermalThickness,
+    IsoPoint0493x10n* out,
+    KineticCrossingAccumulator0493x9x* audit) {
+    if (!out) return false;
+    const bool in0 = a0 >= 0.5;
+    const bool in1 = a1 >= 0.5;
+    if (in0 == in1) return false;
+    const double den = a1 - a0;
+    if (!(fabs(den) > 1.0e-15) || !isfinite(den)) return false;
+    double theta = (0.5 - a0) / den;
+    theta = fmin(1.0, fmax(0.0, theta));
+    const int liquid = in0 ? c0 : c1;
+
+    double g0x = 0.0, g0y = 0.0, g1x = 0.0, g1y = 0.0;
+    q6_x10o_alpha_gradient_cell(
+        alpha, c0, nx, ny, dx, dy, periodicX, periodicY, &g0x, &g0y);
+    q6_x10o_alpha_gradient_cell(
+        alpha, c1, nx, ny, dx, dy, periodicX, periodicY, &g1x, &g1y);
+    double gx = (1.0 - theta) * g0x + theta * g1x;
+    double gy = (1.0 - theta) * g0y + theta * g1y;
+    double nxo = -gx;
+    double nyo = -gy;
+    double n2 = nxo * nxo + nyo * nyo;
+    if (!(n2 > 1.0e-24) || !isfinite(n2)) {
+        const double ex = x1 - x0;
+        const double ey = y1 - y0;
+        const double e2 = ex * ex + ey * ey;
+        if (!(e2 > 1.0e-24)) return false;
+        const double invE = 1.0 / sqrt(e2);
+        nxo = (in0 ? 1.0 : -1.0) * ex * invE;
+        nyo = (in0 ? 1.0 : -1.0) * ey * invE;
+    } else {
+        const double invN = 1.0 / sqrt(n2);
+        nxo *= invN;
+        nyo *= invN;
+    }
+
+    double ux = 0.0, uy = 0.0;
+    bool hydroOk = hydroValid && hydroValid[liquid] != 0u;
+    if (hydroOk) {
+        ux = hydroCellUx[liquid];
+        uy = hydroCellUy[liquid];
+        if (faceOwner >= 0) {
+            if (faceComponent == 0) ux = hydroFaceUxEast[faceOwner];
+            else uy = hydroFaceUyNorth[faceOwner];
+        }
+        hydroOk = isfinite(ux) && isfinite(uy);
+    }
+    if (!hydroOk) {
+        ux = 0.0; uy = 0.0;
+        if (audit) atomicAdd(&audit->q6ThermalHydroFallbacks, 1ull);
+    }
+
+    const double vn = ux * nxo + uy * nyo;
+    const double xc = x0 + theta * (x1 - x0);
+    const double yc = y0 + theta * (y1 - y0);
+    out->x = xc + thermalThickness * nxo;
+    out->y = yc + thermalThickness * nyo;
+    // Only normal motion changes the geometry of an implicit free surface.
+    out->ux = vn * nxo;
+    out->uy = vn * nyo;
+    out->valid = isfinite(out->x) && isfinite(out->y) &&
+                 isfinite(out->ux) && isfinite(out->uy);
+
+    if (out->valid && audit) {
+        atomicAdd(&audit->q6ThermalInterfaceEndpointSamples, 1ull);
+        atomic_add_double_0400(&audit->q6ThermalHydroVnSum, vn);
+        atomic_add_double_0400(&audit->q6ThermalHydroVnSqSum, vn * vn);
+        atomic_add_double_0400(&audit->q6ThermalHydroAbsVnSum, fabs(vn));
+        atomic_add_double_0400(&audit->q6ThermalThicknessSum, thermalThickness);
+    }
+    return out->valid;
+}
+
+__device__ __forceinline__ bool q6_x10n_cell_velocity(
+    int c,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    double* ux, double* uy) {
+    if (c < 0 || !ux || !uy) return false;
+    const double m = totalM[c];
+    const double px = totalPx[c];
+    const double py = totalPy[c];
+    if (!(m > 1.0e-14) || !isfinite(m) || !isfinite(px) || !isfinite(py))
+        return false;
+    *ux = px / m;
+    *uy = py / m;
+    return isfinite(*ux) && isfinite(*uy);
+}
+
+// Q6-consistent alpha=.5 crossing on one edge between two cell centres.
+// The velocity attached to the endpoint is the post-Q6/B1 velocity of the
+// liquid-side cell.  This choice is unique for the shared edge and therefore
+// gives identical endpoint motion to both adjacent dual squares.
+__device__ __forceinline__ bool q6_x10n_edge_crossing(
+    double a0, double a1,
+    double x0, double y0, double x1, double y1,
+    int c0, int c1,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    IsoPoint0493x10n* out) {
+    if (!out) return false;
+    const bool in0 = a0 >= 0.5;
+    const bool in1 = a1 >= 0.5;
+    if (in0 == in1) return false;
+    const double den = a1 - a0;
+    if (!(fabs(den) > 1.0e-15) || !isfinite(den)) return false;
+    double theta = (0.5 - a0) / den;
+    theta = fmin(1.0, fmax(0.0, theta));
+    const int liquid = in0 ? c0 : c1;
+    double ux = 0.0, uy = 0.0;
+    if (!q6_x10n_cell_velocity(
+            liquid, totalM, totalPx, totalPy, &ux, &uy))
+        return false;
+    out->x = x0 + theta * (x1 - x0);
+    out->y = y0 + theta * (y1 - y0);
+    out->ux = ux;
+    out->uy = uy;
+    out->valid = isfinite(out->x) && isfinite(out->y);
+    return out->valid;
+}
+
+__device__ __forceinline__ void q6_x10n_orient_segment_outward(
+    IsoPoint0493x10n* a,
+    IsoPoint0493x10n* b,
+    double a00, double a10, double a11, double a01,
+    double xBase, double yBase, double dx, double dy) {
+    if (!a || !b) return;
+    const double mx = 0.5 * (a->x + b->x);
+    const double my = 0.5 * (a->y + b->y);
+    const double xi = fmin(1.0, fmax(0.0, (mx - xBase) / dx));
+    const double eta = fmin(1.0, fmax(0.0, (my - yBase) / dy));
+    const double gx = ((a10 - a00) * (1.0 - eta) +
+                       (a11 - a01) * eta) / dx;
+    const double gy = ((a01 - a00) * (1.0 - xi) +
+                       (a11 - a10) * xi) / dy;
+    const double tx0 = b->x - a->x;
+    const double ty0 = b->y - a->y;
+    const double L2 = tx0 * tx0 + ty0 * ty0;
+    if (!(L2 > 1.0e-24)) return;
+    const double invL = 1.0 / sqrt(L2);
+    const double nrx = ty0 * invL;   // right normal of A -> B
+    const double nry = -tx0 * invL;
+    // Outward is toward decreasing alpha, i.e. -grad(alpha).
+    if (nrx * (-gx) + nry * (-gy) < 0.0) {
+        const IsoPoint0493x10n tmp = *a;
+        *a = *b;
+        *b = tmp;
+    }
+}
+
+__device__ __forceinline__ bool q6_x10n_store_segment(
+    int owner, int slot,
+    IsoPoint0493x10n a,
+    IsoPoint0493x10n b,
+    double a00, double a10, double a11, double a01,
+    double xBase, double yBase, double dx, double dy,
+    double* segAx, double* segAy,
+    double* segBx, double* segBy,
+    double* segUax, double* segUay,
+    double* segUbx, double* segUby) {
+    if (owner < 0 || slot < 0 || slot > 1 || !a.valid || !b.valid) return false;
+    const double ddx = b.x - a.x;
+    const double ddy = b.y - a.y;
+    if (!(ddx * ddx + ddy * ddy > 1.0e-20 * fmin(dx * dx, dy * dy)))
+        return false;
+    q6_x10n_orient_segment_outward(
+        &a, &b, a00, a10, a11, a01, xBase, yBase, dx, dy);
+    const int s = 2 * owner + slot;
+    segAx[s] = a.x; segAy[s] = a.y;
+    segBx[s] = b.x; segBy[s] = b.y;
+    segUax[s] = a.ux; segUay[s] = a.uy;
+    segUbx[s] = b.ux; segUby[s] = b.uy;
+    return true;
+}
+
+__global__ void q6_x10n_build_continuous_interface(
+    int numCells,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    const unsigned char* q6HydroValid0493x10o,
+    const double* q6HydroCellUx0493x10o,
+    const double* q6HydroCellUy0493x10o,
+    const double* q6HydroFaceUxEast0493x10o,
+    const double* q6HydroFaceUyNorth0493x10o,
+    double thermalThickness0493x10o,
+    int useQ6ThermalWall0493x10o,
+    unsigned char* segCount,
+    double* segAx, double* segAy,
+    double* segBx, double* segBy,
+    double* segUax, double* segUay,
+    double* segUbx, double* segUby,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+
+    for (int owner = idx; owner < numCells; owner += stride) {
+        segCount[owner] = 0;
+        const int i = owner % nx;
+        const int j = owner / nx;
+        if ((!periodicX && i + 1 >= nx) ||
+            (!periodicY && j + 1 >= ny))
+            continue;
+        if (audit) atomicAdd(&audit->continuousWallDualCellsVisited, 1ull);
+
+        const int c00 = q6_x10n_cell_index(i,     j,     nx, ny, periodicX, periodicY);
+        const int c10 = q6_x10n_cell_index(i + 1, j,     nx, ny, periodicX, periodicY);
+        const int c11 = q6_x10n_cell_index(i + 1, j + 1, nx, ny, periodicX, periodicY);
+        const int c01 = q6_x10n_cell_index(i,     j + 1, nx, ny, periodicX, periodicY);
+        if (c00 < 0 || c10 < 0 || c11 < 0 || c01 < 0) continue;
+        const double a00 = alpha[c00], a10 = alpha[c10];
+        const double a11 = alpha[c11], a01 = alpha[c01];
+        if (!isfinite(a00) || !isfinite(a10) || !isfinite(a11) || !isfinite(a01)) {
+            if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+            continue;
+        }
+        const int b0 = a00 >= 0.5 ? 1 : 0;
+        const int b1 = a10 >= 0.5 ? 1 : 0;
+        const int b2 = a11 >= 0.5 ? 1 : 0;
+        const int b3 = a01 >= 0.5 ? 1 : 0;
+        const int code = b0 | (b1 << 1) | (b2 << 2) | (b3 << 3);
+        if (code == 0 || code == 15) continue;
+        if (audit) atomicAdd(&audit->continuousWallInterfaceDualCells, 1ull);
+
+        const double x0 = (static_cast<double>(i) + 0.5) * dx;
+        const double y0 = (static_cast<double>(j) + 0.5) * dy;
+        const double x1 = x0 + dx;
+        const double y1 = y0 + dy;
+        IsoPoint0493x10n e[4];
+        bool h[4] = {false, false, false, false};
+        if (useQ6ThermalWall0493x10o) {
+            // edge 0: c00--c10, Q6 x-face owned by c00
+            h[0] = q6_x10o_edge_crossing_q6_thermal(
+                a00, a10, x0, y0, x1, y0, c00, c10, c00, 0,
+                alpha, nx, ny, dx, dy, periodicX, periodicY,
+                q6HydroValid0493x10o, q6HydroCellUx0493x10o, q6HydroCellUy0493x10o,
+                q6HydroFaceUxEast0493x10o, q6HydroFaceUyNorth0493x10o,
+                thermalThickness0493x10o, &e[0], audit);
+            // edge 1: c10--c11, Q6 y-face owned by c10
+            h[1] = q6_x10o_edge_crossing_q6_thermal(
+                a10, a11, x1, y0, x1, y1, c10, c11, c10, 1,
+                alpha, nx, ny, dx, dy, periodicX, periodicY,
+                q6HydroValid0493x10o, q6HydroCellUx0493x10o, q6HydroCellUy0493x10o,
+                q6HydroFaceUxEast0493x10o, q6HydroFaceUyNorth0493x10o,
+                thermalThickness0493x10o, &e[1], audit);
+            // edge 2: c11--c01, same physical x-face is owned by c01
+            h[2] = q6_x10o_edge_crossing_q6_thermal(
+                a11, a01, x1, y1, x0, y1, c11, c01, c01, 0,
+                alpha, nx, ny, dx, dy, periodicX, periodicY,
+                q6HydroValid0493x10o, q6HydroCellUx0493x10o, q6HydroCellUy0493x10o,
+                q6HydroFaceUxEast0493x10o, q6HydroFaceUyNorth0493x10o,
+                thermalThickness0493x10o, &e[2], audit);
+            // edge 3: c01--c00, same physical y-face is owned by c00
+            h[3] = q6_x10o_edge_crossing_q6_thermal(
+                a01, a00, x0, y1, x0, y0, c01, c00, c00, 1,
+                alpha, nx, ny, dx, dy, periodicX, periodicY,
+                q6HydroValid0493x10o, q6HydroCellUx0493x10o, q6HydroCellUy0493x10o,
+                q6HydroFaceUxEast0493x10o, q6HydroFaceUyNorth0493x10o,
+                thermalThickness0493x10o, &e[3], audit);
+        } else {
+            h[0] = q6_x10n_edge_crossing(a00, a10, x0, y0, x1, y0,
+                                          c00, c10, totalM, totalPx, totalPy, &e[0]);
+            h[1] = q6_x10n_edge_crossing(a10, a11, x1, y0, x1, y1,
+                                          c10, c11, totalM, totalPx, totalPy, &e[1]);
+            h[2] = q6_x10n_edge_crossing(a11, a01, x1, y1, x0, y1,
+                                          c11, c01, totalM, totalPx, totalPy, &e[2]);
+            h[3] = q6_x10n_edge_crossing(a01, a00, x0, y1, x0, y0,
+                                          c01, c00, totalM, totalPx, totalPy, &e[3]);
+        }
+        int edges[4]; int ne = 0;
+        for (int k = 0; k < 4; ++k) if (h[k]) edges[ne++] = k;
+
+        int built = 0;
+        if (ne == 2) {
+            if (q6_x10n_store_segment(owner, 0, e[edges[0]], e[edges[1]],
+                    a00, a10, a11, a01, x0, y0, dx, dy,
+                    segAx, segAy, segBx, segBy,
+                    segUax, segUay, segUbx, segUby))
+                built = 1;
+        } else if (ne == 4) {
+            if (code != 5 && code != 10) {
+                if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                continue;
+            }
+            if (audit) atomicAdd(&audit->continuousWallAmbiguousDualCells, 1ull);
+            // Marching-squares asymptotic choice reduced to the bilinear value
+            // at the dual-square centre.  It is deterministic and shared-edge
+            // continuous; it only selects topology inside this saddle square.
+            const bool centerInside = 0.25 * (a00 + a10 + a11 + a01) >= 0.5;
+            int p00a = 0, p00b = 0, p11a = 0, p11b = 0;
+            if (code == 5) { // inside corners 00 and 11
+                if (centerInside) {
+                    p00a = 0; p00b = 1; p11a = 2; p11b = 3;
+                } else {
+                    p00a = 3; p00b = 0; p11a = 1; p11b = 2;
+                }
+            } else { // code 10: inside corners 10 and 01
+                if (centerInside) {
+                    p00a = 3; p00b = 0; p11a = 1; p11b = 2;
+                } else {
+                    p00a = 0; p00b = 1; p11a = 2; p11b = 3;
+                }
+            }
+            if (q6_x10n_store_segment(owner, built, e[p00a], e[p00b],
+                    a00, a10, a11, a01, x0, y0, dx, dy,
+                    segAx, segAy, segBx, segBy,
+                    segUax, segUay, segUbx, segUby)) ++built;
+            if (built < 2 && q6_x10n_store_segment(owner, built, e[p11a], e[p11b],
+                    a00, a10, a11, a01, x0, y0, dx, dy,
+                    segAx, segAy, segBx, segBy,
+                    segUax, segUay, segUbx, segUby)) ++built;
+        } else {
+            if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+            continue;
+        }
+        segCount[owner] = static_cast<unsigned char>(built);
+        if (audit && built > 0)
+            atomicAdd(&audit->continuousWallSegmentsBuilt,
+                      static_cast<unsigned long long>(built));
+    }
+}
+
+// Collision against a line segment with linearly moving endpoints.  The
+// particle and endpoint trajectories are linear, so collinearity is a
+// quadratic equation in tau.  At the hit, specular reflection uses the local
+// interpolated wall velocity and the instantaneous segment normal.
+// =============================================================================
+// 0493x10p — INITIAL OVERLAP / PENETRATION RESOLUTION
+// =============================================================================
+// A reconstructed moving boundary can move between two alpha reconstructions.
+// A particle may therefore start the next step slightly beyond the kinetic
+// wall even though the previous swept collision was valid.
+//
+// x10p adds the second standard branch of a moving-boundary engine:
+//   (1) swept collision during dt;
+//   (2) initial-overlap resolution at t=0.
+//
+// The nearest finite segment is selected before using the sign of the distance.
+// This avoids classifying against a non-nearest tangent of a curved interface.
+
+__device__ __forceinline__ void q6_x10p_atomic_max_positive_double(
+    double* address, double value) {
+    if (!address || !(value > 0.0) || !isfinite(value)) return;
+    auto* u = reinterpret_cast<unsigned long long*>(address);
+    unsigned long long old = *u;
+    while (true) {
+        const double oldValue = __longlong_as_double(
+            static_cast<long long>(old));
+        if (oldValue >= value) return;
+        const unsigned long long desired =
+            static_cast<unsigned long long>(__double_as_longlong(value));
+        const unsigned long long observed = atomicCAS(u, old, desired);
+        if (observed == old) return;
+        old = observed;
+    }
+}
+
+struct InitialOverlapNearest0493x10p {
+    bool valid = false;
+    double distance = 0.0;
+    double signedDistance = 0.0;
+    double lambda = 0.0;
+    double qx = 0.0, qy = 0.0;
+    double wallVx = 0.0, wallVy = 0.0;
+    double nx = 0.0, ny = 0.0;
+    MovingSegment0493x10n seg{};
+};
+
+__device__ __forceinline__ bool q6_x10p_closest_current_segment(
+    double px, double py,
+    double tStart,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    const MovingSegment0493x10n& seg,
+    InitialOverlapNearest0493x10p* out) {
+    if (!out) return false;
+
+    const double ax = seg.ax + seg.uax * tStart;
+    const double ay = seg.ay + seg.uay * tStart;
+    const double bx = seg.bx + seg.ubx * tStart;
+    const double by = seg.by + seg.uby * tStart;
+
+    const double arx = q6_x10m_minimum_image(ax - px, lx, periodicX);
+    const double ary = q6_x10m_minimum_image(ay - py, ly, periodicY);
+    const double dax = q6_x10m_minimum_image(bx - ax, lx, periodicX);
+    const double day = q6_x10m_minimum_image(by - ay, ly, periodicY);
+    const double L2 = dax * dax + day * day;
+    if (!(L2 > 1.0e-24) || !isfinite(L2)) return false;
+
+    const double pax = -arx;
+    const double pay = -ary;
+    double lambda = (pax * dax + pay * day) / L2;
+    if (!isfinite(lambda)) return false;
+    lambda = fmin(1.0, fmax(0.0, lambda));
+
+    const double qrelx = arx + lambda * dax;
+    const double qrely = ary + lambda * day;
+    const double dxp = -qrelx;
+    const double dyp = -qrely;
+    const double distance = sqrt(dxp * dxp + dyp * dyp);
+
+    const double invL = 1.0 / sqrt(L2);
+    const double nx = day * invL;
+    const double ny = -dax * invL;
+    const double signedDistance = dxp * nx + dyp * ny;
+
+    out->valid = isfinite(distance) && isfinite(signedDistance);
+    out->distance = distance;
+    out->signedDistance = signedDistance;
+    out->lambda = lambda;
+    out->qx = px + qrelx;
+    out->qy = py + qrely;
+    out->wallVx = seg.uax + lambda * (seg.ubx - seg.uax);
+    out->wallVy = seg.uay + lambda * (seg.uby - seg.uay);
+    out->nx = nx;
+    out->ny = ny;
+    out->seg = seg;
+    return out->valid &&
+           isfinite(out->wallVx) && isfinite(out->wallVy);
+}
+
+__device__ __forceinline__ bool q6_x10p_resolve_initial_overlap(
+    double px, double py,
+    double vx, double vy,
+    double mass,
+    double sideTol,
+    const InitialOverlapNearest0493x10p& nearest,
+    MovingSegmentCollision0493x10n* out) {
+    if (!out || !nearest.valid || !(nearest.signedDistance > sideTol))
+        return false;
+
+    const double reln =
+        (vx - nearest.wallVx) * nearest.nx +
+        (vy - nearest.wallVy) * nearest.ny;
+    if (!isfinite(reln)) return false;
+
+    const double pushTol = 4.0 * sideTol;
+
+    out->hit = true;
+    out->initialOverlap = true;
+    out->tau = 0.0;
+    out->lambda = nearest.lambda;
+    out->wallVx = nearest.wallVx;
+    out->wallVy = nearest.wallVy;
+    out->nx = nearest.nx;
+    out->ny = nearest.ny;
+    out->relnBefore = reln;
+    out->penetration = nearest.signedDistance;
+
+    out->positionCorrectionX =
+        (nearest.qx - px) - pushTol * nearest.nx;
+    out->positionCorrectionY =
+        (nearest.qy - py) - pushTol * nearest.ny;
+
+    if (reln > 1.0e-13) {
+        out->overlapOutwardReflected = true;
+        out->newVx = vx - 2.0 * reln * nearest.nx;
+        out->newVy = vy - 2.0 * reln * nearest.ny;
+        const double impulse = 2.0 * mass * reln;
+        out->impulseWallX = impulse * nearest.nx;
+        out->impulseWallY = impulse * nearest.ny;
+    } else {
+        out->overlapOutwardReflected = false;
+        out->newVx = vx;
+        out->newVy = vy;
+        out->impulseWallX = 0.0;
+        out->impulseWallY = 0.0;
+    }
+
+    return isfinite(out->newVx) && isfinite(out->newVy) &&
+           isfinite(out->positionCorrectionX) &&
+           isfinite(out->positionCorrectionY);
+}
+
+__device__ __forceinline__ bool q6_x10n_collide_moving_segment(
+    double x0, double y0,
+    double vx, double vy,
+    double mass,
+    double tStart,
+    double window,
+    double dx, double dy,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    const MovingSegment0493x10n& seg,
+    MovingSegmentCollision0493x10n* out) {
+    if (!out || !(window > 0.0)) return false;
+
+    const double agx = seg.ax + seg.uax * tStart;
+    const double agy = seg.ay + seg.uay * tStart;
+    const double dgx = (seg.bx - seg.ax) + (seg.ubx - seg.uax) * tStart;
+    const double dgy = (seg.by - seg.ay) + (seg.uby - seg.uay) * tStart;
+    double arx = q6_x10m_minimum_image(agx - x0, lx, periodicX);
+    double ary = q6_x10m_minimum_image(agy - y0, ly, periodicY);
+    const double L20 = dgx * dgx + dgy * dgy;
+    if (!(L20 > 1.0e-24) || !isfinite(L20)) return false;
+    const double invL0 = 1.0 / sqrt(L20);
+    const double n0x = dgy * invL0;   // outward: segments are oriented A->B
+    const double n0y = -dgx * invL0;
+    const double s0 = (-arx) * n0x + (-ary) * n0y;
+    const double h = fmin(dx, dy);
+    const double sideTol = 1.0e-8 * fmax(1.0, h);
+    // x10p pre-resolves the nearest finite-segment initial overlap.
+    if (s0 > sideTol || s0 < -2.5 * h) return false;
+
+    const double r0x = -arx;
+    const double r0y = -ary;
+    const double urx = vx - seg.uax;
+    const double ury = vy - seg.uay;
+    const double udx = seg.ubx - seg.uax;
+    const double udy = seg.uby - seg.uay;
+    const double c0 = q6_x10n_cross2(dgx, dgy, r0x, r0y);
+    const double c1 = q6_x10n_cross2(dgx, dgy, urx, ury) +
+                      q6_x10n_cross2(udx, udy, r0x, r0y);
+    const double c2 = q6_x10n_cross2(udx, udy, urx, ury);
+
+    double roots[2]; int nr = 0;
+    const double eps = 1.0e-14;
+    if (fabs(c2) < eps) {
+        if (fabs(c1) < eps) return false;
+        roots[nr++] = -c0 / c1;
+    } else {
+        double disc = c1 * c1 - 4.0 * c2 * c0;
+        if (disc < -1.0e-14 * fmax(1.0, c1 * c1)) return false;
+        disc = fmax(0.0, disc);
+        const double sd = sqrt(disc);
+        roots[nr++] = (-c1 - sd) / (2.0 * c2);
+        roots[nr++] = (-c1 + sd) / (2.0 * c2);
+        if (roots[1] < roots[0]) {
+            const double tmp = roots[0]; roots[0] = roots[1]; roots[1] = tmp;
+        }
+    }
+
+    for (int ir = 0; ir < nr; ++ir) {
+        double tau = roots[ir];
+        const double tTol = 1.0e-11 * fmax(1.0, window);
+        if (tau < -tTol || tau > window + tTol || !isfinite(tau)) continue;
+        tau = fmin(window, fmax(0.0, tau));
+        const double dxh = dgx + udx * tau;
+        const double dyh = dgy + udy * tau;
+        const double L2 = dxh * dxh + dyh * dyh;
+        if (!(L2 > 1.0e-24)) continue;
+        const double rxh = r0x + urx * tau;
+        const double ryh = r0y + ury * tau;
+        double lambda = (rxh * dxh + ryh * dyh) / L2;
+        const double ltol = 1.0e-9;
+        if (lambda < -ltol || lambda > 1.0 + ltol) continue;
+        lambda = fmin(1.0, fmax(0.0, lambda));
+        const double invL = 1.0 / sqrt(L2);
+        const double nxh = dyh * invL;
+        const double nyh = -dxh * invL;
+        const double wallVx = seg.uax + lambda * (seg.ubx - seg.uax);
+        const double wallVy = seg.uay + lambda * (seg.uby - seg.uay);
+        const double reln = (vx - wallVx) * nxh + (vy - wallVy) * nyh;
+        if (!(reln > 1.0e-13) || !isfinite(reln)) continue;
+
+        out->hit = true;
+        out->tau = tau;
+        out->lambda = lambda;
+        out->wallVx = wallVx;
+        out->wallVy = wallVy;
+        out->nx = nxh;
+        out->ny = nyh;
+        out->relnBefore = reln;
+        out->newVx = vx - 2.0 * reln * nxh;
+        out->newVy = vy - 2.0 * reln * nyh;
+        const double impulse = 2.0 * mass * reln;
+        out->impulseWallX = impulse * nxh;
+        out->impulseWallY = impulse * nyh;
+        return isfinite(out->newVx) && isfinite(out->newVy);
+    }
+    return false;
+}
+
+__device__ __forceinline__ int q6_x10n_position_cell(
+    double x, double y,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    if (periodicX) {
+        x -= floor(x / lx) * lx;
+        if (x >= lx) x = 0.0;
+    }
+    if (periodicY) {
+        y -= floor(y / ly) * ly;
+        if (y >= ly) y = 0.0;
+    }
+    if (x < 0.0 || x >= lx || y < 0.0 || y >= ly) return -1;
+    int i = static_cast<int>(floor(x * static_cast<double>(nx) / lx));
+    int j = static_cast<int>(floor(y * static_cast<double>(ny) / ly));
+    if (i < 0) i = 0; else if (i >= nx) i = nx - 1;
+    if (j < 0) j = 0; else if (j >= ny) j = ny - 1;
+    return j * nx + i;
+}
+
+__global__ void q6_x10n_apply_continuous_moving_interface(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const unsigned char* segCount,
+    const double* segAx, const double* segAy,
+    const double* segBx, const double* segBy,
+    const double* segUax, const double* segUay,
+    const double* segUbx, const double* segUby,
+    double* wallImpulseX,
+    double* wallImpulseY,
+    std::uint32_t phaseAType,
+    int nx, int ny,
+    double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    int resolveInitialOverlap0493x10p,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const std::uint64_t idx =
+        static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride =
+        static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+
+    for (std::uint64_t p = idx; p < nParticles; p += stride) {
+        if (particles.role && particles.role[p] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[p] != phaseAType) continue;
+        const int initialCell = cells.cellId[p];
+        if (initialCell < 0 || initialCell >= cells.numCells) continue;
+
+        const double x0 = particles.x[p];
+        const double y0 = particles.y[p];
+        const double vx0 = particles.vx[p];
+        const double vy0 = particles.vy[p];
+        const double mass = particles.mass ? particles.mass[p] : 1.0;
+
+        bool oldStationaryOuter = false;
+        if (audit) {
+            double a0 = 0.0, a1 = 0.0;
+            const bool ok0 = q6_x9t_sample_alpha(
+                alpha, x0, y0, nx, ny, lx, ly, periodicX, periodicY, &a0);
+            const bool ok1 = q6_x9t_sample_alpha(
+                alpha, x0 + vx0 * dt, y0 + vy0 * dt,
+                nx, ny, lx, ly, periodicX, periodicY, &a1);
+            oldStationaryOuter = ok0 && ok1 && a0 >= 0.5 && a1 < 0.5;
+            if (oldStationaryOuter)
+                atomicAdd(&audit->continuousWallOldStationaryCrossingCandidates, 1ull);
+        }
+
+        double cx = x0, cy = y0;
+        double cvx = vx0, cvy = vy0;
+        double elapsed = 0.0;
+        int hitsTotal = 0;
+        bool sawAnySegment = false;
+        bool sawCandidateNoHit = false;
+        int firstSearchCandidates = 0;
+
+        // Up to three local impacts handles a near-vertex hit without turning
+        // the interface into a multi-pass global particle correction.
+        for (int event = 0; event < 3; ++event) {
+            const double remaining = dt - elapsed;
+            if (!(remaining > 1.0e-14)) break;
+            const int cc = q6_x10n_position_cell(
+                cx, cy, nx, ny, lx, ly, periodicX, periodicY);
+            if (cc < 0) break;
+            const int ci = cc % nx;
+            const int cj = cc / nx;
+
+            MovingSegmentCollision0493x10n best{};
+            MovingSegment0493x10n bestSeg{};
+            double bestTau = remaining + 1.0;
+            int validHits = 0;
+            int candidates = 0;
+
+            InitialOverlapNearest0493x10p nearest{};
+            double nearestDistance0493x10p = 1.0e300;
+
+            for (int dj = -1; dj <= 1; ++dj) {
+                for (int di = -1; di <= 1; ++di) {
+                    const int owner = q6_x10n_cell_index(
+                        ci + di, cj + dj, nx, ny, periodicX, periodicY);
+                    if (owner < 0) continue;
+                    const int ns = static_cast<int>(segCount[owner]);
+                    for (int slot = 0; slot < ns && slot < 2; ++slot) {
+                        ++candidates;
+                        const int s = 2 * owner + slot;
+                        MovingSegment0493x10n seg{};
+                        seg.ax = segAx[s]; seg.ay = segAy[s];
+                        seg.bx = segBx[s]; seg.by = segBy[s];
+                        seg.uax = segUax[s]; seg.uay = segUay[s];
+                        seg.ubx = segUbx[s]; seg.uby = segUby[s];
+                        seg.ownerCell = owner;
+
+                        if (resolveInitialOverlap0493x10p && event == 0) {
+                            InitialOverlapNearest0493x10p q{};
+                            if (q6_x10p_closest_current_segment(
+                                    cx, cy, elapsed, lx, ly,
+                                    periodicX, periodicY, seg, &q) &&
+                                q.distance < nearestDistance0493x10p) {
+                                nearestDistance0493x10p = q.distance;
+                                nearest = q;
+                            }
+                        }
+
+                        MovingSegmentCollision0493x10n hit{};
+                        if (!q6_x10n_collide_moving_segment(
+                                cx, cy, cvx, cvy, mass,
+                                elapsed, remaining,
+                                dx, dy, lx, ly,
+                                periodicX, periodicY,
+                                seg, &hit))
+                            continue;
+                        ++validHits;
+                        if (hit.tau < bestTau) {
+                            bestTau = hit.tau;
+                            best = hit;
+                            bestSeg = seg;
+                        }
+                    }
+                }
+            }
+
+            // 0493x10q: fallback broad phase for initial overlap only.
+            // Cost remains on the rare path: the normal swept search above is
+            // unchanged (3x3). If no segment is visible from a vacuum-side
+            // cell, inspect only the outer ring of a 7x7 neighborhood.
+            if (resolveInitialOverlap0493x10p && event == 0 &&
+                !nearest.valid && alpha && alpha[cc] < 0.5) {
+                if (audit)
+                    atomicAdd(&audit->x10qWideSearchTriggered, 1ull);
+
+                for (int dj0493x10q = -3; dj0493x10q <= 3; ++dj0493x10q) {
+                    for (int di0493x10q = -3; di0493x10q <= 3; ++di0493x10q) {
+                        if (di0493x10q >= -1 && di0493x10q <= 1 &&
+                            dj0493x10q >= -1 && dj0493x10q <= 1)
+                            continue; // already covered by the normal 3x3 search
+                        const int owner0493x10q = q6_x10n_cell_index(
+                            ci + di0493x10q, cj + dj0493x10q,
+                            nx, ny, periodicX, periodicY);
+                        if (owner0493x10q < 0) continue;
+                        const int ns0493x10q =
+                            static_cast<int>(segCount[owner0493x10q]);
+                        for (int slot0493x10q = 0;
+                             slot0493x10q < ns0493x10q && slot0493x10q < 2;
+                             ++slot0493x10q) {
+                            const int s0493x10q =
+                                2 * owner0493x10q + slot0493x10q;
+                            MovingSegment0493x10n seg0493x10q{};
+                            seg0493x10q.ax = segAx[s0493x10q];
+                            seg0493x10q.ay = segAy[s0493x10q];
+                            seg0493x10q.bx = segBx[s0493x10q];
+                            seg0493x10q.by = segBy[s0493x10q];
+                            seg0493x10q.uax = segUax[s0493x10q];
+                            seg0493x10q.uay = segUay[s0493x10q];
+                            seg0493x10q.ubx = segUbx[s0493x10q];
+                            seg0493x10q.uby = segUby[s0493x10q];
+                            seg0493x10q.ownerCell = owner0493x10q;
+
+                            InitialOverlapNearest0493x10p q0493x10q{};
+                            if (q6_x10p_closest_current_segment(
+                                    cx, cy, elapsed, lx, ly,
+                                    periodicX, periodicY,
+                                    seg0493x10q, &q0493x10q) &&
+                                q0493x10q.distance < nearestDistance0493x10p) {
+                                nearestDistance0493x10p = q0493x10q.distance;
+                                nearest = q0493x10q;
+                            }
+                        }
+                    }
+                }
+
+                if (audit) {
+                    if (nearest.valid)
+                        atomicAdd(&audit->x10qWideSearchFoundSegment, 1ull);
+                    else
+                        atomicAdd(
+                            &audit->x10qOrphanNoSegmentAfterWideSearch, 1ull);
+                }
+            }
+
+            if (resolveInitialOverlap0493x10p && event == 0 && nearest.valid) {
+                const double h0493x10p = fmin(dx, dy);
+                const double sideTol0493x10p =
+                    1.0e-8 * fmax(1.0, h0493x10p);
+                if (nearest.signedDistance > sideTol0493x10p) {
+                    if (audit)
+                        atomicAdd(&audit->x10pInitialOutside, 1ull);
+
+                    const bool deepOverlap0493x10q =
+                        nearest.distance > 2.5 * h0493x10p;
+                    MovingSegmentCollision0493x10n overlap{};
+                    if (q6_x10p_resolve_initial_overlap(
+                            cx, cy, cvx, cvy, mass,
+                            sideTol0493x10p, nearest, &overlap)) {
+                        best = overlap;
+                        bestSeg = nearest.seg;
+                        bestTau = 0.0;
+                        if (audit) {
+                            atomicAdd(
+                                &audit->x10pInitialOverlapResolved, 1ull);
+                            if (overlap.overlapOutwardReflected)
+                                atomicAdd(
+                                    &audit->x10pInitialOverlapOutwardReflected,
+                                    1ull);
+                            else
+                                atomicAdd(
+                                    &audit->x10pInitialOverlapInwardReleased,
+                                    1ull);
+                            atomic_add_double_0400(
+                                &audit->x10pInitialOverlapPenetrationSum,
+                                overlap.penetration);
+                            q6_x10p_atomic_max_positive_double(
+                                &audit->x10pInitialOverlapMaxPenetration,
+                                overlap.penetration);
+                            q6_x10p_atomic_max_positive_double(
+                                &audit->x10qResolvedNearestDistanceMax,
+                                nearest.distance);
+                            if (deepOverlap0493x10q)
+                                atomicAdd(
+                                    &audit->x10qDeepOverlapResolved, 1ull);
+                        }
+                    } else if (audit) {
+                        // This should be numerically exceptional: nearest is
+                        // already finite and signedDistance>sideTol.
+                        atomicAdd(&audit->x10qOverlapResolveFailure, 1ull);
+                    }
+                }
+            }
+
+            if (event == 0) firstSearchCandidates = candidates;
+            if (candidates > 0) sawAnySegment = true;
+            if (!best.hit) {
+                if (candidates > 0) sawCandidateNoHit = true;
+                break;
+            }
+            if (validHits > 1 && audit)
+                atomicAdd(&audit->continuousWallMultipleCollisionCandidates, 1ull);
+
+            cx += cvx * best.tau + best.positionCorrectionX;
+            cy += cvy * best.tau + best.positionCorrectionY;
+            elapsed += best.tau;
+            cvx = best.newVx;
+            cvy = best.newVy;
+            ++hitsTotal;
+
+            atomic_add_double_0400(
+                &wallImpulseX[bestSeg.ownerCell], best.impulseWallX);
+            atomic_add_double_0400(
+                &wallImpulseY[bestSeg.ownerCell], best.impulseWallY);
+
+            if (audit) {
+                atomicAdd(&audit->continuousWallCollisions, 1ull);
+                if (hitsTotal == 2)
+                    atomicAdd(&audit->continuousWallSecondCollisions, 1ull);
+                else if (hitsTotal == 3)
+                    atomicAdd(&audit->continuousWallThirdCollisions, 1ull);
+                atomic_add_double_0400(
+                    &audit->continuousWallCollisionTimeFractionSum,
+                    elapsed / dt);
+                const double wallVn = best.wallVx * best.nx + best.wallVy * best.ny;
+                atomic_add_double_0400(&audit->continuousWallWallVnSum, wallVn);
+                atomic_add_double_0400(
+                    &audit->continuousWallWallVnSqSum, wallVn * wallVn);
+                atomic_add_double_0400(
+                    &audit->continuousWallWallVnAbsSum, fabs(wallVn));
+                const double cbx = (event == 0 ? vx0 : 0.0); // reference below is recomputed
+                (void)cbx;
+                double beforeRelX = 0.0;
+                double beforeRelY = 0.0;
+                if (best.initialOverlap && !best.overlapOutwardReflected) {
+                    beforeRelX = best.newVx - best.wallVx;
+                    beforeRelY = best.newVy - best.wallVy;
+                } else {
+                    beforeRelX =
+                        (best.newVx + 2.0 * best.relnBefore * best.nx) -
+                        best.wallVx;
+                    beforeRelY =
+                        (best.newVy + 2.0 * best.relnBefore * best.ny) -
+                        best.wallVy;
+                }
+                const double afterRelX = best.newVx - best.wallVx;
+                const double afterRelY = best.newVy - best.wallVy;
+                const double eBefore = beforeRelX * beforeRelX + beforeRelY * beforeRelY;
+                const double eAfter = afterRelX * afterRelX + afterRelY * afterRelY;
+                atomic_add_double_0400(
+                    &audit->continuousWallRelativeSpeedSqAbsErrorSum,
+                    fabs(eAfter - eBefore));
+                atomic_add_double_0400(
+                    &audit->continuousWallRelativeSpeedSqReferenceSum,
+                    fabs(eBefore));
+                const double relAfter =
+                    (best.newVx - best.wallVx) * best.nx +
+                    (best.newVy - best.wallVy) * best.ny;
+                if (!(relAfter < 1.0e-12 * fmax(1.0, fabs(best.relnBefore))))
+                    atomicAdd(&audit->continuousWallRelativeStillOutward, 1ull);
+                atomic_add_double_0400(
+                    &audit->continuousWallImpulseX, best.impulseWallX);
+                atomic_add_double_0400(
+                    &audit->continuousWallImpulseY, best.impulseWallY);
+                atomic_add_double_0400(
+                    &audit->continuousWallImpulseAbsSum,
+                    sqrt(best.impulseWallX * best.impulseWallX +
+                         best.impulseWallY * best.impulseWallY));
+            }
+        }
+
+        if (audit && sawAnySegment)
+            atomicAdd(&audit->continuousWallParticlesWithCandidate, 1ull);
+        if (audit && oldStationaryOuter && hitsTotal == 0)
+            atomicAdd(&audit->continuousWallOldStationaryCrossingReleased, 1ull);
+        if (audit && oldStationaryOuter && firstSearchCandidates == 0)
+            atomicAdd(&audit->continuousWallNoNearbySegment, 1ull);
+        if (audit && oldStationaryOuter && firstSearchCandidates > 0 && hitsTotal == 0)
+            atomicAdd(&audit->continuousWallCandidateNoHit, 1ull);
+        if (audit && hitsTotal >= 3)
+            atomicAdd(&audit->continuousWallCollisionLimitReached, 1ull);
+
+        if (hitsTotal == 0) continue;
+        const double remaining = fmax(0.0, dt - elapsed);
+        const double xf = cx + cvx * remaining;
+        const double yf = cy + cvy * remaining;
+        const double corrX = xf - cvx * dt - x0;
+        const double corrY = yf - cvy * dt - y0;
+        particles.x[p] = x0 + corrX;
+        particles.y[p] = y0 + corrY;
+        particles.vx[p] = cvx;
+        particles.vy[p] = cvy;
+        if (audit)
+            atomic_add_double_0400(
+                &audit->continuousWallPositionShiftAbsSum,
+                sqrt(corrX * corrX + corrY * corrY));
+    }
+}
+
+// 0493x10i: reduce existing per-cell donor/receiver statistics into
+// shifted mesoscopic reservoirs. No particle pass is added.
+// 0493x10l PASSIVE pre-wall-interface diagnostics.
+// These kernels DO NOT modify particles, alpha, Q6 fields, or the kinetic
+// reflection path.  They answer only: what normal interface velocity does the
+// post-Q6/B1 liquid field predict before any wall/interface correction?
+__device__ __forceinline__ int q6_x10l_wrap_or_clamp_index(
+    int i, int n, bool periodic) {
+    if (periodic) {
+        i %= n;
+        if (i < 0) i += n;
+        return i;
+    }
+    return max(0, min(n - 1, i));
+}
+
+__device__ __forceinline__ double q6_x10l_alpha_cell(
+    const double* alpha,
+    int i, int j, int nx, int ny,
+    bool periodicX, bool periodicY) {
+    i = q6_x10l_wrap_or_clamp_index(i, nx, periodicX);
+    j = q6_x10l_wrap_or_clamp_index(j, ny, periodicY);
+    return alpha[j * nx + i];
+}
+
+__device__ __forceinline__ bool q6_x10l_interface_cell_geometry(
+    const double* alpha,
+    int i, int j, int nx, int ny,
+    double dx, double dy,
+    bool periodicX, bool periodicY,
+    double* nxOut, double* nyOut) {
+    const double ac = q6_x10l_alpha_cell(
+        alpha, i, j, nx, ny, periodicX, periodicY);
+    const double al = q6_x10l_alpha_cell(
+        alpha, i - 1, j, nx, ny, periodicX, periodicY);
+    const double ar = q6_x10l_alpha_cell(
+        alpha, i + 1, j, nx, ny, periodicX, periodicY);
+    const double ab = q6_x10l_alpha_cell(
+        alpha, i, j - 1, nx, ny, periodicX, periodicY);
+    const double at = q6_x10l_alpha_cell(
+        alpha, i, j + 1, nx, ny, periodicX, periodicY);
+
+    const double amin = fmin(ac, fmin(fmin(al, ar), fmin(ab, at)));
+    const double amax = fmax(ac, fmax(fmax(al, ar), fmax(ab, at)));
+    if (!(amin <= 0.5 && amax >= 0.5) || !(amax - amin > 1.0e-12))
+        return false;
+
+    const double gx = (ar - al) / (2.0 * dx);
+    const double gy = (at - ab) / (2.0 * dy);
+    const double g2 = gx * gx + gy * gy;
+    if (!(g2 > 1.0e-24) || !isfinite(g2)) return false;
+
+    const double invg = 1.0 / sqrt(g2);
+    // alpha is high in liquid and low in vacuum, therefore -grad(alpha)
+    // points from liquid to vacuum.
+    *nxOut = -gx * invg;
+    *nyOut = -gy * invg;
+    return isfinite(*nxOut) && isfinite(*nyOut);
+}
+
+__global__ void q6_x10l_accumulate_prewall_interface_cells(
+    int numCells,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    bool periodicX,
+    bool periodicY,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    KineticCrossingAccumulator0493x9x* audit) {
+    if (!audit) return;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    const double dsProxy = sqrt(dx * dy);
+    const double cellArea = dx * dy;
+
+    for (int c = idx; c < numCells; c += stride) {
+        const double ac = alpha[c];
+        if (isfinite(ac)) {
+            const double af = fmin(1.0, fmax(0.0, ac));
+            atomic_add_double_0400(&audit->preWallAlphaArea, af * cellArea);
+        }
+
+        const int i = c % nx;
+        const int j = c / nx;
+        double nxo = 0.0, nyo = 0.0;
+        if (!q6_x10l_interface_cell_geometry(
+                alpha, i, j, nx, ny, dx, dy,
+                periodicX, periodicY, &nxo, &nyo))
+            continue;
+
+        atomicAdd(&audit->preWallInterfaceCells, 1ull);
+        atomic_add_double_0400(
+            &audit->preWallInterfaceLengthProxy, dsProxy);
+        // Larger score means a lower Cartesian row.  Audit memory is zeroed,
+        // so atomicMax works without a special sentinel.
+        const unsigned long long score =
+            static_cast<unsigned long long>(ny - j);
+        atomicMax(&audit->preWallLowerTipScore, score);
+
+        const double m = totalM[c];
+        const double px = totalPx[c];
+        const double py = totalPy[c];
+        if (!(m > 1.0e-14) || !isfinite(m) || !isfinite(px) || !isfinite(py))
+            continue;
+
+        const double ux = px / m;
+        const double uy = py / m;
+        const double vn = ux * nxo + uy * nyo;
+        if (!isfinite(vn)) continue;
+
+        atomicAdd(&audit->preWallVelocityCells, 1ull);
+        if (vn > 0.0) atomicAdd(&audit->preWallPositiveVnCells, 1ull);
+        if (vn < 0.0) atomicAdd(&audit->preWallNegativeVnCells, 1ull);
+        atomic_add_double_0400(&audit->preWallVnSum, vn);
+        atomic_add_double_0400(&audit->preWallVnSqSum, vn * vn);
+        atomic_add_double_0400(&audit->preWallAbsVnSum, fabs(vn));
+        atomic_add_double_0400(&audit->preWallVelocityMassSum, m);
+        atomic_add_double_0400(&audit->preWallMassVnSum, m * vn);
+        atomic_add_double_0400(
+            &audit->preWallNetNormalFluxProxy, vn * dsProxy);
+    }
+}
+
+__global__ void q6_x10l_accumulate_prewall_lower_tip(
+    int numCells,
+    int nx,
+    int ny,
+    double lx,
+    double ly,
+    bool periodicX,
+    bool periodicY,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    KineticCrossingAccumulator0493x9x* audit) {
+    if (!audit) return;
+    const unsigned long long score = audit->preWallLowerTipScore;
+    if (score == 0ull) return;
+
+    const int tipJ = ny - static_cast<int>(score);
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        // Cell-centre proxy of the lowest alpha=.5-support row.
+        audit->preWallLowerTipY = (static_cast<double>(tipJ) + 0.5) * dy;
+    }
+
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int c = idx; c < numCells; c += stride) {
+        const int i = c % nx;
+        const int j = c / nx;
+        // Lower-tip band: lowest interface row plus two rows toward the liquid.
+        if (j < tipJ || j > tipJ + 2) continue;
+
+        double nxo = 0.0, nyo = 0.0;
+        if (!q6_x10l_interface_cell_geometry(
+                alpha, i, j, nx, ny, dx, dy,
+                periodicX, periodicY, &nxo, &nyo))
+            continue;
+
+        const double m = totalM[c];
+        const double px = totalPx[c];
+        const double py = totalPy[c];
+        if (!(m > 1.0e-14) || !isfinite(m) || !isfinite(px) || !isfinite(py))
+            continue;
+        const double ux = px / m;
+        const double uy = py / m;
+        const double vn = ux * nxo + uy * nyo;
+        if (!isfinite(vn)) continue;
+
+        atomicAdd(&audit->preWallLowerTipCells, 1ull);
+        if (vn > 0.0)
+            atomicAdd(&audit->preWallLowerTipPositiveVnCells, 1ull);
+        if (vn < 0.0)
+            atomicAdd(&audit->preWallLowerTipNegativeVnCells, 1ull);
+        atomic_add_double_0400(&audit->preWallLowerTipVnSum, vn);
+        atomic_add_double_0400(&audit->preWallLowerTipVnSqSum, vn * vn);
+        atomic_add_double_0400(&audit->preWallLowerTipAbsVnSum, fabs(vn));
+        atomic_add_double_0400(&audit->preWallLowerTipMassSum, m);
+        atomic_add_double_0400(&audit->preWallLowerTipMassVnSum, m * vn);
+    }
+}
+
+__global__ void q6_x10i_reduce_meso_reactions(
+    int numCells,
+    int nx,
+    int blockCells,
+    int shiftX,
+    int shiftY,
+    int blocksX,
+    const double* donorA,
+    const double* donorSx,
+    const double* donorSy,
+    const double* donorH,
+    const double* recvM,
+    const double* recvPx,
+    const double* recvPy,
+    KineticGlobalReaction0493x10f* reactions) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+
+    for (int c = idx; c < numCells; c += stride) {
+        const int rid = q6_x10i_meso_reservoir_id(
+            c, nx, blockCells, shiftX, shiftY, blocksX);
+        KineticGlobalReaction0493x10f* r = &reactions[rid];
+
+        const double A = donorA[c];
+        const double Sx = donorSx[c];
+        const double Sy = donorSy[c];
+        const double H = donorH[c];
+        const double donorRequest = fabs(A) + fabs(Sx) + fabs(Sy) + fabs(H);
+        if (donorRequest > 1.0e-30 &&
+            isfinite(A) && isfinite(Sx) && isfinite(Sy) && isfinite(H)) {
+            atomic_add_double_0400(&r->A, A);
+            atomic_add_double_0400(&r->Sx, Sx);
+            atomic_add_double_0400(&r->Sy, Sy);
+            atomic_add_double_0400(&r->H, H);
+            atomic_add_double_0400(
+                &r->cellSNormSum, sqrt(Sx * Sx + Sy * Sy));
+            atomicAdd(&r->donorCells, 1ull);
+        }
+
+        const double mr = recvM[c];
+        const double px = recvPx[c];
+        const double py = recvPy[c];
+        if (mr > 1.0e-14 && isfinite(mr) && isfinite(px) && isfinite(py)) {
+            atomic_add_double_0400(&r->receiverM, mr);
+            atomic_add_double_0400(&r->receiverPx, px);
+            atomic_add_double_0400(&r->receiverPy, py);
+            atomicAdd(&r->receiverCells, 1ull);
+        }
+    }
+}
+
+// Exact x10f root independently for every mesoscopic reservoir.
+__global__ void q6_x10i_finalize_meso_reactions(
+    int numReservoirs,
+    int blockCells,
+    int shiftX,
+    int shiftY,
+    KineticGlobalReaction0493x10f* reactions,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const int rid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (rid >= numReservoirs) return;
+
+    KineticGlobalReaction0493x10f* global = &reactions[rid];
+    const double A = global->A;
+    const double Sx = global->Sx;
+    const double Sy = global->Sy;
+    const double H = global->H;
+    const double mr = global->receiverM;
+
+    global->a = 0.0;
+    global->dux = 0.0;
+    global->duy = 0.0;
+    global->active = 0;
+    global->trivial = 0;
+    global->invalid = 0;
+
+    if (audit && rid == 0) {
+        audit->mesoReactionBlockCells =
+            static_cast<unsigned long long>(blockCells);
+        audit->mesoReactionShiftX =
+            static_cast<unsigned long long>(shiftX);
+        audit->mesoReactionShiftY =
+            static_cast<unsigned long long>(shiftY);
+        audit->mesoReactionReservoirSlots =
+            static_cast<unsigned long long>(numReservoirs);
+    }
+
+    const double request = fabs(A) + fabs(Sx) + fabs(Sy) + fabs(H);
+    if (!(request > 1.0e-30) || !isfinite(request)) return;
+
+    global->active = 1;
+    double B = 0.0;
+    double uRx = 0.0;
+    double uRy = 0.0;
+    double numer = 0.0;
+    double denom = 0.0;
+    double a = 0.0;
+    bool valid = true;
+    bool noReceiver = false;
+
+    if (!(mr > 1.0e-14) || !isfinite(mr) ||
+        !isfinite(global->receiverPx) || !isfinite(global->receiverPy)) {
+        valid = false;
+        noReceiver = true;
+    } else {
+        uRx = global->receiverPx / mr;
+        uRy = global->receiverPy / mr;
+        B = (Sx * Sx + Sy * Sy) / mr;
+        denom = A + B;
+        numer = 2.0 * (H - (uRx * Sx + uRy * Sy));
+        valid = isfinite(A) && A >= 0.0 &&
+                isfinite(B) && B >= 0.0 &&
+                isfinite(H) && isfinite(denom) && denom > 1.0e-30 &&
+                isfinite(numer);
+        if (valid) a = numer / denom;
+    }
+
+    if (!(a > 0.0) || !isfinite(a)) {
+        a = 0.0;
+        global->trivial = 1;
+        if (!valid) global->invalid = 1;
+    } else {
+        global->dux = a * Sx / mr;
+        global->duy = a * Sy / mr;
+        if (!isfinite(global->dux) || !isfinite(global->duy)) {
+            global->dux = 0.0;
+            global->duy = 0.0;
+            a = 0.0;
+            global->trivial = 1;
+            global->invalid = 1;
+        }
+    }
+    global->a = a;
+
+    const double residual =
+        a * ((uRx * Sx + uRy * Sy) - H) +
+        0.5 * a * a * (A + B);
+    const double sNorm = sqrt(Sx * Sx + Sy * Sy);
+    const double cancellation =
+        global->cellSNormSum > 0.0 ? sNorm / global->cellSNormSum : 0.0;
+    const double duMag =
+        sqrt(global->dux * global->dux + global->duy * global->duy);
+
+    if (audit) {
+        atomicAdd(&audit->mesoReactionActiveReservoirs, 1ull);
+        if (global->trivial)
+            atomicAdd(&audit->mesoReactionTrivialReservoirs, 1ull);
+        if (global->invalid)
+            atomicAdd(&audit->mesoReactionInvalidReservoirs, 1ull);
+        if (noReceiver)
+            atomicAdd(&audit->mesoReactionNoReceiverReservoirs, 1ull);
+        atomicAdd(&audit->mesoReactionDonorCells, global->donorCells);
+        atomicAdd(&audit->mesoReactionReceiverCells, global->receiverCells);
+        atomic_add_double_0400(
+            &audit->mesoReactionReceiverMassSum, mr > 0.0 ? mr : 0.0);
+        atomic_add_double_0400(&audit->mesoReactionScaleSum, a);
+        atomic_add_double_0400(
+            &audit->mesoReactionScaleAbsFromSpecularSum, fabs(a - 2.0));
+        atomic_add_double_0400(
+            &audit->mesoReactionDeltaUMagnitudeSum, duMag);
+        atomic_add_double_0400(
+            &audit->mesoReactionCancellationSum, cancellation);
+        atomic_add_double_0400(
+            &audit->mesoReactionFormulaResidualAbsSum, fabs(residual));
+
+        atomicAdd(&audit->reactionActiveCells, 1ull);
+        atomicAdd(&audit->analyticConservativeReactionCells, 1ull);
+        if (noReceiver)
+            atomicAdd(&audit->reactionNoReceiverCells, 1ull);
+        if (a > 0.0) {
+            atomicAdd(&audit->reactionFeasibleCells, 1ull);
+            atomicAdd(&audit->analyticPositiveScaleCells, 1ull);
+            if (a > 1.0)
+                atomicAdd(&audit->analyticInwardCells, 1ull);
+            else
+                atomicAdd(&audit->analyticNonInwardPositiveCells, 1ull);
+            atomic_add_double_0400(&audit->analyticDonorScaleSum, a);
+            atomic_add_double_0400(
+                &audit->analyticDonorScaleAbsFromSpecularSum, fabs(a - 2.0));
+        } else {
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+            if (global->invalid)
+                atomicAdd(&audit->analyticInvalidCells, 1ull);
+        }
+        atomic_add_double_0400(
+            &audit->reactionEnergyResidualAbsSum, fabs(residual));
+        atomic_add_double_0400(
+            &audit->reactionDeltaUMagnitudeSum, duMag);
+    }
+}
+
+__global__ void q6_x10f_finalize_global_reaction(
+    KineticGlobalReaction0493x10f* global,
+    KineticCrossingAccumulator0493x9x* audit) {
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+
+    const double A = global->A;
+    const double Sx = global->Sx;
+    const double Sy = global->Sy;
+    const double H = global->H;
+    const double mr = global->receiverM;
+
+    global->a = 0.0;
+    global->dux = 0.0;
+    global->duy = 0.0;
+    global->active = 0;
+    global->trivial = 0;
+    global->invalid = 0;
+
+    const double request = fabs(A) + fabs(Sx) + fabs(Sy) + fabs(H);
+    if (!(request > 1.0e-30) || !isfinite(request)) {
+        if (audit) {
+            audit->globalReactionDonorCells = global->donorCells;
+            audit->globalReactionReceiverCells = global->receiverCells;
+        }
+        return;
+    }
+
+    global->active = 1;
+    double B = 0.0;
+    double uRx = 0.0;
+    double uRy = 0.0;
+    double numer = 0.0;
+    double denom = 0.0;
+    double a = 0.0;
+    bool valid = true;
+
+    if (!(mr > 1.0e-14) || !isfinite(mr) ||
+        !isfinite(global->receiverPx) || !isfinite(global->receiverPy)) {
+        valid = false;
+    } else {
+        uRx = global->receiverPx / mr;
+        uRy = global->receiverPy / mr;
+        B = (Sx * Sx + Sy * Sy) / mr;
+        denom = A + B;
+        numer = 2.0 * (H - (uRx * Sx + uRy * Sy));
+        valid = isfinite(A) && A >= 0.0 &&
+                isfinite(B) && B >= 0.0 &&
+                isfinite(H) && isfinite(denom) && denom > 1.0e-30 &&
+                isfinite(numer);
+        if (valid) a = numer / denom;
+    }
+
+    if (!(a > 0.0) || !isfinite(a)) {
+        a = 0.0;
+        global->trivial = 1;
+        if (!valid) global->invalid = 1;
+    } else {
+        global->dux = a * Sx / mr;
+        global->duy = a * Sy / mr;
+        if (!isfinite(global->dux) || !isfinite(global->duy)) {
+            global->dux = 0.0;
+            global->duy = 0.0;
+            a = 0.0;
+            global->trivial = 1;
+            global->invalid = 1;
+        }
+    }
+    global->a = a;
+
+    const double residual =
+        a * ((uRx * Sx + uRy * Sy) - H) +
+        0.5 * a * a * (A + B);
+    const double sNorm = sqrt(Sx * Sx + Sy * Sy);
+    const double cancellation =
+        global->cellSNormSum > 0.0 ? sNorm / global->cellSNormSum : 0.0;
+
+    if (audit) {
+        // Keep generic x10d diagnostics meaningful: one reaction object per
+        // audited step instead of one reaction object per active interface cell.
+        atomicAdd(&audit->reactionActiveCells, 1ull);
+        atomicAdd(&audit->analyticConservativeReactionCells, 1ull);
+        if (!(mr > 1.0e-14) || !isfinite(mr))
+            atomicAdd(&audit->reactionNoReceiverCells, 1ull);
+
+        if (a > 0.0) {
+            atomicAdd(&audit->reactionFeasibleCells, 1ull);
+            atomicAdd(&audit->analyticPositiveScaleCells, 1ull);
+            if (a > 1.0)
+                atomicAdd(&audit->analyticInwardCells, 1ull);
+            else
+                atomicAdd(&audit->analyticNonInwardPositiveCells, 1ull);
+            atomic_add_double_0400(&audit->analyticDonorScaleSum, a);
+            atomic_add_double_0400(
+                &audit->analyticDonorScaleAbsFromSpecularSum, fabs(a - 2.0));
+        } else {
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+            if (global->invalid)
+                atomicAdd(&audit->analyticInvalidCells, 1ull);
+        }
+
+        atomic_add_double_0400(
+            &audit->reactionEnergyResidualAbsSum, fabs(residual));
+        atomic_add_double_0400(
+            &audit->reactionDeltaUMagnitudeSum,
+            sqrt(global->dux * global->dux + global->duy * global->duy));
+
+        audit->globalReactionActive = 1ull;
+        audit->globalReactionTrivial = global->trivial ? 1ull : 0ull;
+        audit->globalReactionInvalid = global->invalid ? 1ull : 0ull;
+        audit->globalReactionDonorCells = global->donorCells;
+        audit->globalReactionReceiverCells = global->receiverCells;
+        audit->globalReactionA = A;
+        audit->globalReactionH = H;
+        audit->globalReactionSNorm = sNorm;
+        audit->globalReactionCellSNormSum = global->cellSNormSum;
+        audit->globalReactionCancellationRatio = cancellation;
+        audit->globalReactionReceiverMass = mr;
+        audit->globalReactionScale = a;
+        audit->globalReactionDeltaUMagnitude =
+            sqrt(global->dux * global->dux + global->duy * global->duy);
+        audit->globalReactionFormulaResidual = residual;
+    }
+}
+
+// 0493x10d: O(Ncell) preparation between particle passes 2 and 3.
+//
+// Hard r=1 mode replaces the x9z receiver affine-translation + thermal-rescale
+// reaction by one exact collective elastic mode.  For donor i, with its own
+// interface normal n_i and the pre-reaction bath mean u_b,
+//
+//   g_i = (v_i-u_b).n_i > 0,
+//   A   = sum m_i g_i^2,
+//   S   = sum m_i g_i n_i.
+//
+// Receivers in the bath cell have mass M_r and mean u_r.  The family
+//
+//   donor:   dv_i = -a g_i n_i
+//   receiver:du_r =  a S / M_r
+//
+// conserves momentum for every a.  Its total kinetic-energy change is
+//
+//   dE(a) = a(C-A) + 0.5 a^2 (A+B),
+//   B = |S|^2/M_r,  C = (u_r-u_b).S.
+//
+// Therefore the non-trivial exact root is
+//
+//   a* = 2(A-C)/(A+B).
+//
+// No lambda, no thermal-energy floor and no fourth particle pass are needed.
+// If the non-trivial root is unavailable/non-positive, x10d deliberately uses
+// the trivial exact root a=0; x10c still enforces r=1 positional containment.
+// Such cells are audited and are not hidden by a clamp.
+__global__ void q6_x9z_prepare_receiver_reaction(
+    int numCells,
+    double* donorDeltaE,
+    double* reactionJx,
+    double* reactionJy,
+    const double* recvM,
+    const double* recvPx,
+    const double* recvPy,
+    const double* recvK,
+    double* reactionLambda,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    double reflectionFraction,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= numCells) return;
+
+    // ---------------------------------------------------------------------
+    // Historical r<1 branch, retained so x10d does not redefine evaporation.
+    // ---------------------------------------------------------------------
+    if (reflectionFraction < 1.0) {
+        const double dED = donorDeltaE[c];
+        const double Jx = reactionJx[c];
+        const double Jy = reactionJy[c];
+        const double request = fabs(dED) + fabs(Jx) + fabs(Jy);
+
+        donorDeltaE[c] = 0.0;
+        reactionJx[c] = 0.0;
+        reactionJy[c] = 0.0;
+        reactionLambda[c] = 1.0;
+        if (!(request > 1.0e-30) || !isfinite(request)) return;
+
+        if (audit) atomicAdd(&audit->reactionActiveCells, 1ull);
+
+        const double mr = recvM[c];
+        if (!(mr > 1.0e-14) || !isfinite(mr)) {
+            if (audit) atomicAdd(&audit->reactionNoReceiverCells, 1ull);
+            return;
+        }
+
+        const double urx = recvPx[c] / mr;
+        const double ury = recvPy[c] / mr;
+        const double kr = recvK[c];
+        const double meanK = 0.5 * mr * (urx * urx + ury * ury);
+        double krel = kr - meanK;
+        const double scale = fmax(1.0, fmax(fabs(kr), fabs(meanK)));
+        const double tol = 1.0e-12 * scale;
+        if (krel < 0.0 && krel > -tol) krel = 0.0;
+
+        const double dux = Jx / mr;
+        const double duy = Jy / mr;
+        const double meanDeltaE = urx * Jx + ury * Jy +
+            0.5 * (Jx * Jx + Jy * Jy) / mr;
+
+        double target = krel - dED - meanDeltaE;
+        double lambda = 1.0;
+        double residual = 0.0;
+        bool feasible = false;
+        if (target < 0.0 && target > -tol) target = 0.0;
+
+        if (krel > tol && target >= 0.0 && isfinite(target)) {
+            lambda = sqrt(target / krel);
+            feasible = isfinite(lambda);
+        } else if (krel <= tol) {
+            lambda = 1.0;
+            residual = krel - target;
+            if (fabs(residual) <= tol) {
+                residual = 0.0;
+                feasible = true;
+            } else if (audit) {
+                atomicAdd(&audit->reactionThermalDegenerateCells, 1ull);
+            }
+        } else {
+            lambda = 0.0;
+            residual = -target;
+            if (audit) atomicAdd(&audit->reactionEnergyFloorCells, 1ull);
+        }
+
+        if (!isfinite(lambda)) {
+            lambda = 1.0;
+            residual = krel - target;
+            feasible = false;
+            if (audit) atomicAdd(&audit->reactionThermalDegenerateCells, 1ull);
+        }
+
+        donorDeltaE[c] = 1.0; // active flag
+        reactionJx[c] = dux;
+        reactionJy[c] = duy;
+        reactionLambda[c] = lambda;
+
+        if (audit) {
+            if (feasible) atomicAdd(&audit->reactionFeasibleCells, 1ull);
+            atomic_add_double_0400(&audit->reactionEnergyResidualAbsSum, fabs(residual));
+            atomic_add_double_0400(&audit->reactionDeltaUMagnitudeSum,
+                                   sqrt(dux * dux + duy * duy));
+            atomic_add_double_0400(&audit->reactionLambdaDeviationAbsSum,
+                                   fabs(lambda - 1.0));
+        }
+        return;
+    }
+
+    // ---------------------------------------------------------------------
+    // x10d hard-r1 exact analytic collective reaction.
+    // Inputs currently hold A and S; outputs reuse the same buffers as
+    // activeFlag, receiver delta-u and donor scale a.
+    // ---------------------------------------------------------------------
+    const double A = donorDeltaE[c];
+    const double Sx = reactionJx[c];
+    const double Sy = reactionJy[c];
+    const double request = fabs(A) + fabs(Sx) + fabs(Sy);
+
+    donorDeltaE[c] = 0.0;   // inactive by default
+    reactionJx[c] = 0.0;    // receiver du_x
+    reactionJy[c] = 0.0;    // receiver du_y
+    reactionLambda[c] = 0.0; // x10d donor scale a (NOT lambda) in hard r=1
+    if (!(request > 1.0e-30) || !isfinite(request)) return;
+
+    // Mark the reaction cell active even when the exact trivial root a=0 is
+    // selected.  Donor and receiver pass-3 decisions remain deterministic.
+    donorDeltaE[c] = 1.0;
+    if (audit) {
+        atomicAdd(&audit->reactionActiveCells, 1ull);
+        atomicAdd(&audit->analyticConservativeReactionCells, 1ull);
+    }
+
+    const double mr = recvM[c];
+    const double mb = totalM[c];
+    if (!(mr > 1.0e-14) || !isfinite(mr)) {
+        if (audit) {
+            atomicAdd(&audit->reactionNoReceiverCells, 1ull);
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+        }
+        return; // a=0: exact no-op root
+    }
+    if (!(mb > 1.0e-14) || !isfinite(mb) ||
+        !isfinite(totalPx[c]) || !isfinite(totalPy[c])) {
+        if (audit) {
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+            atomicAdd(&audit->analyticInvalidCells, 1ull);
+            atomicAdd(&audit->reactionThermalDegenerateCells, 1ull);
+        }
+        return;
+    }
+
+    const double urx = recvPx[c] / mr;
+    const double ury = recvPy[c] / mr;
+    const double ubx = totalPx[c] / mb;
+    const double uby = totalPy[c] / mb;
+
+    const double B = (Sx * Sx + Sy * Sy) / mr;
+    const double C = (urx - ubx) * Sx + (ury - uby) * Sy;
+    const double denom = A + B;
+    const double numer = 2.0 * (A - C);
+
+    bool valid = isfinite(A) && A >= 0.0 &&
+                 isfinite(B) && B >= 0.0 &&
+                 isfinite(C) && isfinite(denom) && denom > 1.0e-30 &&
+                 isfinite(numer);
+    double a = valid ? numer / denom : 0.0;
+
+    // Do not clamp a: a clamp would destroy exact energy conservation.
+    // A non-positive/non-finite non-trivial root is replaced by the other
+    // exact root, a=0, and exposed explicitly in diagnostics.
+    if (!(a > 0.0) || !isfinite(a)) {
+        a = 0.0;
+        if (audit) {
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+            if (!valid || !isfinite(numer / denom))
+                atomicAdd(&audit->analyticInvalidCells, 1ull);
+        }
+        return;
+    }
+
+    const double dux = a * Sx / mr;
+    const double duy = a * Sy / mr;
+    if (!isfinite(dux) || !isfinite(duy)) {
+        reactionLambda[c] = 0.0;
+        if (audit) {
+            atomicAdd(&audit->analyticTrivialCells, 1ull);
+            atomicAdd(&audit->analyticInvalidCells, 1ull);
+        }
+        return;
+    }
+
+    reactionJx[c] = dux;
+    reactionJy[c] = duy;
+    reactionLambda[c] = a;
+
+    // Algebraic residual of the exact kinetic-energy identity.  This is not a
+    // substitute for the actual pass-3 deltaKineticEnergy audit; both are kept.
+    const double residual = a * (C - A) + 0.5 * a * a * (A + B);
+
+    if (audit) {
+        atomicAdd(&audit->reactionFeasibleCells, 1ull);
+        atomicAdd(&audit->analyticPositiveScaleCells, 1ull);
+        if (a > 1.0)
+            atomicAdd(&audit->analyticInwardCells, 1ull);
+        else
+            atomicAdd(&audit->analyticNonInwardPositiveCells, 1ull);
+        atomic_add_double_0400(&audit->analyticDonorScaleSum, a);
+        atomic_add_double_0400(&audit->analyticDonorScaleAbsFromSpecularSum,
+                               fabs(a - 2.0));
+        atomic_add_double_0400(&audit->reactionEnergyResidualAbsSum,
+                               fabs(residual));
+        atomic_add_double_0400(&audit->reactionDeltaUMagnitudeSum,
+                               sqrt(dux * dux + duy * duy));
+        // reactionLambdaDeviationAbsSum intentionally remains zero in r=1:
+        // there is no receiver thermal lambda in x10d.
+    }
+}
+
+__global__ void q6_x9z_apply_individual_reflections(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    const double* alpha,
+    const double* totalM,
+    const double* totalPx,
+    const double* totalPy,
+    const double* reactionActive,
+    const double* reactionDeltaUx,
+    const double* reactionDeltaUy,
+    const double* recvM,
+    const double* recvPx,
+    const double* recvPy,
+    const double* reactionLambda,
+    const KineticGlobalReaction0493x10f* mesoReactions,
+    int mesoBlockCells,
+    int mesoShiftX,
+    int mesoShiftY,
+    int mesoBlocksX,
+    int simpleSpecularAblation,
+    int localFrameSpecularAblation,
+    std::uint32_t phaseAType,
+    int evaporationTargetType,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    double reflectionFraction,
+    unsigned long long step,
+    unsigned long long seed,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const std::uint64_t idx = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
+
+    for (std::uint64_t i = idx; i < nParticles; i += stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        if (!particles.type || particles.type[i] != phaseAType) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+
+        const auto d = q6_x9y_decide_crossing(
+            i, particles, cells, alpha, totalM, totalPx, totalPy,
+            phaseAType, nx, ny, lx, ly, dt, periodicX, periodicY,
+            reflectionFraction, step, seed, true);
+
+        if (audit && d.crossing) {
+            atomic_add_double_0400(&audit->crossingFractionSum, d.crossingFraction);
+            if (d.interiorCrossing)
+                atomicAdd(&audit->bisectionInteriorCrossings, 1ull);
+            if (d.bisectionFallback)
+                atomicAdd(&audit->bisectionFallbacks, 1ull);
+        }
+
+        if ((simpleSpecularAblation || localFrameSpecularAblation) && audit) {
+            const double mAudit = particles.mass ? particles.mass[i] : 1.0;
+            if (alpha[c] < 0.5) atomicAdd(&audit->phaseAOuterCellParticles, 1ull);
+            if (d.shellParticle) atomicAdd(&audit->shellParticles, 1ull);
+            if (d.shellRecoverable) atomicAdd(&audit->shellRecoverableParticles, 1ull);
+            if (d.deepOuterParticle) atomicAdd(&audit->deepOuterParticles, 1ull);
+            if (d.startBelowHalf) atomicAdd(&audit->startBelowHalf, 1ull);
+            if (d.crossingPointNormalFallback)
+                atomicAdd(&audit->crossingPointNormalFallbacks, 1ull);
+            if (d.pointwiseOuterRoutedToShell)
+                atomicAdd(&audit->pointwiseOuterRoutedToShell, 1ull);
+            if (d.pointwiseInteriorOuterCell)
+                atomicAdd(&audit->pointwiseInteriorOuterCell, 1ull);
+            if (d.crossing) {
+                if (d.interiorCrossing) atomicAdd(&audit->interiorCrossings, 1ull);
+                if (d.shellGuard) atomicAdd(&audit->shellGuardCrossings, 1ull);
+                if (d.reflect) {
+                    atomicAdd(&audit->selectedReflections, 1ull);
+                    atomic_add_double_0400(&audit->reflectedMass, mAudit);
+                } else {
+                    atomicAdd(&audit->transmittedCrossings, 1ull);
+                    atomic_add_double_0400(&audit->transmittedMass, mAudit);
+                }
+                atomic_add_double_0400(
+                    &audit->outwardRelativeNormalSpeedSum,
+                    d.outwardRelativeNormalSpeed);
+            }
+        }
+
+        if (d.crossing && !d.reflect) {
+            if (evaporationTargetType >= 0) {
+                particles.type[i] = static_cast<std::uint32_t>(evaporationTargetType);
+                if (audit) atomicAdd(&audit->convertedParticles, 1ull);
+            }
+            continue;
+        }
+
+        const bool hardR1Reaction = reflectionFraction >= 1.0;
+        const bool localFrameSpecular =
+            localFrameSpecularAblation && hardR1Reaction;
+        const bool simpleSpecular =
+            (simpleSpecularAblation || localFrameSpecularAblation) &&
+            hardR1Reaction;
+        const bool donor = d.crossing && d.reflect;
+        // x10h positional recovery is SELECTIVE: an already-outer shell
+        // particle is sealed only when it is itself a reflected thermal donor.
+        // Non-donor shell particles remain mobile and are ordinary receivers.
+        const bool selectiveShellDonorSeal =
+            !simpleSpecular && hardR1Reaction && donor && d.shellRecoverable;
+        const int mesoReactionCell =
+            donor && d.bathCell >= 0 ? d.bathCell : c;
+        const int mesoReactionId =
+            hardR1Reaction && mesoReactions && mesoReactionCell >= 0
+                ? q6_x10i_meso_reservoir_id(
+                      mesoReactionCell, nx, mesoBlockCells,
+                      mesoShiftX, mesoShiftY, mesoBlocksX)
+                : -1;
+        const KineticGlobalReaction0493x10f* mesoReaction =
+            mesoReactionId >= 0 ? &mesoReactions[mesoReactionId] : nullptr;
+        const bool mesoReactionActive =
+            hardR1Reaction && mesoReaction && mesoReaction->active != 0;
+        const bool receiver =
+            !simpleSpecular && !d.crossing &&
+            (hardR1Reaction ? mesoReactionActive
+                            : (reactionActive[c] > 0.5));
+
+        // No x10c/x10e universal endpoint barrier in x10h.
+        if (!donor && !receiver) continue;
+
+        const double oldVx = particles.vx[i];
+        const double oldVy = particles.vy[i];
+        double newVx = oldVx;
+        double newVy = oldVy;
+
+        if (donor) {
+            const int b = d.bathCell;
+            if (b < 0 || b >= cells.numCells) {
+                if (audit) {
+                    atomicAdd(&audit->unsupportedReflections, 1ull);
+                    atomicAdd(&audit->unsupportedInvalidBath, 1ull);
+                }
+                continue;
+            }
+            const double mb = totalM[b];
+            if (!(mb > 0.0) || !isfinite(mb)) {
+                if (audit) {
+                    atomicAdd(&audit->unsupportedReflections, 1ull);
+                    atomicAdd(&audit->unsupportedInvalidBath, 1ull);
+                }
+                continue;
+            }
+
+            const double ubx = totalPx[b] / mb;
+            const double uby = totalPy[b] / mb;
+            const double gn = (oldVx - ubx) * d.nx + (oldVy - uby) * d.ny;
+            if (!(gn > 0.0) || !isfinite(gn)) {
+                // Classification and apply are deterministic with no particle
+                // mutation between them; this should be a pure invariant fault.
+                if (audit) {
+                    atomicAdd(&audit->unsupportedReflections, 1ull);
+                    atomicAdd(&audit->unsupportedGroupNotOutward, 1ull);
+                }
+                continue;
+            }
+
+            if (simpleSpecular) {
+                // 0493x10j/x10k SIMPLE ABLATIONS.
+                // x10j: laboratory-frame specular reflection.
+                // x10k: local-liquid-frame specular reflection
+                //       v' = v - 2[(v-u_b).n] n.
+                // Both deliberately ignore the interface counter-impulse and
+                // bypass all B8/global receiver machinery.
+                if (localFrameSpecular) {
+                    const double relVxBefore = oldVx - ubx;
+                    const double relVyBefore = oldVy - uby;
+                    const double relSpeedSqBefore =
+                        relVxBefore * relVxBefore + relVyBefore * relVyBefore;
+                    const double labSpeedSqBefore =
+                        oldVx * oldVx + oldVy * oldVy;
+
+                    // gn was already evaluated from the same bath velocity and
+                    // pointwise interface normal and is strictly > 0 here.
+                    newVx = oldVx - 2.0 * gn * d.nx;
+                    newVy = oldVy - 2.0 * gn * d.ny;
+
+                    const double relVxAfter = newVx - ubx;
+                    const double relVyAfter = newVy - uby;
+                    const double relSpeedSqAfter =
+                        relVxAfter * relVxAfter + relVyAfter * relVyAfter;
+                    const double gnAfter =
+                        relVxAfter * d.nx + relVyAfter * d.ny;
+                    const double labSpeedSqAfter =
+                        newVx * newVx + newVy * newVy;
+
+                    if (audit) {
+                        atomicAdd(&audit->localFrameSpecularReflections, 1ull);
+                        const double tolGn =
+                            1.0e-12 * fmax(1.0, fabs(gn));
+                        if (!(gnAfter < tolGn) || !isfinite(gnAfter))
+                            atomicAdd(
+                                &audit->localFrameRelativeStillOutward, 1ull);
+                        atomic_add_double_0400(
+                            &audit->localFrameRelativeSpeedSqAbsErrorSum,
+                            fabs(relSpeedSqAfter - relSpeedSqBefore));
+                        atomic_add_double_0400(
+                            &audit->localFrameRelativeSpeedSqReferenceSum,
+                            fabs(relSpeedSqBefore));
+                        const double labDelta =
+                            labSpeedSqAfter - labSpeedSqBefore;
+                        atomic_add_double_0400(
+                            &audit->localFrameLabSpeedSqChangeSum, labDelta);
+                        atomic_add_double_0400(
+                            &audit->localFrameLabSpeedSqAbsChangeSum,
+                            fabs(labDelta));
+                    }
+                } else {
+                    // 0493x10j laboratory-frame control ablation:
+                    //   v' = v - 2(v.n)n
+                    const double vnLab = oldVx * d.nx + oldVy * d.ny;
+                    const double speedSqBefore =
+                        oldVx * oldVx + oldVy * oldVy;
+                    newVx = oldVx - 2.0 * vnLab * d.nx;
+                    newVy = oldVy - 2.0 * vnLab * d.ny;
+                    const double speedSqAfter =
+                        newVx * newVx + newVy * newVy;
+
+                    if (audit) {
+                        atomicAdd(&audit->simpleSpecularReflections, 1ull);
+                        if (!(vnLab > 0.0) || !isfinite(vnLab))
+                            atomicAdd(
+                                &audit->simpleSpecularNonPositiveLabNormal,
+                                1ull);
+                        atomic_add_double_0400(
+                            &audit->simpleSpecularSpeedSqAbsErrorSum,
+                            fabs(speedSqAfter - speedSqBefore));
+                        atomic_add_double_0400(
+                            &audit->simpleSpecularSpeedSqReferenceSum,
+                            fabs(speedSqBefore));
+                    }
+                }
+
+                if (d.interiorCrossing) {
+                    // Standard remaining-time collision kinematics.  There is
+                    // deliberately NO alpha endpoint seal: an interface moving
+                    // with the local liquid may legitimately leave the final
+                    // particle position on the outer side of the old alpha=.5.
+                    const double x0p = particles.x[i];
+                    const double y0p = particles.y[i];
+                    const double s = fmin(fmax(d.crossingFraction, 0.0), 1.0);
+                    const double xInside = x0p + s * oldVx * dt;
+                    const double yInside = y0p + s * oldVy * dt;
+                    const double xTarget = xInside + (1.0 - s) * newVx * dt;
+                    const double yTarget = yInside + (1.0 - s) * newVy * dt;
+                    const double corrX = xTarget - newVx * dt - x0p;
+                    const double corrY = yTarget - newVy * dt - y0p;
+                    particles.x[i] = x0p + corrX;
+                    particles.y[i] = y0p + corrY;
+
+                    if (audit) {
+                        double aFinal = 0.0;
+                        const bool finalOuter =
+                            !q6_x9t_sample_alpha(
+                                alpha,
+                                particles.x[i] + newVx * dt,
+                                particles.y[i] + newVy * dt,
+                                nx, ny, lx, ly,
+                                periodicX, periodicY, &aFinal) ||
+                            !(aFinal >= 0.5);
+                        const double shiftAbs =
+                            sqrt(corrX * corrX + corrY * corrY);
+                        if (localFrameSpecular) {
+                            atomicAdd(
+                                &audit->localFrameInteriorCollisions, 1ull);
+                            atomic_add_double_0400(
+                                &audit->localFramePositionShiftAbsSum,
+                                shiftAbs);
+                            if (finalOuter)
+                                atomicAdd(
+                                    &audit->localFrameInteriorEndpointOuter,
+                                    1ull);
+                        } else {
+                            atomicAdd(
+                                &audit->simpleSpecularInteriorCollisions, 1ull);
+                            atomic_add_double_0400(
+                                &audit->simpleSpecularPositionShiftAbsSum,
+                                shiftAbs);
+                            if (finalOuter)
+                                atomicAdd(
+                                    &audit->simpleSpecularInteriorFinalOutside,
+                                    1ull);
+                        }
+                    }
+                } else if (d.shellGuard) {
+                    // Shell donors get only the velocity reflection; there is
+                    // no positional recovery in either simple ablation.
+                    if (audit) {
+                        double aFinal = 0.0;
+                        const bool finalOuter =
+                            !q6_x9t_sample_alpha(
+                                alpha,
+                                particles.x[i] + newVx * dt,
+                                particles.y[i] + newVy * dt,
+                                nx, ny, lx, ly,
+                                periodicX, periodicY, &aFinal) ||
+                            !(aFinal >= 0.5);
+                        if (localFrameSpecular) {
+                            atomicAdd(
+                                &audit->localFrameShellReflections, 1ull);
+                            if (finalOuter)
+                                atomicAdd(
+                                    &audit->localFrameShellEndpointOuter, 1ull);
+                        } else {
+                            atomicAdd(
+                                &audit->simpleSpecularShellReflections, 1ull);
+                            if (finalOuter)
+                                atomicAdd(
+                                    &audit->simpleSpecularShellFinalOutside,
+                                    1ull);
+                        }
+                    }
+                }
+            } else {
+                // x10d hard-r1 mode replaces fixed specular factor 2 by the
+                // exact cellwise conservative scale a*. r<1 keeps the historical
+                // specular factor so evaporation semantics are unchanged.
+                double donorScale = 2.0;
+                if (hardR1Reaction) {
+                    // x10i: exact scale of the shifted mesoscopic reservoir
+                    // containing the donor's liquid bath cell.
+                    donorScale =
+                        (mesoReaction && mesoReaction->active != 0)
+                            ? mesoReaction->a : 0.0;
+                    if (!(donorScale >= 0.0) || !isfinite(donorScale))
+                        donorScale = 0.0;
+                }
+                newVx = oldVx - donorScale * gn * d.nx;
+                newVy = oldVy - donorScale * gn * d.ny;
+
+                // Historical x10a geometry seal, retained only outside x10j.
+                if (d.interiorCrossing) {
+                    const double x0p = particles.x[i];
+                    const double y0p = particles.y[i];
+                    const double s = fmin(fmax(d.crossingFraction, 0.0), 1.0);
+                    const double xInside = x0p + s * oldVx * dt;
+                    const double yInside = y0p + s * oldVy * dt;
+                    const double xCandidate = xInside + (1.0 - s) * newVx * dt;
+                    const double yCandidate = yInside + (1.0 - s) * newVy * dt;
+
+                    double targetX = xCandidate;
+                    double targetY = yCandidate;
+                    double aCandidate = 1.0;
+                    const bool candidateSampled = q6_x9t_sample_alpha(
+                        alpha, xCandidate, yCandidate,
+                        nx, ny, lx, ly, periodicX, periodicY, &aCandidate);
+                    const bool candidateOutside =
+                        !candidateSampled || !(aCandidate >= 0.5);
+
+                    if (audit && candidateSampled && aCandidate < 0.5)
+                        atomicAdd(&audit->appliedInteriorPredictedOutside, 1ull);
+
+                    if (candidateOutside) {
+                        bool sealFallback = !candidateSampled;
+                        double aInside = 0.0;
+                        if (!q6_x9t_sample_alpha(alpha, xInside, yInside,
+                                                 nx, ny, lx, ly,
+                                                 periodicX, periodicY,
+                                                 &aInside) || !(aInside >= 0.5)) {
+                            targetX = x0p;
+                            targetY = y0p;
+                            sealFallback = true;
+                        } else if (candidateSampled) {
+                            double lo = 0.0;
+                            double hi = 1.0;
+                            for (int it = 0; it < 4; ++it) {
+                                const double mid = 0.5 * (lo + hi);
+                                const double xm =
+                                    xInside + mid * (xCandidate - xInside);
+                                const double ym =
+                                    yInside + mid * (yCandidate - yInside);
+                                double am = 0.5;
+                                if (!q6_x9t_sample_alpha(
+                                        alpha, xm, ym,
+                                        nx, ny, lx, ly,
+                                        periodicX, periodicY, &am) ||
+                                    !isfinite(am)) {
+                                    sealFallback = true;
+                                    break;
+                                }
+                                if (am >= 0.5) lo = mid;
+                                else hi = mid;
+                            }
+                            if (sealFallback) {
+                                targetX = xInside;
+                                targetY = yInside;
+                            } else {
+                                targetX =
+                                    xInside + lo * (xCandidate - xInside);
+                                targetY =
+                                    yInside + lo * (yCandidate - yInside);
+                            }
+                        } else {
+                            targetX = xInside;
+                            targetY = yInside;
+                        }
+
+                        double aTarget = 0.0;
+                        if (!q6_x9t_sample_alpha(
+                                alpha, targetX, targetY,
+                                nx, ny, lx, ly,
+                                periodicX, periodicY, &aTarget) ||
+                            !(aTarget >= 0.5)) {
+                            targetX = x0p;
+                            targetY = y0p;
+                            sealFallback = true;
+                        }
+
+                        if (audit) {
+                            atomicAdd(&audit->endpointSealCorrections, 1ull);
+                            if (sealFallback)
+                                atomicAdd(
+                                    &audit->endpointSealSampleFallbacks, 1ull);
+                        }
+                    }
+
+                    const double corrX = targetX - newVx * dt - x0p;
+                    const double corrY = targetY - newVy * dt - y0p;
+                    particles.x[i] = x0p + corrX;
+                    particles.y[i] = y0p + corrY;
+                    if (audit) {
+                        const double corrAbs = sqrt(corrX * corrX + corrY * corrY);
+                        atomic_add_double_0400(
+                            &audit->positionCorrectionAbsSum, corrAbs);
+                        if (candidateOutside)
+                            atomic_add_double_0400(
+                                &audit->endpointSealCorrectionAbsSum, corrAbs);
+
+                        double afinal = 0.0;
+                        if (!q6_x9t_sample_alpha(
+                                alpha,
+                                particles.x[i] + newVx * dt,
+                                particles.y[i] + newVy * dt,
+                                nx, ny, lx, ly,
+                                periodicX, periodicY, &afinal) ||
+                            !(afinal >= 0.5))
+                            atomicAdd(
+                                &audit->appliedInteriorFinalOutside, 1ull);
+                    }
+                }
+            }
+
+            if (audit) {
+                atomicAdd(&audit->appliedReflections, 1ull);
+                atomicAdd(&audit->individualDonorReflections, 1ull);
+                const double postGn =
+                    (newVx - ubx) * d.nx + (newVy - uby) * d.ny;
+                const double tol = 1.0e-12 * fmax(1.0, fabs(gn));
+                if (postGn > tol)
+                    atomicAdd(&audit->appliedStillOutwardRelative, 1ull);
+            }
+        } else if (receiver) {
+            const double mr = recvM[c];
+            if (!(mr > 0.0) || !isfinite(mr)) continue;
+            if (hardR1Reaction) {
+                // x10i: receiver correction is local to the same shifted
+                // mesoscopic reservoir, preserving exact P/E per reservoir.
+                const double dux = mesoReaction ? mesoReaction->dux : 0.0;
+                const double duy = mesoReaction ? mesoReaction->duy : 0.0;
+                newVx = oldVx + dux;
+                newVy = oldVy + duy;
+            } else {
+                // Historical r<1 reaction retained for evaporation studies.
+                const double urx = recvPx[c] / mr;
+                const double ury = recvPy[c] / mr;
+                const double lambda = reactionLambda[c];
+                newVx = urx + reactionDeltaUx[c] + lambda * (oldVx - urx);
+                newVy = ury + reactionDeltaUy[c] + lambda * (oldVy - ury);
+            }
+            if (audit) atomicAdd(&audit->receiverCorrectedParticles, 1ull);
+        }
+
+        // 0493x10h selective shell DONOR seal.
+        //
+        // This is no longer a general hard-retention mechanism. It runs only
+        // for an already-outer shell particle that has independently satisfied
+        // the relative thermal donor gate and has been selected for reflection.
+        // Non-donor shell particles are never position-corrected here.
+        if (selectiveShellDonorSeal) {
+            if (audit) atomicAdd(&audit->shellHardRetentionCandidates, 1ull);
+
+            const double x0p = particles.x[i];
+            const double y0p = particles.y[i];
+            const double xCandidate = x0p + newVx * dt;
+            const double yCandidate = y0p + newVy * dt;
+            double aCandidate = 0.0;
+            const bool candidateSampled = q6_x9t_sample_alpha(
+                alpha, xCandidate, yCandidate,
+                nx, ny, lx, ly, periodicX, periodicY, &aCandidate);
+
+            if (candidateSampled && aCandidate >= 0.5) {
+                if (audit) atomicAdd(&audit->shellHardRetentionAlreadyInside, 1ull);
+            } else {
+                bool fallback = !candidateSampled;
+                double targetX = xCandidate;
+                double targetY = yCandidate;
+                const int b = d.bathCell;
+
+                if (b >= 0 && b < cells.numCells) {
+                    const int bi = b % nx;
+                    const int bj = b / nx;
+                    const double dx = lx / static_cast<double>(nx);
+                    const double dy = ly / static_cast<double>(ny);
+                    double anchorX = (static_cast<double>(bi) + 0.5) * dx;
+                    double anchorY = (static_cast<double>(bj) + 0.5) * dy;
+
+                    // Use the nearest periodic image so the recovery segment is
+                    // local even when an interface crosses a periodic seam.
+                    if (periodicX) {
+                        double dd = anchorX - xCandidate;
+                        if (dd >  0.5 * lx) anchorX -= lx;
+                        if (dd < -0.5 * lx) anchorX += lx;
+                    }
+                    if (periodicY) {
+                        double dd = anchorY - yCandidate;
+                        if (dd >  0.5 * ly) anchorY -= ly;
+                        if (dd < -0.5 * ly) anchorY += ly;
+                    }
+
+                    double aAnchor = 0.0;
+                    const bool anchorInside = q6_x9t_sample_alpha(
+                        alpha, anchorX, anchorY,
+                        nx, ny, lx, ly, periodicX, periodicY, &aAnchor) &&
+                        aAnchor >= 0.5;
+
+                    if (candidateSampled && aCandidate < 0.5 && anchorInside) {
+                        // lo=outside, hi=inside.  Four iterations match x10a
+                        // and are enough because the anchor is one direct bulk
+                        // cell away.  Mirror the candidate by approximately the
+                        // same normal distance across the located crossing;
+                        // clamp at the bath centre if that mirror would overshoot.
+                        double lo = 0.0;
+                        double hi = 1.0;
+                        for (int it = 0; it < 4; ++it) {
+                            const double mid = 0.5 * (lo + hi);
+                            const double xm = xCandidate + mid * (anchorX - xCandidate);
+                            const double ym = yCandidate + mid * (anchorY - yCandidate);
+                            double am = 0.5;
+                            if (!q6_x9t_sample_alpha(alpha, xm, ym,
+                                                     nx, ny, lx, ly,
+                                                     periodicX, periodicY, &am) ||
+                                !isfinite(am)) {
+                                fallback = true;
+                                break;
+                            }
+                            if (am >= 0.5) hi = mid;
+                            else lo = mid;
+                        }
+
+                        if (!fallback) {
+                            const double tMirror = fmin(1.0, 2.0 * hi);
+                            targetX = xCandidate + tMirror * (anchorX - xCandidate);
+                            targetY = yCandidate + tMirror * (anchorY - yCandidate);
+                            double aTarget = 0.0;
+                            if (!q6_x9t_sample_alpha(alpha, targetX, targetY,
+                                                     nx, ny, lx, ly,
+                                                     periodicX, periodicY, &aTarget) ||
+                                !(aTarget >= 0.5)) {
+                                // The alpha profile need not be monotone along
+                                // a curved-cell diagonal.  The bulk centre is a
+                                // guaranteed local fallback by construction.
+                                targetX = anchorX;
+                                targetY = anchorY;
+                                fallback = true;
+                            }
+                        } else {
+                            targetX = anchorX;
+                            targetY = anchorY;
+                        }
+                    } else if (anchorInside) {
+                        targetX = anchorX;
+                        targetY = anchorY;
+                        fallback = true;
+                    } else {
+                        // Should be unreachable for shellRecoverable; leave the
+                        // state untouched and make the contract failure visible.
+                        fallback = true;
+                    }
+                } else {
+                    fallback = true;
+                }
+
+                double aFinal = 0.0;
+                const bool finalInside = q6_x9t_sample_alpha(
+                    alpha, targetX, targetY,
+                    nx, ny, lx, ly, periodicX, periodicY, &aFinal) &&
+                    aFinal >= 0.5;
+
+                if (finalInside) {
+                    // Store the pre-stream location that makes the ordinary
+                    // downstream streaming land exactly at the recovered target.
+                    const double corrX = targetX - xCandidate;
+                    const double corrY = targetY - yCandidate;
+                    particles.x[i] = x0p + corrX;
+                    particles.y[i] = y0p + corrY;
+                    if (audit) {
+                        atomicAdd(&audit->shellHardRetentionCorrections, 1ull);
+                        if (fallback)
+                            atomicAdd(&audit->shellHardRetentionFallbacks, 1ull);
+                        atomic_add_double_0400(&audit->shellHardRetentionCorrectionAbsSum,
+                                              sqrt(corrX * corrX + corrY * corrY));
+                    }
+                } else if (audit && fallback) {
+                    atomicAdd(&audit->shellHardRetentionFallbacks, 1ull);
+                }
+            }
+
+            if (audit) {
+                double aVerify = 0.0;
+                if (!q6_x9t_sample_alpha(alpha,
+                        particles.x[i] + newVx * dt,
+                        particles.y[i] + newVy * dt,
+                        nx, ny, lx, ly, periodicX, periodicY, &aVerify) ||
+                    !(aVerify >= 0.5))
+                    atomicAdd(&audit->shellHardRetentionFinalOutside, 1ull);
+            }
+        }
+
+        // 0493x10h: no universal alpha(x_final)>=0.5 barrier.
+        //
+        // The current alpha=0.5 is allowed to move with the liquid. Only
+        // actual relative-outward reflected donors receive positional sealing
+        // (x10a interior donor seal or the selective shell donor seal above).
+        // x10g exact global P/E reaction remains unchanged.
+
+        particles.vx[i] = newVx;
+        particles.vy[i] = newVy;
+
+        if (audit) {
+            const double m = particles.mass ? particles.mass[i] : 1.0;
+            atomic_add_double_0400(&audit->deltaPx, m * (newVx - oldVx));
+            atomic_add_double_0400(&audit->deltaPy, m * (newVy - oldVy));
+            atomic_add_double_0400(&audit->deltaKineticEnergy,
+                0.5 * m * ((newVx * newVx + newVy * newVy) -
+                           (oldVx * oldVx + oldVy * oldVy)));
+        }
     }
 }
 
@@ -9964,6 +14916,1096 @@ double reduce_host_max_0400(double* devicePartials, int blocks) {
 }
 
 
+
+void append_kinetic_interface_audit_0493x9t(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const KineticInterfaceAccumulator0493x9t& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_kinetic_reflection_0493x9t.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x9t failed to open kinetic-interface audit CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,reflectionFraction,evaporationTargetType,crossings,"
+               "selectedReflections,transmittedCrossings,appliedReflections,"
+               "unsupportedReflections,convertedParticles,reflectedMass,"
+               "transmittedMass,outwardRelativeNormalSpeedMean,deltaPx,deltaPy,"
+               "deltaKineticEnergy,contract\n";
+    }
+    const double meanOut = a.crossings > 0ull
+        ? a.outwardRelativeNormalSpeedSum / static_cast<double>(a.crossings)
+        : 0.0;
+    out << std::setprecision(17)
+        << step << ',' << time << ','
+        << params.phaseInterfaceKineticReflectionFraction << ','
+        << params.phaseInterfaceEvaporationTargetType << ','
+        << a.crossings << ',' << a.selectedReflections << ','
+        << a.transmittedCrossings << ',' << a.appliedReflections << ','
+        << a.unsupportedReflections << ',' << a.convertedParticles << ','
+        << a.reflectedMass << ',' << a.transmittedMass << ',' << meanOut << ','
+        << a.deltaPx << ',' << a.deltaPy << ',' << a.deltaKineticEnergy << ','
+        << "physical-alpha-x6c;relative-to-local-A-mean;normal-only;"
+           "same-cell-two-group-elastic-recoil;deterministic-hash;"
+           "transmitted-type-conversion-does-not-change-mass-or-velocity" << '\n';
+}
+
+
+bool apply_kinetic_interface_reflection_0493x9t(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    ResidentWorkspace0400& ws,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    std::uint64_t nParticles,
+    int threads,
+    int cellBlocks,
+    int particleBlocks,
+    int periodicX,
+    int periodicY,
+    std::uint32_t phaseAType,
+    const double* phaseAlpha0493x6c,
+    bool geometryValid0493x6c) {
+    const double r = params.phaseInterfaceKineticReflectionFraction;
+    if (!(r > 0.0)) return false; // exact source/runtime no-op
+    if (!geometryValid0493x6c || phaseAlpha0493x6c == nullptr) {
+        throw std::runtime_error(
+            "0493x9t kinetic reflection requested without valid resident x6c alpha geometry");
+    }
+
+    ws.ensure_kinetic_interface_0493x9t(grid.numCells);
+    const std::size_t bytes = static_cast<std::size_t>(grid.numCells) * sizeof(double);
+    double* fields[] = {
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+        ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data()
+    };
+    for (double* field : fields) {
+        check_cuda_0400(cudaMemset(field, 0, bytes), "0493x9t cell moment zero");
+    }
+
+    const bool auditThisStep = step <= 1 ||
+        step % std::max(1, params.summaryEvery) == 0;
+    KineticInterfaceAccumulator0493x9t* auditDev = nullptr;
+    if (auditThisStep) {
+        check_cuda_0400(cudaMemset(
+            ws.kineticAccum0493x9t.data(), 0,
+            sizeof(KineticInterfaceAccumulator0493x9t)),
+            "0493x9t audit zero");
+        auditDev = ws.kineticAccum0493x9t.data();
+    }
+
+    q6_x9t_deposit_total_a_moments<<<particleBlocks, threads>>>(
+        particles, cells, nParticles, phaseAType,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(),
+        ws.kineticTotalPy0493x9t.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9t total-A deposit launch");
+
+    q6_x9t_classify_crossings<<<particleBlocks, threads>>>(
+        particles, cells, nParticles, phaseAlpha0493x6c,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(),
+        ws.kineticTotalPy0493x9t.data(), ws.kineticRefM0493x9t.data(),
+        ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(),
+        ws.kineticTxPy0493x9t.data(), phaseAType, grid.Nx, grid.Ny,
+        params.Lx, params.Ly, params.dt, periodicX, periodicY, r,
+        static_cast<unsigned long long>(step),
+        static_cast<unsigned long long>(params.rngSeed), auditDev);
+    check_cuda_0400(cudaGetLastError(), "0493x9t crossing classification launch");
+
+    q6_x9t_apply_conservative_reflection<<<particleBlocks, threads>>>(
+        particles, cells, nParticles, phaseAlpha0493x6c,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(),
+        ws.kineticTotalPy0493x9t.data(), ws.kineticRefM0493x9t.data(),
+        ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(),
+        ws.kineticTxPy0493x9t.data(), phaseAType,
+        params.phaseInterfaceEvaporationTargetType, grid.Nx, grid.Ny,
+        params.Lx, params.Ly, params.dt, periodicX, periodicY, r,
+        static_cast<unsigned long long>(step),
+        static_cast<unsigned long long>(params.rngSeed), auditDev);
+    check_cuda_0400(cudaGetLastError(), "0493x9t conservative reflection launch");
+
+    // Keep the resident all-particle cell means coherent with the modified
+    // velocities before returning to the pre-stream caller.
+    check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                    "0493x9t cell refresh counter zero");
+    q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
+    check_cuda_0400(cudaGetLastError(), "0493x9t cell moments reset launch");
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+        particles, cells, nParticles);
+    check_cuda_0400(cudaGetLastError(), "0493x9t cell moments redeposit launch");
+    q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9t cell moments finalize launch");
+
+    if (auditThisStep) {
+        KineticInterfaceAccumulator0493x9t audit{};
+        check_cuda_0400(cudaMemcpy(
+            &audit, ws.kineticAccum0493x9t.data(), sizeof(audit), cudaMemcpyDeviceToHost),
+            "0493x9t audit download");
+        append_kinetic_interface_audit_0493x9t(params, step, time, audit);
+    }
+    return true;
+}
+
+
+void append_kinetic_interface_audit_0493x9u(
+    const SimulationParams& params, int step, double time,
+    const KineticInterfaceAccumulator0493x9u& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_kinetic_reflection_0493x9u.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) throw std::runtime_error("0493x9u failed to open kinetic-interface audit CSV: " + path.string());
+    if (header) {
+        out << "step,time,reflectionFraction,evaporationTargetType,phaseAParticlesInOuterSupport,"
+               "crossings,legacyHalfIsoCrossings,supportExitCrossings,selectedReflections,"
+               "transmittedCrossings,appliedReflections,unsupportedReflections,bathSearchFailures,"
+               "bathDepth0,bathDepth1,bathDepth2,normalFallbacks,convertedParticles,reflectedMass,"
+               "transmittedMass,outwardRelativeNormalSpeedMean,deltaPx,deltaPy,deltaKineticEnergy,contract\n";
+    }
+    const double meanOut = a.crossings > 0ull ? a.outwardRelativeNormalSpeedSum / static_cast<double>(a.crossings) : 0.0;
+    out << std::setprecision(17) << step << ',' << time << ','
+        << params.phaseInterfaceKineticReflectionFraction << ',' << params.phaseInterfaceEvaporationTargetType << ','
+        << a.phaseAParticlesInOuterSupport << ',' << a.crossings << ',' << a.legacyHalfIsoCrossings << ','
+        << a.supportExitCrossings << ',' << a.selectedReflections << ',' << a.transmittedCrossings << ','
+        << a.appliedReflections << ',' << a.unsupportedReflections << ',' << a.bathSearchFailures << ','
+        << a.bathDepth0 << ',' << a.bathDepth1 << ',' << a.bathDepth2 << ',' << a.normalFallbacks << ','
+        << a.convertedParticles << ',' << a.reflectedMass << ',' << a.transmittedMass << ',' << meanOut << ','
+        << a.deltaPx << ',' << a.deltaPy << ',' << a.deltaKineticEnergy << ','
+        << "x9t-halfiso-preserved;x9w-strict-bulk-bath-alphaGE0.5;"
+           "outer-target-occupancy-ignored;relative-to-inward-A-bath;max-bath-depth=2;"
+           "nearest-depth-largest-mass;mass-weighted-shared-normal;two-group-elastic-recoil;"
+           "same-three-particle-passes-as-x9t;deterministic-hash" << '\n';
+}
+
+
+void append_kinetic_interface_diagnostic_0493x9v(
+    const SimulationParams& params, int step, double time,
+    const KineticInterfaceAccumulator0493x9u& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_kinetic_escape_diagnostic_0493x9v.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) throw std::runtime_error("0493x9v failed to open kinetic escape diagnostic CSV: " + path.string());
+    if (header) {
+        out << "step,time,reflectionFraction,outerSupportParticles,outerSupportCellParticlesLT3,"
+               "crossings,supportExitCrossings,bathSearchFailures,bathSearchFailureWouldExitLocal,"
+               "detectorPredictedOuterTarget,missedOccupiedOuterTarget,missedSparseOuterTargetLT3,"
+               "absoluteSupportExitCandidates,missedRelativeButAbsoluteExit,"
+               "bathAlphaGEHalf,bathAlphaLTHalf,supportExitBathAlphaGEHalf,supportExitBathAlphaLTHalf,"
+               "selectedReflections,appliedReflections,unsupportedReflections,"
+               "unsupportedInvalidBath,unsupportedInvalidDonorGroup,unsupportedNoReceiverMass,"
+               "unsupportedNormalCancellation,unsupportedGroupNotOutward,"
+               "appliedStillOutwardRelative,appliedStillRelativeExit,appliedStillAbsoluteExit,"
+               "postRelativeNormalSpeedMean,postOutwardRelativeNormalSpeedMean,deltaPx,deltaPy,deltaKineticEnergy,contract\n";
+    }
+    const double postMean = a.appliedReflections > 0ull
+        ? a.postRelativeNormalSpeedSum / static_cast<double>(a.appliedReflections) : 0.0;
+    const double postOutMean = a.appliedStillOutwardRelative > 0ull
+        ? a.postOutwardRelativeNormalSpeedSum / static_cast<double>(a.appliedStillOutwardRelative) : 0.0;
+    out << std::setprecision(17) << step << ',' << time << ','
+        << params.phaseInterfaceKineticReflectionFraction << ','
+        << a.phaseAParticlesInOuterSupport << ',' << a.outerSupportCellParticlesLT3 << ','
+        << a.crossings << ',' << a.supportExitCrossings << ',' << a.bathSearchFailures << ','
+        << a.bathSearchFailureWouldExitLocal << ',' << a.detectorPredictedOuterTarget << ','
+        << a.missedOccupiedOuterTarget << ',' << a.missedSparseOuterTargetLT3 << ','
+        << a.absoluteSupportExitCandidates << ',' << a.missedRelativeButAbsoluteExit << ','
+        << a.bathAlphaGEHalf << ',' << a.bathAlphaLTHalf << ','
+        << a.supportExitBathAlphaGEHalf << ',' << a.supportExitBathAlphaLTHalf << ','
+        << a.selectedReflections << ',' << a.appliedReflections << ',' << a.unsupportedReflections << ','
+        << a.unsupportedInvalidBath << ',' << a.unsupportedInvalidDonorGroup << ','
+        << a.unsupportedNoReceiverMass << ',' << a.unsupportedNormalCancellation << ','
+        << a.unsupportedGroupNotOutward << ',' << a.appliedStillOutwardRelative << ','
+        << a.appliedStillRelativeExit << ',' << a.appliedStillAbsoluteExit << ','
+        << postMean << ',' << postOutMean << ',' << a.deltaPx << ',' << a.deltaPy << ','
+        << a.deltaKineticEnergy << ','
+        << "diagnostic-only;x9w-physics=strict-bulk-bath-alphaGE0.5+occupied-halo-not-support;"
+           "no-new-particle-pass;extra-work-only-on-audit-steps;"
+           "tests=occupied-halo-target,bath-alpha,unsupported-reason,post-reflection-relative-and-absolute-exit"
+        << '\n';
+}
+
+bool apply_kinetic_interface_reflection_0493x9u(
+    CudaParticleDeviceView particles, CudaCellWorkspaceDeviceView cells, ResidentWorkspace0400& ws,
+    const SimulationParams& params, const CellGrid& grid, int step, double time,
+    std::uint64_t nParticles, int threads, int cellBlocks, int particleBlocks,
+    int periodicX, int periodicY, std::uint32_t phaseAType,
+    const double* phaseAlpha0493x6c, bool geometryValid0493x6c) {
+    const double r = params.phaseInterfaceKineticReflectionFraction;
+    if (!(r > 0.0)) return false;
+    if (!geometryValid0493x6c || phaseAlpha0493x6c == nullptr)
+        throw std::runtime_error("0493x9u kinetic reflection requested without valid resident x6c alpha geometry");
+
+    ws.ensure_kinetic_interface_0493x9u(grid.numCells);
+    const std::size_t bytes = static_cast<std::size_t>(grid.numCells) * sizeof(double);
+    double* fields[] = {
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+        ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+        ws.kineticRefNx0493x9u.data(), ws.kineticRefNy0493x9u.data()
+    };
+    for (double* field : fields) check_cuda_0400(cudaMemset(field, 0, bytes), "0493x9u cell field zero");
+
+    const bool auditThisStep = step <= 1 || step % std::max(1, params.summaryEvery) == 0;
+    KineticInterfaceAccumulator0493x9u* auditDev = nullptr;
+    if (auditThisStep) {
+        check_cuda_0400(cudaMemset(ws.kineticAccum0493x9u.data(), 0, sizeof(KineticInterfaceAccumulator0493x9u)),
+                        "0493x9u audit zero");
+        auditDev = ws.kineticAccum0493x9u.data();
+    }
+
+    q6_x9t_deposit_total_a_moments<<<particleBlocks, threads>>>(particles, cells, nParticles, phaseAType,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9u total-A deposit launch");
+
+    q6_x9u_classify_support_exits<<<particleBlocks, threads>>>(particles, cells, nParticles, phaseAlpha0493x6c,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+        ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+        ws.kineticRefNx0493x9u.data(), ws.kineticRefNy0493x9u.data(), phaseAType,
+        grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt, periodicX, periodicY, r,
+        static_cast<unsigned long long>(step), static_cast<unsigned long long>(params.rngSeed), auditDev);
+    check_cuda_0400(cudaGetLastError(), "0493x9u support-exit classification launch");
+
+    q6_x9u_apply_conservative_reflection<<<particleBlocks, threads>>>(particles, cells, nParticles, phaseAlpha0493x6c,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+        ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+        ws.kineticRefNx0493x9u.data(), ws.kineticRefNy0493x9u.data(), phaseAType,
+        params.phaseInterfaceEvaporationTargetType, grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt,
+        periodicX, periodicY, r, static_cast<unsigned long long>(step),
+        static_cast<unsigned long long>(params.rngSeed), auditDev);
+    check_cuda_0400(cudaGetLastError(), "0493x9u conservative reflection launch");
+
+    check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)), "0493x9u cell refresh counter zero");
+    q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
+    check_cuda_0400(cudaGetLastError(), "0493x9u cell moments reset launch");
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    check_cuda_0400(cudaGetLastError(), "0493x9u cell moments redeposit launch");
+    q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9u cell moments finalize launch");
+
+    if (auditThisStep) {
+        KineticInterfaceAccumulator0493x9u audit{};
+        check_cuda_0400(cudaMemcpy(&audit, ws.kineticAccum0493x9u.data(), sizeof(audit), cudaMemcpyDeviceToHost),
+                        "0493x9u audit download");
+        append_kinetic_interface_audit_0493x9u(params, step, time, audit);
+        append_kinetic_interface_diagnostic_0493x9v(params, step, time, audit);
+    }
+    return true;
+}
+
+
+void append_kinetic_crossing_audit_0493x9x(
+    const SimulationParams& params,
+    int step,
+    double time,
+    const KineticCrossingAccumulator0493x9x& a) {
+    if (params.outputDir.empty()) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_phase_kinetic_crossing_0493x9z.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) throw std::runtime_error("0493x9x failed to open kinetic crossing audit CSV: " + path.string());
+
+    if (header) {
+        out << "step,time,reflectionFraction,evaporationTargetType,"
+               "phaseAOuterCellParticles,shellParticles,deepOuterParticles,"
+               "interiorCrossings,shellGuardCrossings,startBelowHalf,"
+               "pointwiseOuterRoutedToShell,pointwiseInteriorOuterCell,"
+               "bisectionInteriorCrossings,bisectionFallbacks,"
+               "selectedReflections,transmittedCrossings,appliedReflections,"
+               "unsupportedReflections,unsupportedInvalidBath,"
+               "unsupportedInvalidDonorGroup,unsupportedNoReceiverMass,"
+               "unsupportedNormalCancellation,unsupportedGroupNotOutward,"
+               "appliedStillOutwardRelative,appliedInteriorPredictedOutside,"
+               "crossingPointNormalFallbacks,endpointSealCorrections,"
+               "endpointSealSampleFallbacks,appliedInteriorFinalOutside,"
+               "shellRecoverableParticles,shellHardRetentionCandidates,"
+               "shellHardRetentionAlreadyInside,shellHardRetentionCorrections,"
+               "shellHardRetentionFallbacks,shellHardRetentionFinalOutside,"
+               "hardFinalEndpointChecks,hardFinalEndpointOutsideBefore,"
+               "hardFinalReceiverOutsideBefore,hardFinalNeutralOutsideBefore,"
+               "hardFinalEndpointCorrections,hardFinalMirrorAttempts,"
+               "hardFinalMirrorAccepted,hardFinalMirrorNormalFallbacks,"
+               "hardFinalMirrorHardFallbacks,hardFinalLocalAnchorCorrections,"
+               "hardFinalLocalAnchorMisses,hardFinalEndpointOutsideAfter,"
+               "convertedParticles,individualDonorReflections,receiverCorrectedParticles,"
+               "reactionActiveCells,reactionFeasibleCells,reactionNoReceiverCells,"
+               "reactionEnergyFloorCells,reactionThermalDegenerateCells,"
+               "crossingFractionMean,"
+               "outwardRelativeNormalSpeedMean,reflectedMass,transmittedMass,"
+               "deltaPx,deltaPy,deltaKineticEnergy,positionCorrectionAbsMean,"
+               "endpointSealCorrectionAbsMean,shellHardRetentionCorrectionAbsMean,"
+               "hardFinalEndpointCorrectionAbsMean,"
+               "reactionEnergyResidualAbs,reactionDeltaUMagnitudeMean,"
+               "reactionLambdaDeviationAbsMean,"
+               "analyticConservativeReactionCells,analyticPositiveScaleCells,"
+               "analyticInwardCells,analyticNonInwardPositiveCells,"
+               "analyticTrivialCells,analyticInvalidCells,"
+               "analyticDonorScaleMean,analyticDonorScaleAbsFromSpecularMean,"
+               "globalReactionActive,globalReactionTrivial,globalReactionInvalid,"
+               "globalReactionDonorCells,globalReactionReceiverCells,"
+               "globalReactionA,globalReactionH,globalReactionSNorm,"
+               "globalReactionCellSNormSum,globalReactionCancellationRatio,"
+               "globalReactionReceiverMass,globalReactionScale,"
+               "globalReactionDeltaUMagnitude,globalReactionFormulaResidual,"
+               "mesoReactionBlockCells,mesoReactionShiftX,mesoReactionShiftY,"
+               "mesoReactionReservoirSlots,mesoReactionActiveReservoirs,"
+               "mesoReactionTrivialReservoirs,mesoReactionInvalidReservoirs,"
+               "mesoReactionNoReceiverReservoirs,mesoReactionDonorCells,"
+               "mesoReactionReceiverCells,mesoReactionReceiverMassSum,"
+               "mesoReactionScaleMean,mesoReactionScaleAbsFromSpecularMean,"
+               "mesoReactionDeltaUMagnitudeMean,mesoReactionCancellationMean,"
+               "mesoReactionFormulaResidualAbsSum,"
+               "simpleSpecularReflections,simpleSpecularInteriorCollisions,"
+               "simpleSpecularShellReflections,simpleSpecularNonPositiveLabNormal,"
+               "simpleSpecularInteriorFinalOutside,simpleSpecularShellFinalOutside,"
+               "simpleSpecularSpeedSqAbsErrorSum,simpleSpecularSpeedSqReferenceSum,"
+               "simpleSpecularPositionShiftAbsSum,"
+               "localFrameSpecularReflections,localFrameInteriorCollisions,"
+               "localFrameShellReflections,localFrameRelativeStillOutward,"
+               "localFrameInteriorEndpointOuter,localFrameShellEndpointOuter,"
+               "localFrameRelativeSpeedSqAbsErrorSum,"
+               "localFrameRelativeSpeedSqReferenceSum,"
+               "localFrameLabSpeedSqChangeSum,localFrameLabSpeedSqAbsChangeSum,"
+               "localFramePositionShiftAbsSum,"
+               "preWallInterfaceCells,preWallVelocityCells,"
+               "preWallPositiveVnCells,preWallNegativeVnCells,"
+               "preWallVnSum,preWallVnSqSum,preWallAbsVnSum,"
+               "preWallVelocityMassSum,preWallMassVnSum,"
+               "preWallNetNormalFluxProxy,preWallInterfaceLengthProxy,"
+               "preWallAlphaArea,preWallLowerTipScore,preWallLowerTipY,"
+               "preWallLowerTipCells,preWallLowerTipPositiveVnCells,"
+               "preWallLowerTipNegativeVnCells,preWallLowerTipVnSum,"
+               "preWallLowerTipVnSqSum,preWallLowerTipAbsVnSum,"
+               "preWallLowerTipMassSum,preWallLowerTipMassVnSum,"
+               "movingWallInterfaceCellsBuilt,movingWallInterfaceVelocityFallbacks,"
+               "movingWallInvalidInterfaceCells,movingWallParticlesWithCandidate,"
+               "movingWallOldStationaryCrossingCandidates,"
+               "movingWallOldStationaryCrossingReleased,movingWallCollisions,"
+               "movingWallAdvanceCollisions,movingWallRecedeCollisions,"
+               "movingWallStationaryCollisions,movingWallMultipleCollisionCandidates,"
+               "movingWallRelativeStillOutward,movingWallFinalRelativeOutside,"
+               "movingWallMeanCollisionTimeFraction,movingWallMeanWallVn,"
+               "movingWallRmsWallVn,movingWallMeanAbsWallVn,"
+               "movingWallRelativeSpeedSqAbsErrorSum,"
+               "movingWallRelativeSpeedSqReferenceSum,"
+               "movingWallImpulseX,movingWallImpulseY,movingWallImpulseAbsSum,"
+               "movingWallPositionShiftAbsSum,"
+               "continuousWallDualCellsVisited,continuousWallInterfaceDualCells,"
+               "continuousWallSegmentsBuilt,continuousWallAmbiguousDualCells,"
+               "continuousWallInvalidDualCells,continuousWallParticlesWithCandidate,"
+               "continuousWallOldStationaryCrossingCandidates,"
+               "continuousWallOldStationaryCrossingReleased,"
+               "continuousWallNoNearbySegment,continuousWallCandidateNoHit,"
+               "continuousWallCollisions,continuousWallSecondCollisions,"
+               "continuousWallThirdCollisions,continuousWallCollisionLimitReached,"
+               "continuousWallMultipleCollisionCandidates,"
+               "continuousWallRelativeStillOutward,"
+               "continuousWallMeanCollisionTimeFraction,continuousWallMeanWallVn,"
+               "continuousWallRmsWallVn,continuousWallMeanAbsWallVn,"
+               "continuousWallRelativeSpeedSqAbsErrorSum,"
+               "continuousWallRelativeSpeedSqReferenceSum,"
+               "continuousWallImpulseX,continuousWallImpulseY,"
+               "continuousWallImpulseAbsSum,continuousWallPositionShiftAbsSum,"
+               "q6ThermalHydroCapturedCells,q6ThermalInterfaceEndpointSamples,"
+               "q6ThermalHydroFallbacks,q6ThermalMeanHydroVn,"
+               "q6ThermalRmsHydroVn,q6ThermalMeanAbsHydroVn,"
+               "q6ThermalMeanThickness,"
+               "x10pInitialOutside,x10pInitialOverlapResolved,"
+               "x10pInitialOverlapOutwardReflected,"
+               "x10pInitialOverlapInwardReleased,"
+               "x10pInitialOutsideTooDeep,"
+               "x10pInitialOverlapPenetrationSum,"
+               "x10pInitialOverlapMaxPenetration,"
+               "x10qWideSearchTriggered,x10qWideSearchFoundSegment,"
+               "x10qOrphanNoSegmentAfterWideSearch,"
+               "x10qDeepOverlapResolved,x10qOverlapResolveFailure,"
+               "x10qResolvedNearestDistanceMax,"
+               "contract\n";
+    }
+
+    const unsigned long long crossings = a.interiorCrossings + a.shellGuardCrossings;
+    const double meanS = crossings > 0ull ? a.crossingFractionSum / static_cast<double>(crossings) : 0.0;
+    const double meanOut = crossings > 0ull ? a.outwardRelativeNormalSpeedSum / static_cast<double>(crossings) : 0.0;
+    const double meanCorr = a.appliedReflections > 0ull ?
+        a.positionCorrectionAbsSum / static_cast<double>(a.appliedReflections) : 0.0;
+    const double meanSealCorr = a.endpointSealCorrections > 0ull ?
+        a.endpointSealCorrectionAbsSum / static_cast<double>(a.endpointSealCorrections) : 0.0;
+    const double meanShellRetentionCorr = a.shellHardRetentionCorrections > 0ull ?
+        a.shellHardRetentionCorrectionAbsSum / static_cast<double>(a.shellHardRetentionCorrections) : 0.0;
+    const double meanHardFinalCorr = a.hardFinalEndpointCorrections > 0ull ?
+        a.hardFinalEndpointCorrectionAbsSum /
+            static_cast<double>(a.hardFinalEndpointCorrections) : 0.0;
+    const double meanReactionDU = a.reactionActiveCells > 0ull ?
+        a.reactionDeltaUMagnitudeSum / static_cast<double>(a.reactionActiveCells) : 0.0;
+    const double meanLambdaDev = a.reactionActiveCells > 0ull ?
+        a.reactionLambdaDeviationAbsSum / static_cast<double>(a.reactionActiveCells) : 0.0;
+    const double meanAnalyticScale = a.analyticPositiveScaleCells > 0ull ?
+        a.analyticDonorScaleSum / static_cast<double>(a.analyticPositiveScaleCells) : 0.0;
+    const double meanAnalyticScaleAbsFrom2 = a.analyticPositiveScaleCells > 0ull ?
+        a.analyticDonorScaleAbsFromSpecularSum /
+            static_cast<double>(a.analyticPositiveScaleCells) : 0.0;
+    const double meanMesoScale =
+        a.mesoReactionActiveReservoirs > 0ull ?
+        a.mesoReactionScaleSum /
+            static_cast<double>(a.mesoReactionActiveReservoirs) : 0.0;
+    const double meanMesoScaleAbsFrom2 =
+        a.mesoReactionActiveReservoirs > 0ull ?
+        a.mesoReactionScaleAbsFromSpecularSum /
+            static_cast<double>(a.mesoReactionActiveReservoirs) : 0.0;
+    const double meanMesoDU =
+        a.mesoReactionActiveReservoirs > 0ull ?
+        a.mesoReactionDeltaUMagnitudeSum /
+            static_cast<double>(a.mesoReactionActiveReservoirs) : 0.0;
+    const double meanMesoCancellation =
+        a.mesoReactionActiveReservoirs > 0ull ?
+        a.mesoReactionCancellationSum /
+            static_cast<double>(a.mesoReactionActiveReservoirs) : 0.0;
+    const double movingWallMeanTime = a.movingWallCollisions > 0ull ?
+        a.movingWallCollisionTimeFractionSum /
+            static_cast<double>(a.movingWallCollisions) : 0.0;
+    const double movingWallMeanVn = a.movingWallCollisions > 0ull ?
+        a.movingWallWallVnSum /
+            static_cast<double>(a.movingWallCollisions) : 0.0;
+    const double movingWallRmsVn = a.movingWallCollisions > 0ull ?
+        sqrt(fmax(0.0, a.movingWallWallVnSqSum /
+            static_cast<double>(a.movingWallCollisions))) : 0.0;
+    const double movingWallMeanAbsVn = a.movingWallCollisions > 0ull ?
+        a.movingWallWallVnAbsSum /
+            static_cast<double>(a.movingWallCollisions) : 0.0;
+    const double continuousWallMeanTime = a.continuousWallCollisions > 0ull ?
+        a.continuousWallCollisionTimeFractionSum /
+            static_cast<double>(a.continuousWallCollisions) : 0.0;
+    const double continuousWallMeanVn = a.continuousWallCollisions > 0ull ?
+        a.continuousWallWallVnSum /
+            static_cast<double>(a.continuousWallCollisions) : 0.0;
+    const double continuousWallRmsVn = a.continuousWallCollisions > 0ull ?
+        sqrt(fmax(0.0, a.continuousWallWallVnSqSum /
+            static_cast<double>(a.continuousWallCollisions))) : 0.0;
+    const double continuousWallMeanAbsVn = a.continuousWallCollisions > 0ull ?
+        a.continuousWallWallVnAbsSum /
+            static_cast<double>(a.continuousWallCollisions) : 0.0;
+    const double q6ThermalMeanHydroVn = a.q6ThermalInterfaceEndpointSamples > 0ull ?
+        a.q6ThermalHydroVnSum /
+            static_cast<double>(a.q6ThermalInterfaceEndpointSamples) : 0.0;
+    const double q6ThermalRmsHydroVn = a.q6ThermalInterfaceEndpointSamples > 0ull ?
+        sqrt(fmax(0.0, a.q6ThermalHydroVnSqSum /
+            static_cast<double>(a.q6ThermalInterfaceEndpointSamples))) : 0.0;
+    const double q6ThermalMeanAbsHydroVn = a.q6ThermalInterfaceEndpointSamples > 0ull ?
+        a.q6ThermalHydroAbsVnSum /
+            static_cast<double>(a.q6ThermalInterfaceEndpointSamples) : 0.0;
+    const double q6ThermalMeanThickness = a.q6ThermalInterfaceEndpointSamples > 0ull ?
+        a.q6ThermalThicknessSum /
+            static_cast<double>(a.q6ThermalInterfaceEndpointSamples) : 0.0;
+
+    out << std::setprecision(17)
+        << step << ',' << time << ','
+        << params.phaseInterfaceKineticReflectionFraction << ','
+        << params.phaseInterfaceEvaporationTargetType << ','
+        << a.phaseAOuterCellParticles << ',' << a.shellParticles << ',' << a.deepOuterParticles << ','
+        << a.interiorCrossings << ',' << a.shellGuardCrossings << ',' << a.startBelowHalf << ','
+        << a.pointwiseOuterRoutedToShell << ',' << a.pointwiseInteriorOuterCell << ','
+        << a.bisectionInteriorCrossings << ',' << a.bisectionFallbacks << ','
+        << a.selectedReflections << ',' << a.transmittedCrossings << ',' << a.appliedReflections << ','
+        << a.unsupportedReflections << ',' << a.unsupportedInvalidBath << ','
+        << a.unsupportedInvalidDonorGroup << ',' << a.unsupportedNoReceiverMass << ','
+        << a.unsupportedNormalCancellation << ',' << a.unsupportedGroupNotOutward << ','
+        << a.appliedStillOutwardRelative << ',' << a.appliedInteriorPredictedOutside << ','
+        << a.crossingPointNormalFallbacks << ',' << a.endpointSealCorrections << ','
+        << a.endpointSealSampleFallbacks << ',' << a.appliedInteriorFinalOutside << ','
+        << a.shellRecoverableParticles << ',' << a.shellHardRetentionCandidates << ','
+        << a.shellHardRetentionAlreadyInside << ',' << a.shellHardRetentionCorrections << ','
+        << a.shellHardRetentionFallbacks << ',' << a.shellHardRetentionFinalOutside << ','
+        << a.hardFinalEndpointChecks << ',' << a.hardFinalEndpointOutsideBefore << ','
+        << a.hardFinalReceiverOutsideBefore << ',' << a.hardFinalNeutralOutsideBefore << ','
+        << a.hardFinalEndpointCorrections << ',' << a.hardFinalMirrorAttempts << ','
+        << a.hardFinalMirrorAccepted << ',' << a.hardFinalMirrorNormalFallbacks << ','
+        << a.hardFinalMirrorHardFallbacks << ',' << a.hardFinalLocalAnchorCorrections << ','
+        << a.hardFinalLocalAnchorMisses << ',' << a.hardFinalEndpointOutsideAfter << ','
+        << a.convertedParticles << ','
+        << a.individualDonorReflections << ',' << a.receiverCorrectedParticles << ','
+        << a.reactionActiveCells << ',' << a.reactionFeasibleCells << ','
+        << a.reactionNoReceiverCells << ',' << a.reactionEnergyFloorCells << ','
+        << a.reactionThermalDegenerateCells << ','
+        << meanS << ',' << meanOut << ','
+        << a.reflectedMass << ',' << a.transmittedMass << ','
+        << a.deltaPx << ',' << a.deltaPy << ',' << a.deltaKineticEnergy << ',' << meanCorr << ','
+        << meanSealCorr << ',' << meanShellRetentionCorr << ',' << meanHardFinalCorr << ','
+        << a.reactionEnergyResidualAbsSum << ',' << meanReactionDU << ',' << meanLambdaDev << ','
+        << a.analyticConservativeReactionCells << ',' << a.analyticPositiveScaleCells << ','
+        << a.analyticInwardCells << ',' << a.analyticNonInwardPositiveCells << ','
+        << a.analyticTrivialCells << ',' << a.analyticInvalidCells << ','
+        << meanAnalyticScale << ',' << meanAnalyticScaleAbsFrom2 << ','
+        << a.globalReactionActive << ',' << a.globalReactionTrivial << ','
+        << a.globalReactionInvalid << ',' << a.globalReactionDonorCells << ','
+        << a.globalReactionReceiverCells << ',' << a.globalReactionA << ','
+        << a.globalReactionH << ',' << a.globalReactionSNorm << ','
+        << a.globalReactionCellSNormSum << ','
+        << a.globalReactionCancellationRatio << ','
+        << a.globalReactionReceiverMass << ',' << a.globalReactionScale << ','
+        << a.globalReactionDeltaUMagnitude << ','
+        << a.globalReactionFormulaResidual << ','
+        << a.mesoReactionBlockCells << ',' << a.mesoReactionShiftX << ','
+        << a.mesoReactionShiftY << ',' << a.mesoReactionReservoirSlots << ','
+        << a.mesoReactionActiveReservoirs << ','
+        << a.mesoReactionTrivialReservoirs << ','
+        << a.mesoReactionInvalidReservoirs << ','
+        << a.mesoReactionNoReceiverReservoirs << ','
+        << a.mesoReactionDonorCells << ',' << a.mesoReactionReceiverCells << ','
+        << a.mesoReactionReceiverMassSum << ',' << meanMesoScale << ','
+        << meanMesoScaleAbsFrom2 << ',' << meanMesoDU << ','
+        << meanMesoCancellation << ','
+        << a.mesoReactionFormulaResidualAbsSum << ','
+        << a.simpleSpecularReflections << ','
+        << a.simpleSpecularInteriorCollisions << ','
+        << a.simpleSpecularShellReflections << ','
+        << a.simpleSpecularNonPositiveLabNormal << ','
+        << a.simpleSpecularInteriorFinalOutside << ','
+        << a.simpleSpecularShellFinalOutside << ','
+        << a.simpleSpecularSpeedSqAbsErrorSum << ','
+        << a.simpleSpecularSpeedSqReferenceSum << ','
+        << a.simpleSpecularPositionShiftAbsSum << ','
+        << a.localFrameSpecularReflections << ','
+        << a.localFrameInteriorCollisions << ','
+        << a.localFrameShellReflections << ','
+        << a.localFrameRelativeStillOutward << ','
+        << a.localFrameInteriorEndpointOuter << ','
+        << a.localFrameShellEndpointOuter << ','
+        << a.localFrameRelativeSpeedSqAbsErrorSum << ','
+        << a.localFrameRelativeSpeedSqReferenceSum << ','
+        << a.localFrameLabSpeedSqChangeSum << ','
+        << a.localFrameLabSpeedSqAbsChangeSum << ','
+        << a.localFramePositionShiftAbsSum << ','
+        << a.preWallInterfaceCells << ',' << a.preWallVelocityCells << ','
+        << a.preWallPositiveVnCells << ',' << a.preWallNegativeVnCells << ','
+        << a.preWallVnSum << ',' << a.preWallVnSqSum << ','
+        << a.preWallAbsVnSum << ',' << a.preWallVelocityMassSum << ','
+        << a.preWallMassVnSum << ',' << a.preWallNetNormalFluxProxy << ','
+        << a.preWallInterfaceLengthProxy << ',' << a.preWallAlphaArea << ','
+        << a.preWallLowerTipScore << ',' << a.preWallLowerTipY << ','
+        << a.preWallLowerTipCells << ','
+        << a.preWallLowerTipPositiveVnCells << ','
+        << a.preWallLowerTipNegativeVnCells << ','
+        << a.preWallLowerTipVnSum << ',' << a.preWallLowerTipVnSqSum << ','
+        << a.preWallLowerTipAbsVnSum << ',' << a.preWallLowerTipMassSum << ','
+        << a.preWallLowerTipMassVnSum << ','
+        << a.movingWallInterfaceCellsBuilt << ','
+        << a.movingWallInterfaceVelocityFallbacks << ','
+        << a.movingWallInvalidInterfaceCells << ','
+        << a.movingWallParticlesWithCandidate << ','
+        << a.movingWallOldStationaryCrossingCandidates << ','
+        << a.movingWallOldStationaryCrossingReleased << ','
+        << a.movingWallCollisions << ','
+        << a.movingWallAdvanceCollisions << ','
+        << a.movingWallRecedeCollisions << ','
+        << a.movingWallStationaryCollisions << ','
+        << a.movingWallMultipleCollisionCandidates << ','
+        << a.movingWallRelativeStillOutward << ','
+        << a.movingWallFinalRelativeOutside << ','
+        << movingWallMeanTime << ',' << movingWallMeanVn << ','
+        << movingWallRmsVn << ',' << movingWallMeanAbsVn << ','
+        << a.movingWallRelativeSpeedSqAbsErrorSum << ','
+        << a.movingWallRelativeSpeedSqReferenceSum << ','
+        << a.movingWallImpulseX << ',' << a.movingWallImpulseY << ','
+        << a.movingWallImpulseAbsSum << ','
+        << a.movingWallPositionShiftAbsSum << ','
+        << a.continuousWallDualCellsVisited << ','
+        << a.continuousWallInterfaceDualCells << ','
+        << a.continuousWallSegmentsBuilt << ','
+        << a.continuousWallAmbiguousDualCells << ','
+        << a.continuousWallInvalidDualCells << ','
+        << a.continuousWallParticlesWithCandidate << ','
+        << a.continuousWallOldStationaryCrossingCandidates << ','
+        << a.continuousWallOldStationaryCrossingReleased << ','
+        << a.continuousWallNoNearbySegment << ','
+        << a.continuousWallCandidateNoHit << ','
+        << a.continuousWallCollisions << ','
+        << a.continuousWallSecondCollisions << ','
+        << a.continuousWallThirdCollisions << ','
+        << a.continuousWallCollisionLimitReached << ','
+        << a.continuousWallMultipleCollisionCandidates << ','
+        << a.continuousWallRelativeStillOutward << ','
+        << continuousWallMeanTime << ',' << continuousWallMeanVn << ','
+        << continuousWallRmsVn << ',' << continuousWallMeanAbsVn << ','
+        << a.continuousWallRelativeSpeedSqAbsErrorSum << ','
+        << a.continuousWallRelativeSpeedSqReferenceSum << ','
+        << a.continuousWallImpulseX << ',' << a.continuousWallImpulseY << ','
+        << a.continuousWallImpulseAbsSum << ','
+        << a.continuousWallPositionShiftAbsSum << ','
+        << a.q6ThermalHydroCapturedCells << ','
+        << a.q6ThermalInterfaceEndpointSamples << ','
+        << a.q6ThermalHydroFallbacks << ','
+        << q6ThermalMeanHydroVn << ',' << q6ThermalRmsHydroVn << ','
+        << q6ThermalMeanAbsHydroVn << ',' << q6ThermalMeanThickness << ','
+        << a.x10pInitialOutside << ','
+        << a.x10pInitialOverlapResolved << ','
+        << a.x10pInitialOverlapOutwardReflected << ','
+        << a.x10pInitialOverlapInwardReleased << ','
+        << a.x10pInitialOutsideTooDeep << ','
+        << a.x10pInitialOverlapPenetrationSum << ','
+        << a.x10pInitialOverlapMaxPenetration << ','
+        << a.x10qWideSearchTriggered << ','
+        << a.x10qWideSearchFoundSegment << ','
+        << a.x10qOrphanNoSegmentAfterWideSearch << ','
+        << a.x10qDeepOverlapResolved << ','
+        << a.x10qOverlapResolveFailure << ','
+        << a.x10qResolvedNearestDistanceMax << ','
+        << "actual-endpoint-first;pointwise-alpha-start-side;relative-outward-gate;"
+           "alpha0.5-four-bisection-last-inside;one-cell-shell-guard;no-halo-search;"
+           "individual-donor-crossing-point-normal-reflection;"
+           "r1-analytic-collective-exact-momentum-energy-reaction;"
+           "r1-no-receiver-thermal-lambda-no-energy-floor;rlt1-legacy-reaction-retained;"
+           "interior-reflected-endpoint-alpha-ge-half-seal;"
+           "r1-shell-position-seal-reflected-donors-only;"
+           "r1-no-universal-alpha-endpoint-barrier;"
+           "r1-mobile-interface-relative-thermal-donor-only-retention;"
+           "r1-global-single-component-reservoir-ablation;"
+           "0493x10g-hierarchical-global-reduction-performance-only;"
+           "0493x10h-mobile-interface-relative-thermal-retention;"
+           "0493x10i-shifted-mesoscopic-reservoirs;"
+           "0493x10j-simple-lab-specular-ablation;"
+           "0493x10k-local-frame-specular-ablation;"
+           "0493x10l-prewall-interface-diagnostics;"
+           "0493x10m-moving-interface-wall;"
+           "0493x10m-fix1-local-alpha-helper-order-independent;"
+           "0493x10n-q6-continuous-moving-interface;"
+           "0493x10o-q6-hydrodynamic-thermal-interface;"
+           "0493x10p-initial-overlap-resolution;"
+           "0493x10q-wide-overlap-recovery;"
+           "x10q-normal-swept-search-remains-3x3;"
+           "x10q-initial-overlap-fallback-ring-7x7-only-when-no-3x3-segment;"
+           "x10q-known-deep-overlap-always-resolved;"
+           "x10p-nearest-finite-moving-segment-before-s0-sign;"
+           "x10p-outward-overlap-specular-inward-overlap-depenetrate-only;"
+           "x10p-no-extra-particle-pass;"
+           "x10o-q6-projected-face-plus-cell-hydrodynamic-velocity;"
+           "x10o-normal-only-interface-motion;"
+           "x10o-thermal-envelope-dt-sqrt-kbt-over-m;"
+           "x10n-shared-q6-theta-edge-crossings;"
+           "x10n-marching-squares-continuous-dual-grid-polyline;"
+           "x10n-shared-endpoint-post-q6-b1-liquid-velocity;"
+           "x10n-moving-segment-event-collision-up-to-three-impacts;"
+           "x10n-free-surface-impulse-diagnostic-only;"
+           "x10m-alpha0.5-one-step-local-moving-boundary;"
+           "x10m-wall-vn-from-post-q6-b1-liquid-cell-velocity;"
+           "x10m-event-driven-moving-plane-specular-collision;"
+           "x10m-boundary-impulse-recorded-not-fed-back-for-free-surface;"
+           "x10m-local-plane-primitive-prepares-mobile-solid-collision-path;"
+           "x10l-passive-after-q6-b1-before-kinetic-wall;"
+           "x10k-v-minus-2-vminusub-dot-n-n;"
+           "x10k-relative-speed-norm-conserving-no-interface-counterreaction;"
+           "x10k-runtime-overrides-x10j-and-r1-mesoscopic-reaction-when-enabled;"
+           "x10j-runtime-overrides-r1-mesoscopic-reaction-when-enabled;"
+           "x10j-lab-speed-norm-conserving-no-interface-counterreaction;"
+           "x10j-interior-collision-time-kinematics-no-endpoint-seal;"
+           "x10j-no-shell-position-recovery;"
+           "mesoscopic-block-size-runtime-4-or-5;"
+           "deterministic-step-shifted-reaction-partition;"
+           "multi-component-not-production-no-ccl;"
+           "no-merge-no-resampling;"
+           "same-three-x9-particle-passes-plus-one-cell-kernel;deterministic-hash" << '\n';
+}
+
+bool apply_kinetic_interface_reflection_0493x9x(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    ResidentWorkspace0400& ws,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    std::uint64_t nParticles,
+    int threads,
+    int cellBlocks,
+    int particleBlocks,
+    int periodicX,
+    int periodicY,
+    std::uint32_t phaseAType,
+    const double* phaseAlpha0493x6c,
+    bool geometryValid0493x6c) {
+    const double r = params.phaseInterfaceKineticReflectionFraction;
+    if (!(r > 0.0)) return false;
+    const bool q6ThermalInterfaceWall0493x10o =
+        r >= 1.0 &&
+        env_int_0400("MPCD_X10O_Q6_THERMAL_INTERFACE_WALL", 0) != 0;
+    const bool initialOverlapResolution0493x10p =
+        q6ThermalInterfaceWall0493x10o &&
+        env_int_0400("MPCD_X10P_INITIAL_OVERLAP_RESOLUTION", 1) != 0;
+    const bool continuousInterfaceWall0493x10n =
+        !q6ThermalInterfaceWall0493x10o && r >= 1.0 &&
+        env_int_0400("MPCD_X10N_Q6_CONTINUOUS_INTERFACE_WALL", 0) != 0;
+    const bool movingInterfaceWall0493x10m =
+        !q6ThermalInterfaceWall0493x10o && !continuousInterfaceWall0493x10n && r >= 1.0 &&
+        env_int_0400("MPCD_X10M_MOVING_INTERFACE_WALL", 0) != 0;
+    const bool localFrameSpecularAblation =
+        !q6ThermalInterfaceWall0493x10o && !continuousInterfaceWall0493x10n &&
+        !movingInterfaceWall0493x10m && r >= 1.0 &&
+        env_int_0400("MPCD_X10K_LOCAL_FRAME_SPECULAR_ABLATION", 0) != 0;
+    const bool simpleSpecularAblation =
+        !q6ThermalInterfaceWall0493x10o && !continuousInterfaceWall0493x10n &&
+        !movingInterfaceWall0493x10m && !localFrameSpecularAblation && r >= 1.0 &&
+        env_int_0400("MPCD_X10J_SIMPLE_SPECULAR_ABLATION", 0) != 0;
+    const bool anySimpleSpecularAblation =
+        q6ThermalInterfaceWall0493x10o || continuousInterfaceWall0493x10n ||
+        movingInterfaceWall0493x10m || simpleSpecularAblation ||
+        localFrameSpecularAblation;
+    const bool preWallInterfaceDiagnostics0493x10l =
+        env_int_0400("MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS", 0) != 0;
+    if (!geometryValid0493x6c || phaseAlpha0493x6c == nullptr)
+        throw std::runtime_error("0493x9x kinetic reflection requested without valid resident x6c alpha geometry");
+
+    double thermalThickness0493x10o = 0.0;
+    if (q6ThermalInterfaceWall0493x10o) {
+        if (!ws.kineticQ6HydroFieldValid0493x10o ||
+            ws.kineticQ6HydroFieldStep0493x10o != step ||
+            ws.kineticQ6HydroFieldType0493x10o != phaseAType) {
+            throw std::runtime_error(
+                "0493x10o requested without same-step projected Q6 liquid hydrodynamic field");
+        }
+        const double particleMass0493x10o = fmax(
+            1.0e-30, env_double_0400("MPCD_X10O_THERMAL_PARTICLE_MASS", 1.0));
+        const double thermalSigmas0493x10o = fmax(
+            0.0, env_double_0400("MPCD_X10O_THERMAL_SIGMAS", 3.0));
+        const double thermalMaxCells0493x10o = fmax(
+            0.0, env_double_0400("MPCD_X10O_THERMAL_MAX_CELLS", 0.75));
+        const double thermalKBT0493x10o =
+            params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+        const double h0493x10o = fmin(
+            params.Lx / static_cast<double>(grid.Nx),
+            params.Ly / static_cast<double>(grid.Ny));
+        const double ballistic0493x10o = thermalSigmas0493x10o * params.dt *
+            sqrt(fmax(0.0, thermalKBT0493x10o) / particleMass0493x10o);
+        thermalThickness0493x10o = fmin(
+            thermalMaxCells0493x10o * h0493x10o, ballistic0493x10o);
+    }
+
+    const int mesoBlockCells =
+        std::max(2, std::min(32,
+            env_int_0400("MPCD_X10I_REACTION_BLOCK_CELLS", 5)));
+    const std::uint64_t mesoHashX = q6_x10i_mix64_host(
+        static_cast<std::uint64_t>(step) ^
+        (static_cast<std::uint64_t>(params.rngSeed) + 0x10a10493ull));
+    const std::uint64_t mesoHashY = q6_x10i_mix64_host(
+        mesoHashX ^ 0xd1b54a32d192ed03ull);
+    const int mesoShiftX =
+        static_cast<int>(mesoHashX % static_cast<std::uint64_t>(mesoBlockCells));
+    const int mesoShiftY =
+        static_cast<int>(mesoHashY % static_cast<std::uint64_t>(mesoBlockCells));
+    const int mesoBlocksX =
+        2 + (std::max(1, grid.Nx) - 1) / mesoBlockCells;
+    const int mesoBlocksY =
+        2 + (std::max(1, grid.Ny) - 1) / mesoBlockCells;
+    const int mesoReservoirs = anySimpleSpecularAblation
+        ? 1 : mesoBlocksX * mesoBlocksY;
+
+    ws.ensure_kinetic_interface_0493x9x(
+        grid.numCells, cellBlocks, mesoReservoirs);
+    const std::size_t bytes = static_cast<std::size_t>(grid.numCells) * sizeof(double);
+    double* fields[] = {
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+        ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+        ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+        ws.kineticRefNx0493x9u.data(), ws.kineticRefNy0493x9u.data()
+    };
+    for (double* field : fields)
+        check_cuda_0400(cudaMemset(field, 0, bytes), "0493x9x cell field zero");
+
+    const bool auditThisStep = step <= 1 || step % std::max(1, params.summaryEvery) == 0;
+    KineticCrossingAccumulator0493x9x* auditDev = nullptr;
+    if (auditThisStep) {
+        check_cuda_0400(cudaMemset(ws.kineticAccum0493x9x.data(), 0,
+            sizeof(KineticCrossingAccumulator0493x9x)), "0493x9x audit zero");
+        auditDev = ws.kineticAccum0493x9x.data();
+    }
+
+    q6_x9t_deposit_total_a_moments<<<particleBlocks, threads>>>(
+        particles, cells, nParticles, phaseAType,
+        ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9x total-A deposit launch");
+
+    if (q6ThermalInterfaceWall0493x10o || continuousInterfaceWall0493x10n) {
+        const std::size_t cellCount =
+            static_cast<std::size_t>(std::max(1, grid.numCells));
+        check_cuda_0400(
+            cudaMemset(ws.kineticContinuousSegCount0493x10n.data(), 0,
+                       cellCount * sizeof(unsigned char)),
+            "0493x10n segment-count zero");
+        check_cuda_0400(
+            cudaMemset(ws.kineticMovingWallImpulseX0493x10m.data(), 0,
+                       cellCount * sizeof(double)),
+            "0493x10n interface impulseX zero");
+        check_cuda_0400(
+            cudaMemset(ws.kineticMovingWallImpulseY0493x10m.data(), 0,
+                       cellCount * sizeof(double)),
+            "0493x10n interface impulseY zero");
+        q6_x10n_build_continuous_interface<<<cellBlocks, threads>>>(
+            grid.numCells, grid.Nx, grid.Ny,
+            params.Lx, params.Ly, periodicX, periodicY,
+            phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(),
+            ws.kineticTotalPx0493x9t.data(),
+            ws.kineticTotalPy0493x9t.data(),
+            q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroValid0493x10o.data() : nullptr,
+            q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroCellUx0493x10o.data() : nullptr,
+            q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroCellUy0493x10o.data() : nullptr,
+            q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroFaceUxEast0493x10o.data() : nullptr,
+            q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroFaceUyNorth0493x10o.data() : nullptr,
+            thermalThickness0493x10o,
+            q6ThermalInterfaceWall0493x10o ? 1 : 0,
+            ws.kineticContinuousSegCount0493x10n.data(),
+            ws.kineticContinuousSegAx0493x10n.data(),
+            ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),
+            ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),
+            ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),
+            ws.kineticContinuousSegUby0493x10n.data(),
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(), "0493x10n continuous-interface build launch");
+    } else if (movingInterfaceWall0493x10m) {
+        const std::size_t cellCount =
+            static_cast<std::size_t>(std::max(1, grid.numCells));
+        check_cuda_0400(
+            cudaMemset(ws.kineticMovingWallActive0493x10m.data(), 0,
+                       cellCount * sizeof(unsigned char)),
+            "0493x10m moving-wall active zero");
+        check_cuda_0400(
+            cudaMemset(ws.kineticMovingWallImpulseX0493x10m.data(), 0,
+                       cellCount * sizeof(double)),
+            "0493x10m moving-wall impulseX zero");
+        check_cuda_0400(
+            cudaMemset(ws.kineticMovingWallImpulseY0493x10m.data(), 0,
+                       cellCount * sizeof(double)),
+            "0493x10m moving-wall impulseY zero");
+
+        q6_x10m_build_moving_interface_cells<<<cellBlocks, threads>>>(
+            grid.numCells,
+            grid.Nx, grid.Ny,
+            params.Lx, params.Ly,
+            periodicX, periodicY,
+            phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(),
+            ws.kineticTotalPx0493x9t.data(),
+            ws.kineticTotalPy0493x9t.data(),
+            ws.kineticMovingWallActive0493x10m.data(),
+            ws.kineticMovingWallNx0493x10m.data(),
+            ws.kineticMovingWallNy0493x10m.data(),
+            ws.kineticMovingWallQx0493x10m.data(),
+            ws.kineticMovingWallQy0493x10m.data(),
+            ws.kineticMovingWallVn0493x10m.data(),
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(), "0493x10m moving-interface build launch");
+    }
+
+    if (preWallInterfaceDiagnostics0493x10l && auditDev) {
+        q6_x10l_accumulate_prewall_interface_cells<<<cellBlocks, threads>>>(
+            grid.numCells,
+            grid.Nx,
+            grid.Ny,
+            params.Lx,
+            params.Ly,
+            periodicX,
+            periodicY,
+            phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(),
+            ws.kineticTotalPx0493x9t.data(),
+            ws.kineticTotalPy0493x9t.data(),
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(),
+            "0493x10l pre-wall interface-cell diagnostic launch");
+
+        q6_x10l_accumulate_prewall_lower_tip<<<cellBlocks, threads>>>(
+            grid.numCells,
+            grid.Nx,
+            grid.Ny,
+            params.Lx,
+            params.Ly,
+            periodicX,
+            periodicY,
+            phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(),
+            ws.kineticTotalPx0493x9t.data(),
+            ws.kineticTotalPy0493x9t.data(),
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(),
+            "0493x10l pre-wall lower-tip diagnostic launch");
+    }
+
+    if (!anySimpleSpecularAblation) {
+        q6_x9z_classify_individual_reflections<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+            ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+            ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+            ws.kineticRefNx0493x9u.data(), ws.kineticRefNy0493x9u.data(), phaseAType,
+            grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt, periodicX, periodicY, r,
+            static_cast<unsigned long long>(step), static_cast<unsigned long long>(params.rngSeed), auditDev);
+        check_cuda_0400(
+            cudaGetLastError(), "0493x9x crossing classification launch");
+    }
+
+    if (!anySimpleSpecularAblation) {
+        if (r >= 1.0) {
+            check_cuda_0400(
+                cudaMemset(
+                    ws.kineticGlobalReaction0493x10f.data(), 0,
+                    static_cast<std::size_t>(mesoReservoirs) *
+                        sizeof(KineticGlobalReaction0493x10f)),
+                "0493x10i mesoscopic reaction array zero");
+
+            q6_x10i_reduce_meso_reactions<<<cellBlocks, threads>>>(
+                grid.numCells,
+                grid.Nx,
+                mesoBlockCells,
+                mesoShiftX,
+                mesoShiftY,
+                mesoBlocksX,
+                ws.kineticRefM0493x9t.data(),
+                ws.kineticRefPx0493x9t.data(),
+                ws.kineticRefPy0493x9t.data(),
+                ws.kineticRefNx0493x9u.data(),
+                ws.kineticTxM0493x9t.data(),
+                ws.kineticTxPx0493x9t.data(),
+                ws.kineticTxPy0493x9t.data(),
+                ws.kineticGlobalReaction0493x10f.data());
+            check_cuda_0400(
+                cudaGetLastError(), "0493x10i mesoscopic reaction reduce launch");
+
+            const int mesoFinalizeBlocks =
+                (mesoReservoirs + threads - 1) / threads;
+            q6_x10i_finalize_meso_reactions<<<mesoFinalizeBlocks, threads>>>(
+                mesoReservoirs,
+                mesoBlockCells,
+                mesoShiftX,
+                mesoShiftY,
+                ws.kineticGlobalReaction0493x10f.data(),
+                auditDev);
+            check_cuda_0400(
+                cudaGetLastError(), "0493x10i mesoscopic reaction finalize launch");
+        } else {
+            q6_x9z_prepare_receiver_reaction<<<cellBlocks, threads>>>(
+                grid.numCells,
+                ws.kineticRefM0493x9t.data(),
+                ws.kineticRefPx0493x9t.data(),
+                ws.kineticRefPy0493x9t.data(),
+                ws.kineticTxM0493x9t.data(),
+                ws.kineticTxPx0493x9t.data(),
+                ws.kineticTxPy0493x9t.data(),
+                ws.kineticRefNx0493x9u.data(),
+                ws.kineticRefNy0493x9u.data(),
+                ws.kineticTotalM0493x9t.data(),
+                ws.kineticTotalPx0493x9t.data(),
+                ws.kineticTotalPy0493x9t.data(),
+                r,
+                auditDev);
+            check_cuda_0400(
+                cudaGetLastError(), "0493x9z receiver reaction prepare launch");
+        }
+
+    }
+
+    if (q6ThermalInterfaceWall0493x10o || continuousInterfaceWall0493x10n) {
+        q6_x10n_apply_continuous_moving_interface<<<particleBlocks, threads>>>(
+            particles, cells, nParticles,
+            phaseAlpha0493x6c,
+            ws.kineticContinuousSegCount0493x10n.data(),
+            ws.kineticContinuousSegAx0493x10n.data(),
+            ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),
+            ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),
+            ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),
+            ws.kineticContinuousSegUby0493x10n.data(),
+            ws.kineticMovingWallImpulseX0493x10m.data(),
+            ws.kineticMovingWallImpulseY0493x10m.data(),
+            phaseAType,
+            grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt,
+            periodicX, periodicY,
+            initialOverlapResolution0493x10p ? 1 : 0,
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(), "0493x10n continuous-interface collision launch");
+    } else if (movingInterfaceWall0493x10m) {
+        q6_x10m_apply_moving_interface_wall<<<particleBlocks, threads>>>(
+            particles, cells, nParticles,
+            phaseAlpha0493x6c,
+            ws.kineticMovingWallActive0493x10m.data(),
+            ws.kineticMovingWallNx0493x10m.data(),
+            ws.kineticMovingWallNy0493x10m.data(),
+            ws.kineticMovingWallQx0493x10m.data(),
+            ws.kineticMovingWallQy0493x10m.data(),
+            ws.kineticMovingWallVn0493x10m.data(),
+            ws.kineticMovingWallImpulseX0493x10m.data(),
+            ws.kineticMovingWallImpulseY0493x10m.data(),
+            phaseAType,
+            grid.Nx, grid.Ny,
+            params.Lx, params.Ly, params.dt,
+            periodicX, periodicY,
+            auditDev);
+        check_cuda_0400(
+            cudaGetLastError(), "0493x10m moving-interface collision launch");
+    } else {
+        q6_x9z_apply_individual_reflections<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, phaseAlpha0493x6c,
+            ws.kineticTotalM0493x9t.data(), ws.kineticTotalPx0493x9t.data(), ws.kineticTotalPy0493x9t.data(),
+            ws.kineticRefM0493x9t.data(), ws.kineticRefPx0493x9t.data(), ws.kineticRefPy0493x9t.data(),
+            ws.kineticTxM0493x9t.data(), ws.kineticTxPx0493x9t.data(), ws.kineticTxPy0493x9t.data(),
+            ws.kineticRefNy0493x9u.data(),
+            ws.kineticGlobalReaction0493x10f.data(),
+            mesoBlockCells,
+            mesoShiftX,
+            mesoShiftY,
+            mesoBlocksX,
+            simpleSpecularAblation ? 1 : 0,
+            localFrameSpecularAblation ? 1 : 0,
+            phaseAType,
+            params.phaseInterfaceEvaporationTargetType,
+            grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt, periodicX, periodicY, r,
+            static_cast<unsigned long long>(step), static_cast<unsigned long long>(params.rngSeed), auditDev);
+        check_cuda_0400(cudaGetLastError(), "0493x9x crossing reflection launch");
+    }
+
+    check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                    "0493x9x cell refresh counter zero");
+    q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
+    check_cuda_0400(cudaGetLastError(), "0493x9x cell moments reset launch");
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    check_cuda_0400(cudaGetLastError(), "0493x9x cell moments redeposit launch");
+    q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
+    check_cuda_0400(cudaGetLastError(), "0493x9x cell moments finalize launch");
+
+    if (auditThisStep) {
+        KineticCrossingAccumulator0493x9x audit{};
+        check_cuda_0400(cudaMemcpy(&audit, ws.kineticAccum0493x9x.data(), sizeof(audit), cudaMemcpyDeviceToHost),
+                        "0493x9x audit download");
+        append_kinetic_crossing_audit_0493x9x(params, step, time, audit);
+    }
+    return true;
+}
+
 bool apply_independent_masked_species_q6_0493w5(
     CudaParticleDeviceView particles,
     CudaCellWorkspaceDeviceView cells,
@@ -10070,6 +16112,9 @@ bool apply_independent_masked_species_q6_0493w5(
             : params.q6DensityRelaxationBeta;
     const bool densityRelaxationRequested0493x7c =
         densityRelaxationBeta0493x7d > 0.0;
+    const bool q6ThermalInterfaceWallRequested0493x10o =
+        freeSurfaceMode0493x5a && params.phaseInterfaceKineticReflectionFraction >= 1.0 &&
+        env_int_0400("MPCD_X10O_Q6_THERMAL_INTERFACE_WALL", 0) != 0;
     if (faceToParticleRt0Requested0493x6hB1 &&
         (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b)) {
         diag.reason =
@@ -10364,6 +16409,27 @@ bool apply_independent_masked_species_q6_0493w5(
     }
     const bool faceToParticleRt00493x6hB1 =
         faceToParticleRt0Requested0493x6hB1 && exclusiveProjectedSpecies;
+    if (q6ThermalInterfaceWallRequested0493x10o) {
+        if (!faceToParticleRt00493x6hB1 || projectedSpeciesIndex0493x7a < 0 ||
+            liquidPhaseSpeciesCount0493x7a != 1 ||
+            params.speciesDefinitions[
+                static_cast<std::size_t>(projectedSpeciesIndex0493x7a)].phaseFamily !=
+                SpeciesPhaseFamily::Liquid) {
+            diag.reason =
+                "0493x10o requires one projected liquid species with free-surface B1/RT0";
+            return false;
+        }
+        const std::size_t c0493x10o =
+            static_cast<std::size_t>(std::max(1, grid.numCells));
+        ws.kineticQ6HydroValid0493x10o.ensure(c0493x10o);
+        ws.kineticQ6HydroCellUx0493x10o.ensure(c0493x10o);
+        ws.kineticQ6HydroCellUy0493x10o.ensure(c0493x10o);
+        ws.kineticQ6HydroFaceUxEast0493x10o.ensure(c0493x10o);
+        ws.kineticQ6HydroFaceUyNorth0493x10o.ensure(c0493x10o);
+        ws.kineticQ6HydroFieldValid0493x10o = false;
+        ws.kineticQ6HydroFieldStep0493x10o = -1;
+        ws.kineticQ6HydroFieldType0493x10o = projectedSpeciesType0493x7a;
+    }
     if (virialDensityKickRequested0493x7a || densityRelaxationRequested0493x7c) {
         if (!exclusiveProjectedSpecies || projectedSpeciesIndex0493x7a < 0 ||
             liquidPhaseSpeciesCount0493x7a != 1 ||
@@ -11071,9 +17137,17 @@ bool apply_independent_masked_species_q6_0493w5(
             }
 
             // 0493x9d production curvature: promote the x9c p3 support to a
-            // per-step field only when capillarity is physically active.  This
-            // does not alter alpha_x6c, x6f geometry or any sigma=0 trajectory.
-            if (surfaceTensionApplySpecies0493x9d) {
+            // per-step field when capillarity is physically active.
+            //
+            // 0493x11c-fix6-x9e-sigma0-p3-diagnostic:
+            // x9e also needs the same p3 field at summary cadence for the
+            // sigma=0 paired Young-Laplace control. This is observational only:
+            // the x6f stencil below still receives curvature and a capillary
+            // potential iff surfaceTensionApplySpecies0493x9d is true.
+            const bool buildPhaseCurvature3Pass0493x11c =
+                surfaceTensionApplySpecies0493x9d ||
+                staticDropDiagnosticsThisStep0493x9e;
+            if (buildPhaseCurvature3Pass0493x11c) {
                 ws.phaseAlphaCurvature0493x9b.ensure(geometryCells0493x6c);
                 ws.phaseAlphaCurvature2Pass0493x9c.ensure(geometryCells0493x6c);
                 ws.phaseAlphaCurvature3Pass0493x9c.ensure(geometryCells0493x6c);
@@ -13164,6 +19238,24 @@ bool apply_independent_masked_species_q6_0493w5(
             periodicX ? 1 : 0, periodicY ? 1 : 0,
             q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
         check_cuda_0400(cudaGetLastError(), "independent masked cell correction launch");
+
+        if (q6ThermalInterfaceWallRequested0493x10o &&
+            s == projectedSpeciesIndex0493x7a) {
+            q6_x10o_capture_projected_q6_hydrodynamics<<<cellBlocks, threads>>>(
+                species, s, ws.speciesMask0493w5.data(),
+                ws.dux.data(), ws.duy.data(), ws.r.data(), ws.p.data(),
+                ws.kineticQ6HydroValid0493x10o.data(),
+                ws.kineticQ6HydroCellUx0493x10o.data(),
+                ws.kineticQ6HydroCellUy0493x10o.data(),
+                ws.kineticQ6HydroFaceUxEast0493x10o.data(),
+                ws.kineticQ6HydroFaceUyNorth0493x10o.data(),
+                grid.Nx, grid.Ny, periodicX, periodicY);
+            check_cuda_0400(
+                cudaGetLastError(), "0493x10o projected Q6 hydrodynamic capture launch");
+            ws.kineticQ6HydroFieldValid0493x10o = true;
+            ws.kineticQ6HydroFieldStep0493x10o = step;
+            ws.kineticQ6HydroFieldType0493x10o = audit.type;
+        }
         double correctionSq = 0.0;
         double divAfterSq = 0.0;
         if (q6GfDiagnosticsThisStep0493x7k) {
@@ -13622,6 +19714,20 @@ bool apply_independent_masked_species_q6_0493w5(
             "0493x7a virial audit download");
         append_virial_density_audit_0493x7a(
             params, step, time, dx, dy, virialAudit0493x7a);
+    }
+
+    if (freeSurfaceMode0493x5a &&
+        params.phaseInterfaceKineticReflectionFraction > 0.0) {
+        const bool geometryValid0493x9x =
+            phaseGeometryResident0493x6c &&
+            ws.phaseGeometryResidentValid0493x6c &&
+            ws.phaseGeometryResidentStep0493x6c == step;
+        apply_kinetic_interface_reflection_0493x9x(
+            particles, cells, ws, params, grid, step, time, nParticles,
+            threads, cellBlocks, particleBlocks, periodicX, periodicY,
+            projectedSpeciesType0493x7a,
+            geometryValid0493x9x ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+            geometryValid0493x9x);
     }
 
     if (q6GfDiagnosticsThisStep0493x7k) {

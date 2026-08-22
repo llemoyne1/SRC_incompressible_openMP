@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+import csv, math, sys
+from pathlib import Path
+if len(sys.argv) != 2:
+    raise SystemExit('usage: analyze_0493x9y_pointwise.py <csv>')
+path = Path(sys.argv[1])
+with path.open(newline='') as f: rows = list(csv.DictReader(f))
+if not rows: raise SystemExit('[0493x9y-check] ERROR empty CSV')
+def I(r,k): return int(float(r.get(k,0) or 0))
+def F(r,k): return float(r.get(k,0) or 0)
+def isum(k): return sum(I(r,k) for r in rows)
+def maxabs(k): return max((abs(F(r,k)) for r in rows), default=0.0)
+first,last=rows[0],rows[-1]
+interior=isum('interiorCrossings'); shell=isum('shellGuardCrossings')
+start_below=isum('startBelowHalf'); pw_outer=isum('pointwiseOuterRoutedToShell')
+pw_inner_outer=isum('pointwiseInteriorOuterCell'); bisect=isum('bisectionInteriorCrossings')
+fallbacks=isum('bisectionFallbacks'); selected=isum('selectedReflections')
+applied=isum('appliedReflections'); unsupported=isum('unsupportedReflections')
+still_out=isum('appliedStillOutwardRelative'); pred_out=isum('appliedInteriorPredictedOutside')
+outer0=I(first,'phaseAOuterCellParticles'); outer1=I(last,'phaseAOuterCellParticles')
+deep0=I(first,'deepOuterParticles'); deep1=I(last,'deepOuterParticles')
+max_dp=max(maxabs('deltaPx'),maxabs('deltaPy')); max_de=maxabs('deltaKineticEnergy')
+conservative=max_dp<=1e-10 and max_de<=1e-10
+print('===== 0493x9y POINTWISE-SIDE + BISECTION REFLECTION =====')
+print(f'file={path}')
+print(f'rows={len(rows)} lastStep={last.get("step","?")} reflectionFraction={last.get("reflectionFraction","?")}')
+print('--- pointwise-side invariant ---')
+print(f'interiorCrossings={interior} startBelowHalf={start_below} invariantOK={int(start_below==0)}')
+print(f'pointwiseOuterRoutedToShell={pw_outer} pointwiseInteriorOuterCell={pw_inner_outer}')
+print('--- bounded crossing solve ---')
+print(f'bisectionInteriorCrossings={bisect} bisectionFallbacks={fallbacks} fallbackFraction={(fallbacks/bisect if bisect else 0):.6%}')
+print(f'lastCrossingFractionMean={F(last,"crossingFractionMean"):.9g}')
+print('--- reflection ---')
+print(f'selected={selected} applied={applied} unsupported={unsupported} unsupportedFraction={(unsupported/selected if selected else 0):.6%}')
+print(f'appliedStillOutwardRelative={still_out}/{applied} ({(still_out/applied if applied else 0):.6%})')
+print(f'appliedInteriorPredictedOutside={pred_out}/{applied} ({(pred_out/applied if applied else 0):.6%})')
+print('--- halo proxies ---')
+print(f'outerCellParticles first={outer0} last={outer1} growth={outer1-outer0:+d}')
+print(f'deepOuterParticles first={deep0} last={deep1} growth={deep1-deep0:+d}')
+print('--- conservation ---')
+print(f'max|deltaP|={max_dp:.6e} max|deltaKE|={max_de:.6e} conservative={int(conservative)}')
+structural=start_below==0 and fallbacks==0 and conservative and selected>0
+print(f'status={"PASS-structural" if structural else "FAIL"}')
+print('\nstep outer deep intX shellX start<.5 predOut applied')
+for r in rows:
+    print(I(r,'step'),I(r,'phaseAOuterCellParticles'),I(r,'deepOuterParticles'),I(r,'interiorCrossings'),I(r,'shellGuardCrossings'),I(r,'startBelowHalf'),I(r,'appliedInteriorPredictedOutside'),I(r,'appliedReflections'))
