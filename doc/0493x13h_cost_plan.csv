@@ -1,0 +1,5 @@
+stage,design,runs,particleSteps
+A_Cdamp,"2 amplitudes x 30 reps, Nx64 Ny16 gamma8",60,186286080
+B_density,"6 reps; Ny128 gamma3,4,6,8,12,16; Ny256 gamma3,4,6,8",60,15092539392
+C_Mach,"Ma .2,.5,.7,.9 x Nx128,256 x 4 seeds",32,871628800
+TOTAL,,152,16150454272

@@ -1,0 +1,9 @@
+branch,group,simulations,estimatedParticleSteps
+Hgamma,gamma=6,8,433766400
+Hgamma,gamma=8,8,579796992
+Hgamma,gamma=10,8,724582400
+Hgamma,gamma=14,8,1012924416
+Hgamma,gamma=20,8,1444085760
+Cstat,A1,24,279183360
+Cstat,G08,60,279183360
+Cstat,G10,48,279183360

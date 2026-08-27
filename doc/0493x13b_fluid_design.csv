@@ -1,0 +1,11 @@
+fluid,gamma,rotationAngleDeg,targetLambdaMeanOverCell,role
+A0,20,90,0.22687409291590604,historical_reference
+A1,20,120,0.48,A1_reference
+A2,20,150,0.95,transition_probe
+A3,20,165,1.32,mesoscopic_probe
+A4,20,175,1.50,kinetic_probe
+A6,20,175,3.00,extended_flight_probe
+G06,6,120,0.48,low_gamma_A1
+G08,8,120,0.48,low_gamma_A1
+G10,10,120,0.48,low_gamma_A1
+G14,14,120,0.48,low_gamma_A1
