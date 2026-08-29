@@ -65,7 +65,7 @@ export THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
 # -----------------------------------------------------------------------------
 # Mechanical surface-tension qualification
 # -----------------------------------------------------------------------------
-export SIGMA_DECLARED="${SIGMA_DECLARED:-1200}"
+export SIGMA_DECLARED="${SIGMA_DECLARED:-15000}"
 export SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"
 
 # Keep the production x12a chain active, but require it to be inactive on the
@@ -110,7 +110,8 @@ lx,ly=float(sys.argv[1]),float(sys.argv[2])
 nx,ny=int(sys.argv[3]),int(sys.argv[4])
 gamma=float(sys.argv[5]); kbt=float(sys.argv[6]); mass=float(sys.argv[7])
 dt=float(sys.argv[8]); alpha=float(sys.argv[9])
-sigma=float(sys.argv[10]); rmin=float(sys.argv[11])
+sigma=float(sys.argv[10]); 
+rmin=float(sys.argv[11])
 
 hx,hy=lx/nx,ly/ny
 if abs(hx-hy) > 1e-12*max(1.0,abs(hx),abs(hy)):

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "$ROOT"
+
+for SEED in 4931501 4931502 4931503; do
+  echo
+  echo "===== 0493x13n Taylor-Culick seed=${SEED} ====="
+  SEED="$SEED" \
+  NX=640 NY=256 Lx=2.5 Ly=1.0 \
+  SHEET_LENGTH_CELLS=512 THICKNESS_CELLS=64 EDGE_ROUND_CELLS=8 \
+  CENTER_X=1.25 CENTER_Y=0.5 \
+  SIGMA_DECLARED=10000 \
+  STEPS=220 SUMMARY_EVERY=5 DUMP_STATE_EVERY=10 \
+  FIT_TAU_MIN=0.5 FIT_TAU_MAX=1.75 \
+  RUN_ROOT="runs/0493x13n_taylor_culick_sheet_2d_x13h_s10000_H64_L512_seed${SEED}" \
+  CLEAN_RUN_ROOT=1 \
+  LIVE_PROGRESS=1 \
+  LIVE_VIS_ENABLE=1 LIVE_VIS_EVERY=1 LIVE_VIS_HOLD_ON_EXIT=0 \
+  LIVE_VIS_RECORD_ENABLE=1 LIVE_VIS_RECORD_EVERY=100 LIVE_VIS_RECORD_FIELDS=mass \
+  FILTERED_RECORDING_ENABLE=1 FILTER_SAMPLE_EVERY=100 \
+  bash scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh
+done

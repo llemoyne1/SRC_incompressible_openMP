@@ -8470,6 +8470,79 @@ __device__ __forceinline__ bool q6_x10v_equal_mass_for_literal_swap(
     return fabs(a - b) <= 1.0e-12 * scale;
 }
 
+// =============================================================================
+// 0493x13o — ONE-FOR-ONE NORMAL-COMPONENT VELOCITY SWAP
+// =============================================================================
+// Optional refinement of x10v.  Candidate selection, ownership, equal-mass
+// guard and position-only support relocation are unchanged.  When enabled,
+// only the velocity component normal to the nearest kinetic-CIC interface is
+// exchanged between the relocated particle and its claimed interior partner;
+// each particle's tangential component is left unchanged.
+//
+// For equal masses and one common unit normal n:
+//     vp' = vp + [(vq-vp).n] n
+//     vq' = vq - [(vq-vp).n] n
+// This exactly preserves pair momentum and pair kinetic energy up to floating
+// roundoff, while removing the tangential mixing of the historical full-vector
+// permutation.  The sign of n is irrelevant because only n*n^T enters.
+//
+// To preserve x10v's low cost, no per-particle normal field is stored.  The
+// nearest reliable normal is recovered only for relocated particles from the
+// already resident kinetic CIC alpha field.  Ring search stops at the first
+// radius with a finite non-zero gradient; max radius 8 also supports the
+// intentionally widened-envelope ablations without changing production cost.
+__device__ __forceinline__ bool q6_x13o_one_for_one_local_normal(
+    const double* alpha,
+    int pc,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    double* nxOut, double* nyOut) {
+    if (!alpha || !nxOut || !nyOut || pc < 0 || nx <= 0 || ny <= 0)
+        return false;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0)) return false;
+
+    const int pi = pc % nx;
+    const int pj = pc / nx;
+    constexpr int maxRadius0493x13o = 8;
+
+    for (int radius = 0; radius <= maxRadius0493x13o; ++radius) {
+        double bestG2 = 0.0;
+        double bestGx = 0.0;
+        double bestGy = 0.0;
+        for (int dj = -radius; dj <= radius; ++dj) {
+            for (int di = -radius; di <= radius; ++di) {
+                if (radius > 0 &&
+                    di != -radius && di != radius &&
+                    dj != -radius && dj != radius)
+                    continue;
+                const int c = q6_x10n_cell_index(
+                    pi + di, pj + dj, nx, ny, periodicX, periodicY);
+                if (c < 0) continue;
+                double gx = 0.0, gy = 0.0;
+                q6_x10o_alpha_gradient_cell(
+                    alpha, c, nx, ny, dx, dy,
+                    periodicX, periodicY, &gx, &gy);
+                const double g2 = gx * gx + gy * gy;
+                if (isfinite(g2) && g2 > bestG2) {
+                    bestG2 = g2;
+                    bestGx = gx;
+                    bestGy = gy;
+                }
+            }
+        }
+        if (bestG2 > 1.0e-24 && isfinite(bestG2)) {
+            const double invG = 1.0 / sqrt(bestG2);
+            *nxOut = -bestGx * invG;
+            *nyOut = -bestGy * invG;
+            return isfinite(*nxOut) && isfinite(*nyOut);
+        }
+    }
+    return false;
+}
+
 __global__ void q6_x10v_apply_local_velocity_swaps(
     CudaParticleDeviceView particles,
     std::uint64_t nParticles,
@@ -8480,7 +8553,8 @@ __global__ void q6_x10v_apply_local_velocity_swaps(
     std::uint32_t phaseAType,
     int nx, int ny,
     double lx, double ly,
-    int periodicX, int periodicY) {
+    int periodicX, int periodicY,
+    int normalOnlySwap0493x13o) {
     const std::uint64_t idx =
         static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const std::uint64_t stride =
@@ -8498,6 +8572,15 @@ __global__ void q6_x10v_apply_local_velocity_swaps(
         if (pc < 0) continue;
         const int pi = pc % nx;
         const int pj = pc / nx;
+
+        double swapNx0493x13o = 0.0;
+        double swapNy0493x13o = 0.0;
+        if (normalOnlySwap0493x13o &&
+            !q6_x13o_one_for_one_local_normal(
+                alpha, pc, nx, ny, lx, ly, periodicX, periodicY,
+                &swapNx0493x13o, &swapNy0493x13o)) {
+            continue;
+        }
 
         // Two candidates/cell over the local 3x3 neighborhood. Prefer the
         // candidate cell with the largest liquid alpha, i.e. the deepest local
@@ -8561,10 +8644,28 @@ __global__ void q6_x10v_apply_local_velocity_swaps(
             const double pvy = particles.vy[p];
             const double qvx = particles.vx[q];
             const double qvy = particles.vy[q];
-            particles.vx[p] = qvx;
-            particles.vy[p] = qvy;
-            particles.vx[q] = pvx;
-            particles.vy[q] = pvy;
+            if (normalOnlySwap0493x13o) {
+                // Exchange only the projections onto one common interface
+                // normal.  Tangential components of p and q are individually
+                // unchanged; for equal masses, total P and kinetic K remain
+                // exactly invariant up to floating roundoff.
+                const double pVn0493x13o =
+                    pvx * swapNx0493x13o + pvy * swapNy0493x13o;
+                const double qVn0493x13o =
+                    qvx * swapNx0493x13o + qvy * swapNy0493x13o;
+                const double deltaVn0493x13o = qVn0493x13o - pVn0493x13o;
+                particles.vx[p] = pvx + deltaVn0493x13o * swapNx0493x13o;
+                particles.vy[p] = pvy + deltaVn0493x13o * swapNy0493x13o;
+                particles.vx[q] = qvx - deltaVn0493x13o * swapNx0493x13o;
+                particles.vy[q] = qvy - deltaVn0493x13o * swapNy0493x13o;
+            } else {
+                // Historical x10v ablation retained bit-for-bit as the default
+                // until the normal-only variant is physically qualified.
+                particles.vx[p] = qvx;
+                particles.vy[p] = qvy;
+                particles.vx[q] = pvx;
+                particles.vy[q] = pvy;
+            }
             break;
         }
     }
@@ -17878,6 +17979,15 @@ bool apply_kinetic_interface_reflection_0493x9x(
     }
     const bool oneForOneVelocitySwap0493x10v =
         oneForOneRelocation0493x10u && oneForOneVelocitySwapRequested0493x10v;
+    const bool oneForOneNormalOnlyRequested0493x13o =
+        env_int_0400("MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY", 0) != 0;
+    if (oneForOneNormalOnlyRequested0493x13o &&
+        !oneForOneVelocitySwap0493x10v) {
+        throw std::runtime_error(
+            "0493x13o normal-only swap requires the x10v one-for-one velocity swap");
+    }
+    const bool oneForOneNormalOnly0493x13o =
+        oneForOneVelocitySwap0493x10v && oneForOneNormalOnlyRequested0493x13o;
     const bool thermalPhaseLimiterRequested0493x10w =
         env_int_0400("MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER", 0) != 0;
     const bool localThermalCoolingRequested0493x12a =
@@ -17923,9 +18033,12 @@ bool apply_kinetic_interface_reflection_0493x9x(
                   << " cic=" << (kineticInterfaceCIC0493x10cic ? 1 : 0)
                   << " biq=" << (quadraticInterface0493x10poly ? 1 : 0)
                   << " swap=" << (oneForOneVelocitySwap0493x10v ? 1 : 0)
+                  << " swapNormalOnly=" << (oneForOneNormalOnly0493x13o ? 1 : 0)
                   << " semantics="
                   << (oneForOneVelocitySwap0493x10v
-                          ? "position-mirror+local-equal-mass-velocity-swap"
+                          ? (oneForOneNormalOnly0493x13o
+                                 ? "position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged"
+                                 : "position-mirror+local-equal-mass-full-vector-swap")
                           : "position-mirror-only;mass-velocity-unchanged")
                   << std::endl;
         oneForOneRelocationReported0493x10u = true;
@@ -18554,9 +18667,10 @@ bool apply_kinetic_interface_reflection_0493x9x(
                 phaseAlphaKinetic0493x10cic,
                 candidate00493x10v, candidate10493x10v,
                 phaseAType, grid.Nx, grid.Ny, params.Lx, params.Ly,
-                periodicX, periodicY);
+                periodicX, periodicY,
+                oneForOneNormalOnly0493x13o ? 1 : 0);
             check_cuda_0400(
-                cudaGetLastError(), "0493x10v local equal-mass velocity swap launch");
+                cudaGetLastError(), "0493x10v/x13o local equal-mass velocity swap launch");
         }
     } else if (movingInterfaceWall0493x10m) {
         q6_x10m_apply_moving_interface_wall<<<particleBlocks, threads>>>(
