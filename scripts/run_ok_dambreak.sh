@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-source "$ROOT/scripts/src_mpcd_run_common_0434.sh"
+source "$ROOT/scripts/src_mpcd_run_ok_common.sh"
 suite_root_cd_0434
 
 # -----------------------------------------------------------------------------
@@ -14,20 +14,56 @@ suite_root_cd_0434
 # -----------------------------------------------------------------------------
 CASE_LABEL="dambreak"
 TOPOLOGY="closed_box"
-Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-300}"; NY="${NY:-150}"
-GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.005}"; KBT="${KBT:-0.05}"
+Lx="${Lx:-2.0}"; Ly="${Ly:-1.0}"; NX="${NX:-512}"; NY="${NY:-256}"
+GAMMA="${GAMMA:-8}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0063471328149122585}"; KBT="${KBT:-0.125}"
+
+PARTICLE_MASS="${PARTICLE_MASS:-1.0}"
+ROTATION_ANGLE="${ROTATION_ANGLE:-2.0943951023931953}"
+RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
+GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"
+THERMOSTAT_MODE="${THERMOSTAT_MODE:-cell_relative_rescale}"
+THERMOSTAT_EVERY="${THERMOSTAT_EVERY:-1}"
+THERMOSTAT_TARGET_KBT="${THERMOSTAT_TARGET_KBT:-$KBT}"
+THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
 SEED="${SEED:-493953}"
+# 0493x13zg-complete-liquid-surface
+# 0493x13zh-dambreak-liquid-vacuum
+# Default run_ok dambreak is now the qualified liquid/vacuum free-surface path.
+# Set RUN_OK_LIQUID_SURFACE_ENABLE=0 to recover the older hydrodynamic
+# SRC / previous-Q6 / Q6-g-f comparison without capillarity.
+RUN_OK_LIQUID_SURFACE_ENABLE="${RUN_OK_LIQUID_SURFACE_ENABLE:-1}"
+# Surface/free-surface physics -- visible runner parameters.
+SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-294.0}"
+SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"
+PHASE_INTERFACE_A_SELECTOR="${PHASE_INTERFACE_A_SELECTOR:-type:1}"
+PHASE_INTERFACE_B_SELECTOR="${PHASE_INTERFACE_B_SELECTOR:-vacuum}"
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-1.0}"
+PHASE_INTERFACE_EVAPORATION_TARGET_TYPE="${PHASE_INTERFACE_EVAPORATION_TARGET_TYPE:--1}"
+PHASE_INTERFACE_CONTACT_ANGLE_DEG="${PHASE_INTERFACE_CONTACT_ANGLE_DEG:--1}"
+X10O_THERMAL_SIGMAS="${X10O_THERMAL_SIGMAS:-3.0}"
+X10O_THERMAL_MAX_CELLS="${X10O_THERMAL_MAX_CELLS:-0.75}"
+X12A_LOCAL_THERMAL_RADIUS_CELLS="${X12A_LOCAL_THERMAL_RADIUS_CELLS:-25.298221281347036}"
 GRAVITY_Y="${GRAVITY_Y:--0.5}"
 LIQUID_COLUMN_WIDTH="${LIQUID_COLUMN_WIDTH:-0.5}"
 LIQUID_COLUMN_HEIGHT="${LIQUID_COLUMN_HEIGHT:-0.8}"
 LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"
-LIQUID_MASS="${LIQUID_MASS:-1000.0}"; GAS_MASS="${GAS_MASS:-1.0}"
+PHASE_INTERFACE_A_SELECTOR="type:$LIQUID_TYPE"
+LIQUID_MASS="${LIQUID_MASS:-1.0}"; GAS_MASS="${GAS_MASS:-1.0}"
 LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"; GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
 SPECIES_Q6_MIN_OCCUPANCY_FRACTION="${SPECIES_Q6_MIN_OCCUPANCY_FRACTION:-0.5}"
 Q6_GF_MIN_FILL_FRACTION="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
 Q6_GF_DENSITY_RELAXATION_TIME="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/run_ok_dambreak_${NX}x${NY}_g${GAMMA}}"
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6 src-q6-g-f}}}}"
+if [[ -z "${RUN_MODES:-}" && -z "${MODES:-}" && -z "${INTEG_PATH:-}" && -z "${SRC_INTEG_PATH:-}" ]]; then
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    RUN_MODES="src-q6-g-f"
+  else
+    RUN_MODES="src src-q6 src-q6-g-f"
+  fi
+else
+  RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6 src-q6-g-f}}}}"
+fi
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-0.5}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-25}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-100}"
 BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
@@ -35,14 +71,14 @@ CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"; PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
-LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-5}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
 LIVE_VIS_NX="${LIVE_VIS_NX:-$NX}"; LIVE_VIS_NY="${LIVE_VIS_NY:-$NY}"
 LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-thermal}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
 LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-1}"
 LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-1}"
 PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:-$LIQUID_TYPE}"
-FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-0}"
+FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 
 PROJECTION_BACKEND="${PROJECTION_BACKEND:-cuda}"
@@ -54,11 +90,23 @@ PROJECTION_MOMENTUM_CORRECTION_ENABLE="${PROJECTION_MOMENTUM_CORRECTION_ENABLE:-
 THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"
 THERMOSTAT_EVERY="${THERMOSTAT_EVERY:-1}"
 
-# This runner owns the two-phase registry.  Q6-g-f reuses it and enables the
-# validated x6g gas-pressure Dirichlet condition; src/src-q6 do not.
+# The qualified kinetic free-surface closure is currently liquid/vacuum only.
+# With the complete-liquid profile ON, generate only the liquid column, disable
+# the x6g gas-pressure provider, and select vacuum as phase B.  The historical
+# liquid/gas dambreak remains available with RUN_OK_LIQUID_SURFACE_ENABLE=0.
 Q6_GF_EXTERNAL_SPECIES=1
-Q6_GF_HAS_GAS_PHASE=1
-PARTICLE_MASS="$GAS_MASS"
+if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+  Q6_GF_HAS_GAS_PHASE=0
+  PARTICLE_MASS="$LIQUID_MASS"
+  RUN_OK_DAMBREAK_PHASE_B="$PHASE_INTERFACE_B_SELECTOR"
+  RUN_OK_DAMBREAK_GENERATOR_EXTRA=(--empty-outside-column)
+else
+  Q6_GF_HAS_GAS_PHASE=1
+  PARTICLE_MASS="$GAS_MASS"
+  RUN_OK_DAMBREAK_PHASE_B="type:$GAS_TYPE"
+  PHASE_INTERFACE_B_SELECTOR="$RUN_OK_DAMBREAK_PHASE_B"
+  RUN_OK_DAMBREAK_GENERATOR_EXTRA=()
+fi
 BACKGROUND_TYPE="$GAS_TYPE"
 INACTIVE_TYPE="$GAS_TYPE"
 GEN_CASE="tg"; U0=0.0; VELOCITY_MODE="zero"; TG_HOLE_ENABLE=false
@@ -157,6 +205,21 @@ run_ok_print_q6_profile_0493x7r() {
 }
 # -----------------------------------------------------------------------------
 
+if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+  THERMOSTAT_ENABLE=true
+  THERMOSTAT_MODE=cell_relative_rescale
+  THERMOSTAT_EVERY=1
+  THERMOSTAT_TARGET_KBT="$KBT"
+  SPECIES_RESAMPLING_ENABLE=false
+  LIQUID_RESAMPLING_ENABLE=false
+  GAS_RESAMPLING_ENABLE=false
+  MASS_RECONDITION_ENABLE=0
+  RESAMPLING_THERMAL_RENORMALIZATION_ENABLE=false
+  RESAMPLING_MASS_GUARD_ENABLE=false
+  WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=false
+  CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
+  VIRIAL_DENSITY_KICK_ENABLE=false
+fi
 suite_defaults_common_0434
 suite_compute_derived_0434
 
@@ -229,12 +292,17 @@ speciesQ6FallbackMode = common
 speciesQ6ComparisonTolerance = 1.0e-11
 speciesQ6MinOccupancyFraction = $SPECIES_Q6_MIN_OCCUPANCY_FRACTION
 PARAMS
+  run_ok_surface_append_params_0493x13zi "$params" "$PHASE_INTERFACE_A_SELECTOR" "$RUN_OK_DAMBREAK_PHASE_B"
   suite_write_common_params_0434 "$mode" >> "$params"
 }
 
 run_one_mode_dambreak_0493x7h() {
   local mode=$1
   suite_validate_path_0434 "$mode"
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    [[ "$mode" == src-q6-g-f ]] || { echo "[run_ok_dambreak] ERROR surface profile requires src-q6-g-f" >&2; return 2; }
+    [[ "$RUN_OK_DAMBREAK_PHASE_B" == vacuum ]] || { echo "[run_ok_dambreak] ERROR qualified kinetic closure requires phase B=vacuum" >&2; return 2; }
+  fi
   local run_root="$BASE_RUN_ROOT/$mode"
   suite_prepare_dirs_0434 "$run_root"
   local state="$run_root/init/dambreak_${NX}x${NY}_g${GAMMA}.smpcd"
@@ -244,21 +312,41 @@ run_one_mode_dambreak_0493x7h() {
   local time_file="$run_root/logs/dambreak.time"
   mkdir -p "$out"
 
+  RUN_OK_GENERATOR_PATH="$ROOT/scripts/generate_0493x0_dam_break_state.py"
+  export RUN_OK_GENERATOR_PATH
   python3 scripts/generate_0493x0_dam_break_state.py \
     --output "$state" --Lx "$Lx" --Ly "$Ly" --nx "$NX" --ny "$NY" --gamma "$GAMMA" \
     --column-width "$LIQUID_COLUMN_WIDTH" --column-height "$LIQUID_COLUMN_HEIGHT" \
     --liquid-type "$LIQUID_TYPE" --gas-type "$GAS_TYPE" \
     --liquid-mass "$LIQUID_MASS" --gas-mass "$GAS_MASS" \
+    "${RUN_OK_DAMBREAK_GENERATOR_EXTRA[@]}" \
     --kBT "$KBT" --seed "$SEED"
 
   write_params_dambreak_0493x7h "$mode" "$state" "$out" "$params"
   suite_export_cuda_flags_0434 "$mode" "$TOPOLOGY"
   run_ok_export_q6_cuda_profile_0493x7r "$mode"
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    PHASE_INTERFACE_B_SELECTOR="$RUN_OK_DAMBREAK_PHASE_B"
+    run_ok_surface_export_qualified_liquid_vacuum_flags_0493x13zi "$LIQUID_MASS"
+  else
+    run_ok_surface_export_off_flags_0493x13zi
+  fi
   suite_prepare_livevis_control_0434 "$run_root" "$mode"
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0493x7h.env" "$mode"
   run_ok_append_q6_profile_audit_0493x7r "$run_root/logs/environment_0493x7h.env" "$mode"
+  cat >> "$run_root/logs/environment_0493x7h.env" <<META_SURFACE
+RUN_OK_LIQUID_SURFACE_ENABLE=$RUN_OK_LIQUID_SURFACE_ENABLE
+SURFACE_TENSION_SIGMA=$SURFACE_TENSION_SIGMA
+SURFACE_TENSION_MIN_RADIUS_CELLS=$SURFACE_TENSION_MIN_RADIUS_CELLS
+PHASE_INTERFACE_A_SELECTOR=$PHASE_INTERFACE_A_SELECTOR
+PHASE_INTERFACE_B_SELECTOR=$RUN_OK_DAMBREAK_PHASE_B
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION=$PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION
+X12A_LOCAL_THERMAL_RADIUS_CELLS=$X12A_LOCAL_THERMAL_RADIUS_CELLS
+META_SURFACE
   run_ok_print_q6_profile_0493x7r "$mode"
+  PHASE_INTERFACE_B_SELECTOR="$RUN_OK_DAMBREAK_PHASE_B"
+  run_ok_surface_print_0493x13zi "$(suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && printf qualified-liquid-vacuum || printf off)"
   cat >> "$run_root/logs/environment_0493x7h.env" <<META
 LIQUID_COLUMN_WIDTH=$LIQUID_COLUMN_WIDTH
 LIQUID_COLUMN_HEIGHT=$LIQUID_COLUMN_HEIGHT
@@ -267,10 +355,16 @@ GAS_TYPE=$GAS_TYPE
 LIQUID_MASS=$LIQUID_MASS
 GAS_MASS=$GAS_MASS
 GRAVITY_Y=$GRAVITY_Y
+RUN_OK_DAMBREAK_PHASE_B=$RUN_OK_DAMBREAK_PHASE_B
+RUN_OK_DAMBREAK_EMPTY_OUTSIDE_COLUMN=$(suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && printf 1 || printf 0)
 META
   echo "[0493x7h] case=dambreak mode=$mode root=$run_root"
   if suite_path_has_q6_g_f_0493x7h "$mode"; then
-    echo "[0493x7h] physics=Q6-g-f tau=$Q6_GF_DENSITY_RELAXATION_TIME minFill=$Q6_GF_MIN_FILL_FRACTION x6g=eos"
+    if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+      echo "[0493x7h] physics=Q6-g-f tau=$Q6_GF_DENSITY_RELAXATION_TIME minFill=$Q6_GF_MIN_FILL_FRACTION x6g=off phaseB=vacuum"
+    else
+      echo "[0493x7h] physics=Q6-g-f tau=$Q6_GF_DENSITY_RELAXATION_TIME minFill=$Q6_GF_MIN_FILL_FRACTION x6g=eos"
+    fi
   elif suite_path_has_q6_0434 "$mode"; then
     echo "[0493x7h] physics=previous-Q6 speciesMode=independent_masked forceOrdering=legacy"
   else

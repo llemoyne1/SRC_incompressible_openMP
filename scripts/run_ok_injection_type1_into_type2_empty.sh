@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-source "$ROOT/scripts/src_mpcd_run_common_0434.sh"
+source "$ROOT/scripts/src_mpcd_run_ok_common.sh"
 suite_root_cd_0434
 
 # -----------------------------------------------------------------------------
@@ -11,8 +11,18 @@ suite_root_cd_0434
 CASE_LABEL="injection_type1_into_type2"
 GEN_CASE="injection"
 TOPOLOGY="${TOPOLOGY:-segmented}"
-Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-900}"; NY="${NY:-300}"
-GAMMA="${GAMMA:-10}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.01}"; KBT="${KBT:-0.005}"
+Lx="${Lx:-3.0}"; Ly="${Ly:-1.0}"; NX="${NX:-768}"; NY="${NY:-256}"
+GAMMA="${GAMMA:-8}"; STEPS="${STEPS:-5000}"; DT="${DT:-0.0063471328149122585}"; KBT="${KBT:-0.125}"
+ROTATION_ANGLE="${ROTATION_ANGLE:-2.0943951023931953}"
+RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
+GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"
+THERMOSTAT_MODE="${THERMOSTAT_MODE:-cell_relative_rescale}"
+THERMOSTAT_EVERY="${THERMOSTAT_EVERY:-1}"
+THERMOSTAT_TARGET_KBT="${THERMOSTAT_TARGET_KBT:-$KBT}"
+THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
+LIQUID_PARTICLE_MASS="${LIQUID_PARTICLE_MASS:-1.0}"
+GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-0.1}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-5.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
@@ -21,21 +31,43 @@ LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
 LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
+# 0493x13zg-complete-liquid-injection
+RUN_OK_LIQUID_SURFACE_ENABLE="${RUN_OK_LIQUID_SURFACE_ENABLE:-1}"
+# Surface/free-surface physics -- visible runner parameters.
+SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-945.0}"
+SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-1.0}"
+PHASE_INTERFACE_EVAPORATION_TARGET_TYPE="${PHASE_INTERFACE_EVAPORATION_TARGET_TYPE:--1}"
+PHASE_INTERFACE_CONTACT_ANGLE_DEG="${PHASE_INTERFACE_CONTACT_ANGLE_DEG:--1}"
+X10O_THERMAL_SIGMAS="${X10O_THERMAL_SIGMAS:-3.0}"
+X10O_THERMAL_MAX_CELLS="${X10O_THERMAL_MAX_CELLS:-0.75}"
+X12A_LOCAL_THERMAL_RADIUS_CELLS="${X12A_LOCAL_THERMAL_RADIUS_CELLS:-25.298221281347036}"
+
 # Baseline validation intentionally excludes resampling.  The public wrapper
 # selects SRC / previous Q6 / Q6-g-f; direct use of this backend retains the
 # historical SRC + SRC-Q6 default unless RUN_MODES is explicitly overridden.
 # Resampling paths remain available explicitly.
-RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"
+if [[ -z "${RUN_MODES:-}" && -z "${MODES:-}" && -z "${INTEG_PATH:-}" && -z "${SRC_INTEG_PATH:-}" ]]; then
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    RUN_MODES="src-q6-g-f"
+  else
+    RUN_MODES="src src-q6"
+  fi
+else
+  RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"
+fi
  
 # Livevis + 0433a WYSIWYR filtered recording.
 LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
-LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-100}"
 LIVE_VIS_NX="${LIVE_VIS_NX:-$NX}"; LIVE_VIS_NY="${LIVE_VIS_NY:-$NY}"
 LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-hot}"
 LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"; LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
 LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-2}"
-RECORD_FIELDS="${RECORD_FIELDS:-rho,ux,uy}"; RECORD_STRIDE="${RECORD_STRIDE:-1}"
-FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-1}"
+RECORD_FIELDS="${RECORD_FIELDS:-mass,ux,uy}"
+RECORD_EVERY="${RECORD_EVERY:-100}"
+RECORD_ENABLE="${RECORD_ENABLE:-true}"
+FILTER_MODE="${FILTER_MODE:-none}"; FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-100}"
 FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
 LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
 LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-1}"
@@ -54,7 +86,7 @@ GUARD_EVERY="${GUARD_EVERY:-5}"
 # Particle type ids are independent of the physical phase family.
 INJECT_TYPE="${INJECT_TYPE:-1}"
 BACKGROUND_TYPE="${BACKGROUND_TYPE:-2}"
-INJECT_PHASE="${INJECT_PHASE:-gas}"
+INJECT_PHASE="${INJECT_PHASE:-liquid}"
 BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"
 
 phase_defaults_0493w4() {
@@ -89,9 +121,9 @@ case "$INJECT_PHASE:$BACKGROUND_PHASE" in
   *) DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO=10.0 ;;
 esac
 INJECT_TO_BACKGROUND_MASS_RATIO="${INJECT_TO_BACKGROUND_MASS_RATIO:-${LIQUID_TO_GAS_MASS_RATIO:-$DEFAULT_INJECT_TO_BACKGROUND_MASS_RATIO}}"
-BACKGROUND_PARTICLE_MASS="${BACKGROUND_PARTICLE_MASS:-${GAS_PARTICLE_MASS:-${PARTICLE_MASS:-1.0}}}"
+BACKGROUND_PARTICLE_MASS="${BACKGROUND_PARTICLE_MASS:-$GAS_PARTICLE_MASS}"
 PARTICLE_MASS="$BACKGROUND_PARTICLE_MASS"
-INJECT_MASS="${INJECT_MASS:-$(awk -v mb="$BACKGROUND_PARTICLE_MASS" -v r="$INJECT_TO_BACKGROUND_MASS_RATIO" 'BEGIN{printf "%.17g", mb*r}')}"
+INJECT_MASS="${INJECT_MASS:-$LIQUID_PARTICLE_MASS}"
 
 SPECIES_DIAGNOSTICS_ENABLE="${SPECIES_DIAGNOSTICS_ENABLE:-true}"
 SPECIES_DIAGNOSTICS_FILENAME="${SPECIES_DIAGNOSTICS_FILENAME:-species_runtime_injection_0493w4.csv}"
@@ -117,7 +149,7 @@ MASS_RECONDITION_ENABLE="${MASS_RECONDITION_ENABLE:-0}"
 RESAMPLING_THERMAL_RENORMALIZATION_ENABLE="${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-false}"
 RESAMPLING_MASS_GUARD_ENABLE="${RESAMPLING_MASS_GUARD_ENABLE:-false}"
 RESAMPLING_PARTICLE_MASS_MAX="${RESAMPLING_PARTICLE_MASS_MAX:-20.0}"
-UIN="${UIN:-0.5}"
+UIN="${UIN:-0.1}"
 INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-15.0}"
 INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y/ly}')}"
 INLET_SMAX="${INLET_SMAX:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y/ly}')}"
@@ -302,6 +334,21 @@ run_ok_print_q6_profile_0493x7r() {
 }
 # -----------------------------------------------------------------------------
 
+if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+  THERMOSTAT_ENABLE=true
+  THERMOSTAT_MODE=cell_relative_rescale
+  THERMOSTAT_EVERY=1
+  THERMOSTAT_TARGET_KBT="$KBT"
+  SPECIES_RESAMPLING_ENABLE=false
+  LIQUID_RESAMPLING_ENABLE=false
+  GAS_RESAMPLING_ENABLE=false
+  MASS_RECONDITION_ENABLE=0
+  RESAMPLING_THERMAL_RENORMALIZATION_ENABLE=false
+  RESAMPLING_MASS_GUARD_ENABLE=false
+  WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=false
+  CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
+  VIRIAL_DENSITY_KICK_ENABLE=false
+fi
 suite_defaults_common_0434
 suite_compute_derived_0434
 
@@ -322,6 +369,32 @@ case "$INITIAL_DOMAIN_MODE:$SCENARIO_EXPECTATION" in
     exit 2
     ;;
 esac
+
+# 0493x13zg: choose the physically supported free-surface pair.  The current
+# Q6-g-f production path projects exactly one incompressible liquid species;
+# liquid/liquid interfacial tension is therefore deliberately not fabricated.
+if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+  [[ "$INJECT_PHASE" == liquid ]] || {
+    echo "[0493x13zg-run-ok] ERROR complete-liquid injection requires INJECT_PHASE=liquid" >&2; exit 2;
+  }
+  if [[ "$INITIAL_DOMAIN_MODE" == full ]]; then
+    [[ "$BACKGROUND_PHASE" == gas ]] || {
+      echo "[0493x13zg-run-ok] ERROR full complete-liquid injection requires BACKGROUND_PHASE=gas; liquid/liquid surface tension is not qualified" >&2; exit 2;
+    }
+    RUN_OK_LIQUID_SURFACE_PHASE_B="type:$BACKGROUND_TYPE"
+  else
+    RUN_OK_LIQUID_SURFACE_PHASE_B="vacuum"
+  fi
+else
+  if [[ "$INITIAL_DOMAIN_MODE" == full ]]; then
+    RUN_OK_LIQUID_SURFACE_PHASE_B="type:$BACKGROUND_TYPE"
+  else
+    RUN_OK_LIQUID_SURFACE_PHASE_B="vacuum"
+  fi
+fi
+RUN_OK_LIQUID_SURFACE_PHASE_A="type:$INJECT_TYPE"
+PHASE_INTERFACE_A_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_A"
+PHASE_INTERFACE_B_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_B"
 
 if suite_truthy_0434 "$POSTCHECK_SPECIES_ENABLE" && ! suite_truthy_0434 "$SPECIES_DIAGNOSTICS_ENABLE"; then
   echo "[0493w4] ERROR POSTCHECK_SPECIES_ENABLE=true requires SPECIES_DIAGNOSTICS_ENABLE=true" >&2
@@ -345,7 +418,12 @@ ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO="$(awk -v mi="$INJECT_MASS" -v mb="$BACKG
 # registry and enable x6g only when one of those species is a gas phase.
 if suite_mode_set_has_q6_g_f_0493x7h; then
   Q6_GF_EXTERNAL_SPECIES=1
-  if [[ "$INJECT_PHASE" == gas || "$BACKGROUND_PHASE" == gas ]]; then
+  # In an empty-domain liquid injection, type 2 exists only as an inactive
+  # slot identity: there is no active gas pressure provider, so the physical
+  # phase-B selector is vacuum.  Full-domain liquid/gas injection keeps x6g.
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && [[ "$INITIAL_DOMAIN_MODE" != full ]]; then
+    Q6_GF_HAS_GAS_PHASE=0
+  elif [[ "$INJECT_PHASE" == gas || "$BACKGROUND_PHASE" == gas ]]; then
     Q6_GF_HAS_GAS_PHASE=1
   else
     Q6_GF_HAS_GAS_PHASE=0
@@ -429,6 +507,7 @@ speciesQ6FallbackMode = ${SPECIES_Q6_FALLBACK_MODE}
 speciesQ6ComparisonTolerance = ${SPECIES_Q6_COMPARISON_TOLERANCE}
 speciesQ6MinOccupancyFraction = ${SPECIES_Q6_MIN_OCCUPANCY_FRACTION}
 PARAMS
+  run_ok_surface_append_params_0493x13zi "$params" "$RUN_OK_LIQUID_SURFACE_PHASE_A" "$RUN_OK_LIQUID_SURFACE_PHASE_B"
   suite_write_common_params_0434 "$mode" >> "$params"
   :
 }
@@ -492,6 +571,10 @@ PYGEN
 run_one_mode_0434() {
   local mode=$1
   suite_validate_path_0434 "$mode"
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    [[ "$mode" == src-q6-g-f ]] || { echo "[run_ok_injection_empty] ERROR surface profile requires src-q6-g-f" >&2; return 2; }
+    [[ "$RUN_OK_LIQUID_SURFACE_PHASE_B" == vacuum ]] || { echo "[run_ok_injection_empty] ERROR qualified kinetic closure requires B=vacuum" >&2; return 2; }
+  fi
   local run_root="$BASE_RUN_ROOT/$mode"
   suite_prepare_dirs_0434 "$run_root"
   local state_suffix="${CASE_LABEL}_${NX}x${NY}_g${GAMMA}"
@@ -517,9 +600,13 @@ run_one_mode_0434() {
 
   case "$INITIAL_DOMAIN_MODE" in
     full)
+      RUN_OK_GENERATOR_PATH="$ROOT/${GENERATOR_0434}"
+      export RUN_OK_GENERATOR_PATH
       suite_generate_case_0434 "$state" "$chi"
       ;;
     empty|empty_refill|empty-refill)
+      RUN_OK_GENERATOR_PATH="embedded:generate_empty_initial_state_0434"
+      export RUN_OK_GENERATOR_PATH
       generate_empty_initial_state_0434 "$state"
       ;;
   esac
@@ -533,11 +620,29 @@ run_one_mode_0434() {
   write_params_0434 "$mode" "$state" "$out" "$chi" "$params"
   suite_export_cuda_flags_0434 "$mode" "$TOPOLOGY"
   run_ok_export_q6_cuda_profile_0493x7r "$mode"
+  PHASE_INTERFACE_B_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_B"
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    run_ok_surface_export_qualified_liquid_vacuum_flags_0493x13zi "$INJECT_MASS"
+  else
+    run_ok_surface_export_off_flags_0493x13zi
+  fi
   suite_prepare_livevis_control_0434 "$run_root" "$mode"
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
   run_ok_append_q6_profile_audit_0493x7r "$run_root/logs/environment_0434.env" "$mode"
+  cat >> "$run_root/logs/environment_0434.env" <<META_SURFACE
+RUN_OK_LIQUID_SURFACE_ENABLE=$RUN_OK_LIQUID_SURFACE_ENABLE
+SURFACE_TENSION_SIGMA=$SURFACE_TENSION_SIGMA
+SURFACE_TENSION_MIN_RADIUS_CELLS=$SURFACE_TENSION_MIN_RADIUS_CELLS
+PHASE_INTERFACE_A_SELECTOR=$RUN_OK_LIQUID_SURFACE_PHASE_A
+PHASE_INTERFACE_B_SELECTOR=$RUN_OK_LIQUID_SURFACE_PHASE_B
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION=$PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION
+X12A_LOCAL_THERMAL_RADIUS_CELLS=$X12A_LOCAL_THERMAL_RADIUS_CELLS
+META_SURFACE
   run_ok_print_q6_profile_0493x7r "$mode"
+  PHASE_INTERFACE_A_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_A"
+  PHASE_INTERFACE_B_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_B"
+  run_ok_surface_print_0493x13zi "$(suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && printf qualified-liquid-vacuum || printf off)"
   cat >> "$run_root/logs/environment_0434.env" <<META_0493W4
 INITIAL_DOMAIN_MODE=${INITIAL_DOMAIN_MODE}
 SCENARIO_EXPECTATION=${SCENARIO_EXPECTATION}

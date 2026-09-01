@@ -1,0 +1,1223 @@
+#!/usr/bin/env bash
+# 0493x13zi -- single common execution library for every scripts/run_ok_*.sh.
+# Physics/problem parameters belong in each public run_ok runner, not here.
+# This library owns only shared execution mechanics, preflight, directory handling,
+# the common root LiveVis control, and resolved-configuration display.
+# Common helpers for homogeneous SRC/MPCD CUDA run scripts, 0434c + 0492.
+# Source this file from scripts/run_0434_*.sh.  It centralizes:
+#   - INTEG_PATH selection: src | src-resampling | src-q6 | src-q6-resampling | src-q6-g-f
+#   - CUDA resident/Q6/resampling flags
+#   - gamma-relative resampling thresholds
+#   - livevis + 0433a WYSIWYR filtered recording controls
+#   - autonomous initial-state / chi generation.
+#   - 0492 run_ok preflight, LiveVis type filtering and optional 0490p species chain.
+
+set -euo pipefail
+
+suite_truthy_0434() {
+  case "${1:-0}" in 1|true|TRUE|yes|YES|on|ON|enable|enabled) return 0 ;; *) return 1 ;; esac
+}
+
+suite_path_has_q6_0434() {
+  case "${1:-src}" in
+    src-q6|q6|src-q6-resampling|q6-resampling|src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 0493x7h comparison mode.  This is deliberately distinct from src-q6:
+# src-q6 retains the previously validated Q6 path, while src-q6-g-f selects
+# the current free-surface/density-restoration Q6-g-f architecture.
+suite_path_has_q6_g_f_0493x7h() {
+  case "${1:-src}" in src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;; *) return 1 ;; esac
+}
+
+suite_mode_set_has_q6_g_f_0493x7h() {
+  local mode
+  while IFS= read -r mode; do
+    [[ -n "$mode" ]] || continue
+    if suite_path_has_q6_g_f_0493x7h "$mode"; then return 0; fi
+  done < <(suite_mode_list_0434)
+  return 1
+}
+
+suite_path_has_resampling_0434() {
+  case "${1:-src}" in src-resampling|resampling|src-q6-resampling|q6-resampling) return 0 ;; *) return 1 ;; esac
+}
+
+suite_species_resampling_active_0492() {
+  suite_path_has_resampling_0434 "${1:-src}" && suite_truthy_0434 "${SPECIES_RESAMPLING_ENABLE:-0}"
+}
+
+# 0493a universal resident routing.
+#
+# Boundary conditions select their own CUDA streaming/IO implementation, but
+# they no longer select a different species-resampling backend.
+#
+#   production : 0490m/0490n/0490p resident path for every supported topology.
+#   validation : explicit CPU/CUDA qualification path; never selected by auto.
+#
+# Historical aliases are accepted and routed to production so existing runners
+# do not silently re-enable the host-compatible path.
+suite_species_resident_mode_0493a() {
+  local mode="${1:-src}"
+  if ! suite_species_resampling_active_0492 "$mode"; then
+    printf 'off'
+    return 0
+  fi
+
+  local requested="${SPECIES_RESIDENT_MODE:-production}"
+  case "$requested" in
+    production|resident|fast|auto|compatible|transitional|host-compatible|host_compatible)
+      printf 'production'
+      ;;
+    validation)
+      printf 'validation'
+      ;;
+    *)
+      echo "[0493a-run-ok] ERROR unsupported SPECIES_RESIDENT_MODE=$requested; expected production or validation" >&2
+      return 2
+      ;;
+  esac
+}
+
+# Compatibility alias for existing 0492 callers.
+suite_species_resident_mode_0492a() {
+  suite_species_resident_mode_0493a "$@"
+}
+
+suite_validate_path_0434() {
+  case "${1:-src}" in
+    src|classic|src-resampling|resampling|src-q6|q6|src-q6-resampling|q6-resampling|src-q6-g-f|q6-g-f|src+q6-g-f) return 0 ;;
+    *) echo "[0434-suite] ERROR unsupported INTEG_PATH/RUN_MODE=$1" >&2; exit 2 ;;
+  esac
+}
+
+suite_bool_kv_0434() { if suite_truthy_0434 "${1:-0}"; then printf true; else printf false; fi; }
+suite_path_src_classic_kv_0434() { if suite_path_has_q6_0434 "${1:-src}"; then printf false; else printf true; fi; }
+suite_path_projection_kv_0434() { if suite_path_has_q6_0434 "${1:-src}"; then printf true; else printf false; fi; }
+suite_path_resampling_kv_0434() { if suite_path_has_resampling_0434 "${1:-src}"; then printf true; else printf false; fi; }
+
+suite_int_round_0434() {
+  python3 - "$1" <<'PY'
+import math, sys
+print(int(math.floor(float(sys.argv[1]) + 0.5)))
+PY
+}
+
+suite_int_ceil_0434() {
+  python3 - "$1" <<'PY'
+import math, sys
+print(int(math.ceil(float(sys.argv[1]))))
+PY
+}
+
+suite_compute_derived_0434() {
+  RESAMPLING_NMIN_COEF="${RESAMPLING_NMIN_COEF:-0.40}"
+  RESAMPLING_NMAX_COEF="${RESAMPLING_NMAX_COEF:-0.60}"
+  GUARD_NMIN="${GUARD_NMIN:-$(python3 - <<PY
+import math
+print(max(1, int(math.ceil(float(${GAMMA})*(1.0-float(${RESAMPLING_NMIN_COEF}))))))
+PY
+)}"
+  GUARD_NTARGET="${GUARD_NTARGET:-${GAMMA}}"
+  GUARD_NMAX="${GUARD_NMAX:-$(python3 - <<PY
+import math
+print(max(1, int(math.ceil(float(${GAMMA})*(1.0+float(${RESAMPLING_NMAX_COEF}))))))
+PY
+)}"
+  EMPTY_REFILL_GAMMA="${EMPTY_REFILL_GAMMA:-${GAMMA}}"
+  EMPTY_REFILL_REFERENCE="${EMPTY_REFILL_REFERENCE:-gamma}"
+  EMPTY_REFILL_TARGET_FRACTION="${EMPTY_REFILL_TARGET_FRACTION:-0.10}"
+  EMPTY_REFILL_MEMORY_MAX_AGE="${EMPTY_REFILL_MEMORY_MAX_AGE:-1000}"
+  INACTIVE_SLOTS="${INACTIVE_SLOTS:-$(python3 - <<PY
+import math
+print(int(math.ceil(float(${NX})*float(${NY})*float(${INACTIVE_SLOTS_CELL_FRACTION:-0.25}))))
+PY
+)}"
+}
+
+suite_root_cd_0434() {
+  ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)}"
+  cd "$ROOT"
+  GENERATOR_0434="${GENERATOR_0434:-scripts/src_mpcd_case_generator_0434.py}"
+  if [[ ! -f "$GENERATOR_0434" ]]; then
+    echo "[0434-suite] ERROR missing generator: $GENERATOR_0434" >&2
+    exit 127
+  fi
+}
+
+suite_mode_list_0434() {
+  # MODES is kept as a short alias for ad-hoc targeted runs.
+  # RUN_MODES remains the canonical variable used by the run_ok suite.
+  if [[ -n "${RUN_MODES:-}" ]]; then
+    printf '%s\n' $RUN_MODES
+  elif [[ -n "${MODES:-}" ]]; then
+    printf '%s\n' $MODES
+  elif [[ -n "${INTEG_PATH:-${SRC_INTEG_PATH:-}}" ]]; then
+    printf '%s\n' "${INTEG_PATH:-${SRC_INTEG_PATH:-src}}"
+  else
+    printf '%s\n' src src-resampling src-q6 src-q6-resampling
+  fi
+}
+
+suite_prepare_dirs_0434() {
+  local run_root=$1
+  if suite_truthy_0434 "${CLEAN_RUN_ROOT:-1}"; then rm -rf "$run_root"; fi
+  mkdir -p "$run_root/init" "$run_root/chi" "$run_root/params" "$run_root/logs" "$run_root/output" "$run_root/analysis"
+}
+
+suite_ensure_binary_0434() {
+  BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
+  FORCE_BUILD="${FORCE_BUILD:-0}"
+  AUTO_BUILD="${AUTO_BUILD:-1}"
+  BUILD_IF_STALE="${BUILD_IF_STALE:-1}"
+  local needs=0
+  if suite_truthy_0434 "$FORCE_BUILD" || [[ ! -x "$BIN" ]]; then
+    needs=1
+  elif suite_truthy_0434 "$BUILD_IF_STALE"; then
+    if find src include scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh -type f -newer "$BIN" -print -quit 2>/dev/null | grep -q .; then
+      needs=1
+    fi
+  fi
+  if [[ "$needs" == 1 ]]; then
+    if ! suite_truthy_0434 "$AUTO_BUILD"; then
+      echo "[0434-suite] ERROR missing/stale binary and AUTO_BUILD=0: $BIN" >&2
+      exit 127
+    fi
+    local helper="" helpers=()
+    if [[ "$BIN" == *livevis* ]]; then
+      helpers=(scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_0315b.sh)
+    else
+      helpers=(scripts/build_src_mpcd_cuda_q6_resident_0400.sh scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh scripts/build_src_mpcd_cuda_0315b.sh)
+    fi
+    for h in "${helpers[@]}"; do
+      [[ -f "$h" ]] && { helper="$h"; break; }
+    done
+    [[ -n "$helper" ]] || { echo "[0434-suite] ERROR no build helper found" >&2; exit 127; }
+    echo "[0434-suite] build $BIN using $helper"
+    MPCD_ENABLE_LIVE_VIS="${MPCD_ENABLE_LIVE_VIS:-1}" OUT="$BIN" bash "$helper"
+  fi
+  [[ -x "$BIN" ]] || { echo "[0434-suite] ERROR binary not executable: $BIN" >&2; exit 127; }
+}
+
+suite_clear_cuda_flags_0434() {
+  export MPCD_CUDA_STREAMING_PERIODIC_0245=0
+  export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=0
+  export MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260=0
+  export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=0
+  export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=0
+  export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264=0
+  export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=0
+  export MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A=0
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=0
+  export MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=0
+  export MPCD_CUDA_Q6_RESIDENT_SRC_STEP_0401=0
+  export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=0
+  export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=0
+  export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=0
+  export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+  # 0493x7h: clear every Q6-g-f opt-in so a preceding src-q6-g-f run cannot
+  # contaminate the legacy src/src-q6 comparison that follows it.
+  export MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C=0
+  export MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D=0
+  export MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E=0
+  export MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos
+  export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G=0
+  export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=0
+  export MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A=0
+  export MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B=0
+  export MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0=0
+  export MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1=0
+  export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+  export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
+}
+
+suite_export_cuda_flags_0434() {
+  local mode=$1 topology=$2
+  local species_resident_mode
+  species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+  SUITE_ACTIVE_MODE_0434="$mode"
+  SUITE_ACTIVE_TOPOLOGY_0434="$topology"
+  export SUITE_ACTIVE_MODE_0434 SUITE_ACTIVE_TOPOLOGY_0434
+  suite_clear_cuda_flags_0434
+
+  export MPCD_CUDA_INACTIVE_TAIL_POOL_0313="${MPCD_CUDA_INACTIVE_TAIL_POOL_0313:-1}"
+  export MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE="${MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE:-1}"
+  export MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE="${MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE:-1}"
+  export MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE="${MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_USE=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_STRICT=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SHARED_0251_STRICT=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_ACTIVE_STRICT=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_MINIMAL_DOWNLOAD_0257=1
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272="${MPCD_CUDA_PERSISTENT_SRC_COLLISION_DEVICE_ROTATION_0272:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321="${MPCD_CUDA_PERSISTENT_SRC_COLLISION_FAST_THERMOSTAT_DIAG_0321:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274="${MPCD_CUDA_PERSISTENT_SRC_COLLISION_FUSED_STREAM_DEPOSIT_0274:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272="${MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327="${MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_HOST_CELLID_FILL_0327:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1
+  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_STRICT=1
+  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT="${MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260="${MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260:-1}"
+  export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT="${MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT:-1}"
+
+  case "$topology" in
+    periodic)
+      export MPCD_CUDA_STREAMING_PERIODIC_0245=1
+      export MPCD_CUDA_CLASSIC_SRC_PERIODIC_RESIDENT_0260=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_STEP_0401=1; fi
+      ;;
+    wall)
+      export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
+      export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=1
+      export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=1; fi
+      ;;
+    closed_box)
+      export MPCD_CUDA_STREAMING_WALL_SIMPLE_0246=1
+      export MPCD_CUDA_CLASSIC_SRC_WALL_RESIDENT_0261=1
+      export MPCD_CUDA_PERSISTENT_SRC_COLLISION_WALL_SIMPLE_0253=1
+      export MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_WALL_STEP_0402=1; fi
+      ;;
+    io_fullface)
+      export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263=1
+      export MPCD_CUDA_CLASSIC_SRC_IO_FULLFACE_RESIDENT_0263_STRICT=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_IO_FULLFACE_0404=1; fi
+      ;;
+    segmented)
+      export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264=1
+      export MPCD_CUDA_CLASSIC_SRC_IO_SEGMENTED_RESIDENT_0264_STRICT=1
+      export MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B=1
+      if suite_path_has_q6_0434 "$mode"; then export MPCD_CUDA_Q6_RESIDENT_SRC_IO_SEGMENTED_0409=1; fi
+      ;;
+    *) echo "[0434-suite] ERROR unsupported topology=$topology" >&2; exit 2 ;;
+  esac
+
+  if suite_path_has_q6_0434 "$mode"; then
+    export MPCD_CUDA_Q6_RESIDENT_0400=1
+    export MPCD_CUDA_Q6_RESIDENT_STRICT_0400="${Q6_STRICT:-1}"
+    export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=1
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=0
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260=0
+    export MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_SHARED_0251_0260_STRICT=0
+  else
+    export MPCD_CUDA_Q6_RESIDENT_0400=0
+    export MPCD_CUDA_Q6_RESIDENT_STRICT_0400=0
+    export MPCD_CUDA_Q6_RESIDENT_THERMOSTAT_0400=0
+  fi
+
+  if suite_path_has_q6_g_f_0493x7h "$mode"; then
+    export MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C=1
+    export MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D=0
+    export MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E=1
+    export MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F=1
+    export MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A=0
+    export MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B=0
+    export MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0=0
+    export MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1=1
+
+    if suite_truthy_0434 "${Q6_GF_HAS_GAS_PHASE:-0}"; then
+      local cell_area gas_pressure_reference
+      cell_area="$(awk -v lx="$Lx" -v ly="$Ly" -v nx="$NX" -v ny="$NY" 'BEGIN{printf "%.17g",(lx/nx)*(ly/ny)}')"
+      gas_pressure_reference="${Q6_GF_GAS_PRESSURE_REFERENCE:-$(awk -v g="$GAMMA" -v t="$KBT" -v a="$cell_area" 'BEGIN{printf "%.17g",g*t/a}')}"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=1
+      export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos
+      export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G="$gas_pressure_reference"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G="$gas_pressure_reference"
+      export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=1
+    fi
+  fi
+
+  if suite_path_has_resampling_0434 "$mode"; then
+    # 0493b production: the shared CUDA particle state is authoritative. Keep the
+    # resident apply/remap chain and scalar reductions, while CPU/CUDA validation
+    # shadows, operation carriers and host particle patchback remain disabled.
+    RESAMPLING_PRODUCTION_STRIP="${RESAMPLING_PRODUCTION_STRIP:-1}"
+    RESAMPLING_DIAG_CSV_ENABLE="${RESAMPLING_DIAG_CSV_ENABLE:-0}"
+    RESAMPLING_FULL_GATE_ENABLE="${RESAMPLING_FULL_GATE_ENABLE:-0}"
+    RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE="${RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE:-0}"
+    RESAMPLING_UPSTREAM_VALIDATE_ENABLE="${RESAMPLING_UPSTREAM_VALIDATE_ENABLE:-0}"
+    local resampling_materializer_validate
+    resampling_materializer_validate="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}"
+    if [[ "$species_resident_mode" == validation ]]; then
+      resampling_materializer_validate=1
+    fi
+
+    export MPCD_CUDA_RESAMPLING_PRODUCTION_STRIP_0484="$RESAMPLING_PRODUCTION_STRIP"
+    export MPCD_CUDA_RESAMPLING_DIAG_CSV_0484="$RESAMPLING_DIAG_CSV_ENABLE"
+    export MPCD_CUDA_RESAMPLING_FULL_GATE_0484="$RESAMPLING_FULL_GATE_ENABLE"
+    export MPCD_CUDA_RESAMPLING_REMAP_CELL_COUNT_DIAG_0484="$RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE"
+
+    export MPCD_CUDA_RESAMPLING_PIPELINE_APPLY_0448=1
+    export MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_0455=1
+    export MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461="${RESAMPLING_SPARSE_DEVICE_GATE_ENABLE:-0}"
+    export MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_GATE_EVERY_0461="${RESIDENT_GATE_EVERY:-${SUMMARY_EVERY:-100}}"
+    export MPCD_CUDA_RESAMPLING_DIRECT_STATE_COMMIT_0471=1
+    export MPCD_CUDA_RESAMPLING_SHARED_STATE_DIRECT_COMMIT_0472=1
+    export MPCD_CUDA_RESAMPLING_HOST_PATCHBACK_0473="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_SHARED_STATE_0474=1
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_SHARED_STATE_0475="$resampling_materializer_validate"
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A="$resampling_materializer_validate"
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_CELL_LIST_0475B="$resampling_materializer_validate"
+    if [[ "$species_resident_mode" == validation ]]; then
+      export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=1
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453="${SPECIES_VALIDATION_MATERIALIZE_EVERY:-1}"
+    else
+      # 0493a production: the CUDA plan and CUDA materializer are authoritative.
+      # Do not rebuild or upload a CPU passive-operation vector.
+      export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+      export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
+    fi
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450="$RESAMPLING_UPSTREAM_VALIDATE_ENABLE"
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451="$RESAMPLING_UPSTREAM_VALIDATE_ENABLE"
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_EVERY_0450="${RESIDENT_GATE_EVERY:-${SUMMARY_EVERY:-100}}"
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_EVERY_0451="${RESIDENT_GATE_EVERY:-${SUMMARY_EVERY:-100}}"
+    export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295="${RESAMPLING_SURVEY_ENABLE:-1}"
+    export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295_EVERY="${RESAMPLING_SURVEY_EVERY:-${SUMMARY_EVERY:-100}}"
+    export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304="${RESAMPLING_ADAPTIVE_FLAG_ENABLE:-1}"
+    export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_EVERY="${FLAG_EVERY:-50}"
+    export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_NMIN="$GUARD_NMIN"
+    export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304_TRIGGER_EMPTY=1
+    if suite_species_resampling_active_0492 "$mode"; then
+      # 0491h-fix1b: 0296 is not species-conservative after typed split/merge.
+      export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296=0
+    else
+      export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296="${MASS_RECONDITION_ENABLE:-1}"
+    fi
+    export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_EVERY="${MASS_RECONDITION_EVERY:-${GUARD_EVERY:-5}}"
+    export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296_STRENGTH="${MASS_RECONDITION_STRENGTH:-1.0}"
+    export MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=1
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297=1
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_EVERY="${GUARD_EVERY:-5}"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NMIN="$GUARD_NMIN"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NTARGET="$GUARD_NTARGET"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_NMAX="$GUARD_NMAX"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297_SPLIT_FRACTION="${GUARD_SPLIT_FRACTION:-0.5}"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE="${BOUNDARY_AWARE:-1}"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_OPEN_BOUNDARY_HALO_CELLS="${OPEN_BOUNDARY_HALO_CELLS:-1}"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_HALO_CELLS="${BOUNDARY_HALO_CELLS:-0}"
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_SOLID_HALO_CELLS="${SOLID_HALO_CELLS:-0}"
+    export MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298="${RESTORE_ENABLE:-1}"
+    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307=1
+    export MPCD_CUDA_RESAMPLING_SPLIT_PREFER_MAX_MASS_DONOR_0307=1
+    export MPCD_CUDA_RESAMPLING_SPLIT_DONOR_MIN_MASS_0307="${SPLIT_DONOR_MIN_MASS:-0.5}"
+    export MPCD_CUDA_RESAMPLING_SPLIT_NEW_PARTICLE_MIN_MASS_0307="${SPLIT_NEW_PARTICLE_MIN_MASS:-0.25}"
+  else
+    export MPCD_CUDA_RESAMPLING_PRODUCTION_STRIP_0484=0
+    export MPCD_CUDA_RESAMPLING_DIAG_CSV_0484=0
+    export MPCD_CUDA_RESAMPLING_FULL_GATE_0484=0
+    export MPCD_CUDA_RESAMPLING_REMAP_CELL_COUNT_DIAG_0484=0
+    export MPCD_CUDA_RESAMPLING_PIPELINE_APPLY_0448=0
+    export MPCD_CUDA_RESAMPLING_DEVICE_CARRIER_0455=0
+    export MPCD_CUDA_RESAMPLING_SPARSE_DEVICE_CARRIER_GATE_0461=0
+    export MPCD_CUDA_RESAMPLING_DIRECT_STATE_COMMIT_0471=0
+    export MPCD_CUDA_RESAMPLING_SHARED_STATE_DIRECT_COMMIT_0472=0
+    export MPCD_CUDA_RESAMPLING_HOST_PATCHBACK_0473=0
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_SHARED_STATE_0474=0
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_SHARED_STATE_0475=0
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_ON_PLAN_0475A=0
+    export MPCD_CUDA_RESAMPLING_MATERIALIZER_CELL_LIST_0475B=0
+    export MPCD_CUDA_RESAMPLING_CPU_OP_CARRIER_0458=0
+    export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453=0
+    export MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_EVERY_0453=1
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_SHADOW_0450=0
+    export MPCD_CUDA_RESAMPLING_UPSTREAM_APPLY_0451=0
+    export MPCD_CUDA_RESAMPLING_SUPPORT_SURVEY_0295=0
+    export MPCD_CUDA_RESAMPLING_ADAPTIVE_FLAG_0304=0
+    export MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296=0
+    export MPCD_CUDA_RESAMPLING_EMPTY_REFILL_0319=0
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0297=0
+    export MPCD_CUDA_RESAMPLING_POPULATION_GUARD_0299_BOUNDARY_AWARE=0
+    export MPCD_CUDA_RESAMPLING_MOMENT_RESTORE_0298=0
+    export MPCD_CUDA_RESAMPLING_SPLIT_SAFETY_0307=0
+  fi
+}
+
+suite_prepare_livevis_control_0434() {
+  local run_root=${1:-} mode=${2:-}
+  LIVE_VIS_CONTROL_FILE="$ROOT/livevis_control.kv"
+  export LIVE_VIS_CONTROL_FILE
+  if [[ ! -f "$LIVE_VIS_CONTROL_FILE" ]]; then
+    echo "[run-ok-common] ERROR missing common LiveVis control: $LIVE_VIS_CONTROL_FILE" >&2
+    return 2
+  fi
+  # The root control file is user-maintained and authoritative.  A run_ok must
+  # never generate, rewrite, or clone it into a run directory.
+  OVERWRITE_LIVEVIS_CONTROL=0
+  export OVERWRITE_LIVEVIS_CONTROL
+  local sha=""
+  sha="$(sha256sum "$LIVE_VIS_CONTROL_FILE" 2>/dev/null | awk '{print $1}')"
+  echo "[run-ok-common] livevis=$LIVE_VIS_CONTROL_FILE sha256=${sha:-unavailable}"
+}
+
+suite_export_livevis_0434() {
+  export SRC_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+  export MPCD_LIVE_VIS_ENABLE="$LIVE_VIS_ENABLE"
+  export SRC_LIVE_VIS_FIELD="$LIVE_VIS_FIELD"
+  export SRC_LIVE_VIS_EVERY="$LIVE_VIS_EVERY"
+  export SRC_LIVE_VIS_NX="$LIVE_VIS_NX"
+  export SRC_LIVE_VIS_NY="$LIVE_VIS_NY"
+  export SRC_LIVE_VIS_CLIP="$LIVE_VIS_CLIP"
+  export SRC_LIVE_VIS_GAIN="$LIVE_VIS_GAIN"
+  export SRC_LIVE_VIS_SMOOTH_PASSES="$LIVE_VIS_SMOOTH_PASSES"
+  export SRC_LIVE_VIS_COLORMAP="$LIVE_VIS_COLORMAP"
+  export SRC_LIVE_VIS_WINDOW_SCALE="$LIVE_VIS_WINDOW_SCALE"
+  export SRC_LIVE_VIS_VSYNC="$LIVE_VIS_VSYNC"
+  export SRC_LIVE_VIS_CUDA_FIELD="$LIVE_VIS_CUDA_FIELD"
+  export SRC_LIVE_VIS_CUDA_SNAPSHOT="$LIVE_VIS_CUDA_SNAPSHOT"
+  export SRC_LIVE_VIS_LOG_SOURCE="$LIVE_VIS_LOG_SOURCE"
+  export SRC_LIVE_VIS_CONTROL_FILE="$LIVE_VIS_CONTROL_FILE"
+  export SRC_LIVE_VIS_CONTROL_EVERY="$LIVE_VIS_CONTROL_EVERY"
+  export SRC_LIVE_VIS_CONTROL_LOG="$LIVE_VIS_CONTROL_LOG"
+  export SRC_LIVE_VIS_HOLD_ON_EXIT="$LIVE_VIS_HOLD_ON_EXIT"
+  export MPCD_LIVE_VIS_HOLD_ON_EXIT="$LIVE_VIS_HOLD_ON_EXIT"
+  export SRC_LIVE_VIS_PARTICLE_TYPE_FILTER="$PARTICLE_TYPE_FILTER"
+  export MPCD_LIVE_VIS_PARTICLE_TYPE_FILTER="$PARTICLE_TYPE_FILTER"
+  export MPCD_FILTERED_FIELD_RECORDING_0432="$FILTERED_RECORDING_ENABLE"
+  export SRC_FILTERED_FIELD_RECORD_FIELDS="$RECORD_FIELDS"
+  export MPCD_FILTERED_FIELD_RECORD_FIELDS="$RECORD_FIELDS"
+  export SRC_FILTERED_FIELD_RECORD_EVERY="$RECORD_EVERY"
+  export MPCD_FILTERED_FIELD_RECORD_EVERY="$RECORD_EVERY"
+  export SRC_FILTERED_FIELD_SAMPLE_EVERY="$FILTER_SAMPLE_EVERY"
+  export MPCD_FILTERED_FIELD_SAMPLE_EVERY="$FILTER_SAMPLE_EVERY"
+  export LIVE_PROGRESS
+}
+
+# 0493x7h writes only parameters that distinguish Q6-g-f from the historical
+# src-q6 path.  Existing run_ok physics stays untouched in src and src-q6.
+suite_write_q6_g_f_params_0493x7h() {
+  local mode=$1
+  suite_path_has_q6_g_f_0493x7h "$mode" || return 0
+
+  local tau="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
+  local min_fill="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
+  local compression_gate=false
+  if suite_truthy_0434 "${Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE:-0}"; then
+    compression_gate=true
+  fi
+  local compression_threshold_particles="${Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES:-3.0}"
+  local compression_threshold_fill
+  compression_threshold_fill="$(awk -v n="$compression_threshold_particles" -v g="$GAMMA" 'BEGIN{
+    if (!(n>0) || !(g>0)) exit 2;
+    printf "%.17g", n/g
+  }')" || {
+    echo "[0493x7d-v2] ERROR compression threshold requires positive particle threshold and GAMMA" >&2
+    return 2
+  }
+  local traction_gain="${Q6_GF_DENSITY_TRACTION_GAIN:-0.0}"
+  local traction_threshold_particles="${Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES:-6.0}"
+  local traction_threshold_fill
+  traction_threshold_fill="$(awk -v n="$traction_threshold_particles" -v g="$GAMMA" 'BEGIN{
+    if (!(n>0) || !(g>0)) exit 2;
+    printf "%.17g", n/g
+  }')" || {
+    echo "[0493x7d-v2-signed1] ERROR traction threshold requires positive particle threshold and GAMMA" >&2
+    return 2
+  }
+  cat <<PARAMS
+q6ForceProjectionMode = prestream_single_fused
+projectionMomentumCorrectionEnable = false
+virialDensityKickEnable = false
+kVirial = 0.0
+betaEOS = 0.0
+virialMomentumCorrectionEnable = false
+q6DensityRelaxationBeta = 0.0
+q6DensityRelaxationTime = ${tau}
+q6DensityRelaxationCompressionGateEnable = ${compression_gate}
+q6DensityRelaxationCompressionThresholdFill = ${compression_threshold_fill}
+q6DensityRelaxationTractionThresholdFill = ${traction_threshold_fill}
+q6DensityRelaxationTractionGain = ${traction_gain}
+keepMeanFlowEnable = false
+PARAMS
+
+  if suite_truthy_0434 "${Q6_GF_EXTERNAL_SPECIES:-0}"; then
+    # The caller owns the species registry (two-phase injection/dam-break).
+    # Override only the Q6 mode and support threshold.
+    cat <<PARAMS
+speciesQ6Enable = true
+speciesQ6Mode = free_surface_masked
+speciesQ6MinOccupancyFraction = ${min_fill}
+PARAMS
+    return 0
+  fi
+
+  local q6_type="${Q6_GF_SINGLE_PHASE_TYPE:-${BACKGROUND_TYPE:-0}}"
+  local q6_mass="${Q6_GF_SINGLE_PHASE_PARTICLE_MASS:-${PARTICLE_MASS}}"
+  local q6_ref
+  q6_ref="$(awk -v g="$GAMMA" -v m="$q6_mass" 'BEGIN{printf "%.17g",g*m}')"
+  cat <<PARAMS
+speciesRegistryEnable = true
+speciesCount = 1
+species0 = ${q6_type} q6_g_f_liquid liquid 1.0 1.0 ${q6_ref}
+species0ResamplingEnable = false
+speciesRequireRegisteredTypes = true
+speciesDiagnosticsEnable = ${Q6_GF_SPECIES_DIAGNOSTICS_ENABLE:-false}
+speciesDiagnosticsFilename = species_runtime_q6_g_f_0493x7h.csv
+speciesCellDiagnosticsEnable = false
+speciesQ6Enable = true
+speciesQ6Mode = free_surface_masked
+speciesQ6Sensitivity = 1.0
+speciesQ6FallbackMode = common
+speciesQ6ComparisonTolerance = 1.0e-11
+speciesQ6MinOccupancyFraction = ${min_fill}
+PARAMS
+}
+
+suite_write_common_params_0434() {
+  local mode=$1
+  local path_resampling species_resampling=false
+  local species_resident_mode=off
+  local species_resident_validation=false
+  local species_resident_fast=false
+  local species_resident_deposits=false
+  local species_resident_pool=false
+  local species_resident_maintenance_strict=false
+  local thermal_renormalization mass_guard
+  path_resampling="$(suite_path_resampling_kv_0434 "$mode")"
+  if suite_species_resampling_active_0492 "$mode"; then
+    species_resampling=true
+    species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "${SUITE_ACTIVE_TOPOLOGY_0434:-${TOPOLOGY:-unknown}}")"
+    case "$species_resident_mode" in
+      production)
+        species_resident_fast=true
+        species_resident_deposits=true
+        species_resident_pool=true
+        species_resident_maintenance_strict=true
+        ;;
+      validation)
+        species_resident_validation=true
+        ;;
+      *)
+        echo "[0493a-run-ok] ERROR invalid resolved species resident mode=$species_resident_mode" >&2
+        return 2
+        ;;
+    esac
+    thermal_renormalization=false
+    mass_guard=false
+  else
+    thermal_renormalization="${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-true}"
+    mass_guard="${RESAMPLING_MASS_GUARD_ENABLE:-true}"
+  fi
+  cat <<PARAMS
+srcClassicCudaModeEnable = $(suite_path_src_classic_kv_0434 "$mode")
+projectionEnable = $(suite_path_projection_kv_0434 "$mode")
+projectionBackend = ${PROJECTION_BACKEND}
+projectionOperator = ${PROJECTION_OPERATOR}
+projectionMaxIterations = ${PROJECTION_MAX_ITERATIONS}
+projectionTolerance = ${PROJECTION_TOLERANCE}
+projectionMomentumCorrectionEnable = ${PROJECTION_MOMENTUM_CORRECTION_ENABLE}
+q6ProjectionStrength = ${Q6_PROJECTION_STRENGTH}
+resamplingEnable = ${WEIGHTED_RESAMPLING_ENABLE_OVERRIDE:-$path_resampling}
+cudaResamplingChiFilterEnable = ${CUDA_RESAMPLING_CHI_FILTER_ENABLE}
+cudaResamplingChiMin = ${CUDA_RESAMPLING_CHI_MIN}
+cudaResamplingEmptyRefillEnable = ${CUDA_EMPTY_REFILL_ENABLE_OVERRIDE:-$path_resampling}
+cudaResamplingEmptyRefillReference = ${EMPTY_REFILL_REFERENCE}
+cudaResamplingEmptyRefillGamma = ${EMPTY_REFILL_GAMMA}
+cudaResamplingEmptyRefillTargetFraction = ${EMPTY_REFILL_TARGET_FRACTION}
+cudaResamplingEmptyRefillMemoryMaxAge = ${EMPTY_REFILL_MEMORY_MAX_AGE}
+cudaResamplingEmptyRefillSpeciesCompositionEnable = ${species_resampling}
+speciesResamplingMassClosureEnable = ${species_resampling}
+speciesResamplingMassClosureCudaEnable = ${species_resampling}
+speciesResamplingPopulationGuardEnable = ${species_resampling}
+speciesResamplingPopulationGuardCudaEnable = ${species_resampling}
+speciesResamplingTransferEnable = ${species_resampling}
+speciesResamplingTransferCudaEnable = ${species_resampling}
+speciesResamplingCudaResidentValidationEnable = ${species_resident_validation}
+speciesResamplingCudaResidentFastPathEnable = ${species_resident_fast}
+speciesResamplingCudaResidentDepositsEnable = ${species_resident_deposits}
+speciesResamplingCudaResidentPoolEnable = ${species_resident_pool}
+speciesResamplingCudaResidentMaintenanceStrict = ${species_resident_maintenance_strict}
+resamplingPopulationNMin = ${GUARD_NMIN}
+resamplingPopulationNTarget = ${GUARD_NTARGET}
+resamplingPopulationNMax = ${GUARD_NMAX}
+resamplingTargetCellMass = ${GAMMA}
+resamplingWetMaskMode = occupied
+resamplingWetCellMassThreshold = 0.0
+resamplingExtractionEnable = ${RESAMPLING_EXTRACTION_ENABLE:-true}
+resamplingInsertionEnable = ${RESAMPLING_INSERTION_ENABLE:-true}
+resamplingRemapEnable = ${RESAMPLING_REMAP_ENABLE:-true}
+resamplingThermalRenormalizationEnable = ${thermal_renormalization}
+resamplingMassGuardEnable = ${mass_guard}
+resamplingParticleMassMin = ${RESAMPLING_PARTICLE_MASS_MIN:-0.5}
+resamplingParticleMassMax = ${RESAMPLING_PARTICLE_MASS_MAX:-2.0}
+resamplingLatentActivationEnable = false
+closedCapacityResponseEnable = false
+closedCapacityVirialKickEnable = false
+rotationAngle = ${ROTATION_ANGLE}
+randomRotationSign = ${RANDOM_ROTATION_SIGN}
+gridShiftEnable = ${GRID_SHIFT_ENABLE}
+rngSeed = ${SEED}
+thermostatEnable = ${THERMOSTAT_ENABLE}
+thermostatMode = ${THERMOSTAT_MODE}
+thermostatEvery = ${THERMOSTAT_EVERY}
+thermostatTargetKBT = ${THERMOSTAT_TARGET_KBT}
+thermostatMinParticles = ${THERMOSTAT_MIN_PARTICLES}
+kBT = ${KBT}
+summaryEvery = ${SUMMARY_EVERY}
+dumpStateEvery = ${DUMP_STATE_EVERY}
+summaryRoleFilter = ${SUMMARY_ROLE_FILTER}
+dumpRoleFilter = ${DUMP_ROLE_FILTER}
+initialInactiveSlots = ${INACTIVE_SLOTS}
+numThreads = ${THREADS}
+PARAMS
+  suite_write_q6_g_f_params_0493x7h "$mode"
+}
+
+suite_write_darcy_params_0434() {
+  local chi=$1 mode="${2:-${SUITE_ACTIVE_MODE_0434:-src}}"
+  local darcy_initial_deactivate="$DARCY_INITIAL_DEACTIVATE_BELOW_CHI"
+  if suite_path_has_q6_g_f_0493x7h "$mode" || suite_truthy_0434 "${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"; then
+    darcy_initial_deactivate=-1
+  fi
+  cat <<PARAMS
+darcyBrinkmanEnable = true
+darcyChiMode = file
+darcyChiFile = ${chi}
+darcyChiNx = ${NX}
+darcyChiNy = ${NY}
+darcyChiFileFormat = float32
+darcyAlphaMin = ${ALPHA_MIN}
+darcyAlphaMax = ${ALPHA}
+darcyQ = ${DARCY_Q}
+darcyUSolidX = ${DARCY_USOLID_X}
+darcyUSolidY = ${DARCY_USOLID_Y}
+darcyCostEvery = ${DARCY_COST_EVERY}
+darcyCostFilename = darcy_cost_0343.csv
+darcyThreadsPerBlock = ${DARCY_THREADS_PER_BLOCK}
+darcyInitialDeactivateBelowChi = ${darcy_initial_deactivate}
+darcyBrinkmanForcingMode = ${DARCY_BRINKMAN_FORCING_MODE}
+darcyChiCollisionVpEnable = ${DARCY_CHI_COLLISION_VP_ENABLE}
+darcyChiCollisionVpMode = ${DARCY_CHI_COLLISION_VP_MODE}
+darcyChiCollisionVpGamma = ${DARCY_CHI_COLLISION_VP_GAMMA}
+darcyChiCollisionVpMass = ${DARCY_CHI_COLLISION_VP_MASS}
+darcyChiCollisionVpLayers = ${DARCY_CHI_COLLISION_VP_LAYERS}
+darcyChiCollisionVpThreshold = ${DARCY_CHI_COLLISION_VP_THRESHOLD}
+darcyChiCollisionVpStrength = ${DARCY_CHI_COLLISION_VP_STRENGTH}
+topoBenchmarkEnable = ${TOPO_BENCHMARK_ENABLE}
+topoBenchmarkEvery = ${TOPO_BENCHMARK_EVERY}
+topoBenchmarkFilename = ${TOPO_BENCHMARK_FILENAME}
+topoBenchmarkForceEnable = ${TOPO_BENCHMARK_FORCE_ENABLE}
+topoBenchmarkDragLiftEnable = ${TOPO_BENCHMARK_DRAG_LIFT_ENABLE}
+topoBenchmarkFlowDirX = ${TOPO_BENCHMARK_FLOW_DIR_X}
+topoBenchmarkFlowDirY = ${TOPO_BENCHMARK_FLOW_DIR_Y}
+topoBenchmarkLiftDirX = ${TOPO_BENCHMARK_LIFT_DIR_X}
+topoBenchmarkLiftDirY = ${TOPO_BENCHMARK_LIFT_DIR_Y}
+PARAMS
+}
+
+suite_generate_case_0434() {
+  local state=$1 chi=${2:-}
+  local chi_args=()
+  [[ -n "$chi" ]] && chi_args=(--chi "$chi")
+  python3 "$GENERATOR_0434" \
+    --case "$GEN_CASE" --state "$state" "${chi_args[@]}" \
+    --Lx "$Lx" --Ly "$Ly" --Nx "$NX" --Ny "$NY" --gamma "$GAMMA" \
+    --kBT "$KBT" --mass "$PARTICLE_MASS" --seed "$SEED" --u0 "$U0" \
+    --velocity-mode "$VELOCITY_MODE" --background-type "$BACKGROUND_TYPE" \
+    --inactive-type "$INACTIVE_TYPE" --inactive-slots "$INACTIVE_SLOTS" \
+    --skip-solid-cells "$SKIP_SOLID_CELLS" --skip-solid-particles "$SKIP_SOLID_PARTICLES" \
+    --tg-hole-enable "$TG_HOLE_ENABLE" --hole-xmin "$HOLE_XMIN" --hole-xmax "$HOLE_XMAX" --hole-ymin "$HOLE_YMIN" --hole-ymax "$HOLE_YMAX" \
+    --step-xmin "$STEP_XMIN" --step-xmax "$STEP_XMAX" --step-ymin "$STEP_YMIN" --step-ymax "$STEP_YMAX" \
+    --cylinder-cx "$CYLINDER_CX" --cylinder-cy "$CYLINDER_CY" --cylinder-r "$CYLINDER_R" \
+    --bend-width "$BEND_WIDTH" --bend-xmid "$BEND_XMID" --bend-y-top "$BEND_Y_TOP" --bend-y-bottom "$BEND_Y_BOTTOM" \
+    --naca-chord "$NACA_CHORD" --naca-cx "$NACA_CX" --naca-cy "$NACA_CY" --naca-alpha-deg "$NACA_ALPHA_DEG" --naca-thickness "$NACA_THICKNESS"
+}
+
+# 0493x7h Darcy comparison generator.  Historical src/src-q6 keep the runner's
+# original solid-particle initialization.  Q6-g-f needs a filled fictitious
+# Brinkman domain so chi does not create a false liquid/gas free surface.
+# RUN_OK_DARCY_COMMON_FILLED_STATE=1 optionally forces the same filled state in
+# every mode for a second, projection-isolation comparison.
+suite_generate_case_for_mode_0493x7h() {
+  local mode=$1 state=$2 chi=${3:-}
+  local saved_skip_cells="$SKIP_SOLID_CELLS"
+  local saved_skip_particles="$SKIP_SOLID_PARTICLES"
+  if [[ -n "$chi" ]] && { suite_path_has_q6_g_f_0493x7h "$mode" || suite_truthy_0434 "${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"; }; then
+    SKIP_SOLID_CELLS=false
+    SKIP_SOLID_PARTICLES=false
+  fi
+  suite_generate_case_0434 "$state" "$chi"
+  SKIP_SOLID_CELLS="$saved_skip_cells"
+  SKIP_SOLID_PARTICLES="$saved_skip_particles"
+}
+
+suite_preflight_run_ok_0492() {
+  local params=$1
+  local mode="${SUITE_ACTIVE_MODE_0434:-unknown}"
+  local topology="${SUITE_ACTIVE_TOPOLOGY_0434:-unknown}"
+  [[ -f "$params" ]] || { echo "[0492-run-ok] ERROR missing params: $params" >&2; return 2; }
+
+  if suite_truthy_0434 "$LIVE_VIS_ENABLE"; then
+    [[ -f "$LIVE_VIS_CONTROL_FILE" ]] || { echo "[0492-run-ok] ERROR missing LiveVis control: $LIVE_VIS_CONTROL_FILE" >&2; return 2; }
+    grep -Eq '^[[:space:]]*field[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis field missing" >&2; return 2; }
+    grep -Eq '^[[:space:]]*particleTypeFilter[[:space:]]*=' "$LIVE_VIS_CONTROL_FILE" || { echo "[0492-run-ok] ERROR LiveVis particleTypeFilter missing" >&2; return 2; }
+  fi
+
+  if suite_path_has_q6_g_f_0493x7h "$mode"; then
+    [[ "${MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C:-0}" == 1 &&
+       "${MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F:-0}" == 1 &&
+       "${MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1:-0}" == 1 ]] || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires x6c+x6f+B1 resident flags" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6ForceProjectionMode[[:space:]]*=[[:space:]]*prestream_single_fused([[:space:]]|$)' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires q6ForceProjectionMode=prestream_single_fused" >&2; return 2; }
+    grep -Eq '^[[:space:]]*speciesQ6Mode[[:space:]]*=[[:space:]]*free_surface_masked([[:space:]]|$)' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f requires speciesQ6Mode=free_surface_masked" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTime[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7h-run-ok] ERROR src-q6-g-f density-restoration time missing" >&2; return 2; }
+    if suite_truthy_0434 "${Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE:-0}"; then
+      grep -Eq '^[[:space:]]*q6DensityRelaxationCompressionGateEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+        echo "[0493x7d-v2-run-ok] ERROR compression gate enable missing" >&2; return 2; }
+      grep -Eq '^[[:space:]]*q6DensityRelaxationCompressionThresholdFill[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+        echo "[0493x7d-v2-run-ok] ERROR compression threshold fill missing" >&2; return 2; }
+    fi
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTractionThresholdFill[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7d-v2-signed1-run-ok] ERROR traction threshold fill missing" >&2; return 2; }
+    grep -Eq '^[[:space:]]*q6DensityRelaxationTractionGain[[:space:]]*=[[:space:]]*[0-9.eE+-]+' "$params" || {
+      echo "[0493x7d-v2-signed1-run-ok] ERROR traction gain missing" >&2; return 2; }
+    if grep -Eq '^[[:space:]]*darcyBrinkmanEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params"; then
+      grep -Eq '^[[:space:]]*darcyInitialDeactivateBelowChi[[:space:]]*=[[:space:]]*-[0-9.eE+]+' "$params" || {
+        echo "[0493x7h-run-ok] ERROR Q6-g-f Darcy requires darcyInitialDeactivateBelowChi<0" >&2; return 2; }
+    fi
+  fi
+
+  if [[ "$topology" == closed_box ]]; then
+    [[ "${MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1:-0}" == 1 ]] || {
+      echo "[0493x1-run-ok] ERROR closed_box topology requires MPCD_CUDA_WALL_SIMPLE_CLOSED_BOX_0493X1=1" >&2
+      return 2
+    }
+    grep -Eq '^[[:space:]]*openBoundarySegmentsEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0493x1-run-ok] ERROR closed_box requires openBoundarySegmentsEnable=false" >&2; return 2; }
+    grep -Eq '^[[:space:]]*openBoundarySegmentCount[[:space:]]*=[[:space:]]*0([[:space:]]|$)' "$params" || {
+      echo "[0493x1-run-ok] ERROR closed_box requires openBoundarySegmentCount=0" >&2; return 2; }
+    local face bc
+    for face in Left Right Bottom Top; do
+      bc="$(awk -F= -v key="bc${face}" '$1 ~ "^[[:space:]]*" key "[[:space:]]*$" {gsub(/[[:space:]]/, "", $2); value=$2} END{print value}' "$params")"
+      case "$bc" in
+        solid|specular) ;;
+        *) echo "[0493x1-run-ok] ERROR closed_box bc${face}=$bc unsupported: use solid or specular" >&2; return 2 ;;
+      esac
+    done
+  fi
+
+  if suite_species_resampling_active_0492 "$mode"; then
+    local key
+    grep -Eq '^[[:space:]]*speciesRegistryEnable[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+      echo "[0492a-run-ok] ERROR species path requires speciesRegistryEnable=true" >&2; return 2; }
+    grep -Eq '^[[:space:]]*speciesRequireRegisteredTypes[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$params" || {
+      echo "[0492a-run-ok] ERROR species path requires speciesRequireRegisteredTypes=true" >&2; return 2; }
+    for key in \
+      cudaResamplingEmptyRefillEnable \
+      cudaResamplingEmptyRefillSpeciesCompositionEnable \
+      speciesResamplingMassClosureEnable \
+      speciesResamplingMassClosureCudaEnable \
+      speciesResamplingPopulationGuardEnable \
+      speciesResamplingPopulationGuardCudaEnable \
+      speciesResamplingTransferEnable \
+      speciesResamplingTransferCudaEnable; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true([[:space:]]|$)" "$params" || {
+        echo "[0492-run-ok] ERROR species-resampling key not enabled: $key" >&2
+        return 2
+      }
+    done
+    local species_resident_mode
+    species_resident_mode="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+    local expect_true=() expect_false=()
+    case "$species_resident_mode" in
+      production)
+        expect_true=(
+          speciesResamplingCudaResidentFastPathEnable
+          speciesResamplingCudaResidentDepositsEnable
+          speciesResamplingCudaResidentPoolEnable
+          speciesResamplingCudaResidentMaintenanceStrict
+        )
+        expect_false=(speciesResamplingCudaResidentValidationEnable)
+        ;;
+      validation)
+        expect_true=(speciesResamplingCudaResidentValidationEnable)
+        expect_false=(
+          speciesResamplingCudaResidentFastPathEnable
+          speciesResamplingCudaResidentDepositsEnable
+          speciesResamplingCudaResidentPoolEnable
+          speciesResamplingCudaResidentMaintenanceStrict
+        )
+        [[ "${MPCD_CUDA_RESAMPLING_OPERATION_MATERIALIZE_0453:-0}" == 1 ]] || {
+          echo "[0493a-run-ok] ERROR validation mode requires CUDA operation materializer 0453" >&2
+          return 2
+        }
+        ;;
+      *)
+        echo "[0493a-run-ok] ERROR invalid species resident mode=$species_resident_mode" >&2
+        return 2
+        ;;
+    esac
+    for key in "${expect_true[@]}"; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true([[:space:]]|$)" "$params" || {
+        echo "[0492a-run-ok] ERROR expected $key=true for speciesResident=$species_resident_mode" >&2; return 2; }
+    done
+    for key in "${expect_false[@]}"; do
+      grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*false([[:space:]]|$)" "$params" || {
+        echo "[0492a-run-ok] ERROR expected $key=false for speciesResident=$species_resident_mode" >&2; return 2; }
+    done
+    grep -Eq '^[[:space:]]*resamplingThermalRenormalizationEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0492-run-ok] ERROR species path requires resamplingThermalRenormalizationEnable=false" >&2; return 2; }
+    grep -Eq '^[[:space:]]*resamplingMassGuardEnable[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$params" || {
+      echo "[0492-run-ok] ERROR species path requires resamplingMassGuardEnable=false" >&2; return 2; }
+    [[ "${MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296:-1}" == 0 ]] || {
+      echo "[0492-run-ok] ERROR species path requires 0296 disabled" >&2; return 2; }
+  fi
+
+  local resident_summary=off
+  if suite_species_resampling_active_0492 "$mode"; then
+    resident_summary="$(suite_species_resident_mode_0492a "$mode" "$topology")"
+  fi
+  echo "[0493a-run-ok] preflight=PASS mode=$mode topology=$topology binary=$BIN livevis=$LIVE_VIS_ENABLE particleTypeFilter=$PARTICLE_TYPE_FILTER speciesResampling=${SPECIES_RESAMPLING_ENABLE:-0} speciesResident=$resident_summary 0296=${MPCD_CUDA_RESAMPLING_MASS_RECONDITION_0296:-0}"
+}
+
+# -----------------------------------------------------------------------------
+# Optional free-surface mechanics used by liquid run_ok demonstrations.
+# IMPORTANT: this common library defines no physical defaults.  Every caller
+# must declare the values below visibly in its own USER EDIT ZONE.
+# -----------------------------------------------------------------------------
+run_ok_surface_require_value_0493x13zi() {
+  local name=${1:?}
+  [[ -n "${!name+x}" ]] || {
+    echo "[run-ok-common] ERROR runner did not define required surface parameter: $name" >&2
+    return 2
+  }
+}
+
+run_ok_surface_append_params_0493x13zi() {
+  local params=${1:?} phase_a=${2:?} phase_b=${3:?}
+  for v in SURFACE_TENSION_SIGMA SURFACE_TENSION_MIN_RADIUS_CELLS PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION PHASE_INTERFACE_EVAPORATION_TARGET_TYPE PHASE_INTERFACE_CONTACT_ANGLE_DEG; do
+    run_ok_surface_require_value_0493x13zi "$v" || return $?
+  done
+  cat >> "$params" <<PARAMS_0493X13ZI
+surfaceTensionSigma = $SURFACE_TENSION_SIGMA
+surfaceTensionMinRadiusCells = $SURFACE_TENSION_MIN_RADIUS_CELLS
+phaseInterfaceKineticReflectionFraction = $PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION
+phaseInterfaceEvaporationTargetType = $PHASE_INTERFACE_EVAPORATION_TARGET_TYPE
+phaseInterfaceASelector = $phase_a
+phaseInterfaceBSelector = $phase_b
+phaseInterfaceContactAngleDegrees = $PHASE_INTERFACE_CONTACT_ANGLE_DEG
+PARAMS_0493X13ZI
+}
+
+run_ok_surface_export_off_flags_0493x13zi() {
+  export MPCD_X10J_SIMPLE_SPECULAR_ABLATION=0
+  export MPCD_X10K_LOCAL_FRAME_SPECULAR_ABLATION=0
+  export MPCD_X10M_MOVING_INTERFACE_WALL=0
+  export MPCD_X10N_Q6_CONTINUOUS_INTERFACE_WALL=0
+  export MPCD_X10O_Q6_THERMAL_INTERFACE_WALL=0
+  export MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS=0
+  export MPCD_X10_KINETIC_INTERFACE_CIC=0
+  export MPCD_X10_KINETIC_INTERFACE_QUADRATIC=0
+  export MPCD_X10P_INITIAL_OVERLAP_RESOLUTION=0
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE=0
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_SWAP=0
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY=0
+  export MPCD_X10R_Q6_THERMAL_FULL_VECTOR_ENDPOINT_VELOCITY=0
+  export MPCD_X10S_Q6_THERMAL_SEGMENT_NORMAL_KINEMATICS=0
+  export MPCD_X10T_Q6_THERMAL_RIGID_TANGENTIAL_KINEMATICS=0
+  export MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER=0
+  export MPCD_X12A_LOCAL_THERMAL_COOLING=0
+}
+
+run_ok_surface_export_qualified_liquid_vacuum_flags_0493x13zi() {
+  local liquid_mass=${1:?}
+  for v in X10O_THERMAL_SIGMAS X10O_THERMAL_MAX_CELLS X12A_LOCAL_THERMAL_RADIUS_CELLS PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION; do
+    run_ok_surface_require_value_0493x13zi "$v" || return $?
+  done
+  if [[ "${PHASE_INTERFACE_B_SELECTOR:-}" != vacuum ]]; then
+    echo "[run-ok-common] ERROR qualified x10u/x10v/x12a closure is liquid/vacuum only; B=${PHASE_INTERFACE_B_SELECTOR:-unset}" >&2
+    return 2
+  fi
+  python3 - "$PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION" "$X12A_LOCAL_THERMAL_RADIUS_CELLS" "$liquid_mass" <<'PY_SURFACE'
+import math,sys
+r,rc,m=map(float,sys.argv[1:])
+if not (math.isfinite(r) and abs(r-1.0)<=1e-12): raise SystemExit('[run-ok-common] qualified kinetic closure requires reflection fraction=1')
+if not (math.isfinite(rc) and rc>0): raise SystemExit('[run-ok-common] x12a radius must be finite and >0')
+if not (math.isfinite(m) and m>0): raise SystemExit('[run-ok-common] liquid particle mass must be finite and >0')
+PY_SURFACE
+  export MPCD_X10J_SIMPLE_SPECULAR_ABLATION=0
+  export MPCD_X10K_LOCAL_FRAME_SPECULAR_ABLATION=0
+  export MPCD_X10M_MOVING_INTERFACE_WALL=0
+  export MPCD_X10N_Q6_CONTINUOUS_INTERFACE_WALL=0
+  export MPCD_X10O_Q6_THERMAL_INTERFACE_WALL=1
+  export MPCD_X10O_THERMAL_PARTICLE_MASS="$liquid_mass"
+  export MPCD_X10O_THERMAL_SIGMAS="$X10O_THERMAL_SIGMAS"
+  export MPCD_X10O_THERMAL_MAX_CELLS="$X10O_THERMAL_MAX_CELLS"
+  export MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS=0
+  export MPCD_X10_KINETIC_INTERFACE_CIC=1
+  export MPCD_X10_KINETIC_INTERFACE_QUADRATIC=1
+  export MPCD_X10P_INITIAL_OVERLAP_RESOLUTION=1
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE=1
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_SWAP=1
+  export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY=0
+  export MPCD_X10R_Q6_THERMAL_FULL_VECTOR_ENDPOINT_VELOCITY=0
+  export MPCD_X10S_Q6_THERMAL_SEGMENT_NORMAL_KINEMATICS=0
+  export MPCD_X10T_Q6_THERMAL_RIGID_TANGENTIAL_KINEMATICS=0
+  export MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER=0
+  export MPCD_X12A_LOCAL_THERMAL_COOLING=1
+  export MPCD_X12A_LOCAL_THERMAL_RADIUS_CELLS="$X12A_LOCAL_THERMAL_RADIUS_CELLS"
+}
+
+run_ok_surface_print_0493x13zi() {
+  local profile=${1:?}
+  echo "[run-ok-common] surfaceProfile=$profile sigma=${SURFACE_TENSION_SIGMA:-unset} rmin/h=${SURFACE_TENSION_MIN_RADIUS_CELLS:-unset} A=${PHASE_INTERFACE_A_SELECTOR:-unset} B=${PHASE_INTERFACE_B_SELECTOR:-unset}"
+  echo "[run-ok-common] kineticReflection=${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-unset} contact=${PHASE_INTERFACE_CONTACT_ANGLE_DEG:-unset} x12aRc/h=${X12A_LOCAL_THERMAL_RADIUS_CELLS:-off}"
+}
+# -----------------------------------------------------------------------------
+
+suite_livevis_value_0493x13zj() {
+  local key=$1 file="$ROOT/livevis_control.kv"
+  [[ -f "$file" ]] || return 0
+  awk -F= -v want="$key" '
+    { line=$0; sub(/#.*/,"",line); if(index(line,"=")==0) next;
+      split(line,a,"="); k=a[1]; gsub(/[[:space:]_]/,"",k); k=tolower(k);
+      v=substr(line,index(line,"=")+1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+      w=want; gsub(/[[:space:]_]/,"",w); w=tolower(w); if(k==w && v!="") val=v }
+    END { if(val!="") print val }' "$file"
+}
+
+suite_livevis_value_0493x13zj() {
+  local key=$1 file="$ROOT/livevis_control.kv"
+  [[ -f "$file" ]] || return 0
+  awk -F= -v want="$key" '
+    { line=$0; sub(/#.*/,"",line); if(index(line,"=")==0) next;
+      split(line,a,"="); k=a[1]; gsub(/[[:space:]_]/,"",k); k=tolower(k);
+      v=substr(line,index(line,"=")+1); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+      w=want; gsub(/[[:space:]_]/,"",w); w=tolower(w); if(k==w && v!="") val=v }
+    END { if(val!="") print val }' "$file"
+}
+
+suite_print_effective_run_0493x13zi() {
+  local params=${1:?} log=${2:?} time=${3:?} out=${4:?}
+  local mode="${SUITE_ACTIVE_MODE_0434:-${RUN_MODE:-unknown}}" state=""
+  [[ -f "$params" ]] && state="$(awk -F= '$1 ~ /^[[:space:]]*inputState[[:space:]]*$/ {v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); print v; exit}' "$params")"
+  local runner="${RUN_OK_ENTRYPOINT:-unknown}" generator="${RUN_OK_GENERATOR_PATH:-${GENERATOR_0434:-none}}"
+  local hinfo lambda ref_mass provider_mass
+  ref_mass="${RUN_OK_REFERENCE_PARTICLE_MASS:-${LIQUID_PARTICLE_MASS:-${LIQUID_MASS:-${PARTICLE_MASS:-1}}}}"
+  provider_mass="${PARTICLE_MASS:-$ref_mass}"
+  hinfo="$(python3 - "$Lx" "$Ly" "$NX" "$NY" <<'PY_H'
+import sys
+lx,ly,nx,ny=float(sys.argv[1]),float(sys.argv[2]),int(sys.argv[3]),int(sys.argv[4])
+print(f"hx={lx/nx:.12g} hy={ly/ny:.12g}")
+PY_H
+)"
+  lambda="$(python3 - "$KBT" "$ref_mass" "$DT" "$Lx" "$NX" <<'PY_L'
+import math,sys
+k,m,dt,lx,nx=float(sys.argv[1]),float(sys.argv[2]),float(sys.argv[3]),float(sys.argv[4]),int(sys.argv[5])
+h=lx/nx; print(f"{math.sqrt(math.pi*k/(2*m))*dt/h:.8g}")
+PY_L
+)"
+  local le re rf fs gx gy
+  le="$(suite_livevis_value_0493x13zj liveEvery)"; [[ -n "$le" ]] || le="$LIVE_VIS_EVERY"
+  re="$(suite_livevis_value_0493x13zj recordEvery)"; [[ -n "$re" ]] || re="$RECORD_EVERY"
+  rf="$(suite_livevis_value_0493x13zj recordFields)"; [[ -n "$rf" ]] || rf="$RECORD_FIELDS"
+  fs="$(suite_livevis_value_0493x13zj filterSampleEvery)"; [[ -n "$fs" ]] || fs="$FILTER_SAMPLE_EVERY"
+  gx="$(suite_livevis_value_0493x13zj liveGridNx)"; [[ -n "$gx" ]] || gx="$LIVE_VIS_NX"
+  gy="$(suite_livevis_value_0493x13zj liveGridNy)"; [[ -n "$gy" ]] || gy="$LIVE_VIS_NY"
+  local ren="$(suite_livevis_value_0493x13zj recordEnable)"; [[ -n "$ren" ]] || ren="$RECORD_ENABLE"
+
+  echo "===== RUN_OK ${CASE_LABEL:-case} ====="
+  echo "PATHS: runner=$runner generator=$generator binary=$BIN"
+  echo "       state=${state:-<runner>} params=$params output=$out log=$log livevis=$ROOT/livevis_control.kv"
+  echo "FLUID: domain=${Lx}x${Ly} grid=${NX}x${NY} $hinfo gamma=$GAMMA referenceMass=$ref_mass"
+  if [[ "$provider_mass" != "$ref_mass" ]]; then echo "       activeProviderMass=$provider_mass (secondary/background phase)"; fi
+  echo "       kBT=$KBT dt=$DT rotation=${ROTATION_ANGLE:-n/a} lambda/h=$lambda gridShift=${GRID_SHIFT_ENABLE:-n/a} thermostat=${THERMOSTAT_MODE:-n/a}/every${THERMOSTAT_EVERY:-n/a}"
+  echo "RUN:   mode=$mode steps=$STEPS summaryEvery=${SUMMARY_EVERY:-n/a} dumpEvery=${DUMP_STATE_EVERY:-n/a} preflight=${PREFLIGHT_ONLY:-0}"
+  echo "LIVE:  grid=${gx}x${gy} liveEvery=$le recordEnable=$ren recordFields=$rf recordEvery=$re filterSampleEvery=$fs"
+  echo "================================"
+}
+suite_run_binary_0434() {
+  local params_file=$1 log=$2 time=$3 out=$4
+  suite_prepare_livevis_control_0434 "${RUN_ROOT:-}" "${SUITE_ACTIVE_MODE_0434:-${RUN_MODE:-unknown}}"
+  suite_export_livevis_0434
+  if ! suite_truthy_0434 "${PREFLIGHT_ONLY:-0}"; then
+    suite_ensure_binary_0434
+  fi
+  suite_preflight_run_ok_0492 "$params_file"
+  suite_print_effective_run_0493x13zi "$params_file" "$log" "$time" "$out"
+  echo "[0434-suite] binary=$BIN"
+  echo "[0434-suite] params=$params_file"
+  echo "[0434-suite] output=$out"
+  if suite_truthy_0434 "${PREFLIGHT_ONLY:-0}"; then
+    echo "[0493a-run-ok] PREFLIGHT_ONLY=1: binary launch skipped"
+    return 0
+  fi
+  local rc=0
+  /usr/bin/time -o "$time" -f 'elapsed=%e user=%U sys=%S' "$BIN" "$params_file" | tee "$log" || rc=$?
+  if [[ "$rc" != 0 ]]; then
+    echo "[0434-suite] ERROR rc=$rc" >&2
+    tail -80 "$log" >&2 || true
+    return "$rc"
+  fi
+  echo "[0434-suite] time=$(cat "$time")"
+}
+
+suite_write_env_file_0434() {
+  local file=$1 mode=$2
+  mkdir -p "$(dirname "$file")"
+  env | grep -E '^(MPCD_CUDA_|MPCD_Q6_|SRC_LIVE_VIS_|MPCD_LIVE_VIS_|MPCD_FILTERED_FIELD_RECORDING_0432=|LIVE_PROGRESS=|OMP_|BIN=|INTEG_PATH=|SRC_INTEG_PATH=|RUN_MODES=|MODES=|SRC_MPCD_DEFAULT_BIN_0434=|NX=|NY=|GAMMA=|U0=|UIN=|KBT=|DT=|ALPHA=|DARCY_|TOPO_)' | sort > "$file"
+  cat >> "$file" <<META
+mode=${mode}
+GUARD_NMIN=${GUARD_NMIN}
+GUARD_NTARGET=${GUARD_NTARGET}
+GUARD_NMAX=${GUARD_NMAX}
+RESAMPLING_NMIN_COEF=${RESAMPLING_NMIN_COEF}
+RESAMPLING_NMAX_COEF=${RESAMPLING_NMAX_COEF}
+INACTIVE_SLOTS=${INACTIVE_SLOTS}
+LIVE_VIS_CONTROL_FILE=${LIVE_VIS_CONTROL_FILE}
+LIVE_PROGRESS=${LIVE_PROGRESS}
+PARTICLE_TYPE_FILTER=${PARTICLE_TYPE_FILTER}
+PREFLIGHT_ONLY=${PREFLIGHT_ONLY}
+SPECIES_RESAMPLING_ENABLE=${SPECIES_RESAMPLING_ENABLE}
+SPECIES_RESIDENT_MODE=${SPECIES_RESIDENT_MODE}
+SPECIES_RESIDENT_MODE_RESOLVED=$(suite_species_resident_mode_0492a "$mode" "${SUITE_ACTIVE_TOPOLOGY_0434:-${TOPOLOGY:-unknown}}")
+SPECIES_VALIDATION_MATERIALIZE_EVERY=${SPECIES_VALIDATION_MATERIALIZE_EVERY}
+Q6_GF_ACTIVE=$(suite_path_has_q6_g_f_0493x7h "$mode" && printf 1 || printf 0)
+Q6_GF_DENSITY_RELAXATION_TIME=${Q6_GF_DENSITY_RELAXATION_TIME}
+Q6_GF_MIN_FILL_FRACTION=${Q6_GF_MIN_FILL_FRACTION}
+Q6_GF_HAS_GAS_PHASE=${Q6_GF_HAS_GAS_PHASE}
+Q6_GF_EXTERNAL_SPECIES=${Q6_GF_EXTERNAL_SPECIES}
+RUN_OK_DARCY_COMMON_FILLED_STATE=${RUN_OK_DARCY_COMMON_FILLED_STATE}
+META
+}
+
+suite_defaults_common_0434() {
+  THREADS="${THREADS:-8}"
+  export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$THREADS}"
+  export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
+  export OMP_PLACES="${OMP_PLACES:-cores}"
+  export OMP_DYNAMIC="${OMP_DYNAMIC:-false}"
+
+  BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
+  CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+  PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+  LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+  export LIVE_PROGRESS
+  PARTICLE_MASS="${PARTICLE_MASS:-1.0}"
+  BACKGROUND_TYPE="${BACKGROUND_TYPE:-0}"
+  INACTIVE_TYPE="${INACTIVE_TYPE:-0}"
+  SKIP_SOLID_CELLS="${SKIP_SOLID_CELLS:-true}"
+  SKIP_SOLID_PARTICLES="${SKIP_SOLID_PARTICLES:-true}"
+
+  SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
+  DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
+  RESAMPLING_PRODUCTION_STRIP="${RESAMPLING_PRODUCTION_STRIP:-1}"
+  RESAMPLING_DIAG_CSV_ENABLE="${RESAMPLING_DIAG_CSV_ENABLE:-0}"
+  RESAMPLING_FULL_GATE_ENABLE="${RESAMPLING_FULL_GATE_ENABLE:-0}"
+  RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE="${RESAMPLING_REMAP_CELL_COUNT_DIAG_ENABLE:-0}"
+  RESAMPLING_UPSTREAM_VALIDATE_ENABLE="${RESAMPLING_UPSTREAM_VALIDATE_ENABLE:-0}"
+  RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE="${RESAMPLING_OPERATION_MATERIALIZER_VALIDATE_ENABLE:-0}"
+  RESAMPLING_HOST_PATCHBACK_ENABLE="${RESAMPLING_HOST_PATCHBACK_ENABLE:-0}"
+  SPECIES_RESAMPLING_ENABLE="${SPECIES_RESAMPLING_ENABLE:-false}"
+  SPECIES_RESIDENT_MODE="${SPECIES_RESIDENT_MODE:-production}"
+  SPECIES_VALIDATION_MATERIALIZE_EVERY="${SPECIES_VALIDATION_MATERIALIZE_EVERY:-1}"
+  DUMP_ROLE_FILTER="${DUMP_ROLE_FILTER:-fluid}"
+  SUMMARY_ROLE_FILTER="${SUMMARY_ROLE_FILTER:-fluid}"
+
+  PROJECTION_BACKEND="${PROJECTION_BACKEND:-cuda}"
+  PROJECTION_OPERATOR="${PROJECTION_OPERATOR:-auto_fv_cg}"
+  PROJECTION_MAX_ITERATIONS="${PROJECTION_MAX_ITERATIONS:-800}"
+  PROJECTION_TOLERANCE="${PROJECTION_TOLERANCE:-1e-10}"
+  PROJECTION_MOMENTUM_CORRECTION_ENABLE="${PROJECTION_MOMENTUM_CORRECTION_ENABLE:-true}"
+  Q6_PROJECTION_STRENGTH="${Q6_PROJECTION_STRENGTH:-1.0}"
+  Q6_STRICT="${Q6_STRICT:-1}"
+  Q6_GF_DENSITY_RELAXATION_TIME="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
+  Q6_GF_MIN_FILL_FRACTION="${Q6_GF_MIN_FILL_FRACTION:-0.10}"
+  Q6_GF_HAS_GAS_PHASE="${Q6_GF_HAS_GAS_PHASE:-0}"
+  Q6_GF_EXTERNAL_SPECIES="${Q6_GF_EXTERNAL_SPECIES:-0}"
+  RUN_OK_DARCY_COMMON_FILLED_STATE="${RUN_OK_DARCY_COMMON_FILLED_STATE:-0}"
+
+  ROTATION_ANGLE="${ROTATION_ANGLE:-1.5}"
+  RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
+  GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
+  THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"
+  THERMOSTAT_MODE="${THERMOSTAT_MODE:-cell_relative_rescale}"
+  THERMOSTAT_EVERY="${THERMOSTAT_EVERY:-1}"
+  THERMOSTAT_TARGET_KBT="${THERMOSTAT_TARGET_KBT:--1.0}"
+  THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
+
+  CUDA_RESAMPLING_CHI_FILTER_ENABLE="${CUDA_RESAMPLING_CHI_FILTER_ENABLE:-false}"
+  CUDA_RESAMPLING_CHI_MIN="${CUDA_RESAMPLING_CHI_MIN:-0.05}"
+
+  LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
+  LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-density}"
+  LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"
+  LIVE_VIS_NX="${LIVE_VIS_NX:-$NX}"
+  LIVE_VIS_NY="${LIVE_VIS_NY:-$NY}"
+  LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"
+  LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
+  LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-0}"
+  LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-gray}"
+  LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
+  LIVE_VIS_VSYNC="${LIVE_VIS_VSYNC:-0}"
+  LIVE_VIS_CUDA_FIELD="${LIVE_VIS_CUDA_FIELD:-1}"
+  LIVE_VIS_CUDA_SNAPSHOT="${LIVE_VIS_CUDA_SNAPSHOT:-1}"
+  LIVE_VIS_LOG_SOURCE="${LIVE_VIS_LOG_SOURCE:-0}"
+  LIVE_VIS_CONTROL_EVERY="${LIVE_VIS_CONTROL_EVERY:-1}"
+  LIVE_VIS_CONTROL_LOG="${LIVE_VIS_CONTROL_LOG:-0}"
+  LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-0}"
+  PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:--1}"
+
+  FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
+  RECORD_ENABLE="${RECORD_ENABLE:-true}"
+  RECORD_EVERY="${RECORD_EVERY:-25}"
+  RECORD_SESSION_PREFIX="${RECORD_SESSION_PREFIX:-${CASE_LABEL}_0434}"
+  RECORD_FIELDS="${RECORD_FIELDS:-mass,ux,uy}"
+  RECORD_FORMAT="${RECORD_FORMAT:-f32}"
+  RECORD_STRIDE="${RECORD_STRIDE:-1}"
+  FILTER_MODE="${FILTER_MODE:-none}"
+  FILTER_TAU="${FILTER_TAU:-0.0}"
+  FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-100}"
+
+  ALPHA="${ALPHA:-800000.0}"
+  ALPHA_MIN="${ALPHA_MIN:-0.0}"
+  DARCY_Q="${DARCY_Q:-0.1}"
+  DARCY_USOLID_X="${DARCY_USOLID_X:-0.0}"
+  DARCY_USOLID_Y="${DARCY_USOLID_Y:-0.0}"
+  DARCY_COST_EVERY="${DARCY_COST_EVERY:-$SUMMARY_EVERY}"
+  DARCY_THREADS_PER_BLOCK="${DARCY_THREADS_PER_BLOCK:-256}"
+  DARCY_INITIAL_DEACTIVATE_BELOW_CHI="${DARCY_INITIAL_DEACTIVATE_BELOW_CHI:-0.05}"
+  DARCY_BRINKMAN_FORCING_MODE="${DARCY_BRINKMAN_FORCING_MODE:-mean_outward_bath}"
+  DARCY_CHI_COLLISION_VP_ENABLE="${DARCY_CHI_COLLISION_VP_ENABLE:-true}"
+  DARCY_CHI_COLLISION_VP_MODE="${DARCY_CHI_COLLISION_VP_MODE:-interface_band}"
+  DARCY_CHI_COLLISION_VP_GAMMA="${DARCY_CHI_COLLISION_VP_GAMMA:--1}"
+  DARCY_CHI_COLLISION_VP_MASS="${DARCY_CHI_COLLISION_VP_MASS:-1.0}"
+  DARCY_CHI_COLLISION_VP_LAYERS="${DARCY_CHI_COLLISION_VP_LAYERS:-1}"
+  DARCY_CHI_COLLISION_VP_THRESHOLD="${DARCY_CHI_COLLISION_VP_THRESHOLD:-0.5}"
+  DARCY_CHI_COLLISION_VP_STRENGTH="${DARCY_CHI_COLLISION_VP_STRENGTH:-0.25}"
+  TOPO_BENCHMARK_ENABLE="${TOPO_BENCHMARK_ENABLE:-true}"
+  TOPO_BENCHMARK_EVERY="${TOPO_BENCHMARK_EVERY:-$DARCY_COST_EVERY}"
+  TOPO_BENCHMARK_FILENAME="${TOPO_BENCHMARK_FILENAME:-topo_benchmark_0348.csv}"
+  TOPO_BENCHMARK_FORCE_ENABLE="${TOPO_BENCHMARK_FORCE_ENABLE:-true}"
+  TOPO_BENCHMARK_DRAG_LIFT_ENABLE="${TOPO_BENCHMARK_DRAG_LIFT_ENABLE:-true}"
+  TOPO_BENCHMARK_FLOW_DIR_X="${TOPO_BENCHMARK_FLOW_DIR_X:-1.0}"
+  TOPO_BENCHMARK_FLOW_DIR_Y="${TOPO_BENCHMARK_FLOW_DIR_Y:-0.0}"
+  TOPO_BENCHMARK_LIFT_DIR_X="${TOPO_BENCHMARK_LIFT_DIR_X:-0.0}"
+  TOPO_BENCHMARK_LIFT_DIR_Y="${TOPO_BENCHMARK_LIFT_DIR_Y:-1.0}"
+
+  TG_HOLE_ENABLE="${TG_HOLE_ENABLE:-false}"
+  HOLE_XMIN="${HOLE_XMIN:-0.45}"; HOLE_XMAX="${HOLE_XMAX:-0.55}"
+  HOLE_YMIN="${HOLE_YMIN:-0.45}"; HOLE_YMAX="${HOLE_YMAX:-0.55}"
+  STEP_XMIN="${STEP_XMIN:-0.0}"; STEP_XMAX="${STEP_XMAX:-1.0}"
+  STEP_YMIN="${STEP_YMIN:-0.0}"; STEP_YMAX="${STEP_YMAX:-0.52}"
+  CYLINDER_CX="${CYLINDER_CX:-1.0}"; CYLINDER_CY="${CYLINDER_CY:-0.5}"; CYLINDER_R="${CYLINDER_R:-0.08}"
+  BEND_WIDTH="${BEND_WIDTH:-0.25}"; BEND_XMID="${BEND_XMID:-0.5}"; BEND_Y_TOP="${BEND_Y_TOP:-0.875}"; BEND_Y_BOTTOM="${BEND_Y_BOTTOM:-0.125}"
+  NACA_CHORD="${NACA_CHORD:-0.55}"; NACA_CX="${NACA_CX:-0.5}"; NACA_CY="${NACA_CY:-0.5}"; NACA_ALPHA_DEG="${NACA_ALPHA_DEG:-5.0}"; NACA_THICKNESS="${NACA_THICKNESS:-0.12}"
+}
+
+# 0493x13zi source-time invariants for the run_ok collection.
+RUN_OK_ENTRYPOINT="${RUN_OK_ENTRYPOINT:-${BASH_SOURCE[1]:-unknown}}"
+LIVE_VIS_CONTROL_FILE="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/livevis_control.kv"
+OVERWRITE_LIVEVIS_CONTROL=0
+export RUN_OK_ENTRYPOINT LIVE_VIS_CONTROL_FILE OVERWRITE_LIVEVIS_CONTROL

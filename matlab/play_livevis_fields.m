@@ -93,7 +93,7 @@ function out = play_livevis_fields(recordingDir, varargin)
     addParameter(p, 'startStep', -Inf, @(x) isnumeric(x) && isscalar(x));
     addParameter(p, 'endStep', Inf, @(x) isnumeric(x) && isscalar(x));
     addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
-    addParameter(p, 'pauseTime', 0.02, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+    addParameter(p, 'pauseTime', 0.2, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 
     addParameter(p, 'gain', 1000.0, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
     addParameter(p, 'clip', NaN, @(x) isnumeric(x) && isscalar(x));

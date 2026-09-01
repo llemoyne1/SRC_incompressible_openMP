@@ -3,70 +3,76 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+common="scripts/src_mpcd_run_ok_common.sh"
+livevis="./livevis_control.kv"
 expected_bin='build/src_mpcd_base_cuda_q6_resident_livevis_0486'
-for f in scripts/run_ok*.sh scripts/src_mpcd_run_common_0434.sh; do
+
+[[ -f "$common" ]] || { echo "[run-ok-check] missing common base: $common" >&2; exit 1; }
+[[ -f "$livevis" ]] || { echo "[run-ok-check] missing root LiveVis control: $livevis" >&2; exit 1; }
+bash -n "$common"
+
+count=0
+for f in scripts/run_ok_*.sh; do
+  [[ -f "$f" ]] || continue
+  count=$((count+1))
   bash -n "$f"
+  grep -Fq 'source "$ROOT/scripts/src_mpcd_run_ok_common.sh"' "$f" || {
+    echo "[run-ok-check] runner does not source the unique common base: $f" >&2; exit 1;
+  }
+  nsource=$(grep -Ec '^[[:space:]]*(source|\.)[[:space:]]+' "$f" || true)
+  [[ "$nsource" == 1 ]] || {
+    echo "[run-ok-check] runner has $nsource shell source dependencies, expected exactly 1: $f" >&2; exit 1;
+  }
+  if grep -Eq '^[[:space:]]*(exec[[:space:]]+)?bash[[:space:]]+.*scripts/' "$f"; then
+    echo "[run-ok-check] runner chains to another shell runner: $f" >&2; exit 1
+  fi
+  grep -Fq "$expected_bin" "$f" || { echo "[run-ok-check] missing default 0486 binary: $f" >&2; exit 1; }
+  grep -Fq 'PREFLIGHT_ONLY=' "$f" || { echo "[run-ok-check] missing PREFLIGHT_ONLY: $f" >&2; exit 1; }
 done
-python3 -m py_compile scripts/check_injection_species_0492b.py
 
-for f in scripts/run_ok*.sh; do
-  grep -Fq "$expected_bin" "$f" || { echo "[0492b-check] missing default 0486 binary: $f" >&2; exit 1; }
-  grep -Fq 'LIVE_VIS_ENABLE=' "$f" || { echo "[0492b-check] missing LiveVis enable: $f" >&2; exit 1; }
-  grep -Fq 'LIVE_PROGRESS=' "$f" || { echo "[0492b-check] missing LIVE_PROGRESS: $f" >&2; exit 1; }
-  grep -Fq 'PARTICLE_TYPE_FILTER=' "$f" || { echo "[0492b-check] missing particle filter: $f" >&2; exit 1; }
-  grep -Fq 'PREFLIGHT_ONLY=' "$f" || { echo "[0492b-check] missing preflight control: $f" >&2; exit 1; }
-done
-
-inj_empty=scripts/run_ok_injection_type1_into_type2_empty.sh
 for token in \
-  'src-q6-resampling' \
-  'SPECIES_RESAMPLING_ENABLE=' \
-  'MASS_RECONDITION_ENABLE=' \
-  'INJECT_PHASE="${INJECT_PHASE:-liquid}"' \
-  'BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"' \
-  'INJECT_Q6_STRENGTH=' \
-  'BACKGROUND_Q6_STRENGTH=' \
-  'INJECT_MASS_CLOSURE_STRENGTH=' \
-  'BACKGROUND_MASS_CLOSURE_STRENGTH=' \
-  'SPECIES_CELL_DIAGNOSTICS_ENABLE="${SPECIES_CELL_DIAGNOSTICS_ENABLE:-false}"' \
-  'speciesQ6Mode = ${SPECIES_Q6_MODE}' \
-  'RUN_MODES="${RUN_MODES:-${MODES:-${INTEG_PATH:-${SRC_INTEG_PATH:-src src-q6}}}}"' \
-  'INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-empty}"' \
-  'SCENARIO_EXPECTATION="${SCENARIO_EXPECTATION:-empty}"' \
-  'check_injection_species_0492b.py'; do
-  grep -Fq "$token" "$inj_empty" || { echo "[0492b-check] empty injection contract missing: $token" >&2; exit 1; }
+  'LIVE_VIS_CONTROL_FILE="$ROOT/livevis_control.kv"' \
+  'OVERWRITE_LIVEVIS_CONTROL=0' \
+  'suite_print_effective_run_0493x13zi' \
+  'FLUID: domain=' \
+  'LIVE:  grid=' \
+  'run_ok_surface_export_qualified_liquid_vacuum_flags_0493x13zi'; do
+  grep -Fq "$token" "$common" || { echo "[run-ok-check] common contract missing: $token" >&2; exit 1; }
 done
 
-inj_two=scripts/run_ok_injection_type1_into_type2.sh
-for token in \
-  'INITIAL_DOMAIN_MODE="${INITIAL_DOMAIN_MODE:-full}"' \
-  'SCENARIO_EXPECTATION="${SCENARIO_EXPECTATION:-two_species}"' \
-  'INJECT_PHASE="${INJECT_PHASE:-liquid}"' \
-  'BACKGROUND_PHASE="${BACKGROUND_PHASE:-gas}"' \
-  'run_ok_injection_type1_into_type2_empty.sh'; do
-  grep -Fq "$token" "$inj_two" || { echo "[0492b-check] two-species wrapper contract missing: $token" >&2; exit 1; }
+for spec in \
+  'scripts/run_ok_dambreak.sh|SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-945.0}"|PHASE_INTERFACE_B_SELECTOR="${PHASE_INTERFACE_B_SELECTOR:-vacuum}"' \
+  'scripts/run_ok_injection_type1_into_type2_empty.sh|SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-945.0}"|PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-1.0}"' \
+  'scripts/run_ok_injection_type1_into_type2.sh|SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-945.0}"|PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-0.0}"' \
+  'scripts/run_ok_splash.sh|SIGMA_ACTIVE="${SIGMA_ACTIVE:-945.0}"|SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"' \
+  'scripts/run_ok_puddle.sh|SIGMA_ACTIVE="${SIGMA_ACTIVE:-945.0}"|SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"' \
+  'scripts/run_ok_dripping.sh|SIGMA_ACTIVE="${SIGMA_ACTIVE:-2500.0}"|SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-3}"'; do
+  IFS='|' read -r f a b <<< "$spec"
+  grep -Fq "$a" "$f" || { echo "[run-ok-check] visible physics parameter missing: $f :: $a" >&2; exit 1; }
+  grep -Fq "$b" "$f" || { echo "[run-ok-check] visible physics parameter missing: $f :: $b" >&2; exit 1; }
 done
 
-common=scripts/src_mpcd_run_common_0434.sh
-for token in \
-  'speciesResamplingMassClosureCudaEnable' \
-  'speciesResamplingPopulationGuardCudaEnable' \
-  'cudaResamplingEmptyRefillSpeciesCompositionEnable' \
-  'speciesResamplingTransferCudaEnable' \
-  'speciesResamplingCudaResidentValidationEnable' \
-  'speciesResamplingCudaResidentMaintenanceStrict' \
-  'suite_species_resident_mode_0492a' \
-  'particleTypeFilter = ${PARTICLE_TYPE_FILTER}' \
-  '[0493a-run-ok] preflight=PASS'; do
-  grep -Fq "$token" "$common" || { echo "[0492b-check] common contract missing: $token" >&2; exit 1; }
+# 0493x13zj: every public runner exposes the reference-fluid microphysics directly.
+for f in scripts/run_ok_*.sh; do
+  grep -Fq 'GAMMA="${GAMMA:-8}"' "$f" || { echo "[run-ok-check] G08 gamma missing: $f" >&2; exit 1; }
+  grep -Fq '0.0063471328149122585' "$f" || { echo "[run-ok-check] G08 dt missing: $f" >&2; exit 1; }
+  grep -Fq 'KBT="${KBT:-0.125}"' "$f" || { echo "[run-ok-check] G08 kBT missing: $f" >&2; exit 1; }
+  grep -Fq '2.0943951023931953' "$f" || { echo "[run-ok-check] 120deg rotation missing: $f" >&2; exit 1; }
 done
+for tok in 'liveEvery = 100' 'recordEnable = true' 'recordFields = mass,ux,uy' 'recordEvery = 100' 'filterSampleEvery = 100'; do
+  grep -Fq "$tok" "$livevis" || { echo "[run-ok-check] LiveVis default missing: $tok" >&2; exit 1; }
+done
+if grep -Eq '^[[:space:]]*liveGridN[xy][[:space:]]*=' "$livevis"; then
+  echo '[run-ok-check] root livevis must not hard-code liveGridNx/liveGridNy; inherit solver Nx/Ny' >&2; exit 1
+fi
 
+# Keep the resident-species helper sanity checks from the historical checker.
 source "$common"
 SPECIES_RESAMPLING_ENABLE=true
-[[ "$(suite_species_resident_mode_0492a src-q6-resampling periodic)" == production ]] || { echo '[0492b-check] periodic auto mode is not production' >&2; exit 1; }
-[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == production ]] || { echo '[0492b-check] segmented auto mode is not production' >&2; exit 1; }
+[[ "$(suite_species_resident_mode_0492a src-q6-resampling periodic)" == production ]] || { echo '[run-ok-check] periodic auto mode is not production' >&2; exit 1; }
+[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == production ]] || { echo '[run-ok-check] segmented auto mode is not production' >&2; exit 1; }
 SPECIES_RESIDENT_MODE=validation
-[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == validation ]] || { echo '[0492b-check] explicit validation mode failed' >&2; exit 1; }
+[[ "$(suite_species_resident_mode_0492a src-q6-resampling segmented)" == validation ]] || { echo '[run-ok-check] explicit validation mode failed' >&2; exit 1; }
 unset SPECIES_RESIDENT_MODE SPECIES_RESAMPLING_ENABLE
 
-echo '[0492b-check] PASS'
+echo "[run-ok-check] PASS runners=$count common=$common livevis=$livevis"
