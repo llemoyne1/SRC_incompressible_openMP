@@ -62,4 +62,11 @@ CollisionDiagnostics src_collision_step(ParticleState& state,
                                         std::uint64_t step,
                                         CollisionWorkspace& ws);
 
+// 0493x14g: expose the device-resident cellId produced by the most recent
+// persistent SRC collision on this thread. The pointer is valid only when the
+// requested step and active-particle count match the recorded collision.
+// Consumers must treat the pointed array as read-only.
+const int* cuda_persistent_src_collision_device_cell_ids_0493x14g(
+    std::uint64_t step, std::uint64_t expectedActiveParticles);
+
 } // namespace mpcd

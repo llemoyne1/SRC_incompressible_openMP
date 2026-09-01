@@ -24,6 +24,7 @@ struct SimulationParams {
     // and trajectories are unchanged. Each declaration uses:
     //   speciesK = type name phaseFamily q6StrengthDeclared massClosureStrengthDeclared [referenceCellMassDeclared]
     //   speciesKResamplingEnable = true|false  (default: true)
+    //   speciesKThermostatTargetKBT = value     (negative => inherit global target)
     // The Q6 strength remains declarative in 0490d. The mass-closure strength
     // and reference cell mass become active only when
     // speciesResamplingMassClosureEnable=true.
@@ -33,6 +34,11 @@ struct SimulationParams {
     bool speciesRequireRegisteredTypes = false;
     bool speciesDiagnosticsEnable = false;
     std::string speciesDiagnosticsFilename = "species_runtime_0490a.csv";
+
+    // 0493x14a: opt-in thermostat separation by registered particle type.
+    // Disabled by default so the legacy all-fluid thermostat path remains
+    // byte-for-byte selected for existing parameter files.
+    bool speciesThermostatEnable = false;
 
     // 0490b opt-in dense CPU reference deposit on the physical, unshifted
     // grid. This is a diagnostic/scaffolding path only.

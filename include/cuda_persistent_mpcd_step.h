@@ -244,4 +244,16 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
 void cuda_persistent_record_consumed_thermostat(std::uint64_t step, const ThermostatDiagnostics& diag);
 bool cuda_persistent_take_consumed_thermostat(std::uint64_t step, ThermostatDiagnostics& diag);
 
+// 0493x14d: resident per-species thermostat stage for the classic SRC path.
+// It consumes the collision cellId already resident in cellWorkspace, leaves
+// particle velocities on device, and conserves each species barycentric
+// momentum cell by cell. The preceding SRC collision remains mixture-wide.
+ThermostatDiagnostics cuda_apply_persistent_species_thermostat_0493x14d(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    const std::vector<std::uint32_t>& speciesTypes,
+    const std::vector<double>& targetKBT,
+    int minParticles,
+    double epsilon);
+
 } // namespace mpcd

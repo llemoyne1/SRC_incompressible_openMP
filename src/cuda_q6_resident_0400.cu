@@ -7,6 +7,7 @@
 #include "cuda_shared_particle_state_0251.h"
 #include "cuda_species_cell_fields_0490h.h"
 #include "open_boundary_segments.h"
+#include "src_collision.h"
 
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
@@ -16027,11 +16028,17 @@ __global__ void q6_update_corrected_cell_means_0400(CudaCellWorkspaceDeviceView 
 
 __global__ void q6_thermostat_deposit_moments_from_cell_ids_0400(CudaParticleDeviceView particles,
                                                                        CudaCellWorkspaceDeviceView cells,
-                                                                       std::uint64_t nParticles) {
+                                                                       std::uint64_t nParticles,
+                                                                       int filterByType0493x14a,
+                                                                       std::uint32_t particleType0493x14a) {
     const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
     for (std::uint64_t i = idx; i < nParticles; i += stride) {
         if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        if (filterByType0493x14a &&
+            (particles.type == nullptr || particles.type[i] != particleType0493x14a)) {
             continue;
         }
         const int c = cells.cellId[i];
@@ -16083,11 +16090,17 @@ __global__ void q6_x12a_thermostat_deposit_moments_and_factor(
 
 __global__ void q6_thermostat_kinetic_0400(CudaParticleDeviceView particles,
                                            CudaCellWorkspaceDeviceView cells,
-                                           std::uint64_t nParticles) {
+                                           std::uint64_t nParticles,
+                                           int filterByType0493x14a,
+                                           std::uint32_t particleType0493x14a) {
     const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
     for (std::uint64_t i = idx; i < nParticles; i += stride) {
         if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        if (filterByType0493x14a &&
+            (particles.type == nullptr || particles.type[i] != particleType0493x14a)) {
             continue;
         }
         const int c = cells.cellId[i];
@@ -16151,11 +16164,17 @@ __global__ void q6_thermostat_scale_0400(CudaCellWorkspaceDeviceView cells,
 
 __global__ void q6_thermostat_apply_0400(CudaParticleDeviceView particles,
                                          CudaCellWorkspaceDeviceView cells,
-                                         std::uint64_t nParticles) {
+                                         std::uint64_t nParticles,
+                                         int filterByType0493x14a,
+                                         std::uint32_t particleType0493x14a) {
     const std::uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
     for (std::uint64_t i = idx; i < nParticles; i += stride) {
         if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) {
+            continue;
+        }
+        if (filterByType0493x14a &&
+            (particles.type == nullptr || particles.type[i] != particleType0493x14a)) {
             continue;
         }
         const int c = cells.cellId[i];
@@ -17245,7 +17264,7 @@ bool apply_kinetic_interface_reflection_0493x9t(
     q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
     check_cuda_0400(cudaGetLastError(), "0493x9t cell moments reset launch");
     q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
-        particles, cells, nParticles);
+        particles, cells, nParticles, 0, 0u);
     check_cuda_0400(cudaGetLastError(), "0493x9t cell moments redeposit launch");
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "0493x9t cell moments finalize launch");
@@ -17397,7 +17416,7 @@ bool apply_kinetic_interface_reflection_0493x9u(
     check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)), "0493x9u cell refresh counter zero");
     q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
     check_cuda_0400(cudaGetLastError(), "0493x9u cell moments reset launch");
-    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles, 0, 0u);
     check_cuda_0400(cudaGetLastError(), "0493x9u cell moments redeposit launch");
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "0493x9u cell moments finalize launch");
@@ -18716,7 +18735,7 @@ bool apply_kinetic_interface_reflection_0493x9x(
                     "0493x9x cell refresh counter zero");
     q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments reset launch");
-    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles, 0, 0u);
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments redeposit launch");
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments finalize launch");
@@ -22423,7 +22442,7 @@ bool apply_independent_masked_species_q6_0493w5(
                         "0493x7a virial apply plus cell moments redeposit launch");
     } else {
         q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
-            particles, cells, nParticles);
+            particles, cells, nParticles, 0, 0u);
         check_cuda_0400(cudaGetLastError(),
                         "independent masked cell moments redeposit launch");
     }
@@ -23190,7 +23209,7 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
         return diag;
     }
     const double targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
-    if (!(targetKBT > 0.0)) {
+    if (!params.speciesThermostatEnable && !(targetKBT > 0.0)) {
         diag.reason = "invalid thermostat target";
         return diag;
     }
@@ -23230,13 +23249,203 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
 
     diag.supported = true;
     std::uint64_t cellIdH2DEntries0491f = 0u;
-    if (collisionCellId.size() == static_cast<std::size_t>(nParticles)) {
+    // 0493x14g: when the persistent SRC collision kept its cell workspace on
+    // device (0272 fast path), consume those exact post-stream/post-shift
+    // collision ids directly. This avoids both a GPU->CPU->GPU round trip and
+    // the stale pre-stream Q6 cellId that previously contaminated q6-g-f.
+    const int* residentCollisionCellId0493x14g = nullptr;
+    if (params.speciesThermostatEnable) {
+        residentCollisionCellId0493x14g =
+            cuda_persistent_src_collision_device_cell_ids_0493x14g(step, nParticles);
+    }
+    if (residentCollisionCellId0493x14g != nullptr) {
+        cells.cellId = const_cast<int*>(residentCollisionCellId0493x14g);
+    } else if (collisionCellId.size() == static_cast<std::size_t>(nParticles)) {
         check_cuda_0400(cudaMemcpy(cells.cellId, collisionCellId.data(),
                                    static_cast<std::size_t>(nParticles) * sizeof(int),
                                    cudaMemcpyHostToDevice),
                         "thermostat collision cellId upload");
         cellIdH2DEntries0491f = nParticles;
+    } else if (params.speciesThermostatEnable && params.speciesQ6Enable &&
+               params.speciesQ6Mode == "free_surface_masked") {
+        throw std::runtime_error(
+            "0493x14g species q6-g-f thermostat requires current post-stream SRC collision cellId; "
+            "resident bridge and host collisionCellId are both unavailable");
     }
+
+    // 0493x14a: opt-in thermostat separation by registered particle type.
+    // The legacy all-fluid path below is left untouched when the option is off.
+    // Each pass reuses the same resident O(Ncell) workspace, so memory does not
+    // scale with species count. The preceding SRC collision remains mixture-wide.
+    if (params.speciesThermostatEnable) {
+        if (localThermalCooling0493x12a) {
+            throw std::runtime_error(
+                "0493x14a species thermostat is intentionally incompatible with x12a local thermal cooling in V1");
+        }
+        if (!particles.type) {
+            throw std::runtime_error(
+                "0493x14a species thermostat requires resident particle type metadata");
+        }
+
+        const int minParticles = std::max(1, params.thermostatMinParticles);
+        const double epsilon = std::max(0.0, params.thermostatEpsilon);
+        const double inheritedTarget =
+            params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+
+        double totalKBefore0493x14a = 0.0;
+        double targetKTotal0493x14a = 0.0;
+        double scaleSum0493x14a = 0.0;
+        double scaleMin0493x14a = std::numeric_limits<double>::infinity();
+        double scaleMax0493x14a = 0.0;
+        std::uint64_t dofTotal0493x14a = 0u;
+        std::uint64_t cellsRescaled0493x14a = 0u;
+        std::uint64_t particlesRescaled0493x14a = 0u;
+        bool anyPassApplied0493x14a = false;
+
+        const bool q6GfThermostat0493x14a =
+            params.speciesQ6Enable && params.speciesQ6Mode == "free_surface_masked";
+        const bool collectThermostatDiagnostics0493x14a =
+            !q6GfThermostat0493x14a ||
+            q6_g_f_diagnostics_this_step_0493x7k(params, step);
+
+        for (const SpeciesDefinition& species0493x14a : params.speciesDefinitions) {
+            const double targetKBT0493x14a =
+                species0493x14a.thermostatTargetKBTDeclared > 0.0
+                    ? species0493x14a.thermostatTargetKBTDeclared
+                    : inheritedTarget;
+
+            auto t0 = Clock0400::now();
+            q6_zero_cells_0400<<<cellBlocks, threads>>>(
+                cells, ws.rhs.data(), ws.phi.data(), ws.r.data(),
+                ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data(), 0);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat zero cell moments launch");
+            check_cuda_0400(cudaMemset(
+                cells.cellKinetic, 0,
+                static_cast<std::size_t>(grid.numCells) * sizeof(double)),
+                "0493x14a thermostat kinetic zero");
+            check_cuda_0400(cudaMemset(
+                cells.cellScale, 0,
+                static_cast<std::size_t>(grid.numCells) * sizeof(double)),
+                "0493x14a thermostat scale zero");
+            check_cuda_0400(cudaMemset(cells.fluidCounter, 0, sizeof(unsigned long long)),
+                            "0493x14a thermostat fluid counter zero");
+            check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
+                            "0493x14a thermostat empty counter zero");
+
+            q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+                particles, cells, nParticles, 1, species0493x14a.type);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat species moment deposit launch");
+            q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat species finalize moments launch");
+            q6_thermostat_kinetic_0400<<<particleBlocks, threads>>>(
+                particles, cells, nParticles, 1, species0493x14a.type);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat species kinetic launch");
+            diag.kineticSeconds += seconds_since_0400(t0);
+
+            t0 = Clock0400::now();
+            q6_thermostat_scale_0400<<<cellBlocks, threads, pairShared>>>(
+                cells, targetKBT0493x14a, 0, minParticles, epsilon,
+                ws.partial0.data(), ws.partial1.data());
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat species scale launch");
+            if (collectThermostatDiagnostics0493x14a) {
+                totalKBefore0493x14a +=
+                    reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
+                targetKTotal0493x14a +=
+                    reduce_host_sum_0400(ws.partial1.data(), cellBlocks);
+            }
+            diag.scaleSeconds += seconds_since_0400(t0);
+
+            t0 = Clock0400::now();
+            q6_thermostat_apply_0400<<<particleBlocks, threads>>>(
+                particles, cells, nParticles, 1, species0493x14a.type);
+            check_cuda_0400(cudaGetLastError(),
+                            "0493x14a thermostat species apply launch");
+            diag.applySeconds += seconds_since_0400(t0);
+
+            if (collectThermostatDiagnostics0493x14a) {
+                t0 = Clock0400::now();
+                std::vector<std::uint32_t> hostCount(
+                    static_cast<std::size_t>(grid.numCells), 0u);
+                std::vector<double> hostKinetic(
+                    static_cast<std::size_t>(grid.numCells), 0.0);
+                std::vector<double> hostScale(
+                    static_cast<std::size_t>(grid.numCells), 1.0);
+                check_cuda_0400(cudaMemcpy(
+                    hostCount.data(), cells.count,
+                    static_cast<std::size_t>(grid.numCells) * sizeof(std::uint32_t),
+                    cudaMemcpyDeviceToHost),
+                    "0493x14a thermostat count download");
+                check_cuda_0400(cudaMemcpy(
+                    hostKinetic.data(), cells.cellKinetic,
+                    static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                    cudaMemcpyDeviceToHost),
+                    "0493x14a thermostat kinetic download");
+                check_cuda_0400(cudaMemcpy(
+                    hostScale.data(), cells.cellScale,
+                    static_cast<std::size_t>(grid.numCells) * sizeof(double),
+                    cudaMemcpyDeviceToHost),
+                    "0493x14a thermostat scale download");
+                diag.diagnosticsDownloadSeconds += seconds_since_0400(t0);
+
+                for (int c = 0; c < grid.numCells; ++c) {
+                    const std::uint32_t count = hostCount[static_cast<std::size_t>(c)];
+                    const double K = hostKinetic[static_cast<std::size_t>(c)];
+                    if (count < static_cast<std::uint32_t>(minParticles) ||
+                        !(K > epsilon)) {
+                        continue;
+                    }
+                    const double scale = hostScale[static_cast<std::size_t>(c)];
+                    anyPassApplied0493x14a = true;
+                    cellsRescaled0493x14a += 1u;
+                    particlesRescaled0493x14a += static_cast<std::uint64_t>(count);
+                    dofTotal0493x14a +=
+                        static_cast<std::uint64_t>(2u * (count - 1u));
+                    scaleSum0493x14a += scale;
+                    scaleMin0493x14a = std::min(scaleMin0493x14a, scale);
+                    scaleMax0493x14a = std::max(scaleMax0493x14a, scale);
+                }
+            }
+        }
+
+        if (collectThermostatDiagnostics0493x14a) {
+            diag.thermostat.applied = anyPassApplied0493x14a;
+            diag.thermostat.cellsRescaled = cellsRescaled0493x14a;
+            diag.thermostat.particlesRescaled = particlesRescaled0493x14a;
+            diag.thermostat.kBTBefore = dofTotal0493x14a > 0u
+                ? 2.0 * totalKBefore0493x14a / static_cast<double>(dofTotal0493x14a)
+                : 0.0;
+            diag.thermostat.kBTAfter = dofTotal0493x14a > 0u
+                ? 2.0 * targetKTotal0493x14a / static_cast<double>(dofTotal0493x14a)
+                : 0.0;
+            diag.thermostat.scaleMean = cellsRescaled0493x14a > 0u
+                ? scaleSum0493x14a / static_cast<double>(cellsRescaled0493x14a)
+                : 1.0;
+            diag.thermostat.scaleMin = cellsRescaled0493x14a > 0u
+                ? scaleMin0493x14a : 1.0;
+            diag.thermostat.scaleMax = cellsRescaled0493x14a > 0u
+                ? scaleMax0493x14a : 1.0;
+        } else {
+            // The physical passes ran; production diagnostics are intentionally
+            // sparse on Q6-g-f steps, matching the legacy resident thermostat.
+            diag.thermostat.applied = true;
+        }
+
+        state.NactiveFluid = nParticles;
+        cuda_shared_particle_state_0251_mark_fresh(
+            "cuda_q6_resident_species_thermostat_0493x14a");
+        diag.handled = true;
+        diag.reason = "ok_species_0493x14a";
+        diag.totalSeconds = seconds_since_0400(tTotal);
+        // Do not append the legacy single-target 0491f audit here: a single
+        // targetKBT column would be misleading for a multi-target thermostat.
+        return diag;
+    }
+
     q6_zero_cells_0400<<<cellBlocks, threads>>>(cells, ws.rhs.data(), ws.phi.data(), ws.r.data(),
                                                 ws.p.data(), ws.Ap.data(), ws.dux.data(), ws.duy.data(),
                                                 0);
@@ -23273,12 +23482,12 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
             "0493x12a thermostat moment+factor deposit launch");
     } else {
         q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
-            particles, cells, nParticles);
+            particles, cells, nParticles, 0, 0u);
         check_cuda_0400(cudaGetLastError(), "thermostat moment deposit launch");
     }
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "thermostat finalize moments launch");
-    q6_thermostat_kinetic_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    q6_thermostat_kinetic_0400<<<particleBlocks, threads>>>(particles, cells, nParticles, 0, 0u);
     check_cuda_0400(cudaGetLastError(), "thermostat kinetic launch");
     diag.kineticSeconds = seconds_since_0400(t0);
 
@@ -23308,7 +23517,7 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     diag.scaleSeconds = seconds_since_0400(t0);
 
     t0 = Clock0400::now();
-    q6_thermostat_apply_0400<<<particleBlocks, threads>>>(particles, cells, nParticles);
+    q6_thermostat_apply_0400<<<particleBlocks, threads>>>(particles, cells, nParticles, 0, 0u);
     check_cuda_0400(cudaGetLastError(), "thermostat apply launch");
     diag.applySeconds = seconds_since_0400(t0);
 

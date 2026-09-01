@@ -182,12 +182,35 @@ bool parse_species_resampling_enable_key(const std::string& key, int* speciesInd
     return true;
 }
 
+bool parse_species_thermostat_target_key(const std::string& key, int* speciesIndex) {
+    const std::string prefix = "species";
+    const std::string suffix = "ThermostatTargetKBT";
+    if (key.rfind(prefix, 0) != 0 || key.size() <= prefix.size() + suffix.size() ||
+        key.compare(key.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return false;
+    }
+    const std::string indexText = key.substr(
+        prefix.size(), key.size() - prefix.size() - suffix.size());
+    if (indexText.empty() ||
+        !std::all_of(indexText.begin(), indexText.end(),
+                     [](unsigned char c) { return std::isdigit(c); })) {
+        return false;
+    }
+    const long long value = std::stoll(indexText);
+    if (value < 0 || value > static_cast<long long>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error(key + ": species index exceeds int range");
+    }
+    if (speciesIndex != nullptr) *speciesIndex = static_cast<int>(value);
+    return true;
+}
+
 bool is_species_definition_key(const std::string& key) {
     const std::string prefix = "species";
     if (key.rfind(prefix, 0) != 0) return false;
     if (key == "speciesRegistryEnable" || key == "speciesCount" ||
         key == "speciesRequireRegisteredTypes" || key == "speciesDiagnosticsEnable" ||
-        key == "speciesDiagnosticsFilename" || key == "speciesCellDiagnosticsEnable" ||
+        key == "speciesDiagnosticsFilename" || key == "speciesThermostatEnable" ||
+        key == "speciesCellDiagnosticsEnable" ||
         key == "speciesCellDiagnosticsFilename" ||
         key == "speciesCellCudaDepositEnable" ||
         key == "speciesCellCudaComparisonFilename" ||
@@ -682,6 +705,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesRequireRegisteredTypes") p.speciesRequireRegisteredTypes = parse_bool(value, key);
         else if (key == "speciesDiagnosticsEnable") p.speciesDiagnosticsEnable = parse_bool(value, key);
         else if (key == "speciesDiagnosticsFilename") p.speciesDiagnosticsFilename = trim(value);
+        else if (key == "speciesThermostatEnable") p.speciesThermostatEnable = parse_bool(value, key);
         else if (key == "speciesCellDiagnosticsEnable") p.speciesCellDiagnosticsEnable = parse_bool(value, key);
         else if (key == "speciesCellDiagnosticsFilename") p.speciesCellDiagnosticsFilename = trim(value);
         else if (key == "speciesCellCudaDepositEnable") p.speciesCellCudaDepositEnable = parse_bool(value, key);
@@ -720,6 +744,9 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "speciesCudaResidentMaintenanceDiagnosticsFilename") p.speciesCudaResidentMaintenanceDiagnosticsFilename = trim(value);
         else if (key == "cudaResamplingEmptyRefillSpeciesCompositionEnable") p.cudaResamplingEmptyRefillSpeciesCompositionEnable = parse_bool(value, key);
         else if (parse_species_resampling_enable_key(key, nullptr)) {
+            // Parsed after the generic loop, once speciesCount and speciesK are known.
+        }
+        else if (parse_species_thermostat_target_key(key, nullptr)) {
             // Parsed after the generic loop, once speciesCount and speciesK are known.
         }
         else if (is_species_definition_key(key)) {
@@ -807,11 +834,23 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             if (has_key(kv, resamplingKey)) {
                 definition.resamplingEnable = parse_bool(kv.at(resamplingKey), resamplingKey);
             }
+            const std::string thermostatKey =
+                speciesKey + "ThermostatTargetKBT";
+            if (has_key(kv, thermostatKey)) {
+                definition.thermostatTargetKBTDeclared =
+                    parse_double(kv.at(thermostatKey), thermostatKey);
+            }
             p.speciesDefinitions.push_back(std::move(definition));
         }
         for (const auto& item : kv) {
             int speciesIndex = -1;
             if (parse_species_resampling_enable_key(item.first, &speciesIndex) &&
+                (speciesIndex < 0 || speciesIndex >= p.speciesCount)) {
+                throw std::runtime_error(
+                    item.first + ": species index is outside [0,speciesCount)");
+            }
+            speciesIndex = -1;
+            if (parse_species_thermostat_target_key(item.first, &speciesIndex) &&
                 (speciesIndex < 0 || speciesIndex >= p.speciesCount)) {
                 throw std::runtime_error(
                     item.first + ": species index is outside [0,speciesCount)");
@@ -825,7 +864,8 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         }
         for (const auto& item : kv) {
             if (is_species_definition_key(item.first) ||
-                parse_species_resampling_enable_key(item.first, nullptr)) {
+                parse_species_resampling_enable_key(item.first, nullptr) ||
+                parse_species_thermostat_target_key(item.first, nullptr)) {
                 throw std::runtime_error("Found " + item.first +
                                          " but speciesRegistryEnable=false");
             }
@@ -1280,11 +1320,37 @@ void validate_simulation_params(const SimulationParams& p) {
         if (!(p.thermostatEpsilon > 0.0)) {
             throw std::runtime_error("thermostatEpsilon must be positive");
         }
-        if (p.thermostatTargetKBT < 0.0 && !(p.kBT > 0.0)) {
-            throw std::runtime_error("thermostatTargetKBT is negative, so kBT must be positive when thermostatEnable=true");
+        if (!p.speciesThermostatEnable &&
+            p.thermostatTargetKBT < 0.0 && !(p.kBT > 0.0)) {
+            throw std::runtime_error("thermostatTargetKBT is negative, so kBT must be positive when thermostatEnable=true unless speciesThermostatEnable supplies positive per-species targets");
         }
         if (p.thermostatTargetKBT == 0.0) {
             throw std::runtime_error("thermostatTargetKBT must be positive, or negative to inherit kBT");
+        }
+    }
+    if (p.speciesThermostatEnable) {
+        if (!p.thermostatEnable) {
+            throw std::runtime_error(
+                "speciesThermostatEnable=true requires thermostatEnable=true");
+        }
+        if (!p.speciesRegistryEnable || p.speciesDefinitions.empty()) {
+            throw std::runtime_error(
+                "speciesThermostatEnable=true requires a non-empty species registry");
+        }
+        if (!p.speciesRequireRegisteredTypes) {
+            throw std::runtime_error(
+                "speciesThermostatEnable=true requires speciesRequireRegisteredTypes=true so no transported fluid type is left unthermostatted");
+        }
+        const double inheritedTarget =
+            p.thermostatTargetKBT > 0.0 ? p.thermostatTargetKBT : p.kBT;
+        for (const SpeciesDefinition& d : p.speciesDefinitions) {
+            const double target = d.thermostatTargetKBTDeclared > 0.0
+                ? d.thermostatTargetKBTDeclared : inheritedTarget;
+            if (!(target > 0.0) || !std::isfinite(target)) {
+                throw std::runtime_error(
+                    "species thermostat target must resolve to a finite positive value for type " +
+                    std::to_string(d.type));
+            }
         }
     }
     // 0259: classic SRC CUDA mode is a durable operator-level short-circuit

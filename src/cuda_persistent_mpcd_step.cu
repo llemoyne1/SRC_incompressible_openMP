@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -701,6 +702,71 @@ __global__ void apply_thermostat_persistent_kernel(int n,
     vy[i] = uy + s * (vy[i] - uy);
 }
 
+
+// 0493x14d: species-filtered real-particle thermostat primitives. They reuse
+// the collision cellId but rebuild moments independently for each type.
+__global__ void reset_species_thermostat_cells_0493x14d_kernel(
+    int nc, unsigned int* count, double* cellMass, double* cellPx, double* cellPy,
+    double* cellUx, double* cellUy, double* cellKinetic, double* cellScale) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= nc) return;
+    count[c] = 0u;
+    cellMass[c] = 0.0;
+    cellPx[c] = 0.0;
+    cellPy[c] = 0.0;
+    cellUx[c] = 0.0;
+    cellUy[c] = 0.0;
+    cellKinetic[c] = 0.0;
+    cellScale[c] = 1.0;
+}
+
+__global__ void deposit_species_thermostat_moments_0493x14d_kernel(
+    int n, const int* cellId, const unsigned char* role, const std::uint32_t* type,
+    const double* mass, const double* vx, const double* vy, unsigned char fluidRole,
+    std::uint32_t selectedType, int nc, unsigned int* count, double* cellMass,
+    double* cellPx, double* cellPy) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n || role[i] != fluidRole || type[i] != selectedType) return;
+    const int c = cellId[i];
+    if (c < 0 || c >= nc) return;
+    const double m = mass[i];
+    atomicAdd(&count[c], 1u);
+    atomicAdd(&cellMass[c], m);
+    atomicAdd(&cellPx[c], m * vx[i]);
+    atomicAdd(&cellPy[c], m * vy[i]);
+}
+
+__global__ void kinetic_species_thermostat_0493x14d_kernel(
+    int n, const int* cellId, const unsigned char* role, const std::uint32_t* type,
+    const double* mass, const double* vx, const double* vy, const double* cellUx,
+    const double* cellUy, unsigned char fluidRole, std::uint32_t selectedType,
+    int nc, double* cellKinetic) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n || role[i] != fluidRole || type[i] != selectedType) return;
+    const int c = cellId[i];
+    if (c < 0 || c >= nc) return;
+    const double dvx = vx[i] - cellUx[c];
+    const double dvy = vy[i] - cellUy[c];
+    atomicAdd(&cellKinetic[c], 0.5 * mass[i] * (dvx * dvx + dvy * dvy));
+}
+
+__global__ void apply_species_thermostat_0493x14d_kernel(
+    int n, const int* cellId, const unsigned char* role, const std::uint32_t* type,
+    const double* cellUx, const double* cellUy, const double* cellScale,
+    unsigned char fluidRole, std::uint32_t selectedType, int nc,
+    double* vx, double* vy) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n || role[i] != fluidRole || type[i] != selectedType) return;
+    const int c = cellId[i];
+    if (c < 0 || c >= nc) return;
+    const double s = cellScale[c];
+    if (s == 1.0) return;
+    const double ux = cellUx[c];
+    const double uy = cellUy[c];
+    vx[i] = ux + s * (vx[i] - ux);
+    vy[i] = uy + s * (vy[i] - uy);
+}
+
 } // namespace
 
 bool cuda_persistent_mpcd_step_available() {
@@ -735,6 +801,125 @@ bool cuda_persistent_take_consumed_thermostat(std::uint64_t step, ThermostatDiag
     diag = g_consumedThermostatDiag;
     g_consumedThermostatValid = false;
     return true;
+}
+
+ThermostatDiagnostics cuda_apply_persistent_species_thermostat_0493x14d(
+    CudaParticleState& gpuState,
+    CudaCellWorkspace& cellWorkspace,
+    const std::vector<std::uint32_t>& speciesTypes,
+    const std::vector<double>& targetKBT,
+    int minParticles,
+    double epsilon) {
+#if !defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP) || !defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) || !defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    (void)gpuState; (void)cellWorkspace; (void)speciesTypes; (void)targetKBT;
+    (void)minParticles; (void)epsilon;
+    throw std::runtime_error(
+        "cuda_apply_persistent_species_thermostat_0493x14d requires persistent CUDA particle/cell state");
+#else
+    if (speciesTypes.empty() || speciesTypes.size() != targetKBT.size()) {
+        throw std::runtime_error("0493x14d species thermostat requires matching non-empty type/target arrays");
+    }
+    if (minParticles < 1) minParticles = 1;
+    if (!(epsilon >= 0.0)) epsilon = 0.0;
+
+    const CudaParticleDeviceView pv = gpuState.device_view();
+    const CudaCellWorkspaceDeviceView cv = cellWorkspace.device_view();
+    const std::uint64_t nActive64 = pv.nActiveFluid > 0u ? pv.nActiveFluid : pv.n;
+    const int n = static_cast<int>(nActive64);
+    if (static_cast<std::uint64_t>(n) != nActive64) {
+        throw std::runtime_error("0493x14d species thermostat particle count exceeds int kernel range");
+    }
+    const int nc = cv.numCells;
+    if (n <= 0 || nc <= 0 || cv.particleCapacity < nActive64 ||
+        pv.vx == nullptr || pv.vy == nullptr || pv.mass == nullptr ||
+        pv.role == nullptr || pv.type == nullptr || cv.cellId == nullptr ||
+        cv.count == nullptr || cv.cellMass == nullptr || cv.cellPx == nullptr ||
+        cv.cellPy == nullptr || cv.cellUx == nullptr || cv.cellUy == nullptr ||
+        cv.cellKinetic == nullptr || cv.cellScale == nullptr) {
+        throw std::runtime_error("0493x14d species thermostat has incomplete resident CUDA state");
+    }
+
+    const int threads = 256;
+    const int particleBlocks = std::max(1, (n + threads - 1) / threads);
+    const int cellBlocks = std::max(1, (nc + threads - 1) / threads);
+    const std::size_t cBytesU = static_cast<std::size_t>(nc) * sizeof(unsigned int);
+    const std::size_t cBytesD = static_cast<std::size_t>(nc) * sizeof(double);
+
+    ThermostatDiagnostics diag{};
+    double totalKBefore = 0.0;
+    double targetKTotal = 0.0;
+    double scaleSum = 0.0;
+    double scaleMin = std::numeric_limits<double>::infinity();
+    double scaleMax = 0.0;
+    std::uint64_t dofTotal = 0u;
+    std::uint64_t cellsRescaled = 0u;
+    std::uint64_t particlesRescaled = 0u;
+
+    std::vector<unsigned int> hostCount(static_cast<std::size_t>(nc));
+    std::vector<double> hostKinetic(static_cast<std::size_t>(nc));
+    std::vector<double> hostScale(static_cast<std::size_t>(nc));
+
+    for (std::size_t sidx = 0; sidx < speciesTypes.size(); ++sidx) {
+        const double target = targetKBT[sidx];
+        if (!(target > 0.0) || !std::isfinite(target)) {
+            throw std::runtime_error("0493x14d species thermostat target must be finite and positive");
+        }
+        reset_species_thermostat_cells_0493x14d_kernel<<<cellBlocks, threads>>>(
+            nc, cv.count, cv.cellMass, cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy,
+            cv.cellKinetic, cv.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        deposit_species_thermostat_moments_0493x14d_kernel<<<particleBlocks, threads>>>(
+            n, cv.cellId, pv.role, pv.type, pv.mass, pv.vx, pv.vy,
+            static_cast<unsigned char>(kParticleRoleFluid), speciesTypes[sidx], nc,
+            cv.count, cv.cellMass, cv.cellPx, cv.cellPy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(
+            nc, cv.cellMass, cv.cellPx, cv.cellPy, cv.cellUx, cv.cellUy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        kinetic_species_thermostat_0493x14d_kernel<<<particleBlocks, threads>>>(
+            n, cv.cellId, pv.role, pv.type, pv.mass, pv.vx, pv.vy, cv.cellUx, cv.cellUy,
+            static_cast<unsigned char>(kParticleRoleFluid), speciesTypes[sidx], nc, cv.cellKinetic);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        scale_persistent_kernel<<<cellBlocks, threads>>>(
+            nc, cv.count, cv.cellKinetic, target, minParticles, epsilon, cv.cellScale);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        apply_species_thermostat_0493x14d_kernel<<<particleBlocks, threads>>>(
+            n, cv.cellId, pv.role, pv.type, cv.cellUx, cv.cellUy, cv.cellScale,
+            static_cast<unsigned char>(kParticleRoleFluid), speciesTypes[sidx], nc, pv.vx, pv.vy);
+        MPCD_CUDA_CHECK(cudaGetLastError());
+        MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+
+        MPCD_CUDA_CHECK(cudaMemcpy(hostCount.data(), cv.count, cBytesU, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(hostKinetic.data(), cv.cellKinetic, cBytesD, cudaMemcpyDeviceToHost));
+        MPCD_CUDA_CHECK(cudaMemcpy(hostScale.data(), cv.cellScale, cBytesD, cudaMemcpyDeviceToHost));
+        for (int c = 0; c < nc; ++c) {
+            const unsigned int count = hostCount[static_cast<std::size_t>(c)];
+            const double K = hostKinetic[static_cast<std::size_t>(c)];
+            if (count < static_cast<unsigned int>(minParticles) || !(K > epsilon)) continue;
+            const double dof = 2.0 * static_cast<double>(count - 1u);
+            const double targetK = 0.5 * dof * target;
+            const double sc = hostScale[static_cast<std::size_t>(c)];
+            totalKBefore += K;
+            targetKTotal += targetK;
+            dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
+            cellsRescaled += 1u;
+            particlesRescaled += static_cast<std::uint64_t>(count);
+            scaleSum += sc;
+            scaleMin = std::min(scaleMin, sc);
+            scaleMax = std::max(scaleMax, sc);
+        }
+    }
+
+    diag.applied = cellsRescaled > 0u;
+    diag.cellsRescaled = cellsRescaled;
+    diag.particlesRescaled = particlesRescaled;
+    diag.kBTBefore = dofTotal > 0u ? 2.0 * totalKBefore / static_cast<double>(dofTotal) : 0.0;
+    diag.kBTAfter = dofTotal > 0u ? 2.0 * targetKTotal / static_cast<double>(dofTotal) : 0.0;
+    diag.scaleMean = cellsRescaled > 0u ? scaleSum / static_cast<double>(cellsRescaled) : 1.0;
+    diag.scaleMin = cellsRescaled > 0u ? scaleMin : 1.0;
+    diag.scaleMax = cellsRescaled > 0u ? scaleMax : 1.0;
+    return diag;
+#endif
 }
 
 CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(

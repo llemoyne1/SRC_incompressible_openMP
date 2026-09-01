@@ -97,6 +97,12 @@ void validate_species_definitions(const std::vector<SpeciesDefinition>& definiti
                                      ": referenceCellMassDeclared must be finite and positive for type " +
                                      std::to_string(d.type));
         }
+        if (!std::isfinite(d.thermostatTargetKBTDeclared) ||
+            d.thermostatTargetKBTDeclared == 0.0) {
+            throw std::runtime_error(context +
+                                     ": thermostatTargetKBTDeclared must be finite and either positive or negative-to-inherit for type " +
+                                     std::to_string(d.type));
+        }
     }
 }
 
@@ -169,6 +175,7 @@ void SpeciesDiagnosticsWriter0490a::append(
             acc.definition.q6StrengthDeclared = 0.0;
             acc.definition.resamplingMassClosureStrengthDeclared = 0.0;
             acc.definition.referenceCellMassDeclared = 1.0;
+            acc.definition.thermostatTargetKBTDeclared = -1.0;
             acc.registered = false;
         }
 

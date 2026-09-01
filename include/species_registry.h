@@ -31,6 +31,11 @@ struct SpeciesDefinition {
     // phase-aware local mass target.
     double referenceCellMassDeclared = 1.0;
 
+    // 0493x14a: optional per-species thermostat target. A negative value
+    // inherits SimulationParams::thermostatTargetKBT (or kBT through that
+    // legacy fallback). The field is inert unless speciesThermostatEnable=true.
+    double thermostatTargetKBTDeclared = -1.0;
+
     // 0493b: orthogonal mutation policy. Disabled species remain physical
     // participants in streaming, SRC, boundaries, Darcy, thermostat and Q6,
     // and remain present in every species-cell deposit. Only resampling

@@ -15,7 +15,7 @@ function out = play_livevis_fields(recordingDir, varargin)
 %
 % Common examples
 % ---------------
-% Replay only:
+% Replay only:re
 %   play_livevis_fields(recDir, ...
 %       'field','mass', 'colormap','thermal', 'gain',1);
 %

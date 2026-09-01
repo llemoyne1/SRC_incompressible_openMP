@@ -652,6 +652,13 @@ CudaCellWorkspace& cuda_persistent_cell_workspace_tls() {
     static thread_local CudaCellWorkspace workspace;
     return workspace;
 }
+
+// 0493x14g: metadata for the cellId currently held by the persistent SRC
+// collision workspace. It is deliberately thread-local, like the workspace
+// itself, and invalidated at the beginning of every collision attempt.
+thread_local bool g_persistentSrcCellIdsValid0493x14g = false;
+thread_local std::uint64_t g_persistentSrcCellIdsStep0493x14g = 0u;
+thread_local std::uint64_t g_persistentSrcCellIdsParticles0493x14g = 0u;
 #endif
 
 bool cuda_wall_simple_collision_0253_enabled() {
@@ -1042,9 +1049,20 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     // 0291b: thermostatEnable is the authoritative physical switch.
     // Environment flags may select an accelerated CUDA thermostat backend, but
     // they must not force a thermostat when params.thermostatEnable=false.
+    // 0493x14d: the legacy fused persistent thermostat remains all-fluid.
+    // With speciesThermostatEnable, keep the SRC collision resident/common and
+    // apply the per-type thermostat as a separate resident stage below.
     const bool persistentCollisionThermostat =
-        persistentCollisionThermostatRequested && params.thermostatEnable;
-    if (!persistentCollision && !persistentCollisionThermostat) return false;
+        persistentCollisionThermostatRequested && params.thermostatEnable &&
+        !params.speciesThermostatEnable;
+    const bool persistentSpeciesThermostatRequested0493x14d =
+        persistentCollisionThermostatRequested && params.thermostatEnable &&
+        params.speciesThermostatEnable;
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    g_persistentSrcCellIdsValid0493x14g = false;
+#endif
+    if (!persistentCollision && !persistentCollisionThermostat &&
+        !persistentSpeciesThermostatRequested0493x14d) return false;
 
     std::string reason;
     if (!cuda_persistent_collision_subset_supported(params, grid, domain, &reason)) {
@@ -1205,11 +1223,21 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     }
 
     ThermostatDiagnostics consumedThermostat{};
-    const bool applyPersistentThermostat = persistentCollisionThermostat && params.thermostatEnable &&
-        params.thermostatEvery > 0 && ((step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u);
+    const bool thermostatDue0493x14d = params.thermostatEnable &&
+        params.thermostatEvery > 0 &&
+        ((step % static_cast<std::uint64_t>(params.thermostatEvery)) == 0u);
+    const bool applyPersistentThermostat = persistentCollisionThermostat && thermostatDue0493x14d;
+    // Only the classic SRC/no-Q6 ordering can consume the species thermostat
+    // here. Q6/Q6-g-f must preserve collision -> projection -> thermostat and
+    // therefore continue to the resident Q6 thermostat stage.
+    const bool applyPersistentSpeciesThermostat0493x14d =
+        persistentSpeciesThermostatRequested0493x14d && thermostatDue0493x14d &&
+        !params.projectionEnable && !params.speciesQ6Enable &&
+        !params.closedCapacityResponseEnable && !params.closedCapacityVirialKickEnable;
     CudaPersistentMpcdStepDiagnostics raw{};
     CudaParticleStateDiagnostics particleDiag{};
     CudaCellWorkspaceDiagnostics cellDiag{};
+    bool persistentSrcCellIdsResident0493x14g = false;
     const bool useSharedParticleState = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_PARTICLE_STATE_USE", false);
     const bool useSharedCellWorkspace = persistent_env_flag_enabled("MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE", false);
     const bool wallCircleSharedThermostat0338 = wall_circle_resident_shared_thermostat_0338();
@@ -1256,6 +1284,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                 cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+                persistentSrcCellIdsResident0493x14g = true;
                 raw.uploadSeconds += cellDiag.allocateSeconds;
                 raw.totalSeconds += cellDiag.allocateSeconds;
                 consumedSharedThermostatState0260 = true;
@@ -1279,6 +1308,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                 cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision_thermostat(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg, &consumedThermostat);
+                persistentSrcCellIdsResident0493x14g = true;
             } else
 #endif
             {
@@ -1316,8 +1346,30 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                 cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+                persistentSrcCellIdsResident0493x14g = true;
                 raw.uploadSeconds += cellDiag.allocateSeconds;
                 raw.totalSeconds += cellDiag.allocateSeconds;
+                if (applyPersistentSpeciesThermostat0493x14d) {
+                    std::vector<std::uint32_t> thermostatTypes0493x14d;
+                    std::vector<double> thermostatTargets0493x14d;
+                    thermostatTypes0493x14d.reserve(params.speciesDefinitions.size());
+                    thermostatTargets0493x14d.reserve(params.speciesDefinitions.size());
+                    const double inheritedTarget0493x14d =
+                        params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+                    for (const SpeciesDefinition& d0493x14d : params.speciesDefinitions) {
+                        thermostatTypes0493x14d.push_back(d0493x14d.type);
+                        thermostatTargets0493x14d.push_back(
+                            d0493x14d.thermostatTargetKBTDeclared > 0.0
+                                ? d0493x14d.thermostatTargetKBTDeclared
+                                : inheritedTarget0493x14d);
+                    }
+                    consumedThermostat = cuda_apply_persistent_species_thermostat_0493x14d(
+                        gpuState, cellWorkspace, thermostatTypes0493x14d, thermostatTargets0493x14d,
+                        params.thermostatMinParticles, params.thermostatEpsilon);
+                    cuda_persistent_record_consumed_thermostat(step, consumedThermostat);
+                    cuda_shared_particle_state_0251_mark_fresh(
+                        "persistent_src_species_thermostat_0493x14d");
+                }
                 consumedSharedParticleState0251 = true;
             }
         }
@@ -1338,6 +1390,7 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                 cellWorkspace.ensure_capacity(active_fluid_count(state), grid.Nx * grid.Ny, &cellDiag);
                 raw = cuda_apply_persistent_tg_deposit_src_collision(
                     gpuState, cellWorkspace, state, ws.cellId, ws.cellCount, ws.cellMass, ws.cellUx, ws.cellUy, cfg);
+                persistentSrcCellIdsResident0493x14g = true;
             } else
 #endif
             {
@@ -1365,6 +1418,14 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
 #endif
     }
 
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (persistentSrcCellIdsResident0493x14g) {
+        g_persistentSrcCellIdsValid0493x14g = true;
+        g_persistentSrcCellIdsStep0493x14g = step;
+        g_persistentSrcCellIdsParticles0493x14g = raw.particlesVisited;
+    }
+#endif
+
     CudaPersistentCollisionActiveRow row{};
     row.step = step;
     row.particlesVisited = raw.particlesVisited;
@@ -1378,8 +1439,9 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     row.totalSeconds = raw.totalSeconds;
     row.shiftX = diagOut.shift.sx;
     row.shiftY = diagOut.shift.sy;
-    row.thermostatAppliedOnGpu = applyPersistentThermostat ? 1 : 0;
-    if (applyPersistentThermostat) {
+    row.thermostatAppliedOnGpu =
+        (applyPersistentThermostat || applyPersistentSpeciesThermostat0493x14d) ? 1 : 0;
+    if (applyPersistentThermostat || applyPersistentSpeciesThermostat0493x14d) {
         row.thermostatCellsRescaled = consumedThermostat.cellsRescaled;
         row.thermostatParticlesRescaled = consumedThermostat.particlesRescaled;
         row.thermostatKBTBefore = consumedThermostat.kBTBefore;
@@ -1655,6 +1717,26 @@ void maybe_validate_cuda_src_collision_shadow(const ParticleState& cpuPostCollis
 #endif
 
 } // namespace
+
+const int* cuda_persistent_src_collision_device_cell_ids_0493x14g(
+    const std::uint64_t step, const std::uint64_t expectedActiveParticles) {
+#if defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
+    if (!g_persistentSrcCellIdsValid0493x14g ||
+        g_persistentSrcCellIdsStep0493x14g != step ||
+        g_persistentSrcCellIdsParticles0493x14g != expectedActiveParticles) {
+        return nullptr;
+    }
+    const CudaCellWorkspaceDeviceView cv = cuda_persistent_cell_workspace_tls().device_view();
+    if (cv.cellId == nullptr || cv.particleCapacity < expectedActiveParticles) {
+        return nullptr;
+    }
+    return cv.cellId;
+#else
+    (void)step;
+    (void)expectedActiveParticles;
+    return nullptr;
+#endif
+}
 
 GridShift sample_grid_shift(const SimulationParams& params, std::uint64_t step) {
     GridShift shift{};

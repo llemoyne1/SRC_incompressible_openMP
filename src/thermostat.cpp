@@ -377,6 +377,168 @@ void resize_thermostat_workspace(ThermostatWorkspace& ws,
     }
 }
 
+namespace {
+
+double resolved_species_thermostat_target_0493x14a(
+    const SpeciesDefinition& species,
+    const SimulationParams& params) {
+    if (species.thermostatTargetKBTDeclared > 0.0) {
+        return species.thermostatTargetKBTDeclared;
+    }
+    return params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+}
+
+ThermostatDiagnostics apply_species_cell_relative_rescale_cpu_0493x14a(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    const std::vector<int>& cellId,
+    ThermostatWorkspace& ws) {
+    ThermostatDiagnostics diag{};
+    const std::size_t n = active_fluid_count_size(state);
+    const int nc = grid.numCells;
+    const int nt = std::max(1, thread_count());
+    resize_thermostat_workspace(ws, active_fluid_count(state), nc, nt);
+
+    double totalKBefore = 0.0;
+    double targetKTotal = 0.0;
+    double scaleSum = 0.0;
+    double scaleMin = std::numeric_limits<double>::infinity();
+    double scaleMax = 0.0;
+    std::uint64_t dofTotal = 0u;
+    std::uint64_t cellsRescaled = 0u;
+    std::uint64_t particlesRescaled = 0u;
+
+    for (const SpeciesDefinition& species : params.speciesDefinitions) {
+        std::fill(ws.cellCount.begin(), ws.cellCount.end(), 0u);
+        std::fill(ws.cellMass.begin(), ws.cellMass.end(), 0.0);
+        std::fill(ws.cellUx.begin(), ws.cellUx.end(), 0.0);
+        std::fill(ws.cellUy.begin(), ws.cellUy.end(), 0.0);
+        std::fill(ws.cellKinetic.begin(), ws.cellKinetic.end(), 0.0);
+        std::fill(ws.cellScale.begin(), ws.cellScale.end(), 1.0);
+        std::fill(ws.localCount.begin(), ws.localCount.end(), 0u);
+        std::fill(ws.localMass.begin(), ws.localMass.end(), 0.0);
+        std::fill(ws.localPx.begin(), ws.localPx.end(), 0.0);
+        std::fill(ws.localPy.begin(), ws.localPy.end(), 0.0);
+        std::fill(ws.localKinetic.begin(), ws.localKinetic.end(), 0.0);
+
+#pragma omp parallel
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
+#pragma omp for
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i) || state.type[i] != species.type) continue;
+                const int c = cellId[i];
+                if (c < 0 || c >= nc) continue;
+                const std::size_t k = offset + static_cast<std::size_t>(c);
+                const double m = state.mass[i];
+                ws.localCount[k] += 1u;
+                ws.localMass[k] += m;
+                ws.localPx[k] += m * state.vx[i];
+                ws.localPy[k] += m * state.vy[i];
+            }
+        }
+
+#pragma omp parallel for if(nc > 256)
+        for (int c = 0; c < nc; ++c) {
+            std::uint32_t count = 0u;
+            double mass = 0.0;
+            double px = 0.0;
+            double py = 0.0;
+            for (int t = 0; t < nt; ++t) {
+                const std::size_t k = static_cast<std::size_t>(t * nc + c);
+                count += ws.localCount[k];
+                mass += ws.localMass[k];
+                px += ws.localPx[k];
+                py += ws.localPy[k];
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            ws.cellCount[kk] = count;
+            ws.cellMass[kk] = mass;
+            if (mass > 0.0) {
+                ws.cellUx[kk] = px / mass;
+                ws.cellUy[kk] = py / mass;
+            }
+        }
+
+        std::fill(ws.localKinetic.begin(), ws.localKinetic.end(), 0.0);
+#pragma omp parallel
+        {
+            const int tid = thread_id();
+            const std::size_t offset = static_cast<std::size_t>(tid * nc);
+#pragma omp for
+            for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+                const std::size_t i = static_cast<std::size_t>(ii);
+                if (!is_fluid_particle(state, i) || state.type[i] != species.type) continue;
+                const int c = cellId[i];
+                if (c < 0 || c >= nc) continue;
+                const std::size_t kk = static_cast<std::size_t>(c);
+                const double dvx = state.vx[i] - ws.cellUx[kk];
+                const double dvy = state.vy[i] - ws.cellUy[kk];
+                ws.localKinetic[offset + kk] +=
+                    0.5 * state.mass[i] * (dvx * dvx + dvy * dvy);
+            }
+        }
+
+        const double targetKBT = resolved_species_thermostat_target_0493x14a(species, params);
+#pragma omp parallel for reduction(+:totalKBefore,targetKTotal,scaleSum,dofTotal,cellsRescaled,particlesRescaled) reduction(min:scaleMin) reduction(max:scaleMax) if(nc > 256)
+        for (int c = 0; c < nc; ++c) {
+            double K = 0.0;
+            for (int t = 0; t < nt; ++t) {
+                K += ws.localKinetic[static_cast<std::size_t>(t * nc + c)];
+            }
+            const std::size_t kk = static_cast<std::size_t>(c);
+            ws.cellKinetic[kk] = K;
+            const std::uint32_t count = ws.cellCount[kk];
+            if (count < static_cast<std::uint32_t>(params.thermostatMinParticles) ||
+                !(K > params.thermostatEpsilon)) {
+                continue;
+            }
+            const double dof = 2.0 * static_cast<double>(count - 1u);
+            const double targetK = 0.5 * dof * targetKBT;
+            const double scale = std::sqrt(targetK / K);
+            ws.cellScale[kk] = scale;
+            totalKBefore += K;
+            targetKTotal += targetK;
+            dofTotal += static_cast<std::uint64_t>(2u * (count - 1u));
+            cellsRescaled += 1u;
+            particlesRescaled += static_cast<std::uint64_t>(count);
+            scaleSum += scale;
+            if (scale < scaleMin) scaleMin = scale;
+            if (scale > scaleMax) scaleMax = scale;
+        }
+
+#pragma omp parallel for if(n > 10000)
+        for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
+            const std::size_t i = static_cast<std::size_t>(ii);
+            if (!is_fluid_particle(state, i) || state.type[i] != species.type) continue;
+            const int c = cellId[i];
+            if (c < 0 || c >= nc) continue;
+            const std::size_t kk = static_cast<std::size_t>(c);
+            const double scale = ws.cellScale[kk];
+            if (scale == 1.0) continue;
+            const double ux = ws.cellUx[kk];
+            const double uy = ws.cellUy[kk];
+            state.vx[i] = ux + scale * (state.vx[i] - ux);
+            state.vy[i] = uy + scale * (state.vy[i] - uy);
+        }
+    }
+
+    diag.applied = cellsRescaled > 0u;
+    diag.cellsRescaled = cellsRescaled;
+    diag.particlesRescaled = particlesRescaled;
+    diag.kBTBefore = dofTotal > 0u ? 2.0 * totalKBefore / static_cast<double>(dofTotal) : 0.0;
+    diag.kBTAfter = dofTotal > 0u ? 2.0 * targetKTotal / static_cast<double>(dofTotal) : 0.0;
+    diag.scaleMean = cellsRescaled > 0u ? scaleSum / static_cast<double>(cellsRescaled) : 1.0;
+    diag.scaleMin = cellsRescaled > 0u ? scaleMin : 1.0;
+    diag.scaleMax = cellsRescaled > 0u ? scaleMax : 1.0;
+    return diag;
+}
+
+} // namespace
+
 ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& state,
                                                               const SimulationParams& params,
                                                               const CellGrid& grid,
@@ -404,22 +566,33 @@ ThermostatDiagnostics apply_cell_relative_rescale_thermostat(ParticleState& stat
     }
 
     const double targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
-    if (!(targetKBT > 0.0)) {
+    if (!params.speciesThermostatEnable && !(targetKBT > 0.0)) {
         throw std::runtime_error("Thermostat requires positive thermostatTargetKBT or kBT");
     }
 
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
+    // 0493x14d: in classic SRC resident mode, speciesThermostatEnable uses a
+    // separate per-type CUDA stage immediately after the mixture-wide SRC
+    // collision. Consume that result here exactly like the legacy fused
+    // thermostat, so the CPU fallback cannot apply a second thermostat.
     if (env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE", false)) {
         ThermostatDiagnostics consumed{};
         if (cuda_persistent_take_consumed_thermostat(step, consumed)) {
             return consumed;
         }
         const bool strictConsumed = env_flag_enabled("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_CONSUME_STRICT", true);
-        if (strictConsumed) {
-            throw std::runtime_error("MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1 but no consumed thermostat diagnostics were recorded for this step");
+        if (strictConsumed && (!params.speciesThermostatEnable || params.srcClassicCudaModeEnable)) {
+            throw std::runtime_error(
+                "MPCD_CUDA_PERSISTENT_SRC_THERMOSTAT_USE=1 but no consumed thermostat diagnostics were recorded for this step");
         }
     }
 #endif
+
+    // 0493x14a CPU fallback remains available for non-resident/custom paths.
+    if (params.speciesThermostatEnable) {
+        return apply_species_cell_relative_rescale_cpu_0493x14a(
+            state, params, grid, cellId, ws);
+    }
 
     const int nc = grid.numCells;
     const int nt = std::max(1, thread_count());
