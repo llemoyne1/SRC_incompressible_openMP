@@ -497,6 +497,13 @@ struct SimulationParams {
     // same cell; tangential motion is untouched.  A non-reflected crossing
     // may optionally be relabelled to an unprojected registered type.
     double phaseInterfaceKineticReflectionFraction = 0.0;
+    // 0493x14k-bilateral-x10u: opt-in liquid/gas extension of the qualified
+    // position-only x10u support relocation.  The liquid A side keeps the
+    // historical x10o+CIC+Q2+x10p/x10u geometry.  A single explicit gas B
+    // species is allowed to use the same moving Q2 wall with reversed phase
+    // sense.  No velocity, mass or particle type is changed by this flag.
+    // Default false preserves the liquid/vacuum guard and legacy path exactly.
+    bool phaseInterfaceKineticBilateralRelocation = false;
     int phaseInterfaceEvaporationTargetType = -1;
 
     // 0493x9g: phase-pair abstraction for the resident interface geometry.

@@ -255,7 +255,8 @@ bool q6_g_f_diagnostics_this_step_0493x7k(
 
 enum class PhaseGasPressureMode0493x6g : int {
     Eos = 0,
-    Constant = 1
+    Constant = 1,
+    EosAccessibleVolume = 2
 };
 
 PhaseGasPressureMode0493x6g phase_gas_pressure_mode_0493x6g() {
@@ -263,6 +264,10 @@ PhaseGasPressureMode0493x6g phase_gas_pressure_mode_0493x6g() {
     if (value == nullptr || *value == '\0' || std::strcmp(value, "eos") == 0 ||
         std::strcmp(value, "EOS") == 0) {
         return PhaseGasPressureMode0493x6g::Eos;
+    }
+    if (std::strcmp(value, "eos_accessible_volume") == 0 ||
+        std::strcmp(value, "EOS_ACCESSIBLE_VOLUME") == 0) {
+        return PhaseGasPressureMode0493x6g::EosAccessibleVolume;
     }
     if (std::strcmp(value, "constant") == 0 || std::strcmp(value, "CONSTANT") == 0) {
         return PhaseGasPressureMode0493x6g::Constant;
@@ -272,7 +277,13 @@ PhaseGasPressureMode0493x6g phase_gas_pressure_mode_0493x6g() {
 }
 
 const char* phase_gas_pressure_mode_name_0493x6g(PhaseGasPressureMode0493x6g mode) {
-    return mode == PhaseGasPressureMode0493x6g::Constant ? "constant" : "eos";
+    switch (mode) {
+        case PhaseGasPressureMode0493x6g::Constant: return "constant";
+        case PhaseGasPressureMode0493x6g::EosAccessibleVolume:
+            return "eos_accessible_volume";
+        case PhaseGasPressureMode0493x6g::Eos:
+        default: return "eos";
+    }
 }
 
 // Small-cut-cell conditioning guard for the first active geometry test.  A
@@ -1687,7 +1698,10 @@ void append_phase_interface_gas_pressure_audit_0493x6g(
         << a.pressurePotentialStd << ',' << a.pressureDeltaMean << ','
         << a.pressureDeltaStd << ',' << a.prepareSeconds << ',' << a.residentBytes << ','
         << "phiGamma=dt*pressureScale*(pGas-pressureReference)/rhoLiquidRef;"
-           "EOS:pGas=Ng*kBT/cellArea;trace=gas-side(alpha<0.5)-cell" << '\n';
+           "EOS:pRaw=Ng*kBT/cellArea;trace=gas-side(alpha<0.5)-cell;"
+           "eos_accessible_volume:pGas=pRaw/fQ6;"
+           "fQ6=clamp(((1-alpha)-0.37396789550781245)/"
+           "(0.9153533203125-0.37396789550781245),0.05,1)" << '\n';
 }
 
 void append_q6_resident_thermostat_audit_0491f(
@@ -6289,15 +6303,23 @@ __device__ __forceinline__ bool q6_x10p_resolve_initial_overlap(
     double px, double py,
     double vx, double vy,
     double mass,
+    int phaseSense0493x14k,
     double sideTol,
     const InitialOverlapNearest0493x10p& nearest,
     MovingSegmentCollision0493x10n* out) {
-    if (!out || !nearest.valid || !(nearest.signedDistance > sideTol))
+    const double phaseSign0493x14k = phaseSense0493x14k >= 0 ? 1.0 : -1.0;
+    const double penetration0493x14k =
+        phaseSign0493x14k * nearest.signedDistance;
+    if (!out || !nearest.valid || !(penetration0493x14k > sideTol))
         return false;
 
+    // Normal is always outward from the particle's own support.  For phase B
+    // this is the opposite of the historical A->B Q2 normal.
+    const double nx0493x14k = phaseSign0493x14k * nearest.nx;
+    const double ny0493x14k = phaseSign0493x14k * nearest.ny;
     const double reln =
-        (vx - nearest.wallVx) * nearest.nx +
-        (vy - nearest.wallVy) * nearest.ny;
+        (vx - nearest.wallVx) * nx0493x14k +
+        (vy - nearest.wallVy) * ny0493x14k;
     if (!isfinite(reln)) return false;
 
     const double pushTol = 4.0 * sideTol;
@@ -6308,23 +6330,23 @@ __device__ __forceinline__ bool q6_x10p_resolve_initial_overlap(
     out->lambda = nearest.lambda;
     out->wallVx = nearest.wallVx;
     out->wallVy = nearest.wallVy;
-    out->nx = nearest.nx;
-    out->ny = nearest.ny;
+    out->nx = nx0493x14k;
+    out->ny = ny0493x14k;
     out->relnBefore = reln;
-    out->penetration = nearest.signedDistance;
+    out->penetration = penetration0493x14k;
 
     out->positionCorrectionX =
-        (nearest.qx - px) - pushTol * nearest.nx;
+        (nearest.qx - px) - pushTol * nx0493x14k;
     out->positionCorrectionY =
-        (nearest.qy - py) - pushTol * nearest.ny;
+        (nearest.qy - py) - pushTol * ny0493x14k;
 
     if (reln > 1.0e-13) {
         out->overlapOutwardReflected = true;
-        out->newVx = vx - 2.0 * reln * nearest.nx;
-        out->newVy = vy - 2.0 * reln * nearest.ny;
+        out->newVx = vx - 2.0 * reln * nx0493x14k;
+        out->newVy = vy - 2.0 * reln * ny0493x14k;
         const double impulse = 2.0 * mass * reln;
-        out->impulseWallX = impulse * nearest.nx;
-        out->impulseWallY = impulse * nearest.ny;
+        out->impulseWallX = impulse * nx0493x14k;
+        out->impulseWallY = impulse * ny0493x14k;
     } else {
         out->overlapOutwardReflected = false;
         out->newVx = vx;
@@ -6347,9 +6369,11 @@ __device__ __forceinline__ bool q6_x10n_collide_moving_segment(
     double dx, double dy,
     double lx, double ly,
     int periodicX, int periodicY,
+    int phaseSense0493x14k,
     const MovingSegment0493x10n& seg,
     MovingSegmentCollision0493x10n* out) {
     if (!out || !(window > 0.0)) return false;
+    const double phaseSign0493x14k = phaseSense0493x14k >= 0 ? 1.0 : -1.0;
 
     const double agx = seg.ax + seg.uax * tStart;
     const double agy = seg.ay + seg.uay * tStart;
@@ -6363,10 +6387,12 @@ __device__ __forceinline__ bool q6_x10n_collide_moving_segment(
     const double n0x = dgy * invL0;   // outward: segments are oriented A->B
     const double n0y = -dgx * invL0;
     const double s0 = (-arx) * n0x + (-ary) * n0y;
+    const double sOwn0493x14k = phaseSign0493x14k * s0;
     const double h = fmin(dx, dy);
     const double sideTol = 1.0e-8 * fmax(1.0, h);
-    // x10p pre-resolves the nearest finite-segment initial overlap.
-    if (s0 > sideTol || s0 < -2.5 * h) return false;
+    // x10p pre-resolves the nearest finite-segment initial overlap.  sOwn is
+    // negative on the particle's own side for both A and B.
+    if (sOwn0493x14k > sideTol || sOwn0493x14k < -2.5 * h) return false;
 
     const double r0x = -arx;
     const double r0y = -ary;
@@ -6412,8 +6438,8 @@ __device__ __forceinline__ bool q6_x10n_collide_moving_segment(
         if (lambda < -ltol || lambda > 1.0 + ltol) continue;
         lambda = fmin(1.0, fmax(0.0, lambda));
         const double invL = 1.0 / sqrt(L2);
-        const double nxh = dyh * invL;
-        const double nyh = -dxh * invL;
+        const double nxh = phaseSign0493x14k * dyh * invL;
+        const double nyh = phaseSign0493x14k * (-dxh * invL);
         const double wallVx = seg.uax + lambda * (seg.ubx - seg.uax);
         const double wallVy = seg.uay + lambda * (seg.uby - seg.uay);
         const double reln = (vx - wallVx) * nxh + (vy - wallVy) * nyh;
@@ -6660,11 +6686,13 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     double lx, double ly,
     int nx,
     int periodicX, int periodicY,
+    int phaseSense0493x14k,
     double phaseNormalScale0493x10w,
     const BiquadraticAlphaPatch0493x10biq& q,
     const MovingSegment0493x10n& seg,
     MovingSegmentCollision0493x10n* out) {
     if (!out || !q.valid || !(window > 0.0)) return false;
+    const double phaseSign0493x14k = phaseSense0493x14k >= 0 ? 1.0 : -1.0;
 
     // Keep the qualified x10o kinematic frame.  Geometry is biquadratic; the
     // wall velocity still comes from the matching moving thermal segment.
@@ -6719,27 +6747,31 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     const double ux = (phaseVx0493x10w - wallVx) / dx;
     const double uy = (phaseVy0493x10w - wallVy) / dy;
 
-    double f0 = 0.0, f1 = 0.0;
+    double f0Raw0493x14k = 0.0, f1Raw0493x14k = 0.0;
     if (!q6_x10biq_level_at_tau(
             q, xi0, eta0, ux, uy, 0.0,
-            thermalThickness, dx, dy, &f0)) return false;
+            thermalThickness, dx, dy, &f0Raw0493x14k)) return false;
     const double sideTol = 1.0e-10;
-    // x10p owns true initial-overlap handling.  Do not manufacture a swept
-    // hit from a particle already outside the reconstructed thermal envelope.
+    // The Q2 field is positive on liquid A.  Multiplying by phaseSign makes
+    // the level positive on the current particle's own support for both A
+    // (+1) and gas B (-1).  x10p owns true initial-overlap handling.
+    const double f0 = phaseSign0493x14k * f0Raw0493x14k;
     if (f0 < -sideTol) return false;
     if (!q6_x10biq_level_at_tau(
             q, xi0, eta0, ux, uy, window,
-            thermalThickness, dx, dy, &f1)) return false;
+            thermalThickness, dx, dy, &f1Raw0493x14k)) return false;
+    const double f1 = phaseSign0493x14k * f1Raw0493x14k;
 
     double lo = 0.0, hi = window;
     double flo = f0, fhi = f1;
     if (fhi > 0.0) {
         // Rare cross-and-return safeguard without a global subdivision pass.
         const double mid = 0.5 * window;
-        double fm = 0.0;
+        double fmRaw0493x14k = 0.0;
         if (!q6_x10biq_level_at_tau(
                 q, xi0, eta0, ux, uy, mid,
-                thermalThickness, dx, dy, &fm)) return false;
+                thermalThickness, dx, dy, &fmRaw0493x14k)) return false;
+        const double fm = phaseSign0493x14k * fmRaw0493x14k;
         if (fm >= 0.0) return false;
         hi = mid; fhi = fm;
     }
@@ -6762,10 +6794,11 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
             if (isfinite(sec) && sec > lo + guard && sec < hi - guard)
                 trial = sec;
         }
-        double ft = 0.0;
+        double ftRaw0493x14k = 0.0;
         if (!q6_x10biq_level_at_tau(
                 q, xi0, eta0, ux, uy, trial,
-                thermalThickness, dx, dy, &ft)) return false;
+                thermalThickness, dx, dy, &ftRaw0493x14k)) return false;
+        const double ft = phaseSign0493x14k * ftRaw0493x14k;
         tau = trial;
         if (ft >= 0.0) { lo = trial; flo = ft; }
         else { hi = trial; fhi = ft; }
@@ -6803,6 +6836,8 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
             thermalThickness, dx, dy, 1,
             &finalLevel, &nxh, &nyh, nullptr)) return false;
 
+    nxh *= phaseSign0493x14k;
+    nyh *= phaseSign0493x14k;
     const double reln = (vx - wallVxHit) * nxh +
                         (vy - wallVyHit) * nyh;
     if (!(reln > 1.0e-13) || !isfinite(reln)) return false;
@@ -7380,7 +7415,7 @@ __global__ void q6_x10w_mark_pairwise_thermal_candidates(
                         0.0, dt, thermalThickness,
                         dx, dy, lx, ly, nx,
                         periodicX, periodicY,
-                        1.0, patch, seg, &raw);
+                        +1, 1.0, patch, seg, &raw);
                     if (!rawOk || !(raw.tau < earliestRawTau)) continue;
 
                     earliestRawTau = raw.tau;
@@ -7392,7 +7427,7 @@ __global__ void q6_x10w_mark_pairwise_thermal_candidates(
                             0.0, dt, thermalThickness,
                             dx, dy, lx, ly, nx,
                             periodicX, periodicY,
-                            a, patch, seg, &filtered);
+                            +1, a, patch, seg, &filtered);
                     }
                 }
             }
@@ -7488,7 +7523,7 @@ __global__ void q6_x10w_apply_pairwise_thermal_velocity_redistribution(
                         0.0, dt, thermalThickness,
                         dx, dy, lx, ly, nx,
                         periodicX, periodicY,
-                        1.0, patch, seg, &raw);
+                        +1, 1.0, patch, seg, &raw);
                     if (!rawOk || !(raw.tau < earliestRawTau)) continue;
                     earliestRawTau=raw.tau;
                     earliestRawSuppressed=false;
@@ -7501,7 +7536,7 @@ __global__ void q6_x10w_apply_pairwise_thermal_velocity_redistribution(
                             0.0, dt, thermalThickness,
                             dx, dy, lx, ly, nx,
                             periodicX, periodicY,
-                            a, patch, seg, &filtered);
+                            +1, a, patch, seg, &filtered);
                     }
                 }
             }
@@ -7774,6 +7809,9 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
     double* wallImpulseX,
     double* wallImpulseY,
     std::uint32_t phaseAType,
+    std::uint32_t phaseBType0493x14k,
+    int bilateralRelocation0493x14k,
+    int gasSpecularReflection0493x14l,
     int nx, int ny,
     double lx, double ly, double dt,
     int periodicX, int periodicY,
@@ -7797,7 +7835,28 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
 
     for (std::uint64_t p = idx; p < nParticles; p += stride) {
         if (particles.role && particles.role[p] != kParticleRoleFluid) continue;
-        if (!particles.type || particles.type[p] != phaseAType) continue;
+        if (!particles.type) continue;
+        const std::uint32_t particleType0493x14k = particles.type[p];
+        int phaseSense0493x14k = 0;
+        if (particleType0493x14k == phaseAType) {
+            phaseSense0493x14k = +1;
+        } else if (bilateralRelocation0493x14k &&
+                   particleType0493x14k == phaseBType0493x14k) {
+            phaseSense0493x14k = -1;
+        } else {
+            continue;
+        }
+        // 0493x14l-gas-specular: ONLY phase B may bypass x10u.  The liquid A
+        // path remains the qualified position-only x10u path byte-for-byte
+        // below.  For B, q6_x10biq/q6_x10p already computed a specular
+        // response in the local moving-interface frame; x14l simply preserves
+        // that response instead of overwriting it with position-only x10u.
+        const bool gasSpecularThisParticle0493x14l =
+            gasSpecularReflection0493x14l != 0 &&
+            phaseSense0493x14k < 0;
+        const bool positionOnlyThisParticle0493x14l =
+            oneForOneRelocation0493x10u &&
+            !gasSpecularThisParticle0493x14l;
         const int initialCell = cells.cellId[p];
         if (initialCell < 0 || initialCell >= cells.numCells) continue;
 
@@ -7815,7 +7874,12 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
             const bool ok1 = q6_x9t_sample_alpha(
                 alpha, x0 + vx0 * dt, y0 + vy0 * dt,
                 nx, ny, lx, ly, periodicX, periodicY, &a1);
-            oldStationaryOuter = ok0 && ok1 && a0 >= 0.5 && a1 < 0.5;
+            const double ownLevel00493x14k =
+                static_cast<double>(phaseSense0493x14k) * (a0 - 0.5);
+            const double ownLevel10493x14k =
+                static_cast<double>(phaseSense0493x14k) * (a1 - 0.5);
+            oldStationaryOuter = ok0 && ok1 &&
+                ownLevel00493x14k >= 0.0 && ownLevel10493x14k < 0.0;
             if (oldStationaryOuter)
                 atomicAdd(&audit->continuousWallOldStationaryCrossingCandidates, 1ull);
         }
@@ -7885,7 +7949,8 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                             continue;
                         double thermalThicknessLocal0493x12a =
                             thermalThickness0493x10poly;
-                        if (localThermalCooling0493x12a) {
+                        if (localThermalCooling0493x12a &&
+                            phaseSense0493x14k > 0) {
                             double ts0493x12a = slot == 0
                                 ? wallImpulseX[owner] : wallImpulseY[owner];
                             if (!isfinite(ts0493x12a) || ts0493x12a < 0.0 ||
@@ -7950,7 +8015,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                 thermalThicknessLocal0493x12a,
                                 dx, dy, lx, ly, nx,
                                 periodicX, periodicY,
-                                phaseScale0493x10w,
+                                phaseSense0493x14k, phaseScale0493x10w,
                                 patch0493x10poly, seg, &hit);
                             // A raw Q2 crossing that disappears under the
                             // phase-transport scale is NOT a relocation/swap.
@@ -7968,7 +8033,8 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                         thermalThickness0493x10poly,
                                         dx, dy, lx, ly, nx,
                                         periodicX, periodicY,
-                                        1.0, patch0493x10poly, seg,
+                                        phaseSense0493x14k, 1.0,
+                                        patch0493x10poly, seg,
                                         &raw0493x10w);
                                 if (rawOk0493x10w &&
                                     raw0493x10w.tau < suppressedTau0493x10w) {
@@ -7988,7 +8054,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                 elapsed, remaining,
                                 dx, dy, lx, ly,
                                 periodicX, periodicY,
-                                seg, &hit);
+                                phaseSense0493x14k, seg, &hit);
                         }
                         if (!hitOk0493x10poly) continue;
                         ++validHits;
@@ -8005,8 +8071,12 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
             // Cost remains on the rare path: the normal swept search above is
             // unchanged (3x3). If no segment is visible from a vacuum-side
             // cell, inspect only the outer ring of a 7x7 neighborhood.
+            const bool wrongBulkSide0493x14k = alpha &&
+                (phaseSense0493x14k > 0
+                    ? alpha[cc] < 0.5
+                    : alpha[cc] > 0.5);
             if (resolveInitialOverlap0493x10p && event == 0 &&
-                !nearest.valid && alpha && alpha[cc] < 0.5) {
+                !nearest.valid && wrongBulkSide0493x14k) {
                 if (audit)
                     atomicAdd(&audit->x10qWideSearchTriggered, 1ull);
 
@@ -8053,7 +8123,8 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                 continue;
                             double thermalThicknessWide0493x12a =
                                 thermalThickness0493x10poly;
-                            if (localThermalCooling0493x12a) {
+                            if (localThermalCooling0493x12a &&
+                                phaseSense0493x14k > 0) {
                                 double ts0493x12a = slot0493x10q == 0
                                     ? wallImpulseX[owner0493x10q]
                                     : wallImpulseY[owner0493x10q];
@@ -8113,7 +8184,10 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                 const double h0493x10p = fmin(dx, dy);
                 const double sideTol0493x10p =
                     1.0e-8 * fmax(1.0, h0493x10p);
-                if (nearest.signedDistance > sideTol0493x10p) {
+                const double signedOutsideOwn0493x14k =
+                    static_cast<double>(phaseSense0493x14k) *
+                    nearest.signedDistance;
+                if (signedOutsideOwn0493x14k > sideTol0493x10p) {
                     if (audit)
                         atomicAdd(&audit->x10pInitialOutside, 1ull);
 
@@ -8122,7 +8196,8 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                     MovingSegmentCollision0493x10n overlap{};
                     if (q6_x10p_resolve_initial_overlap(
                             cx, cy, cvx, cvy, mass,
-                            sideTol0493x10p, nearest, &overlap)) {
+                            phaseSense0493x14k, sideTol0493x10p,
+                            nearest, &overlap)) {
                         // 0493x10w-fix1: x10w may have deliberately prevented
                         // this same outward thermal excursion at the previous
                         // step.  If the present penetration is no deeper than
@@ -8168,7 +8243,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                         if (audit) {
                             atomicAdd(
                                 &audit->x10pInitialOverlapResolved, 1ull);
-                            if (!oneForOneRelocation0493x10u) {
+                            if (!positionOnlyThisParticle0493x14l) {
                                 if (overlap.overlapOutwardReflected)
                                     atomicAdd(
                                         &audit->x10pInitialOverlapOutwardReflected,
@@ -8234,7 +8309,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
             // liquid support, but the interface no longer acts as a material
             // wall.  Keep the exact same particle slot, mass and velocity.
             // Only its position is mirrored to the liquid side.
-            if (oneForOneRelocation0493x10u) {
+            if (positionOnlyThisParticle0493x14l) {
                 best.newVx = cvx;
                 best.newVy = cvy;
                 best.impulseWallX = 0.0;
@@ -8304,10 +8379,19 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
             cvy = best.newVy;
             ++hitsTotal;
 
-            atomic_add_double_0400(
-                &wallImpulseX[bestSeg.ownerCell], best.impulseWallX);
-            atomic_add_double_0400(
-                &wallImpulseY[bestSeg.ownerCell], best.impulseWallY);
+            // 0493x14m-full-liquid-gas-compat: x12a aliases these two
+            // cell buffers as per-segment thickness-scale scratch.  The A/x10u
+            // impulse is identically zero.  B/x14l has a real specular impulse
+            // but its feedback is intentionally NOT applied; while x12a is
+            // active keep that B impulse in the audit only so the qualified
+            // liquid x12a scale cannot be corrupted by a concurrent gas hit.
+            if (!(localThermalCooling0493x12a &&
+                  gasSpecularThisParticle0493x14l)) {
+                atomic_add_double_0400(
+                    &wallImpulseX[bestSeg.ownerCell], best.impulseWallX);
+                atomic_add_double_0400(
+                    &wallImpulseY[bestSeg.ownerCell], best.impulseWallY);
+            }
 
             if (audit) {
                 atomicAdd(&audit->continuousWallCollisions, 1ull);
@@ -8328,7 +8412,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                 (void)cbx;
                 double beforeRelX = 0.0;
                 double beforeRelY = 0.0;
-                if (oneForOneRelocation0493x10u ||
+                if (positionOnlyThisParticle0493x14l ||
                     (best.initialOverlap && !best.overlapOutwardReflected)) {
                     beforeRelX = best.newVx - best.wallVx;
                     beforeRelY = best.newVy - best.wallVy;
@@ -8353,7 +8437,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                 const double relAfter =
                     (best.newVx - best.wallVx) * best.nx +
                     (best.newVy - best.wallVy) * best.ny;
-                if (!oneForOneRelocation0493x10u &&
+                if (!positionOnlyThisParticle0493x14l &&
                     !(relAfter < 1.0e-12 * fmax(1.0, fabs(best.relnBefore))))
                     atomicAdd(&audit->continuousWallRelativeStillOutward, 1ull);
                 atomic_add_double_0400(
@@ -8391,7 +8475,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
         // particle kinetic energy are invariant under the support correction.
         particles.vx[p] = cvx;
         particles.vy[p] = cvy;
-        if (hitsTotal > 0 && oneForOneRelocation0493x10u &&
+        if (hitsTotal > 0 && positionOnlyThisParticle0493x14l &&
             oneForOneRelocated0493x10v)
             oneForOneRelocated0493x10v[p] = 1u;
         if (audit)
@@ -12998,6 +13082,46 @@ __global__ void q6_contact_angle_curvature_audit_0493x9i(
     if (sqLocal != 0.0) atomic_add_double_0400(&accum->curvatureSqSum, sqLocal);
 }
 
+// 0493x14s-x6g-accessible-volume: experimental Q6-alpha cut-cell
+// pressure correction.  Existing x6g EOS and constant modes remain unchanged.
+// x14r offline fit (pooled 1636 represented faces):
+//   g = 1-alpha_Q6,
+//   f_access = clamp((g-g0)/(g1-g0),0,1),
+//   g0 = 0.37396789550781245, g1 = 0.9153533203125.
+// The correction is evaluated only on already-prepared alpha=0.5 interface
+// faces, so it adds no O(Ncells) pass, no particle pass and no resident buffer.
+bool phase_gas_pressure_mode_uses_eos_0493x6g(
+    PhaseGasPressureMode0493x6g mode) {
+    return mode == PhaseGasPressureMode0493x6g::Eos ||
+           mode == PhaseGasPressureMode0493x6g::EosAccessibleVolume;
+}
+
+__device__ __forceinline__ double q6_x14s_accessible_volume_fraction_0493x6g(
+    double alphaGasSide0493x6g) {
+    constexpr double g00493x14s = 0.37396789550781245;
+    constexpr double g10493x14s = 0.9153533203125;
+    constexpr double fractionFloor0493x14s = 0.05;
+    const double g0493x14s = 1.0 - alphaGasSide0493x6g;
+    const double ramp0493x14s =
+        (g0493x14s - g00493x14s) / (g10493x14s - g00493x14s);
+    // On a valid x6f gas-side trace alpha<0.5, hence g>0.5 and the fitted
+    // ramp is already >~0.23.  The floor is only a defensive finite guard.
+    return fmin(1.0, fmax(fractionFloor0493x14s, ramp0493x14s));
+}
+
+__device__ __forceinline__ double q6_x14s_correct_gas_pressure_potential_0493x6g(
+    double rawGaugePotential0493x6g,
+    double alphaGasSide0493x6g,
+    double referencePotential0493x6g) {
+    const double fraction0493x14s =
+        q6_x14s_accessible_volume_fraction_0493x6g(alphaGasSide0493x6g);
+    // rawGaugePotential = C*(p_raw-p_ref), referencePotential=C*p_ref.
+    // Therefore (rawGauge+reference)/f-reference = C*(p_raw/f-p_ref).
+    return (rawGaugePotential0493x6g + referencePotential0493x6g) /
+               fraction0493x14s -
+           referencePotential0493x6g;
+}
+
 __global__ void q6_build_phase_fill_resident_0493x6c(
     CudaSpeciesCellDeviceView0490h species,
     int phaseASelectorKind0493x9g,
@@ -13024,7 +13148,8 @@ __global__ void q6_build_phase_fill_resident_0493x6c(
             phaseASelectorValue0493x9g, phaseAReferenceCellMass0493x9g);
         if (buildGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
             double pressure = constantPressure0493x6g;
-            if (gasPressureMode0493x6g == static_cast<int>(PhaseGasPressureMode0493x6g::Eos)) {
+            if (gasPressureMode0493x6g == static_cast<int>(PhaseGasPressureMode0493x6g::Eos) ||
+                gasPressureMode0493x6g == static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
                 unsigned long long gasCount = 0ull;
                 for (int s = 0; s < species.speciesCount; ++s) {
                     if (q6_phase_selector_matches_0493x9g(
@@ -13857,6 +13982,8 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
     double* facePhiGammaX0493x6g,
     double* facePhiGammaY0493x6g,
     int useGasPressure0493x6g,
+    int gasPressureMode0493x6g,
+    double gasPressureReferencePotential0493x6g,
     int useSurfaceTension0493x9d,
     int usePhaseInterface0493x7m,
     int nx,
@@ -13939,6 +14066,13 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                             // AI carrier topologies and does not dilute p_g
                             // with the liquid-side cell where gas may be absent.
                             gasPhiGammaX0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            if (gasPressureMode0493x6g ==
+                                static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
+                                gasPhiGammaX0493x6g =
+                                    q6_x14s_correct_gas_pressure_potential_0493x6g(
+                                        gasPhiGammaX0493x6g, alphaLow,
+                                        gasPressureReferencePotential0493x6g);
+                            }
                             phiGammaX0493x6g += gasPhiGammaX0493x6g;
                         }
                         if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
@@ -14031,6 +14165,13 @@ __global__ void q6_prepare_phase_interface_stencil_0493x6f(
                         double gasPhiGammaY0493x6g = 0.0;
                         if (useGasPressure0493x6g && gasPressurePotential0493x6g != nullptr) {
                             gasPhiGammaY0493x6g = gasPressurePotential0493x6g[gasSideCell];
+                            if (gasPressureMode0493x6g ==
+                                static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
+                                gasPhiGammaY0493x6g =
+                                    q6_x14s_correct_gas_pressure_potential_0493x6g(
+                                        gasPhiGammaY0493x6g, alphaLow,
+                                        gasPressureReferencePotential0493x6g);
+                            }
                             phiGammaY0493x6g += gasPhiGammaY0493x6g;
                         }
                         if (useSurfaceTension0493x9d && capillaryCurvature0493x9d != nullptr) {
@@ -16062,6 +16203,8 @@ __global__ void q6_x12a_thermostat_deposit_moments_and_factor(
     CudaCellWorkspaceDeviceView cells,
     std::uint64_t nParticles,
     const float* fixedFactor,
+    int filterByType0493x14m,
+    std::uint32_t particleType0493x14m,
     int nx, int ny,
     double lx, double ly,
     int periodicX, int periodicY) {
@@ -16069,6 +16212,9 @@ __global__ void q6_x12a_thermostat_deposit_moments_and_factor(
     const std::uint64_t stride = static_cast<std::uint64_t>(blockDim.x) * gridDim.x;
     for (std::uint64_t i = idx; i < nParticles; i += stride) {
         if (particles.role != nullptr && particles.role[i] != kParticleRoleFluid) continue;
+        if (filterByType0493x14m &&
+            (particles.type == nullptr || particles.type[i] != particleType0493x14m))
+            continue;
         const int c = cells.cellId[i];
         if (c < 0 || c >= cells.numCells) continue;
         const double m = particles.mass ? particles.mass[i] : 1.0;
@@ -17860,6 +18006,7 @@ bool apply_kinetic_interface_reflection_0493x9x(
     int periodicX,
     int periodicY,
     std::uint32_t phaseAType,
+    std::uint32_t phaseBType0493x14k,
     CudaSpeciesCellDeviceView0490h species0493x10cic,
     int phaseASelectorKind0493x10cic,
     unsigned int phaseASelectorValue0493x10cic,
@@ -17985,6 +18132,18 @@ bool apply_kinetic_interface_reflection_0493x9x(
     const bool oneForOneRelocation0493x10u =
         quadraticInterface0493x10poly &&
         env_int_0400("MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE", 0) != 0;
+    const bool bilateralRelocation0493x14k =
+        params.phaseInterfaceKineticBilateralRelocation;
+    const bool gasSpecularReflection0493x14l =
+        env_int_0400("MPCD_X14L_GAS_SPECULAR_REFLECTION", 0) != 0;
+    if (gasSpecularReflection0493x14l && !bilateralRelocation0493x14k) {
+        throw std::runtime_error(
+            "0493x14l gas specular reflection requires phaseInterfaceKineticBilateralRelocation=true (x14k two-phase geometry gate)");
+    }
+    if (bilateralRelocation0493x14k && !oneForOneRelocation0493x10u) {
+        throw std::runtime_error(
+            "0493x14k bilateral relocation requires x10o+CIC+Q2+x10p+x10u position-only path");
+    }
     if (oneForOneRelocation0493x10u && !initialOverlapResolution0493x10p) {
         throw std::runtime_error(
             "0493x10u one-for-one relocation requires x10p initial-overlap resolution");
@@ -17998,6 +18157,11 @@ bool apply_kinetic_interface_reflection_0493x9x(
     }
     const bool oneForOneVelocitySwap0493x10v =
         oneForOneRelocation0493x10u && oneForOneVelocitySwapRequested0493x10v;
+    if (bilateralRelocation0493x14k && oneForOneVelocitySwap0493x10v &&
+        !gasSpecularReflection0493x14l) {
+        throw std::runtime_error(
+            "0493x14k bilateral position-only V1 forbids x10v; x14l gas-specular mode may reuse the historical phase-A x10v swap");
+    }
     const bool oneForOneNormalOnlyRequested0493x13o =
         env_int_0400("MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY", 0) != 0;
     if (oneForOneNormalOnlyRequested0493x13o &&
@@ -18011,6 +18175,15 @@ bool apply_kinetic_interface_reflection_0493x9x(
         env_int_0400("MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER", 0) != 0;
     const bool localThermalCoolingRequested0493x12a =
         env_int_0400("MPCD_X12A_LOCAL_THERMAL_COOLING", 0) != 0;
+    if (bilateralRelocation0493x14k && thermalPhaseLimiterRequested0493x10w) {
+        throw std::runtime_error(
+            "0493x14m liquid/gas compatibility keeps x10w OFF; the qualified liquid branch uses x12a");
+    }
+    if (bilateralRelocation0493x14k && localThermalCoolingRequested0493x12a &&
+        !gasSpecularReflection0493x14l) {
+        throw std::runtime_error(
+            "0493x14k bilateral position-only V1 forbids x12a; x14l gas-specular mode may reuse historical phase-A x12a");
+    }
     if (localThermalCoolingRequested0493x12a && thermalPhaseLimiterRequested0493x10w) {
         throw std::runtime_error(
             "0493x12a local thermal cooling is mutually exclusive with x10w pairwise limiter");
@@ -18063,6 +18236,58 @@ bool apply_kinetic_interface_reflection_0493x9x(
         oneForOneRelocationReported0493x10u = true;
     }
 
+    static bool bilateralRelocationReported0493x14k = false;
+    if (bilateralRelocation0493x14k &&
+        !bilateralRelocationReported0493x14k) {
+        std::cout
+            << "[0493x14k-bilateral-x10u] enabled=1"
+            << " AType=" << phaseAType
+            << " BType=" << phaseBType0493x14k
+            << " semantics="
+            << (gasSpecularReflection0493x14l
+                    ? "shared-liquid-defined-x10o-Q2-wall;A-position-mirror-only;B-response=x14l-specular;mass-type-unchanged;liquid-x10v/x12a=runtime;no-orphan-guard"
+                    : "shared-liquid-defined-x10o-Q2-wall;A-and-B-position-mirror-only;mass-type-velocity-unchanged;x10v-off;x12a-off;no-orphan-guard")
+            << std::endl;
+        bilateralRelocationReported0493x14k = true;
+    }
+
+    static bool gasSpecularReported0493x14l = false;
+    if (gasSpecularReflection0493x14l && !gasSpecularReported0493x14l) {
+        std::cout
+            << "[0493x14l-gas-specular] enabled=1"
+            << " AType=" << phaseAType
+            << " BType=" << phaseBType0493x14k
+            << " liquid=x10u-position-only-UNCHANGED"
+               " gas=local-moving-frame-specular-normal-reflection"
+               " tangential=unchanged"
+               " wallImpulseFeedback=NOT_APPLIED"
+            << " liquidX10v="
+            << (oneForOneVelocitySwap0493x10v ? "ON-phase-A-only" : "OFF")
+            << " liquidX12a="
+            << (localThermalCoolingRequested0493x12a ? "ON-phase-A-only" : "OFF")
+            << " no-orphan-guard"
+            << std::endl;
+        gasSpecularReported0493x14l = true;
+    }
+
+    const bool fullLiquidGasCompat0493x14m =
+        gasSpecularReflection0493x14l && oneForOneVelocitySwap0493x10v &&
+        localThermalCooling0493x12a && params.speciesThermostatEnable;
+    static bool fullLiquidGasCompatReported0493x14m = false;
+    if (fullLiquidGasCompat0493x14m &&
+        !fullLiquidGasCompatReported0493x14m) {
+        std::cout
+            << "[0493x14m-full-liquid-gas-compat] enabled=1"
+            << " liquid=x10o+CIC+Q2+x10p/q+x10u+x10v-full-vector+x12a"
+               " liquidLaws=UNCHANGED"
+               " gas=x14l-local-moving-frame-specular"
+               " gasWallImpulseFeedback=NOT_APPLIED"
+               " x12aKineticEnvelope=phase-A-only"
+               " x12aSpeciesThermostat=phase-A-only"
+            << std::endl;
+        fullLiquidGasCompatReported0493x14m = true;
+    }
+
     static bool localThermalCoolingReported0493x12a = false;
     if (q6ThermalInterfaceWall0493x10o &&
         !localThermalCoolingReported0493x12a) {
@@ -18105,8 +18330,30 @@ bool apply_kinetic_interface_reflection_0493x9x(
             0.0, env_double_0400("MPCD_X10O_THERMAL_SIGMAS", 3.0));
         const double thermalMaxCells0493x10o = fmax(
             0.0, env_double_0400("MPCD_X10O_THERMAL_MAX_CELLS", 0.75));
-        const double thermalKBT0493x10o =
+        double thermalKBT0493x10o =
             params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
+        // 0493x14k-bilateral-x10u: x10o is the liquid-defined kinetic wall.
+        // In the differentiated-thermostat path the global target belongs to
+        // the gas EOS, so resolve the A-species target instead.  This branch
+        // is active only for the new bilateral V1; all historical x10o paths
+        // retain their previous scalar target bit-for-bit.
+        if (bilateralRelocation0493x14k && params.speciesThermostatEnable) {
+            bool foundPhaseAThermostat0493x14k = false;
+            const double inheritedTarget0493x14k = thermalKBT0493x10o;
+            for (const SpeciesDefinition& d0493x14k : params.speciesDefinitions) {
+                if (d0493x14k.type != phaseAType) continue;
+                thermalKBT0493x10o =
+                    d0493x14k.thermostatTargetKBTDeclared > 0.0
+                        ? d0493x14k.thermostatTargetKBTDeclared
+                        : inheritedTarget0493x14k;
+                foundPhaseAThermostat0493x14k = true;
+                break;
+            }
+            if (!foundPhaseAThermostat0493x14k) {
+                throw std::runtime_error(
+                    "0493x14k bilateral x10u could not resolve the phase-A thermostat target");
+            }
+        }
         const double h0493x10o = fmin(
             params.Lx / static_cast<double>(grid.Nx),
             params.Ly / static_cast<double>(grid.Ny));
@@ -18629,7 +18876,9 @@ bool apply_kinetic_interface_reflection_0493x9x(
             ws.kineticContinuousSegUby0493x10n.data(),
             ws.kineticMovingWallImpulseX0493x10m.data(),
             ws.kineticMovingWallImpulseY0493x10m.data(),
-            phaseAType,
+            phaseAType, phaseBType0493x14k,
+            bilateralRelocation0493x14k ? 1 : 0,
+            gasSpecularReflection0493x14l ? 1 : 0,
             grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt,
             periodicX, periodicY,
             rigidTangentialKinematics0493x10t ? 1 : 0,
@@ -19391,7 +19640,7 @@ bool apply_independent_masked_species_q6_0493w5(
 
             const int phaseBSpeciesCount0493x9g = phaseB0493x9g.matchedSpecies;
             if (phaseGasPressureApplySpecies0493x6g &&
-                phaseGasPressureMode0493x6g == PhaseGasPressureMode0493x6g::Eos) {
+                phase_gas_pressure_mode_uses_eos_0493x6g(phaseGasPressureMode0493x6g)) {
                 if (phaseBSpeciesCount0493x9g == 0) {
                     diag.reason = "0493x9g EOS phase-B pressure requires registered phase-B species";
                     append_independent_masked_species_audit_0493w5(
@@ -20443,6 +20692,12 @@ bool apply_independent_masked_species_q6_0493w5(
                     interfaceDirichletApplySpecies0493x9d
                         ? ws.phaseFacePhiGammaY0493x6g.data() : nullptr,
                     phaseGasPressureApplySpecies0493x6g ? 1 : 0,
+                    static_cast<int>(phaseGasPressureMode0493x6g),
+                    phaseAReferenceCellMass0493x9g > 0.0
+                        ? params.dt * phaseGasPressureScale0493x6g *
+                              phaseGasPressureReference0493x6g * (dx * dy) /
+                              phaseAReferenceCellMass0493x9g
+                        : 0.0,
                     surfaceTensionApplySpecies0493x9d ? 1 : 0,
                     registeredPhaseB0493x9g ? 1 : 0,
                     grid.Nx, grid.Ny, periodicX, periodicY,
@@ -22468,7 +22723,7 @@ bool apply_independent_masked_species_q6_0493w5(
         apply_kinetic_interface_reflection_0493x9x(
             particles, cells, ws, params, grid, step, time, nParticles,
             threads, cellBlocks, particleBlocks, periodicX, periodicY,
-            projectedSpeciesType0493x7a,
+            projectedSpeciesType0493x7a, phaseB0493x9g.value,
             species,
             static_cast<int>(phaseA0493x9g.kind), phaseA0493x9g.value,
             phaseA0493x9g.referenceCellMass,
@@ -23278,9 +23533,13 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     // Each pass reuses the same resident O(Ncell) workspace, so memory does not
     // scale with species count. The preceding SRC collision remains mixture-wide.
     if (params.speciesThermostatEnable) {
-        if (localThermalCooling0493x12a) {
+        const bool x14mSpeciesX12aCompat =
+            localThermalCooling0493x12a &&
+            params.phaseInterfaceKineticBilateralRelocation &&
+            env_int_0400("MPCD_X14L_GAS_SPECULAR_REFLECTION", 0) != 0;
+        if (localThermalCooling0493x12a && !x14mSpeciesX12aCompat) {
             throw std::runtime_error(
-                "0493x14a species thermostat is intentionally incompatible with x12a local thermal cooling in V1");
+                "0493x14a species thermostat remains incompatible with x12a except in explicit x14l/x14m liquid-gas compatibility mode");
         }
         if (!particles.type) {
             throw std::runtime_error(
@@ -23307,8 +23566,15 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
         const bool collectThermostatDiagnostics0493x14a =
             !q6GfThermostat0493x14a ||
             q6_g_f_diagnostics_this_step_0493x7k(params, step);
+        const ResolvedPhaseSelector0493x9g phaseAThermostat0493x14m =
+            resolve_phase_selector_0493x9g(
+                params.phaseInterfaceASelector, params.speciesDefinitions);
 
         for (const SpeciesDefinition& species0493x14a : params.speciesDefinitions) {
+            const bool useLocalThermalFactor0493x14m =
+                localThermalCooling0493x12a &&
+                phase_selector_matches_definition_0493x9g(
+                    phaseAThermostat0493x14m, species0493x14a);
             const double targetKBT0493x14a =
                 species0493x14a.thermostatTargetKBTDeclared > 0.0
                     ? species0493x14a.thermostatTargetKBTDeclared
@@ -23324,19 +23590,41 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
                 cells.cellKinetic, 0,
                 static_cast<std::size_t>(grid.numCells) * sizeof(double)),
                 "0493x14a thermostat kinetic zero");
-            check_cuda_0400(cudaMemset(
-                cells.cellScale, 0,
-                static_cast<std::size_t>(grid.numCells) * sizeof(double)),
-                "0493x14a thermostat scale zero");
+            if (useLocalThermalFactor0493x14m) {
+                q6_x12a_fill_double_ones<<<cellBlocks, threads>>>(
+                    grid.numCells, cells.cellScale);
+                check_cuda_0400(
+                    cudaGetLastError(),
+                    "0493x14m species thermostat local-factor fill launch");
+            } else {
+                check_cuda_0400(cudaMemset(
+                    cells.cellScale, 0,
+                    static_cast<std::size_t>(grid.numCells) * sizeof(double)),
+                    "0493x14a thermostat scale zero");
+            }
             check_cuda_0400(cudaMemset(cells.fluidCounter, 0, sizeof(unsigned long long)),
                             "0493x14a thermostat fluid counter zero");
             check_cuda_0400(cudaMemset(ws.counter.data(), 0, sizeof(unsigned long long)),
                             "0493x14a thermostat empty counter zero");
 
-            q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
-                particles, cells, nParticles, 1, species0493x14a.type);
-            check_cuda_0400(cudaGetLastError(),
-                            "0493x14a thermostat species moment deposit launch");
+            if (useLocalThermalFactor0493x14m) {
+                const int periodicX0493x14m = is_x_periodic(params) ? 1 : 0;
+                const int periodicY0493x14m = is_y_periodic(params) ? 1 : 0;
+                q6_x12a_thermostat_deposit_moments_and_factor<<<particleBlocks, threads>>>(
+                    particles, cells, nParticles,
+                    ws.kineticLocalThermalFactor0493x12a.data(),
+                    1, species0493x14a.type,
+                    grid.Nx, grid.Ny, params.Lx, params.Ly,
+                    periodicX0493x14m, periodicY0493x14m);
+                check_cuda_0400(
+                    cudaGetLastError(),
+                    "0493x14m thermostat phase-A species moment+factor deposit launch");
+            } else {
+                q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+                    particles, cells, nParticles, 1, species0493x14a.type);
+                check_cuda_0400(cudaGetLastError(),
+                                "0493x14a thermostat species moment deposit launch");
+            }
             q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
             check_cuda_0400(cudaGetLastError(),
                             "0493x14a thermostat species finalize moments launch");
@@ -23348,7 +23636,9 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
 
             t0 = Clock0400::now();
             q6_thermostat_scale_0400<<<cellBlocks, threads, pairShared>>>(
-                cells, targetKBT0493x14a, 0, minParticles, epsilon,
+                cells, targetKBT0493x14a,
+                useLocalThermalFactor0493x14m ? 1 : 0,
+                minParticles, epsilon,
                 ws.partial0.data(), ws.partial1.data());
             check_cuda_0400(cudaGetLastError(),
                             "0493x14a thermostat species scale launch");
@@ -23475,6 +23765,7 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
         q6_x12a_thermostat_deposit_moments_and_factor<<<particleBlocks, threads>>>(
             particles, cells, nParticles,
             ws.kineticLocalThermalFactor0493x12a.data(),
+            0, 0u,
             grid.Nx, grid.Ny, params.Lx, params.Ly,
             periodicX0493x12a, periodicY0493x12a);
         check_cuda_0400(

@@ -72,11 +72,11 @@ def main() -> int:
             raise RuntimeError(f"step {step}: no represented interface faces")
 
         mode = row["sourceMode"].strip().lower()
-        if mode not in {"eos", "constant"}:
+        if mode not in {"eos", "eos_accessible_volume", "constant"}:
             raise RuntimeError(f"step {step}: unsupported source mode {mode!r}")
         modes.add(mode)
         gas_species = int(row["gasSpeciesCount"])
-        if mode == "eos" and gas_species <= 0:
+        if mode in {"eos", "eos_accessible_volume"} and gas_species <= 0:
             raise RuntimeError(f"step {step}: EOS mode has no gas species")
 
         ref = f(row, "pressureReference")

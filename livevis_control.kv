@@ -15,7 +15,7 @@
 # They do not change streaming, collision, thermostat, Q6, virial closure,
 # resampling, or boundary-condition physics.
 
- 
+
 # =============================================================================
 # 1. Live scalar field
 # =============================================================================
@@ -47,7 +47,7 @@ gain = 1
 # smoothPasses:
 #   spatial smoothing of the scalar field.
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
-smoothPasses = 1
+smoothPasses = 0
 
 # =============================================================================
 # 2. Live grid and cadence
@@ -57,8 +57,8 @@ smoothPasses = 1
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
-# liveGridNx = 800    # unset by default: inherit solver Nx/Ny
-# liveGridNy = 400    # unset by default: inherit solver Nx/Ny
+ liveGridNx = 600    # unset by default: inherit solver Nx/Ny
+ liveGridNy = 600    # unset by default: inherit solver Nx/Ny
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -74,7 +74,7 @@ liveEvery = 1
 # quiverScale:
 #   <0 disables quiver overlay.
 #   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
-quiverScale = 10.0
+quiverScale = 150.0
 
 # quiverNx/quiverNy:
 #   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.
@@ -89,7 +89,7 @@ quiverMinSpeed = 0.0
 #   -1 reuses smoothPasses.
 #    0 disables quiver smoothing.
 #   >0 smooths vectors independently from the scalar field.
-quiverSmoothPasses = -5
+quiverSmoothPasses = 5
 
 
 # =============================================================================
@@ -100,7 +100,7 @@ quiverSmoothPasses = -5
 #   false/0/off stops or keeps recording disabled.
 #   true/1/on opens a recording session if the recorder is enabled by the run
 #   environment, e.g. FILTERED_RECORDING_ENABLE=1 or SRC/MPCD 0432 env flags.
-recordEnable = true
+recordEnable = false
 
 # recordSession:
 #   subdirectory name under output/recordings/.
@@ -173,7 +173,7 @@ filterSampleEvery = -1
 #
 # Runner override in 0436 injection script:
 #   PARTICLE_TYPE_FILTER=-1|0|1|2
-particleTypeFilter = 1
+particleTypeFilter = -1
 
 
 # =============================================================================

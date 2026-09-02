@@ -578,6 +578,7 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "surfaceTensionSigma" || key == "q6GfSurfaceTensionSigma") p.surfaceTensionSigma = parse_double(value, key);
         else if (key == "surfaceTensionMinRadiusCells" || key == "q6GfSurfaceTensionMinRadiusCells") p.surfaceTensionMinRadiusCells = parse_double(value, key);
         else if (key == "phaseInterfaceKineticReflectionFraction" || key == "kineticReflectionFraction") p.phaseInterfaceKineticReflectionFraction = parse_double(value, key);
+        else if (key == "phaseInterfaceKineticBilateralRelocation") p.phaseInterfaceKineticBilateralRelocation = parse_bool(value, key);
         else if (key == "phaseInterfaceEvaporationTargetType" || key == "evaporationTargetType") p.phaseInterfaceEvaporationTargetType = parse_int(value, key);
         else if (key == "phaseInterfaceASelector" || key == "capillaryPhaseASelector")
             p.phaseInterfaceASelector = canonical_phase_selector_0493x9g(value, key);
@@ -1467,6 +1468,11 @@ void validate_simulation_params(const SimulationParams& p) {
         throw std::runtime_error(
             "0493x9t phaseInterfaceKineticReflectionFraction must lie in [0,1]");
     }
+    if (p.phaseInterfaceKineticBilateralRelocation &&
+        std::abs(p.phaseInterfaceKineticReflectionFraction - 1.0) > 1.0e-12) {
+        throw std::runtime_error(
+            "0493x14k bilateral x10u requires phaseInterfaceKineticReflectionFraction=1 (historical hard-retention gate)");
+    }
     if (p.phaseInterfaceEvaporationTargetType < -1) {
         throw std::runtime_error(
             "0493x9t phaseInterfaceEvaporationTargetType must be -1 or a non-negative registered type");
@@ -1480,9 +1486,20 @@ void validate_simulation_params(const SimulationParams& p) {
             throw std::runtime_error(
                 "0493x9t kinetic reflection requires q6ForceProjectionMode=prestream_single_fused");
         }
-        if (p.phaseInterfaceBSelector != "vacuum") {
+        // 0493x14k-bilateral-x10u: preserve the historical vacuum-only guard
+        // except for one narrow, explicit liquid/gas position-only extension.
+        // The CUDA runtime performs additional x10u/x10v/x12 compatibility
+        // checks before any kinetic work is launched.
+        if (p.phaseInterfaceBSelector != "vacuum" &&
+            !p.phaseInterfaceKineticBilateralRelocation) {
             throw std::runtime_error(
-                "0493x9t kinetic reflection is currently restricted to phaseInterfaceBSelector=vacuum");
+                "0493x9t kinetic reflection is restricted to phaseInterfaceBSelector=vacuum unless phaseInterfaceKineticBilateralRelocation=true");
+        }
+        if (p.phaseInterfaceKineticBilateralRelocation) {
+            if (p.phaseInterfaceEvaporationTargetType >= 0) {
+                throw std::runtime_error(
+                    "0493x14k bilateral x10u is incompatible with evaporation/relabeling");
+            }
         }
         int projectedCount0493x9t = 0;
         std::uint32_t projectedType0493x9t = 0u;
@@ -1608,6 +1625,48 @@ void validate_simulation_params(const SimulationParams& p) {
             if (phaseBSelector0493x9g == "wall") {
                 throw std::runtime_error(
                     "0493x9i active contact angle requires a particle/vacuum phase B distinct from wall");
+            }
+        }
+        if (p.phaseInterfaceKineticBilateralRelocation) {
+            // V1 is intentionally narrow: one explicit liquid A type and one
+            // explicit unprojected gas B type.  This is not a general
+            // multi-liquid immiscibility closure.
+            if (phaseASelector0493x9g.rfind("type:", 0) != 0 ||
+                phaseBSelector0493x9g.rfind("type:", 0) != 0) {
+                throw std::runtime_error(
+                    "0493x14k bilateral x10u requires explicit type:<id> selectors for both A and B");
+            }
+            int aMatches0493x14k = 0;
+            int bMatches0493x14k = 0;
+            bool aAllLiquid0493x14k = true;
+            bool bAllGas0493x14k = true;
+            bool bAllUnprojected0493x14k = true;
+            for (const SpeciesDefinition& d0493x14k : p.speciesDefinitions) {
+                const bool a0493x14k = phase_selector_matches_definition_0493x9g(
+                    phaseASelector0493x9g, d0493x14k);
+                const bool b0493x14k = phase_selector_matches_definition_0493x9g(
+                    phaseBSelector0493x9g, d0493x14k);
+                if (a0493x14k) {
+                    ++aMatches0493x14k;
+                    aAllLiquid0493x14k = aAllLiquid0493x14k &&
+                        d0493x14k.phaseFamily == SpeciesPhaseFamily::Liquid;
+                }
+                if (b0493x14k) {
+                    ++bMatches0493x14k;
+                    bAllGas0493x14k = bAllGas0493x14k &&
+                        d0493x14k.phaseFamily == SpeciesPhaseFamily::Gas;
+                    bAllUnprojected0493x14k = bAllUnprojected0493x14k &&
+                        !(d0493x14k.q6StrengthDeclared > 0.0);
+                }
+            }
+            if (aMatches0493x14k != 1 || !aAllLiquid0493x14k) {
+                throw std::runtime_error(
+                    "0493x14k bilateral x10u requires A to match exactly one registered liquid species");
+            }
+            if (bMatches0493x14k != 1 || !bAllGas0493x14k ||
+                !bAllUnprojected0493x14k) {
+                throw std::runtime_error(
+                    "0493x14k bilateral x10u requires B to match exactly one registered unprojected gas species");
             }
         }
         (void)phaseBAllGas0493x9g;
