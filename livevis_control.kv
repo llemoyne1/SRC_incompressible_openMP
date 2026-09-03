@@ -26,14 +26,14 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-field = mass  
+field = ux  
 
 # colormap:
 #   blue_red, gray, thermal
 # Aliases generally accepted by recent builds:
 #   grey/grayscale/greyscale -> gray
 #   heat/hot                 -> thermal
-colormap = hot
+colormap = blue_red
 
 # clip:
 #   >0 fixes color saturation scale.
@@ -42,7 +42,7 @@ clip = -0.65
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
-gain = 1
+gain = 2
 
 # smoothPasses:
 #   spatial smoothing of the scalar field.
@@ -74,12 +74,12 @@ liveEvery = 1
 # quiverScale:
 #   <0 disables quiver overlay.
 #   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
-quiverScale = 150.0
+quiverScale = -1500.0
 
 # quiverNx/quiverNy:
 #   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.
 quiverNx = 30
-quiverNy = 20
+quiverNy = 30
 
 # quiverMinSpeed:
 #   do not draw vectors below this speed. 0.0 draws all nonzero vectors.
@@ -89,7 +89,7 @@ quiverMinSpeed = 0.0
 #   -1 reuses smoothPasses.
 #    0 disables quiver smoothing.
 #   >0 smooths vectors independently from the scalar field.
-quiverSmoothPasses = 5
+quiverSmoothPasses = -10
 
 
 # =============================================================================
@@ -100,7 +100,7 @@ quiverSmoothPasses = 5
 #   false/0/off stops or keeps recording disabled.
 #   true/1/on opens a recording session if the recorder is enabled by the run
 #   environment, e.g. FILTERED_RECORDING_ENABLE=1 or SRC/MPCD 0432 env flags.
-recordEnable = false
+recordEnable = true
 
 # recordSession:
 #   subdirectory name under output/recordings/.
@@ -173,7 +173,7 @@ filterSampleEvery = -1
 #
 # Runner override in 0436 injection script:
 #   PARTICLE_TYPE_FILTER=-1|0|1|2
-particleTypeFilter = -1
+particleTypeFilter = 1
 
 
 # =============================================================================

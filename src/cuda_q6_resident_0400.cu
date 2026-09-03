@@ -7786,6 +7786,14 @@ __device__ __forceinline__ int q6_x10n_position_cell(
     return j * nx + i;
 }
 
+// 0493x14v forward declaration.  The implementation is placed beside the
+// existing x10cic helpers so both paths use exactly the same CIC convention.
+__device__ __forceinline__ void q6_x14v_deposit_signed_phase_mass_cic(
+    double x, double y, double massDelta,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY,
+    double* massCIC);
+
 // =============================================================================
 // 0493x10u-oneforone — CONSERVATIVE ONE-PARTICLE SUPPORT RELOCATION
 // =============================================================================
@@ -7812,6 +7820,10 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
     std::uint32_t phaseBType0493x14k,
     int bilateralRelocation0493x14k,
     int gasSpecularReflection0493x14l,
+    int gasKineticExcessKick0493x14v,
+    double* gasRawImpulseOwnerX0493x14v,
+    double* gasRawImpulseOwnerY0493x14v,
+    double* liquidMassCIC0493x14v,
     int nx, int ny,
     double lx, double ly, double dt,
     int periodicX, int periodicY,
@@ -8393,6 +8405,21 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                     &wallImpulseY[bestSeg.ownerCell], best.impulseWallY);
             }
 
+            // 0493x14v: x14l already computed the exact reaction impulse of
+            // each gas reflection.  Aggregate it by the already-known branch
+            // owner (two FP64 atomics/hit).  Do NOT touch x12a's impulse-scale
+            // scratch; kineticRefPx/Py are dead on the x10o simple-wall path.
+            if (gasKineticExcessKick0493x14v &&
+                gasSpecularThisParticle0493x14l &&
+                bestSeg.ownerCell >= 0 && bestSeg.ownerCell < cells.numCells) {
+                atomic_add_double_0400(
+                    &gasRawImpulseOwnerX0493x14v[bestSeg.ownerCell],
+                    best.impulseWallX);
+                atomic_add_double_0400(
+                    &gasRawImpulseOwnerY0493x14v[bestSeg.ownerCell],
+                    best.impulseWallY);
+            }
+
             if (audit) {
                 atomicAdd(&audit->continuousWallCollisions, 1ull);
                 if (hitsTotal == 2)
@@ -8470,6 +8497,23 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
         const double corrY = yf - cvy * dt - y0;
         particles.x[p] = x0 + corrX;
         particles.y[p] = y0 + corrY;
+
+        // 0493x14v keeps an exact post-x10u liquid CIC mass without a second
+        // O(Nparticle) deposit: start from the already-computed pre-wall CIC
+        // mass and update only particles whose support position actually moved.
+        // x10v changes velocities only, so this mass stays valid through the
+        // later collective kick.
+        if (gasKineticExcessKick0493x14v && phaseSense0493x14k > 0 &&
+            liquidMassCIC0493x14v != nullptr &&
+            (fabs(corrX) > 0.0 || fabs(corrY) > 0.0)) {
+            q6_x14v_deposit_signed_phase_mass_cic(
+                x0, y0, -mass, nx, ny, lx, ly, periodicX, periodicY,
+                liquidMassCIC0493x14v);
+            q6_x14v_deposit_signed_phase_mass_cic(
+                particles.x[p], particles.y[p], mass,
+                nx, ny, lx, ly, periodicX, periodicY,
+                liquidMassCIC0493x14v);
+        }
         // 0493x10u-oneforone leaves particles.mass untouched.  In relocation
         // mode cvx/cvy are also exactly the incoming velocity, hence M, P and
         // particle kinetic energy are invariant under the support correction.
@@ -11143,6 +11187,48 @@ __device__ __forceinline__ void q6_x10cic_deposit_phase_mass(
     if (w11 > 0.0) atomic_add_double_0400(&rawCIC[iy1 * nx + ix1], normalizedMass * w11);
 }
 
+// =============================================================================
+// 0493x14v — GAS KINETIC EXCESS KICK
+// =============================================================================
+// x14t qualified the thermodynamic normal pressure already supplied by x6g.
+// x14u then showed that the directed normal momentum lost by x14l specular
+// gas reflection is not transferred instantaneously to the liquid.  x14v
+// adds ONLY that missing non-equilibrium part:
+//
+//   J_excess = sum(J_gas->wall, actual reflections) - J_pressure_already_x6g
+//
+// The reaction is aggregated on the interface, then distributed collectively
+// to phase A through the already-qualified kinetic CIC geometry.  Scratch-only
+// implementation: no new resident buffer, no host transfer, no new particle
+// pass.  The final kick is fused into the cell-moment redeposit already present
+// after x10v.  x10u/x10v/x12a laws themselves are unchanged.
+
+__device__ __forceinline__ void q6_x14v_deposit_signed_phase_mass_cic(
+    double x, double y, double massDelta,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY,
+    double* massCIC) {
+    if (massCIC == nullptr || massDelta == 0.0 || !isfinite(massDelta) ||
+        nx <= 0 || ny <= 0 || !(lx > 0.0) || !(ly > 0.0)) return;
+    const double invDx = static_cast<double>(nx) / lx;
+    const double invDy = static_cast<double>(ny) / ly;
+    if (periodicX) x -= floor(x / lx) * lx;
+    else x = fmin(fmax(x, 0.0), nextafter(lx, 0.0));
+    if (periodicY) y -= floor(y / ly) * ly;
+    else y = fmin(fmax(y, 0.0), nextafter(ly, 0.0));
+    const double qx = x * invDx - 0.5;
+    const double qy = y * invDy - 0.5;
+    int ix0=0, ix1=0, iy0=0, iy1=0;
+    double wx0=0.0, wx1=0.0, wy0=0.0, wy1=0.0;
+    q6_x10cic_axis_pair(qx, nx, periodicX, &ix0, &ix1, &wx0, &wx1);
+    q6_x10cic_axis_pair(qy, ny, periodicY, &iy0, &iy1, &wy0, &wy1);
+    const double w00=wx0*wy0, w10=wx1*wy0, w01=wx0*wy1, w11=wx1*wy1;
+    if (w00 > 0.0) atomic_add_double_0400(&massCIC[iy0*nx+ix0], massDelta*w00);
+    if (w10 > 0.0) atomic_add_double_0400(&massCIC[iy0*nx+ix1], massDelta*w10);
+    if (w01 > 0.0) atomic_add_double_0400(&massCIC[iy1*nx+ix0], massDelta*w01);
+    if (w11 > 0.0) atomic_add_double_0400(&massCIC[iy1*nx+ix1], massDelta*w11);
+}
+
 // Fuse CIC into the total-A moment pass already mandatory in x9x.  Therefore
 // enabling CIC adds no extra O(Nparticle) kernel launch or particle traversal.
 __global__ void q6_x10cic_deposit_total_a_moments_and_phase_cic(
@@ -11206,7 +11292,9 @@ __global__ void q6_x10cic_filter_phase_alpha(
     int ny,
     int periodicX,
     int periodicY,
-    double lambda) {
+    double lambda,
+    double phaseAReferenceCellMass0493x14v,
+    double* liquidMassCIC0493x14v) {
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -11214,6 +11302,10 @@ __global__ void q6_x10cic_filter_phase_alpha(
         const int ix = c % nx;
         const int iy = c / nx;
         const double center = rawCIC[c];
+        if (liquidMassCIC0493x14v != nullptr) {
+            liquidMassCIC0493x14v[c] =
+                center * phaseAReferenceCellMass0493x14v;
+        }
         double lap = 0.0;
         if (periodicX || ix > 0) {
             const int xw = periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1;
@@ -13120,6 +13212,308 @@ __device__ __forceinline__ double q6_x14s_correct_gas_pressure_potential_0493x6g
     return (rawGaugePotential0493x6g + referencePotential0493x6g) /
                fraction0493x14s -
            referencePotential0493x6g;
+}
+
+__device__ __forceinline__ bool q6_x14v_cic_stencil(
+    double x, double y,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY,
+    int ids[4], double w[4]) {
+    if (nx <= 0 || ny <= 0 || !(lx > 0.0) || !(ly > 0.0)) return false;
+    if (periodicX) x -= floor(x / lx) * lx;
+    else x = fmin(fmax(x, 0.0), nextafter(lx, 0.0));
+    if (periodicY) y -= floor(y / ly) * ly;
+    else y = fmin(fmax(y, 0.0), nextafter(ly, 0.0));
+    const double qx = x * static_cast<double>(nx) / lx - 0.5;
+    const double qy = y * static_cast<double>(ny) / ly - 0.5;
+    int ix0=0, ix1=0, iy0=0, iy1=0;
+    double wx0=0.0, wx1=0.0, wy0=0.0, wy1=0.0;
+    q6_x10cic_axis_pair(qx, nx, periodicX, &ix0, &ix1, &wx0, &wx1);
+    q6_x10cic_axis_pair(qy, ny, periodicY, &iy0, &iy1, &wy0, &wy1);
+    ids[0]=iy0*nx+ix0; w[0]=wx0*wy0;
+    ids[1]=iy0*nx+ix1; w[1]=wx1*wy0;
+    ids[2]=iy1*nx+ix0; w[2]=wx0*wy1;
+    ids[3]=iy1*nx+ix1; w[3]=wx1*wy1;
+    return true;
+}
+
+__device__ __forceinline__ void q6_x14v_scatter_supported_impulse(
+    double x, double y, double jx, double jy,
+    const double* liquidMassCIC, double massFloor,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY,
+    double* kickX, double* kickY) {
+    if ((jx == 0.0 && jy == 0.0) || !isfinite(jx) || !isfinite(jy) ||
+        liquidMassCIC == nullptr || kickX == nullptr || kickY == nullptr) return;
+    int ids[4]; double w[4];
+    if (!q6_x14v_cic_stencil(
+            x, y, nx, ny, lx, ly, periodicX, periodicY, ids, w)) return;
+    double supported = 0.0;
+    for (int k=0; k<4; ++k) {
+        const double m = liquidMassCIC[ids[k]];
+        if (w[k] > 0.0 && isfinite(m) && m > massFloor) supported += w[k];
+    }
+    if (supported > 1.0e-14 && isfinite(supported)) {
+        const double inv = 1.0 / supported;
+        for (int k=0; k<4; ++k) {
+            const double m = liquidMassCIC[ids[k]];
+            if (!(w[k] > 0.0) || !isfinite(m) || !(m > massFloor)) continue;
+            const double wk = w[k] * inv;
+            atomic_add_double_0400(&kickX[ids[k]], jx * wk);
+            atomic_add_double_0400(&kickY[ids[k]], jy * wk);
+        }
+        return;
+    }
+
+    // Defensive support fallback: only O(Ninterface), never a particle search.
+    // Deposit the whole owner impulse on the nearest ring containing any
+    // positive liquid-CIC mass.  This preserves total momentum even if the
+    // thermal wall is locally farther out than the four immediate CIC nodes.
+    const int pc = q6_x10n_position_cell(x, y, nx, ny, lx, ly, periodicX, periodicY);
+    if (pc < 0) return;
+    const int pi = pc % nx, pj = pc / nx;
+    for (int radius=0; radius<=2; ++radius) {
+        int best = -1;
+        double bestMass = massFloor;
+        for (int dj=-radius; dj<=radius; ++dj) {
+            for (int di=-radius; di<=radius; ++di) {
+                if (radius > 0 && di != -radius && di != radius &&
+                    dj != -radius && dj != radius) continue;
+                const int c = q6_x10n_cell_index(
+                    pi+di, pj+dj, nx, ny, periodicX, periodicY);
+                if (c < 0) continue;
+                const double m = liquidMassCIC[c];
+                if (isfinite(m) && m > bestMass) {
+                    bestMass = m;
+                    best = c;
+                }
+            }
+        }
+        if (best >= 0) {
+            atomic_add_double_0400(&kickX[best], jx);
+            atomic_add_double_0400(&kickY[best], jy);
+            return;
+        }
+    }
+}
+
+__device__ __forceinline__ int q6_x14v_nearest_q6_gas_cell(
+    double mx, double my, double nxOut, double nyOut,
+    const double* alphaQ6,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    if (!alphaQ6) return -1;
+    const double h = fmin(lx/static_cast<double>(nx), ly/static_cast<double>(ny));
+    constexpr double offsets[5] = {0.0, 0.35, 0.75, 1.25, 1.75};
+    for (int k=0; k<5; ++k) {
+        const int c = q6_x10n_position_cell(
+            mx + offsets[k]*h*nxOut,
+            my + offsets[k]*h*nyOut,
+            nx, ny, lx, ly, periodicX, periodicY);
+        if (c >= 0) {
+            const double a = alphaQ6[c];
+            if (isfinite(a) && a < 0.5) return c;
+        }
+    }
+    const int pc = q6_x10n_position_cell(mx, my, nx, ny, lx, ly, periodicX, periodicY);
+    if (pc < 0) return -1;
+    const int pi = pc % nx, pj = pc / nx;
+    int best = -1;
+    double bestAlpha = -1.0e300;
+    for (int radius=1; radius<=2; ++radius) {
+        for (int dj=-radius; dj<=radius; ++dj) {
+            for (int di=-radius; di<=radius; ++di) {
+                const int c = q6_x10n_cell_index(
+                    pi+di, pj+dj, nx, ny, periodicX, periodicY);
+                if (c < 0) continue;
+                const double a = alphaQ6[c];
+                if (isfinite(a) && a < 0.5 && a > bestAlpha) {
+                    bestAlpha = a;
+                    best = c;
+                }
+            }
+        }
+        if (best >= 0) break;
+    }
+    return best;
+}
+
+__device__ __forceinline__ double q6_x14v_x6g_represented_pressure(
+    double mx, double my, double nxOut, double nyOut,
+    const double* alphaQ6,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double pressureReference,
+    double constantPressure,
+    double pressureScale,
+    double referencePotential,
+    double potentialToPressure,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    if (gasPressureMode == static_cast<int>(PhaseGasPressureMode0493x6g::Constant)) {
+        const double p = pressureReference +
+            pressureScale * (constantPressure - pressureReference);
+        return isfinite(p) ? fmax(0.0, p) : fmax(0.0, pressureReference);
+    }
+    const int c = q6_x14v_nearest_q6_gas_cell(
+        mx, my, nxOut, nyOut, alphaQ6,
+        nx, ny, lx, ly, periodicX, periodicY);
+    if (c < 0 || gasPressurePotential == nullptr)
+        return fmax(0.0, pressureReference);
+    double gauge = gasPressurePotential[c];
+    if (gasPressureMode ==
+        static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
+        gauge = q6_x14s_correct_gas_pressure_potential_0493x6g(
+            gauge, alphaQ6[c], referencePotential);
+    }
+    const double p = pressureReference + gauge * potentialToPressure;
+    return isfinite(p) ? fmax(0.0, p) : fmax(0.0, pressureReference);
+}
+
+// One cell kernel replaces the two x10v candidate-sentinel memsets when x14v
+// is active.  It also subtracts the pressure traction already represented by
+// x6g and scatters only the residual kinetic impulse onto supported liquid CIC
+// nodes.  The raw gas impulse is already aggregated by owner in q6_x10n.
+__global__ void q6_x14v_prepare_excess_and_reset_candidates(
+    int numCells,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    const unsigned char* segCount,
+    const double* segAx, const double* segAy,
+    const double* segBx, const double* segBy,
+    const double* segUax, const double* segUay,
+    const double* segUbx, const double* segUby,
+    const double* alphaQ6,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double pressureReference,
+    double constantPressure,
+    double pressureScale,
+    double referencePotential,
+    double potentialToPressure,
+    const double* rawOwnerX,
+    const double* rawOwnerY,
+    const double* liquidMassCIC,
+    double massFloor,
+    double* kickX,
+    double* kickY,
+    unsigned long long* candidate0,
+    unsigned long long* candidate1) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const unsigned long long empty = ~0ull;
+    for (int owner=idx; owner<numCells; owner+=stride) {
+        candidate0[owner] = empty;
+        candidate1[owner] = empty;
+        const int ns = segCount ? min(2, static_cast<int>(segCount[owner])) : 0;
+        if (ns <= 0) continue;
+        const double rawX = rawOwnerX ? rawOwnerX[owner] : 0.0;
+        const double rawY = rawOwnerY ? rawOwnerY[owner] : 0.0;
+
+        double len[2] = {0.0,0.0};
+        double tx[2] = {0.0,0.0};
+        double ty[2] = {0.0,0.0};
+        double mx[2] = {0.0,0.0};
+        double my[2] = {0.0,0.0};
+        double totalLen = 0.0;
+        for (int slot=0; slot<ns; ++slot) {
+            const int s = 2*owner + slot;
+            double dxs = q6_x10m_minimum_image(segBx[s]-segAx[s], lx, periodicX);
+            double dys = q6_x10m_minimum_image(segBy[s]-segAy[s], ly, periodicY);
+            dxs += 0.5*dt*(segUbx[s]-segUax[s]);
+            dys += 0.5*dt*(segUby[s]-segUay[s]);
+            const double L = sqrt(dxs*dxs + dys*dys);
+            if (!(L > 1.0e-14*fmin(lx/static_cast<double>(nx),
+                                  ly/static_cast<double>(ny))) || !isfinite(L))
+                continue;
+            tx[slot]=dxs; ty[slot]=dys; len[slot]=L; totalLen += L;
+            const double axm = segAx[s] + 0.5*dt*segUax[s];
+            const double aym = segAy[s] + 0.5*dt*segUay[s];
+            mx[slot] = axm + 0.5*dxs;
+            my[slot] = aym + 0.5*dys;
+        }
+        if (!(totalLen > 0.0) || !isfinite(totalLen)) continue;
+
+        for (int slot=0; slot<ns; ++slot) {
+            if (!(len[slot] > 0.0)) continue;
+            const double frac = len[slot] / totalLen;
+            const double nxOut = ty[slot] / len[slot];
+            const double nyOut = -tx[slot] / len[slot];
+            const double pGas = q6_x14v_x6g_represented_pressure(
+                mx[slot], my[slot], nxOut, nyOut,
+                alphaQ6, gasPressurePotential, gasPressureMode,
+                pressureReference, constantPressure, pressureScale,
+                referencePotential, potentialToPressure,
+                nx, ny, lx, ly, periodicX, periodicY);
+
+            // Right normal of oriented A->B is liquid->gas.  Gas pressure on
+            // the liquid is -p*n, and n*dL=(dy,-dx), hence
+            // J_eq = p*dt*(-dy,+dx).  Mid-step tangent integrates exactly for
+            // linearly moving endpoints.
+            const double jeqX = pGas * dt * (-ty[slot]);
+            const double jeqY = pGas * dt * ( tx[slot]);
+            const double jexX = rawX * frac - jeqX;
+            const double jexY = rawY * frac - jeqY;
+            q6_x14v_scatter_supported_impulse(
+                mx[slot], my[slot], jexX, jexY,
+                liquidMassCIC, massFloor,
+                nx, ny, lx, ly, periodicX, periodicY,
+                kickX, kickY);
+        }
+    }
+}
+
+// Replace the ordinary post-kinetic moment redeposit, so x14v adds no new
+// O(Nparticle) traversal.  The CIC denominator is the exact post-x10u phase-A
+// mass: pre-wall mass saved by the x10cic filter plus signed relocation deltas.
+__global__ void q6_x14v_apply_cic_kick_and_deposit_moments(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    std::uint64_t nParticles,
+    std::uint32_t phaseAType,
+    const double* liquidMassCIC,
+    const double* kickX,
+    const double* kickY,
+    double massFloor,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    const std::uint64_t idx =
+        static_cast<std::uint64_t>(blockIdx.x)*blockDim.x + threadIdx.x;
+    const std::uint64_t stride =
+        static_cast<std::uint64_t>(blockDim.x)*gridDim.x;
+    for (std::uint64_t i=idx; i<nParticles; i+=stride) {
+        if (particles.role && particles.role[i] != kParticleRoleFluid) continue;
+        const int c = cells.cellId[i];
+        if (c < 0 || c >= cells.numCells) continue;
+        const double m = particles.mass ? particles.mass[i] : 1.0;
+        if (!(m > 0.0) || !isfinite(m)) continue;
+
+        if (particles.type && particles.type[i] == phaseAType &&
+            liquidMassCIC && kickX && kickY) {
+            int ids[4]; double w[4];
+            if (q6_x14v_cic_stencil(
+                    particles.x[i], particles.y[i],
+                    nx, ny, lx, ly, periodicX, periodicY, ids, w)) {
+                double dvx=0.0, dvy=0.0;
+                for (int k=0; k<4; ++k) {
+                    if (!(w[k] > 0.0)) continue;
+                    const double mg = liquidMassCIC[ids[k]];
+                    if (!isfinite(mg) || !(mg > massFloor)) continue;
+                    dvx += w[k] * kickX[ids[k]] / mg;
+                    dvy += w[k] * kickY[ids[k]] / mg;
+                }
+                if (isfinite(dvx) && isfinite(dvy)) {
+                    particles.vx[i] += dvx;
+                    particles.vy[i] += dvy;
+                }
+            }
+        }
+
+        atomicAdd(&cells.count[c], 1u);
+        atomic_add_double_0400(&cells.cellMass[c], m);
+        atomic_add_double_0400(&cells.cellPx[c], m * particles.vx[i]);
+        atomic_add_double_0400(&cells.cellPy[c], m * particles.vy[i]);
+    }
 }
 
 __global__ void q6_build_phase_fill_resident_0493x6c(
@@ -18013,7 +18407,12 @@ bool apply_kinetic_interface_reflection_0493x9x(
     double phaseAReferenceCellMass0493x10cic,
     int phaseAUniqueProjectedType0493x10cic,
     const double* phaseAlphaQ60493x6c,
-    bool geometryValid0493x6c) {
+    bool geometryValid0493x6c,
+    bool phaseGasPressureEnabled0493x14v,
+    PhaseGasPressureMode0493x6g phaseGasPressureMode0493x14v,
+    double phaseGasPressureReference0493x14v,
+    double phaseGasPressureConstant0493x14v,
+    double phaseGasPressureScale0493x14v) {
     const double r = params.phaseInterfaceKineticReflectionFraction;
     if (!(r > 0.0)) return false;
     const bool q6ThermalInterfaceWall0493x10o =
@@ -18171,6 +18570,47 @@ bool apply_kinetic_interface_reflection_0493x9x(
     }
     const bool oneForOneNormalOnly0493x13o =
         oneForOneVelocitySwap0493x10v && oneForOneNormalOnlyRequested0493x13o;
+
+    const bool gasKineticExcessKickRequested0493x14v =
+        env_int_0400("MPCD_X14V_GAS_KINETIC_EXCESS_KICK", 0) != 0;
+    if (gasKineticExcessKickRequested0493x14v &&
+        (!q6ThermalInterfaceWall0493x10o ||
+         !kineticInterfaceCIC0493x10cic ||
+         !quadraticInterface0493x10poly ||
+         !oneForOneRelocation0493x10u ||
+         !oneForOneVelocitySwap0493x10v ||
+         !bilateralRelocation0493x14k ||
+         !gasSpecularReflection0493x14l)) {
+        throw std::runtime_error(
+            "0493x14v kinetic excess kick requires x10o+CIC+Q2+x10u+x10v + bilateral x14l gas-specular closure");
+    }
+    if (gasKineticExcessKickRequested0493x14v &&
+        !phaseGasPressureEnabled0493x14v) {
+        throw std::runtime_error(
+            "0493x14v kinetic excess kick requires x6g gas pressure so the already-represented thermodynamic traction can be subtracted");
+    }
+    if (gasKineticExcessKickRequested0493x14v &&
+        phaseAUniqueProjectedType0493x10cic != 1) {
+        throw std::runtime_error(
+            "0493x14v optimized CIC kick currently requires phase A to be the unique projected liquid type");
+    }
+    const bool gasKineticExcessKick0493x14v =
+        gasKineticExcessKickRequested0493x14v;
+    static bool gasKineticExcessKickReported0493x14v = false;
+    if (gasKineticExcessKick0493x14v &&
+        !gasKineticExcessKickReported0493x14v) {
+        std::cout
+            << "[0493x14v-gas-kinetic-excess] enabled=1"
+               " raw=gas-specular-owner-aggregate"
+               " subtract=x6g-thermodynamic-traction"
+               " transfer=collective-liquid-CIC"
+               " storage=reused-x9t/x10m"
+               " newParticlePass=0"
+               " liquidLaws=UNCHANGED"
+            << std::endl;
+        gasKineticExcessKickReported0493x14v = true;
+    }
+
     const bool thermalPhaseLimiterRequested0493x10w =
         env_int_0400("MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER", 0) != 0;
     const bool localThermalCoolingRequested0493x12a =
@@ -18513,7 +18953,11 @@ bool apply_kinetic_interface_reflection_0493x9x(
             ws.kineticMovingWallImpulseX0493x10m.data(),
             ws.kineticPhaseAlphaCIC0493x10cic.data(),
             grid.Nx, grid.Ny, periodicX, periodicY,
-            kPhaseGeometryFilterLambda0493x6c);
+            kPhaseGeometryFilterLambda0493x6c,
+            phaseAReferenceCellMass0493x10cic,
+            gasKineticExcessKick0493x14v
+                ? ws.kineticMovingWallVn0493x10m.data()
+                : nullptr);
         check_cuda_0400(cudaGetLastError(), "0493x10cic kinetic alpha filter launch");
         phaseAlphaKinetic0493x10cic = ws.kineticPhaseAlphaCIC0493x10cic.data();
     }
@@ -18879,6 +19323,13 @@ bool apply_kinetic_interface_reflection_0493x9x(
             phaseAType, phaseBType0493x14k,
             bilateralRelocation0493x14k ? 1 : 0,
             gasSpecularReflection0493x14l ? 1 : 0,
+            gasKineticExcessKick0493x14v ? 1 : 0,
+            gasKineticExcessKick0493x14v
+                ? ws.kineticRefPx0493x9t.data() : nullptr,
+            gasKineticExcessKick0493x14v
+                ? ws.kineticRefPy0493x9t.data() : nullptr,
+            gasKineticExcessKick0493x14v
+                ? ws.kineticMovingWallVn0493x10m.data() : nullptr,
             grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt,
             periodicX, periodicY,
             rigidTangentialKinematics0493x10t ? 1 : 0,
@@ -18905,19 +19356,70 @@ bool apply_kinetic_interface_reflection_0493x9x(
                 sizeof(unsigned long long);
             static_assert(sizeof(double) == sizeof(unsigned long long),
                           "0493x10v scratch alias requires 64-bit double/index");
-            check_cuda_0400(cudaMemset(
-                ws.kineticMovingWallImpulseX0493x10m.data(), 0xff,
-                candidateBytes0493x10v),
-                "0493x10v candidate0 sentinel fill");
-            check_cuda_0400(cudaMemset(
-                ws.kineticMovingWallImpulseY0493x10m.data(), 0xff,
-                candidateBytes0493x10v),
-                "0493x10v candidate1 sentinel fill");
-
             auto* candidate00493x10v = reinterpret_cast<unsigned long long*>(
                 ws.kineticMovingWallImpulseX0493x10m.data());
             auto* candidate10493x10v = reinterpret_cast<unsigned long long*>(
                 ws.kineticMovingWallImpulseY0493x10m.data());
+            if (gasKineticExcessKick0493x14v) {
+                const double dx0493x14v = params.Lx / static_cast<double>(grid.Nx);
+                const double dy0493x14v = params.Ly / static_cast<double>(grid.Ny);
+                const double cellArea0493x14v = dx0493x14v * dy0493x14v;
+                const double referencePotential0493x14v =
+                    phaseAReferenceCellMass0493x10cic > 0.0
+                        ? params.dt * phaseGasPressureScale0493x14v *
+                              phaseGasPressureReference0493x14v *
+                              cellArea0493x14v /
+                              phaseAReferenceCellMass0493x10cic
+                        : 0.0;
+                const double potentialToPressure0493x14v =
+                    (params.dt > 0.0 && cellArea0493x14v > 0.0)
+                        ? phaseAReferenceCellMass0493x10cic /
+                              (params.dt * cellArea0493x14v)
+                        : 0.0;
+                const double massFloor0493x14v =
+                    1.0e-14 * fmax(1.0, phaseAReferenceCellMass0493x10cic);
+                q6_x14v_prepare_excess_and_reset_candidates<<<cellBlocks, threads>>>(
+                    grid.numCells, grid.Nx, grid.Ny,
+                    params.Lx, params.Ly, params.dt,
+                    periodicX, periodicY,
+                    ws.kineticContinuousSegCount0493x10n.data(),
+                    ws.kineticContinuousSegAx0493x10n.data(),
+                    ws.kineticContinuousSegAy0493x10n.data(),
+                    ws.kineticContinuousSegBx0493x10n.data(),
+                    ws.kineticContinuousSegBy0493x10n.data(),
+                    ws.kineticContinuousSegUax0493x10n.data(),
+                    ws.kineticContinuousSegUay0493x10n.data(),
+                    ws.kineticContinuousSegUbx0493x10n.data(),
+                    ws.kineticContinuousSegUby0493x10n.data(),
+                    phaseAlphaQ60493x6c,
+                    ws.phaseGasPressurePotential0493x6a.data(),
+                    static_cast<int>(phaseGasPressureMode0493x14v),
+                    phaseGasPressureReference0493x14v,
+                    phaseGasPressureConstant0493x14v,
+                    phaseGasPressureScale0493x14v,
+                    referencePotential0493x14v,
+                    potentialToPressure0493x14v,
+                    ws.kineticRefPx0493x9t.data(),
+                    ws.kineticRefPy0493x9t.data(),
+                    ws.kineticMovingWallVn0493x10m.data(),
+                    massFloor0493x14v,
+                    ws.kineticTxPx0493x9t.data(),
+                    ws.kineticTxPy0493x9t.data(),
+                    candidate00493x10v, candidate10493x10v);
+                check_cuda_0400(
+                    cudaGetLastError(),
+                    "0493x14v excess-traction prepare + x10v candidate reset launch");
+            } else {
+                check_cuda_0400(cudaMemset(
+                    ws.kineticMovingWallImpulseX0493x10m.data(), 0xff,
+                    candidateBytes0493x10v),
+                    "0493x10v candidate0 sentinel fill");
+                check_cuda_0400(cudaMemset(
+                    ws.kineticMovingWallImpulseY0493x10m.data(), 0xff,
+                    candidateBytes0493x10v),
+                    "0493x10v candidate1 sentinel fill");
+            }
+
             q6_x10v_build_velocity_swap_candidates<<<particleBlocks, threads>>>(
                 particles, nParticles,
                 ws.kineticOneForOneRelocated0493x10v.data(),
@@ -18984,8 +19486,24 @@ bool apply_kinetic_interface_reflection_0493x9x(
                     "0493x9x cell refresh counter zero");
     q6_zero_cell_moments_only_0493w5<<<cellBlocks, threads>>>(cells);
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments reset launch");
-    q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(particles, cells, nParticles, 0, 0u);
-    check_cuda_0400(cudaGetLastError(), "0493x9x cell moments redeposit launch");
+    if (gasKineticExcessKick0493x14v) {
+        const double massFloor0493x14v =
+            1.0e-14 * fmax(1.0, phaseAReferenceCellMass0493x10cic);
+        q6_x14v_apply_cic_kick_and_deposit_moments<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, phaseAType,
+            ws.kineticMovingWallVn0493x10m.data(),
+            ws.kineticTxPx0493x9t.data(),
+            ws.kineticTxPy0493x9t.data(),
+            massFloor0493x14v,
+            grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY);
+        check_cuda_0400(
+            cudaGetLastError(),
+            "0493x14v collective kinetic kick + cell moments redeposit launch");
+    } else {
+        q6_thermostat_deposit_moments_from_cell_ids_0400<<<particleBlocks, threads>>>(
+            particles, cells, nParticles, 0, 0u);
+        check_cuda_0400(cudaGetLastError(), "0493x9x cell moments redeposit launch");
+    }
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments finalize launch");
 
@@ -22732,7 +23250,12 @@ bool apply_independent_masked_species_q6_0493w5(
                  phaseA0493x9g,
                  params.speciesDefinitions[static_cast<std::size_t>(projectedSpeciesIndex0493x7a)])) ? 1 : 0,
             geometryValid0493x9x ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
-            geometryValid0493x9x);
+            geometryValid0493x9x,
+            phaseGasPressure0493x6g,
+            phaseGasPressureMode0493x6g,
+            phaseGasPressureReference0493x6g,
+            phaseGasPressureConstant0493x6g,
+            phaseGasPressureScale0493x6g);
     }
 
     if (q6GfDiagnosticsThisStep0493x7k) {
