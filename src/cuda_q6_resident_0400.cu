@@ -2604,6 +2604,36 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> kineticContinuousSegUbx0493x10n;
     DeviceBuffer0400<double> kineticContinuousSegUby0493x10n;
 
+    // 0493x14z — reference-pressure geometric closure.
+    // Three doubles only: sum(-dy), sum(+dx), sum(ds) for the same mid-step
+    // x10n segments consumed by x14v.  Allocated lazily only when the opt-in
+    // closure gate is active; no O(Ncell) or O(Np) storage is added.
+    DeviceBuffer0400<double> kineticReferencePressureClosure0493x14z;
+    // 0493x14ac — conservative gauge-resultant projection onto x10n normals.
+    // Seven doubles only: F_Q6(x,y), F_x10n(x,y), Mxx, Mxy, Myy.  This is
+    // O(1) scratch, reset and accumulated inside already-required kernels.
+    DeviceBuffer0400<double> kineticGaugeResultantProjection0493x14ac;
+    // 0493x14ae — temporary scatter-loss diagnostic only.
+    // Three cumulative doubles: terminal no-support event count and the
+    // corresponding untransmitted liquid impulse Jx/Jy.  Atomics occur only
+    // in the terminal radius-2 failure branch; production path is unchanged
+    // when the gate is off.
+    DeviceBuffer0400<double> kineticScatterLossAccum0493x14ae;
+    bool kineticScatterLossDiagnosticInitialized0493x14ae = false;
+    // 0493x14af — temporary x14v global-balance diagnostic.
+    // Eleven cumulative doubles only: segment count plus Jraw, Jthermo,
+    // Jpref, Jgauge and the final requested CIC kick (x/y).  The accumulator
+    // is written only by the already-required x14v interface-cell kernel; no
+    // new CUDA launch/pass/O(N) storage is introduced.
+    DeviceBuffer0400<double> kineticGlobalBalanceAccum0493x14af;
+    bool kineticGlobalBalanceDiagnosticInitialized0493x14af = false;
+    // 0493x14ai — production-candidate device-side Q6 resultant closure.
+    // Two doubles only: exact B1/RT0 pressure-correction impulse actually
+    // applied to the unique projected liquid species during the current step.
+    // Reset is piggybacked on x10o capture; B1 contributes one atomic pair per
+    // CUDA block after a warp reduction. No host transfer/kernel/O(N) pass.
+    DeviceBuffer0400<double> kineticAppliedQ6Resultant0493x14ai;
+
     // 0493x10o stores the projected liquid hydrodynamic field produced by Q6
     // before r/p/dux/duy are reused.  Cell values are tentative liquid COM
     // velocity + Q6 cell correction; east/north values carry the corresponding
@@ -5766,6 +5796,7 @@ __global__ void q6_x10o_capture_projected_q6_hydrodynamics(
     double* cellUy,
     double* faceUxEast,
     double* faceUyNorth,
+    double* appliedQ6Resultant0493x14ai,
     int nx,
     int ny,
     int periodicX,
@@ -5773,6 +5804,12 @@ __global__ void q6_x10o_capture_projected_q6_hydrodynamics(
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
+    // 0493x14ai: reset in this already-required launch. Same-stream ordering
+    // makes the zero visible to the later B1/RT0 particle kernel.
+    if (idx == 0 && appliedQ6Resultant0493x14ai != nullptr) {
+        appliedQ6Resultant0493x14ai[0] = 0.0;
+        appliedQ6Resultant0493x14ai[1] = 0.0;
+    }
     for (int c = idx; c < n; c += stride) {
         const int k = speciesIndex * species.numCells + c;
         const double m = species.mass[k];
@@ -6021,6 +6058,135 @@ __device__ __forceinline__ void q6_x10n_orient_segment_outward(
     }
 }
 
+// 0493x14ac uses the already-qualified x14v/x14ab pressure reconstructions
+// while the x10n geometry is still in the build launch.  Definitions remain
+// beside x14v below; only forward declarations are needed here.
+__device__ __forceinline__ double q6_x14ab_x6g_face_gauge_pressure(
+    int gasSideCell, double alphaGasSide,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double referencePotential,
+    double potentialToPressure);
+__device__ __forceinline__ double q6_x14v_x6g_represented_pressure(
+    double mx, double my, double nxOut, double nyOut,
+    const double* alphaQ6,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double pressureReference,
+    double constantPressure,
+    double pressureScale,
+    double referencePotential,
+    double potentialToPressure,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY);
+
+// 0493x14ad — local x6g-face gauge sampling carried on x10n normals.
+// Edge ids are the native x10n marching-square edges:
+//   0=c00--c10 (x face owned by c00)
+//   1=c10--c11 (y face owned by c10)
+//   2=c11--c01 (x face owned by c01)
+//   3=c01--c00 (y face owned by c00).
+// The helper accepts only a face actually represented by x6f/x6g (coeff>1)
+// and returns the signed gauge pressure stored by the gas-side Q6 cell.
+__device__ __forceinline__ bool q6_x14ad_edge_gauge_pressure(
+    int owner, int edge,
+    const double* alphaQ6,
+    const double* faceCoeffX,
+    const double* faceCoeffY,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double referencePotential,
+    double potentialToPressure,
+    int nx, int ny, int periodicX, int periodicY,
+    double* deltaP) {
+    if (!deltaP || !alphaQ6 || !faceCoeffX || !faceCoeffY ||
+        !gasPressurePotential || owner < 0 || edge < 0 || edge > 3)
+        return false;
+    const int i = owner % nx;
+    const int j = owner / nx;
+    const int c00 = q6_x10n_cell_index(i,     j,     nx, ny, periodicX, periodicY);
+    const int c10 = q6_x10n_cell_index(i + 1, j,     nx, ny, periodicX, periodicY);
+    const int c11 = q6_x10n_cell_index(i + 1, j + 1, nx, ny, periodicX, periodicY);
+    const int c01 = q6_x10n_cell_index(i,     j + 1, nx, ny, periodicX, periodicY);
+    if (c00 < 0 || c10 < 0 || c11 < 0 || c01 < 0) return false;
+
+    int faceOwner = -1;
+    int ca = -1, cb = -1;
+    int component = -1;
+    if (edge == 0) { faceOwner = c00; ca = c00; cb = c10; component = 0; }
+    else if (edge == 1) { faceOwner = c10; ca = c10; cb = c11; component = 1; }
+    else if (edge == 2) { faceOwner = c01; ca = c01; cb = c11; component = 0; }
+    else { faceOwner = c00; ca = c00; cb = c01; component = 1; }
+
+    const double coeff = component == 0 ? faceCoeffX[faceOwner] : faceCoeffY[faceOwner];
+    if (!isfinite(coeff) || !(coeff > 1.0)) return false;
+    const double aa = alphaQ6[ca];
+    const double ab = alphaQ6[cb];
+    if (!isfinite(aa) || !isfinite(ab)) return false;
+    const bool aGas = aa < 0.5 && ab >= 0.5;
+    const bool bGas = ab < 0.5 && aa >= 0.5;
+    if (!(aGas || bGas)) return false;
+    const int gasCell = aGas ? ca : cb;
+    const double alphaGas = aGas ? aa : ab;
+    const double dp = q6_x14ab_x6g_face_gauge_pressure(
+        gasCell, alphaGas, gasPressurePotential, gasPressureMode,
+        referencePotential, potentialToPressure);
+    if (!isfinite(dp)) return false;
+    *deltaP = dp;
+    return true;
+}
+
+// Two edge ids fit in one nibble; two x10n segments therefore fit in one
+// already-existing byte/cell scratch.  0xf denotes an invalid/unset slot.
+__device__ __forceinline__ void q6_x14ad_record_segment_edges(
+    unsigned char* packedEdges, int owner, int slot, int edgeA, int edgeB) {
+    if (!packedEdges || owner < 0 || slot < 0 || slot > 1 ||
+        edgeA < 0 || edgeA > 3 || edgeB < 0 || edgeB > 3 || edgeA == edgeB)
+        return;
+    const unsigned int shift = static_cast<unsigned int>(4 * slot);
+    const unsigned char nibble = static_cast<unsigned char>(edgeA | (edgeB << 2));
+    const unsigned char mask = static_cast<unsigned char>(0x0fu << shift);
+    const unsigned char oldValue = packedEdges[owner];
+    packedEdges[owner] = static_cast<unsigned char>(
+        (oldValue & static_cast<unsigned char>(~mask)) |
+        static_cast<unsigned char>(nibble << shift));
+}
+
+__device__ __forceinline__ bool q6_x14ad_segment_local_gauge_pressure(
+    int owner, int slot,
+    const unsigned char* packedEdges,
+    const double* alphaQ6,
+    const double* faceCoeffX,
+    const double* faceCoeffY,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double referencePotential,
+    double potentialToPressure,
+    int nx, int ny, int periodicX, int periodicY,
+    double* deltaP) {
+    if (!deltaP || !packedEdges || owner < 0 || slot < 0 || slot > 1)
+        return false;
+    const unsigned char nibble = static_cast<unsigned char>(
+        (packedEdges[owner] >> (4 * slot)) & 0x0fu);
+    if (nibble == 0x0fu) return false;
+    const int edgeA = static_cast<int>(nibble & 0x03u);
+    const int edgeB = static_cast<int>((nibble >> 2) & 0x03u);
+    if (edgeA == edgeB) return false;
+    double pA = 0.0, pB = 0.0;
+    const bool okA = q6_x14ad_edge_gauge_pressure(
+        owner, edgeA, alphaQ6, faceCoeffX, faceCoeffY, gasPressurePotential,
+        gasPressureMode, referencePotential, potentialToPressure,
+        nx, ny, periodicX, periodicY, &pA);
+    const bool okB = q6_x14ad_edge_gauge_pressure(
+        owner, edgeB, alphaQ6, faceCoeffX, faceCoeffY, gasPressurePotential,
+        gasPressureMode, referencePotential, potentialToPressure,
+        nx, ny, periodicX, periodicY, &pB);
+    if (okA && okB) { *deltaP = 0.5 * (pA + pB); return true; }
+    if (okA) { *deltaP = pA; return true; }
+    if (okB) { *deltaP = pB; return true; }
+    return false;
+}
+
 __device__ __forceinline__ bool q6_x10n_store_segment(
     int owner, int slot,
     IsoPoint0493x10n a,
@@ -6030,7 +6196,9 @@ __device__ __forceinline__ bool q6_x10n_store_segment(
     double* segAx, double* segAy,
     double* segBx, double* segBy,
     double* segUax, double* segUay,
-    double* segUbx, double* segUby) {
+    double* segUbx, double* segUby,
+    double dt0493x14z,
+    double* referencePressureClosureScratch0493x14z) {
     if (owner < 0 || slot < 0 || slot > 1 || !a.valid || !b.valid) return false;
     const double ddx = b.x - a.x;
     const double ddy = b.y - a.y;
@@ -6038,6 +6206,25 @@ __device__ __forceinline__ bool q6_x10n_store_segment(
         return false;
     q6_x10n_orient_segment_outward(
         &a, &b, a00, a10, a11, a01, xBase, yBase, dx, dy);
+    if (referencePressureClosureScratch0493x14z != nullptr) {
+        // Same mid-step tangent as x14v, but computed while endpoints are
+        // already resident in registers.  No segment-array reread is added.
+        const double dxs0493x14z = (b.x - a.x) +
+            0.5 * dt0493x14z * (b.ux - a.ux);
+        const double dys0493x14z = (b.y - a.y) +
+            0.5 * dt0493x14z * (b.uy - a.uy);
+        const double len0493x14z = sqrt(
+            dxs0493x14z * dxs0493x14z + dys0493x14z * dys0493x14z);
+        if (isfinite(len0493x14z) &&
+            len0493x14z > 1.0e-14 * fmin(dx, dy)) {
+            atomic_add_double_0400(
+                &referencePressureClosureScratch0493x14z[0], -dys0493x14z);
+            atomic_add_double_0400(
+                &referencePressureClosureScratch0493x14z[1],  dxs0493x14z);
+            atomic_add_double_0400(
+                &referencePressureClosureScratch0493x14z[2],  len0493x14z);
+        }
+    }
     const int s = 2 * owner + slot;
     segAx[s] = a.x; segAy[s] = a.y;
     segBx[s] = b.x; segBy[s] = b.y;
@@ -6063,6 +6250,22 @@ __global__ void q6_x10n_build_continuous_interface(
     double thermalThickness0493x10o,
     int useQ6ThermalWall0493x10o,
     int fullVectorEndpointVelocity0493x10r,
+    double dt0493x14z,
+    double* referencePressureClosureScratch0493x14z,
+    int gaugeResultantProjection0493x14ac,
+    const double* alphaQ60493x14ac,
+    const double* faceCoeffX0493x14ac,
+    const double* faceCoeffY0493x14ac,
+    const double* gasPressurePotential0493x14ac,
+    int gasPressureMode0493x14ac,
+    double pressureReference0493x14ac,
+    double constantPressure0493x14ac,
+    double pressureScale0493x14ac,
+    double referencePotential0493x14ac,
+    double potentialToPressure0493x14ac,
+    double* gaugeProjectionScratch0493x14ac,
+    int localFaceGaugeProjection0493x14ad,
+    unsigned char* segmentEdgePairs0493x14ad,
     unsigned char* segCount,
     double* segAx, double* segAy,
     double* segBx, double* segBy,
@@ -6076,8 +6279,70 @@ __global__ void q6_x10n_build_continuous_interface(
 
     for (int owner = idx; owner < numCells; owner += stride) {
         segCount[owner] = 0;
+        if (segmentEdgePairs0493x14ad != nullptr)
+            segmentEdgePairs0493x14ad[owner] = 0xffu;
         const int i = owner % nx;
         const int j = owner / nx;
+
+        // 0493x14ac: accumulate only the global signed x6g gauge resultant.
+        // Each cell owns one east and one north face, so every represented
+        // x6f/x6g interface face is counted exactly once.  No CIC scatter is
+        // performed here; the local traction will remain on x10n normals.
+        if (gaugeResultantProjection0493x14ac &&
+            gaugeProjectionScratch0493x14ac != nullptr &&
+            alphaQ60493x14ac != nullptr && gasPressurePotential0493x14ac != nullptr &&
+            faceCoeffX0493x14ac != nullptr && faceCoeffY0493x14ac != nullptr) {
+            const double alphaC0493x14ac = alphaQ60493x14ac[owner];
+            const double coeffX0493x14ac = faceCoeffX0493x14ac[owner];
+            if (isfinite(coeffX0493x14ac) && coeffX0493x14ac > 1.0 &&
+                (periodicX || i < nx - 1)) {
+                const int east0493x14ac = j * nx +
+                    (periodicX ? wrap_cell_index_0400(i + 1, nx) : i + 1);
+                const double alphaE0493x14ac = alphaQ60493x14ac[east0493x14ac];
+                const bool cHigh0493x14ac =
+                    alphaC0493x14ac >= 0.5 && alphaE0493x14ac < 0.5;
+                const bool eHigh0493x14ac =
+                    alphaE0493x14ac >= 0.5 && alphaC0493x14ac < 0.5;
+                if (cHigh0493x14ac || eHigh0493x14ac) {
+                    const int gasCell0493x14ac = cHigh0493x14ac ? east0493x14ac : owner;
+                    const double alphaGas0493x14ac = cHigh0493x14ac
+                        ? alphaE0493x14ac : alphaC0493x14ac;
+                    const double dp0493x14ac = q6_x14ab_x6g_face_gauge_pressure(
+                        gasCell0493x14ac, alphaGas0493x14ac,
+                        gasPressurePotential0493x14ac, gasPressureMode0493x14ac,
+                        referencePotential0493x14ac, potentialToPressure0493x14ac);
+                    const double fx0493x14ac =
+                        (cHigh0493x14ac ? -1.0 : 1.0) * dp0493x14ac * dy;
+                    if (isfinite(fx0493x14ac))
+                        atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[0], fx0493x14ac);
+                }
+            }
+            const double coeffY0493x14ac = faceCoeffY0493x14ac[owner];
+            if (isfinite(coeffY0493x14ac) && coeffY0493x14ac > 1.0 &&
+                (periodicY || j < ny - 1)) {
+                const int north0493x14ac =
+                    (periodicY ? wrap_cell_index_0400(j + 1, ny) : j + 1) * nx + i;
+                const double alphaN0493x14ac = alphaQ60493x14ac[north0493x14ac];
+                const bool cHigh0493x14ac =
+                    alphaC0493x14ac >= 0.5 && alphaN0493x14ac < 0.5;
+                const bool nHigh0493x14ac =
+                    alphaN0493x14ac >= 0.5 && alphaC0493x14ac < 0.5;
+                if (cHigh0493x14ac || nHigh0493x14ac) {
+                    const int gasCell0493x14ac = cHigh0493x14ac ? north0493x14ac : owner;
+                    const double alphaGas0493x14ac = cHigh0493x14ac
+                        ? alphaN0493x14ac : alphaC0493x14ac;
+                    const double dp0493x14ac = q6_x14ab_x6g_face_gauge_pressure(
+                        gasCell0493x14ac, alphaGas0493x14ac,
+                        gasPressurePotential0493x14ac, gasPressureMode0493x14ac,
+                        referencePotential0493x14ac, potentialToPressure0493x14ac);
+                    const double fy0493x14ac =
+                        (cHigh0493x14ac ? -1.0 : 1.0) * dp0493x14ac * dx;
+                    if (isfinite(fy0493x14ac))
+                        atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[1], fy0493x14ac);
+                }
+            }
+        }
+
         if ((!periodicX && i + 1 >= nx) ||
             (!periodicY && j + 1 >= ny))
             continue;
@@ -6155,8 +6420,12 @@ __global__ void q6_x10n_build_continuous_interface(
             if (q6_x10n_store_segment(owner, 0, e[edges[0]], e[edges[1]],
                     a00, a10, a11, a01, x0, y0, dx, dy,
                     segAx, segAy, segBx, segBy,
-                    segUax, segUay, segUbx, segUby))
+                    segUax, segUay, segUbx, segUby,
+                    dt0493x14z, referencePressureClosureScratch0493x14z)) {
+                q6_x14ad_record_segment_edges(
+                    segmentEdgePairs0493x14ad, owner, 0, edges[0], edges[1]);
                 built = 1;
+            }
         } else if (ne == 4) {
             if (code != 5 && code != 10) {
                 if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
@@ -6184,16 +6453,97 @@ __global__ void q6_x10n_build_continuous_interface(
             if (q6_x10n_store_segment(owner, built, e[p00a], e[p00b],
                     a00, a10, a11, a01, x0, y0, dx, dy,
                     segAx, segAy, segBx, segBy,
-                    segUax, segUay, segUbx, segUby)) ++built;
+                    segUax, segUay, segUbx, segUby,
+                    dt0493x14z, referencePressureClosureScratch0493x14z)) {
+                q6_x14ad_record_segment_edges(
+                    segmentEdgePairs0493x14ad, owner, built, p00a, p00b);
+                ++built;
+            }
             if (built < 2 && q6_x10n_store_segment(owner, built, e[p11a], e[p11b],
                     a00, a10, a11, a01, x0, y0, dx, dy,
                     segAx, segAy, segBx, segBy,
-                    segUax, segUay, segUbx, segUby)) ++built;
+                    segUax, segUay, segUbx, segUby,
+                    dt0493x14z, referencePressureClosureScratch0493x14z)) {
+                q6_x14ad_record_segment_edges(
+                    segmentEdgePairs0493x14ad, owner, built, p11a, p11b);
+                ++built;
+            }
         } else {
             if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
             continue;
         }
         segCount[owner] = static_cast<unsigned char>(built);
+
+        // 0493x14ac: keep the nominal local x10n gauge sampling, but record
+        // its global resultant and the 2x2 normal metric.  The later x14v
+        // kernel uses only their difference from the Q6-face resultant to
+        // construct the minimum-L2 pressure correction.  A second pressure
+        // lookup there avoids any new O(Ncell) per-segment storage.
+        if (gaugeResultantProjection0493x14ac && built > 0 &&
+            gaugeProjectionScratch0493x14ac != nullptr &&
+            alphaQ60493x14ac != nullptr) {
+            for (int slot0493x14ac = 0; slot0493x14ac < built; ++slot0493x14ac) {
+                const int s0493x14ac = 2 * owner + slot0493x14ac;
+                double tx0493x14ac = q6_x10m_minimum_image(
+                    segBx[s0493x14ac] - segAx[s0493x14ac], lx, periodicX);
+                double ty0493x14ac = q6_x10m_minimum_image(
+                    segBy[s0493x14ac] - segAy[s0493x14ac], ly, periodicY);
+                tx0493x14ac += 0.5 * dt0493x14z *
+                    (segUbx[s0493x14ac] - segUax[s0493x14ac]);
+                ty0493x14ac += 0.5 * dt0493x14z *
+                    (segUby[s0493x14ac] - segUay[s0493x14ac]);
+                const double L20493x14ac =
+                    tx0493x14ac * tx0493x14ac + ty0493x14ac * ty0493x14ac;
+                if (!(L20493x14ac > 1.0e-28 * fmin(dx * dx, dy * dy)) ||
+                    !isfinite(L20493x14ac)) continue;
+                const double L0493x14ac = sqrt(L20493x14ac);
+                const double axm0493x14ac = segAx[s0493x14ac] +
+                    0.5 * dt0493x14z * segUax[s0493x14ac];
+                const double aym0493x14ac = segAy[s0493x14ac] +
+                    0.5 * dt0493x14z * segUay[s0493x14ac];
+                const double mx0493x14ac = axm0493x14ac + 0.5 * tx0493x14ac;
+                const double my0493x14ac = aym0493x14ac + 0.5 * ty0493x14ac;
+                const double nxOut0493x14ac = ty0493x14ac / L0493x14ac;
+                const double nyOut0493x14ac = -tx0493x14ac / L0493x14ac;
+                double dp0493x14ac = 0.0;
+                bool localPressureOk0493x14ad = false;
+                if (localFaceGaugeProjection0493x14ad &&
+                    segmentEdgePairs0493x14ad != nullptr) {
+                    localPressureOk0493x14ad = q6_x14ad_segment_local_gauge_pressure(
+                        owner, slot0493x14ac, segmentEdgePairs0493x14ad,
+                        alphaQ60493x14ac, faceCoeffX0493x14ac,
+                        faceCoeffY0493x14ac, gasPressurePotential0493x14ac,
+                        gasPressureMode0493x14ac, referencePotential0493x14ac,
+                        potentialToPressure0493x14ac, nx, ny, periodicX, periodicY,
+                        &dp0493x14ac);
+                }
+                if (!localPressureOk0493x14ad) {
+                    const double pAbs0493x14ac = q6_x14v_x6g_represented_pressure(
+                        mx0493x14ac, my0493x14ac, nxOut0493x14ac, nyOut0493x14ac,
+                        alphaQ60493x14ac, gasPressurePotential0493x14ac,
+                        gasPressureMode0493x14ac, pressureReference0493x14ac,
+                        constantPressure0493x14ac, pressureScale0493x14ac,
+                        referencePotential0493x14ac, potentialToPressure0493x14ac,
+                        nx, ny, lx, ly, periodicX, periodicY);
+                    dp0493x14ac = pAbs0493x14ac - pressureReference0493x14ac;
+                }
+                const double mxForce0493x14ac = -ty0493x14ac / L0493x14ac;
+                const double myForce0493x14ac =  tx0493x14ac / L0493x14ac;
+                const double f0x0493x14ac = dp0493x14ac * (-ty0493x14ac);
+                const double f0y0493x14ac = dp0493x14ac * ( tx0493x14ac);
+                if (isfinite(f0x0493x14ac) && isfinite(f0y0493x14ac)) {
+                    atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[2], f0x0493x14ac);
+                    atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[3], f0y0493x14ac);
+                    atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[4],
+                        L0493x14ac * mxForce0493x14ac * mxForce0493x14ac);
+                    atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[5],
+                        L0493x14ac * mxForce0493x14ac * myForce0493x14ac);
+                    atomic_add_double_0400(&gaugeProjectionScratch0493x14ac[6],
+                        L0493x14ac * myForce0493x14ac * myForce0493x14ac);
+                }
+            }
+        }
+
         if (audit && built > 0)
             atomicAdd(&audit->continuousWallSegmentsBuilt,
                       static_cast<unsigned long long>(built));
@@ -11294,10 +11644,25 @@ __global__ void q6_x10cic_filter_phase_alpha(
     int periodicY,
     double lambda,
     double phaseAReferenceCellMass0493x14v,
-    double* liquidMassCIC0493x14v) {
+    double* liquidMassCIC0493x14v,
+    double* referencePressureClosureScratch0493x14z,
+    double* gaugeProjectionScratch0493x14ac) {
     const int n = nx * ny;
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
+    // 0493x14z: piggyback the 24-byte reset on this already-required launch.
+    // Kernel ordering in the same stream makes the zero visible to the later
+    // x10n builder without a new cudaMemset or kernel launch.
+    if (idx == 0 && referencePressureClosureScratch0493x14z != nullptr) {
+        referencePressureClosureScratch0493x14z[0] = 0.0;
+        referencePressureClosureScratch0493x14z[1] = 0.0;
+        referencePressureClosureScratch0493x14z[2] = 0.0;
+    }
+    // 0493x14ac: reset the seven-scalar projection state in the same launch.
+    if (idx == 0 && gaugeProjectionScratch0493x14ac != nullptr) {
+        for (int k0493x14ac = 0; k0493x14ac < 7; ++k0493x14ac)
+            gaugeProjectionScratch0493x14ac[k0493x14ac] = 0.0;
+    }
     for (int c = idx; c < n; c += stride) {
         const int ix = c % nx;
         const int iy = c / nx;
@@ -13242,7 +13607,8 @@ __device__ __forceinline__ void q6_x14v_scatter_supported_impulse(
     const double* liquidMassCIC, double massFloor,
     int nx, int ny, double lx, double ly,
     int periodicX, int periodicY,
-    double* kickX, double* kickY) {
+    double* kickX, double* kickY,
+    double* scatterLossAccum0493x14ae) {
     if ((jx == 0.0 && jy == 0.0) || !isfinite(jx) || !isfinite(jy) ||
         liquidMassCIC == nullptr || kickX == nullptr || kickY == nullptr) return;
     int ids[4]; double w[4];
@@ -13259,8 +13625,8 @@ __device__ __forceinline__ void q6_x14v_scatter_supported_impulse(
             const double m = liquidMassCIC[ids[k]];
             if (!(w[k] > 0.0) || !isfinite(m) || !(m > massFloor)) continue;
             const double wk = w[k] * inv;
-            atomic_add_double_0400(&kickX[ids[k]], jx * wk);
-            atomic_add_double_0400(&kickY[ids[k]], jy * wk);
+            if (jx != 0.0) atomic_add_double_0400(&kickX[ids[k]], jx * wk);
+            if (jy != 0.0) atomic_add_double_0400(&kickY[ids[k]], jy * wk);
         }
         return;
     }
@@ -13290,11 +13656,64 @@ __device__ __forceinline__ void q6_x14v_scatter_supported_impulse(
             }
         }
         if (best >= 0) {
-            atomic_add_double_0400(&kickX[best], jx);
-            atomic_add_double_0400(&kickY[best], jy);
+            if (jx != 0.0) atomic_add_double_0400(&kickX[best], jx);
+            if (jy != 0.0) atomic_add_double_0400(&kickY[best], jy);
             return;
         }
     }
+
+    // 0493x14ae diagnostic: this is the only normal x14v path where a valid
+    // nonzero impulse reaches the support fallback yet is not deposited.
+    // Keep the diagnostic cumulative and virtually free: three atomics only
+    // when the terminal radius-2 search itself fails.
+    if (scatterLossAccum0493x14ae != nullptr) {
+        atomic_add_double_0400(&scatterLossAccum0493x14ae[0], 1.0);
+        atomic_add_double_0400(&scatterLossAccum0493x14ae[1], jx);
+        atomic_add_double_0400(&scatterLossAccum0493x14ae[2], jy);
+    }
+}
+
+// 0493x14aa — thermodynamic traction from the exact represented x6g face.
+// The gas-side cell is the one already selected by x6f, so no x10n->Q6
+// nearest-cell lookup is needed in this path.
+__device__ __forceinline__ double q6_x14aa_x6g_face_pressure(
+    int gasSideCell, double alphaGasSide,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double pressureReference,
+    double referencePotential,
+    double potentialToPressure) {
+    if (gasSideCell < 0 || gasPressurePotential == nullptr)
+        return fmax(0.0, pressureReference);
+    double gauge = gasPressurePotential[gasSideCell];
+    if (gasPressureMode ==
+        static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
+        gauge = q6_x14s_correct_gas_pressure_potential_0493x6g(
+            gauge, alphaGasSide, referencePotential);
+    }
+    const double p = pressureReference + gauge * potentialToPressure;
+    return isfinite(p) ? fmax(0.0, p) : fmax(0.0, pressureReference);
+}
+
+// 0493x14ab — signed gauge-pressure component represented by x6g.
+// x6g stores C*(p_g-p_ref), including pressureScale, and x14s corrects this
+// gauge potential consistently for accessible gas volume.  Do NOT clamp the
+// reconstructed delta-p: negative gauge pressure is a physical part of x6g.
+__device__ __forceinline__ double q6_x14ab_x6g_face_gauge_pressure(
+    int gasSideCell, double alphaGasSide,
+    const double* gasPressurePotential,
+    int gasPressureMode,
+    double referencePotential,
+    double potentialToPressure) {
+    if (gasSideCell < 0 || gasPressurePotential == nullptr) return 0.0;
+    double gauge = gasPressurePotential[gasSideCell];
+    if (gasPressureMode ==
+        static_cast<int>(PhaseGasPressureMode0493x6g::EosAccessibleVolume)) {
+        gauge = q6_x14s_correct_gas_pressure_potential_0493x6g(
+            gauge, alphaGasSide, referencePotential);
+    }
+    const double deltaP = gauge * potentialToPressure;
+    return isfinite(deltaP) ? deltaP : 0.0;
 }
 
 __device__ __forceinline__ int q6_x14v_nearest_q6_gas_cell(
@@ -13374,6 +13793,61 @@ __device__ __forceinline__ double q6_x14v_x6g_represented_pressure(
 // is active.  It also subtracts the pressure traction already represented by
 // x6g and scatters only the residual kinetic impulse onto supported liquid CIC
 // nodes.  The raw gas impulse is already aggregated by owner in q6_x10n.
+//
+// 0493x14aa — x6g-face thermodynamic traction (opt-in qualification)
+// Raw reflection remains x14l/x10n/CIC.  Only J_thermo moves to the same
+// represented east/north cut faces already used by x6f/x6g.  The current x6g
+// gas-side cell, gauge potential and x14s accessible-volume correction are
+// reused exactly.  Face impulses are scattered into the existing x14v CIC
+// kick buffers inside this existing O(Ncell) kernel.  Cost contract: zero new
+// kernels, zero new cell/particle passes, zero new resident buffers, no second
+// CG.  x14z is bypassed in this mode.
+//
+// 0493x14ab — hybrid reference/gauge thermodynamic traction (opt-in).
+// Preserve the local equilibrium cancellation on the same x10n/CIC segments
+// as J_refl by subtracting only p_ref there.  Subtract only the signed gauge
+// part delta-p=(p_g-p_ref) on the exact represented x6g faces, because this is
+// the component actually carried by the x6g Dirichlet potential.  This avoids
+// moving the large uniform p_ref from CIC geometry to Q6 geometry.  It reuses
+// the x14aa face path and adds no kernel, pass, resident buffer or second CG.
+// x14aa absolute-face mode and x14ab hybrid mode are mutually exclusive.
+//
+// 0493x14ac — minimum-L2 conservative gauge-resultant projection (opt-in).
+// 0493x14ad — local-x6g-face gauge sampling with residual resultant projection.
+// Keep both p_ref and the nominal x6g gauge pressure on the local x10n/CIC
+// normals that qualified the n=2 shape dynamics.  Only a two-component global
+// resultant is imported from the represented x6g faces.  The difference is
+// redistributed as delta-p_s = m_s dot lambda, where
+// M lambda = F_Q6 - F_x10n and M=sum L_s m_s m_s^T.  This is the minimum-L2
+// normal pressure correction, dipolar (n=1) on a circular interface.  The
+// seven-double scratch is accumulated in the existing x10n build launch and
+// solved per block in shared memory in this existing x14v cell kernel: zero
+// new launch/pass/O(N) buffer/host transfer/CG solve.
+//
+// 0493x14ad — local x6g-face gauge pressure + residual projection (opt-in).
+// Preserve x10n normals, but replace the nominal nearest-gas-cell gauge sample
+// by the arithmetic mean of the two represented x6g faces that terminate the
+// same marching-squares segment.  If only one endpoint face is represented,
+// use it; if neither is represented, fall back to the nominal x14v lookup.
+// The same seven-scalar x14ac projection then corrects only the residual global
+// resultant.  Segment edge ids are packed into the already-allocated x10m
+// active-byte scratch (one byte/cell) in the x10n branch: no new buffer/pass.
+//
+// 0493x14z — reference-pressure geometric closure
+// The uniform p_ref part of the reconstructed traction is projected onto zero
+// global resultant using the geometric defect of the same mid-step x10n
+// polyline.  The defect is accumulated in the existing x10n build launch and
+// distributed by segment length in x14v.  The variable delta-p traction is not
+// altered.  Cost contract: 24 B lazy scratch, zero extra CUDA launches, zero
+// extra O(Ncell) passes, zero extra O(Np) passes, one sqrt + three atomics/interface segment.
+//
+// 0493x14y — x14v p_G SUBTRACTION ABLATION
+// Production semantics are unchanged by default.  The opt-in environment gate
+// MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION=0 suppresses only the
+// reconstructed x6g thermodynamic-traction subtraction inside x14v, leaving
+// x6g itself, x14l reflection, raw reflection aggregation and CIC transfer ON.
+// This is an ablation only: with the gate at 0, x14v transfers J_raw rather
+// than J_raw-J_x6g.  No buffer, particle pass or liquid law is changed.
 __global__ void q6_x14v_prepare_excess_and_reset_candidates(
     int numCells,
     int nx, int ny, double lx, double ly, double dt,
@@ -13384,6 +13858,8 @@ __global__ void q6_x14v_prepare_excess_and_reset_candidates(
     const double* segUax, const double* segUay,
     const double* segUbx, const double* segUby,
     const double* alphaQ6,
+    const double* faceCoeffX0493x6f,
+    const double* faceCoeffY0493x6f,
     const double* gasPressurePotential,
     int gasPressureMode,
     double pressureReference,
@@ -13391,20 +13867,197 @@ __global__ void q6_x14v_prepare_excess_and_reset_candidates(
     double pressureScale,
     double referencePotential,
     double potentialToPressure,
+    int subtractX6gThermodynamicTraction0493x14y,
+    int useX6gFaceThermoTraction0493x14aa,
+    int useX6gGaugeFaceThermoTraction0493x14ab,
+    int useX6gGaugeResultantProjection0493x14ac,
+    int useX6gLocalFaceGaugeProjection0493x14ad,
+    int useDeviceAppliedQ6ResultantClosure0493x14ai,
+    const double* appliedQ6Resultant0493x14ai,
+    double appliedQ6ResultantDt0493x14ai,
+    const double* gaugeProjectionScratch0493x14ac,
+    const unsigned char* segmentEdgePairs0493x14ad,
+    int referencePressureGeometricClosure0493x14z,
+    const double* referencePressureClosureScratch0493x14z,
     const double* rawOwnerX,
     const double* rawOwnerY,
     const double* liquidMassCIC,
     double massFloor,
     double* kickX,
     double* kickY,
+    double* scatterLossAccum0493x14ae,
+    double* globalBalanceAccum0493x14af,
     unsigned long long* candidate0,
     unsigned long long* candidate1) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     const unsigned long long empty = ~0ull;
+
+    // 0493x14ac: one thread per block reads the seven global scalars and solves
+    // the same 2x2 system.  Shared broadcast avoids O(Ncell) global rereads or
+    // repeated solves, while retaining zero additional kernel launches.
+    __shared__ double gaugeProjectionLambdaX0493x14ac;
+    __shared__ double gaugeProjectionLambdaY0493x14ac;
+    if (threadIdx.x == 0) {
+        gaugeProjectionLambdaX0493x14ac = 0.0;
+        gaugeProjectionLambdaY0493x14ac = 0.0;
+        if (subtractX6gThermodynamicTraction0493x14y &&
+            (useX6gGaugeResultantProjection0493x14ac ||
+             useX6gLocalFaceGaugeProjection0493x14ad) &&
+            gaugeProjectionScratch0493x14ac != nullptr) {
+            double fqX = gaugeProjectionScratch0493x14ac[0];
+            double fqY = gaugeProjectionScratch0493x14ac[1];
+            if (useDeviceAppliedQ6ResultantClosure0493x14ai &&
+                appliedQ6Resultant0493x14ai != nullptr &&
+                appliedQ6ResultantDt0493x14ai > 0.0) {
+                fqX = appliedQ6Resultant0493x14ai[0] /
+                      appliedQ6ResultantDt0493x14ai;
+                fqY = appliedQ6Resultant0493x14ai[1] /
+                      appliedQ6ResultantDt0493x14ai;
+            }
+            const double f0X = gaugeProjectionScratch0493x14ac[2];
+            const double f0Y = gaugeProjectionScratch0493x14ac[3];
+            const double mXX = gaugeProjectionScratch0493x14ac[4];
+            const double mXY = gaugeProjectionScratch0493x14ac[5];
+            const double mYY = gaugeProjectionScratch0493x14ac[6];
+            const double tr = mXX + mYY;
+            const double det = mXX * mYY - mXY * mXY;
+            const double dFx = fqX - f0X;
+            const double dFy = fqY - f0Y;
+            // Closed curved interfaces are well conditioned.  Degenerate
+            // planar/rank-1 geometries deliberately fall back to no projection
+            // rather than amplify an unresolved transverse component.
+            if (isfinite(tr) && tr > 0.0 && isfinite(det) &&
+                det > 1.0e-12 * tr * tr &&
+                isfinite(dFx) && isfinite(dFy)) {
+                gaugeProjectionLambdaX0493x14ac =
+                    (mYY * dFx - mXY * dFy) / det;
+                gaugeProjectionLambdaY0493x14ac =
+                    (-mXY * dFx + mXX * dFy) / det;
+            }
+        }
+    }
+    __syncthreads();
+
+    double referencePressureClosureX0493x14z = 0.0;
+    double referencePressureClosureY0493x14z = 0.0;
+    double referencePressureClosureFactor0493x14z = 0.0;
+    if (subtractX6gThermodynamicTraction0493x14y &&
+        referencePressureGeometricClosure0493x14z &&
+        referencePressureClosureScratch0493x14z != nullptr) {
+        const double closureX0493x14z = referencePressureClosureScratch0493x14z[0];
+        const double closureY0493x14z = referencePressureClosureScratch0493x14z[1];
+        const double perimeter0493x14z = referencePressureClosureScratch0493x14z[2];
+        if (isfinite(closureX0493x14z) && isfinite(closureY0493x14z) &&
+            isfinite(perimeter0493x14z) && perimeter0493x14z > 0.0) {
+            referencePressureClosureX0493x14z = closureX0493x14z;
+            referencePressureClosureY0493x14z = closureY0493x14z;
+            referencePressureClosureFactor0493x14z =
+                pressureReference * dt / perimeter0493x14z;
+        }
+    }
+    const double cellDx0493x14aa = lx / static_cast<double>(nx);
+    const double cellDy0493x14aa = ly / static_cast<double>(ny);
     for (int owner=idx; owner<numCells; owner+=stride) {
         candidate0[owner] = empty;
         candidate1[owner] = empty;
+
+        // x14aa: each cell owns exactly one east and one north x6f face.
+        // coeff>1 identifies a represented alpha=0.5 cut face (interior faces
+        // are 1, absent/truncated faces are 0).
+        if (subtractX6gThermodynamicTraction0493x14y &&
+            (useX6gFaceThermoTraction0493x14aa ||
+             useX6gGaugeFaceThermoTraction0493x14ab) &&
+            alphaQ6 != nullptr && gasPressurePotential != nullptr &&
+            faceCoeffX0493x6f != nullptr && faceCoeffY0493x6f != nullptr) {
+            const int ix = owner % nx;
+            const int iy = owner / nx;
+            const double alphaC = alphaQ6[owner];
+
+            const double coeffX = faceCoeffX0493x6f[owner];
+            if (isfinite(coeffX) && coeffX > 1.0 &&
+                (periodicX || ix < nx-1)) {
+                const int east = iy*nx +
+                    (periodicX ? wrap_cell_index_0400(ix+1,nx) : ix+1);
+                const double alphaE = alphaQ6[east];
+                const bool cHigh = alphaC >= 0.5 && alphaE < 0.5;
+                const bool eHigh = alphaE >= 0.5 && alphaC < 0.5;
+                if (cHigh || eHigh) {
+                    const double alphaHigh = cHigh ? alphaC : alphaE;
+                    const double alphaLow = cHigh ? alphaE : alphaC;
+                    const double denom = alphaHigh-alphaLow;
+                    if (denom > 0.0) {
+                        const double theta = (alphaHigh-0.5)/denom;
+                        const int gasCell = cHigh ? east : owner;
+                        const double pFace0493x14ab =
+                            useX6gGaugeFaceThermoTraction0493x14ab
+                                ? q6_x14ab_x6g_face_gauge_pressure(
+                                      gasCell, alphaLow, gasPressurePotential,
+                                      gasPressureMode, referencePotential,
+                                      potentialToPressure)
+                                : q6_x14aa_x6g_face_pressure(
+                                      gasCell, alphaLow, gasPressurePotential,
+                                      gasPressureMode, pressureReference,
+                                      referencePotential, potentialToPressure);
+                        // J_thermo is the pressure impulse on liquid.  x14aa
+                        // uses absolute p_g; x14ab uses only signed delta-p.
+                        // x14v transfers raw-J_thermo, so scatter its negative.
+                        const double jThermoX = (cHigh ? -1.0 : 1.0) *
+                            pFace0493x14ab * dt * cellDy0493x14aa;
+                        double xf = (static_cast<double>(ix)+0.5 +
+                            (cHigh ? theta : 1.0-theta))*cellDx0493x14aa;
+                        if (periodicX) xf -= floor(xf/lx)*lx;
+                        const double yf =
+                            (static_cast<double>(iy)+0.5)*cellDy0493x14aa;
+                        q6_x14v_scatter_supported_impulse(
+                            xf, yf, -jThermoX, 0.0, liquidMassCIC, massFloor,
+                            nx, ny, lx, ly, periodicX, periodicY, kickX, kickY,
+                            scatterLossAccum0493x14ae);
+                    }
+                }
+            }
+
+            const double coeffY = faceCoeffY0493x6f[owner];
+            if (isfinite(coeffY) && coeffY > 1.0 &&
+                (periodicY || iy < ny-1)) {
+                const int north =
+                    (periodicY ? wrap_cell_index_0400(iy+1,ny) : iy+1)*nx + ix;
+                const double alphaN = alphaQ6[north];
+                const bool cHigh = alphaC >= 0.5 && alphaN < 0.5;
+                const bool nHigh = alphaN >= 0.5 && alphaC < 0.5;
+                if (cHigh || nHigh) {
+                    const double alphaHigh = cHigh ? alphaC : alphaN;
+                    const double alphaLow = cHigh ? alphaN : alphaC;
+                    const double denom = alphaHigh-alphaLow;
+                    if (denom > 0.0) {
+                        const double theta = (alphaHigh-0.5)/denom;
+                        const int gasCell = cHigh ? north : owner;
+                        const double pFace0493x14ab =
+                            useX6gGaugeFaceThermoTraction0493x14ab
+                                ? q6_x14ab_x6g_face_gauge_pressure(
+                                      gasCell, alphaLow, gasPressurePotential,
+                                      gasPressureMode, referencePotential,
+                                      potentialToPressure)
+                                : q6_x14aa_x6g_face_pressure(
+                                      gasCell, alphaLow, gasPressurePotential,
+                                      gasPressureMode, pressureReference,
+                                      referencePotential, potentialToPressure);
+                        const double jThermoY = (cHigh ? -1.0 : 1.0) *
+                            pFace0493x14ab * dt * cellDx0493x14aa;
+                        const double xf =
+                            (static_cast<double>(ix)+0.5)*cellDx0493x14aa;
+                        double yf = (static_cast<double>(iy)+0.5 +
+                            (cHigh ? theta : 1.0-theta))*cellDy0493x14aa;
+                        if (periodicY) yf -= floor(yf/ly)*ly;
+                        q6_x14v_scatter_supported_impulse(
+                            xf, yf, 0.0, -jThermoY, liquidMassCIC, massFloor,
+                            nx, ny, lx, ly, periodicX, periodicY, kickX, kickY,
+                            scatterLossAccum0493x14ae);
+                    }
+                }
+            }
+        }
+
         const int ns = segCount ? min(2, static_cast<int>(segCount[owner])) : 0;
         if (ns <= 0) continue;
         const double rawX = rawOwnerX ? rawOwnerX[owner] : 0.0;
@@ -13439,26 +14092,114 @@ __global__ void q6_x14v_prepare_excess_and_reset_candidates(
             const double frac = len[slot] / totalLen;
             const double nxOut = ty[slot] / len[slot];
             const double nyOut = -tx[slot] / len[slot];
-            const double pGas = q6_x14v_x6g_represented_pressure(
-                mx[slot], my[slot], nxOut, nyOut,
-                alphaQ6, gasPressurePotential, gasPressureMode,
-                pressureReference, constantPressure, pressureScale,
-                referencePotential, potentialToPressure,
-                nx, ny, lx, ly, periodicX, periodicY);
+            double pGas = 0.0;
+            if (subtractX6gThermodynamicTraction0493x14y) {
+                if (useX6gLocalFaceGaugeProjection0493x14ad) {
+                    // x14ad: use the gauge pressure carried by the exact two
+                    // represented x6g faces terminating this x10n segment, but
+                    // keep the traction on the smooth x10n normal.  The x14ac
+                    // lambda then corrects only the residual global resultant.
+                    double dpLocal0493x14ad = 0.0;
+                    const bool localOk0493x14ad =
+                        q6_x14ad_segment_local_gauge_pressure(
+                            owner, slot, segmentEdgePairs0493x14ad,
+                            alphaQ6, faceCoeffX0493x6f, faceCoeffY0493x6f,
+                            gasPressurePotential, gasPressureMode,
+                            referencePotential, potentialToPressure,
+                            nx, ny, periodicX, periodicY, &dpLocal0493x14ad);
+                    if (localOk0493x14ad) {
+                        const double pref0493x14ad = isfinite(pressureReference)
+                            ? fmax(0.0, pressureReference) : 0.0;
+                        pGas = fmax(0.0, pref0493x14ad + dpLocal0493x14ad);
+                    } else {
+                        pGas = q6_x14v_x6g_represented_pressure(
+                            mx[slot], my[slot], nxOut, nyOut,
+                            alphaQ6, gasPressurePotential, gasPressureMode,
+                            pressureReference, constantPressure, pressureScale,
+                            referencePotential, potentialToPressure,
+                            nx, ny, lx, ly, periodicX, periodicY);
+                    }
+                    const double mxForce0493x14ad = -ty[slot] / len[slot];
+                    const double myForce0493x14ad =  tx[slot] / len[slot];
+                    const double dpCorrection0493x14ad =
+                        mxForce0493x14ad * gaugeProjectionLambdaX0493x14ac +
+                        myForce0493x14ad * gaugeProjectionLambdaY0493x14ac;
+                    if (isfinite(dpCorrection0493x14ad))
+                        pGas += dpCorrection0493x14ad;
+                } else if (useX6gGaugeResultantProjection0493x14ac) {
+                    // x14ac: retain the nominal local x10n pressure sampling
+                    // and add only the minimum-L2 normal correction required
+                    // to match the signed global x6g-face gauge resultant.
+                    pGas = q6_x14v_x6g_represented_pressure(
+                        mx[slot], my[slot], nxOut, nyOut,
+                        alphaQ6, gasPressurePotential, gasPressureMode,
+                        pressureReference, constantPressure, pressureScale,
+                        referencePotential, potentialToPressure,
+                        nx, ny, lx, ly, periodicX, periodicY);
+                    const double mxForce0493x14ac = -ty[slot] / len[slot];
+                    const double myForce0493x14ac =  tx[slot] / len[slot];
+                    const double dpCorrection0493x14ac =
+                        mxForce0493x14ac * gaugeProjectionLambdaX0493x14ac +
+                        myForce0493x14ac * gaugeProjectionLambdaY0493x14ac;
+                    if (isfinite(dpCorrection0493x14ac))
+                        pGas += dpCorrection0493x14ac;
+                } else if (useX6gGaugeFaceThermoTraction0493x14ab) {
+                    // x14ab: keep the large uniform equilibrium pressure on
+                    // exactly the same x10n/CIC geometry as J_refl.  Only the
+                    // x6g gauge component is moved to Q6 represented faces.
+                    pGas = isfinite(pressureReference)
+                        ? fmax(0.0, pressureReference) : 0.0;
+                } else if (!useX6gFaceThermoTraction0493x14aa) {
+                    pGas = q6_x14v_x6g_represented_pressure(
+                        mx[slot], my[slot], nxOut, nyOut,
+                        alphaQ6, gasPressurePotential, gasPressureMode,
+                        pressureReference, constantPressure, pressureScale,
+                        referencePotential, potentialToPressure,
+                        nx, ny, lx, ly, periodicX, periodicY);
+                }
+            }
 
             // Right normal of oriented A->B is liquid->gas.  Gas pressure on
             // the liquid is -p*n, and n*dL=(dy,-dx), hence
             // J_eq = p*dt*(-dy,+dx).  Mid-step tangent integrates exactly for
             // linearly moving endpoints.
-            const double jeqX = pGas * dt * (-ty[slot]);
-            const double jeqY = pGas * dt * ( tx[slot]);
-            const double jexX = rawX * frac - jeqX;
-            const double jexY = rawY * frac - jeqY;
+            double jeqX = pGas * dt * (-ty[slot]);
+            double jeqY = pGas * dt * ( tx[slot]);
+            if (referencePressureClosureFactor0493x14z != 0.0) {
+                // Only the uniform reference-pressure part is projected onto
+                // zero global resultant.  delta-p remains exactly as before.
+                // Weighting by segment length minimizes the local perturbation.
+                const double wref0493x14z =
+                    referencePressureClosureFactor0493x14z * len[slot];
+                jeqX -= wref0493x14z * referencePressureClosureX0493x14z;
+                jeqY -= wref0493x14z * referencePressureClosureY0493x14z;
+            }
+            const double rawSegX0493x14af = rawX * frac;
+            const double rawSegY0493x14af = rawY * frac;
+            const double jexX = rawSegX0493x14af - jeqX;
+            const double jexY = rawSegY0493x14af - jeqY;
+            if (globalBalanceAccum0493x14af != nullptr) {
+                const double pref0493x14af = isfinite(pressureReference)
+                    ? fmax(0.0, pressureReference) : 0.0;
+                const double jprefX0493x14af = pref0493x14af * dt * (-ty[slot]);
+                const double jprefY0493x14af = pref0493x14af * dt * ( tx[slot]);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[0], 1.0);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[1], rawSegX0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[2], rawSegY0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[3], jeqX);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[4], jeqY);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[5], jprefX0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[6], jprefY0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[7], jeqX-jprefX0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[8], jeqY-jprefY0493x14af);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[9], jexX);
+                atomic_add_double_0400(&globalBalanceAccum0493x14af[10], jexY);
+            }
             q6_x14v_scatter_supported_impulse(
                 mx[slot], my[slot], jexX, jexY,
                 liquidMassCIC, massFloor,
                 nx, ny, lx, ly, periodicX, periodicY,
-                kickX, kickY);
+                kickX, kickY, scatterLossAccum0493x14ae);
         }
     }
 }
@@ -16145,10 +16886,14 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
     int periodicMomentumCorrectionEnable0493x7dv2fix2,
     int periodicMomentumCorrectX0493x7dv2fix2,
     int periodicMomentumCorrectY0493x7dv2fix2,
-    int collectDiagnostics0493x7k) {
+    int collectDiagnostics0493x7k,
+    double* appliedQ6Resultant0493x14ai,
+    int collectAppliedQ6Resultant0493x14ai) {
     extern __shared__ double sh[];
     double* shX = sh;
-    double* shY = sh + blockDim.x;
+    // Closure-only allocates just the warp scratch; avoid even forming an
+    // out-of-range shY pointer when the historical diagnostic is disabled.
+    double* shY = sh + (collectDiagnostics0493x7k ? blockDim.x : 0);
     const int tid = threadIdx.x;
     double px = 0.0;
     double py = 0.0;
@@ -16214,30 +16959,110 @@ __global__ void q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1(
         const double dvy = cy + (2.0 * eta - 1.0) * (dVn - cy);
         particles.vx[i] += dvx - periodicCvx0493x7dv2fix2;
         particles.vy[i] += dvy - periodicCvy0493x7dv2fix2;
-        if (collectDiagnostics0493x7k) {
+        if (collectDiagnostics0493x7k || collectAppliedQ6Resultant0493x14ai) {
             const double m = particles.mass ? particles.mass[i] : 1.0;
-            // As in x5a, audit only the pressure correction.  The physical force
-            // momentum is deliberately not folded into the Q6 momentum residual.
+            // Same quantity as the x14af host audit: pressure correction only.
+            // Body/TG forcing is excluded deliberately.
             px += m * dvx;
             py += m * dvy;
-            ++correctedLocal;
+            if (collectDiagnostics0493x7k) ++correctedLocal;
         }
     }
-    if (!collectDiagnostics0493x7k) return;
-    if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
-    shX[tid] = px;
-    shY[tid] = py;
-    __syncthreads();
-    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
-        if (tid < offset) {
-            shX[tid] += shX[tid + offset];
-            shY[tid] += shY[tid + offset];
-        }
+    if (!collectDiagnostics0493x7k && !collectAppliedQ6Resultant0493x14ai) return;
+
+    if (collectDiagnostics0493x7k) {
+        // Preserve the historical audit reduction and partial arrays.
+        if (correctedLocal != 0ull) atomicAdd(correctedCounter, correctedLocal);
+        shX[tid] = px;
+        shY[tid] = py;
         __syncthreads();
+        for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+            if (tid < offset) {
+                shX[tid] += shX[tid + offset];
+                shY[tid] += shY[tid + offset];
+            }
+            __syncthreads();
+        }
+        if (tid == 0) {
+            partialPx[blockIdx.x] = shX[0];
+            partialPy[blockIdx.x] = shY[0];
+            if (collectAppliedQ6Resultant0493x14ai &&
+                appliedQ6Resultant0493x14ai != nullptr) {
+                // 0493x14ai-fix1: x14v must target the impulse ACTUALLY applied
+                // by B1, after the uniform x7d-v2 periodic k=0 correction.
+                // Preserve x7k partialPx/partialPy semantics (raw RT0 audit):
+                // subtract the uniform correction only from the x14ai device
+                // accumulator, exactly once for the whole launch.
+                double appliedBlockX0493x14ai = shX[0];
+                double appliedBlockY0493x14ai = shY[0];
+                if (blockIdx.x == 0 &&
+                    periodicMomentumCorrectionEnable0493x7dv2fix2 &&
+                    periodicMomentumAccum0493x7dv2fix2 != nullptr &&
+                    periodicMomentumAccum0493x7dv2fix2->activeMass > 0.0) {
+                    const double activeMass0493x14ai =
+                        periodicMomentumAccum0493x7dv2fix2->activeMass;
+                    appliedBlockX0493x14ai -=
+                        periodicCvx0493x7dv2fix2 * activeMass0493x14ai;
+                    appliedBlockY0493x14ai -=
+                        periodicCvy0493x7dv2fix2 * activeMass0493x14ai;
+                }
+                atomic_add_double_0400(
+                    &appliedQ6Resultant0493x14ai[0], appliedBlockX0493x14ai);
+                atomic_add_double_0400(
+                    &appliedQ6Resultant0493x14ai[1], appliedBlockY0493x14ai);
+            }
+        }
+        return;
     }
-    if (tid == 0) {
-        partialPx[blockIdx.x] = shX[0];
-        partialPy[blockIdx.x] = shY[0];
+
+    // Closure-only path: one warp reduction + one block rendezvous. Dynamic
+    // shared memory is only 2*ceil(blockDim/32) doubles; two atomics/block.
+    const unsigned int warpMask0493x14ai = __activemask();
+    for (int off0493x14ai = 16; off0493x14ai > 0; off0493x14ai >>= 1) {
+        px += __shfl_down_sync(warpMask0493x14ai, px, off0493x14ai);
+        py += __shfl_down_sync(warpMask0493x14ai, py, off0493x14ai);
+    }
+    const int lane0493x14ai = tid & 31;
+    const int warp0493x14ai = tid >> 5;
+    const int warps0493x14ai = (blockDim.x + 31) >> 5;
+    double* warpX0493x14ai = sh;
+    double* warpY0493x14ai = sh + warps0493x14ai;
+    if (lane0493x14ai == 0) {
+        warpX0493x14ai[warp0493x14ai] = px;
+        warpY0493x14ai[warp0493x14ai] = py;
+    }
+    __syncthreads();
+    if (warp0493x14ai == 0) {
+        double bx0493x14ai = lane0493x14ai < warps0493x14ai
+            ? warpX0493x14ai[lane0493x14ai] : 0.0;
+        double by0493x14ai = lane0493x14ai < warps0493x14ai
+            ? warpY0493x14ai[lane0493x14ai] : 0.0;
+        constexpr unsigned int fullWarpMask0493x14ai = 0xffffffffu;
+        for (int off0493x14ai = 16; off0493x14ai > 0; off0493x14ai >>= 1) {
+            bx0493x14ai += __shfl_down_sync(
+                fullWarpMask0493x14ai, bx0493x14ai, off0493x14ai);
+            by0493x14ai += __shfl_down_sync(
+                fullWarpMask0493x14ai, by0493x14ai, off0493x14ai);
+        }
+        if (lane0493x14ai == 0 && appliedQ6Resultant0493x14ai != nullptr) {
+            // 0493x14ai-fix1: convert the raw RT0 block reduction to the
+            // post-periodic impulse really added to particle velocities.  The
+            // correction is spatially uniform, so one block subtracts C*M once;
+            // this avoids any additional per-particle FLOP/register pressure.
+            if (blockIdx.x == 0 &&
+                periodicMomentumCorrectionEnable0493x7dv2fix2 &&
+                periodicMomentumAccum0493x7dv2fix2 != nullptr &&
+                periodicMomentumAccum0493x7dv2fix2->activeMass > 0.0) {
+                const double activeMass0493x14ai =
+                    periodicMomentumAccum0493x7dv2fix2->activeMass;
+                bx0493x14ai -=
+                    periodicCvx0493x7dv2fix2 * activeMass0493x14ai;
+                by0493x14ai -=
+                    periodicCvy0493x7dv2fix2 * activeMass0493x14ai;
+            }
+            atomic_add_double_0400(&appliedQ6Resultant0493x14ai[0], bx0493x14ai);
+            atomic_add_double_0400(&appliedQ6Resultant0493x14ai[1], by0493x14ai);
+        }
     }
 }
 
@@ -17679,6 +18504,30 @@ double reduce_host_max_0400(double* devicePartials, int blocks) {
 
 
 
+void append_x14v_global_balance_0493x14af(
+    const SimulationParams& params, int step, double time, const double* a) {
+    if (params.outputDir.empty() || a == nullptr) return;
+    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
+        "cuda_x14v_global_balance_0493x14af.csv";
+    std::filesystem::create_directories(path.parent_path());
+    const bool header = !std::filesystem::exists(path) ||
+                        std::filesystem::file_size(path) == 0u;
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error(
+            "0493x14af failed to open x14v global-balance CSV: " + path.string());
+    }
+    if (header) {
+        out << "step,time,cumSegments,cumRawX,cumRawY,cumThermoX,cumThermoY,"
+               "cumPrefX,cumPrefY,cumGaugeX,cumGaugeY,cumKickX,cumKickY,contract\n";
+    }
+    out << std::setprecision(17)
+        << step << ',' << time;
+    for (int i=0; i<11; ++i) out << ',' << a[i];
+    out << ",cumulative-x14ad-segment-resultants;Jkick=Jraw-Jthermo;"
+           "Jthermo=Jpref+Jgauge\n";
+}
+
 void append_kinetic_interface_audit_0493x9t(
     const SimulationParams& params,
     int step,
@@ -18407,6 +19256,8 @@ bool apply_kinetic_interface_reflection_0493x9x(
     double phaseAReferenceCellMass0493x10cic,
     int phaseAUniqueProjectedType0493x10cic,
     const double* phaseAlphaQ60493x6c,
+    const double* phaseFaceCoeffX0493x6f,
+    const double* phaseFaceCoeffY0493x6f,
     bool geometryValid0493x6c,
     bool phaseGasPressureEnabled0493x14v,
     PhaseGasPressureMode0493x6g phaseGasPressureMode0493x14v,
@@ -18573,6 +19424,65 @@ bool apply_kinetic_interface_reflection_0493x9x(
 
     const bool gasKineticExcessKickRequested0493x14v =
         env_int_0400("MPCD_X14V_GAS_KINETIC_EXCESS_KICK", 0) != 0;
+    const bool gasKineticSubtractX6gPressure0493x14y =
+        env_int_0400("MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION", 1) != 0;
+    const bool gasKineticX6gFaceThermoTraction0493x14aa =
+        env_int_0400("MPCD_X14V_X6G_FACE_THERMO_TRACTION", 0) != 0 &&
+        gasKineticSubtractX6gPressure0493x14y;
+    const bool gasKineticX6gGaugeFaceThermoTraction0493x14ab =
+        env_int_0400("MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION", 0) != 0 &&
+        gasKineticSubtractX6gPressure0493x14y;
+    const bool gasKineticX6gGaugeResultantProjection0493x14ac =
+        env_int_0400("MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION", 0) != 0 &&
+        gasKineticSubtractX6gPressure0493x14y;
+    const bool gasKineticX6gLocalFaceGaugeProjection0493x14ad =
+        env_int_0400("MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION", 0) != 0 &&
+        gasKineticSubtractX6gPressure0493x14y;
+    const bool gasKineticScatterLossDiagnostic0493x14ae =
+        env_int_0400("MPCD_X14V_SCATTER_LOSS_DIAGNOSTIC", 0) != 0 &&
+        gasKineticExcessKickRequested0493x14v;
+    const bool gasKineticAnyGaugeResultantProjection0493x14ad =
+        gasKineticX6gGaugeResultantProjection0493x14ac ||
+        gasKineticX6gLocalFaceGaugeProjection0493x14ad;
+    const int gasKineticThermoGeometryModes0493x14ad =
+        (gasKineticX6gFaceThermoTraction0493x14aa ? 1 : 0) +
+        (gasKineticX6gGaugeFaceThermoTraction0493x14ab ? 1 : 0) +
+        (gasKineticX6gGaugeResultantProjection0493x14ac ? 1 : 0) +
+        (gasKineticX6gLocalFaceGaugeProjection0493x14ad ? 1 : 0);
+    if (gasKineticThermoGeometryModes0493x14ad > 1) {
+        throw std::runtime_error(
+            "0493x14aa/x14ab/x14ac/x14ad thermodynamic-traction modes are mutually exclusive");
+    }
+    // 0493x14z — reference-pressure geometric closure
+    // Kept opt-in at source level until the curved-interface qualification.
+    // Runtime cost when enabled: 24 B scratch, no extra launch/pass, one sqrt + three
+    // atomic adds per valid x10n interface segment, O(1) arithmetic in x14v.
+    const bool gasKineticReferencePressureClosure0493x14z =
+        env_int_0400("MPCD_X14V_REFERENCE_PRESSURE_GEOMETRIC_CLOSURE", 0) != 0 &&
+        gasKineticSubtractX6gPressure0493x14y &&
+        !gasKineticX6gFaceThermoTraction0493x14aa &&
+        !gasKineticX6gGaugeFaceThermoTraction0493x14ab &&
+        !gasKineticX6gGaugeResultantProjection0493x14ac &&
+        !gasKineticX6gLocalFaceGaugeProjection0493x14ad;
+    const bool gasKineticGlobalBalanceDiagnostic0493x14af =
+        env_int_0400("MPCD_X14V_GLOBAL_BALANCE_DIAGNOSTIC", 0) != 0 &&
+        gasKineticExcessKickRequested0493x14v;
+    const bool gasKineticDeviceAppliedQ6ResultantClosure0493x14ai =
+        env_int_0400("MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE", 0) != 0 &&
+        gasKineticExcessKickRequested0493x14v;
+    if (gasKineticDeviceAppliedQ6ResultantClosure0493x14ai &&
+        (!gasKineticX6gLocalFaceGaugeProjection0493x14ad ||
+         gasKineticReferencePressureClosure0493x14z ||
+         !q6ThermalInterfaceWall0493x10o || !kineticInterfaceCIC0493x10cic)) {
+        throw std::runtime_error(
+            "0493x14ai requires x14ad local-face gauge projection + x10o/CIC and x14z=0");
+    }
+    if (gasKineticGlobalBalanceDiagnostic0493x14af &&
+        (!gasKineticX6gLocalFaceGaugeProjection0493x14ad ||
+         gasKineticReferencePressureClosure0493x14z)) {
+        throw std::runtime_error(
+            "0493x14af diagnostic requires x14ad local-face gauge projection and x14z=0");
+    }
     if (gasKineticExcessKickRequested0493x14v &&
         (!q6ThermalInterfaceWall0493x10o ||
          !kineticInterfaceCIC0493x10cic ||
@@ -18589,6 +19499,14 @@ bool apply_kinetic_interface_reflection_0493x9x(
         throw std::runtime_error(
             "0493x14v kinetic excess kick requires x6g gas pressure so the already-represented thermodynamic traction can be subtracted");
     }
+    if ((gasKineticX6gFaceThermoTraction0493x14aa ||
+         gasKineticX6gGaugeFaceThermoTraction0493x14ab ||
+         gasKineticX6gGaugeResultantProjection0493x14ac ||
+         gasKineticX6gLocalFaceGaugeProjection0493x14ad) &&
+        (phaseFaceCoeffX0493x6f == nullptr || phaseFaceCoeffY0493x6f == nullptr)) {
+        throw std::runtime_error(
+            "0493x14aa/x14ab/x14ac/x14ad x6g traction requires the current x6f face stencil");
+    }
     if (gasKineticExcessKickRequested0493x14v &&
         phaseAUniqueProjectedType0493x10cic != 1) {
         throw std::runtime_error(
@@ -18602,13 +19520,77 @@ bool apply_kinetic_interface_reflection_0493x9x(
         std::cout
             << "[0493x14v-gas-kinetic-excess] enabled=1"
                " raw=gas-specular-owner-aggregate"
-               " subtract=x6g-thermodynamic-traction"
-               " transfer=collective-liquid-CIC"
+               " subtract="
+            << (gasKineticSubtractX6gPressure0493x14y
+                    ? "x6g-thermodynamic-traction"
+                    : "OFF-x14y-ablation")
+            << " thermoGeometry="
+            << (gasKineticX6gLocalFaceGaugeProjection0493x14ad
+                    ? "x10n-local-x6g-face-gauge+residual-resultant-projection"
+                    : (gasKineticX6gGaugeResultantProjection0493x14ac
+                           ? "x10n-local+x6g-gauge-resultant-projection"
+                           : (gasKineticX6gGaugeFaceThermoTraction0493x14ab
+                                  ? "hybrid-x10n-pref+x6g-gauge-faces"
+                                  : (gasKineticX6gFaceThermoTraction0493x14aa
+                                         ? "x6g-represented-faces-absolute"
+                                         : "x10n-segments"))))
+            << " refPressureClosure="
+            << (gasKineticReferencePressureClosure0493x14z
+                    ? "global-geometric-length-weighted"
+                    : "off")
+            << " transfer=collective-liquid-CIC"
                " storage=reused-x9t/x10m"
+               " newBufferBytes-x14aa=0"
+               " newBufferBytes-x14ab=0"
+            << " newScratchBytes-x14ac="
+            << (gasKineticAnyGaugeResultantProjection0493x14ad ? 56 : 0)
+            << " x14adEdgeMetadata="
+            << (gasKineticX6gLocalFaceGaugeProjection0493x14ad
+                    ? "reused-x10m-active-byte" : "off")
+            << " newBufferBytes-x14ad=0"
+            << " scatterLossDiag="
+            << (gasKineticScatterLossDiagnostic0493x14ae ? "terminal-radius2" : "off")
+            << " newScratchBytes-x14ae="
+            << (gasKineticScatterLossDiagnostic0493x14ae ? 24 : 0)
+            << " globalBalanceDiag="
+            << (gasKineticGlobalBalanceDiagnostic0493x14af
+                    ? "cumulative-x14ad-resultants" : "off")
+            << " newScratchBytes-x14af="
+            << (gasKineticGlobalBalanceDiagnostic0493x14af ? 88 : 0)
+            << " deviceAppliedQ6ResultantClosure="
+            << (gasKineticDeviceAppliedQ6ResultantClosure0493x14ai
+                    ? "B1-exact-post-periodic-device-target" : "off")
+            << " newScratchBytes-x14ai="
+            << (gasKineticDeviceAppliedQ6ResultantClosure0493x14ai ? 16 : 0)
+            << " x14aiScope=isolated-liquid-component-no-external-Q6-contact"
+            << " newKernelLaunch=0"
+               " newCellPass=0"
                " newParticlePass=0"
                " liquidLaws=UNCHANGED"
             << std::endl;
         gasKineticExcessKickReported0493x14v = true;
+    }
+
+    // x14v/x14ac pressure conversion scalars are invariant within this step.
+    // Compute them once on host and reuse in both the x10n accumulation and
+    // the later x14v prepare launch.
+    double referencePotential0493x14v = 0.0;
+    double potentialToPressure0493x14v = 0.0;
+    if (gasKineticExcessKick0493x14v) {
+        const double dx0493x14v = params.Lx / static_cast<double>(grid.Nx);
+        const double dy0493x14v = params.Ly / static_cast<double>(grid.Ny);
+        const double cellArea0493x14v = dx0493x14v * dy0493x14v;
+        referencePotential0493x14v =
+            phaseAReferenceCellMass0493x10cic > 0.0
+                ? params.dt * phaseGasPressureScale0493x14v *
+                      phaseGasPressureReference0493x14v * cellArea0493x14v /
+                      phaseAReferenceCellMass0493x10cic
+                : 0.0;
+        potentialToPressure0493x14v =
+            (params.dt > 0.0 && cellArea0493x14v > 0.0)
+                ? phaseAReferenceCellMass0493x10cic /
+                      (params.dt * cellArea0493x14v)
+                : 0.0;
     }
 
     const bool thermalPhaseLimiterRequested0493x10w =
@@ -18881,6 +19863,34 @@ bool apply_kinetic_interface_reflection_0493x9x(
 
     ws.ensure_kinetic_interface_0493x9x(
         grid.numCells, cellBlocks, mesoReservoirs);
+    if (gasKineticExcessKick0493x14v &&
+        gasKineticReferencePressureClosure0493x14z) {
+        ws.kineticReferencePressureClosure0493x14z.ensure(3u);
+    }
+    if (gasKineticExcessKick0493x14v &&
+        gasKineticAnyGaugeResultantProjection0493x14ad) {
+        ws.kineticGaugeResultantProjection0493x14ac.ensure(7u);
+    }
+    if (gasKineticScatterLossDiagnostic0493x14ae) {
+        ws.kineticScatterLossAccum0493x14ae.ensure(3u);
+        if (!ws.kineticScatterLossDiagnosticInitialized0493x14ae) {
+            check_cuda_0400(cudaMemset(
+                ws.kineticScatterLossAccum0493x14ae.data(), 0,
+                3u * sizeof(double)),
+                "0493x14ae cumulative scatter-loss diagnostic zero");
+            ws.kineticScatterLossDiagnosticInitialized0493x14ae = true;
+        }
+    }
+    if (gasKineticGlobalBalanceDiagnostic0493x14af) {
+        ws.kineticGlobalBalanceAccum0493x14af.ensure(11u);
+        if (!ws.kineticGlobalBalanceDiagnosticInitialized0493x14af) {
+            check_cuda_0400(cudaMemset(
+                ws.kineticGlobalBalanceAccum0493x14af.data(), 0,
+                11u * sizeof(double)),
+                "0493x14af cumulative global-balance diagnostic zero");
+            ws.kineticGlobalBalanceDiagnosticInitialized0493x14af = true;
+        }
+    }
     if (localThermalCooling0493x12a) {
         ws.kineticLocalThermalFactor0493x12a.ensure(
             static_cast<std::size_t>(std::max(1, grid.numCells)));
@@ -18957,6 +19967,14 @@ bool apply_kinetic_interface_reflection_0493x9x(
             phaseAReferenceCellMass0493x10cic,
             gasKineticExcessKick0493x14v
                 ? ws.kineticMovingWallVn0493x10m.data()
+                : nullptr,
+            (gasKineticExcessKick0493x14v &&
+             gasKineticReferencePressureClosure0493x14z)
+                ? ws.kineticReferencePressureClosure0493x14z.data()
+                : nullptr,
+            (gasKineticExcessKick0493x14v &&
+             gasKineticAnyGaugeResultantProjection0493x14ad)
+                ? ws.kineticGaugeResultantProjection0493x14ac.data()
                 : nullptr);
         check_cuda_0400(cudaGetLastError(), "0493x10cic kinetic alpha filter launch");
         phaseAlphaKinetic0493x10cic = ws.kineticPhaseAlphaCIC0493x10cic.data();
@@ -18992,6 +20010,29 @@ bool apply_kinetic_interface_reflection_0493x9x(
             thermalThickness0493x10o,
             q6ThermalInterfaceWall0493x10o ? 1 : 0,
             (fullVectorEndpointVelocity0493x10r || segmentNormalKinematics0493x10s || rigidTangentialKinematics0493x10t) ? 1 : 0,
+            params.dt,
+            (gasKineticExcessKick0493x14v &&
+             gasKineticReferencePressureClosure0493x14z)
+                ? ws.kineticReferencePressureClosure0493x14z.data()
+                : nullptr,
+            gasKineticAnyGaugeResultantProjection0493x14ad ? 1 : 0,
+            phaseAlphaQ60493x6c,
+            phaseFaceCoeffX0493x6f,
+            phaseFaceCoeffY0493x6f,
+            ws.phaseGasPressurePotential0493x6a.data(),
+            static_cast<int>(phaseGasPressureMode0493x14v),
+            phaseGasPressureReference0493x14v,
+            phaseGasPressureConstant0493x14v,
+            phaseGasPressureScale0493x14v,
+            referencePotential0493x14v,
+            potentialToPressure0493x14v,
+            gasKineticAnyGaugeResultantProjection0493x14ad
+                ? ws.kineticGaugeResultantProjection0493x14ac.data()
+                : nullptr,
+            gasKineticX6gLocalFaceGaugeProjection0493x14ad ? 1 : 0,
+            gasKineticX6gLocalFaceGaugeProjection0493x14ad
+                ? ws.kineticMovingWallActive0493x10m.data()
+                : nullptr,
             ws.kineticContinuousSegCount0493x10n.data(),
             ws.kineticContinuousSegAx0493x10n.data(),
             ws.kineticContinuousSegAy0493x10n.data(),
@@ -19361,21 +20402,6 @@ bool apply_kinetic_interface_reflection_0493x9x(
             auto* candidate10493x10v = reinterpret_cast<unsigned long long*>(
                 ws.kineticMovingWallImpulseY0493x10m.data());
             if (gasKineticExcessKick0493x14v) {
-                const double dx0493x14v = params.Lx / static_cast<double>(grid.Nx);
-                const double dy0493x14v = params.Ly / static_cast<double>(grid.Ny);
-                const double cellArea0493x14v = dx0493x14v * dy0493x14v;
-                const double referencePotential0493x14v =
-                    phaseAReferenceCellMass0493x10cic > 0.0
-                        ? params.dt * phaseGasPressureScale0493x14v *
-                              phaseGasPressureReference0493x14v *
-                              cellArea0493x14v /
-                              phaseAReferenceCellMass0493x10cic
-                        : 0.0;
-                const double potentialToPressure0493x14v =
-                    (params.dt > 0.0 && cellArea0493x14v > 0.0)
-                        ? phaseAReferenceCellMass0493x10cic /
-                              (params.dt * cellArea0493x14v)
-                        : 0.0;
                 const double massFloor0493x14v =
                     1.0e-14 * fmax(1.0, phaseAReferenceCellMass0493x10cic);
                 q6_x14v_prepare_excess_and_reset_candidates<<<cellBlocks, threads>>>(
@@ -19392,6 +20418,8 @@ bool apply_kinetic_interface_reflection_0493x9x(
                     ws.kineticContinuousSegUbx0493x10n.data(),
                     ws.kineticContinuousSegUby0493x10n.data(),
                     phaseAlphaQ60493x6c,
+                    phaseFaceCoeffX0493x6f,
+                    phaseFaceCoeffY0493x6f,
                     ws.phaseGasPressurePotential0493x6a.data(),
                     static_cast<int>(phaseGasPressureMode0493x14v),
                     phaseGasPressureReference0493x14v,
@@ -19399,12 +20427,37 @@ bool apply_kinetic_interface_reflection_0493x9x(
                     phaseGasPressureScale0493x14v,
                     referencePotential0493x14v,
                     potentialToPressure0493x14v,
+                    gasKineticSubtractX6gPressure0493x14y ? 1 : 0,
+                    gasKineticX6gFaceThermoTraction0493x14aa ? 1 : 0,
+                    gasKineticX6gGaugeFaceThermoTraction0493x14ab ? 1 : 0,
+                    gasKineticX6gGaugeResultantProjection0493x14ac ? 1 : 0,
+                    gasKineticX6gLocalFaceGaugeProjection0493x14ad ? 1 : 0,
+                    gasKineticDeviceAppliedQ6ResultantClosure0493x14ai ? 1 : 0,
+                    gasKineticDeviceAppliedQ6ResultantClosure0493x14ai
+                        ? ws.kineticAppliedQ6Resultant0493x14ai.data() : nullptr,
+                    params.dt,
+                    gasKineticAnyGaugeResultantProjection0493x14ad
+                        ? ws.kineticGaugeResultantProjection0493x14ac.data()
+                        : nullptr,
+                    gasKineticX6gLocalFaceGaugeProjection0493x14ad
+                        ? ws.kineticMovingWallActive0493x10m.data()
+                        : nullptr,
+                    gasKineticReferencePressureClosure0493x14z ? 1 : 0,
+                    gasKineticReferencePressureClosure0493x14z
+                        ? ws.kineticReferencePressureClosure0493x14z.data()
+                        : nullptr,
                     ws.kineticRefPx0493x9t.data(),
                     ws.kineticRefPy0493x9t.data(),
                     ws.kineticMovingWallVn0493x10m.data(),
                     massFloor0493x14v,
                     ws.kineticTxPx0493x9t.data(),
                     ws.kineticTxPy0493x9t.data(),
+                    gasKineticScatterLossDiagnostic0493x14ae
+                        ? ws.kineticScatterLossAccum0493x14ae.data()
+                        : nullptr,
+                    gasKineticGlobalBalanceDiagnostic0493x14af
+                        ? ws.kineticGlobalBalanceAccum0493x14af.data()
+                        : nullptr,
                     candidate00493x10v, candidate10493x10v);
                 check_cuda_0400(
                     cudaGetLastError(),
@@ -19506,6 +20559,41 @@ bool apply_kinetic_interface_reflection_0493x9x(
     }
     q6_finalize_cells_0400<<<cellBlocks, threads>>>(cells, ws.counter.data());
     check_cuda_0400(cudaGetLastError(), "0493x9x cell moments finalize launch");
+
+    // 0493x14ae: download only at the first and nominal final step.  The
+    // device accumulator is cumulative over the run, so the diagnostic adds
+    // no per-step synchronization and no cost in the normal scatter path.
+    if (gasKineticScatterLossDiagnostic0493x14ae &&
+        (step <= 1 || step == params.nSteps)) {
+        double scatterLoss0493x14ae[3] = {0.0, 0.0, 0.0};
+        check_cuda_0400(cudaMemcpy(
+            scatterLoss0493x14ae,
+            ws.kineticScatterLossAccum0493x14ae.data(),
+            3u * sizeof(double), cudaMemcpyDeviceToHost),
+            "0493x14ae cumulative scatter-loss diagnostic download");
+        const double lostNorm0493x14ae = std::sqrt(
+            scatterLoss0493x14ae[1] * scatterLoss0493x14ae[1] +
+            scatterLoss0493x14ae[2] * scatterLoss0493x14ae[2]);
+        std::cout
+            << "[0493x14ae-scatter-loss] step=" << step
+            << " terminalNoSupportCount=" << scatterLoss0493x14ae[0]
+            << " lostJx=" << scatterLoss0493x14ae[1]
+            << " lostJy=" << scatterLoss0493x14ae[2]
+            << " lostJnorm=" << lostNorm0493x14ae
+            << " semantics=cumulative-valid-nonzero-impulse-untransmitted-after-radius2"
+            << std::endl;
+    }
+
+    if (gasKineticGlobalBalanceDiagnostic0493x14af && auditThisStep) {
+        double globalBalance0493x14af[11] = {};
+        check_cuda_0400(cudaMemcpy(
+            globalBalance0493x14af,
+            ws.kineticGlobalBalanceAccum0493x14af.data(),
+            11u * sizeof(double), cudaMemcpyDeviceToHost),
+            "0493x14af cumulative global-balance diagnostic download");
+        append_x14v_global_balance_0493x14af(
+            params, step, time, globalBalance0493x14af);
+    }
 
     if (auditThisStep) {
         KineticCrossingAccumulator0493x9x audit{};
@@ -19625,6 +20713,16 @@ bool apply_independent_masked_species_q6_0493w5(
     const bool q6ThermalInterfaceWallRequested0493x10o =
         freeSurfaceMode0493x5a && params.phaseInterfaceKineticReflectionFraction >= 1.0 &&
         env_int_0400("MPCD_X10O_Q6_THERMAL_INTERFACE_WALL", 0) != 0;
+    const bool deviceAppliedQ6ResultantClosureRequested0493x14ai =
+        freeSurfaceMode0493x5a &&
+        env_int_0400("MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE", 0) != 0;
+    if (deviceAppliedQ6ResultantClosureRequested0493x14ai &&
+        (!faceToParticleRt0Requested0493x6hB1 ||
+         !q6ThermalInterfaceWallRequested0493x10o || (threads % 32) != 0)) {
+        diag.reason =
+            "0493x14ai requires free-surface B1/RT0 + x10o and a whole-warp particle block";
+        return false;
+    }
     if (faceToParticleRt0Requested0493x6hB1 &&
         (!freeSurfaceMode0493x5a || !fuseForceKick0493x4b)) {
         diag.reason =
@@ -19936,6 +21034,8 @@ bool apply_independent_masked_species_q6_0493w5(
         ws.kineticQ6HydroCellUy0493x10o.ensure(c0493x10o);
         ws.kineticQ6HydroFaceUxEast0493x10o.ensure(c0493x10o);
         ws.kineticQ6HydroFaceUyNorth0493x10o.ensure(c0493x10o);
+        if (deviceAppliedQ6ResultantClosureRequested0493x14ai)
+            ws.kineticAppliedQ6Resultant0493x14ai.ensure(2u);
         ws.kineticQ6HydroFieldValid0493x10o = false;
         ws.kineticQ6HydroFieldStep0493x10o = -1;
         ws.kineticQ6HydroFieldType0493x10o = projectedSpeciesType0493x7a;
@@ -22765,6 +23865,8 @@ bool apply_independent_masked_species_q6_0493w5(
                 ws.kineticQ6HydroCellUy0493x10o.data(),
                 ws.kineticQ6HydroFaceUxEast0493x10o.data(),
                 ws.kineticQ6HydroFaceUyNorth0493x10o.data(),
+                deviceAppliedQ6ResultantClosureRequested0493x14ai
+                    ? ws.kineticAppliedQ6Resultant0493x14ai.data() : nullptr,
                 grid.Nx, grid.Ny, periodicX, periodicY);
             check_cuda_0400(
                 cudaGetLastError(), "0493x10o projected Q6 hydrodynamic capture launch");
@@ -22922,8 +24024,15 @@ bool apply_independent_masked_species_q6_0493w5(
             } else {
                 // Historical B1 path: keep this launch unchanged for all
                 // partial-domain free-surface cases, including dam-break.
+                const std::size_t x14aiShared0493x14ai =
+                    q6GfDiagnosticsThisStep0493x7k
+                        ? pairShared
+                        : (deviceAppliedQ6ResultantClosureRequested0493x14ai
+                               ? 2u * static_cast<std::size_t>((threads + 31) / 32) *
+                                     sizeof(double)
+                               : 0u);
                 q6_apply_free_surface_force_and_rt0_correction_0493x6h_b1<<<
-                    particleBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
+                    particleBlocks, threads, x14aiShared0493x14ai>>>(
                     particles, cells, denseMask, denseDUx, denseDUy,
                     ws.r.data(), ws.p.data(), audit.type, nParticles,
                     grid.Nx, grid.Ny, params.Lx, params.Ly, periodicX, periodicY,
@@ -22936,7 +24045,10 @@ bool apply_independent_masked_species_q6_0493w5(
                         ? ws.periodicMomentumAccum0493x7dv2fix2.data() : nullptr,
                     periodicProjectedMomentumCorrection0493x7dv2fix2 ? 1 : 0,
                     periodicX ? 1 : 0, periodicY ? 1 : 0,
-                    q6GfDiagnosticsThisStep0493x7k ? 1 : 0);
+                    q6GfDiagnosticsThisStep0493x7k ? 1 : 0,
+                    deviceAppliedQ6ResultantClosureRequested0493x14ai
+                        ? ws.kineticAppliedQ6Resultant0493x14ai.data() : nullptr,
+                    deviceAppliedQ6ResultantClosureRequested0493x14ai ? 1 : 0);
                 check_cuda_0400(cudaGetLastError(),
                                 "0493x6h-B1 fused RT0 free-surface force and Q6 apply launch");
             }
@@ -23250,6 +24362,12 @@ bool apply_independent_masked_species_q6_0493w5(
                  phaseA0493x9g,
                  params.speciesDefinitions[static_cast<std::size_t>(projectedSpeciesIndex0493x7a)])) ? 1 : 0,
             geometryValid0493x9x ? ws.phaseAlphaFiltered0493x6c.data() : nullptr,
+            (ws.phaseInterfaceStencilValid0493x6f &&
+             ws.phaseInterfaceStencilStep0493x6f == step)
+                ? ws.phaseFaceCoeffX0493x6f.data() : nullptr,
+            (ws.phaseInterfaceStencilValid0493x6f &&
+             ws.phaseInterfaceStencilStep0493x6f == step)
+                ? ws.phaseFaceCoeffY0493x6f.data() : nullptr,
             geometryValid0493x9x,
             phaseGasPressure0493x6g,
             phaseGasPressureMode0493x6g,

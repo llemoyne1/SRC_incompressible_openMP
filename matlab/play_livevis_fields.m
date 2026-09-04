@@ -95,9 +95,9 @@ function out = play_livevis_fields(recordingDir, varargin)
     addParameter(p, 'frameStride', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
     addParameter(p, 'pauseTime', 0.2, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 
-    addParameter(p, 'gain', 1000.0, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
+    addParameter(p, 'gain', 1.0, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
     addParameter(p, 'clip', NaN, @(x) isnumeric(x) && isscalar(x));
-    addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
+    addParameter(p, 'clim', [-0.1 0.1], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
     addParameter(p, 'scaleMode', 'global', @(s) ischar(s) || isstring(s));
     addParameter(p, 'centerZero', 'auto', @(s) ischar(s) || isstring(s));
     addParameter(p, 'colormap', 'thermal', @(s) ischar(s) || isstring(s));
