@@ -26,14 +26,14 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-field = ux 
+field = rho
 
 # colormap:
 #   blue_red, gray, thermal
 # Aliases generally accepted by recent builds:
 #   grey/grayscale/greyscale -> gray
 #   heat/hot                 -> thermal
-colormap = blue_red
+colormap = blue_red 
 
 # clip:
 #   >0 fixes color saturation scale.
@@ -42,7 +42,7 @@ clip = -0.65
 
 # gain:
 #   multiplicative visual gain. Increase for weak contrast, decrease if saturated.
-gain = 2
+gain = 1
 
 # smoothPasses:
 #   spatial smoothing of the scalar field.
@@ -59,8 +59,8 @@ particleTypeFilter = 1
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
- liveGridNx = 600    # unset by default: inherit solver Nx/Ny
- liveGridNy = 600    # unset by default: inherit solver Nx/Ny
+ liveGridNx = 800    # unset by default: inherit solver Nx/Ny
+ liveGridNy = 500    # unset by default: inherit solver Nx/Ny
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -76,7 +76,7 @@ liveEvery = 1
 # quiverScale:
 #   <0 disables quiver overlay.
 #   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
-quiverScale = -150.0
+quiverScale = -50.0
 
 # quiverNx/quiverNy:
 #   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.
@@ -91,7 +91,7 @@ quiverMinSpeed = 0.0
 #   -1 reuses smoothPasses.
 #    0 disables quiver smoothing.
 #   >0 smooths vectors independently from the scalar field.
-quiverSmoothPasses = -10
+quiverSmoothPasses = 5
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ filterTau = 0.0
 # filterSampleEvery:
 #   internal sampling cadence for the recorder filter. Can be more frequent than
 #   recordEvery to smooth without dumping every sample.
-filterSampleEvery = 100
+filterSampleEvery = -1
 
 
 # =============================================================================

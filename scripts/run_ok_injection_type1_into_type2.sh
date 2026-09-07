@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Latest common helper reads SEED while being sourced under set -u.
+SEED="${SEED:-1628431}"
 source "$ROOT/scripts/src_mpcd_run_ok_common.sh"
 suite_root_cd_0434
 
@@ -11,8 +13,14 @@ suite_root_cd_0434
 CASE_LABEL="injection_type1_into_type2"
 GEN_CASE="injection"
 TOPOLOGY="${TOPOLOGY:-segmented}"
-Lx="${Lx:-4.5}"; Ly="${Ly:-1.5}"; NX="${NX:-1152}"; NY="${NY:-384}"
-GAMMA="${GAMMA:-8}"; STEPS="${STEPS:-2000}"; DT="${DT:-0.0063471328149122585}"; KBT="${KBT:-0.125}"
+Lx="${Lx:-2}"; Ly="${Ly:-1}"; NX="${NX:-800}"; NY="${NY:-400}"
+GAMMA="${GAMMA:-8}"; STEPS="${STEPS:-7500}"; DT="${DT:-0.0063471328149122585}"
+# Preserve the historical equal-temperature default, while making the current
+# two-species thermodynamics explicit. x6g consumes global KBT, so global KBT
+# is always the gas EOS temperature; the liquid uses its species target.
+LIQUID_KBT="${LIQUID_KBT:-${KBT:-0.0125}}"
+GAS_KBT="${GAS_KBT:-${KBT:-0.045125}}"
+KBT="$GAS_KBT"
 ROTATION_ANGLE="${ROTATION_ANGLE:-2.0943951023931953}"
 RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
 GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
@@ -23,11 +31,11 @@ THERMOSTAT_TARGET_KBT="${THERMOSTAT_TARGET_KBT:-$KBT}"
 THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
 # 0493x14d: optional per-type thermostat targets. Disabled by default so the
 # historical runner remains unchanged unless explicitly requested.
-SPECIES_THERMOSTAT_ENABLE="${SPECIES_THERMOSTAT_ENABLE:-false}"
-INJECT_THERMOSTAT_TARGET_KBT="${INJECT_THERMOSTAT_TARGET_KBT:--1.0}"
-BACKGROUND_THERMOSTAT_TARGET_KBT="${BACKGROUND_THERMOSTAT_TARGET_KBT:--1.0}"
+SPECIES_THERMOSTAT_ENABLE="${SPECIES_THERMOSTAT_ENABLE:-true}"
+INJECT_THERMOSTAT_TARGET_KBT="${INJECT_THERMOSTAT_TARGET_KBT:-$LIQUID_KBT}"
+BACKGROUND_THERMOSTAT_TARGET_KBT="${BACKGROUND_THERMOSTAT_TARGET_KBT:-$GAS_KBT}"
 LIQUID_PARTICLE_MASS="${LIQUID_PARTICLE_MASS:-1.0}"
-GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-0.1}"
+GAS_PARTICLE_MASS="${GAS_PARTICLE_MASS:-1.0}"
 SEED="${SEED:-1628431}"; U0="${U0:-0.0}"; VELOCITY_MODE="${VELOCITY_MODE:-zero}"
 INACTIVE_SLOTS_CELL_FRACTION="${INACTIVE_SLOTS_CELL_FRACTION:-5.0}"
 SUMMARY_EVERY="${SUMMARY_EVERY:-100}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-1000000}"
@@ -37,18 +45,24 @@ LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$ROOT/livevis_control.kv}"
 LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-1}"
 
 # Full-domain liquid type-1 injection into active gas type-2.
-# x9 capillarity + x6g gas pressure are enabled; the qualified x10u/x10v/x12a
-# kinetic closure remains OFF because it is liquid/vacuum-only.
+# Current surface path: x9 capillarity + x6g gas pressure + bilateral x10/x12
+# support closure + x14l/x14v/x14ad gas coupling. x14ai is intentionally OFF:
+# the injected liquid is connected to an external Q6 inlet/outlet topology.
 RUN_OK_LIQUID_SURFACE_ENABLE="${RUN_OK_LIQUID_SURFACE_ENABLE:-1}"
 # Surface/free-surface physics -- visible runner parameters.
-SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-500.0}"
+SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-35.000}"
 SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"
-PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-0.0}"
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-1.0}"
 PHASE_INTERFACE_EVAPORATION_TARGET_TYPE="${PHASE_INTERFACE_EVAPORATION_TARGET_TYPE:--1}"
 PHASE_INTERFACE_CONTACT_ANGLE_DEG="${PHASE_INTERFACE_CONTACT_ANGLE_DEG:--1}"
 X10O_THERMAL_SIGMAS="${X10O_THERMAL_SIGMAS:-3.0}"
 X10O_THERMAL_MAX_CELLS="${X10O_THERMAL_MAX_CELLS:-0.75}"
 X12A_LOCAL_THERMAL_RADIUS_CELLS="${X12A_LOCAL_THERMAL_RADIUS_CELLS:-25.298221281347036}"
+X14_COUPLING_ENABLE="${X14_COUPLING_ENABLE:-1}"
+X14_GAS_SPECULAR_REFLECTION="${X14_GAS_SPECULAR_REFLECTION:-1}"
+X14_GAS_KINETIC_EXCESS_KICK="${X14_GAS_KINETIC_EXCESS_KICK:-1}"
+X14_LOCAL_FACE_GAUGE_PROJECTION="${X14_LOCAL_FACE_GAUGE_PROJECTION:-1}"
+X14_DEVICE_Q6_RESULTANT_CLOSURE="${X14_DEVICE_Q6_RESULTANT_CLOSURE:-0}"
 
 # Baseline validation intentionally excludes resampling.  The public wrapper
 # selects SRC / previous Q6 / Q6-g-f; direct use of this backend retains the
@@ -156,8 +170,10 @@ MASS_RECONDITION_ENABLE="${MASS_RECONDITION_ENABLE:-0}"
 RESAMPLING_THERMAL_RENORMALIZATION_ENABLE="${RESAMPLING_THERMAL_RENORMALIZATION_ENABLE:-false}"
 RESAMPLING_MASS_GUARD_ENABLE="${RESAMPLING_MASS_GUARD_ENABLE:-false}"
 RESAMPLING_PARTICLE_MASS_MAX="${RESAMPLING_PARTICLE_MASS_MAX:-20.0}"
-UIN="${UIN:-0.75}"
-INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.75}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-17.0}"
+
+
+UIN="${UIN:-0.25}"
+INLET_FACE="${INLET_FACE:-left}"; INLET_CENTER_Y="${INLET_CENTER_Y:-0.5}"; INLET_HEIGHT_CELLS="${INLET_HEIGHT_CELLS:-30.0}"
 INLET_SMIN="${INLET_SMIN:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy-0.5*h*dy; if(y<0)y=0; printf "%.17g", y/ly}')}"
 INLET_SMAX="${INLET_SMAX:-$(awk -v cy="$INLET_CENTER_Y" -v h="$INLET_HEIGHT_CELLS" -v ly="$Ly" -v ny="$NY" 'BEGIN{dy=ly/ny; y=cy+0.5*h*dy; if(y>ly)y=ly; printf "%.17g", y/ly}')}"
 OUTLET_SMIN="${OUTLET_SMIN:-0.0}"; OUTLET_SMAX="${OUTLET_SMAX:-1.0}"
@@ -359,6 +375,13 @@ fi
 suite_defaults_common_0434
 suite_compute_derived_0434
 
+CELL_AREA="$(awk -v lx="$Lx" -v ly="$Ly" -v nx="$NX" -v ny="$NY" 'BEGIN{printf "%.17g",(lx/nx)*(ly/ny)}')"
+GAS_PRESSURE_REFERENCE="${GAS_PRESSURE_REFERENCE:-$(awk -v g="$GAMMA" -v t="$GAS_KBT" -v a="$CELL_AREA" 'BEGIN{printf "%.17g",g*t/a}')}"
+if [[ "$X14_DEVICE_Q6_RESULTANT_CLOSURE" != 0 && "$X14_DEVICE_Q6_RESULTANT_CLOSURE" != false ]]; then
+  echo "[run_ok_injection_type1_into_type2] ERROR x14ai device-resultant closure is invalid for inlet/outlet-connected liquid; keep X14_DEVICE_Q6_RESULTANT_CLOSURE=0" >&2
+  exit 2
+fi
+
 [[ "$INITIAL_DOMAIN_MODE" == full ]] || { echo "[run_ok_injection_type1_into_type2] ERROR this runner is full-domain; use run_ok_injection_type1_into_type2_empty.sh for vacuum" >&2; exit 2; }
 
 case "$SCENARIO_EXPECTATION" in
@@ -374,8 +397,9 @@ case "$INITIAL_DOMAIN_MODE:$SCENARIO_EXPECTATION" in
     ;;
 esac
 
-# Full liquid/gas interface.  Mechanical capillarity is active through x9 and
-# gas pressure through x6g.  Kinetic reflection/one-for-one/x12a are disabled.
+# Full liquid/gas interface. Mechanical capillarity is active through x9,
+# gas pressure through x6g, and the current bilateral x10/x12 + x14l/x14v/x14ad
+# coupling is enabled below. x14ai remains OFF because this liquid is inlet-connected.
 [[ "$INJECT_PHASE" == liquid && "$BACKGROUND_PHASE" == gas ]] || {
   echo "[run_ok_injection_type1_into_type2] ERROR default full surface case requires INJECT_PHASE=liquid BACKGROUND_PHASE=gas" >&2
   exit 2
@@ -443,11 +467,11 @@ bcTop = solid
 bcX = solid
 bcY = solid
 openBoundarySegmentsEnable = true
-openBoundarySegmentCount = 4
+openBoundarySegmentCount = 2 #4
 openBoundarySegment0 = ${INLET_FACE} inlet ${INLET_SMIN} ${INLET_SMAX} ${UIN} 0.0 ${INJECT_TYPE} ${INJECT_MASS}
 openBoundarySegment1 = right outlet ${OUTLET_SMIN} ${OUTLET_SMAX} ${UOUT} 0.0 0 ${PARTICLE_MASS}
-openBoundarySegment2 = ${INLET_FACE} inlet 0.01 ${INLET_SMIN} 0.01 0.0 2 0.1
-openBoundarySegment3 = ${INLET_FACE} inlet ${INLET_SMAX} 0.99 0.01 0.0 2 0.1
+#openBoundarySegment2 = ${INLET_FACE} inlet 0.01 ${INLET_SMIN} 0.01 0.0 2 0.1
+#openBoundarySegment3 = ${INLET_FACE} inlet ${INLET_SMAX} 0.99 0.01 0.0 2 0.1
 
 
 inletVelocityRampEnable = true
@@ -456,7 +480,7 @@ inletVelocityRampEndTime = 0.25
 inletVelocityRampInitialFactor = 0.2
 inletVelocityRampFinalFactor = 1.0
 inletVelocityRampProfile = smoothstep
-inletVelocitySpatialProfile = uniform
+inletVelocitySpatialProfile =  uniform #poiseuille_y_max
 inletKBT = -0.00001
 inletThermalNoise = ${INLET_THERMAL_NOISE}
 inletInjectionMode = hard_cell_density
@@ -498,6 +522,9 @@ speciesQ6ComparisonTolerance = ${SPECIES_Q6_COMPARISON_TOLERANCE}
 speciesQ6MinOccupancyFraction = ${SPECIES_Q6_MIN_OCCUPANCY_FRACTION}
 PARAMS
   run_ok_surface_append_params_0493x13zi "$params" "$RUN_OK_LIQUID_SURFACE_PHASE_A" "$RUN_OK_LIQUID_SURFACE_PHASE_B"
+  cat >> "$params" <<'PARAMS_X14'
+phaseInterfaceKineticBilateralRelocation = true
+PARAMS_X14
   suite_write_common_params_0434 "$mode" >> "$params"
   :
 }
@@ -611,6 +638,49 @@ run_one_mode_0434() {
   run_ok_export_q6_cuda_profile_0493x7r "$mode"
   PHASE_INTERFACE_B_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_B"
   run_ok_surface_export_off_flags_0493x13zi
+
+  if suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE"; then
+    # Explicit x6g EOS, consistent with the gas species thermostat target.
+    export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=1
+    export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos_accessible_volume
+    export MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G=0
+    export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G="$GAS_PRESSURE_REFERENCE"
+    export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=1
+
+    if suite_truthy_0434 "$X14_COUPLING_ENABLE"; then
+      # Qualified liquid support chain + bilateral liquid/gas interface geometry.
+      export MPCD_X10J_SIMPLE_SPECULAR_ABLATION=0
+      export MPCD_X10K_LOCAL_FRAME_SPECULAR_ABLATION=0
+      export MPCD_X10M_MOVING_INTERFACE_WALL=0
+      export MPCD_X10N_Q6_CONTINUOUS_INTERFACE_WALL=0
+      export MPCD_X10O_Q6_THERMAL_INTERFACE_WALL=1
+      export MPCD_X10O_THERMAL_PARTICLE_MASS="$INJECT_MASS"
+      export MPCD_X10O_THERMAL_SIGMAS="$X10O_THERMAL_SIGMAS"
+      export MPCD_X10O_THERMAL_MAX_CELLS="$X10O_THERMAL_MAX_CELLS"
+      export MPCD_X10_KINETIC_INTERFACE_CIC=1
+      export MPCD_X10_KINETIC_INTERFACE_QUADRATIC=1
+      export MPCD_X10P_INITIAL_OVERLAP_RESOLUTION=1
+      export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE=1
+      export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_SWAP=1
+      export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY=0
+      export MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER=0
+      export MPCD_X12A_LOCAL_THERMAL_COOLING=1
+      export MPCD_X12A_LOCAL_THERMAL_RADIUS_CELLS="$X12A_LOCAL_THERMAL_RADIUS_CELLS"
+
+      # Current gas coupling. x14ai is explicitly OFF for external Q6 boundaries.
+      export MPCD_X14L_GAS_SPECULAR_REFLECTION="$X14_GAS_SPECULAR_REFLECTION"
+      export MPCD_X14V_GAS_KINETIC_EXCESS_KICK="$X14_GAS_KINETIC_EXCESS_KICK"
+      export MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION=1
+      export MPCD_X14V_X6G_FACE_THERMO_TRACTION=0
+      export MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION=0
+      export MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION=0
+      export MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION="$X14_LOCAL_FACE_GAUGE_PROJECTION"
+      export MPCD_X14V_REFERENCE_PRESSURE_GEOMETRIC_CLOSURE=0
+      export MPCD_X14V_SCATTER_LOSS_DIAGNOSTIC=0
+      export MPCD_X14V_GLOBAL_BALANCE_DIAGNOSTIC=0
+      export MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE="$X14_DEVICE_Q6_RESULTANT_CLOSURE"
+    fi
+  fi
   suite_prepare_livevis_control_0434 "$run_root" "$mode"
   suite_export_livevis_0434
   suite_write_env_file_0434 "$run_root/logs/environment_0434.env" "$mode"
@@ -623,11 +693,20 @@ PHASE_INTERFACE_A_SELECTOR=$RUN_OK_LIQUID_SURFACE_PHASE_A
 PHASE_INTERFACE_B_SELECTOR=$RUN_OK_LIQUID_SURFACE_PHASE_B
 PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION=$PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION
 X12A_LOCAL_THERMAL_RADIUS_CELLS=$X12A_LOCAL_THERMAL_RADIUS_CELLS
+LIQUID_KBT=$LIQUID_KBT
+GAS_KBT=$GAS_KBT
+GLOBAL_KBT_X6G=$KBT
+GAS_PRESSURE_REFERENCE=$GAS_PRESSURE_REFERENCE
+X14_COUPLING_ENABLE=$X14_COUPLING_ENABLE
+MPCD_X14L_GAS_SPECULAR_REFLECTION=${MPCD_X14L_GAS_SPECULAR_REFLECTION:-0}
+MPCD_X14V_GAS_KINETIC_EXCESS_KICK=${MPCD_X14V_GAS_KINETIC_EXCESS_KICK:-0}
+MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION=${MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION:-0}
+MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE=${MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE:-0}
 META_SURFACE
   run_ok_print_q6_profile_0493x7r "$mode"
   PHASE_INTERFACE_A_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_A"
   PHASE_INTERFACE_B_SELECTOR="$RUN_OK_LIQUID_SURFACE_PHASE_B"
-  run_ok_surface_print_0493x13zi "$(suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && printf x9+x6g-liquid-gas-no-kinetic-closure || printf off)"
+  run_ok_surface_print_0493x13zi "$(suite_truthy_0434 "$RUN_OK_LIQUID_SURFACE_ENABLE" && printf x9+x6g+x10/x12+x14l+x14v+x14ad-open-boundary-no-x14ai || printf off)"
   cat >> "$run_root/logs/environment_0434.env" <<META_0493W4
 INITIAL_DOMAIN_MODE=${INITIAL_DOMAIN_MODE}
 SCENARIO_EXPECTATION=${SCENARIO_EXPECTATION}
@@ -652,7 +731,8 @@ META_0493W4
   echo "[0434-suite] initialDomainMode=$INITIAL_DOMAIN_MODE state=$state"
   if [[ "$INITIAL_DOMAIN_MODE" == full ]]; then
     echo "[0434-suite] inject(type=$INJECT_TYPE,phase=$INJECT_PHASE,mass=$INJECT_MASS,q6Alpha=$INJECT_Q6_STRENGTH,closure=$INJECT_MASS_CLOSURE_STRENGTH) into background(type=$BACKGROUND_TYPE,phase=$BACKGROUND_PHASE,mass=$BACKGROUND_PARTICLE_MASS,q6Alpha=$BACKGROUND_Q6_STRENGTH,closure=$BACKGROUND_MASS_CLOSURE_STRENGTH) mass_ratio=$ACTUAL_INJECT_TO_BACKGROUND_MASS_RATIO"
-    echo "[0493x14d] speciesThermostat=$SPECIES_THERMOSTAT_ENABLE injectKBT=$INJECT_THERMOSTAT_TARGET_KBT backgroundKBT=$BACKGROUND_THERMOSTAT_TARGET_KBT"
+    echo "[0493x14-current] speciesThermostat=$SPECIES_THERMOSTAT_ENABLE liquidKBT=$INJECT_THERMOSTAT_TARGET_KBT gasKBT=$BACKGROUND_THERMOSTAT_TARGET_KBT globalKBT(EOS)=$KBT pRefGas=$GAS_PRESSURE_REFERENCE"
+    echo "[0493x14-current] coupling=x14l+x14v+x14ad x14ai=$X14_DEVICE_Q6_RESULTANT_CLOSURE (OFF required for inlet/outlet-connected liquid)"
   else
     echo "[0434-suite] inject(type=$INJECT_TYPE,phase=$INJECT_PHASE,mass=$INJECT_MASS,q6Alpha=$INJECT_Q6_STRENGTH,closure=$INJECT_MASS_CLOSURE_STRENGTH) into empty domain; inactiveSlotType=$BACKGROUND_TYPE inactiveSlotPhase=$BACKGROUND_PHASE inactiveSlotMass=$BACKGROUND_PARTICLE_MASS"
   fi

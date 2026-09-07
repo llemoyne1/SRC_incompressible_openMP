@@ -62,21 +62,6 @@ function out = play_livevis_fields(recordingDir, varargin)
 %   'figurePosition' : [left bottom width height]
 %   'titlePrefix'    : title prefix
 %
-% Static Darcy/chi geometry overlay:
-%   'chiOverlay'      : 'auto' | 'yes' | 'no' [auto]
-%                       auto searches the enclosing run's chi/ directory
-%   'chiFile'         : explicit chi .f32 path; empty = auto-discover ['']
-%   'chiAlpha'        : opacity of fully solid chi cells [0.45]
-%   'chiColor'        : RGB colour of the solid overlay [[0.15 0.15 0.15]]
-%
-% The usual run layout is detected automatically:
-%   RUN_ROOT/output/recordings/<session>/...
-%   RUN_ROOT/chi/<case>_<Nx>x<Ny>.f32
-% The chi sidecar <file>.f32.json is used when available to recover the
-% solver grid and the fluid/solid chi convention. No resampling of chi is
-% needed: the static mask is drawn over the same physical [0,Lx]x[0,Ly]
-% extent as the recorded livevis field.
-%
 % Movie:
 %   'videoFile'      : '', .avi, .mov, .mpg/.mpeg, or .mp4
 %   'frameRate'      : movie FPS [30]
@@ -122,13 +107,6 @@ function out = play_livevis_fields(recordingDir, varargin)
         @(x) isnumeric(x) && numel(x) == 4);
     addParameter(p, 'titlePrefix', 'SRC/MPCD live recording', ...
         @(s) ischar(s) || isstring(s));
-
-    addParameter(p, 'chiOverlay', 'auto', @(s) ischar(s) || isstring(s) || (islogical(s) && isscalar(s)));
-    addParameter(p, 'chiFile', '', @(s) ischar(s) || isstring(s));
-    addParameter(p, 'chiAlpha', 0.45, ...
-        @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x <= 1);
-    addParameter(p, 'chiColor', [0.15 0.15 0.15], ...
-        @(x) isnumeric(x) && numel(x) == 3 && all(isfinite(x(:))) && all(x(:) >= 0) && all(x(:) <= 1));
 
     addParameter(p, 'videoFile', '', @(s) ischar(s) || isstring(s));
     addParameter(p, 'frameRate', 30, @(x) isnumeric(x) && isscalar(x) && x > 0);
@@ -184,11 +162,6 @@ function out = play_livevis_fields(recordingDir, varargin)
     Ly = local_resolve_number(opt.Ly, manifest, {'Ly'}, Ny);
     dt = local_resolve_number(opt.dt, manifest, {'dt'}, NaN);
 
-    % Static Darcy/chi geometry is independent of the recorded live grid.
-    % Resolve it once from the enclosing run directory (or an explicit path)
-    % and draw it in physical coordinates on top of every frame.
-    chiInfo = local_resolve_chi_overlay(sessionDir, Nx, Ny, opt);
-
     frameTable = local_list_frames(sessionDir, fieldName, Nx, Ny);
     keep = frameTable.step >= opt.startStep & frameTable.step <= opt.endStep;
     frameTable = frameTable(keep, :);
@@ -222,23 +195,6 @@ function out = play_livevis_fields(recordingDir, varargin)
     set(ax, 'YDir', 'normal');
     axis(ax, 'equal');
     axis(ax, 'tight');
-
-    % True-colour chi overlay: because CData is RGB, it does not consume or
-    % alter the scalar colormap used by the livevis field. Alpha is 0 in
-    % fluid cells and chiAlpha in fully solid cells; intermediate chi values
-    % are represented continuously.
-    chiHandle = [];
-    if chiInfo.enabled
-        hold(ax, 'on');
-        rgb = zeros(chiInfo.Ny, chiInfo.Nx, 3);
-        rgb(:,:,1) = opt.chiColor(1);
-        rgb(:,:,2) = opt.chiColor(2);
-        rgb(:,:,3) = opt.chiColor(3);
-        chiHandle = image(ax, [0 Lx], [0 Ly], rgb);
-        set(chiHandle, 'AlphaData', opt.chiAlpha .* chiInfo.solidWeight, ...
-                       'AlphaDataMapping', 'none', 'HitTest', 'off');
-        hold(ax, 'off');
-    end
 
     local_apply_colormap(fig, char(opt.colormap), 256);
     local_apply_frame_clim(ax, Z0, fixedClim, opt, centerZero);
@@ -318,20 +274,10 @@ function out = play_livevis_fields(recordingDir, varargin)
     out.clim = get(ax, 'CLim');
     out.gain = opt.gain;
     out.videoFile = video.finalFile;
-    out.chi = local_chi_public_info(chiInfo);
-    out.chiHandle = chiHandle;
 
     fprintf('[play_livevis_fields] session=%s\n', sessionDir);
     fprintf('[play_livevis_fields] field=%s frames=%d grid=%dx%d\n', ...
         fieldName, height(frameTable), Nx, Ny);
-    if chiInfo.enabled
-        fprintf('[play_livevis_fields] chi=%s grid=%dx%d solidFraction=%.6g alpha=%.3g\n', ...
-            chiInfo.path, chiInfo.Nx, chiInfo.Ny, chiInfo.solidFraction, opt.chiAlpha);
-    elseif local_chi_overlay_requested(opt.chiOverlay)
-        fprintf('[play_livevis_fields] chi overlay requested but no chi field was found.\n');
-    else
-        fprintf('[play_livevis_fields] chi overlay=off\n');
-    end
     if ~isempty(video.finalFile)
         fprintf('[play_livevis_fields] movie=%s\n', video.finalFile);
     end
@@ -552,317 +498,6 @@ function F = local_read_f32(path, Nx, Ny)
 
     % Recorder convention: x varies fastest.
     F = reshape(v, [Nx Ny]).';
-end
-
-
-% =========================================================================
-% Static Darcy/chi overlay
-% =========================================================================
-
-function info = local_resolve_chi_overlay(sessionDir, liveNx, liveNy, opt)
-    info = local_empty_chi_info();
-
-    mode = local_chi_overlay_mode(opt.chiOverlay);
-    if strcmp(mode, 'no')
-        return;
-    end
-
-    explicitPath = strtrim(char(opt.chiFile));
-    runRoot = local_find_run_root(sessionDir);
-    paramsPath = '';
-    params = struct();
-    if ~isempty(runRoot)
-        [paramsPath, params] = local_find_params_for_chi(runRoot);
-    end
-
-    chiPath = '';
-    if ~isempty(explicitPath)
-        chiPath = local_resolve_existing_path(explicitPath, runRoot, paramsPath);
-        if isempty(chiPath)
-            error('play_livevis_fields:chiFileNotFound', ...
-                'Explicit chiFile was not found: %s', explicitPath);
-        end
-    else
-        % First honour darcyChiFile from the run params if present.
-        key = matlab.lang.makeValidName('darcyChiFile');
-        if isfield(params, key)
-            chiPath = local_resolve_existing_path(params.(key), runRoot, paramsPath);
-        end
-
-        % Robust fallback for the standard runner layout: RUN_ROOT/chi/*.f32.
-        if isempty(chiPath) && ~isempty(runRoot)
-            D = dir(fullfile(runRoot, 'chi', '*.f32'));
-            D = D(~[D.isdir]);
-            if ~isempty(D)
-                if numel(D) > 1
-                    % Prefer a name carrying the solver grid dimensions.
-                    wanted = sprintf('%dx%d', local_param_number(params, 'darcyChiNx', NaN), ...
-                                               local_param_number(params, 'darcyChiNy', NaN));
-                    k = [];
-                    if ~contains(wanted, 'NaN')
-                        k = find(contains({D.name}, wanted), 1, 'first');
-                    end
-                    if isempty(k)
-                        [~, k] = max([D.datenum]);
-                    end
-                    warning('play_livevis_fields:multipleChi', ...
-                        'Found %d chi .f32 files in %s; using %s.', ...
-                        numel(D), fullfile(runRoot,'chi'), D(k).name);
-                else
-                    k = 1;
-                end
-                chiPath = fullfile(D(k).folder, D(k).name);
-            end
-        end
-    end
-
-    if isempty(chiPath)
-        if strcmp(mode, 'yes')
-            error('play_livevis_fields:noChi', ...
-                ['chiOverlay=yes but no Darcy/chi .f32 file was found. ' ...
-                 'Pass ''chiFile'',<path> explicitly.']);
-        end
-        return;
-    end
-
-    [chiNx, chiNy, fluidValue, solidValue, sidecarPath] = ...
-        local_resolve_chi_metadata(chiPath, params, liveNx, liveNy);
-
-    expectedBytes = chiNx * chiNy * 4;
-    d = dir(chiPath);
-    if isempty(d) || d(1).bytes ~= expectedBytes
-        got = NaN;
-        if ~isempty(d), got = d(1).bytes; end
-        error('play_livevis_fields:badChiSize', ...
-            'Chi size mismatch for %s: got %g bytes, expected %d (%dx%d float32).', ...
-            chiPath, got, expectedBytes, chiNx, chiNy);
-    end
-
-    fid = fopen(chiPath, 'rb');
-    if fid < 0
-        error('play_livevis_fields:openChi', 'Cannot open chi file: %s', chiPath);
-    end
-    cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
-    v = fread(fid, chiNx*chiNy, 'single=>single');
-    if numel(v) ~= chiNx*chiNy
-        error('play_livevis_fields:shortChi', ...
-            'Unexpected chi length in %s.', chiPath);
-    end
-    chi = double(reshape(v, [chiNx chiNy]).');
-
-    den = fluidValue - solidValue;
-    if ~(isfinite(den) && abs(den) > eps)
-        warning('play_livevis_fields:chiConvention', ...
-            'Invalid/equal fluid and solid chi values; assuming fluid=1, solid=0.');
-        fluidValue = 1.0;
-        solidValue = 0.0;
-        den = 1.0;
-    end
-
-    % 1 at the declared solid value, 0 at the declared fluid value.
-    solidWeight = (fluidValue - chi) ./ den;
-    solidWeight = min(1, max(0, solidWeight));
-
-    info.enabled = true;
-    info.path = chiPath;
-    info.sidecarPath = sidecarPath;
-    info.runRoot = runRoot;
-    info.paramsPath = paramsPath;
-    info.Nx = chiNx;
-    info.Ny = chiNy;
-    info.fluidValue = fluidValue;
-    info.solidValue = solidValue;
-    info.solidWeight = solidWeight;
-    info.solidFraction = mean(solidWeight(:));
-end
-
-
-function tf = local_chi_overlay_requested(modeIn)
-    mode = local_chi_overlay_mode(modeIn);
-    tf = ~strcmp(mode, 'no');
-end
-
-
-function mode = local_chi_overlay_mode(modeIn)
-    if islogical(modeIn)
-        if modeIn, mode = 'yes'; else, mode = 'no'; end
-        return;
-    end
-    mode = lower(strtrim(char(modeIn)));
-    switch mode
-        case {'auto'}
-            mode = 'auto';
-        case {'yes','true','1','on'}
-            mode = 'yes';
-        case {'no','false','0','off'}
-            mode = 'no';
-        otherwise
-            error('play_livevis_fields:chiOverlay', ...
-                'chiOverlay must be auto, yes, or no.');
-    end
-end
-
-
-function info = local_empty_chi_info()
-    info = struct('enabled',false, 'path','', 'sidecarPath','', ...
-        'runRoot','', 'paramsPath','', 'Nx',NaN, 'Ny',NaN, ...
-        'fluidValue',NaN, 'solidValue',NaN, 'solidWeight',[], ...
-        'solidFraction',NaN);
-end
-
-
-function pub = local_chi_public_info(info)
-    pub = info;
-    if isfield(pub, 'solidWeight')
-        pub = rmfield(pub, 'solidWeight');
-    end
-end
-
-
-function runRoot = local_find_run_root(sessionDir)
-    runRoot = '';
-    here = sessionDir;
-    for depth = 1:8 %#ok<NASGU>
-        if isfolder(fullfile(here, 'chi')) || isfolder(fullfile(here, 'params'))
-            runRoot = here;
-            return;
-        end
-        parent = fileparts(here);
-        if isempty(parent) || strcmp(parent, here)
-            break;
-        end
-        here = parent;
-    end
-end
-
-
-function [paramsPath, kv] = local_find_params_for_chi(runRoot)
-    paramsPath = '';
-    kv = struct();
-    D = dir(fullfile(runRoot, 'params', '*.kv'));
-    D = D(~[D.isdir]);
-    if isempty(D)
-        return;
-    end
-
-    % Prefer the first params file that actually declares darcyChiFile.
-    for i = 1:numel(D)
-        pth = fullfile(D(i).folder, D(i).name);
-        tmp = local_read_kv(pth);
-        if isfield(tmp, matlab.lang.makeValidName('darcyChiFile'))
-            paramsPath = pth;
-            kv = tmp;
-            return;
-        end
-    end
-
-    [~, k] = max([D.datenum]);
-    paramsPath = fullfile(D(k).folder, D(k).name);
-    kv = local_read_kv(paramsPath);
-end
-
-
-function pathOut = local_resolve_existing_path(pathIn, runRoot, paramsPath)
-    pathOut = '';
-    raw = strtrim(char(pathIn));
-    if isempty(raw)
-        return;
-    end
-
-    candidates = {raw};
-    [~, base, ext] = fileparts(raw);
-    basename = [base ext];
-
-    if ~isempty(runRoot)
-        candidates{end+1} = fullfile(runRoot, 'chi', basename); %#ok<AGROW>
-        candidates{end+1} = fullfile(runRoot, raw); %#ok<AGROW>
-    end
-    if ~isempty(paramsPath)
-        candidates{end+1} = fullfile(fileparts(paramsPath), raw); %#ok<AGROW>
-    end
-
-    % A runner usually writes darcyChiFile relative to the repository root.
-    % Recover that root from RUN_ROOT by walking upward and trying the raw path.
-    if ~isempty(runRoot)
-        here = runRoot;
-        for depth = 1:8 %#ok<NASGU>
-            candidates{end+1} = fullfile(here, raw); %#ok<AGROW>
-            parent = fileparts(here);
-            if isempty(parent) || strcmp(parent, here), break; end
-            here = parent;
-        end
-    end
-
-    for i = 1:numel(candidates)
-        if isfile(candidates{i})
-            pathOut = candidates{i};
-            return;
-        end
-    end
-end
-
-
-function [nx, ny, fluidValue, solidValue, sidecarPath] = ...
-        local_resolve_chi_metadata(chiPath, params, liveNx, liveNy)
-    nx = local_param_number(params, 'darcyChiNx', NaN);
-    ny = local_param_number(params, 'darcyChiNy', NaN);
-    fluidValue = 1.0;
-    solidValue = 0.0;
-    sidecarPath = [chiPath '.json'];
-
-    if isfile(sidecarPath)
-        try
-            meta = jsondecode(fileread(sidecarPath));
-            if isfield(meta, 'grid')
-                if isfield(meta.grid, 'Nx'), nx = double(meta.grid.Nx); end
-                if isfield(meta.grid, 'Ny'), ny = double(meta.grid.Ny); end
-            end
-            if isfield(meta, 'chi')
-                if isfield(meta.chi, 'fluid'), fluidValue = double(meta.chi.fluid); end
-                if isfield(meta.chi, 'solid'), solidValue = double(meta.chi.solid); end
-            end
-        catch ME
-            warning('play_livevis_fields:chiSidecar', ...
-                'Could not parse chi sidecar %s: %s', sidecarPath, ME.message);
-        end
-    else
-        sidecarPath = '';
-    end
-
-    if ~(isfinite(nx) && isfinite(ny) && nx >= 1 && ny >= 1)
-        [~, name, ext] = fileparts(chiPath);
-        tok = regexp([name ext], '_(\d+)x(\d+)\.f32$', 'tokens', 'once');
-        if ~isempty(tok)
-            nx = str2double(tok{1});
-            ny = str2double(tok{2});
-        end
-    end
-
-    if ~(isfinite(nx) && isfinite(ny) && nx >= 1 && ny >= 1)
-        d = dir(chiPath);
-        if ~isempty(d) && d(1).bytes == liveNx*liveNy*4
-            nx = liveNx;
-            ny = liveNy;
-        else
-            error('play_livevis_fields:chiGrid', ...
-                ['Cannot determine chi grid dimensions for %s. Expected ' ...
-                 'darcyChiNx/Ny in params, grid.Nx/Ny in sidecar JSON, or ' ...
-                 'a filename suffix _<Nx>x<Ny>.f32.'], chiPath);
-        end
-    end
-
-    nx = round(nx);
-    ny = round(ny);
-end
-
-
-function x = local_param_number(kv, key0, fallback)
-    x = fallback;
-    key = matlab.lang.makeValidName(key0);
-    if isfield(kv, key)
-        y = str2double(kv.(key));
-        if isfinite(y), x = y; end
-    end
 end
 
 
