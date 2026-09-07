@@ -1,0 +1,5 @@
+*.sqlite.tmp
+*.sqlite-wal
+*.sqlite-shm
+*.sql.tmp
+__pycache__/

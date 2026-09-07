@@ -1,0 +1,188 @@
+\documentclass[a4paper,9pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{margin=10mm}
+\usepackage{pdflscape}
+\usepackage{longtable,booktabs,array,xcolor,colortbl}
+\usepackage{microtype}
+\usepackage{ragged2e}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.14}
+\definecolor{groupgray}{gray}{0.90}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+\begin{document}
+\begin{landscape}
+\begin{center}
+{\Large\bfseries Référentiel des phases et jalons ``x...'' de SRC\_GPU-SURF}\\[2mm]
+{\small Nom explicite, fonction et statut - état consolidé au 5 septembre 2026}
+\end{center}
+\vspace{1mm}
+\footnotesize
+\begin{longtable}{L{2.35cm} L{5.3cm} L{13.25cm} L{4.75cm}}
+\toprule
+\textbf{Jalon / phase} & \textbf{Nom clair} & \textbf{Fonction} & \textbf{Statut / portée}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Jalon / phase} & \textbf{Nom clair} & \textbf{Fonction} & \textbf{Statut / portée}\\
+\midrule
+\endhead
+\midrule
+\multicolumn{4}{r}{\scriptsize Suite page suivante}\\
+\endfoot
+\bottomrule
+\endlastfoot
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{Socle fonctionnel (avant les jalons 0493x)}}\\
+\texttt{SRC/MPCD} & Collision particulaire SRC/MPCD & Streaming des particules, collision stochastique par cellule, rotation SRD, grid shift et thermostat. C'est le fluide mésoscopique de base. & Socle actif \\
+\texttt{Q6} & Projection quasi-incompressible & Projection du champ de vitesse/moment pour réduire la divergence. Les variantes récentes opèrent sur GPU résident. & Socle actif selon RUN\_MODE \\
+\texttt{Q9} & Relaxation basse fréquence du flux de masse & Ancienne projection complémentaire du flux de masse à grande longueur d'onde. & Historique / séparée du chemin Q6-g-f actuel \\
+\texttt{Resampling} & Contrôle du support particulaire & Rééchantillonnage local conservatif pour maintenir population et masse cellulaire; distinct de Q6 et opt-in. & Module séparé, OFF dans les qualifications surface libre récentes \\
+\texttt{Q6 multi-espèces} & Projection sélective par espèce & Registre d'espèces; mode independent\_masked pour projeter le liquide sans projeter directement le gaz. & Socle multi-espèces \\
+\texttt{Q6-g} & Q6 force-aware & Inclut la force dans la vitesse tentative avant le streaming afin que la projection corrige la vitesse réellement utilisée pour transporter les particules. & Introduit par x3, base de Q6-g-f \\
+\texttt{Q6-g-f} & Q6 force-aware + interface + face-particule + densité & Chaîne: vitesse tentative forcée, interface physique alpha=0.5, condition de pression, reconstruction face-particule B1/RT0 et relaxation lente de densité dans le même solveur CG. & Chaîne de projection de référence \\
+\texttt{x1} & Jalon ancien non individualisé dans le rapport consolidé & Le rapport consolidé actuel ne donne pas une définition séparée et fiable de x1. & À retrouver dans l'historique Git si nécessaire \\
+\texttt{x2} & Test Q6 liquide seul / gravité & Campagne liquide seul qui a montré que le kick gravitaire appliqué avant une projection trop tardive pouvait court-circuiter l'objectif de Q6. & Historique; mène à x3 \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x3-x7 : Q6-g / Q6-g-f, dam-break et fermeture incompressible}}\\
+\texttt{x3} & Q6-g force-aware - preuve de concept & Projette une vitesse tentative incluant la force avant streaming; première version avec double projection pour démontrer la cause de la sédimentation parasite. & Supplanté par x4a/x4b \\
+\texttt{x4a} & prestream\_single & Une seule projection avant transport; évite le double solve tout en supprimant la dérive gravitaire. & Supplanté par x4b \\
+\texttt{x4b} & prestream\_single\_fused & Fusionne dépôt de v+a dt, projection Q6, puis application force+Q6 sans passage particulaire dédié au kick. & Séquençage de référence Q6-g-f \\
+\texttt{x5a} & free\_surface\_masked initial & Masque Q6 du liquide partiellement rempli; bord du support traité comme pression de jauge nulle à demi-maille. & Étape historique \\
+\texttt{x5a2} & Dam-break vide & Validation du masque surface libre sur dam-break sans gaz; robuste avant impact mais révèle que bord du support != interface physique. & Historique / discriminant \\
+\texttt{x5b} & Gaz explicite compressible & Ajoute une espèce gaz q6Strength=0 qui collisionne avec le liquide sans être projetée incompressible. & Base du couplage gaz \\
+\texttt{x6a} & Diagnostic EOS gaz & Reconstruit une pression gazeuse EOS sans modifier la physique afin d'auditer le futur couplage de pression. & Diagnostic historique \\
+\texttt{x6b} & Audit support vs interface & Compare seuil de support Q6 et isovaleur physique alpha=0.5. & Diagnostic historique \\
+\texttt{x6c} & Alpha physique résident & Construit sur GPU un champ alpha du liquide, filtré par stencil cinq points, distinct du simple carrier Q6. & Actif, base géométrique Q6/capillarité \\
+\texttt{x6d} & Distance sous-maille 1/theta & Utilise la position locale de l'isovaleur pour corriger la distance de frontière au lieu du facteur demi-maille. & Supplanté par x6f \\
+\texttt{x6e} & Audit topologique des crossings & Montre que l'interface alpha=0.5 traverse souvent des paires de cellules qui sont encore toutes deux dans le carrier numérique. & Diagnostic architectural \\
+\texttt{x6f} & Stencil physique d'interface & Sépare pressureMask et carrierMask; prépare les coefficients de face sur les crossings alpha=0.5 et la distance sous-maille theta. & Actif \\
+\texttt{x6g} & Pression gazeuse interfaciale & Fournit p\_g sur les faces d'interface et impose p\_L|Gamma=p\_g dans le Dirichlet Q6; plus tard composé avec sigma*kappa. & Actif quand gaz explicite \\
+\texttt{x6h-A} & Reconstruction faces basses & Reconstruit les corrections ouest/sud sur frontières physiques basses absentes du stockage east/north. & Actif dans Q6-g-f \\
+\texttt{x6h-B0} & Diagnostic post-application & Sépare bulk/interface/paroi/zones mixtes pour localiser la divergence après application aux particules. & Diagnostic OFF production \\
+\texttt{x6h-B1} & Reconstruction face-particule RT0 & Remplace une correction constante par cellule par une reconstruction affine entre corrections de faces, cohérente avec la divergence FV projetée. & Actif dans Q6-g-f \\
+\texttt{x7a/x7b} & Kick viriel de densité & Tentatives de restauration de densité par kick post-projection de type ressort/viriel. & Rejeté dans Q6-g-f; mutuellement exclusif avec x7d \\
+\texttt{x7d} & Relaxation de densité dans le RHS & Ajoute (f-1)/tau\_rho dans le second membre Q6 pour restaurer lentement la densité sans resampling ni kick post-projection. & Actif; tau\_rho=0.25 dans profil qualifié \\
+\texttt{x7e} & Qualification x6g+x7d & Valide la coexistence pression gaz + relaxation de densité dans le même RHS, y compris runs longs/coarse-fine. & Qualification historique \\
+\texttt{x7f} & Extension multi-topologies & Étend Q6-g-f aux topologies statiques supportées: périodique, canal, boîte fermée, inlet/outlet, segments. & Actif \\
+\texttt{x7f-fix2} & Garde wall-simple & Autorise une face specular simple sans imposer artificiellement wallVP. & Correctif actif \\
+\texttt{x7g} & Darcy avant projection & Place le kick Darcy-Brinkman dans la vitesse tentative avant Q6-g-f, sans le rejouer après collision. & Actif selon mode Darcy \\
+\texttt{x7h} & Factorisation run\_ok & Rassemble dans les runners le profil src-q6-g-f: x4b, B1, x6f, registre espèces et relaxation densité. & Infrastructure runner \\
+\texttt{x7i} & Qualification multi-conditions-limites & Campagne commune Taylor-Green, Poiseuille, bend-pipe Darcy et same-face IO pour comparer SRC/Q6/Q6-g-f. & Benchmark de référence \\
+\texttt{x7j} & CG coopératif CUDA résident & Remplace les réductions/synchronisations host à chaque itération par un unique CG coopératif entièrement GPU. & Actif; optimisation majeure coût \\
+\texttt{x7k/x7l} & Réduction de télémétrie & Calcule audits Q6-g-f et réductions host thermostat uniquement au premier pas / cadence summary, sans changer la physique. & Actif \\
+\texttt{x7m} & Correction topologie monophase & Empêche une fluctuation alpha<0.5 de créer une fausse interface interne dans un fluide monophase complet. & Actif automatiquement \\
+\texttt{x7o} & Symétrisation Q6 indépendant & Supprime le biais est/nord dans la reconstruction des faces pour le domaine complet independent\_masked. & Actif \\
+\texttt{x7p} & Symétrisation Q6 commun & Applique la même convention symétrique au Q6 commun. & Actif \\
+\texttt{x7q} & Fermeture exacte du moment périodique & Mesure le moment B1/RT0 réellement appliqué aux particules et enlève le résidu uniforme k=0 dans les directions périodiques fullDomain. & Actif automatiquement seulement dans son domaine; pas sur dam-break partiel \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x8 : conditions limites ouvertes et benchmark von Karman}}\\
+\texttt{x8k} & Inlet segmenté Poiseuille local & Définit une coordonnée locale au segment et impose u\_n=4 Umax eta(1-eta) de façon cohérente à l'injection particulaire et à Q6. & Actif \\
+\texttt{x8q} & Continuation cinétique outlet & Supprime les sortants et reconstruit la demi-distribution entrante depuis les moments de couches intérieures, pondérée par le flux normal. & Actif pour outlet Neumann \\
+\texttt{x8r} & Outlet pression Neumann & Conserve gradient de vitesse normal nul pour la vitesse tentative mais impose phi\_out=0 côté projection; ne réimpose plus UOUT comme cible physique. & Actif \\
+\texttt{x8s} & Déflation des modes lents du CG & Résout analytiquement les modes longitudinaux les plus lents à l'initialisation du CG pour améliorer le conditionnement du canal long. & Actif dans cas applicable \\
+\texttt{x8t} & Relaxation densité sans mode moyen & Retire uniquement la moyenne spatiale de la cible de relaxation de densité quand outlet pression + fullDomain sont actifs. & Actif dans cas applicable \\
+\texttt{x8j} & Analyse VK POD + sondes & Analyseur de shedding: fréquence POD et probe, phase spatiale, période et comparaison bibliographique. & Tooling/qualification, pas une physique \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x9 : tension superficielle, courbure et mouillage}}\\
+\texttt{x9a-x9c} & Choix de la géométrie de courbure & Compare les constructions de champ de courbure; production retient trois passes binomiales 3x3 + gradient/divergence de Scharr (p3). & Étapes de sélection; p3 retenu \\
+\texttt{x9d} & Activation du saut de Laplace & Ajoute sigma*kappa au potentiel de Dirichlet Q6-g-f; pas de force CSF ni kick particulaire direct. & Actif; coeur de la tension superficielle \\
+\texttt{x9e} & Diagnostic pression goutte statique & Mesure le saut de pression reconstruit dans la solution Q6 et les grandeurs géométriques des gouttes. & Diagnostic/qualification \\
+\texttt{x9f} & Diagnostic quadrupole signé & Observable de forme pour suivre les modes d'oscillation des gouttes. & Diagnostic/qualification \\
+\texttt{x9g} & Sélecteurs de phases A/B & Généralise les côtés de l'interface: family:liquid/gas, type:N, vacuum, wall, etc. & Actif \\
+\texttt{x9h} & Géométrie de paroi pour mouillage & Traite wall comme troisième objet géométrique, distinct des deux phases capillaires. & Actif dans mouillage \\
+\texttt{x9i-x9l} & Prototypes angle de contact & Teste remplacement de normale, ghost alpha et reconstructions pariétales; révèle biais de courbure malgré angle local correct. & Ablations/supplantés \\
+\texttt{x9m} & Fermeture statique de mouillage & Construit la courbure de contact à partir d'une normale imposée au mur et d'une normale p3 hors support pariétal. & Bonne statique; dynamique ligne triple non fermée \\
+\texttt{x9r} & Cutoff de petite courbure résolue & Borne uniquement kappa utilisé dans sigma*kappa par un rayon minimal en cellules; ne modifie pas alpha ni le champ kappa brut. & Actif selon benchmark; paramètre de résolution \\
+\texttt{x9s} & Impact/splash paramétrable & Runners goutte -> paroi sèche ou flaque pour changements de topologie et splash. & Démonstration/qualification qualitative \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x10-x12 : fermeture cinétique de surface libre}}\\
+\texttt{x10a-x10e} & Premières barrières / seals / réactions & Premières géométries de crossing et réactions locales pour empêcher les sorties de support. & Historique, supplanté \\
+\texttt{x10f-x10g} & Réaction conservative globale & Réduction globale des grandeurs de réaction pour éviter des receivers cellule par cellule. & Code conservé sans call-site actif \\
+\texttt{x10h-x10i} & Critère relatif et réaction par blocs & Utilise (v-u\_Gamma).n et une réaction mésoscopique; x10i sert de fallback hard r=1 legacy. & Legacy; bypassé par x10o dans runners récents \\
+\texttt{x10j} & Réflexion spéculaire labo & Réfléchit la vitesse dans le repère laboratoire. & Ablation rejetée: bloque fortement le dripping \\
+\texttt{x10k} & Réflexion spéculaire repère interface & Réflexion dans le repère local mobile de l'interface. & Ablation rejetée \\
+\texttt{x10l} & Diagnostic pré-mur cinétique & Mesure l'état juste avant fermeture et montre que Q6/B1 garde un mouvement normal sortant avant le traitement cinétique. & Diagnostic passif \\
+\texttt{x10m} & Paroi implicite mobile / scratch & Étape architecturale; buffers cellulaires ensuite réutilisés par x10v et autres briques. & Ablation/infrastructure \\
+\texttt{x10n} & Polyligne continue marching-squares & Construit segments, normales et primitives continues réutilisées par x10o, Q2, x12a et plus tard x14. & Infrastructure active \\
+\texttt{x10o} & Paroi thermique / enveloppe locale & Interface continue Q6 avec enveloppe thermique delta\_th=min(C\_T dt sqrt(kBT/m), delta\_max). & Socle actif de la fermeture liquide x12 \\
+\texttt{x10p/x10q} & Résolution recouvrements initiaux & Traite particules déjà du mauvais côté; recherche 3x3 puis fallback 7x7 rare si aucun segment trouvé. & Actif \\
+\texttt{x10cic} & Alpha cinétique CIC dédié & Champ alpha réservé à la cinétique, distinct du x6c utilisé par Q6/capillarité. & Actif; orchestration encore liée à Q6 \\
+\texttt{x10biq / Q2} & Reconstruction biquadratique tensorielle & Utilise les 9 valeurs CIC d'un patch 3x3 pour crossing et normale subcellulaires; pas de grille de coefficients supplémentaire. & Actif \\
+\texttt{x10r} & Vitesses endpoints full-vector & Améliore covariance galiléenne par vitesses vectorielles complètes aux endpoints. & Ablation rejetée: dripping dégradé \\
+\texttt{x10s} & Cinématique normale au segment & Projette la cinématique sur la normale du segment. & Ablation rejetée/OFF \\
+\texttt{x10t} & Cinématique tangentielle rigide & Ajoute une cinématique tangentielle rigide. & Ablation rejetée; impulse parasite aggravée \\
+\texttt{x10u} & Relocalisation one-for-one & Miroire uniquement la position d'une particule sortante; même slot, masse et vitesse, sans kick direct. & Actif dans chaîne liquide qualifiée \\
+\texttt{x10v} & Swap local full-vector & Échange le vecteur vitesse complet avec un partenaire liquide intérieur de même masse; conserve exactement P et K de la paire. & Actif; peut ajouter dispersion/dissipation interfaciale \\
+\texttt{x10w} & Limiter thermique pairwise & Réduction thermique locale avec redistribution pairwise conservative P/K. & Implémenté mais OFF; exclusif avec x12a \\
+\texttt{x11a} & Validation Young-Laplace & Suite de gouttes statiques multi-rayons/multi-sigma utilisant x9e pour comparer Delta p\_Q6 à sigma/R\_eff. & Tooling de qualification \\
+\texttt{x11b} & Dispersion onde capillaire & Suit une interface sinusoïdale et ajuste une oscillation amortie pour mesurer la dispersion capillaire. & Tooling de qualification \\
+\texttt{x12a} & Refroidissement thermique local petites structures & Réduit kBT effectif et enveloppe x10o quand l'épaisseur locale L\_loc devient inférieure au rayon Rc \textasciitilde{}25.3h. & Actif dans chaîne liquide qualifiée \\
+\texttt{x12b/x12c} & Construction benchmark JFM & Étapes de construction/réduction du domaine splash JFM sans nouvelle physique C++. & Tooling historique \\
+\texttt{x12d} & Benchmark JFM 524 & Runner de mesure du splash/obstacle d'après Josserand-Lemoyne-Troeger-Zaleski. & Benchmark applicatif; similitude Re encore limitée \\
+\texttt{x12cal} & Calibrateur dynamique capillaire & Mesure la dispersion/frequence des ondes et distingue sigma\_dyn de la tension mécanique. & Qualification dynamique \\
+\texttt{x12yl} & Calibrateur mécanique de sigma & Gouttes statiques appariées pour extraire sigma\_eff via Delta p\_cap = sigma\_eff <kappa>. & Qualification mécanique historique \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x13 : propriétés de transport, fluide de référence et campagne Taylor-Culick}}\\
+\texttt{x13a} & Pré-balayage analytique transport & Définit la portée intrinsèque des candidats SRC avant runs coûteux. & Tooling/calibration \\
+\texttt{x13b} & Cisaillement transverse pur & Première métrologie de viscosité transverse; utile pour tendance/localité mais déclassée comme échelle absolue. & Diagnostic historique \\
+\texttt{x13c} & Choix de gamma & Qualifie l'occupation moyenne et conduit au choix économique gamma=8. & Calibration \\
+\texttt{x13d} & Longue longueur d'onde / acoustique & Ajoute grandes longueurs d'onde, corrige le calibrateur longitudinal amorti et qualifie un premier G08. & Calibration \\
+\texttt{x13e} & Sweep Mach & Explore la réponse non linéaire compressible et sépare domaine résolu et domaine constitutif sûr. & Calibration \\
+\texttt{x13f} & Optimisation (angle, lambda/h) & Sweep local à gamma=8 pour réduire viscosité/coût tout en conservant propagation acceptable. & Calibration \\
+\texttt{x13g} & Reproductibilité statistique GPU & Montre qu'état initial + seed identiques ne donnent pas une trajectoire GPU bit-à-bit; impose analyses multi-graines. & Règle méthodologique \\
+\texttt{x13h-A} & Acoustique point final lambda/h=0.72 & Mesure c\_s et viscosité longitudinale du fluide final avec amplitudes multiples et bootstrap. & Qualification constitutive \\
+\texttt{x13h-B} & Viscosité vs densité / localité & Cartographie la dépendance à gamma et la frontière de localité; échelle absolue ensuite réauditée par Taylor-Green. & Qualification constitutive \\
+\texttt{x13h-C} & Domaine Mach final & Définit l'enveloppe de densité/Mach du fluide G08-0.72. & Qualification constitutive \\
+\texttt{x13h} & Point liquide de référence & Fluide économique gamma=8, angle 120 deg, lambda/h=0.72; utilisé pour qualification surface libre finale. & Référence liquide qualifiée 31/08/2026 \\
+\texttt{x13j} & Young-Laplace x13h smoke & Smoke/qualification mécanique du point x13h; un seul point n'est pas une qualification multi-rayons. & Tooling \\
+\texttt{x13k} & Goutte oscillante n=2 & Validation dynamique capillaire du mode azimutal n=2 sur fluide x13h. & Qualifié historique \\
+\texttt{x13l} & Goutte oscillante n=3 & Validation dynamique capillaire du mode n=3. & Qualifié historique \\
+\texttt{x13m} & Goutte oscillante n=4 & Validation dynamique capillaire du mode n=4. & Qualifié historique \\
+\texttt{x13n} & Taylor-Culick 2D & Benchmark de rétraction de nappe; révèle une vitesse trop faible malgré traction capillaire locale proche de 2 sigma. & Limite dynamique connue; référence G\_TC \textasciitilde{}0.795 au rollback \\
+\texttt{x13o} & Swap normal-only & Ablation de x10v: échange seulement la composante normale locale et laisse tangentielle inchangée. & OFF production \\
+\texttt{x13r/x13s} & Refroidissements locaux directs & Tentatives plus agressives de refroidissement interfacial pour accélérer Taylor-Culick. & Rejetées \\
+\texttt{x13t} & Refroidissement progressif unifié & Loi progressive de refroidissement/rétention fondée sur l'échelle locale. & Rejetée comme chemin général \\
+\texttt{x13u/x13v} & Rétention one-for-one sous x13t & Sépare correction de position et swap pour tester la rétention des particules au rim. & Expérimental/rejeté \\
+\texttt{x13w} & Escape -> inactive -> reseed & Transforme les sorties en slots inactifs puis réensemence localement côté liquide. & Rejeté: contraction artificielle du support \\
+\texttt{x13w-fix3} & Correctif reseed & Version corrigée du choix géométrique de cellule de reseed utilisée dans la validation croisée finale. & Toujours invalidée physiquement \\
+\texttt{x13x} & Rétention probabiliste & Balaye une fraction de rétention pour chercher compromis Taylor-Culick / dynamique de goutte. & Aucun compromis robuste \\
+\texttt{x13z} & Changements de grille & Explore raffinement de grille et gains Taylor-Culick. & Non suffisant pour validation \\
+\texttt{x13za-x13zc} & Dépendance de grille de l'interface & Analyse rayon effectif, courbure et métriques Young-Laplace lors du raffinement. & Diagnostic; révèle forte dépendance de kappa\_active à forte sigma \\
+\texttt{x13zd} & Validation croisée décisive & Teste x13t+x13w sur gouttes oscillantes; montre contraction de support et détruit la dynamique modale. & Invalide ces fermetures; motive rollback au tag qualifié \\
+\rowcolor{groupgray}\multicolumn{4}{l}{\textbf{x14 : phase gaz explicite et transfert liquide-gaz}}\\
+\texttt{x14a-x14j} & Thermostat séparé par espèce & Ajoute des cibles kBT propres aux espèces après collision SRC commune, sans séparer la collision du mélange. & Architecture x14 \\
+\texttt{x14d} & Collision commune + thermostats séparés & Conserve SRC commun au mélange; seule la remise à température est faite par type. & Actif dans x14 \\
+\texttt{x14g} & Cellules exactes post-stream/grid-shift & Utilise les identifiants de cellule SRC persistants exacts pour thermostat par espèce. & Correctif d'intégration actif \\
+\texttt{x14j} & Goutte deux températures & Cas d'intégration thermostat liquide/gaz avant fermeture cinétique bilatérale. & Benchmark d'intégration \\
+\texttt{x14k} & Géométrie cinétique bilatérale & Autorise le côté gaz à consommer la même géométrie de relocalisation x10 que le liquide, avec sens de phase inversé. & Opt-in; change le modèle d'interface \\
+\texttt{x14l} & Réflexion spéculaire du gaz & Réfléchit la composante normale relative du gaz à l'interface mobile; tangentielle inchangée. & Qualifié pour imperméabilité normale dans cas tests \\
+\texttt{x14m} & Assemblage bilatéral + compatibilité x12a & Combine liquide x10/x12, gaz x14l et thermostat séparé; x12a reste côté liquide uniquement. & Architecture intégrée \\
+\texttt{x14n} & Ablation fermeture gaz OFF & Coupe la fermeture cinétique gazeuse pour séparer pression et imperméabilité. & Ablation \\
+\texttt{x14o} & Ablation pression gaz constante & Utilise une pression gazeuse constante choisie pour annuler la contribution de jauge. & Ablation \\
+\texttt{x14r} & Analyse volume accessible & Analyse offline montrant que p=N kBT/A\_cell sous-estime la pression si seule une fraction de cellule est accessible au gaz. & Diagnostic conduisant à x14s \\
+\texttt{x14s} & EOS gaz volume accessible & Corrige la pression gazeuse par la fraction de volume accessible dérivée de alpha Q6. & Actif dans x14 récent \\
+\texttt{x14t} & Piston pression thermodynamique & Benchmark plan qui qualifie la transmission moyenne de p\_g par x6g/x14s sans terme impulsionnel direct. & Qualification composante thermodynamique \\
+\texttt{x14u} & Gaz incident normal & Benchmark de flux de moment dirigé; montre que x14l seul rend imperméable mais ne restitue presque pas le moment perdu au liquide. & Diagnostic conduisant à x14v \\
+\texttt{x14v} & Kick cinétique excédentaire & Transfère J\_excess = J\_raw - J\_thermo au liquide afin d'ajouter le flux cinétique hors équilibre sans doubler la pression x6g. & Actif dans chaîne x14 candidate \\
+\texttt{x14w} & Couette biphasique & Benchmark de transfert tangentiel; teste continuité de contrainte via collisions SRC communes sans frottement interfacial ad hoc. & PASS-like sur contrainte tangentielle \\
+\texttt{x14x} & Goutte oscillante diphasique n=2 & Runner intégré x6g+x9+x14l+x14v+chaîne liquide; banc pour forme, moment et fréquence. & Qualification intégrée/tooling \\
+\texttt{x14y} & Ablation sans soustraction p\_g & Transfère J\_raw directement et supprime la soustraction thermodynamique. & Rejeté: double comptage pression équilibre \\
+\texttt{x14z} & Fermeture géométrique p\_ref & Corrige la résultante du seul p\_ref uniforme sur la polyligne x10n. & Rejeté comme cause du défaut n=1 \\
+\texttt{x14aa} & Traction thermodynamique absolue sur faces x6g & Déplace toute la traction sur la géométrie de faces Q6. & Non retenu: dégrade la géométrie locale de forme \\
+\texttt{x14ab} & p\_ref sur x10n + jauge sur faces x6g & Sépare référence et jauge mais garde traction variable sur normales axiales Q6. & Non retenu \\
+\texttt{x14ac} & Projection globale minimum-L2 & Garde l'ancien échantillonnage local et corrige uniquement la résultante globale. & Principe conservé, local supplanté par x14ad \\
+\texttt{x14ad} & Traction locale cohérente avec faces x6g & Échantillonne la pression de jauge des faces représentées qui terminent chaque segment x10n, applique sur normale locale, puis corrige la résultante résiduelle. & Retenu pour interfaces courbes x14 \\
+\texttt{x14ae} & Diagnostic pertes scatter & Compte les kicks x14v qui ne trouvent aucun support liquide après CIC/fallback. & Diagnostic; pertes nulles sur cas discriminant \\
+\texttt{x14af} & Diagnostic bilan global & Mesure J\_Q6 applique, J\_thermo et x14v; identifie le mismatch Q6/B1 - traction reconstruite comme source de dérive. & Diagnostic causal \\
+\texttt{x14ag} & Traînée avec inlet/outlet & Premier benchmark de traînée ouvert; évolution du gaz jusqu'à inversion du courant. & Abandonné \\
+\texttt{x14ah} & Traînée périodique-x & Canal périodique avec goutte entraînée par un profil gazeux; vérifie que la fermeture ne supprime pas la vraie traînée. & Benchmark intégré \\
+\texttt{x14ai} & Fermeture de résultante Q6 appliquée & Utilise la résultante B1/RT0 réellement appliquée comme cible globale de la projection de traction x14ad. & Concept retenu mais version initiale supplantée \\
+\texttt{x14ai-fix1} & Fermeture B1 exacte post-correction périodique & Corrige la cible x14ai pour inclure la correction uniforme périodique B1; ferme le moment global au roundoff. & Seulement composante liquide fermée et isolée des frontières Q6 externes \\
+\texttt{x14aj} & Goutte oscillante n=3 avec gaz & Qualification du mode n=3 de la chaîne x14ai-fix1. & REVIEW: fréquence \textasciitilde{}12\% lente dans campagne actuelle \\
+\texttt{x14ak} & Taylor-Culick diphasique - fluide x14 & TC avec paramètres liquide x14 (gamma=20, dt=0.002, etc.); comparaison historique confondait changement de fluide et effet gaz. & REVIEW; ne pas utiliser pour isoler effet gaz \\
+\texttt{x14al} & Taylor-Culick apparié au point x13h & Deux runs avec liquide initial identique: liquide seul vs même liquide + gaz, pour isoler le couplage gaz. & Contrôle liquide reproduit; branche gaz à relire car EOS global kBT avait été mal aligné dans le premier runner \\
+\texttt{x14am} & Young-Laplace diphasique multi-rayons & Screening multi-rayons avec x9e sans baseline sigma=0 longue. & REVIEW/non décisif à sigma=10000: kappa\_active et pression sont déjà connus comme métrologie bruyante/non monotone dans ce régime \\
+\end{longtable}
+\vspace{1mm}
+{\scriptsize\textit{Convention de lecture :} un jalon marqué ``diagnostic'', ``benchmark'' ou ``tooling'' ne constitue pas nécessairement une modification de la physique C++/CUDA. Les plages (par exemple x14a--x14j) sont regroupées lorsque le rapport consolidé ne documente pas une fonction distincte pour chaque lettre. Les nouveaux jalons x14al/x14am sont inclus afin que ce référentiel couvre aussi les campagnes les plus récentes.}
+\end{landscape}
+\end{document}

@@ -89,10 +89,7 @@ def main():
     ap.add_argument('--Lx',type=pfloat,default=2.0); ap.add_argument('--Ly',type=pfloat,default=1.0); ap.add_argument('--nx',type=pint,default=512); ap.add_argument('--ny',type=pint,default=256); ap.add_argument('--gamma',type=pint,default=20)
     ap.add_argument('--liquid-type',type=pint,default=1); ap.add_argument('--gas-type',type=pint,default=2); ap.add_argument('--liquid-mass',type=pfloat,default=1.0); ap.add_argument('--gas-mass',type=pfloat,default=.1); ap.add_argument('--liquid-kBT',type=nnfloat,default=.02); ap.add_argument('--gas-kBT',type=nnfloat,default=.08); ap.add_argument('--seed',type=int,default=493215)
     ap.add_argument('--liquid-center-y',type=float,default=.5); ap.add_argument('--liquid-diameter-cells',type=pint,default=12); ap.add_argument('--liquid-length-cells',type=pint,default=64); ap.add_argument('--liquid-wall-cells',type=pint,default=4); ap.add_argument('--liquid-prime-extra-cells',type=nint,default=4); ap.add_argument('--liquid-initial-ux',type=float,default=0.0)
-    ap.add_argument('--air-top-center-x-cells',type=pint,default=88); ap.add_argument('--air-bottom-center-x-cells',type=pint,default=88)
-    ap.add_argument('--air-top-thickness-cells',type=pint,default=12); ap.add_argument('--air-bottom-thickness-cells',type=pint,default=12)
-    ap.add_argument('--air-top-length-cells',type=pint,default=80); ap.add_argument('--air-bottom-length-cells',type=pint,default=80)
-    ap.add_argument('--air-top-wall-cells',type=pint,default=4); ap.add_argument('--air-bottom-wall-cells',type=pint,default=4)
+    ap.add_argument('--air-center-x-cells',type=pint,default=88); ap.add_argument('--air-top-diameter-cells',type=pint,default=12); ap.add_argument('--air-bottom-diameter-cells',type=pint,default=12); ap.add_argument('--air-top-length-cells',type=pint,default=80); ap.add_argument('--air-bottom-length-cells',type=pint,default=80); ap.add_argument('--air-wall-cells',type=pint,default=4); ap.add_argument('--air-feed-clearance-cells',type=nint,default=4)
     a=ap.parse_args()
     if a.gamma<2: ap.error('gamma must be >=2')
     if a.liquid_type==a.gas_type: ap.error('liquid and gas types must differ')
@@ -101,40 +98,30 @@ def main():
     h=hx
     lc=a.liquid_center_y; ld=a.liquid_diameter_cells*h; lw=a.liquid_wall_cells*h; lx=a.liquid_length_cells*h
     ly0,ly1=lc-ld/2,lc+ld/2; loy0,loy1=ly0-lw,ly1+lw
-
-    # 0414 geometry: direct top/bottom segmented air inlets.  Each straight
-    # nozzle has an independent x-position, aperture thickness, penetration
-    # length and wall thickness.
-    tcx=a.air_top_center_x_cells*h; bcx=a.air_bottom_center_x_cells*h
-    tt=a.air_top_thickness_cells*h; bt=a.air_bottom_thickness_cells*h
-    tl=a.air_top_length_cells*h; bl=a.air_bottom_length_cells*h
-    tw=a.air_top_wall_cells*h; bw=a.air_bottom_wall_cells*h
-    tx0,tx1=tcx-tt/2,tcx+tt/2; bx0,bx1=bcx-bt/2,bcx+bt/2
-    ty0,ty1=a.Ly-tl,a.Ly; by0,by1=0.0,bl
-    tox0,tox1=tx0-tw,tx1+tw; box0,box1=bx0-bw,bx1+bw
-
+    cx=a.air_center_x_cells*h; td=a.air_top_diameter_cells*h; bd=a.air_bottom_diameter_cells*h; aw=a.air_wall_cells*h; clear=a.air_feed_clearance_cells*h
+    tfy=a.Ly-clear-aw-td/2; bfy=clear+aw+bd/2
+    tex=tfy-a.air_top_length_cells*h; bex=bfy+a.air_bottom_length_cells*h
+    tx0,tx1=cx-td/2,cx+td/2; bx0,bx1=cx-bd/2,cx+bd/2
+    tf0,tf1=tfy-td/2,tfy+td/2; bf0,bf1=bfy-bd/2,bfy+bd/2
     try:
-        for n,v in [('ly0',ly0),('ly1',ly1),('loy0',loy0),('loy1',loy1),('lx',lx),
-                    ('tx0',tx0),('tx1',tx1),('bx0',bx0),('bx1',bx1),
-                    ('ty0',ty0),('by1',by1),('tox0',tox0),('tox1',tox1),('box0',box0),('box1',box1)]:
-            aligned(v,h,n)
+        for n,v in [('ly0',ly0),('ly1',ly1),('loy0',loy0),('loy1',loy1),('lx',lx),('cx',cx),('tx0',tx0),('tx1',tx1),('bx0',bx0),('bx1',bx1),('tf0',tf0),('tf1',tf1),('bf0',bf0),('bf1',bf1),('tex',tex),('bex',bex)]: aligned(v,h,n)
     except ValueError as e: ap.error(str(e))
     if not (0<loy0<ly0<ly1<loy1<a.Ly): ap.error('liquid nozzle does not fit')
-    if not (0<tx0<tx1<a.Lx and 0<bx0<bx1<a.Lx): ap.error('air inlet aperture outside top/bottom boundary')
-    if not (0<tox0<tx0<tx1<tox1<a.Lx and 0<box0<bx0<bx1<box1<a.Lx): ap.error('air nozzle walls outside domain')
-    if not (0<by1<loy0<loy1<ty0<a.Ly): ap.error('straight air nozzles overlap or do not bracket the liquid nozzle')
-    if not (lx < min(tox0,box0)-h): ap.error('air nozzle must be downstream of liquid-nozzle exit')
-
-    chi=array('f'); counts={'liquid_nozzle':0,'air_top_straight':0,'air_bottom_straight':0}; solid=0
+    if not (0<lx<cx-2*h<a.Lx): ap.error('air turn must be downstream of liquid exit')
+    if not (0<bf0<bf1<bex<lc<tex<tf0<tf1<a.Ly): ap.error('air feed/nozzle geometry does not bracket liquid center')
+    # Build chi as outer envelope minus L-shaped fluid corridor.
+    chi=array('f'); counts={'liquid_nozzle':0,'air_top_L':0,'air_bottom_L':0}; solid=0
     for j in range(a.ny):
         y=(j+.5)*h
         for i in range(a.nx):
             x=(i+.5)*h
             liq=(inside(x,y,0,loy0,lx,loy1) and not inside(x,y,0,ly0,lx,ly1))
-            ti=inside(x,y,tx0,ty0,tx1,ty1); to=inside(x,y,tox0,ty0,tox1,ty1)
-            bi=inside(x,y,bx0,by0,bx1,by1); bo=inside(x,y,box0,by0,box1,by1)
-            top=to and not ti
-            bot=bo and not bi
+            ti_h=inside(x,y,0,tf0,cx+td/2,tf1); ti_v=inside(x,y,tx0,tex,tx1,tfy+td/2)
+            to_h=inside(x,y,0,tf0-aw,cx+td/2+aw,tf1+aw); to_v=inside(x,y,tx0-aw,tex,tx1+aw,tfy+td/2+aw)
+            top=(to_h or to_v) and not (ti_h or ti_v)
+            bi_h=inside(x,y,0,bf0,cx+bd/2,bf1); bi_v=inside(x,y,bx0,bfy-bd/2,bx1,bex)
+            bo_h=inside(x,y,0,bf0-aw,cx+bd/2+aw,bf1+aw); bo_v=inside(x,y,bx0-aw,bfy-bd/2-aw,bx1+aw,bex)
+            bot=(bo_h or bo_v) and not (bi_h or bi_v)
             flags=(liq,top,bot); n=sum(map(int,flags))
             if n>1: ap.error(f'chi nozzle wall overlap at cell {i},{j}')
             chi.append(0.0 if n else 1.0); solid+=int(n>0)
@@ -159,11 +146,9 @@ def main():
                 for (px,py),(ux,uy) in zip(positions(i,j,a.gamma,h),paired(r,a.gamma,m,k,u,v)):
                     X.append(px);Y.append(py);VX.append(ux);VY.append(uy);T.append(typ);M.append(m);R.append(1)
         npart=len(X); write_state(a.output,X,Y,VX,VY,T,M,R)
-    meta={'profile':'0493x14av_0414_air_assisted_atomizer_2d','openBoundaryContract':'0414 multi-axis segmented: left liquid inlet + top/bottom gas inlets + right Neumann outlet','grid':{'Lx':a.Lx,'Ly':a.Ly,'Nx':a.nx,'Ny':a.ny,'h':h},'gamma':a.gamma,
+    meta={'profile':'0493x14av_fix1_air_assisted_atomizer_2d','openBoundaryContract':'x-axis only; three segmented left inlets + right outlet','grid':{'Lx':a.Lx,'Ly':a.Ly,'Nx':a.nx,'Ny':a.ny,'h':h},'gamma':a.gamma,
           'liquid':{'type':a.liquid_type,'mass':a.liquid_mass,'kBT':a.liquid_kBT,'centerY':lc,'diameterCells':a.liquid_diameter_cells,'diameter':ld,'lengthCells':a.liquid_length_cells,'length':lx,'wallCells':a.liquid_wall_cells,'innerY':[ly0,ly1],'outerY':[loy0,loy1],'primeX':prime},
-          'air':{'type':a.gas_type,'mass':a.gas_mass,'kBT':a.gas_kBT,
-                 'top':{'face':'top','centerX':tcx,'innerX':[tx0,tx1],'thicknessCells':a.air_top_thickness_cells,'thickness':tt,'lengthCells':a.air_top_length_cells,'length':tl,'wallCells':a.air_top_wall_cells,'exitY':ty0,'direction':'down'},
-                 'bottom':{'face':'bottom','centerX':bcx,'innerX':[bx0,bx1],'thicknessCells':a.air_bottom_thickness_cells,'thickness':bt,'lengthCells':a.air_bottom_length_cells,'length':bl,'wallCells':a.air_bottom_wall_cells,'exitY':by1,'direction':'up'}},
+          'air':{'type':a.gas_type,'mass':a.gas_mass,'kBT':a.gas_kBT,'turnX':cx,'wallCells':a.air_wall_cells,'feedClearanceCells':a.air_feed_clearance_cells,'top':{'feedCenterY':tfy,'feedInnerY':[tf0,tf1],'diameter':td,'length':a.air_top_length_cells*h,'exitY':tex,'direction':'down'},'bottom':{'feedCenterY':bfy,'feedInnerY':[bf0,bf1],'diameter':bd,'length':a.air_bottom_length_cells*h,'exitY':bex,'direction':'up'}},
           'chi':{'fluid':1.0,'solid':0.0,'solidCells':solid,'solidByPart':counts},'initialState':{'particles':npart,'liquidParticles':nl,'gasParticles':ng,'chiOnly':a.chi_only}}
     if not a.chi_only: a.output.with_suffix(a.output.suffix+'.json').write_text(json.dumps(meta,indent=2)+'\n')
     a.chi_output.with_suffix(a.chi_output.suffix+'.json').write_text(json.dumps(meta,indent=2)+'\n')
@@ -171,16 +156,14 @@ def main():
         a.geometry_svg.parent.mkdir(parents=True,exist_ok=True); W,H=1000.,500.; sx,sy=W/a.Lx,H/a.Ly
         def rect(x0,y0,x1,y1,fill): return f'<rect x="{x0*sx:.2f}" y="{H-y1*sy:.2f}" width="{(x1-x0)*sx:.2f}" height="{(y1-y0)*sy:.2f}" fill="{fill}"/>'
         bg='#eef6ff'; wall='#555'; liq='#2a78c4'
-        pieces=[rect(0,loy0,lx,loy1,wall),rect(0,ly0,prime,ly1,liq),
-                rect(tox0,ty0,tox1,ty1,wall),rect(tx0,ty0,tx1,ty1,bg),
-                rect(box0,by0,box1,by1,wall),rect(bx0,by0,bx1,by1,bg)]
-        svg='<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500">\n'+f'<rect width="1000" height="500" fill="{bg}" stroke="#111" stroke-width="2"/>\n'+''.join(pieces)+'\n<text x="12" y="24" font-family="sans-serif" font-size="18">0493x14av-0414: direct top/bottom gas inlets</text>\n</svg>\n'
+        pieces=[rect(0,loy0,lx,loy1,wall),rect(0,ly0,prime,ly1,liq),rect(0,tf0-aw,cx+td/2+aw,tf1+aw,wall),rect(tx0-aw,tex,tx1+aw,tfy+td/2+aw,wall),rect(0,tf0,cx+td/2,tf1,bg),rect(tx0,tex,tx1,tfy+td/2,bg),rect(0,bf0-aw,cx+bd/2+aw,bf1+aw,wall),rect(bx0-aw,bfy-bd/2-aw,bx1+aw,bex,wall),rect(0,bf0,cx+bd/2,bf1,bg),rect(bx0,bfy-bd/2,bx1,bex,bg)]
+        svg='<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500">\n'+f'<rect width="1000" height="500" fill="{bg}" stroke="#111" stroke-width="2"/>\n'+''.join(pieces)+'\n<text x="12" y="24" font-family="sans-serif" font-size="18">0493x14av-fix1: x-open only; L-shaped gas feeds</text>\n</svg>\n'
         a.geometry_svg.write_text(svg)
-    print(f'[0493x14av-0414-generate] grid={a.nx}x{a.ny} h={h:.9g} gamma={a.gamma} N={npart} chiOnly={int(a.chi_only)}')
-    print(f'[0493x14av-0414-generate] liquid D={ld:.9g} L={lx:.9g} exitX={lx:.9g}')
-    print(f'[0493x14av-0414-generate] top gas face=top centerX={tcx:.9g} aperture={tt:.9g} length={tl:.9g} exitY={ty0:.9g}')
-    print(f'[0493x14av-0414-generate] bottom gas face=bottom centerX={bcx:.9g} aperture={bt:.9g} length={bl:.9g} exitY={by1:.9g}')
-    print(f'[0493x14av-0414-generate] openAxes=x+y gapY={ty0-by1:.9g} chiSolidCells={solid}')
+    print(f'[0493x14av-fix1-generate] grid={a.nx}x{a.ny} h={h:.9g} gamma={a.gamma} N={npart} chiOnly={int(a.chi_only)}')
+    print(f'[0493x14av-fix1-generate] liquid D={ld:.9g} L={lx:.9g} exitX={lx:.9g}')
+    print(f'[0493x14av-fix1-generate] top gas leftFeedY={tfy:.9g} D={td:.9g} terminalL={a.air_top_length_cells*h:.9g} exitY={tex:.9g}')
+    print(f'[0493x14av-fix1-generate] bottom gas leftFeedY={bfy:.9g} D={bd:.9g} terminalL={a.air_bottom_length_cells*h:.9g} exitY={bex:.9g}')
+    print(f'[0493x14av-fix1-generate] openAxis=x only turnX={cx:.9g} gap={tex-bex:.9g} chiSolidCells={solid}')
     return 0
 if __name__=='__main__': raise SystemExit(main())
 PYGEN
@@ -269,10 +252,8 @@ def main() -> int:
     ap.add_argument("--gamma", type=float, required=True)
     ap.add_argument("--liquid-type", type=int, required=True)
     ap.add_argument("--liquid-nozzle-exit-x", type=float, required=True)
-    ap.add_argument("--air-top-center-x", type=float, required=True)
-    ap.add_argument("--air-bottom-center-x", type=float, required=True)
-    ap.add_argument("--air-top-thickness", type=float, required=True)
-    ap.add_argument("--air-bottom-thickness", type=float, required=True)
+    ap.add_argument("--air-center-x", type=float, required=True)
+    ap.add_argument("--air-diameter", type=float, required=True)
     ap.add_argument("--component-threshold-fraction", type=float, default=0.25)
     ap.add_argument("--min-detached-cells", type=int, default=2)
     args = ap.parse_args()
@@ -289,10 +270,7 @@ def main() -> int:
     if abs(hx-hy) > 1e-12*max(1.0, abs(hx), abs(hy)):
         raise RuntimeError("square cells required")
     threshold = max(1, int(round(args.component_threshold_fraction * args.gamma)))
-    downstream_x = max(
-        args.air_top_center_x + 2.0 * args.air_top_thickness,
-        args.air_bottom_center_x + 2.0 * args.air_bottom_thickness,
-    )
+    downstream_x = args.air_center_x + 2.0 * args.air_diameter
 
     rows = []
     for step, path in dumps:
@@ -377,39 +355,45 @@ chmod +x "$GENERATOR" "$ANALYZER"
 # helper preflight plus the selected binary.  Generator/analyzer remain embedded.
 
 # =============================================================================
-# 0493x14av-0414 — AIR-ASSISTED ATOMIZER DEMONSTRATION
+# 0493x14av-s2 — AIR-ASSISTED ATOMIZER DEMONSTRATION (2-D, run_ok-homogeneous standalone runner)
 #
-# Geometry (chi-Darcy nozzle walls + 0414 segmented open boundaries):
+# Geometry (chi-Darcy nozzle walls):
 #
-#                  TOP GAS INLET
-#                       ||
-#                       \/
+# LEFT FACE ONLY (current 0142 open-boundary contract):
+#
+#     gas inlet --->========\
+#                           ||
+#                           ||  top air nozzle
+#                           \/
 # liquid inlet --->===========> liquid jet ==================> RIGHT OUTLET
-#                       /\
-#                       ||
-#                BOTTOM GAS INLET
+#                           /\
+#                           ||  bottom air nozzle
+#                           ||
+#     gas inlet --->========/
 #
-# Patch 0414 removes the old single-open-axis restriction. The liquid keeps its
-# segmented LEFT inlet and the full RIGHT passive Neumann outlet. Gas is now
-# supplied directly by independent segmented TOP and BOTTOM inlets; the old
-# L-shaped feed ducts and 90-degree turns are removed.
+# All THREE inlet reservoirs are segmented on the LEFT face.  Chi-Darcy
+# L-shaped feed ducts turn the two gas streams through 90 degrees so that their
+# terminal nozzle legs are perpendicular to the horizontal liquid nozzle.  This
+# respects the current 0142 solver contract: open boundaries may occupy only one
+# Cartesian axis at a time.  The full right face is the passive Neumann outlet.
 #
-# Top and bottom air nozzles independently parameterize x-position, aperture
-# thickness, straight penetration length, wall thickness and inlet speed.
-#
-# This remains a DEMONSTRATION runner, not a physical atomizer qualification. It
-# keeps the same x14 liquid/gas physics and numerical parameters as the previous
-# runner; only air-feed geometry/open-boundary placement is changed for 0414.
+# This is a DEMONSTRATION runner, not a physical atomizer qualification.  It
+# integrates the currently qualified compatible pieces of the x14 liquid/gas
+# chain: multi-species SRC, liquid Q6-g-f, x9 surface tension, x6g gas pressure,
+# x10o/CIC/Q2/x10u/x10v/x12a liquid interface support, x14l gas specular normal
+# reflection, x14v gas excess normal impulse, x14ad local gas traction, chi-Darcy
+# nozzle shaping, three same-face segmented inlets and a passive right outlet.
 #
 # x14ai global-resultant closure remains OFF because the liquid is connected to
-# an external inlet and the domain has open boundaries. Resampling and virial
-# closures remain OFF.
+# an external inlet and the domain has open boundaries.  Resampling and virial
+# closures remain OFF: they are not silently added to the qualified x14 chain.
 #
-# Requires the qualified 0414 CUDA-resident segmented x+y boundary path.
-# No C++/CUDA modification. LiveVis control remains user-owned/read-only.
+# No C++/CUDA modification. ./livevis_control.kv is read-only/user-owned.
+# Runtime conventions follow the 0434/run_ok_* suite wherever the two-phase x14
+# physics does not require an explicit specialization.
 # =============================================================================
 
-CASE_LABEL="${CASE_LABEL:-0493x14av_0414_air_assisted_atomizer_demo}"
+CASE_LABEL="${CASE_LABEL:-0493x14av_air_assisted_atomizer_demo}"
 RUN_MODE="src-q6-g-f"
 TOPOLOGY="segmented"
 
@@ -462,10 +446,8 @@ GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
 SPECIES_Q6_MIN_FILL_FRACTION="${SPECIES_Q6_MIN_FILL_FRACTION:-0.10}"
 
 # ---- Three parameterized nozzles --------------------------------------------
-# Liquid nozzle is unchanged. In 2-D the gas-nozzle "thickness" is the slot
-# aperture along the top/bottom boundary; "length" is straight penetration into
-# the domain. Common AIR_NOZZLE_* aliases preserve the former default values,
-# while every top/bottom geometric quantity can be overridden independently.
+# In 2-D, "diameter" means slit aperture width. Cell counts ensure exact chi
+# alignment; physical D and L are derived as cells*h and printed by preflight.
 LIQUID_NOZZLE_CENTER_Y="${LIQUID_NOZZLE_CENTER_Y:-0.78125}"
 LIQUID_NOZZLE_DIAMETER_CELLS="${LIQUID_NOZZLE_DIAMETER_CELLS:-12}"
 LIQUID_NOZZLE_LENGTH_CELLS="${LIQUID_NOZZLE_LENGTH_CELLS:-32}"
@@ -473,24 +455,20 @@ LIQUID_NOZZLE_WALL_CELLS="${LIQUID_NOZZLE_WALL_CELLS:-24}"
 LIQUID_PRIME_EXTRA_CELLS="${LIQUID_PRIME_EXTRA_CELLS:-4}"
 LIQUID_SPEED="${LIQUID_SPEED:-0.15}"
 
+# The air-nozzle center is specified as a cell coordinate from the left face.
+# It must lie downstream of the liquid nozzle exit. Top and bottom dimensions
+# can be varied independently; the common AIR_NOZZLE_* aliases set both.
 AIR_NOZZLE_CENTER_X_CELLS="${AIR_NOZZLE_CENTER_X_CELLS:-88}"
-AIR_TOP_NOZZLE_CENTER_X_CELLS="${AIR_TOP_NOZZLE_CENTER_X_CELLS:-$AIR_NOZZLE_CENTER_X_CELLS}"
-AIR_BOTTOM_NOZZLE_CENTER_X_CELLS="${AIR_BOTTOM_NOZZLE_CENTER_X_CELLS:-$AIR_NOZZLE_CENTER_X_CELLS}"
-
 AIR_NOZZLE_DIAMETER_CELLS="${AIR_NOZZLE_DIAMETER_CELLS:-12}"
-AIR_TOP_NOZZLE_THICKNESS_CELLS="${AIR_TOP_NOZZLE_THICKNESS_CELLS:-${AIR_TOP_NOZZLE_DIAMETER_CELLS:-$AIR_NOZZLE_DIAMETER_CELLS}}"
-AIR_BOTTOM_NOZZLE_THICKNESS_CELLS="${AIR_BOTTOM_NOZZLE_THICKNESS_CELLS:-${AIR_BOTTOM_NOZZLE_DIAMETER_CELLS:-$AIR_NOZZLE_DIAMETER_CELLS}}"
-
+AIR_TOP_NOZZLE_DIAMETER_CELLS="${AIR_TOP_NOZZLE_DIAMETER_CELLS:-$AIR_NOZZLE_DIAMETER_CELLS}"
+AIR_BOTTOM_NOZZLE_DIAMETER_CELLS="${AIR_BOTTOM_NOZZLE_DIAMETER_CELLS:-$AIR_NOZZLE_DIAMETER_CELLS}"
 AIR_NOZZLE_LENGTH_CELLS="${AIR_NOZZLE_LENGTH_CELLS:-140}"
 AIR_TOP_NOZZLE_LENGTH_CELLS="${AIR_TOP_NOZZLE_LENGTH_CELLS:-$AIR_NOZZLE_LENGTH_CELLS}"
 AIR_BOTTOM_NOZZLE_LENGTH_CELLS="${AIR_BOTTOM_NOZZLE_LENGTH_CELLS:-$AIR_NOZZLE_LENGTH_CELLS}"
-
 AIR_NOZZLE_WALL_CELLS="${AIR_NOZZLE_WALL_CELLS:-14}"
-AIR_TOP_NOZZLE_WALL_CELLS="${AIR_TOP_NOZZLE_WALL_CELLS:-$AIR_NOZZLE_WALL_CELLS}"
-AIR_BOTTOM_NOZZLE_WALL_CELLS="${AIR_BOTTOM_NOZZLE_WALL_CELLS:-$AIR_NOZZLE_WALL_CELLS}"
-
-AIR_TOP_SPEED="${AIR_TOP_SPEED:-0.0}"
-AIR_BOTTOM_SPEED="${AIR_BOTTOM_SPEED:-0.0}"
+AIR_FEED_CLEARANCE_CELLS="${AIR_FEED_CLEARANCE_CELLS:-4}"
+AIR_TOP_SPEED="${AIR_TOP_SPEED:-1.5}"
+AIR_BOTTOM_SPEED="${AIR_BOTTOM_SPEED:-1.5}" #$AIR_TOP_SPEED}"
 
 # One common ramp is a current segmented-IO property; speeds remain independent.
 INLET_RAMP_START_TIME="${INLET_RAMP_START_TIME:-0.0}"
@@ -625,7 +603,7 @@ RECORD_EVERY="${RECORD_EVERY:-100}"
 RECORD_FIELDS="${RECORD_FIELDS:-mass,ux,uy}"
 FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-100}"
 
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-${CAMPAIGN_ROOT:-runs/0493x14av_0414_air_assisted_atomizer_seed_noair_${SEED}}}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-${CAMPAIGN_ROOT:-runs/0493x14av_air_assisted_atomizer_seed${SEED}}}"
 if [[ "$RESTART" == "1" ]]; then
   [[ -n "$RESTART_STATE" && -s "$RESTART_STATE" ]] || { echo '[0493x14av] ERROR RESTART=1 requires RESTART_STATE=/path/state_step_N.smpcd' >&2; exit 2; }
   RUN_ROOT="$BASE_RUN_ROOT/restart_${RESTART_TAG}"
@@ -645,57 +623,53 @@ suite_compute_derived_0434
 # ---- Geometry and dimensionless preflight -----------------------------------
 DERIVED_LINE="$(python3 - \
   "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$LIQUID_NOZZLE_CENTER_Y" "$LIQUID_NOZZLE_DIAMETER_CELLS" \
-  "$LIQUID_NOZZLE_LENGTH_CELLS" "$LIQUID_NOZZLE_WALL_CELLS" \
-  "$AIR_TOP_NOZZLE_CENTER_X_CELLS" "$AIR_BOTTOM_NOZZLE_CENTER_X_CELLS" \
-  "$AIR_TOP_NOZZLE_THICKNESS_CELLS" "$AIR_BOTTOM_NOZZLE_THICKNESS_CELLS" \
-  "$AIR_TOP_NOZZLE_LENGTH_CELLS" "$AIR_BOTTOM_NOZZLE_LENGTH_CELLS" \
-  "$AIR_TOP_NOZZLE_WALL_CELLS" "$AIR_BOTTOM_NOZZLE_WALL_CELLS" \
-  "$LIQUID_SPEED" "$AIR_TOP_SPEED" "$AIR_BOTTOM_SPEED" "$DT" \
+  "$LIQUID_NOZZLE_LENGTH_CELLS" "$AIR_NOZZLE_CENTER_X_CELLS" "$AIR_TOP_NOZZLE_DIAMETER_CELLS" \
+  "$AIR_BOTTOM_NOZZLE_DIAMETER_CELLS" "$AIR_TOP_NOZZLE_LENGTH_CELLS" "$AIR_BOTTOM_NOZZLE_LENGTH_CELLS" \
+  "$AIR_NOZZLE_WALL_CELLS" "$AIR_FEED_CLEARANCE_CELLS" "$LIQUID_SPEED" "$AIR_TOP_SPEED" "$AIR_BOTTOM_SPEED" "$DT" \
   "$GAS_MASS" "$GAS_KBT" "$LIQUID_MASS" "$LIQUID_KBT" "$SURFACE_TENSION_SIGMA" \
-  "$LIQUID_NU_REFERENCE" "$GAS_NU_REFERENCE" "$ALPHA" "$INLET_RESERVOIR_CELLS" <<'PYDER'
+  "$LIQUID_NU_REFERENCE" "$GAS_NU_REFERENCE" "$ALPHA" <<'PY'
 import math,sys
-lx,ly=map(float,sys.argv[1:3]); nx,ny=map(int,sys.argv[3:5]); gam=float(sys.argv[5]); lcy=float(sys.argv[6]); ldc=int(sys.argv[7]); llc=int(sys.argv[8]); lwc=int(sys.argv[9])
-tcxcell=int(sys.argv[10]); bcxcell=int(sys.argv[11]); ttc=int(sys.argv[12]); btc=int(sys.argv[13]); tlc=int(sys.argv[14]); blc=int(sys.argv[15]); twc=int(sys.argv[16]); bwc=int(sys.argv[17])
-ul=float(sys.argv[18]); uat=float(sys.argv[19]); uab=float(sys.argv[20]); dt=float(sys.argv[21]); mg=float(sys.argv[22]); kg=float(sys.argv[23]); ml=float(sys.argv[24]); kl=float(sys.argv[25]); sig=float(sys.argv[26]); nul=float(sys.argv[27]); nug=float(sys.argv[28]); alpha=float(sys.argv[29]); reservoir=int(sys.argv[30])
+lx,ly=map(float,sys.argv[1:3]); nx,ny=map(int,sys.argv[3:5]); gam=float(sys.argv[5]); lcy=float(sys.argv[6]); ldc=int(sys.argv[7]); llc=int(sys.argv[8]); acell=int(sys.argv[9]); atdc=int(sys.argv[10]); abdc=int(sys.argv[11]); atlc=int(sys.argv[12]); ablc=int(sys.argv[13]); awc=int(sys.argv[14]); clearc=int(sys.argv[15]); ul=float(sys.argv[16]); uat=float(sys.argv[17]); uab=float(sys.argv[18]); dt=float(sys.argv[19]); mg=float(sys.argv[20]); kg=float(sys.argv[21]); ml=float(sys.argv[22]); kl=float(sys.argv[23]); sig=float(sys.argv[24]); nul=float(sys.argv[25]); nug=float(sys.argv[26]); alpha=float(sys.argv[27])
 hx=lx/nx; hy=ly/ny
-if abs(hx-hy)>1e-12*max(1,abs(hx),abs(hy)): raise SystemExit('[0493x14av-0414] square cells required')
-if min(ldc,llc,lwc,tcxcell,bcxcell,ttc,btc,tlc,blc,twc,bwc,reservoir)<=0: raise SystemExit('[0493x14av-0414] invalid cell parameter')
-ld=ldc*hx; ll=llc*hx; lw=lwc*hx; y0=lcy-.5*ld; y1=lcy+.5*ld; loy0=y0-lw; loy1=y1+lw
-tcx=tcxcell*hx; bcx=bcxcell*hx; tt=ttc*hx; bt=btc*hx; tl=tlc*hy; bl=blc*hy; tw=twc*hx; bw=bwc*hx
-tx0,tx1=tcx-.5*tt,tcx+.5*tt; bx0,bx1=bcx-.5*bt,bcx+.5*bt
-tox0,tox1=tx0-tw,tx1+tw; box0,box1=bx0-bw,bx1+bw
-ty0=ly-tl; by1=bl
-for name,val in [('y0',y0),('y1',y1),('loy0',loy0),('loy1',loy1),('ll',ll),('tx0',tx0),('tx1',tx1),('bx0',bx0),('bx1',bx1),('ty0',ty0),('by1',by1),('tox0',tox0),('tox1',tox1),('box0',box0),('box1',box1)]:
-    if abs(val/hx-round(val/hx))>1e-9: raise SystemExit(f'[0493x14av-0414] {name}={val:.17g} not cell-face aligned')
-if not (0<loy0<y0<y1<loy1<ly): raise SystemExit('[0493x14av-0414] liquid nozzle outside domain')
-if not (0<tox0<tx0<tx1<tox1<lx and 0<box0<bx0<bx1<box1<lx): raise SystemExit('[0493x14av-0414] top/bottom nozzle aperture or walls outside domain')
-if not (0<by1<loy0<loy1<ty0<ly): raise SystemExit('[0493x14av-0414] straight air nozzles overlap or fail to bracket liquid nozzle')
-if not (ll < min(tox0,box0)-hx): raise SystemExit('[0493x14av-0414] gas nozzle must be downstream of liquid nozzle exit')
-ls0=y0/ly; ls1=y1/ly; ts0=tx0/lx; ts1=tx1/lx; bs0=bx0/lx; bs1=bx1/lx
-for a,b,n in ((ls0,ls1,'liquid-left'),(ts0,ts1,'top-gas'),(bs0,bs1,'bottom-gas')):
-    if not (0<=a<b<=1): raise SystemExit(f'[0493x14av-0414] invalid segmented opening {n}')
-r=reservoir*hx
-if tx0 < r and loy1 > ly-r: raise SystemExit('[0493x14av-0414] top gas hard reservoir overlaps left liquid hard reservoir')
-if bx0 < r and loy0 < r: raise SystemExit('[0493x14av-0414] bottom gas hard reservoir overlaps left liquid hard reservoir')
+if abs(hx-hy)>1e-12*max(1,abs(hx),abs(hy)): raise SystemExit('[0493x14av-fix1] square cells required')
+if min(ldc,llc,acell,atdc,abdc,atlc,ablc,awc)<=0 or clearc<0: raise SystemExit('[0493x14av-fix1] invalid cell parameter')
+ld=ldc*hx; ll=llc*hx; y0=lcy-.5*ld; y1=lcy+.5*ld; ac=acell*hx; atd=atdc*hx; abd=abdc*hx; aw=awc*hx; clear=clearc*hx
+# Horizontal feed-channel centerlines are placed inside top/bottom walls; the
+# vertical terminal leg length is the user AIR_*_NOZZLE_LENGTH_CELLS.
+atfy=ly-clear-aw-.5*atd
+abfy=clear+aw+.5*abd
+ate=atfy-atlc*hy
+abe=abfy+ablc*hy
+if not (0<y0<y1<ly): raise SystemExit('[0493x14av-fix1] liquid aperture outside domain')
+if not (0<ll<ac-2*hx<lx): raise SystemExit('[0493x14av-fix1] air center must be downstream of liquid exit')
+if not (0<abfy<abe<lcy<ate<atfy<ly): raise SystemExit('[0493x14av-fix1] air terminal exits/feed channels do not bracket liquid centerline')
+ls0=y0/ly; ls1=y1/ly
+ats0=(atfy-.5*atd)/ly; ats1=(atfy+.5*atd)/ly
+abs0=(abfy-.5*abd)/ly; abs1=(abfy+.5*abd)/ly
+for a,b,n in ((ls0,ls1,'liquid'),(ats0,ats1,'top gas'),(abs0,abs1,'bottom gas')):
+    if not (0<=a<b<=1): raise SystemExit(f'[0493x14av-fix1] invalid left-face segment {n}')
+# Segments must be disjoint on the single supported open axis.
+segs=sorted([(ls0,ls1,'liquid'),(ats0,ats1,'top'),(abs0,abs1,'bottom')])
+for (_,b,n1),(c,_,n2) in zip(segs,segs[1:]):
+    if b>c+1e-12: raise SystemExit(f'[0493x14av-fix1] overlapping left inlet segments {n1}/{n2}')
 A=hx*hy; rhoG=gam*mg/A; rhoL=gam*ml/A; pref=gam*kg/A
 cthg=math.sqrt(kg/mg)*dt/hx; cthl=math.sqrt(kl/ml)*dt/hx
 cgt=cthg+abs(uat)*dt/hx; cgb=cthg+abs(uab)*dt/hx; cl=cthl+abs(ul)*dt/hx
-wegt=rhoG*uat*uat*tt/sig; wegb=rhoG*uab*uab*bt/sig; wel=rhoL*ul*ul*ld/sig
-regt=abs(uat)*tt/nug; regb=abs(uab)*bt/nug; rel=abs(ul)*ld/nul
+wegt=rhoG*uat*uat*atd/sig; wegb=rhoG*uab*uab*abd/sig; wel=rhoL*ul*ul*ld/sig
+regt=abs(uat)*atd/nug; regb=abs(uab)*abd/nug; rel=abs(ul)*ld/nul
 mrt=(rhoG*uat*uat)/(rhoL*ul*ul) if ul else float('inf'); mrb=(rhoG*uab*uab)/(rhoL*ul*ul) if ul else float('inf')
 lam=1-math.exp(-alpha*dt)
-print(hx,A,ld,ll,y0,y1,loy0,loy1,tcx,bcx,tt,bt,tl,bl,ty0,by1,ls0,ls1,ts0,ts1,bs0,bs1,pref,rhoG,rhoL,cthg,cthl,cgt,cgb,cl,wegt,wegb,wel,regt,regb,rel,mrt,mrb,lam)
-PYDER
-)" || { echo '[0493x14av-0414] ERROR geometry/derived-parameter preflight failed' >&2; exit 2; }
+print(hx,A,ld,ll,y0,y1,ac,atd,abd,ate,abe,ls0,ls1,ats0,ats1,abs0,abs1,atfy,abfy,pref,rhoG,rhoL,cthg,cthl,cgt,cgb,cl,wegt,wegb,wel,regt,regb,rel,mrt,mrb,lam)
+PY
+)" || { echo '[0493x14av] ERROR geometry/derived-parameter preflight failed' >&2; exit 2; }
 
-read -r H CELL_AREA LIQ_D LIQ_L LIQ_Y0 LIQ_Y1 LIQ_OY0 LIQ_OY1 \
-  AIR_TOP_CX AIR_BOT_CX AIR_TOP_D AIR_BOT_D AIR_TOP_L AIR_BOT_L AIR_TOP_EXIT AIR_BOT_EXIT \
+read -r H CELL_AREA LIQ_D LIQ_L LIQ_Y0 LIQ_Y1 AIR_CX AIR_TOP_D AIR_BOT_D AIR_TOP_EXIT AIR_BOT_EXIT \
   LIQ_SMIN LIQ_SMAX AIR_TOP_SMIN AIR_TOP_SMAX AIR_BOT_SMIN AIR_BOT_SMAX \
-  GAS_P_REF GAS_RHO LIQUID_RHO CTH_G CTH_L CFL_G_TOP CFL_G_BOT CFL_L \
+  AIR_TOP_FEED_Y AIR_BOT_FEED_Y GAS_P_REF GAS_RHO LIQUID_RHO CTH_G CTH_L CFL_G_TOP CFL_G_BOT CFL_L \
   WE_G_TOP WE_G_BOT WE_L RE_G_TOP RE_G_BOT RE_L MOM_RATIO_TOP MOM_RATIO_BOT DARCY_LAMBDA <<<"$DERIVED_LINE"
 
-for v in H LIQ_D LIQ_L AIR_TOP_CX AIR_BOT_CX LIQ_SMIN LIQ_SMAX AIR_TOP_SMIN AIR_TOP_SMAX AIR_BOT_SMIN AIR_BOT_SMAX; do
-  [[ -n "${!v:-}" ]] || { echo "[0493x14av-0414] ERROR derived variable $v is empty" >&2; exit 2; }
+for v in H LIQ_D LIQ_L AIR_CX LIQ_SMIN LIQ_SMAX AIR_TOP_SMIN AIR_TOP_SMAX AIR_BOT_SMIN AIR_BOT_SMAX; do
+  [[ -n "${!v:-}" ]] || { echo "[0493x14av] ERROR derived variable $v is empty" >&2; exit 2; }
 done
 
 MAX_FLIGHT="$(python3 - "$CFL_G_TOP" "$CFL_G_BOT" "$CFL_L" <<'PYF'
@@ -733,14 +707,13 @@ GEN_ARGS=(
   --liquid-length-cells "$LIQUID_NOZZLE_LENGTH_CELLS"
   --liquid-wall-cells "$LIQUID_NOZZLE_WALL_CELLS"
   --liquid-prime-extra-cells "$LIQUID_PRIME_EXTRA_CELLS"
-  --air-top-center-x-cells "$AIR_TOP_NOZZLE_CENTER_X_CELLS"
-  --air-bottom-center-x-cells "$AIR_BOTTOM_NOZZLE_CENTER_X_CELLS"
-  --air-top-thickness-cells "$AIR_TOP_NOZZLE_THICKNESS_CELLS"
-  --air-bottom-thickness-cells "$AIR_BOTTOM_NOZZLE_THICKNESS_CELLS"
+  --air-center-x-cells "$AIR_NOZZLE_CENTER_X_CELLS"
+  --air-top-diameter-cells "$AIR_TOP_NOZZLE_DIAMETER_CELLS"
+  --air-bottom-diameter-cells "$AIR_BOTTOM_NOZZLE_DIAMETER_CELLS"
   --air-top-length-cells "$AIR_TOP_NOZZLE_LENGTH_CELLS"
   --air-bottom-length-cells "$AIR_BOTTOM_NOZZLE_LENGTH_CELLS"
-  --air-top-wall-cells "$AIR_TOP_NOZZLE_WALL_CELLS"
-  --air-bottom-wall-cells "$AIR_BOTTOM_NOZZLE_WALL_CELLS"
+  --air-wall-cells "$AIR_NOZZLE_WALL_CELLS"
+  --air-feed-clearance-cells "$AIR_FEED_CLEARANCE_CELLS"
 )
 if [[ "$RESTART" == "1" ]]; then
   cp -f "$RESTART_STATE" "$STATE"
@@ -752,9 +725,9 @@ fi
 LREF="$(awk -v g="$GAMMA" -v m="$LIQUID_MASS" 'BEGIN{printf "%.17g",g*m}')"
 GREF="$(awk -v g="$GAMMA" -v m="$GAS_MASS" 'BEGIN{printf "%.17g",g*m}')"
 
-SEG0="left inlet $LIQ_SMIN $LIQ_SMAX $LIQUID_SPEED 0.0 $LIQUID_TYPE $LIQUID_MASS"
-SEG1="bottom inlet $AIR_BOT_SMIN $AIR_BOT_SMAX 0.0 $AIR_BOTTOM_SPEED $GAS_TYPE $GAS_MASS"
-SEG2="top inlet $AIR_TOP_SMIN $AIR_TOP_SMAX 0.0 -$AIR_TOP_SPEED $GAS_TYPE $GAS_MASS"
+SEG0="left inlet $AIR_BOT_SMIN $AIR_BOT_SMAX $AIR_BOTTOM_SPEED 0.0 $GAS_TYPE $GAS_MASS"
+SEG1="left inlet $LIQ_SMIN $LIQ_SMAX $LIQUID_SPEED 0.0 $LIQUID_TYPE $LIQUID_MASS"
+SEG2="left inlet $AIR_TOP_SMIN $AIR_TOP_SMAX $AIR_TOP_SPEED 0.0 $GAS_TYPE $GAS_MASS"
 SEG3="right outlet $OUTLET_SMIN $OUTLET_SMAX 0.0 0.0 0 $GAS_MASS"
 
 validate_segment_0493x14av() {
@@ -907,21 +880,16 @@ LIQUID_NOZZLE_LENGTH_CELLS=$LIQUID_NOZZLE_LENGTH_CELLS
 LIQUID_NOZZLE_DIAMETER=$LIQ_D
 LIQUID_NOZZLE_LENGTH=$LIQ_L
 LIQUID_SPEED=$LIQUID_SPEED
-PATCH_0414_MULTI_AXIS_AIR_INLETS=1
-AIR_TOP_NOZZLE_CENTER_X_CELLS=$AIR_TOP_NOZZLE_CENTER_X_CELLS
-AIR_BOTTOM_NOZZLE_CENTER_X_CELLS=$AIR_BOTTOM_NOZZLE_CENTER_X_CELLS
-AIR_TOP_NOZZLE_CENTER_X=$AIR_TOP_CX
-AIR_BOTTOM_NOZZLE_CENTER_X=$AIR_BOT_CX
-AIR_TOP_NOZZLE_THICKNESS_CELLS=$AIR_TOP_NOZZLE_THICKNESS_CELLS
-AIR_BOTTOM_NOZZLE_THICKNESS_CELLS=$AIR_BOTTOM_NOZZLE_THICKNESS_CELLS
+AIR_NOZZLE_CENTER_X_CELLS=$AIR_NOZZLE_CENTER_X_CELLS
+AIR_NOZZLE_CENTER_X=$AIR_CX
+AIR_TOP_NOZZLE_DIAMETER_CELLS=$AIR_TOP_NOZZLE_DIAMETER_CELLS
+AIR_BOTTOM_NOZZLE_DIAMETER_CELLS=$AIR_BOTTOM_NOZZLE_DIAMETER_CELLS
 AIR_TOP_NOZZLE_LENGTH_CELLS=$AIR_TOP_NOZZLE_LENGTH_CELLS
 AIR_BOTTOM_NOZZLE_LENGTH_CELLS=$AIR_BOTTOM_NOZZLE_LENGTH_CELLS
-AIR_TOP_NOZZLE_WALL_CELLS=$AIR_TOP_NOZZLE_WALL_CELLS
-AIR_BOTTOM_NOZZLE_WALL_CELLS=$AIR_BOTTOM_NOZZLE_WALL_CELLS
 AIR_TOP_SPEED=$AIR_TOP_SPEED
 AIR_BOTTOM_SPEED=$AIR_BOTTOM_SPEED
 RIGHT_OUTLET_MODE=$OUTLET_MODE
-RUN_OK_PROFILE=0493x14av_0414_run_ok_homogeneous
+RUN_OK_PROFILE=0493x14av_s2_run_ok_homogeneous
 RUN_OK_DARCY_PROFILE=0434_common
 ALPHA=$ALPHA
 ALPHA_MIN=$ALPHA_MIN
@@ -939,14 +907,14 @@ META
 
 run_ok_surface_print_0493x13zi "air-assisted atomizer: gas pressure + Laplace tension + liquid interface support + gas specular/excess impulse + local traction"
 echo "===== 0493x14av-s2 AIR-ASSISTED ATOMIZER DEMO ====="
-echo "PATHS: runner=scripts/run_ok_air_assisted_atomizer.sh"
+echo "PATHS: runner=scripts/run_0493x14av_air_assisted_atomizer_demo.sh"
 echo "       generator=embedded analyzer=embedded binary=$BIN"
 echo "       state=$STATE chi=$CHI_FILE geometry=$GEOM_SVG"
 echo "DOMAIN: ${Lx}x${Ly} grid=${NX}x${NY} h=$H gamma=$GAMMA dt=$DT steps=$STEPS"
 echo "LIQUID NOZZLE: left -> right centerY=$LIQUID_NOZZLE_CENTER_Y Dcells=$LIQUID_NOZZLE_DIAMETER_CELLS D=$LIQ_D Lcells=$LIQUID_NOZZLE_LENGTH_CELLS L=$LIQ_L U=$LIQUID_SPEED"
-echo "AIR TOP: direct TOP inlet centerX=$AIR_TOP_CX centerCells=$AIR_TOP_NOZZLE_CENTER_X_CELLS thicknessCells=$AIR_TOP_NOZZLE_THICKNESS_CELLS thickness=$AIR_TOP_D lengthCells=$AIR_TOP_NOZZLE_LENGTH_CELLS length=$AIR_TOP_L exitY=$AIR_TOP_EXIT inwardUy=-$AIR_TOP_SPEED"
-echo "AIR BOTTOM: direct BOTTOM inlet centerX=$AIR_BOT_CX centerCells=$AIR_BOTTOM_NOZZLE_CENTER_X_CELLS thicknessCells=$AIR_BOTTOM_NOZZLE_THICKNESS_CELLS thickness=$AIR_BOT_D lengthCells=$AIR_BOTTOM_NOZZLE_LENGTH_CELLS length=$AIR_BOT_L exitY=$AIR_BOT_EXIT inwardUy=$AIR_BOTTOM_SPEED"
-echo "BOUNDARIES(0414): segmented LEFT liquid inlet + BOTTOM/TOP gas inlets + full RIGHT Neumann outlet; x+y open axes"
+echo "AIR TOP: left-feedY=$AIR_TOP_FEED_Y -> 90deg turn at x=$AIR_CX; Dcells=$AIR_TOP_NOZZLE_DIAMETER_CELLS D=$AIR_TOP_D verticalLcells=$AIR_TOP_NOZZLE_LENGTH_CELLS exitY=$AIR_TOP_EXIT nominalU=$AIR_TOP_SPEED"
+echo "AIR BOTTOM: left-feedY=$AIR_BOT_FEED_Y -> 90deg turn at x=$AIR_CX; Dcells=$AIR_BOTTOM_NOZZLE_DIAMETER_CELLS D=$AIR_BOT_D verticalLcells=$AIR_BOTTOM_NOZZLE_LENGTH_CELLS exitY=$AIR_BOT_EXIT nominalU=$AIR_BOTTOM_SPEED"
+echo "BOUNDARIES: THREE segmented inlets on LEFT (gas/liquid/gas) + full RIGHT Neumann outlet; y-axis CLOSED (0142 one-open-axis contract)"
 echo "DARCY(run_ok common): alpha=[$ALPHA_MIN,$ALPHA] lambdaSolidPerStep=$DARCY_LAMBDA forcing=$DARCY_BRINKMAN_FORCING_MODE chiCollisionVP=$DARCY_CHI_COLLISION_VP_ENABLE"
 echo "                    q=$DARCY_Q initialDeactivateEffective=-1 commonFilled=$RUN_OK_DARCY_COMMON_FILLED_STATE VPmode=$DARCY_CHI_COLLISION_VP_MODE VPgamma=$DARCY_CHI_COLLISION_VP_GAMMA VPmass=$DARCY_CHI_COLLISION_VP_MASS"
 echo "Q6(run_ok profile): projection=$PROJECTION_OPERATOR tol=$PROJECTION_TOLERANCE maxIt=$PROJECTION_MAX_ITERATIONS strict=$Q6_STRICT tau=$Q6_GF_DENSITY_RELAXATION_TIME minFill=$Q6_GF_MIN_FILL_FRACTION"
@@ -960,12 +928,14 @@ echo "RESTART: active=$RESTART state=${RESTART_STATE:-none}; STEPS is segment le
 echo "PARAMETERS: fully resolved solver file=$PARAMS"
 echo "====================================================="
 
-# 0414 contract guard: this demonstration intentionally exercises both axes.
-for expected in   "openBoundarySegment0 = left inlet"   "openBoundarySegment1 = bottom inlet"   "openBoundarySegment2 = top inlet"   "openBoundarySegment3 = right outlet"
-do
-  grep -Fq "$expected" "$PARAMS" || { echo "[0493x14av-0414] ERROR missing expected 0414 segment: $expected" >&2; exit 2; }
-done
-echo "[0493x14av-0414] open-boundary contract: left liquid + bottom/top gas + right Neumann outlet PASS"
+# 0493x14av-fix1: explicit runner-side guard for the core 0142 contract.
+# PRELIGHT_ONLY skips the binary, so the runner itself must reject any accidental
+# reintroduction of y-axis open segments.
+if grep -Eq "^openBoundarySegment[0-9]+[[:space:]]*=[[:space:]]*(top|bottom)[[:space:]]" "$PARAMS"; then
+  echo "[0493x14av-fix1] ERROR y-axis open segment generated; 0142 permits one open axis only" >&2
+  exit 2
+fi
+echo "[0493x14av-fix1] open-boundary contract: x-axis only (3 left inlets + 1 right outlet) PASS"
 
 # Ensure the resolved params really use the same Darcy contract as the common
 # run_ok writer.  This catches stale/duplicate manual keys before binary launch.
@@ -992,8 +962,7 @@ if suite_truthy_0434 "$ANALYZE_ENABLE"; then
   python3 "$ANALYZER" \
     --run-root "$RUN_ROOT" --Lx "$Lx" --Ly "$Ly" --nx "$NX" --ny "$NY" --gamma "$GAMMA" \
     --liquid-type "$LIQUID_TYPE" --liquid-nozzle-exit-x "$LIQ_L" \
-    --air-top-center-x "$AIR_TOP_CX" --air-bottom-center-x "$AIR_BOT_CX" \
-    --air-top-thickness "$AIR_TOP_D" --air-bottom-thickness "$AIR_BOT_D"
+    --air-center-x "$AIR_CX" --air-diameter "$AIR_TOP_D"
 fi
 
 OUT_TAR="$RUN_ROOT/0493x14av_air_assisted_atomizer_compact.tar.gz"
