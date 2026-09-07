@@ -117,13 +117,110 @@ CREATE TABLE evidence (
 CREATE TABLE git_commits (
   hash TEXT PRIMARY KEY,
   authored_date TEXT,
-  subject TEXT NOT NULL
+  committed_date TEXT,
+  author_name TEXT,
+  author_email TEXT,
+  subject TEXT NOT NULL,
+  parent_count INTEGER NOT NULL DEFAULT 0,
+  is_merge INTEGER NOT NULL DEFAULT 0 CHECK(is_merge IN (0,1))
 );
+CREATE INDEX idx_git_commits_authored_date ON git_commits(authored_date);
+
 CREATE TABLE git_tags (
   tag TEXT PRIMARY KEY,
   commit_hash TEXT REFERENCES git_commits(hash),
-  tagged_date TEXT
+  tagged_date TEXT,
+  tag_type TEXT NOT NULL DEFAULT 'LIGHTWEIGHT',
+  tag_message TEXT
 );
+CREATE INDEX idx_git_tags_commit ON git_tags(commit_hash);
+
+CREATE TABLE git_refs (
+  ref_name TEXT PRIMARY KEY,
+  ref_type TEXT NOT NULL CHECK(ref_type IN ('LOCAL_BRANCH','REMOTE_BRANCH','TAG')),
+  commit_hash TEXT REFERENCES git_commits(hash),
+  remote_name TEXT,
+  is_symbolic INTEGER NOT NULL DEFAULT 0 CHECK(is_symbolic IN (0,1))
+);
+CREATE INDEX idx_git_refs_commit ON git_refs(commit_hash);
+
+CREATE TABLE git_commit_refs (
+  commit_hash TEXT NOT NULL REFERENCES git_commits(hash) ON DELETE CASCADE,
+  ref_name TEXT NOT NULL REFERENCES git_refs(ref_name) ON DELETE CASCADE,
+  PRIMARY KEY(commit_hash, ref_name)
+);
+CREATE INDEX idx_git_commit_refs_ref ON git_commit_refs(ref_name);
+
+CREATE TABLE git_commit_files (
+  commit_hash TEXT NOT NULL REFERENCES git_commits(hash) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  change_type TEXT NOT NULL,
+  old_path TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(commit_hash, path, old_path)
+);
+CREATE INDEX idx_git_commit_files_path ON git_commit_files(path);
+
+CREATE TABLE git_commit_mainline_status (
+  commit_hash TEXT PRIMARY KEY REFERENCES git_commits(hash) ON DELETE CASCADE,
+  mainline_ref TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('IN_MAINLINE','PATCH_EQUIVALENT_IN_MAINLINE','UNIQUE_OUTSIDE_MAINLINE')),
+  observed_branch TEXT,
+  notes TEXT
+);
+CREATE INDEX idx_git_commit_mainline_status_status ON git_commit_mainline_status(status);
+
+CREATE TABLE git_branch_audit (
+  branch_name TEXT PRIMARY KEY,
+  tip_commit TEXT REFERENCES git_commits(hash),
+  mainline_ref TEXT NOT NULL,
+  relation_to_mainline TEXT NOT NULL CHECK(relation_to_mainline IN ('MAINLINE','ANCESTOR_OF_MAINLINE','PATCH_EQUIVALENT_IN_MAINLINE','HAS_UNIQUE_PATCHES','AUDIT_ERROR')),
+  unique_commits INTEGER NOT NULL DEFAULT 0,
+  patch_unique_commits INTEGER NOT NULL DEFAULT 0,
+  patch_equivalent_commits INTEGER NOT NULL DEFAULT 0,
+  first_unique_date TEXT,
+  last_unique_date TEXT,
+  notes TEXT
+);
+CREATE INDEX idx_git_branch_audit_relation ON git_branch_audit(relation_to_mainline);
+
+CREATE TABLE git_branch_commit_status (
+  branch_name TEXT NOT NULL REFERENCES git_refs(ref_name) ON DELETE CASCADE,
+  commit_hash TEXT NOT NULL REFERENCES git_commits(hash) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('PATCH_EQUIVALENT_IN_MAINLINE','UNIQUE_OUTSIDE_MAINLINE')),
+  subject TEXT,
+  PRIMARY KEY(branch_name, commit_hash)
+);
+CREATE INDEX idx_git_branch_commit_status_commit ON git_branch_commit_status(commit_hash);
+
+CREATE TABLE git_milestone_candidates (
+  candidate_id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  normalized_label TEXT NOT NULL,
+  candidate_family TEXT NOT NULL CHECK(candidate_family IN ('X','NUMERIC')),
+  anchor_commit TEXT REFERENCES git_commits(hash),
+  first_date TEXT,
+  last_date TEXT,
+  evidence_count INTEGER NOT NULL DEFAULT 0,
+  max_confidence TEXT NOT NULL DEFAULT 'C' CHECK(max_confidence IN ('A','B','C')),
+  status TEXT NOT NULL DEFAULT 'CANDIDATE' CHECK(status IN ('CANDIDATE','LINKED','CURATED','REJECTED')),
+  linked_milestone_object_id TEXT REFERENCES milestones(object_id),
+  notes TEXT
+);
+CREATE INDEX idx_git_candidates_label ON git_milestone_candidates(normalized_label);
+CREATE INDEX idx_git_candidates_status ON git_milestone_candidates(status);
+
+CREATE TABLE git_candidate_evidence (
+  id INTEGER PRIMARY KEY,
+  candidate_id TEXT NOT NULL REFERENCES git_milestone_candidates(candidate_id) ON DELETE CASCADE,
+  evidence_type TEXT NOT NULL,
+  commit_hash TEXT REFERENCES git_commits(hash),
+  ref_name TEXT,
+  path TEXT,
+  evidence_text TEXT,
+  confidence TEXT NOT NULL DEFAULT 'C' CHECK(confidence IN ('A','B','C'))
+);
+CREATE INDEX idx_git_candidate_evidence_candidate ON git_candidate_evidence(candidate_id);
+CREATE INDEX idx_git_candidate_evidence_commit ON git_candidate_evidence(commit_hash);
 
 CREATE TABLE raw_params_inventory (
   source_file TEXT NOT NULL,

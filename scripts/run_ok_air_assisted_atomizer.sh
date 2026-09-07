@@ -423,7 +423,7 @@ TOPOLOGY="segmented"
 Lx="${Lx:-3.125}"; Ly="${Ly:-1.5625}"; NX="${NX:-800}"; NY="${NY:-400}"
 GAMMA="${GAMMA:-8}"
 DT="${DT:-0.00635}"
-STEPS="${STEPS:-3500}"
+STEPS="${STEPS:-7000}"
 GRAVITY_Y="${GRAVITY_Y:-0.0}"
 
 LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"

@@ -3,3 +3,8 @@
 *.sqlite-shm
 *.sql.tmp
 __pycache__/
+
+# Reconstructible local SRC reference database
+/db/src_reference.sqlite
+/db/src_reference.sqlite-wal
+/db/src_reference.sqlite-shm

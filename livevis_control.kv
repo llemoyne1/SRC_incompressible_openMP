@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-  field = uy
+  field = rho
 
 # colormap:
 #   blue_red, gray, thermal
@@ -114,7 +114,7 @@ recordSession = record
 #   or comma-separated list:
 #     rho,density,mass,rho1,rho2,y1,y2,ux,uy,speed,n,n1,n2
 #   For comparisons, rho,ux,uy is the robust default.
-recordFields = mass,ux,uy
+recordFields = rho,rho2,ux,uy
 
 # recordFormat:
 #   f32 or float32. Current supported binary dump format is float32 raw field.

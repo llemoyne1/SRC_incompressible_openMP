@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections import defaultdict
@@ -284,22 +285,38 @@ def infer_env_param_links(db: sqlite3.Connection) -> int:
     return count
 
 
-X_MILESTONE_RE = re.compile(r'(?i)(?:0493)?(x\d+[a-z][a-z0-9-]*)')
-NUMERIC_HINT_RE = re.compile(r'(?<!\d)(0\d{3}[A-Za-z0-9_-]*)')
+X_MILESTONE_RE = re.compile(
+    r'(?i)(?<![A-Za-z0-9])(?:0493)?(x\d+[a-z]*(?:-[a-z0-9]+)*)(?![A-Za-z0-9])'
+)
+NUMERIC_HINT_RE = re.compile(
+    r'(?i)(?<!\d)(0\d{3}(?:[a-z])?(?:(?:-|_)(?:fix\d+|doc))?)(?![A-Za-z0-9])'
+)
+
+
+def normalize_candidate_label(label: str) -> str:
+    return label.strip().replace('_', '-').lower()
+
+
+def extract_candidate_mentions(text: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for m in X_MILESTONE_RE.finditer(text or ''):
+        label = normalize_candidate_label(m.group(1))
+        item = (label, 'X')
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    for m in NUMERIC_HINT_RE.finditer(text or ''):
+        label = normalize_candidate_label(m.group(1))
+        item = (label, 'NUMERIC')
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 def extract_hints(text: str) -> list[str]:
-    out: list[str] = []
-    for m in X_MILESTONE_RE.finditer(text):
-        x = m.group(1).lower()
-        if x not in out:
-            out.append(x)
-    for m in NUMERIC_HINT_RE.finditer(text):
-        x = m.group(1)
-        if x not in out:
-            out.append(x)
-    return out
-
+    return [label for label, _family in extract_candidate_mentions(text)]
 
 def artifact_kind(path: str) -> str:
     b = Path(path).name.lower()
@@ -486,53 +503,479 @@ def git_available(repo: Path) -> bool:
     return cp.returncode == 0 and cp.stdout.strip().lower() == 'true'
 
 
-def import_git(db: sqlite3.Connection, repo: Path) -> tuple[int, int, str]:
-    if not git_available(repo):
-        return 0, 0, 'skipped:no-git-worktree'
-    fmt = '%H%x1f%aI%x1f%s'
-    cp = subprocess.run(
-        ['git', '-C', str(repo), 'log', '--all', f'--format={fmt}'],
-        text=True, capture_output=True, check=True,
+def git_run(repo: Path, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ['git', '-C', str(repo), *args],
+        text=True, capture_output=True, check=check,
     )
+
+
+def resolve_mainline_ref(repo: Path, requested: str | None) -> str:
+    candidates: list[str] = []
+    if requested and requested != 'auto':
+        candidates.append(requested)
+    candidates.extend(['origin/surf', 'surf', 'HEAD'])
+    seen: set[str] = set()
+    for ref in candidates:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        cp = git_run(repo, ['rev-parse', '--verify', '--quiet', f'{ref}^{{commit}}'], check=False)
+        if cp.returncode == 0 and cp.stdout.strip():
+            return ref
+    raise RuntimeError('unable to resolve Git mainline ref (tried requested ref, origin/surf, surf, HEAD)')
+
+
+def candidate_id_for(label: str, family: str, commit_hash: str | None, anchor_text: str) -> str:
+    norm = normalize_candidate_label(label)
+    if family == 'X':
+        return f'candidate:x:{norm}'
+    if commit_hash:
+        anchor = 'commit-' + commit_hash[:12]
+    else:
+        anchor = 'evidence-' + hashlib.sha1(anchor_text.encode('utf-8')).hexdigest()[:12]
+    return f'candidate:numeric:{norm}:{anchor}'
+
+
+def add_git_candidate_evidence(
+    db: sqlite3.Connection,
+    label: str,
+    family: str,
+    evidence_type: str,
+    confidence: str,
+    commit_hash: str | None = None,
+    ref_name: str | None = None,
+    path: str | None = None,
+    evidence_text: str | None = None,
+) -> str:
+    norm = normalize_candidate_label(label)
+    anchor_text = '|'.join(x or '' for x in (evidence_type, ref_name, path, evidence_text))
+    cid = candidate_id_for(norm, family, commit_hash, anchor_text)
+    linked = resolve_milestone_label(db, norm) if family == 'X' else None
+    status = 'LINKED' if linked else 'CANDIDATE'
+    db.execute(
+        """INSERT OR IGNORE INTO git_milestone_candidates(
+             candidate_id,label,normalized_label,candidate_family,anchor_commit,status,linked_milestone_object_id)
+           VALUES(?,?,?,?,?,?,?)""",
+        (cid, norm, norm, family, commit_hash, status, linked),
+    )
+    if linked:
+        db.execute(
+            """UPDATE git_milestone_candidates
+               SET status='LINKED', linked_milestone_object_id=COALESCE(linked_milestone_object_id,?)
+               WHERE candidate_id=?""",
+            (linked, cid),
+        )
+    db.execute(
+        """INSERT INTO git_candidate_evidence(
+             candidate_id,evidence_type,commit_hash,ref_name,path,evidence_text,confidence)
+           VALUES(?,?,?,?,?,?,?)""",
+        (cid, evidence_type, commit_hash, ref_name, path, evidence_text, confidence),
+    )
+    return cid
+
+
+def refresh_candidate_rollups(db: sqlite3.Connection) -> None:
+    db.execute(
+        """UPDATE git_milestone_candidates
+           SET evidence_count=(SELECT count(*) FROM git_candidate_evidence e WHERE e.candidate_id=git_milestone_candidates.candidate_id),
+               max_confidence=COALESCE((
+                 SELECT CASE min(CASE e.confidence WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END)
+                          WHEN 1 THEN 'A' WHEN 2 THEN 'B' ELSE 'C' END
+                 FROM git_candidate_evidence e WHERE e.candidate_id=git_milestone_candidates.candidate_id
+               ),'C'),
+               first_date=(
+                 SELECT min(c.authored_date) FROM git_candidate_evidence e
+                 JOIN git_commits c ON c.hash=e.commit_hash
+                 WHERE e.candidate_id=git_milestone_candidates.candidate_id
+               ),
+               last_date=(
+                 SELECT max(c.authored_date) FROM git_candidate_evidence e
+                 JOIN git_commits c ON c.hash=e.commit_hash
+                 WHERE e.candidate_id=git_milestone_candidates.candidate_id
+               )"""
+    )
+
+
+def import_git_commits(db: sqlite3.Connection, repo: Path) -> tuple[int, int]:
+    fmt = '%H%x1f%aI%x1f%cI%x1f%an%x1f%ae%x1f%P%x1f%s'
+    cp = git_run(repo, ['log', '--all', f'--format={fmt}'])
     commits = links = 0
     for line in cp.stdout.splitlines():
-        parts = line.split('\x1f', 2)
-        if len(parts) != 3:
+        parts = line.split('\x1f', 6)
+        if len(parts) != 7:
             continue
-        commit_hash, date, subject = parts
-        db.execute('INSERT OR REPLACE INTO git_commits VALUES(?,?,?)', (commit_hash, date, subject))
+        commit_hash, authored, committed, author_name, author_email, parents, subject = parts
+        parent_count = len([p for p in parents.split() if p])
+        db.execute(
+            """INSERT OR REPLACE INTO git_commits(
+                 hash,authored_date,committed_date,author_name,author_email,subject,parent_count,is_merge)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (commit_hash, authored, committed, author_name, author_email, subject, parent_count, int(parent_count > 1)),
+        )
         coid = 'git:' + commit_hash
         ensure_object(db, coid, 'GIT_COMMIT', commit_hash[:10] + ' ' + subject, 'git')
-        for hint in extract_hints(subject):
-            if not hint.startswith('x'):
-                continue
-            moid = resolve_milestone_label(db, hint)
-            if moid:
-                db.execute(
-                    'INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text) VALUES(?,?,?,?,?)',
-                    (moid, 'EVIDENCED_BY_COMMIT', coid, 'B', subject),
-                )
-                db.execute(
-                    'INSERT INTO evidence(object_id,evidence_type,commit_hash,confidence,notes) VALUES(?,?,?,?,?)',
-                    (moid, 'GIT_COMMIT', commit_hash, 'B', subject),
-                )
-                links += 1
+        for label, family in extract_candidate_mentions(subject):
+            confidence = 'A' if re.search(r'^\s*(?:0493)?' + re.escape(label) + r'(?:\b|[:_ -])', subject, re.I) else 'B'
+            add_git_candidate_evidence(
+                db, label, family, 'COMMIT_SUBJECT', confidence,
+                commit_hash=commit_hash, evidence_text=subject,
+            )
+            if family == 'X':
+                moid = resolve_milestone_label(db, label)
+                if moid:
+                    db.execute(
+                        """INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text)
+                           VALUES(?,?,?,?,?)""",
+                        (moid, 'EVIDENCED_BY_COMMIT', coid, confidence, subject),
+                    )
+                    db.execute(
+                        'INSERT INTO evidence(object_id,evidence_type,commit_hash,confidence,notes) VALUES(?,?,?,?,?)',
+                        (moid, 'GIT_COMMIT', commit_hash, confidence, subject),
+                    )
+                    links += 1
         commits += 1
-    tags = subprocess.run(
-        ['git', '-C', str(repo), 'for-each-ref', 'refs/tags', '--format=%(refname:short)%00%(*objectname)%00%(objectname)%00%(creatordate:iso-strict)'],
-        text=True, capture_output=True, check=True,
-    )
-    for line in tags.stdout.splitlines():
-        parts = line.split('\x00')
-        if len(parts) < 3:
-            continue
-        tag, peeled, direct = parts[:3]
-        date = parts[3] if len(parts) > 3 else ''
-        commit_hash = peeled or direct
-        if db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
-            db.execute('INSERT OR REPLACE INTO git_tags VALUES(?,?,?)', (tag, commit_hash, date))
-    return commits, links, 'imported'
+    return commits, links
 
+
+def import_git_commit_files(db: sqlite3.Connection, repo: Path) -> tuple[int, int]:
+    """Import changed paths and derive conservative milestone evidence.
+
+    Numeric milestone labels are contextual by design.  A path containing e.g.
+    ``0414`` is evidence for a *new* numeric candidate only when that labelled
+    path is introduced (A), or when a rename/copy introduces the label in the
+    destination name.  Later M/D operations and pure relocations of an already
+    labelled path are retained in ``git_commit_files`` but must not manufacture
+    fresh candidates.  This prevents README moves and later edits of historical
+    runners from becoming false milestones.
+
+    X-family labels remain global identities, so path touches may safely add
+    evidence to the existing X candidate.
+    """
+    cp = git_run(repo, ['log', '--all', '--format=%x1e%H', '--name-status', '--find-renames'])
+    count = 0
+    skipped_numeric_path_mentions = 0
+    for record in cp.stdout.split('\x1e'):
+        lines = [line for line in record.splitlines() if line.strip()]
+        if not lines:
+            continue
+        commit_hash = lines[0].strip()
+        if not re.fullmatch(r'[0-9a-fA-F]{40}', commit_hash):
+            continue
+        if not db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
+            continue
+        for line in lines[1:]:
+            parts = line.split('\t')
+            if len(parts) < 2:
+                continue
+            change = parts[0]
+            old_path = ''
+            if change.startswith(('R', 'C')) and len(parts) >= 3:
+                old_path, path = parts[1], parts[2]
+            else:
+                path = parts[1]
+            db.execute(
+                'INSERT OR REPLACE INTO git_commit_files(commit_hash,path,change_type,old_path) VALUES(?,?,?,?)',
+                (commit_hash, path, change, old_path),
+            )
+            # Info/ documents the project but must not recursively generate historical candidates.
+            if path.startswith('Info/') or old_path.startswith('Info/'):
+                count += 1
+                continue
+
+            new_mentions = set(extract_candidate_mentions(path))
+            old_mentions = set(extract_candidate_mentions(old_path)) if old_path else set()
+            mentions = new_mentions | old_mentions
+            for label, family in sorted(mentions):
+                if family == 'NUMERIC':
+                    introduced = False
+                    if change.startswith('A') and (label, family) in new_mentions:
+                        introduced = True
+                    elif change.startswith(('R', 'C')):
+                        # A rename/copy only introduces a numeric milestone label
+                        # if the destination gains a label absent from the source.
+                        introduced = ((label, family) in new_mentions and
+                                      (label, family) not in old_mentions)
+                    if not introduced:
+                        skipped_numeric_path_mentions += 1
+                        continue
+
+                base = Path(path).name.lower()
+                confidence = 'A' if base.startswith(('readme_' + label.lower(), 'readme-' + label.lower())) else 'B'
+                add_git_candidate_evidence(
+                    db, label, family, 'COMMIT_PATH', confidence,
+                    commit_hash=commit_hash, path=path,
+                    evidence_text=f'{change} {old_path + " -> " if old_path else ""}{path}',
+                )
+            count += 1
+    return count, skipped_numeric_path_mentions
+
+
+def prune_info_only_commit_candidates(db: sqlite3.Connection) -> int:
+    info_only = [r[0] for r in db.execute(
+        '''SELECT commit_hash FROM git_commit_files
+           GROUP BY commit_hash
+           HAVING sum(CASE WHEN path NOT LIKE 'Info/%' AND old_path NOT LIKE 'Info/%' THEN 1 ELSE 0 END)=0'''
+    ).fetchall()]
+    removed = 0
+    for commit_hash in info_only:
+        cur = db.execute(
+            "DELETE FROM git_candidate_evidence WHERE evidence_type='COMMIT_SUBJECT' AND commit_hash=?",
+            (commit_hash,),
+        )
+        removed += cur.rowcount
+    db.execute(
+        '''DELETE FROM git_milestone_candidates
+           WHERE NOT EXISTS (SELECT 1 FROM git_candidate_evidence e WHERE e.candidate_id=git_milestone_candidates.candidate_id)'''
+    )
+    return removed
+
+
+def import_git_tags(db: sqlite3.Connection, repo: Path) -> int:
+    cp = git_run(
+        repo,
+        ['for-each-ref', 'refs/tags', '--format=%(refname:short)%00%(objecttype)%00%(*objectname)%00%(objectname)%00%(creatordate:iso-strict)'],
+    )
+    count = 0
+    for line in cp.stdout.splitlines():
+        parts = line.split('\x00')
+        if len(parts) < 5:
+            continue
+        tag, object_type, peeled, direct, date = parts[:5]
+        commit_hash = peeled or direct
+        if not db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
+            continue
+        tag_type = 'ANNOTATED' if object_type == 'tag' else 'LIGHTWEIGHT'
+        message = ''
+        if tag_type == 'ANNOTATED':
+            msg = git_run(repo, ['for-each-ref', f'refs/tags/{tag}', '--format=%(contents)'], check=False)
+            if msg.returncode == 0:
+                message = msg.stdout.strip()
+        db.execute(
+            'INSERT OR REPLACE INTO git_tags(tag,commit_hash,tagged_date,tag_type,tag_message) VALUES(?,?,?,?,?)',
+            (tag, commit_hash, date, tag_type, message),
+        )
+        db.execute(
+            """INSERT OR REPLACE INTO git_refs(ref_name,ref_type,commit_hash,remote_name,is_symbolic)
+               VALUES(?,?,?,?,0)""",
+            (tag, 'TAG', commit_hash, None),
+        )
+        for label, family in extract_candidate_mentions(tag):
+            add_git_candidate_evidence(
+                db, label, family, 'TAG_NAME', 'A', commit_hash=commit_hash,
+                ref_name=tag, evidence_text=tag,
+            )
+        for label, family in extract_candidate_mentions(message):
+            add_git_candidate_evidence(
+                db, label, family, 'TAG_MESSAGE', 'A', commit_hash=commit_hash,
+                ref_name=tag, evidence_text=message,
+            )
+        count += 1
+    return count
+
+
+def import_git_refs(db: sqlite3.Connection, repo: Path) -> tuple[int, int]:
+    cp = git_run(
+        repo,
+        ['for-each-ref', 'refs/heads', 'refs/remotes', '--format=%(refname:short)%00%(refname)%00%(objectname)%00%(symref)'],
+    )
+    refs: list[tuple[str, str, str, str | None, int]] = []
+    for line in cp.stdout.splitlines():
+        parts = line.split('\x00')
+        if len(parts) < 4:
+            continue
+        short, full, commit_hash, symref = parts[:4]
+        if not db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
+            continue
+        if full.startswith('refs/remotes/'):
+            ref_type = 'REMOTE_BRANCH'
+            remote = short.split('/', 1)[0] if '/' in short else None
+        else:
+            ref_type = 'LOCAL_BRANCH'
+            remote = None
+        symbolic = int(bool(symref))
+        db.execute(
+            """INSERT OR REPLACE INTO git_refs(ref_name,ref_type,commit_hash,remote_name,is_symbolic)
+               VALUES(?,?,?,?,?)""",
+            (short, ref_type, commit_hash, remote, symbolic),
+        )
+        refs.append((short, ref_type, commit_hash, remote, symbolic))
+        if not symbolic:
+            for label, family in extract_candidate_mentions(short):
+                add_git_candidate_evidence(
+                    db, label, family, 'BRANCH_REF', 'C', commit_hash=commit_hash,
+                    ref_name=short, evidence_text=short,
+                )
+    memberships = 0
+    for short, _ref_type, _tip, _remote, symbolic in refs:
+        if symbolic:
+            continue
+        revs = git_run(repo, ['rev-list', short], check=False)
+        if revs.returncode != 0:
+            continue
+        for commit_hash in revs.stdout.splitlines():
+            if db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
+                db.execute(
+                    'INSERT OR IGNORE INTO git_commit_refs(commit_hash,ref_name) VALUES(?,?)',
+                    (commit_hash, short),
+                )
+                memberships += 1
+    return len(refs), memberships
+
+
+def audit_git_branches(db: sqlite3.Connection, repo: Path, requested_mainline: str | None) -> tuple[int, int, int, str]:
+    mainline = resolve_mainline_ref(repo, requested_mainline)
+    mainline_hash = git_run(repo, ['rev-parse', f'{mainline}^{{commit}}']).stdout.strip()
+    db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('git_mainline_ref', mainline))
+    mainline_commits = git_run(repo, ['rev-list', mainline]).stdout.splitlines()
+    for commit_hash in mainline_commits:
+        if db.execute('SELECT 1 FROM git_commits WHERE hash=?', (commit_hash,)).fetchone():
+            db.execute(
+                """INSERT OR REPLACE INTO git_commit_mainline_status(
+                     commit_hash,mainline_ref,status,observed_branch,notes) VALUES(?,?,?,?,?)""",
+                (commit_hash, mainline, 'IN_MAINLINE', mainline, ''),
+            )
+
+    remote_rows = db.execute(
+        "SELECT ref_name,commit_hash FROM git_refs WHERE ref_type='REMOTE_BRANCH' AND remote_name='origin' AND is_symbolic=0 ORDER BY ref_name"
+    ).fetchall()
+    rows = remote_rows or db.execute(
+        "SELECT ref_name,commit_hash FROM git_refs WHERE ref_type='LOCAL_BRANCH' AND is_symbolic=0 ORDER BY ref_name"
+    ).fetchall()
+    audited = plus_total = minus_total = 0
+    for branch, tip in rows:
+        if branch == mainline:
+            relation = 'MAINLINE'
+            db.execute(
+                """INSERT OR REPLACE INTO git_branch_audit(
+                     branch_name,tip_commit,mainline_ref,relation_to_mainline,unique_commits,
+                     patch_unique_commits,patch_equivalent_commits,notes)
+                   VALUES(?,?,?,?,0,0,0,?)""",
+                (branch, tip, mainline, relation, 'mainline ref'),
+            )
+            audited += 1
+            continue
+        unique_cp = git_run(repo, ['rev-list', f'{mainline}..{branch}'], check=False)
+        if unique_cp.returncode != 0:
+            db.execute(
+                """INSERT OR REPLACE INTO git_branch_audit(
+                     branch_name,tip_commit,mainline_ref,relation_to_mainline,notes)
+                   VALUES(?,?,?,?,?)""",
+                (branch, tip, mainline, 'AUDIT_ERROR', unique_cp.stderr.strip()[:500]),
+            )
+            audited += 1
+            continue
+        unique_hashes = [x for x in unique_cp.stdout.splitlines() if x]
+        if not unique_hashes:
+            db.execute(
+                """INSERT OR REPLACE INTO git_branch_audit(
+                     branch_name,tip_commit,mainline_ref,relation_to_mainline,unique_commits,
+                     patch_unique_commits,patch_equivalent_commits,notes)
+                   VALUES(?,?,?,?,0,0,0,?)""",
+                (branch, tip, mainline, 'ANCESTOR_OF_MAINLINE', ''),
+            )
+            audited += 1
+            continue
+        cherry = git_run(repo, ['cherry', '-v', mainline, branch], check=False)
+        if cherry.returncode != 0:
+            db.execute(
+                """INSERT OR REPLACE INTO git_branch_audit(
+                     branch_name,tip_commit,mainline_ref,relation_to_mainline,unique_commits,notes)
+                   VALUES(?,?,?,?,?,?)""",
+                (branch, tip, mainline, 'AUDIT_ERROR', len(unique_hashes), cherry.stderr.strip()[:500]),
+            )
+            audited += 1
+            continue
+        plus = minus = 0
+        for line in cherry.stdout.splitlines():
+            m = re.match(r'^([+-])\s+([0-9a-fA-F]{40})\s*(.*)$', line)
+            if not m:
+                continue
+            sign, commit_hash, subject = m.groups()
+            if sign == '+':
+                status = 'UNIQUE_OUTSIDE_MAINLINE'
+                plus += 1
+            else:
+                status = 'PATCH_EQUIVALENT_IN_MAINLINE'
+                minus += 1
+            db.execute(
+                '''INSERT OR REPLACE INTO git_branch_commit_status(branch_name,commit_hash,status,subject)
+                   VALUES(?,?,?,?)''',
+                (branch, commit_hash, status, subject),
+            )
+            existing = db.execute(
+                'SELECT status FROM git_commit_mainline_status WHERE commit_hash=?', (commit_hash,)
+            ).fetchone()
+            if not existing or existing[0] != 'IN_MAINLINE':
+                final_status = status
+                if existing and existing[0] == 'UNIQUE_OUTSIDE_MAINLINE':
+                    final_status = existing[0]
+                db.execute(
+                    """INSERT OR REPLACE INTO git_commit_mainline_status(
+                         commit_hash,mainline_ref,status,observed_branch,notes) VALUES(?,?,?,?,?)""",
+                    (commit_hash, mainline, final_status, branch, subject),
+                )
+        placeholders = ','.join('?' for _ in unique_hashes)
+        dates = [
+            r[0] for r in db.execute(
+                f'SELECT authored_date FROM git_commits WHERE hash IN ({placeholders}) AND authored_date IS NOT NULL ORDER BY authored_date',
+                unique_hashes,
+            ).fetchall()
+        ]
+        relation = 'PATCH_EQUIVALENT_IN_MAINLINE' if plus == 0 else 'HAS_UNIQUE_PATCHES'
+        unclassified = len(unique_hashes) - plus - minus
+        note = f'cherry_unclassified={unclassified}' if unclassified else ''
+        db.execute(
+            """INSERT OR REPLACE INTO git_branch_audit(
+                 branch_name,tip_commit,mainline_ref,relation_to_mainline,unique_commits,
+                 patch_unique_commits,patch_equivalent_commits,first_unique_date,last_unique_date,notes)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (branch, tip, mainline, relation, len(unique_hashes), plus, minus,
+             dates[0] if dates else None, dates[-1] if dates else None, note),
+        )
+        plus_total += plus
+        minus_total += minus
+        audited += 1
+    return audited, plus_total, minus_total, mainline
+
+
+def import_git(db: sqlite3.Connection, repo: Path, requested_mainline: str | None) -> dict[str, int | str]:
+    if not git_available(repo):
+        return {
+            'git_commits': 0, 'git_links': 0, 'git_commit_files': 0, 'git_tags': 0,
+            'git_refs': 0, 'git_ref_memberships': 0, 'git_branches_audited': 0,
+            'git_unique_patches': 0, 'git_patch_equivalent': 0, 'git_candidates': 0,
+            'git_candidate_evidence': 0, 'git_info_candidate_evidence_pruned': 0,
+            'git_numeric_path_mentions_skipped': 0,
+            'git_unique_outside_commits': 0, 'git_patch_equivalent_commits': 0,
+            'git_mainline_ref': '', 'git_import_status': 'skipped:no-git-worktree',
+        }
+    commits, links = import_git_commits(db, repo)
+    commit_files, skipped_numeric_paths = import_git_commit_files(db, repo)
+    pruned_info_candidates = prune_info_only_commit_candidates(db)
+    tags = import_git_tags(db, repo)
+    refs, memberships = import_git_refs(db, repo)
+    branches, plus, minus, mainline = audit_git_branches(db, repo, requested_mainline)
+    refresh_candidate_rollups(db)
+    return {
+        'git_commits': commits,
+        'git_links': links,
+        'git_commit_files': commit_files,
+        'git_tags': tags,
+        'git_refs': db.execute('SELECT count(*) FROM git_refs').fetchone()[0],
+        'git_ref_memberships': memberships,
+        'git_branches_audited': branches,
+        'git_unique_patches': plus,
+        'git_patch_equivalent': minus,
+        'git_candidates': db.execute('SELECT count(*) FROM git_milestone_candidates').fetchone()[0],
+        'git_candidate_evidence': db.execute('SELECT count(*) FROM git_candidate_evidence').fetchone()[0],
+        'git_info_candidate_evidence_pruned': pruned_info_candidates,
+        'git_numeric_path_mentions_skipped': skipped_numeric_paths,
+        'git_unique_outside_commits': db.execute("SELECT count(*) FROM git_commit_mainline_status WHERE status='UNIQUE_OUTSIDE_MAINLINE'").fetchone()[0],
+        'git_patch_equivalent_commits': db.execute("SELECT count(*) FROM git_commit_mainline_status WHERE status='PATCH_EQUIVALENT_IN_MAINLINE'").fetchone()[0],
+        'git_mainline_ref': mainline,
+        'git_import_status': 'imported',
+    }
 
 def apply_curations(db: sqlite3.Connection, curations_dir: Path) -> int:
     if not curations_dir.exists():
@@ -575,6 +1018,58 @@ def refresh_search(db: sqlite3.Connection) -> None:
             'INSERT INTO search_fts VALUES(?,?,?,?)',
             (oid, 'ARTIFACT', path, ' '.join(x or '' for x in (kind, hint, description))),
         )
+    for cid, label, family, status, confidence, count in db.execute(
+        'SELECT candidate_id,label,candidate_family,status,max_confidence,evidence_count FROM git_milestone_candidates'
+    ):
+        ev = ' '.join(
+            (x[0] or '') for x in db.execute(
+                'SELECT evidence_text FROM git_candidate_evidence WHERE candidate_id=? ORDER BY id LIMIT 12', (cid,)
+            )
+        )
+        db.execute(
+            'INSERT INTO search_fts VALUES(?,?,?,?)',
+            (cid, 'GIT_CANDIDATE', label, f'{family} {status} confidence={confidence} evidence={count} {ev}'),
+        )
+
+
+
+def remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def atomic_replace_many(pairs: list[tuple[Path, Path]]) -> None:
+    """Replace a set of generated files/directories as one rollback-capable batch."""
+    installed: list[tuple[Path, Path | None]] = []
+    try:
+        for tmp, dest in pairs:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            backup = dest.with_name(dest.name + '.__bak__')
+            remove_path(backup)
+            had_dest = dest.exists() or dest.is_symlink()
+            if had_dest:
+                os.replace(dest, backup)
+            try:
+                os.replace(tmp, dest)
+            except Exception:
+                if had_dest and backup.exists():
+                    os.replace(backup, dest)
+                raise
+            installed.append((dest, backup if had_dest else None))
+    except Exception:
+        for dest, backup in reversed(installed):
+            remove_path(dest)
+            if backup is not None and backup.exists():
+                os.replace(backup, dest)
+        raise
+    else:
+        for _dest, backup in installed:
+            if backup is not None:
+                remove_path(backup)
 
 
 def export_dump(db: sqlite3.Connection, path: Path) -> None:
@@ -590,10 +1085,16 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
     tmp_db = args.db.with_name(args.db.name + '.tmp')
     if tmp_db.exists():
         tmp_db.unlink()
+    publish_tmp = None
+    if args.publish_dir is not None:
+        publish_tmp = args.publish_dir.with_name(args.publish_dir.name + '.__tmp__')
+        remove_path(publish_tmp)
+
     db = sqlite3.connect(tmp_db)
     db.executescript(args.schema.read_text(encoding='utf-8'))
     with db:
-        db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '3'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '4'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('built_utc', dt.datetime.now(dt.timezone.utc).isoformat()))
         db.execute('INSERT INTO meta VALUES(?,?)', ('repo_root', '.'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('info_root', repo_relative_label(args.repo_root, args.info_root)))
@@ -607,9 +1108,14 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
         env_links = infer_env_param_links(db)
         milestone_links = infer_milestone_links(db)
         symbol_milestone_links = infer_symbol_milestone_links(db)
-        git_commits, git_links, git_status = import_git(db, args.repo_root)
-        db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('git_import_status', git_status))
+        git_stats = import_git(db, args.repo_root, args.mainline_ref)
+        db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('git_import_status', str(git_stats['git_import_status'])))
         refresh_search(db)
+
+    publish_stats: dict[str, int] = {}
+    if publish_tmp is not None:
+        from publish_src_reference import publish_reference
+        publish_stats = publish_reference(db, publish_tmp)
 
     quick = db.execute('PRAGMA quick_check').fetchone()[0]
     fk = db.execute('PRAGMA foreign_key_check').fetchall()
@@ -626,15 +1132,14 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
         'evidence': db.execute('SELECT count(*) FROM evidence').fetchone()[0],
         'raw_params': db.execute('SELECT count(*) FROM raw_params_inventory').fetchone()[0],
         'raw_env': db.execute('SELECT count(*) FROM raw_env_inventory').fetchone()[0],
-        'git_commits': db.execute('SELECT count(*) FROM git_commits').fetchone()[0],
-        'git_import_status': git_status,
+        **git_stats,
         'curations_applied': curations_applied,
         'artifact_links': artifact_links,
         'source_links': source_links,
         'env_param_links': env_links,
         'milestone_links': milestone_links,
         'symbol_milestone_links': symbol_milestone_links,
-        'git_links': git_links,
+        **publish_stats,
         'quick_check': quick,
         'foreign_key_violations': len(fk),
     }
@@ -646,9 +1151,12 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
         export_dump(db, dump_tmp)
     db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     db.close()
-    os.replace(tmp_db, args.db)
+    replacements: list[tuple[Path, Path]] = [(tmp_db, args.db)]
     if dump_tmp:
-        os.replace(dump_tmp, args.sql_dump)
+        replacements.append((dump_tmp, args.sql_dump))
+    if publish_tmp is not None:
+        replacements.append((publish_tmp, args.publish_dir))
+    atomic_replace_many(replacements)
     return stats
 
 
@@ -702,6 +1210,12 @@ def main() -> None:
     ap.add_argument('--env-inventory', type=Path, default=None)
     ap.add_argument('--milestones-tex', type=Path, default=None)
     ap.add_argument('--curations', type=Path, default=None)
+    ap.add_argument('--publish-dir', type=Path, default=None,
+                    help='Generated human-readable views; default Info/generated/.')
+    ap.add_argument('--no-publish', action='store_true',
+                    help='Build the database without regenerating Info/generated/.')
+    ap.add_argument('--mainline-ref', default='origin/surf',
+                    help='Git mainline used for branch audit; falls back to surf then HEAD if unavailable.')
     args = ap.parse_args()
 
     args.info_root = info_root
@@ -718,6 +1232,10 @@ def main() -> None:
     args.milestones_tex = (args.milestones_tex.resolve() if args.milestones_tex
                            else resolve_info_path(info_root, cfg['milestones']))
     args.curations = (args.curations.resolve() if args.curations else info_root / 'curations')
+    if args.no_publish:
+        args.publish_dir = None
+    else:
+        args.publish_dir = (args.publish_dir.resolve() if args.publish_dir else info_root / 'generated')
 
     required_paths = {
         'repository root': args.repo_root,

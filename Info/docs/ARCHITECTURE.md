@@ -110,3 +110,52 @@ Les relations automatiques sont associées à un niveau de confiance :
 - `A` : relation explicite/provenance directe ;
 - `B` : inférence structurée forte ;
 - `C` : inférence textuelle/historique à confirmer.
+
+
+## Extension V3 — graphe Git historique
+
+La V3 ajoute une couche d'audit qui ne promeut jamais directement un ancien identifiant numérique en jalon canonique.
+
+```text
+git_commits
+   ├──< git_commit_files
+   ├──< git_commit_refs >── git_refs
+   ├──< git_branch_commit_status >── git_branch_audit
+   ├──1 git_commit_mainline_status
+   └──< git_candidate_evidence >── git_milestone_candidates
+
+git_tags ────────────────┘
+```
+
+### Ligne principale
+
+La référence par défaut est `origin/surf`. Le builder calcule pour chaque branche :
+
+```text
+ANCESTOR_OF_MAINLINE
+PATCH_EQUIVALENT_IN_MAINLINE
+HAS_UNIQUE_PATCHES
+MAINLINE
+AUDIT_ERROR
+```
+
+Au niveau commit :
+
+```text
+IN_MAINLINE
+PATCH_EQUIVALENT_IN_MAINLINE
+UNIQUE_OUTSIDE_MAINLINE
+```
+
+`git_branch_commit_status` conserve le résultat `git cherry` **par branche** ; `git_commit_mainline_status` donne une synthèse globale par commit.
+
+### Candidats historiques
+
+Deux familles sont distinguées :
+
+- `X` : `x3`, `x14ai-fix1`, etc. ; agrégation globale autorisée et lien automatique possible vers `milestones` ;
+- `NUMERIC` : `0175`, `0334a`, `0414`, `0490A`, etc. ; chaque candidat reste ancré à un commit afin d'éviter les collisions historiques.
+
+Exemple volontaire : deux commits contenant `0414` produisent deux `candidate_id` différents. La fusion éventuelle relève d'une curation explicite.
+
+Les preuves automatiques sont classées `A/B/C` selon leur force : tag ou sujet explicitement préfixé, chemin README/artefact, branche ou mention contextuelle.

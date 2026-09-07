@@ -8,7 +8,9 @@ Son objectif est de maintenir **une seule base relationnelle** reliant :
 - les paramètres `.kv`, champs C++ et alias de runners ;
 - les variables d'environnement / flags ;
 - les sources, runners, générateurs, analyseurs, calibrateurs et documentation ;
-- les commits/tags Git et les preuves documentaires ;
+- les commits/tags/branches Git et les preuves documentaires ;
+- l'audit d'ascendance et de patch-équivalence des branches par rapport à `surf` ;
+- les candidats-jalons historiques avant leur promotion vers le référentiel canonique ;
 - les relations entre tous ces objets.
 
 ## Arborescence
@@ -32,10 +34,23 @@ Info/
 │   └── 0001_current_0414_segmented_xy.sql
 ├── scripts/
 │   ├── build_src_reference.py
+│   ├── publish_src_reference.py
 │   └── query_src_reference.py
+├── generated/
+│   ├── README.md
+│   ├── jalons.md
+│   ├── jalons_par_nature.md
+│   ├── parametres.md
+│   ├── flags.md
+│   ├── cles_controle_sorties.md
+│   ├── artefacts.md
+│   ├── audit_candidats_git.md
+│   └── csv/
 └── docs/
     ├── ARCHITECTURE.md
-    └── BOOTSTRAP_AUDIT.md
+    ├── BOOTSTRAP_AUDIT.md
+    ├── GIT_AUDIT_V3.md
+    └── PUBLICATION_V4.md
 ```
 
 ## Deux racines distinctes
@@ -91,11 +106,50 @@ Le builder :
 6. scanne `src/`, `include/`, `scripts/`, `matlab/`, `doc/`, `docs/`, `examples/`, `external_benchmarks/`, `tools/` ;
 7. applique les curations SQL ;
 8. construit les relations symboles ↔ fichiers, flags ↔ paramètres, symboles ↔ jalons et artefacts ↔ jalons ;
-9. importe `git log --all` et les tags si Git est disponible ;
-10. reconstruit l'index plein texte ;
-11. valide l'intégrité et remplace la base atomiquement.
+9. importe tous les commits, fichiers modifiés, tags et refs Git ;
+10. audite chaque branche `origin/*` contre `origin/surf` avec `git rev-list` et `git cherry` ;
+11. classe les commits comme `IN_MAINLINE`, `PATCH_EQUIVALENT_IN_MAINLINE` ou `UNIQUE_OUTSIDE_MAINLINE` ;
+12. construit les candidats-jalons à partir des sujets de commits, tags, branches et chemins historiques ;
+13. reconstruit l'index plein texte ;
+14. génère les vues humaines `Info/generated/` et les exports CSV ;
+15. valide l'intégrité puis remplace en lot la base, le dump et les publications avec rollback en cas d'échec.
 
 Les chemins absolus de la machine ne sont pas écrits comme identité documentaire dans la base : `meta.repo_root='.'` et `meta.info_root='Info'` dans l'installation normale.
+
+## Publication V4
+
+`Info/generated/` contient les vues directement consultables dans Git/GitHub. Elles sont
+**générées** et ne doivent jamais être éditées manuellement. Le document `jalons.md` ne
+publie que la table canonique `milestones`; les candidats historiques restent séparés
+dans `audit_candidats_git.md` jusqu'à curation explicite.
+
+Les paramètres sont publiés depuis les symboles normalisés : une fiche regroupe le concept
+canonique, ses clés `.kv`, champs C++, alias runners, valeurs par défaut, contraintes, rôle,
+sources et jalons associés. Les flags / variables de runners sont publiés dans un document
+séparé avec leurs relations `SETS_PARAMETER`.
+
+Voir `Info/docs/PUBLICATION_V4.md`.
+
+
+
+## Audit Git V3
+
+La V3 considère `origin/surf` comme ligne historique principale par défaut (`--mainline-ref origin/surf`). Si cette ref n'existe pas, le builder essaie `surf`, puis `HEAD`.
+
+Pour chaque branche distante `origin/*`, la base conserve :
+
+- le nombre de commits hors ascendance de la mainline ;
+- le résultat `git cherry` par commit (`+` réellement distinct, `-` patch-équivalent) ;
+- les fichiers ajoutés/modifiés/renommés par commit ;
+- les refs qui contiennent chaque commit ;
+- les tags annotés/légers et leur message ;
+- les candidats de jalons dérivés de ces preuves.
+
+Les anciens labels numériques (`0414`, `0490A`, `0432a`, etc.) **ne sont jamais fusionnés automatiquement par leur seul nom**. Ils restent contextualisés par leur commit d'ancrage jusqu'à curation. Les labels `x...`, beaucoup moins ambigus, peuvent être reliés automatiquement au jalon canonique existant.
+
+`Info/` est conservé dans l'inventaire Git des fichiers modifiés, mais ses propres noms de fichiers ne créent pas de candidats-jalons : le système documentaire ne s'auto-indexe pas comme histoire du solveur.
+
+Voir `Info/docs/GIT_AUDIT_V3.md` pour le détail des tables et des statuts.
 
 ## Changer de snapshot sans modifier le code
 
@@ -123,6 +177,13 @@ python3 Info/scripts/query_src_reference.py flag WALL_KBT
 python3 Info/scripts/query_src_reference.py param q6PressureOutletDeflationEnable
 
 python3 Info/scripts/query_src_reference.py artifact run_0493x14ai_drag_device_closure.sh
+
+python3 Info/scripts/query_src_reference.py branches
+python3 Info/scripts/query_src_reference.py publications
+python3 Info/scripts/query_src_reference.py branch origin/feature/cuda-resident-q6
+python3 Info/scripts/query_src_reference.py commit 3945cdc8
+python3 Info/scripts/query_src_reference.py candidate 0490A
+python3 Info/scripts/query_src_reference.py candidate 0414
 python3 Info/scripts/query_src_reference.py search "surface tension"
 python3 Info/scripts/query_src_reference.py stats
 python3 Info/scripts/query_src_reference.py doctor
@@ -149,3 +210,18 @@ Toute modification doit idéalement suivre cette règle :
 - **base et dump générés** → reconstruction complète puis `doctor`.
 
 Cela garantit qu'une étape de maintenance met à jour simultanément toutes les vues de la connaissance plutôt que plusieurs tableaux autonomes.
+
+## V4 — publication consultable
+
+La reconstruction normale produit maintenant simultanément SQLite, dump SQL et documents `Info/generated/`. Le remplacement est groupé et rollback-capable : un échec de génération ne laisse pas une base plus récente que les documents publiés.
+
+## V3.1 — candidats numériques conservateurs
+
+La V3.1 corrige la création des candidats numériques historiques (`0xxx`). Une simple
+modification ou suppression ultérieure d'un fichier portant un ancien numéro ne crée
+plus un nouveau jalon. Un chemin ne crée un candidat numérique que lors de son ajout,
+ou lorsqu'un renommage/copie introduit effectivement un nouveau label dans le nom de
+destination. Les touches ultérieures restent intégralement disponibles dans
+`git_commit_files`. Cette règle évite notamment qu'un déplacement de README `0490A`
+ou qu'une modification tardive de l'ancien runner NACA `0414` soit interprété comme
+un nouveau jalon.
