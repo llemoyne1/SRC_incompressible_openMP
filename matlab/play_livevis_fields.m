@@ -112,7 +112,7 @@ function out = play_livevis_fields(recordingDir, varargin)
 
     addParameter(p, 'gain', 1.0, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
     addParameter(p, 'clip', NaN, @(x) isnumeric(x) && isscalar(x));
-    addParameter(p, 'clim', [-0.1 0.1], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
+    addParameter(p, 'clim', [], @(x) isempty(x) || (isnumeric(x) && numel(x) == 2));
     addParameter(p, 'scaleMode', 'global', @(s) ischar(s) || isstring(s));
     addParameter(p, 'centerZero', 'auto', @(s) ischar(s) || isstring(s));
     addParameter(p, 'colormap', 'thermal', @(s) ischar(s) || isstring(s));
@@ -125,10 +125,8 @@ function out = play_livevis_fields(recordingDir, varargin)
 
     addParameter(p, 'chiOverlay', 'auto', @(s) ischar(s) || isstring(s) || (islogical(s) && isscalar(s)));
     addParameter(p, 'chiFile', '', @(s) ischar(s) || isstring(s));
-    addParameter(p, 'chiAlpha', 0.45, ...
-        @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x <= 1);
-    addParameter(p, 'chiColor', [0.15 0.15 0.15], ...
-        @(x) isnumeric(x) && numel(x) == 3 && all(isfinite(x(:))) && all(x(:) >= 0) && all(x(:) <= 1));
+    addParameter(p, 'chiAlpha', 0.85,  @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x <= 1);
+    addParameter(p, 'chiColor', [0.45 0.45 0.45],   @(x) isnumeric(x) && numel(x) == 3 && all(isfinite(x(:))) && all(x(:) >= 0) && all(x(:) <= 1));
 
     addParameter(p, 'videoFile', '', @(s) ischar(s) || isstring(s));
     addParameter(p, 'frameRate', 30, @(x) isnumeric(x) && isscalar(x) && x > 0);

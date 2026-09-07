@@ -341,6 +341,13 @@ struct SimulationParams {
     //                   a weak global outlet-only flux-balance feedback.  This
     //                   is intended for violent slit/nozzle injection tests.
     std::string openBoundaryOutletMode = "balanced_flux";
+    // 0414d: runtime ablation switch for the exact x8s pressure-outlet
+    // low-mode deflation.  Default true preserves the qualified historical
+    // right/full-face behavior and the 0414 separable quadriface extension.
+    // false changes conditioning only: x8r phi=0 pressure-outlet physics,
+    // x8q kinetic continuation, x8t centering, tolerance and CG operator stay
+    // unchanged.
+    bool q6PressureOutletDeflationEnable = true;
     double openBoundaryOutletHybridBlend = 0.0;   // 0: pure Neumann local profile, 1: balanced profile
     double openBoundaryOutletFeedbackGain = 0.0;  // 0: off, 1: cancel current projection flux imbalance
 

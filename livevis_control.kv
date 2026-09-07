@@ -26,14 +26,14 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-field = rho
+  field = uy
 
 # colormap:
 #   blue_red, gray, thermal
 # Aliases generally accepted by recent builds:
 #   grey/grayscale/greyscale -> gray
 #   heat/hot                 -> thermal
-colormap = blue_red 
+colormap = gray 
 
 # clip:
 #   >0 fixes color saturation scale.
@@ -49,7 +49,7 @@ gain = 1
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
 smoothPasses = 0
 
-particleTypeFilter = 1
+particleTypeFilter = 2
 
 # =============================================================================
 # 2. Live grid and cadence

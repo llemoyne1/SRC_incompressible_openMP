@@ -27,6 +27,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mpcd {
@@ -300,8 +301,9 @@ constexpr double kPhaseGeometryFilterLambda0493x6c = 0.125;
 struct Q6SegmentedIo0409 {
     int enabled = 0;
     int count = 0;
+    int multiAxis0414 = 0;
     int inletProfileCode = 0; // 0 uniform, 1 local Poiseuille Umax, 2 local Poiseuille Umean
-    int passiveNeumannRightOutlet0493x8l = 0;
+    int passiveNeumannOutlet0493x8r = 0;
     int face[kOpenBoundaryMaxSegments]{}; // 0 left, 1 right, 2 bottom, 3 top
     int mode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
     std::uint32_t type[kOpenBoundaryMaxSegments]{};
@@ -1873,7 +1875,9 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
     cfg.enabled = 1;
     cfg.count = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
     cfg.inletProfileCode = q6_segmented_profile_code_0493x8k(params);
-    cfg.passiveNeumannRightOutlet0493x8l = params.openBoundaryOutletMode == "neumann" ? 1 : 0;
+    cfg.passiveNeumannOutlet0493x8r = params.openBoundaryOutletMode == "neumann" ? 1 : 0;
+    bool hasX0414 = false;
+    bool hasY0414 = false;
     for (int k = 0; k < cfg.count; ++k) {
         const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
         cfg.face[k] = q6_face_code_0409(seg.face);
@@ -1882,15 +1886,18 @@ Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double 
         cfg.sMin[k] = seg.sMin;
         cfg.sMax[k] = seg.sMax;
         cfg.flux[k] = ramp * (open_boundary_face_is_x(seg.face) ? seg.ux : seg.uy);
+        hasX0414 = hasX0414 || open_boundary_face_is_x(seg.face);
+        hasY0414 = hasY0414 || open_boundary_face_is_y(seg.face);
     }
+    cfg.multiAxis0414 = hasX0414 && hasY0414 ? 1 : 0;
     return cfg;
 }
 
-bool q6_has_passive_pressure_outlet_right_0493x8r(
+bool q6_has_passive_pressure_outlet_0493x8r(
     const Q6SegmentedIo0409& cfg) {
-    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l) return false;
+    if (!cfg.enabled || !cfg.passiveNeumannOutlet0493x8r) return false;
     for (int k = 0; k < cfg.count; ++k) {
-        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
+        if (cfg.mode[k] == 2 && cfg.face[k] >= 0 && cfg.face[k] <= 3 &&
             cfg.sMax[k] > cfg.sMin[k]) {
             return true;
         }
@@ -1898,17 +1905,44 @@ bool q6_has_passive_pressure_outlet_right_0493x8r(
     return false;
 }
 
-bool q6_has_fullheight_passive_pressure_outlet_right_0493x8s(
+bool q6_has_passive_pressure_outlet_nonright_0414(
     const Q6SegmentedIo0409& cfg) {
-    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l) return false;
-    constexpr double eps = 1.0e-12;
+    if (!cfg.enabled || !cfg.passiveNeumannOutlet0493x8r) return false;
     for (int k = 0; k < cfg.count; ++k) {
-        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
-            cfg.sMin[k] <= eps && cfg.sMax[k] >= 1.0 - eps) {
-            return true;
-        }
+        if (cfg.mode[k] == 2 && cfg.face[k] != 1 &&
+            cfg.face[k] >= 0 && cfg.face[k] <= 3 &&
+            cfg.sMax[k] > cfg.sMin[k]) return true;
     }
     return false;
+}
+
+// 0414: 0=no pressure outlet on face, 1=the union of outlet segments covers
+// the complete face, 2=partial/gapped coverage.  Exact x8s separation is only
+// valid when every pressure-outlet face is either absent or complete.
+int q6_passive_pressure_outlet_face_coverage_0414(
+    const Q6SegmentedIo0409& cfg, int face) {
+    if (!cfg.enabled || !cfg.passiveNeumannOutlet0493x8r) return 0;
+    std::vector<std::pair<double, double>> intervals;
+    for (int k = 0; k < cfg.count; ++k) {
+        if (cfg.face[k] == face && cfg.mode[k] == 2 && cfg.sMax[k] > cfg.sMin[k]) {
+            intervals.emplace_back(cfg.sMin[k], cfg.sMax[k]);
+        }
+    }
+    if (intervals.empty()) return 0;
+    std::sort(intervals.begin(), intervals.end());
+    constexpr double eps = 1.0e-12;
+    if (intervals.front().first > eps) return 2;
+    double end = intervals.front().second;
+    for (std::size_t i = 1; i < intervals.size(); ++i) {
+        if (intervals[i].first > end + eps) return 2;
+        end = std::max(end, intervals[i].second);
+    }
+    return end >= 1.0 - eps ? 1 : 2;
+}
+
+bool q6_has_fullheight_passive_pressure_outlet_right_0493x8s(
+    const Q6SegmentedIo0409& cfg) {
+    return q6_passive_pressure_outlet_face_coverage_0414(cfg, 1) == 1;
 }
 
 double q6_segmented_flux_integral_0409(const Q6SegmentedIo0409& cfg, int face, double length) {
@@ -3006,20 +3040,25 @@ __device__ double q6_species_boundary_fraction_0493w7(
     return fmin(1.0, fmax(0.0, species.occupancyFraction[k]));
 }
 
-__device__ bool q6_passive_pressure_outlet_right_cell_0493x8r(
+__device__ bool q6_passive_pressure_outlet_cell_0493x8r(
     const Q6SegmentedIo0409& cfg,
+    int face,
     int ix,
     int iy,
     int nx,
     int ny) {
-    if (!cfg.enabled || !cfg.passiveNeumannRightOutlet0493x8l ||
-        ix != nx - 1 || ny <= 0) {
+    if (!cfg.enabled || !cfg.passiveNeumannOutlet0493x8r || nx <= 0 || ny <= 0) {
         return false;
     }
-    const double tangent =
-        (static_cast<double>(iy) + 0.5) / static_cast<double>(ny);
+    if ((face == 0 && ix != 0) || (face == 1 && ix != nx - 1) ||
+        (face == 2 && iy != 0) || (face == 3 && iy != ny - 1)) {
+        return false;
+    }
+    const double tangent = (face == 0 || face == 1)
+        ? (static_cast<double>(iy) + 0.5) / static_cast<double>(ny)
+        : (static_cast<double>(ix) + 0.5) / static_cast<double>(nx);
     for (int k = 0; k < cfg.count; ++k) {
-        if (cfg.face[k] == 1 && cfg.mode[k] == 2 &&
+        if (cfg.face[k] == face && cfg.mode[k] == 2 &&
             tangent >= cfg.sMin[k] && tangent <= cfg.sMax[k]) {
             return true;
         }
@@ -3052,13 +3091,11 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
         if (cfg.face[k] != face || tangent < cfg.sMin[k] || tangent > cfg.sMax[k]) {
             continue;
         }
-        // 0493x8l + 0493x8r passive right outlet.
-        // Extrapolate the current boundary-cell ux to the BASE outlet face:
-        // u*_out = u*_cell, i.e. zero normal gradient of the predictor
-        // velocity.  x8r no longer treats this value as a prescribed final
-        // flux: the pressure solve uses phi=0 at the outlet face and is free
-        // to add the normal pressure correction required by continuity.
-        if (cfg.mode[k] == 2 && cfg.passiveNeumannRightOutlet0493x8l && face == 1) {
+        // 0414 / x8r quadriface pressure outlet.  Extrapolate the
+        // predictor normal velocity from the adjacent cell (zero normal
+        // gradient) but do not prescribe the final outlet flux: phi=0 on the
+        // physical face leaves the projection free to determine that flux.
+        if (cfg.mode[k] == 2 && cfg.passiveNeumannOutlet0493x8r) {
             if (speciesIndex < 0 || speciesIndex >= species.speciesCount ||
                 cell < 0 || cell >= species.numCells) {
                 return 0.0;
@@ -3066,8 +3103,10 @@ __device__ double q6_species_boundary_flux_for_cell_0493w7(
             const int sk = speciesIndex * species.numCells + cell;
             const double m = species.mass[sk];
             if (!(m > 0.0)) return 0.0;
-            const double localUx = species.px[sk] / m;
-            return localUx * fraction;
+            const double localNormal = (face == 0 || face == 1)
+                ? species.px[sk] / m
+                : species.py[sk] / m;
+            return localNormal * fraction;
         }
 
         const double targetFlux =
@@ -15985,6 +16024,143 @@ __global__ void q6_build_independent_rhs_after_mask_0493w5(
     }
 }
 
+// 0414 exact separable extension of x8s.  Axis BC codes describe the
+// pressure-correction operator at the low/high domain faces:
+// 0=Neumann/Neumann, 1=Neumann/Dirichlet, 2=Dirichlet/Neumann,
+// 3=Dirichlet/Dirichlet.  The historical right-only x8s path is exactly
+// xBc=1, yBc=0 with (mx,my)=(0,0),(1,0),(2,0).
+constexpr int kQ6PressureOutletDeflationMaxModes0414 = 6;
+struct Q6PressureOutletDeflationConfig0414 {
+    int enabled = 0;
+    int modeCount = 0;
+    int xBc = 0;
+    int yBc = 0;
+    int mx[kQ6PressureOutletDeflationMaxModes0414]{};
+    int my[kQ6PressureOutletDeflationMaxModes0414]{};
+    double lambda[kQ6PressureOutletDeflationMaxModes0414]{};
+    double norm[kQ6PressureOutletDeflationMaxModes0414]{};
+};
+
+__host__ __device__ __forceinline__ double q6_pressure_axis_mode_0414(
+    int i, int n, int mode, int bc) {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    if (n <= 0) return 0.0;
+    if (bc == 0) {
+        const double theta = static_cast<double>(mode) * pi / static_cast<double>(n);
+        return cos(theta * (static_cast<double>(i) + 0.5));
+    }
+    if (bc == 1) {
+        const double theta = (static_cast<double>(mode) + 0.5) * pi / static_cast<double>(n);
+        return cos(theta * (static_cast<double>(i) + 0.5));
+    }
+    if (bc == 2) {
+        const double theta = (static_cast<double>(mode) + 0.5) * pi / static_cast<double>(n);
+        return cos(theta * (static_cast<double>(n - i) - 0.5));
+    }
+    const double theta = (static_cast<double>(mode) + 1.0) * pi / static_cast<double>(n);
+    return sin(theta * (static_cast<double>(i) + 0.5));
+}
+
+__host__ __device__ __forceinline__ double q6_pressure_axis_lambda_0414(
+    int n, int mode, int bc, double invD2) {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    if (n <= 0) return 0.0;
+    double theta = 0.0;
+    if (bc == 0) theta = static_cast<double>(mode) * pi / static_cast<double>(n);
+    else if (bc == 1 || bc == 2) theta = (static_cast<double>(mode) + 0.5) * pi / static_cast<double>(n);
+    else theta = (static_cast<double>(mode) + 1.0) * pi / static_cast<double>(n);
+    const double q = sin(0.5 * theta);
+    return 4.0 * q * q * invD2;
+}
+
+__host__ __device__ __forceinline__ double q6_pressure_axis_norm_0414(
+    int n, int mode, int bc) {
+    if (n <= 0) return 1.0;
+    if ((bc == 0 && mode == 0) || (bc == 3 && mode == n - 1)) {
+        return static_cast<double>(n);
+    }
+    return 0.5 * static_cast<double>(n);
+}
+
+__host__ __device__ __forceinline__ double q6_pressure_outlet_mode_0414(
+    const Q6PressureOutletDeflationConfig0414& cfg,
+    int ix, int iy, int nx, int ny, int slot) {
+    return q6_pressure_axis_mode_0414(ix, nx, cfg.mx[slot], cfg.xBc) *
+           q6_pressure_axis_mode_0414(iy, ny, cfg.my[slot], cfg.yBc);
+}
+
+Q6PressureOutletDeflationConfig0414 q6_make_pressure_outlet_deflation_0414(
+    const Q6SegmentedIo0409& segmentedIo,
+    int nx, int ny,
+    double invDx2, double invDy2,
+    int periodicX, int periodicY) {
+    Q6PressureOutletDeflationConfig0414 out{};
+    const int covLeft = q6_passive_pressure_outlet_face_coverage_0414(segmentedIo, 0);
+    const int covRight = q6_passive_pressure_outlet_face_coverage_0414(segmentedIo, 1);
+    const int covBottom = q6_passive_pressure_outlet_face_coverage_0414(segmentedIo, 2);
+    const int covTop = q6_passive_pressure_outlet_face_coverage_0414(segmentedIo, 3);
+    if (covLeft == 2 || covRight == 2 || covBottom == 2 || covTop == 2) return out;
+    const int fullFaces = (covLeft == 1) + (covRight == 1) + (covBottom == 1) + (covTop == 1);
+    if (fullFaces == 0) return out;
+    if ((periodicX && (covLeft == 1 || covRight == 1)) ||
+        (periodicY && (covBottom == 1 || covTop == 1))) return out;
+
+    out.xBc = (covLeft == 1 ? 2 : 0) + (covRight == 1 ? 1 : 0);
+    out.yBc = (covBottom == 1 ? 2 : 0) + (covTop == 1 ? 1 : 0);
+
+    auto add_mode = [&](int mx, int my) {
+        if (mx < 0 || my < 0 || mx >= nx || my >= ny) return;
+        if (out.modeCount >= kQ6PressureOutletDeflationMaxModes0414) return;
+        const int k = out.modeCount++;
+        out.mx[k] = mx;
+        out.my[k] = my;
+        out.lambda[k] = q6_pressure_axis_lambda_0414(nx, mx, out.xBc, invDx2) +
+                        q6_pressure_axis_lambda_0414(ny, my, out.yBc, invDy2);
+        out.norm[k] = q6_pressure_axis_norm_0414(nx, mx, out.xBc) *
+                      q6_pressure_axis_norm_0414(ny, my, out.yBc);
+    };
+
+    // Preserve the historical three-mode path exactly for a single complete
+    // pressure outlet; rotate/reflect it for the other three orientations.
+    if (fullFaces == 1) {
+        if (covLeft == 1 || covRight == 1) {
+            add_mode(0, 0); add_mode(1, 0); add_mode(2, 0);
+        } else {
+            add_mode(0, 0); add_mode(0, 1); add_mode(0, 2);
+        }
+        out.enabled = out.modeCount == 3 ? 1 : 0;
+        return out;
+    }
+
+    struct Candidate0414 { int mx; int my; double lambda; };
+    std::vector<Candidate0414> candidates;
+    // A periodic axis has Fourier (not NN-cosine) non-zero modes.  The
+    // constant transverse mode is nevertheless exact, so keep only mode 0
+    // on a periodic axis in this first separable extension.  Multi-axis
+    // segmented outlets necessarily make the corresponding axes nonperiodic.
+    const int mxMax = periodicX ? 1 : std::min(nx, kQ6PressureOutletDeflationMaxModes0414);
+    const int myMax = periodicY ? 1 : std::min(ny, kQ6PressureOutletDeflationMaxModes0414);
+    for (int mx = 0; mx < mxMax; ++mx) {
+        for (int my = 0; my < myMax; ++my) {
+            const double lambda =
+                q6_pressure_axis_lambda_0414(nx, mx, out.xBc, invDx2) +
+                q6_pressure_axis_lambda_0414(ny, my, out.yBc, invDy2);
+            if (lambda > 0.0 && std::isfinite(lambda)) candidates.push_back({mx, my, lambda});
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate0414& a, const Candidate0414& b) {
+        if (a.lambda != b.lambda) return a.lambda < b.lambda;
+        if (a.mx != b.mx) return a.mx < b.mx;
+        return a.my < b.my;
+    });
+    for (const auto& c : candidates) {
+        if (out.modeCount >= kQ6PressureOutletDeflationMaxModes0414) break;
+        add_mode(c.mx, c.my);
+    }
+    out.enabled = out.modeCount > 0 ? 1 : 0;
+    return out;
+}
+
 // 0493x8s exact pressure-outlet low-mode deflation.
 __host__ __device__ __forceinline__ double q6_pressure_outlet_mode_0493x8s(
     int ix,
@@ -16190,8 +16366,8 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
                     useCutFaceGeometry, cutFaceThetaMinGuard);
             a += factor * invDx2 *
                  (p[c] - (mask[east] ? p[east] : 0.0));
-        } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
-                       segmentedIo, ix, iy, nx, ny)) {
+        } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                       segmentedIo, 1, ix, iy, nx, ny)) {
             // 0493x8r passive pressure outlet: phi=0 at the physical face,
             // whose distance from this cell centre is dx/2.
             a += 2.0 * invDx2 * p[c];
@@ -16206,6 +16382,9 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
                     useCutFaceGeometry, cutFaceThetaMinGuard);
             a += factor * invDx2 *
                  (p[c] - (mask[west] ? p[west] : 0.0));
+        } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                       segmentedIo, 0, ix, iy, nx, ny)) {
+            a += 2.0 * invDx2 * p[c];
         }
         if (periodicY || iy < ny - 1) {
             const int north =
@@ -16217,6 +16396,9 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
                     useCutFaceGeometry, cutFaceThetaMinGuard);
             a += factor * invDy2 *
                  (p[c] - (mask[north] ? p[north] : 0.0));
+        } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                       segmentedIo, 3, ix, iy, nx, ny)) {
+            a += 2.0 * invDy2 * p[c];
         }
         if (periodicY || iy > 0) {
             const int south =
@@ -16228,6 +16410,9 @@ __global__ void q6_apply_masked_operator_and_dot_0493w5(
                     useCutFaceGeometry, cutFaceThetaMinGuard);
             a += factor * invDy2 *
                  (p[c] - (mask[south] ? p[south] : 0.0));
+        } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                       segmentedIo, 2, ix, iy, nx, ny)) {
+            a += 2.0 * invDy2 * p[c];
         }
         Ap[c] = a;
         dot += p[c] * a;
@@ -16301,8 +16486,8 @@ __global__ void q6_compute_masked_face_correction_0493w5(
                 faceDUx[c] = 0.0;
             }
         } else if (mask[c]) {
-            if (q6_passive_pressure_outlet_right_cell_0493x8r(
-                    segmentedIo, ix, iy, nx, ny)) {
+            if (q6_passive_pressure_outlet_cell_0493x8r(
+                    segmentedIo, 1, ix, iy, nx, ny)) {
                 // 0493x8r: correction = -grad(phi), phi_out=0 and
                 // distance(cell centre, outlet face)=dx/2.
                 faceDUx[c] = strength * (2.0 * phi[c] / dx);
@@ -16334,12 +16519,17 @@ __global__ void q6_compute_masked_face_correction_0493w5(
                 faceDUy[c] = 0.0;
             }
         } else if (mask[c]) {
-            const double target = q6_species_boundary_flux_for_cell_0493w7(
-                segmentedIo, 3, ix, iy, nx, ny, yHighFlux, species, speciesIndex,
-                speciesType, c, exclusiveProjectedSpecies);
-            const double before = q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, c, 1);
-            faceDUy[c] = strength * (target - before);
+            if (q6_passive_pressure_outlet_cell_0493x8r(
+                    segmentedIo, 3, ix, iy, nx, ny)) {
+                faceDUy[c] = strength * (2.0 * phi[c] / dy);
+            } else {
+                const double target = q6_species_boundary_flux_for_cell_0493w7(
+                    segmentedIo, 3, ix, iy, nx, ny, yHighFlux, species, speciesIndex,
+                    speciesType, c, exclusiveProjectedSpecies);
+                const double before = q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, c, 1);
+                faceDUy[c] = strength * (target - before);
+            }
         } else {
             faceDUy[c] = 0.0;
         }
@@ -16351,6 +16541,7 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     int speciesIndex,
     const unsigned char* mask,
     const unsigned char* pressureMask,
+    const double* phi,
     const double* faceDUx,
     const double* faceDUy,
     double* cellDUx,
@@ -16359,6 +16550,8 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
     double* partialMax,
     int nx,
     int ny,
+    double dx,
+    double dy,
     int periodicX,
     int periodicY,
     int fullDomain,
@@ -16412,20 +16605,30 @@ __global__ void q6_compute_masked_cell_correction_stats_0493w5(
         double westCorrection = hasWest ? faceDUx[west] : 0.0;
         double southCorrection = hasSouth ? faceDUy[south] : 0.0;
         if (!hasWest && pressureMask[c] != 0u) {
-            const double target = q6_species_boundary_flux_for_cell_0493w7(
-                segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
-                speciesType, c, exclusiveProjectedSpecies);
-            const double before = q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, c, 0);
-            westCorrection = strength * (target - before);
+            if (q6_passive_pressure_outlet_cell_0493x8r(
+                    segmentedIo, 0, ix, iy, nx, ny)) {
+                westCorrection = -strength * (2.0 * phi[c] / dx);
+            } else {
+                const double target = q6_species_boundary_flux_for_cell_0493w7(
+                    segmentedIo, 0, ix, iy, nx, ny, xLowFlux, species, speciesIndex,
+                    speciesType, c, exclusiveProjectedSpecies);
+                const double before = q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, c, 0);
+                westCorrection = strength * (target - before);
+            }
         }
         if (!hasSouth && pressureMask[c] != 0u) {
-            const double target = q6_species_boundary_flux_for_cell_0493w7(
-                segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
-                speciesType, c, exclusiveProjectedSpecies);
-            const double before = q6_species_cell_velocity_component_0493w5(
-                species, speciesIndex, c, 1);
-            southCorrection = strength * (target - before);
+            if (q6_passive_pressure_outlet_cell_0493x8r(
+                    segmentedIo, 2, ix, iy, nx, ny)) {
+                southCorrection = -strength * (2.0 * phi[c] / dy);
+            } else {
+                const double target = q6_species_boundary_flux_for_cell_0493w7(
+                    segmentedIo, 2, ix, iy, nx, ny, yLowFlux, species, speciesIndex,
+                    speciesType, c, exclusiveProjectedSpecies);
+                const double before = q6_species_cell_velocity_component_0493w5(
+                    species, speciesIndex, c, 1);
+                southCorrection = strength * (target - before);
+            }
         }
         // 0493x7o: reconstruct the cell correction from both opposite FV
         // faces in every mode.  For fullDomain this removes the historical
@@ -16481,8 +16684,10 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
     int speciesIndex,
     const unsigned char* mask,
     const unsigned char* velocityMask,
+    const double* phi,
     const double* faceDUx,
     const double* faceDUy,
+    double strength,
     double* partialSq,
     double* partialMax,
     int nx,
@@ -16578,9 +16783,23 @@ __global__ void q6_masked_projected_divergence_stats_0493w5(
             : localYLowFlux;
 
         const double fxEast = fxEastBase + faceDUx[c];
-        const double fxWest = hasWest ? fxWestBase + faceDUx[west] : fxWestBase;
+        double fxWest = hasWest ? fxWestBase + faceDUx[west] : fxWestBase;
         const double fyNorth = fyNorthBase + faceDUy[c];
-        const double fySouth = hasSouth ? fySouthBase + faceDUy[south] : fySouthBase;
+        double fySouth = hasSouth ? fySouthBase + faceDUy[south] : fySouthBase;
+        // 0414-diagnostic-fix1: low physical faces do not have an east/north
+        // owner cell from which faceDUx/faceDUy can be fetched.  The production
+        // cell-correction path already reconstructs the x8r half-cell
+        // Dirichlet correction there; the projected-face diagnostic must use
+        // the same correction or mirrored left/bottom outlets report a false
+        // O(1) divergence despite a converged pressure solve.
+        if (!hasWest && q6_passive_pressure_outlet_cell_0493x8r(
+                segmentedIo, 0, ix, iy, nx, ny)) {
+            fxWest += -strength * (2.0 * phi[c] / dx);
+        }
+        if (!hasSouth && q6_passive_pressure_outlet_cell_0493x8r(
+                segmentedIo, 2, ix, iy, nx, ny)) {
+            fySouth += -strength * (2.0 * phi[c] / dy);
+        }
         const double div = (fxEast - fxWest) / dx + (fyNorth - fySouth) / dy;
         double residual = div;
         double targetDiv0493x7c = 0.0;
@@ -18029,21 +18248,30 @@ __device__ __forceinline__ double q6_full_operator_cell_0493x7j(
     if (periodicX || ix > 0) {
         const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
         value += (center - p[west]) * invDx2;
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 0, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDx2;
     }
     if (periodicX || ix < nx - 1) {
         const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
         value += (center - p[east]) * invDx2;
-    } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
-                   segmentedIo, ix, iy, nx, ny)) {
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 1, ix, iy, nx, ny)) {
         value += 2.0 * center * invDx2;
     }
     if (periodicY || iy > 0) {
         const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
         value += (center - p[south]) * invDy2;
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 2, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDy2;
     }
     if (periodicY || iy < ny - 1) {
         const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
         value += (center - p[north]) * invDy2;
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 3, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDy2;
     }
     return value;
 }
@@ -18068,21 +18296,30 @@ __device__ __forceinline__ double q6_prepared_masked_operator_cell_0493x7j(
     if (periodicX || ix < nx - 1) {
         const int east = iy * nx + (periodicX ? wrap_cell_index_0400(ix + 1, nx) : ix + 1);
         value += faceCoeffX[c] * invDx2 * (center - (mask[east] ? p[east] : 0.0));
-    } else if (q6_passive_pressure_outlet_right_cell_0493x8r(
-                   segmentedIo, ix, iy, nx, ny)) {
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 1, ix, iy, nx, ny)) {
         value += 2.0 * center * invDx2;
     }
     if (periodicX || ix > 0) {
         const int west = iy * nx + (periodicX ? wrap_cell_index_0400(ix - 1, nx) : ix - 1);
         value += faceCoeffX[west] * invDx2 * (center - (mask[west] ? p[west] : 0.0));
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 0, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDx2;
     }
     if (periodicY || iy < ny - 1) {
         const int north = (periodicY ? wrap_cell_index_0400(iy + 1, ny) : iy + 1) * nx + ix;
         value += faceCoeffY[c] * invDy2 * (center - (mask[north] ? p[north] : 0.0));
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 3, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDy2;
     }
     if (periodicY || iy > 0) {
         const int south = (periodicY ? wrap_cell_index_0400(iy - 1, ny) : iy - 1) * nx + ix;
         value += faceCoeffY[south] * invDy2 * (center - (mask[south] ? p[south] : 0.0));
+    } else if (q6_passive_pressure_outlet_cell_0493x8r(
+                   segmentedIo, 2, ix, iy, nx, ny)) {
+        value += 2.0 * center * invDy2;
     }
     return value;
 }
@@ -18113,7 +18350,7 @@ __global__ void q6_cg_g_f_resident_0493x7j(
     Q6SegmentedIo0409 segmentedIo,
     int densityRelaxationCenterMean0493x8t,
     int pressureOutletDirichlet0493x8r,
-    int pressureOutletDeflation0493x8s,
+    Q6PressureOutletDeflationConfig0414 pressureOutletDeflation0414,
     int fullDomain) {
     cooperative_groups::grid_group grid = cooperative_groups::this_grid();
     extern __shared__ double warpSums[];
@@ -18170,48 +18407,39 @@ __global__ void q6_cg_g_f_resident_0493x7j(
     const bool removeConstantNullspace0493x8r =
         fullDomain && !pressureOutletDirichlet0493x8r;
     const bool deflatePressureOutlet0493x8s =
-        pressureOutletDeflation0493x8s != 0;
+        fullDomain && pressureOutletDeflation0414.enabled != 0 &&
+        pressureOutletDeflation0414.modeCount > 0;
     const double rhsMean = removeConstantNullspace0493x8r
         ? state->rhsSum / static_cast<double>(n)
         : 0.0;
 
-    double rhsMode0 = 0.0;
-    double rhsMode1 = 0.0;
-    double rhsMode2 = 0.0;
+    double rhsMode0414[kQ6PressureOutletDeflationMaxModes0414]{};
     double rhsNormSq0493x8s = 0.0;
     if (deflatePressureOutlet0493x8s) {
-        double local0 = 0.0;
-        double local1 = 0.0;
-        double local2 = 0.0;
+        double localMode0414[kQ6PressureOutletDeflationMaxModes0414]{};
         double localSq = 0.0;
         for (int c = idx; c < n; c += stride) {
             const int ix = c % nx;
+            const int iy = c / nx;
             const double v = rhs[c];
-            local0 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
-            local1 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
-            local2 += v * q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
+            #pragma unroll
+            for (int k = 0; k < kQ6PressureOutletDeflationMaxModes0414; ++k) {
+                if (k >= pressureOutletDeflation0414.modeCount) break;
+                localMode0414[k] += v * q6_pressure_outlet_mode_0414(
+                    pressureOutletDeflation0414, ix, iy, nx, ny, k);
+            }
             localSq += v * v;
         }
-        const double dot0 = q6_grid_sum_0493x7j(
-            local0, blockPartials0, warpSums, grid, state);
-        const double dot1 = q6_grid_sum_0493x7j(
-            local1, blockPartials0, warpSums, grid, state);
-        const double dot2 = q6_grid_sum_0493x7j(
-            local2, blockPartials0, warpSums, grid, state);
+        #pragma unroll
+        for (int k = 0; k < kQ6PressureOutletDeflationMaxModes0414; ++k) {
+            if (k >= pressureOutletDeflation0414.modeCount) break;
+            const double dot = q6_grid_sum_0493x7j(
+                localMode0414[k], blockPartials0, warpSums, grid, state);
+            rhsMode0414[k] = dot / pressureOutletDeflation0414.norm[k];
+        }
         rhsNormSq0493x8s = q6_grid_sum_0493x7j(
             localSq, blockPartials0, warpSums, grid, state);
-        const double modeNorm = 0.5 * static_cast<double>(n);
-        rhsMode0 = dot0 / modeNorm;
-        rhsMode1 = dot1 / modeNorm;
-        rhsMode2 = dot2 / modeNorm;
     }
-
-    const double lambda0 = deflatePressureOutlet0493x8s
-        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 0, invDx2) : 1.0;
-    const double lambda1 = deflatePressureOutlet0493x8s
-        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 1, invDx2) : 1.0;
-    const double lambda2 = deflatePressureOutlet0493x8s
-        ? q6_pressure_outlet_mode_lambda_0493x8s(nx, 2, invDx2) : 1.0;
 
     double localRr = 0.0;
     for (int c = idx; c < n; c += stride) {
@@ -18228,15 +18456,18 @@ __global__ void q6_cg_g_f_resident_0493x7j(
         rhs[c] = v;
         if (deflatePressureOutlet0493x8s) {
             const int ix = c % nx;
-            const double e0 = q6_pressure_outlet_mode_0493x8s(ix, nx, 0);
-            const double e1 = q6_pressure_outlet_mode_0493x8s(ix, nx, 1);
-            const double e2 = q6_pressure_outlet_mode_0493x8s(ix, nx, 2);
-            const double lowRhs =
-                rhsMode0 * e0 + rhsMode1 * e1 + rhsMode2 * e2;
-            phi[c] =
-                (rhsMode0 / lambda0) * e0 +
-                (rhsMode1 / lambda1) * e1 +
-                (rhsMode2 / lambda2) * e2;
+            const int iy = c / nx;
+            double lowRhs = 0.0;
+            double lowPhi = 0.0;
+            #pragma unroll
+            for (int k = 0; k < kQ6PressureOutletDeflationMaxModes0414; ++k) {
+                if (k >= pressureOutletDeflation0414.modeCount) break;
+                const double e = q6_pressure_outlet_mode_0414(
+                    pressureOutletDeflation0414, ix, iy, nx, ny, k);
+                lowRhs += rhsMode0414[k] * e;
+                lowPhi += (rhsMode0414[k] / pressureOutletDeflation0414.lambda[k]) * e;
+            }
+            phi[c] = lowPhi;
             const double rv = v - lowRhs;
             r[c] = rv;
             p[c] = rv;
@@ -18413,7 +18644,7 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     Q6SegmentedIo0409 segmentedIo,
     bool densityRelaxationCenterMean0493x8t,
     bool pressureOutletDirichlet0493x8r,
-    bool pressureOutletDeflation0493x8s,
+    Q6PressureOutletDeflationConfig0414 pressureOutletDeflation0414,
     bool fullDomain,
     double& divBeforeSqOut0493x7j,
     IndependentMaskedSpeciesAudit0493w5& audit) {
@@ -18442,7 +18673,7 @@ bool launch_q6_g_f_resident_cg_0493x7j(
     int densityRelaxationCenterMean =
         densityRelaxationCenterMean0493x8t ? 1 : 0;
     int pressureOutlet = pressureOutletDirichlet0493x8r ? 1 : 0;
-    int pressureOutletDeflation = pressureOutletDeflation0493x8s ? 1 : 0;
+    Q6PressureOutletDeflationConfig0414 pressureOutletDeflation = pressureOutletDeflation0414;
     int full = fullDomain ? 1 : 0;
 
     void* args[] = {
@@ -21061,9 +21292,18 @@ bool apply_independent_masked_species_q6_0493w5(
     // A phi=0 outlet face removes the constant pressure-correction nullspace
     // even when every pressure cell is active.
     const bool pressureOutletDirichlet0493x8r =
-        q6_has_passive_pressure_outlet_right_0493x8r(segmentedIo);
-    // 0493x8s exact pressure-outlet low-mode deflation
+        q6_has_passive_pressure_outlet_0493x8r(segmentedIo);
+    // 0414: exact x8s deflation for every separable full-face pressure-outlet
+    // topology.  Keep the legacy right-only boolean below solely for the
+    // nonresident fallback path, which is outside the present qualification.
+    const Q6PressureOutletDeflationConfig0414 pressureOutletDeflation0414 =
+        pressureOutletDirichlet0493x8r && params.q6PressureOutletDeflationEnable
+            ? q6_make_pressure_outlet_deflation_0414(
+                  segmentedIo, grid.Nx, grid.Ny, invDx2, invDy2,
+                  periodicX ? 1 : 0, periodicY ? 1 : 0)
+            : Q6PressureOutletDeflationConfig0414{};
     const bool pressureOutletDeflation0493x8s =
+        params.q6PressureOutletDeflationEnable &&
         pressureOutletDirichlet0493x8r && !periodicX &&
         q6_has_fullheight_passive_pressure_outlet_right_0493x8s(segmentedIo);
 
@@ -22701,8 +22941,14 @@ bool apply_independent_masked_species_q6_0493w5(
                 periodicX, periodicY, segmentedIo,
                 densityRelaxationCenterMean0493x8t,
                 pressureOutletDirichlet0493x8r,
-                pressureOutletDeflation0493x8s && audit.fullDomain,
+                pressureOutletDeflation0414,
                 audit.fullDomain, divBeforeSq, audit);
+        if (!residentCgUsed0493x7j &&
+            (segmentedIo.multiAxis0414 ||
+             q6_has_passive_pressure_outlet_nonright_0414(segmentedIo))) {
+            throw std::runtime_error(
+                "0414 generalized segmented pressure outlets require the cooperative CUDA-resident x7j CG path; host fallback is intentionally unsupported");
+        }
         if (!residentCgUsed0493x7j) {
             double rhsSum = reduce_host_sum_0400(ws.partial0.data(), cellBlocks);
             if (densityRelaxationCenterMean0493x8t) {
@@ -23843,8 +24089,8 @@ bool apply_independent_masked_species_q6_0493w5(
         q6_compute_masked_cell_correction_stats_0493w5<<<
             cellBlocks, threads, q6GfDiagnosticsThisStep0493x7k ? pairShared : 0u>>>(
             species, s, ws.speciesMask0493w5.data(), q6SolveMask0493x6f,
-            ws.r.data(), ws.p.data(), ws.dux.data(), ws.duy.data(),
-            ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny,
+            ws.phi.data(), ws.r.data(), ws.p.data(), ws.dux.data(), ws.duy.data(),
+            ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
             periodicX, periodicY, audit.fullDomain ? 1 : 0,
             effectiveStrength, xLowFlux, yLowFlux, segmentedIo, audit.type,
             exclusiveProjectedSpecies,
@@ -23886,7 +24132,7 @@ bool apply_independent_masked_species_q6_0493w5(
             q6_masked_projected_divergence_stats_0493w5<<<
                 cellBlocks, threads, tripleShared>>>(
                 species, s, q6SolveMask0493x6f, ws.speciesMask0493w5.data(),
-                ws.r.data(), ws.p.data(),
+                ws.phi.data(), ws.r.data(), ws.p.data(), effectiveStrength,
                 ws.partial0.data(), ws.partial1.data(), grid.Nx, grid.Ny, dx, dy,
                 periodicX, periodicY, xLowFlux, xHighFlux, yLowFlux, yHighFlux,
                 segmentedIo, audit.type, exclusiveProjectedSpecies,

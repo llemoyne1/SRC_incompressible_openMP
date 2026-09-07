@@ -340,6 +340,72 @@ std::string boundary_mode_for_face(const SimulationParams& p, const std::string&
     return "";
 }
 
+
+bool relative_interval_overlap_positive_0414(double a0, double a1, double b0, double b1) {
+    constexpr double eps = 1.0e-14;
+    return std::min(a1, b1) - std::max(a0, b0) > eps;
+}
+
+bool segment_contains_relative_coordinate_0414(const OpenBoundarySegment& seg, double s) {
+    constexpr double eps = 1.0e-12;
+    return s >= seg.sMin - eps && s <= seg.sMax + eps;
+}
+
+bool orthogonal_segment_corner_coordinates_0414(
+    const OpenBoundarySegment& a,
+    const OpenBoundarySegment& b,
+    double& sa,
+    double& sb) {
+    const OpenBoundarySegment* vertical = &a;
+    const OpenBoundarySegment* horizontal = &b;
+    bool swapped = false;
+    if (open_boundary_face_is_y(a.face) && open_boundary_face_is_x(b.face)) {
+        vertical = &b;
+        horizontal = &a;
+        swapped = true;
+    } else if (!(open_boundary_face_is_x(a.face) && open_boundary_face_is_y(b.face))) {
+        return false;
+    }
+
+    double sv = 0.0;
+    double sh = 0.0;
+    if (vertical->face == "left" && horizontal->face == "bottom") { sv = 0.0; sh = 0.0; }
+    else if (vertical->face == "left" && horizontal->face == "top") { sv = 1.0; sh = 0.0; }
+    else if (vertical->face == "right" && horizontal->face == "bottom") { sv = 0.0; sh = 1.0; }
+    else if (vertical->face == "right" && horizontal->face == "top") { sv = 1.0; sh = 1.0; }
+    else return false;
+
+    if (!swapped) { sa = sv; sb = sh; }
+    else { sa = sh; sb = sv; }
+    return true;
+}
+
+bool orthogonal_hard_inlet_reservoirs_overlap_0414(
+    const SimulationParams& p,
+    const OpenBoundarySegment& a,
+    const OpenBoundarySegment& b) {
+    if (!open_boundary_segment_is_inlet(a) || !open_boundary_segment_is_inlet(b)) return false;
+    const OpenBoundarySegment* vertical = &a;
+    const OpenBoundarySegment* horizontal = &b;
+    if (open_boundary_face_is_y(a.face) && open_boundary_face_is_x(b.face)) {
+        vertical = &b;
+        horizontal = &a;
+    } else if (!(open_boundary_face_is_x(a.face) && open_boundary_face_is_y(b.face))) {
+        return false;
+    }
+    if (p.Nx <= 0 || p.Ny <= 0 || p.inletReservoirCells <= 0) return false;
+    const double rx = static_cast<double>(std::min(p.inletReservoirCells, p.Nx)) /
+                      static_cast<double>(p.Nx);
+    const double ry = static_cast<double>(std::min(p.inletReservoirCells, p.Ny)) /
+                      static_cast<double>(p.Ny);
+    const double vx0 = vertical->face == "left" ? 0.0 : 1.0 - rx;
+    const double vx1 = vertical->face == "left" ? rx : 1.0;
+    const double hy0 = horizontal->face == "bottom" ? 0.0 : 1.0 - ry;
+    const double hy1 = horizontal->face == "bottom" ? ry : 1.0;
+    return relative_interval_overlap_positive_0414(horizontal->sMin, horizontal->sMax, vx0, vx1) &&
+           relative_interval_overlap_positive_0414(vertical->sMin, vertical->sMax, hy0, hy1);
+}
+
 } // namespace
 
 SimulationParams read_simulation_params_kv(const std::string& filepath) {
@@ -499,6 +565,11 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
                  key == "outletBoundaryMode" || key == "q6q9OutletBoundaryMode") {
             p.openBoundaryOutletMode = get_lower(kv, key);
             std::replace(p.openBoundaryOutletMode.begin(), p.openBoundaryOutletMode.end(), '-', '_');
+        }
+        else if (key == "q6PressureOutletDeflationEnable" ||
+                 key == "pressureOutletDeflationEnable" ||
+                 key == "q6X8sDeflationEnable") {
+            p.q6PressureOutletDeflationEnable = parse_bool(value, key);
         }
         else if (key == "openBoundaryOutletHybridBlend" || key == "outletHybridBlend" ||
                  key == "openOutletHybridBlend") p.openBoundaryOutletHybridBlend = parse_double(value, key);
@@ -1028,7 +1099,19 @@ void validate_simulation_params(const SimulationParams& p) {
     const bool hasIO = xHasIO || yHasIO || has_io_boundary(p);
     if (hasIO) {
         if (xHasIO && yHasIO) {
-            throw std::runtime_error("0142 standalone/open-boundary support keeps one open axis at a time");
+            // 0414: multi-axis support is intentionally limited to compact
+            // segmented openings on wall-like faces.  Full-face/segmented
+            // mixtures keep the historical one-open-axis guard.
+            const bool segmentedOnlyMultiAxis0414 =
+                p.openBoundarySegmentsEnable &&
+                has_open_boundary_segments_on_x_axis(p) &&
+                has_open_boundary_segments_on_y_axis(p) &&
+                !is_io_boundary_mode(p.bcLeft) && !is_io_boundary_mode(p.bcRight) &&
+                !is_io_boundary_mode(p.bcBottom) && !is_io_boundary_mode(p.bcTop);
+            if (!segmentedOnlyMultiAxis0414) {
+                throw std::runtime_error(
+                    "0414 multi-axis open-boundary support is restricted to segmented openings on wall-like faces");
+            }
         }
         const bool standaloneOpenBoundary = (xHasIO && (!xIoPair || has_open_boundary_segments_on_x_axis(p))) ||
                                             (yHasIO && (!yIoPair || has_open_boundary_segments_on_y_axis(p)));
@@ -1196,6 +1279,34 @@ void validate_simulation_params(const SimulationParams& p) {
                     throw std::runtime_error("openBoundarySegment on face '" + seg.face + "' requires a wall-like bcFace mode");
                 }
             }
+            // 0414 corner policy.  Orthogonal inlet reservoirs may not overlap:
+            // a doubly owned hard_cell_density cell would otherwise have two
+            // incompatible occupancy/velocity/type targets.  Also reject an
+            // inlet/outlet pair that claims the exact same geometrical corner;
+            // the chronological CUDA crossing resolver must never choose a
+            // physics priority between contradictory simultaneous openings.
+            for (std::size_t ia = 0; ia < p.openBoundarySegments.size(); ++ia) {
+                for (std::size_t ib = ia + 1; ib < p.openBoundarySegments.size(); ++ib) {
+                    const auto& a = p.openBoundarySegments[ia];
+                    const auto& b = p.openBoundarySegments[ib];
+                    if (open_boundary_face_is_x(a.face) == open_boundary_face_is_x(b.face)) continue;
+                    if (orthogonal_hard_inlet_reservoirs_overlap_0414(p, a, b)) {
+                        throw std::runtime_error(
+                            "0414 orthogonal segmented inlet hard_cell_density reservoirs overlap (" +
+                            a.face + ", " + b.face + "); move the segments away from the common corner or reduce inletReservoirCells");
+                    }
+                    double sa = 0.0, sb = 0.0;
+                    if (orthogonal_segment_corner_coordinates_0414(a, b, sa, sb) &&
+                        segment_contains_relative_coordinate_0414(a, sa) &&
+                        segment_contains_relative_coordinate_0414(b, sb) &&
+                        open_boundary_segment_is_inlet(a) != open_boundary_segment_is_inlet(b)) {
+                        throw std::runtime_error(
+                            "0414 orthogonal segmented inlet/outlet intervals claim the same exact corner (" +
+                            a.face + ", " + b.face + "); shrink one interval so the corner belongs to at most one open mode");
+                    }
+                }
+            }
+
             const char* faces[] = {"left", "right", "bottom", "top"};
             for (const char* face : faces) {
                 std::vector<OpenBoundarySegment> local;

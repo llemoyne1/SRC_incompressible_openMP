@@ -147,6 +147,7 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double immersedCircleCy = 0.0;
     double immersedCircleR = 0.0;
     int segmentedEnable = 0;
+    int segmentedMultiAxis0414 = 0;
     int segmentCount = 0;
     int segmentFace[kOpenBoundaryMaxSegments]{};
     int segmentMode[kOpenBoundaryMaxSegments]{}; // 1 inlet, 2 outlet
@@ -200,6 +201,20 @@ __device__ inline double clamp_strictly_inside_device_0263(double x, double lo, 
     const double eps = 1.0e-12 * fmax(1.0, fabs(width));
     return clamp_device_0263(x, lo + eps, hi - eps);
 }
+
+// 0414: the multi-axis chronological crossing resolver is declared before the
+// historical wall-reflection definitions below, so keep explicit device
+// prototypes here without moving the qualified mono-axis implementation.
+__device__ inline void apply_y_wall_reflection_device_0263(int mode,
+                                                           double wallUx,
+                                                           double wallUy,
+                                                           double& vx,
+                                                           double& vy);
+__device__ inline void apply_x_wall_reflection_device_0263(int mode,
+                                                           double wallUx,
+                                                           double wallUy,
+                                                           double& vx,
+                                                           double& vy);
 
 __device__ inline std::uint64_t splitmix64_device_0263(std::uint64_t x) {
     x += 0x9e3779b97f4a7c15ULL;
@@ -354,6 +369,148 @@ __device__ inline int segment_mode_at_device_0263(const CudaClassicSrcIoFullface
         }
     }
     return 0;
+}
+
+
+__device__ inline void count_boundary_face_hit_0414(
+    int face, CudaClassicSrcIoCounters0263& local) {
+    if (face == 0) local.hitsLeft += 1ULL;
+    else if (face == 1) local.hitsRight += 1ULL;
+    else if (face == 2) local.hitsBottom += 1ULL;
+    else if (face == 3) local.hitsTop += 1ULL;
+}
+
+__device__ inline void reflect_boundary_face_0414(
+    int face,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    double& vx,
+    double& vy) {
+    if (face == 0) {
+        apply_x_wall_reflection_device_0263(
+            cfg.leftWallMode == 0 ? 1 : cfg.leftWallMode, 0.0, 0.0, vx, vy);
+    } else if (face == 1) {
+        apply_x_wall_reflection_device_0263(
+            cfg.rightWallMode == 0 ? 1 : cfg.rightWallMode, 0.0, 0.0, vx, vy);
+    } else if (face == 2) {
+        apply_y_wall_reflection_device_0263(
+            cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx, vy);
+    } else if (face == 3) {
+        apply_y_wall_reflection_device_0263(
+            cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx, vy);
+    }
+}
+
+// 0414 multi-axis segmented crossing.  The historical resident path resolves
+// x overshoots before y overshoots; with openings on both axes that ordering
+// is not rotationally covariant.  For the new multi-axis subset only, trace
+// the streamed straight segment from its reconstructed pre-stream position,
+// process the earliest physical face intersection, reflect on a solid part,
+// and continue for the remaining fraction of the same time step.
+__device__ inline bool resolve_segmented_multi_axis_crossing_0414(
+    double xPre,
+    double yPre,
+    double& xPost,
+    double& yPost,
+    double& vx,
+    double& vy,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaClassicSrcIoCounters0263& local,
+    int& removeMode,
+    int& yReflections) {
+    if (!cfg.segmentedEnable || !cfg.segmentedMultiAxis0414 || !(cfg.dt > 0.0)) {
+        return false;
+    }
+
+    double cx = clamp_device_0263(xPre, cfg.xMin, cfg.xMax);
+    double cy = clamp_device_0263(yPre, cfg.yMin, cfg.yMax);
+    double remaining = cfg.dt;
+    constexpr double inf = 1.0e300;
+    constexpr double epsTime = 1.0e-12;
+    constexpr int maxEvents = 128;
+
+    for (int event = 0; event < maxEvents && remaining > 0.0; ++event) {
+        double tx = inf;
+        double ty = inf;
+        int faceX = -1;
+        int faceY = -1;
+        if (vx < 0.0) {
+            tx = (cfg.xMin - cx) / vx;
+            faceX = 0;
+        } else if (vx > 0.0) {
+            tx = (cfg.xMax - cx) / vx;
+            faceX = 1;
+        }
+        if (vy < 0.0) {
+            ty = (cfg.yMin - cy) / vy;
+            faceY = 2;
+        } else if (vy > 0.0) {
+            ty = (cfg.yMax - cy) / vy;
+            faceY = 3;
+        }
+        if (tx < 0.0 && tx > -epsTime) tx = 0.0;
+        if (ty < 0.0 && ty > -epsTime) ty = 0.0;
+        if (tx < 0.0) tx = inf;
+        if (ty < 0.0) ty = inf;
+
+        const double tEvent = tx < ty ? tx : ty;
+        const double tol = epsTime * fmax(1.0, remaining);
+        if (!(tEvent <= remaining + tol) || tEvent >= inf * 0.5) {
+            cx += vx * remaining;
+            cy += vy * remaining;
+            remaining = 0.0;
+            break;
+        }
+
+        const bool hitX = fabs(tx - tEvent) <= tol;
+        const bool hitY = fabs(ty - tEvent) <= tol;
+        const double ex = cx + vx * tEvent;
+        const double ey = cy + vy * tEvent;
+        int modeX = 0;
+        int modeY = 0;
+        if (hitX) {
+            count_boundary_face_hit_0414(faceX, local);
+            modeX = segment_mode_at_device_0263(
+                cfg, faceX, segment_s_device_0263(faceX, ex, ey, cfg));
+        }
+        if (hitY) {
+            count_boundary_face_hit_0414(faceY, local);
+            modeY = segment_mode_at_device_0263(
+                cfg, faceY, segment_s_device_0263(faceY, ex, ey, cfg));
+        }
+
+        // A geometrically simultaneous open/open corner is consumed once.
+        // Mixed inlet/outlet ownership is rejected by host validation; retain
+        // a hard device guard in case a malformed configuration bypasses it.
+        if (modeX != 0 || modeY != 0) {
+            if (modeX != 0 && modeY != 0 && modeX != modeY) {
+                local.failureFlag = 41;
+                xPost = clamp_device_0263(ex, cfg.xMin, cfg.xMax);
+                yPost = clamp_device_0263(ey, cfg.yMin, cfg.yMax);
+                removeMode = 0;
+                return true;
+            }
+            removeMode = modeX != 0 ? modeX : modeY;
+            xPost = clamp_device_0263(ex, cfg.xMin, cfg.xMax);
+            yPost = clamp_device_0263(ey, cfg.yMin, cfg.yMax);
+            return true;
+        }
+
+        cx = clamp_device_0263(ex, cfg.xMin, cfg.xMax);
+        cy = clamp_device_0263(ey, cfg.yMin, cfg.yMax);
+        remaining = fmax(0.0, remaining - tEvent);
+        if (hitX) reflect_boundary_face_0414(faceX, cfg, vx, vy);
+        if (hitY) {
+            reflect_boundary_face_0414(faceY, cfg, vx, vy);
+            ++yReflections;
+        }
+    }
+
+    if (remaining > 0.0) {
+        local.failureFlag = 42;
+    }
+    xPost = clamp_device_0263(cx, cfg.xMin, cfg.xMax);
+    yPost = clamp_device_0263(cy, cfg.yMin, cfg.yMax);
+    return false;
 }
 
 __device__ inline int inlet_segment_index_for_cell_device_0263(const CudaClassicSrcIoFullfaceConfig0263& cfg, int face, double s) {
@@ -1748,59 +1905,68 @@ __global__ void io_fullface_boundary_particles_kernel_0267(
     bool remove = false;
     int removeMode = 0;
 
-    int guardX = 0;
-    while (x[i] < cfg.xMin || x[i] > cfg.xMax) {
-        if (++guardX > 64) { local.failureFlag = 3; break; }
-        if (x[i] < cfg.xMin) {
-            local.hitsLeft += 1ULL;
-            int mode = cfg.leftMode;
-            if (cfg.segmentedEnable) {
-                const double sseg = segment_s_device_0263(0, x[i], y[i], cfg);
-                mode = segment_mode_at_device_0263(cfg, 0, sseg);
+    if (cfg.segmentedMultiAxis0414) {
+        int yReflections0414 = 0;
+        remove = resolve_segmented_multi_axis_crossing_0414(
+            xpre0493x8q, ypre0493x8q, x[i], y[i], vx[i], vy[i],
+            cfg, local, removeMode, yReflections0414);
+        if (yReflections0414 > maxY) maxY = yReflections0414;
+    } else {
+        int guardX = 0;
+        while (x[i] < cfg.xMin || x[i] > cfg.xMax) {
+            if (++guardX > 64) { local.failureFlag = 3; break; }
+            if (x[i] < cfg.xMin) {
+                local.hitsLeft += 1ULL;
+                int mode = cfg.leftMode;
+                if (cfg.segmentedEnable) {
+                    const double sseg = segment_s_device_0263(0, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 0, sseg);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                x[i] = 2.0 * cfg.xMin - x[i];
+                apply_x_wall_reflection_device_0263(cfg.leftWallMode == 0 ? 1 : cfg.leftWallMode, 0.0, 0.0, vx[i], vy[i]);
+            } else if (x[i] > cfg.xMax) {
+                local.hitsRight += 1ULL;
+                int mode = cfg.rightMode;
+                if (cfg.segmentedEnable) {
+                    const double sseg = segment_s_device_0263(1, x[i], y[i], cfg);
+                    mode = segment_mode_at_device_0263(cfg, 1, sseg);
+                }
+                if (mode != 0) { remove = true; removeMode = mode; break; }
+                x[i] = 2.0 * cfg.xMax - x[i];
+                apply_x_wall_reflection_device_0263(cfg.rightWallMode == 0 ? 1 : cfg.rightWallMode, 0.0, 0.0, vx[i], vy[i]);
             }
-            if (mode != 0) { remove = true; removeMode = mode; break; }
-            x[i] = 2.0 * cfg.xMin - x[i];
-            apply_x_wall_reflection_device_0263(cfg.leftWallMode == 0 ? 1 : cfg.leftWallMode, 0.0, 0.0, vx[i], vy[i]);
-        } else if (x[i] > cfg.xMax) {
-            local.hitsRight += 1ULL;
-            int mode = cfg.rightMode;
-            if (cfg.segmentedEnable) {
-                const double sseg = segment_s_device_0263(1, x[i], y[i], cfg);
-                mode = segment_mode_at_device_0263(cfg, 1, sseg);
-            }
-            if (mode != 0) { remove = true; removeMode = mode; break; }
-            x[i] = 2.0 * cfg.xMax - x[i];
-            apply_x_wall_reflection_device_0263(cfg.rightWallMode == 0 ? 1 : cfg.rightWallMode, 0.0, 0.0, vx[i], vy[i]);
         }
-    }
 
-    if (!remove) {
-        int guard = 0;
-        while (y[i] < cfg.yMin || y[i] > cfg.yMax) {
-            if (++guard > 64) { local.failureFlag = 2; break; }
-            if (y[i] < cfg.yMin) {
-                local.hitsBottom += 1ULL;
-                int mode = cfg.bottomMode;
-                if (cfg.segmentedEnable) {
-                    const double sseg = segment_s_device_0263(2, x[i], y[i], cfg);
-                    mode = segment_mode_at_device_0263(cfg, 2, sseg);
+        if (!remove) {
+            int guard = 0;
+            while (y[i] < cfg.yMin || y[i] > cfg.yMax) {
+                if (++guard > 64) { local.failureFlag = 2; break; }
+                if (y[i] < cfg.yMin) {
+                    local.hitsBottom += 1ULL;
+                    int mode = cfg.bottomMode;
+                    if (cfg.segmentedEnable) {
+                        const double sseg = segment_s_device_0263(2, x[i], y[i], cfg);
+                        mode = segment_mode_at_device_0263(cfg, 2, sseg);
+                    }
+                    if (mode != 0) { remove = true; removeMode = mode; break; }
+                    y[i] = 2.0 * cfg.yMin - y[i];
+                    apply_y_wall_reflection_device_0263(cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx[i], vy[i]);
+                } else if (y[i] > cfg.yMax) {
+                    local.hitsTop += 1ULL;
+                    int mode = cfg.topMode;
+                    if (cfg.segmentedEnable) {
+                        const double sseg = segment_s_device_0263(3, x[i], y[i], cfg);
+                        mode = segment_mode_at_device_0263(cfg, 3, sseg);
+                    }
+                    if (mode != 0) { remove = true; removeMode = mode; break; }
+                    y[i] = 2.0 * cfg.yMax - y[i];
+                    apply_y_wall_reflection_device_0263(cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx[i], vy[i]);
                 }
-                if (mode != 0) { remove = true; removeMode = mode; break; }
-                y[i] = 2.0 * cfg.yMin - y[i];
-                apply_y_wall_reflection_device_0263(cfg.bottomWallMode, cfg.wallUxBottom, cfg.wallUyBottom, vx[i], vy[i]);
-            } else if (y[i] > cfg.yMax) {
-                local.hitsTop += 1ULL;
-                int mode = cfg.topMode;
-                if (cfg.segmentedEnable) {
-                    const double sseg = segment_s_device_0263(3, x[i], y[i], cfg);
-                    mode = segment_mode_at_device_0263(cfg, 3, sseg);
-                }
-                if (mode != 0) { remove = true; removeMode = mode; break; }
-                y[i] = 2.0 * cfg.yMax - y[i];
-                apply_y_wall_reflection_device_0263(cfg.topWallMode, cfg.wallUxTop, cfg.wallUyTop, vx[i], vy[i]);
             }
+            if (guard > maxY) maxY = guard;
         }
-        if (guard > maxY) maxY = guard;
+
     }
 
     if (!remove && point_in_inlet_reservoir_device_0263(x[i], y[i], cfg)) {
@@ -3311,6 +3477,8 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     if (params.openBoundarySegmentsEnable) {
         cfg.segmentedEnable = 1;
         cfg.segmentCount = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
+        bool hasSegmentX0414 = false;
+        bool hasSegmentY0414 = false;
         for (int k = 0; k < cfg.segmentCount; ++k) {
             const OpenBoundarySegment& seg = params.openBoundarySegments[static_cast<std::size_t>(k)];
             cfg.segmentFace[k] = segment_face_code_0264(seg.face);
@@ -3321,7 +3489,10 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
             cfg.segmentUy[k] = seg.uy;
             cfg.segmentMass[k] = seg.mass;
             cfg.segmentType[k] = seg.type;
+            hasSegmentX0414 = hasSegmentX0414 || open_boundary_face_is_x(seg.face);
+            hasSegmentY0414 = hasSegmentY0414 || open_boundary_face_is_y(seg.face);
         }
+        cfg.segmentedMultiAxis0414 = hasSegmentX0414 && hasSegmentY0414 ? 1 : 0;
     }
     return cfg;
 }
@@ -3736,7 +3907,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     const std::uint64_t oldActivePrefix0315c = nActiveFluid;
     const bool serialBoundary0267 =
         env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY") &&
-        !cfg.outletNeumannKinetic0493x8q;
+        !cfg.outletNeumannKinetic0493x8q &&
+        !cfg.segmentedMultiAxis0414;
     NeumannGhostWorkspace0493x8q ghostWorkspace0493x8q =
         prepare_neumann_ghost_candidates_0493x8q(cfg, nActiveFluid);
     if (serialBoundary0267) {
@@ -4039,7 +4211,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     const std::uint64_t oldActivePrefix0315c = nActiveFluid;
     const bool serialBoundary0267 =
         env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY") &&
-        !cfg.outletNeumannKinetic0493x8q;
+        !cfg.outletNeumannKinetic0493x8q &&
+        !cfg.segmentedMultiAxis0414;
     NeumannGhostWorkspace0493x8q ghostWorkspace0493x8q =
         prepare_neumann_ghost_candidates_0493x8q(cfg, nActiveFluid);
     if (serialBoundary0267) {
