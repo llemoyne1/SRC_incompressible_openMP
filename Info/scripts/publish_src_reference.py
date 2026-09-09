@@ -94,6 +94,152 @@ def _runner_aliases_for_param(db: sqlite3.Connection, oid: str) -> list[str]:
     )]
 
 
+
+
+def _natural_key(v: str):
+    """Case-insensitive natural sort: x9 < x10 and fix2 < fix10."""
+    text = _text(v).lower()
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r'(\d+)', text))
+
+
+def _milestone_family(milestone_id: str, group_name: str = '') -> str:
+    mid = _text(milestone_id)
+    m = re.match(r'(?i)^x(\d+)', mid)
+    if m:
+        return f"x{int(m.group(1))}"
+    m = re.match(r'^(0\d{3})', mid)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r'\d+', mid):
+        return mid
+    g = _text(group_name)
+    if g.lower().startswith('socle') or mid.lower() in {
+        'src/mpcd', 'q6', 'resampling', 'q6 multi-espèces', 'q6-g', 'q6-g-f'
+    }:
+        return 'socle'
+    return g or 'autres'
+
+
+def _milestone_artifacts(db: sqlite3.Connection, oid: str) -> list[tuple[str, str, str]]:
+    rows = db.execute(
+        '''SELECT r.relation_type,a.path,a.kind FROM relations r
+           JOIN artifacts a ON a.object_id=r.target_object_id
+           WHERE r.source_object_id=?
+           UNION ALL
+           SELECT r.relation_type,a.path,a.kind FROM relations r
+           JOIN artifacts a ON a.object_id=r.source_object_id
+           WHERE r.target_object_id=?
+           ORDER BY 1,2''', (oid, oid)
+    ).fetchall()
+    seen = set()
+    out = []
+    for rel, path, kind in rows:
+        key = (rel, path, kind)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _milestone_support_type(db: sqlite3.Connection, r: sqlite3.Row) -> str:
+    """Human-facing implementation/support type, distinct from milestone nature."""
+    source = _text(r['source_file'])
+    base = Path(source).name.lower()
+    nature = _text(r['nature']).upper()
+    labels: list[str] = []
+
+    def add(label: str) -> None:
+        if label and label not in labels:
+            labels.append(label)
+
+    # The primary source is the strongest signal for scripts-only milestones.
+    if re.match(r'^(analy[sz]e|analyse)_', base):
+        add('analyseur')
+    elif base.startswith(('calibrate_', 'calibrator_', 'calibrateur_')) or 'calibrat' in base:
+        add('calibrateur')
+    elif base.startswith(('run_', 'run-ok_', 'run_ok_', 'src_mpcd_run_')):
+        add('runner')
+    elif base.startswith(('check_', 'validate_', 'validation_')):
+        add('vérificateur')
+    elif base.startswith(('generate_', 'generator_')):
+        add('générateur')
+    elif base.startswith(('patch_', 'apply_', 'install_')) or base.endswith(('.patch', '.diff')):
+        add('modification code')
+    elif base.endswith(('.cu', '.cuh', '.cpp', '.cc', '.c', '.h', '.hpp')):
+        add('modification code')
+
+    kind_labels = {
+        'SOURCE': 'modification code',
+        'RUNNER': 'runner',
+        'ANALYZER': 'analyseur',
+        'GENERATOR': 'générateur',
+        'CHECKER': 'vérificateur',
+        'MATLAB_TOOL': 'outil MATLAB',
+        'VISUALIZER': 'visualisation',
+        'BUILD': 'build',
+    }
+    linked = _milestone_artifacts(db, r['object_id'])
+    kinds = {kind for _, _, kind in linked}
+    for kind in (
+        'SOURCE', 'RUNNER', 'ANALYZER', 'GENERATOR', 'CHECKER',
+        'MATLAB_TOOL', 'VISUALIZER', 'BUILD'
+    ):
+        if kind in kinds:
+            add(kind_labels[kind])
+
+    # Documentation is evidence, not normally the implementation/support type of a milestone.
+    # When the primary evidence is only a README, the canonical nature decides the fallback.
+    if nature == 'CALIBRATOR':
+        add('calibrateur')
+    elif nature == 'BENCHMARK' and not labels:
+        add('benchmark / campagne')
+    elif nature == 'DIAGNOSTIC' and not labels:
+        add('diagnostic')
+    elif nature == 'QUALIFICATION' and not labels:
+        add('qualification')
+    elif nature == 'INFRA' and not labels:
+        add('infrastructure')
+    elif nature in {'CODE', 'FIX', 'PERF', 'ABLATION'} and not labels:
+        add('modification code')
+
+    if nature == 'ABLATION' and 'modification code' in labels:
+        labels[labels.index('modification code')] = 'modification code / ablation'
+
+    # Keep the quick-reference column compact; Nature carries the scientific classification.
+    return ' + '.join(labels[:2]) if labels else 'non déterminé'
+
+
+def publish_milestone_lexicon(db: sqlite3.Connection, out: Path) -> None:
+    rows = db.execute('SELECT * FROM milestones').fetchall()
+    rows = sorted(rows, key=lambda r: (_natural_key(r['milestone_id']), _natural_key(r['milestone_key'])))
+    lines = [
+        '# Lexique rapide des jalons SRC_GPU-SURF', '',
+        '> Vue générée automatiquement pour décoder rapidement un identifiant (`x10e`, `x7q`, `0490A`, etc.). '
+        'Le tri est **naturel numérique puis alphabétique**. La colonne **Type / support** décrit la forme concrète du jalon '
+        '(modification code, runner, analyseur, calibrateur…), tandis que **Nature** conserve la classification canonique de la base.', '',
+        '| Jalon | Famille | Type / support | Nature | Fonction | Statut |',
+        '|---|---|---|---|---|---|',
+    ]
+    csv_rows = []
+    for r in rows:
+        family = _milestone_family(r['milestone_id'], r['group_name'])
+        support = _milestone_support_type(db, r)
+        function = _text(r['summary']) or _text(r['name'])
+        lines.append('| ' + ' | '.join([
+            f"`{_md(r['milestone_id'])}`", _md(family), _md(support), _md(r['nature']),
+            _md(function), _md(r['status'])
+        ]) + ' |')
+        csv_rows.append([
+            _text(r['milestone_id']), family, support, _text(r['nature']), function, _text(r['status']),
+            _text(r['milestone_key']), _text(r['canonical_id']), _text(r['domain']), _text(r['name'])
+        ])
+    _write(out / 'lexique_jalons.md', '\n'.join(lines))
+    _write_csv(out / 'csv/lexique_jalons.csv', [
+        'milestone_id', 'family', 'support_type', 'nature', 'function', 'status',
+        'milestone_key', 'canonical_id', 'domain', 'name'
+    ], csv_rows)
+
+
 def publish_index(db: sqlite3.Connection, out: Path) -> None:
     counts = {
         'Jalons canoniques': db.execute('SELECT count(*) FROM milestones').fetchone()[0],
@@ -111,7 +257,8 @@ def publish_index(db: sqlite3.Connection, out: Path) -> None:
         'Les inventaires bruts, curations et données Git restent les sources de provenance.', '',
         f'**Mainline Git auditée :** `{mainline}`', '',
         '## Contenu', '',
-        '- [`jalons.md`](jalons.md) — référentiel canonique des jalons/phases.',
+        '- [`lexique_jalons.md`](lexique_jalons.md) — décodage rapide des jalons, tri naturel, fonction/statut/support.',
+        '- [`jalons.md`](jalons.md) — référentiel canonique détaillé des jalons/phases.',
         '- [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature.',
         '- [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias.',
         '- [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés.',
@@ -418,6 +565,7 @@ def publish_reference(db: sqlite3.Connection, output_dir: Path) -> dict[str, int
     db.row_factory = sqlite3.Row
     output_dir.mkdir(parents=True, exist_ok=True)
     publish_index(db, output_dir)
+    publish_milestone_lexicon(db, output_dir)
     publish_milestones(db, output_dir)
     publish_parameters(db, output_dir)
     publish_flags(db, output_dir)

@@ -4847,6 +4847,7 @@ Cible thermique propre à l’espèce K.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x14a` — Smoke thermostat deux types
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g
@@ -5391,6 +5392,7 @@ Conserve la collision SRC commune au mélange mais applique ensuite une remise �
 - `DEFINED_OR_USED_IN` — `src/thermostat.cpp`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x14a` — Smoke thermostat deux types
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g

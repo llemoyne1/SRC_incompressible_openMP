@@ -8,7 +8,8 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 
 ## Contenu
 
-- [`jalons.md`](jalons.md) — référentiel canonique des jalons/phases.
+- [`lexique_jalons.md`](lexique_jalons.md) — décodage rapide des jalons, tri naturel, fonction/statut/support.
+- [`jalons.md`](jalons.md) — référentiel canonique détaillé des jalons/phases.
 - [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature.
 - [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias.
 - [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés.
@@ -21,10 +22,10 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 
 | Objet | Nombre |
 |---|---:|
-| Jalons canoniques | 254 |
+| Jalons canoniques | 277 |
 | Paramètres canoniques | 314 |
 | Flags / variables runner | 625 |
-| Artefacts indexés | 1686 |
+| Artefacts indexés | 1677 |
 | Candidats Git | 1185 |
 
 ## Règle de publication

@@ -6,18 +6,19 @@
 
 | Statut | Confiance | Nombre |
 |---|---|---:|
-| CANDIDATE | A | 467 |
-| CANDIDATE | B | 500 |
+| CANDIDATE | A | 466 |
+| CANDIDATE | B | 476 |
 | CANDIDATE | C | 3 |
-| CURATED | A | 43 |
+| CURATED | A | 44 |
 | CURATED | B | 8 |
 | LINKED | A | 13 |
-| LINKED | B | 151 |
+| LINKED | B | 175 |
 
 ## Candidats déjà reliés à un jalon canonique
 
 | Label | Candidat | Preuves |
 |---|---|---:|
+| `0414` | `candidate:numeric:0414:commit-e2fe1ca29042` | 2 |
 | `0490a` | `candidate:numeric:0490a:commit-cb8a4cbf8774` | 3 |
 | `0490b` | `candidate:numeric:0490b:commit-545fc6232939` | 5 |
 | `0490c` | `candidate:numeric:0490c:commit-58029bd58881` | 3 |
@@ -142,6 +143,14 @@
 | `x13zb3` | `candidate:x:x13zb3` | 3 |
 | `x13zc` | `candidate:x:x13zc` | 3 |
 | `x13zd` | `candidate:x:x13zd` | 4 |
+| `x13ze` | `candidate:x:x13ze` | 1 |
+| `x13zf` | `candidate:x:x13zf` | 1 |
+| `x13zg` | `candidate:x:x13zg` | 1 |
+| `x13zj` | `candidate:x:x13zj` | 1 |
+| `x13zk` | `candidate:x:x13zk` | 1 |
+| `x13zl` | `candidate:x:x13zl` | 1 |
+| `x13zn` | `candidate:x:x13zn` | 1 |
+| `x14a` | `candidate:x:x14a` | 1 |
 | `x14aa` | `candidate:x:x14aa` | 1 |
 | `x14ab` | `candidate:x:x14ab` | 1 |
 | `x14ac` | `candidate:x:x14ac` | 1 |
@@ -155,12 +164,28 @@
 | `x14ak` | `candidate:x:x14ak` | 3 |
 | `x14al` | `candidate:x:x14al` | 5 |
 | `x14am` | `candidate:x:x14am` | 4 |
+| `x14an` | `candidate:x:x14an` | 2 |
+| `x14ao` | `candidate:x:x14ao` | 1 |
+| `x14ap` | `candidate:x:x14ap` | 1 |
+| `x14aq` | `candidate:x:x14aq` | 2 |
+| `x14ar` | `candidate:x:x14ar` | 1 |
+| `x14as` | `candidate:x:x14as` | 2 |
+| `x14at` | `candidate:x:x14at` | 7 |
+| `x14au` | `candidate:x:x14au` | 5 |
+| `x14av` | `candidate:x:x14av` | 3 |
+| `x14b` | `candidate:x:x14b` | 2 |
+| `x14c` | `candidate:x:x14c` | 2 |
+| `x14e` | `candidate:x:x14e` | 1 |
+| `x14f` | `candidate:x:x14f` | 3 |
+| `x14i` | `candidate:x:x14i` | 1 |
 | `x14j` | `candidate:x:x14j` | 3 |
 | `x14k` | `candidate:x:x14k` | 1 |
 | `x14l` | `candidate:x:x14l` | 1 |
 | `x14m` | `candidate:x:x14m` | 2 |
 | `x14n` | `candidate:x:x14n` | 2 |
 | `x14o` | `candidate:x:x14o` | 1 |
+| `x14p` | `candidate:x:x14p` | 1 |
+| `x14q` | `candidate:x:x14q` | 1 |
 | `x14r` | `candidate:x:x14r` | 1 |
 | `x14s` | `candidate:x:x14s` | 5 |
 | `x14t` | `candidate:x:x14t` | 3 |
@@ -615,7 +640,6 @@
 | `0365` | 2026-06-20T18:48:36+02:00 | `d3dbadb022` 0365: add resampling empty-refill validation docs and VK 0251 script | 2 | IN_MAINLINE |
 | `0366` | 2026-06-20T16:32:11+02:00 | `5100d232e8` 0366: finalize live visualization N minmax and quiver overlays | 2 | IN_MAINLINE |
 | `0406` | 2026-06-21T15:03:49+02:00 | `7332259847` 0406: compare SRC Q6 modes and fix CUDA Q6 profile labels | 1 | IN_MAINLINE |
-| `0414` | 2026-09-07T17:31:58+02:00 | `e2fe1ca290` 0414: generalize segmented open boundaries to x/y on CUDA resident path | 2 | IN_MAINLINE |
 | `0417` | 2026-06-23T14:29:09+02:00 | `18104a67a7` restriction inlet/oulet left/right suppr. for SRC classic + inactive_slot autonomous ensure mode | 2 | IN_MAINLINE |
 | `0418` | 2026-06-23T23:20:27+02:00 | `f1b70b0e68` solid-like darcy/brinkman/wallVP treatment | 2 | IN_MAINLINE |
 | `0419` | 2026-06-23T23:20:27+02:00 | `f1b70b0e68` solid-like darcy/brinkman/wallVP treatment | 2 | IN_MAINLINE |
@@ -1074,15 +1098,6 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x11` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
 | `x12` | 2026-08-27T21:27:16+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 2 | IN_MAINLINE |
 | `x13tw` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x14an` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
-| `x14aq` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
-| `x14as` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
-| `x14at` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 7 | IN_MAINLINE |
-| `x14au` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 5 | IN_MAINLINE |
-| `x14av` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 3 | IN_MAINLINE |
-| `x14b` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 2 | IN_MAINLINE |
-| `x14c` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 2 | IN_MAINLINE |
-| `x14f` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 3 | IN_MAINLINE |
 | `x7s` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 | `x7t` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 2 | IN_MAINLINE |
 | `x7u` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 7 | IN_MAINLINE |

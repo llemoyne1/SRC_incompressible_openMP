@@ -1,0 +1,10 @@
+-- V4.25: close the documentary scope of branch surf.
+--
+-- V4.22/V4.23 were provisional curations sourced from the separate
+-- SRC_GPU-SURF-x8q-ablation worktree.  Their SQL files and source evidence are
+-- removed from the surf corpus by the V4.25 source patch itself, so no DELETE
+-- statements are needed during a clean rebuild.
+--
+-- This curation intentionally creates no milestone and changes no solver fact.
+-- The final surf frontier remains V4.21 physics plus the V4.24 exact Git
+-- reconciliation of 20260907-0414-segmented-xy with e2fe1ca.

@@ -21,6 +21,7 @@ régénérés depuis `Info/db/src_reference.sqlite` à chaque reconstruction nor
 ```text
 Info/generated/
 ├── README.md
+├── lexique_jalons.md
 ├── jalons.md
 ├── jalons_par_nature.md
 ├── parametres.md
@@ -29,12 +30,37 @@ Info/generated/
 ├── artefacts.md
 ├── audit_candidats_git.md
 └── csv/
+    ├── lexique_jalons.csv
     ├── jalons.csv
     ├── parametres.csv
     ├── flags.csv
     ├── artefacts.csv
     └── candidats_git.csv
 ```
+
+
+## Lexique de consultation rapide
+
+`lexique_jalons.md` est une vue compacte, exhaustive et triée naturellement des jalons
+canoniques. Elle est destinée à répondre rapidement à des questions comme « que signifie
+`x10e` ? » sans ouvrir la fiche détaillée de `jalons.md`.
+
+Colonnes publiées :
+
+- **Jalon** — identifiant humain ;
+- **Famille** — groupe court (`0490`, `x10`, `x14`, etc.) ;
+- **Type / support** — forme concrète déduite des artefacts et de la source primaire
+  (`modification code`, `runner`, `analyseur`, `calibrateur`, `générateur`, etc.) ;
+- **Nature** — classification canonique (`CODE`, `FIX`, `ABLATION`, `QUALIFICATION`, etc.) ;
+- **Fonction** — résumé fonctionnel canonique ;
+- **Statut** — portée actuelle/historique/qualifiée/supplantée.
+
+Le tri utilise une clé naturelle : `x9z < x10a`, `x7d-fix2 < x7d-fix10`. Le CSV
+`csv/lexique_jalons.csv` conserve en plus la clé unique, l'ID canonique, le domaine et le nom long.
+
+Le glossaire manuel `Info/docs/GLOSSAIRE_SIGLES.md` est volontairement séparé des vues
+générées : les développements d'acronymes et conventions scientifiques demandent une curation
+humaine et ne doivent pas être inférés automatiquement depuis les noms de symboles.
 
 ## Reconstruction
 

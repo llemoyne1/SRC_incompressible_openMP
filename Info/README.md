@@ -1,6 +1,6 @@
 # Info — base de référence SRC_GPU-SURF
 
-> **V4.16** — curation accélérée : clôture x8 par `x8u`, puis reconstruction/consolidation du scaffold capillaire `x9a` à `x9h` jusqu'au provider géométrique de paroi.
+> **V4.26** — publication de consultation rapide : lexique des jalons trié naturellement et glossaire des sigles/notions du projet.
 
 
 `Info/` est le sous-système documentaire versionné du projet SRC_GPU-SURF. Il est volontairement séparé du code de calcul (`src/`, `include/`), des runners/analyseurs (`scripts/`, `matlab/`) et des outils temporaires (`tools/`).
@@ -48,6 +48,7 @@ Info/
 │   └── query_src_reference.py
 ├── generated/
 │   ├── README.md
+│   ├── lexique_jalons.md
 │   ├── jalons.md
 │   ├── jalons_par_nature.md
 │   ├── parametres.md
@@ -61,6 +62,7 @@ Info/
     ├── BOOTSTRAP_AUDIT.md
     ├── GIT_AUDIT_V3.md
     ├── PUBLICATION_V4.md
+    ├── GLOSSAIRE_SIGLES.md
     ├── CURATION_0490_V4_1.md
     ├── CURATION_0491_V4_2.md
     ├── CURATION_0492_V4_3.md
@@ -437,3 +439,54 @@ La curation `0020_0493x11_x12_capillary_validation.sql` ferme x11 et x12 en un s
 ### V4.20 — x13 : fluide de référence, qualification surface libre et rollback Taylor–Culick
 
 La curation `0021_0493x13_reference_tc_rollback.sql` ferme x13 jusqu’à `x13zd`. Elle requalifie x13a-h comme chaîne constitutive scripts-only, ajoute x13i, documente le double usage historique de x13j, consolide les qualifications gouttes/TC x13k-n, individualise les expériences x13p/q/r/s/u/v et la séquence de grille x13za/zb/zb2/zb3/zc, puis fixe x13zd comme validation croisée qui invalide x13t+x13w et motive le retour au tag `surf-tension-qualified-x13h-20260831`. Les agrégats x13r/x13s, x13u/x13v et x13za-x13zc disparaissent. Le total canonique passe de 245 à **254 jalons**. Voir `docs/CURATION_0493X13_V4_20.md`.
+
+### V4.21 — x13ze+ et cycle x14 liquide/gaz jusqu'à x14av
+
+La curation `0022_0493x13ze_x14av_liquid_gas.sql` ferme le post-rollback x13 avec les identités effectivement attestées `x13ze/zf/zg/zj/zk/zl/zn`, puis remplace l'agrégat `x14a-x14j` par les jalons x14 réellement documentés. Elle ajoute `x14a/b/c/e/f/i`, les diagnostics offline `x14p/q`, puis la séquence application-scale `x14an→x14av`. Aucun `x13zh/x13zi/x13zm` ni `x14h` n'est inventé.
+
+Le statut reste volontairement différencié : x14at est une validation externe **ciblée** de la profondeur de cavité Sato pour `H/D=0.8` et `Fr'_m≈0.49–0.59` (écarts 4.8–9.9 %), tandis que `H/D=1.7` reste REVIEW; x14au est `INVALID` côté viscosité liquide primaire et `REVIEW` côté gaz; x14av reste `DEMONSTRATION_DIAGNOSTIC_ONLY`. Voir `docs/CURATION_0493X13ZE_X14AV_V4_21.md`.
+
+Comme les curations récentes, le patch livré est strictement **source-only** : les bases/dumps et `Info/generated/*` sont reconstruits après application et ne font pas partie du patch de curation.
+
+
+### V4.24 — fermeture Git de 0414 sur `surf`
+
+La curation `0025_20260907_0414_git_reconciliation.sql` ne crée aucun nouveau jalon :
+elle réconcilie explicitement le candidat numérique `0414` porté par le commit `e2fe1ca`
+avec la clé déjà existante `20260907-0414-segmented-xy`. Après l'import Git, le builder
+applique uniquement ce triplet exact; les anciens usages historiques du numéro `0414`
+restent volontairement distincts. Le commit d'introduction et la preuve Git sont désormais
+explicites. Voir
+`docs/CURATION_20260907_0414_GIT_RECONCILIATION_V4_24.md`.
+
+Le patch reste strictement **source-only** : les bases/dumps et `Info/generated/*` sont
+reconstruits localement après application.
+
+
+### V4.25 — clôture documentaire de la branche `surf`
+
+L'audit de périmètre final a confirmé que les curations provisoires V4.22/V4.23
+reposaient sur des artefacts du worktree `SRC_GPU-SURF-x8q-ablation` et non sur le
+`HEAD` de la branche `surf`. Elles sont donc retirées de la base `surf` avec leurs
+preuves locales. Ces développements pourront être documentés ultérieurement dans un
+périmètre expérimental séparé, sans retargeter les jalons historiques de `surf`.
+
+La frontière `surf` reste celle fermée par V4.21 pour la physique x13/x14, complétée
+par la réconciliation Git V4.24 du jalon namespacé `20260907-0414-segmented-xy` avec
+le commit `e2fe1ca`. Aucun nouveau jalon physique n'est créé en V4.25. Voir
+`docs/CURATION_SURF_SCOPE_CLOSURE_V4_25.md`.
+
+Le patch reste strictement **source-only** : aucune base SQLite, aucun dump SQL ni
+`Info/generated/*` n'est livré.
+
+### V4.26 — lexique rapide des jalons et glossaire des sigles
+
+Cette évolution de publication n'ajoute ni ne retire aucun jalon canonique. Elle ajoute
+`Info/generated/lexique_jalons.md` et son CSV, triés en ordre naturel numérique puis
+alphabétique (`x9...` avant `x10...`, suffixes `fix2` avant `fix10`). Chaque ligne expose
+le jalon, sa famille, un **type/support concret** (modification code, runner, analyseur,
+calibrateur, etc.), sa nature canonique, sa fonction et son statut.
+
+`Info/docs/GLOSSAIRE_SIGLES.md` complète ce lexique par une liste alphabétique des
+sigles et notions récurrents (`Q6-g-f`, `CIC`, `RT0`, `TC`, `TG`, `VK`, etc.). Le lexique
+est généré depuis SQLite; le glossaire est volontairement curé manuellement.

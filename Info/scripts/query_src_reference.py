@@ -342,6 +342,7 @@ def doctor(db: sqlite3.Connection, info_root: Path) -> bool:
     generated = info_root / 'generated'
     expected = {
         'jalons': (generated / 'csv/jalons.csv', db.execute('SELECT count(*) FROM milestones').fetchone()[0]),
+        'lexique_jalons': (generated / 'csv/lexique_jalons.csv', db.execute('SELECT count(*) FROM milestones').fetchone()[0]),
         'parametres': (generated / 'csv/parametres.csv', db.execute("SELECT count(*) FROM symbols WHERE namespace='PARAM'").fetchone()[0]),
         'flags': (generated / 'csv/flags.csv', db.execute("SELECT count(*) FROM symbols WHERE namespace='ENV'").fetchone()[0]),
     }
@@ -357,7 +358,7 @@ def doctor(db: sqlite3.Connection, info_root: Path) -> bool:
         print(f'publication_{label}_rows={actual_rows} expected={expected_rows} status={"ok" if ok else "MISMATCH"}')
         publication_ok = publication_ok and ok
     required_docs = [
-        'README.md','jalons.md','jalons_par_nature.md','parametres.md','flags.md',
+        'README.md','lexique_jalons.md','jalons.md','jalons_par_nature.md','parametres.md','flags.md',
         'cles_controle_sorties.md','artefacts.md','audit_candidats_git.md'
     ]
     missing_docs = [name for name in required_docs if not (generated / name).exists()]

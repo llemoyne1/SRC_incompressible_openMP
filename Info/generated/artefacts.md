@@ -1004,19 +1004,10 @@
 | `matlab/bin_smpcd_state.m` |  | present |
 | `matlab/compare_poiseuille_runs.m` |  | present |
 | `matlab/demo_immersed_circle_combined_motion.m` |  | present |
-| `matlab/inj_rho_x8q_legacy.avi` | x8q | present |
-| `matlab/inj_rho_x8q_replica.avi` | x8q | present |
-| `matlab/inj_rho_x8q_species.avi` | x8q | present |
-| `matlab/inj_rho_x8q_strict.avi` | x8q | present |
-| `matlab/inj_rho_x8q_strict_400.avi` | x8q | present |
-| `matlab/inj_rho_x8q_strict_cont_200.avi` | x8q | present |
+| `matlab/inj_rho_400.avi` |  | present |
+| `matlab/inj_rho_kk.avi` |  | present |
+| `matlab/inj_rho_kk2.avi` |  | present |
 | `matlab/inj_rho_x8q_strict_cont_400.avi` | x8q | present |
-| `matlab/inj_rho_x8q_virtual.avi` | x8q | present |
-| `matlab/inj_rho_x8q_virtual_pressure.avi` | x8q | present |
-| `matlab/inj_rho_x8q_virtual_pressure2.avi` | x8q | present |
-| `matlab/inj_rho_x8q_zerodrift.avi` | x8q | present |
-| `matlab/inj_rho_x8qoff.avi` |  | present |
-| `matlab/inj_rho_x8qon.avi` |  | present |
 | `matlab/inspect_smpcd_particle_thresholds.m` |  | present |
 | `matlab/inspect_smpcd_state.m` |  | present |
 | `matlab/list_smpcd_dumps.m` |  | present |

@@ -725,6 +725,68 @@ def reconcile_unique_numeric_candidates(db: sqlite3.Connection) -> int:
             (anchor, first_date, moid),
         )
         linked += 1
+
+    # V4.24: exact reconciliation for a deliberately reused numeric label.
+    # 0414 appears in several historical contexts, so the generic numeric matcher
+    # must remain conservative.  The 2026-09-07 surf commit is nevertheless
+    # unambiguous: its subject names the segmented x/y generalization and it adds
+    # run_0414_segmented_xy_neumann_qualification.sh.  Keep this as an exact triple
+    # rather than broadening the numeric-label heuristic.
+    exact_reused_numeric = (
+        (
+            '0414',
+            'e2fe1ca29042c2391cd5b6ee7f9eb7fe9a2065a8',
+            'milestone:20260907-0414-segmented-xy',
+            'exact reused-label curation: 2026-09-07 segmented x/y CUDA-resident 0414',
+        ),
+    )
+    for norm, anchor, moid, resolution in exact_reused_numeric:
+        if not db.execute('SELECT 1 FROM milestones WHERE object_id=?', (moid,)).fetchone():
+            continue
+        row = db.execute(
+            """SELECT candidate_id,first_date,status,linked_milestone_object_id
+               FROM git_milestone_candidates
+               WHERE candidate_family='NUMERIC' AND normalized_label=? AND anchor_commit=?""",
+            (norm, anchor),
+        ).fetchone()
+        if row is None:
+            continue
+        cid, first_date, old_status, old_link = row
+        already = old_status == 'CURATED' and old_link == moid
+        db.execute(
+            """UPDATE git_milestone_candidates
+               SET status='CURATED', linked_milestone_object_id=?,
+                   notes=trim(COALESCE(notes,'') ||
+                     CASE WHEN instr(COALESCE(notes,''),?)>0 THEN ''
+                          WHEN COALESCE(notes,'')='' THEN ? ELSE '; ' || ? END)
+               WHERE candidate_id=?""",
+            (moid, resolution, 'linked by ' + resolution, 'linked by ' + resolution, cid),
+        )
+        coid = 'git:' + anchor
+        if db.execute('SELECT 1 FROM objects WHERE object_id=?', (coid,)).fetchone():
+            db.execute(
+                """INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text)
+                   VALUES(?,?,?,?,?)""",
+                (moid, 'EVIDENCED_BY_COMMIT', coid, 'A', resolution),
+            )
+            if not db.execute(
+                "SELECT 1 FROM evidence WHERE object_id=? AND evidence_type='GIT_COMMIT' AND commit_hash=?",
+                (moid, anchor),
+            ).fetchone():
+                db.execute(
+                    "INSERT INTO evidence(object_id,evidence_type,commit_hash,confidence,notes) VALUES(?,?,?,?,?)",
+                    (moid, 'GIT_COMMIT', anchor, 'A', resolution),
+                )
+        db.execute(
+            """UPDATE milestones
+               SET introduced_commit=COALESCE(NULLIF(introduced_commit,''),?),
+                   introduced_date=COALESCE(NULLIF(introduced_date,''),substr(?,1,10))
+               WHERE object_id=?""",
+            (anchor, first_date, moid),
+        )
+        if not already:
+            linked += 1
+
     return linked
 
 def import_git_commits(db: sqlite3.Connection, repo: Path) -> tuple[int, int]:
@@ -1224,7 +1286,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
     db.executescript(args.schema.read_text(encoding='utf-8'))
     with db:
         db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '4'))
-        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.20'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.26'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('built_utc', dt.datetime.now(dt.timezone.utc).isoformat()))
         db.execute('INSERT INTO meta VALUES(?,?)', ('repo_root', '.'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('info_root', repo_relative_label(args.repo_root, args.info_root)))

@@ -1,0 +1,27 @@
+0493x14au Sato viscosity qualification
+====================================
+
+Primary metrology: existing 0493w1 standalone Taylor-Green ensemble.
+Primary wavelength = 64 h; application check = 64/3 h = 21.333333 h = 1.066667 D.
+
+LIQUID
+  primary path=src-q6-g-f status=INVALID viscosityStatus=INVALID
+  nu(64h)=0.00127714220632  std=0.000355645  CV=27.8470%
+  app-scale status=REVIEW viscosityStatus=REVIEW
+  nu(64/3h)=0.00121155799447  std=0.000144268  CV=11.9076%
+  delta_app/primary=-5.13523%  z=0.17088  scale=CONSISTENT_2SIGMA
+
+GAS
+  primary path=src status=REVIEW viscosityStatus=REVIEW
+  nu(64h)=0.00137319078304  std=0.000108612  CV=7.9095%
+  app-scale status=REVIEW viscosityStatus=REVIEW
+  nu(64/3h)=0.00147084714634  std=0.000212502  CV=14.4476%
+  delta_app/primary=+7.11164%  z=0.4092  scale=CONSISTENT_2SIGMA
+
+Dynamic viscosity ratio mu_G/mu_L (primary nu) = 0.1075205859
+Kinematic viscosity ratio nu_G/nu_L = 1.075205859
+rho_G/rho_L = 0.1
+
+Sato campaign propagation uses D=20h, |g|=0.5 and sigma=294.461365748622.
+The 3-D experimental coefficient is not used as a viscosity acceptance criterion.
+Scale consistency is diagnostic: CONSISTENT_2SIGMA means |nu_app-nu_primary| <= 2*sqrt(sd_primary^2+sd_app^2).

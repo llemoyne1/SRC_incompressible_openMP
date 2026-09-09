@@ -76,8 +76,20 @@
 | `x13f` | Optimisation locale du transport G08 | TRANSPORT_SURFACE | Optimisation/calibration du fluide, pas optimisation de code |
 | `x13i` | Loi d’échelle en kBT du fluide x13h | TRANSPORT_SURFACE | Calibration de similitude thermique du fluide x13h; scripts-only |
 | `x13j` | Calibrateur transport autonome + qualification Young–Laplace x13h | TRANSPORT_SURFACE | Double rôle historique documenté; aucune nouvelle physique C++ |
+| `x14au` | Qualification viscosité associée au cas Sato | LIQUID_GAS | Liquide primaire INVALID; gaz REVIEW; cohérence d’échelle 2σ diagnostique seulement |
 | `x8e` | Recalibration viscosité Q6-g-f et raideur Darcy | Q6_GF | Calibration Q6-g-f et carte de raideur Darcy; aucun changement du solveur |
 | `0493W1` | Calibrateur constitutif du fluide SRC | SRC_CALIBRATION | Calibrateur historique |
+
+## CAMPAIGN
+
+| ID | Nom | Domaine | Statut |
+|---|---|---|---|
+| `x14an` | Jet gazeux plan sur bain liquide | LIQUID_GAS | Campagne de construction/qualification; aucun PASS physique autonome inféré du runner |
+| `x14ao` | Buse planaire Darcy/chi paramétrable | LIQUID_GAS | Étape géométrique de campagne; pas de qualification autonome revendiquée |
+| `x14ap` | Buse Darcy/chi aux défauts de similitude expérimentale | LIQUID_GAS | Point de similitude de campagne; pas de PASS autonome |
+| `x14aq` | Réservoirs gazeux ambiants latéraux | LIQUID_GAS | Expérience de condition limite; non retenue comme validation autonome |
+| `x14ar` | Atmosphère hard-density sur le dessus hors buse | LIQUID_GAS | Expérience de condition limite; pas de PASS physique autonome |
+| `x14as` | Buse à sorties larges, pression gaz comme covariable | LIQUID_GAS | Topologie retenue pour x14at; pression gaz traitée comme covariable mesurée |
 
 ## CODE
 
@@ -88,7 +100,6 @@
 | `Q9` | Relaxation basse fréquence du flux de masse | CORE | Historique / séparée du chemin Q6-g-f actuel |
 | `Q6-g` | Q6 force-aware | CORE | Introduit par x3, base de Q6-g-f |
 | `Q6-g-f` | Q6 force-aware + interface + face-particule + densité | CORE | Chaîne de projection de référence |
-| `x14a-x14j` | Thermostat séparé par espèce | LIQUID_GAS | Architecture x14 |
 | `x14d` | Collision commune + thermostats séparés | LIQUID_GAS | Actif dans x14 |
 | `x14k` | Géométrie cinétique bilatérale | LIQUID_GAS | Opt-in; change le modèle d'interface |
 | `x14l` | Réflexion spéculaire du gaz | LIQUID_GAS | Qualifié pour imperméabilité normale dans cas tests |
@@ -170,6 +181,14 @@
 | `0493W5` | Q6 multi-espèces independent_masked — étape périodique | SPECIES_Q6 | Jalon historique documenté |
 | `0493W7` | Q6 independent_masked sur toutes les familles de frontières résidentes | SPECIES_Q6 | Jalon historique documenté et qualifié |
 
+## DEMONSTRATION
+
+| ID | Nom | Domaine | Statut |
+|---|---|---|---|
+| `x13ze` | Démonstrations run_ok impact/puddle stabilisées | FREE_SURFACE_KINETICS | Démonstration historique stabilisée; pas une nouvelle qualification physique |
+| `x13zf` | Démonstration run_ok dripping qualitative | FREE_SURFACE_KINETICS | Démonstration qualitative historique stabilisée; non benchmark quantitatif |
+| `x14av` | Démonstration atomiseur air-assisté | LIQUID_GAS | DEMONSTRATION_DIAGNOSTIC_ONLY; aucune qualification physique d’atomisation |
+
 ## DIAGNOSTIC
 
 | ID | Nom | Domaine | Statut |
@@ -185,6 +204,8 @@
 | `x13zb2` | Baseline sigma=0 courte pour comparaison de grille | TRANSPORT_SURFACE | Essai de protocole; ne ferme pas le biais de baseline |
 | `x13zb3` | Audit de stabilité et rebaseline Young–Laplace | TRANSPORT_SURFACE | Diagnostic de baseline; motive l’abandon de la référence libre longue sigma=0 |
 | `x13zc` | Mécanique statique de goutte versus grille | TRANSPORT_SURFACE | Diagnostic de représentation; R_eff plus petit sur grille fine explique une part majeure du shift fréquentiel |
+| `x14p` | Audit offline alpha/volume gazeux accessible | LIQUID_GAS | Diagnostic offline; aucune loi CUDA proposée à ce stade |
+| `x14q` | Fit offline de fraction de volume accessible | LIQUID_GAS | Diagnostic offline; explicitement pas une proposition CUDA |
 | `x2` | Diagnostic liquide plein : force appliquée avant une projection Q6 trop tardive | Q6_GF | Diagnostic causal; mène directement à x3 |
 | `x6a` | Diagnostic EOS de pression gazeuse interfaciale | Q6_GF | Diagnostic EOS préparatoire; aucune rétroaction sur le solveur |
 | `x6b` | Diagnostic géométrique support Q6 / interface alpha=0.5 | Q6_GF | Diagnostic géométrique; prépare la matérialisation résidente x6c |
@@ -211,6 +232,7 @@
 | `x10p` | Résolution des recouvrements initiaux | FREE_SURFACE_KINETICS | Actif en production x12; aucune passe particulaire supplémentaire |
 | `x10q` | Récupération large des recouvrements initiaux rares | FREE_SURFACE_KINETICS | Actif en production x12; complète x10p sans élargir le hot path normal |
 | `x13w-fix3` | Reseed sur moyenne pré-échappement | TRANSPORT_SURFACE | Correctif utilisé dans x13zd; mécanisme x13w reste invalidé physiquement |
+| `x13zn` | Nettoyage runner injection | RUN_OK | Correctif runner-only attesté; aucune modification solveur |
 | `x6f2` | Correction : géométrie de phase bornée avant filtrage | Q6_GF | Correctif géométrique actif de la chaîne x6f/x6g |
 | `x6h-A` | Correctif des corrections de faces physiques basses | Q6_GF | Correctif de reconstruction des faces basses actif dans Q6-g-f |
 | `x7d-v2-fix2` | Première fermeture du moment périodique B1 au niveau cellule | Q6_GF | Correctif intermédiaire actif historiquement; fermeture k=0 centrée cellule ensuite rendue exacte au niveau particulaire par x7q |
@@ -280,6 +302,13 @@
 | `x13l` | Qualification goutte oscillante n=3 | TRANSPORT_SURFACE | Qualification dynamique historique |
 | `x13m` | Qualification goutte oscillante n=4 | TRANSPORT_SURFACE | Qualification dynamique historique |
 | `x13zd` | Validation croisée décisive et rollback | TRANSPORT_SURFACE | Invalide x13t+x13w comme chemin général; point de production ramené à surf-tension-qualified-x13h-20260831 |
+| `x14a` | Smoke thermostat deux types | LIQUID_GAS | PASS des smokes thermostat deux types |
+| `x14at` | Validation externe Sato Stage-A | LIQUID_GAS | Validation externe ciblée: H/D=0.8 et Fr_m≈0.49–0.59 à 4.8–9.9% de Sato; H/D=1.7 REVIEW; pas de similitude dynamique complète |
+| `x14b` | Qualification thermostat avec collision SRC active | LIQUID_GAS | PASS active-collision exact-grid |
+| `x14c` | Probe thermostat en grille décalée | LIQUID_GAS | PASS production-like shifted-grid probe |
+| `x14e` | Qualification thermostat sur chemin SRC de production | LIQUID_GAS | PASS chemin SRC production résident |
+| `x14f` | Qualification exacte thermostat sur src-q6-g-f | LIQUID_GAS | PASS x14f-fix1 exact src-q6-g-f |
+| `x14i` | Qualification finale thermostat src-q6-g-f avec grid shift | LIQUID_GAS | PASS production shifted-grid resident species thermostat |
 | `x5a2` | Qualification dam-break liquide-vide du free_surface_masked | Q6_GF | Qualification discriminante; motive la séparation support/interface de x6 |
 | `x5b` | Qualification liquide-gaz : Q6-g liquide et gaz compressible explicite | Q6_GF | Première qualification bi-espèces; couplage gaz-liquide encore collisionnel côté pression |
 | `x7e` | Qualification combinée pression gaz x6g + restauration de densité x7d | Q6_GF | Qualification de composition Q6-g-f; kick viriel explicite désactivé |
@@ -307,6 +336,15 @@
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
 | `0493W4` | Runner d'injection multi-espèces normalisé par famille de phase | MULTISPECIES_RUNNER | Jalon de runner attesté par le code et les inventaires |
+
+## TOOLING
+
+| ID | Nom | Domaine | Statut |
+|---|---|---|---|
+| `x13zg` | Profil run_ok surface libre qualifié | FREE_SURFACE_KINETICS | Profil run_ok de référence; chaîne x13h explicitement figée |
+| `x13zj` | Harmonisation fluide de référence et LiveVis run_ok | RUN_OK | Harmonisation documentaire/outillage historique attestée par README Git |
+| `x13zk` | Checker run_ok à sémantique physique | RUN_OK | Contrôle sémantique run_ok; aucune nouvelle physique |
+| `x13zl` | Collection run_ok canonique homogène | RUN_OK | Collection run_ok homogénéisée |
 
 ## VISUALIZATION
 

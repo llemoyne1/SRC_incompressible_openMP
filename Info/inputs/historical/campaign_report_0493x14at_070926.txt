@@ -1,0 +1,54 @@
+0493x14at — Sato Stage-A planar analogue campaign
+=================================================
+
+Interpretation contract
+-----------------------
+Primary test: linearity of h/D with measured Fr_m' below the Sato critical value 1.17.
+Primary h is referenced to the INITIAL bath level, as in the Sato plunging-depth definition.
+etaFar-etaMin is retained only as a finite-bath deformation diagnostic.
+Common averaging window: steps [3000,4000].
+The 3000:4000 protocol is empirically selected from three 6000-step H/D=0.8 sentinels; per-window drift is retained as a local oscillation/trend diagnostic, not a standalone stationarity proof.
+External 3-D reference: h/D = 1.30 Fr_m'.  The coefficient 1.30 is NOT a strict 2-D pass/fail target.
+Gas pressure offset is a measured generating covariate; it is not silently subtracted from h/D.
+A pressure-covariate regression is reported only to diagnose whether pressure drift explains part of the response.
+
+Per-case means
+--------------
+0493x14at_H0p8_Fr0p20_seed493205: H/D=0.8 Fr_target=0.2 Fr_meas=0.328519558272 h/D=0.317972183625 dp*=-1.90175200633 stability=REVIEW drift=0.105373906142 halfDelta=0.081503193709
+0493x14at_H0p8_Fr0p40_seed493205: H/D=0.8 Fr_target=0.4 Fr_meas=0.44910572372 h/D=0.460541700947 dp*=-1.84183629293 stability=PASS drift=-0.00716822272695 halfDelta=0.0041780363165
+0493x14at_H0p8_Fr0p660364520158346_seed493205: H/D=0.8 Fr_target=0.660364520158 Fr_meas=0.48802758197 h/D=0.603919004931 dp*=-1.78723426566 stability=REVIEW drift=0.125691310377 halfDelta=0.0708734216622
+0493x14at_H0p8_Fr0p90_seed493205: H/D=0.8 Fr_target=0.9 Fr_meas=0.585866384469 h/D=0.686147221146 dp*=-1.73476417349 stability=PASS drift=0.00480608905447 halfDelta=0.00996629669984
+0493x14at_H1p7_Fr0p20_seed493205: H/D=1.7 Fr_target=0.2 Fr_meas=0.368807331912 h/D=0.10663643458 dp*=-1.91706743627 stability=REVIEW drift=-1.31433985553 halfDelta=-0.630779216137
+0493x14at_H1p7_Fr0p40_seed493205: H/D=1.7 Fr_target=0.4 Fr_meas=0.492508685966 h/D=0.20980189926 dp*=-1.8631396476 stability=REVIEW drift=-0.482231552742 halfDelta=-0.243920350061
+0493x14at_H1p7_Fr0p660364520158346_seed493205: H/D=1.7 Fr_target=0.660364520158 Fr_meas=0.695608315704 h/D=0.319790159548 dp*=-1.80468621169 stability=REVIEW drift=-0.282404880784 halfDelta=-0.143513388626
+0493x14at_H1p7_Fr0p90_seed493205: H/D=1.7 Fr_target=0.9 Fr_meas=0.768893965093 h/D=0.390437070471 dp*=-1.75251174283 stability=REVIEW drift=-0.224634725549 halfDelta=-0.0941706647109
+
+Fits
+----
+H/D=0.8 | hD=a*targetFr | n=4 a=0.874190338048 b=nan c=0 R2=0.447691506228
+H/D=0.8 | hD=a*targetFr+c | n=4 a=0.526083287122 b=nan c=0.233012110625 R2=0.978869449494
+H/D=0.8 | hD=a*measuredFr | n=4 a=1.13128642503 b=nan c=0 R2=0.893989180498
+H/D=0.8 | hD=a*measuredFr+c | n=4 a=1.48549961977 b=nan c=-0.170462757224 R2=0.950155449744
+H/D=0.8 | hD=a*measuredFr+b*dpStar+c | n=4 a=-0.354870408526 b=2.76973957821 c=5.71235316275 R2=0.992486852987
+H/D=1.7 | hD=a*targetFr | n=4 a=0.461813236603 b=nan c=0 R2=0.963783205821
+H/D=1.7 | hD=a*targetFr+c | n=4 a=0.405769991363 b=nan c=0.0375136177936 R2=0.987120775134
+H/D=1.7 | hD=a*measuredFr | n=4 a=0.457682253858 b=nan c=0 R2=0.879917083338
+H/D=1.7 | hD=a*measuredFr+c | n=4 a=0.674778508817 b=nan c=-0.135686659875 R2=0.990076024027
+H/D=1.7 | hD=a*measuredFr+b*dpStar+c | n=4 a=0.269362902205 b=1.05633768967 c=2.03773847083 R2=0.997932320355
+combined | hD=a*targetFr | n=8 a=0.668001787326 b=nan c=0 R2=0.355949400822
+combined | hD=a*targetFr+c | n=8 a=0.465926639243 b=nan c=0.135262864209 R2=0.464155862758
+combined | hD=a*measuredFr | n=8 a=0.713666636826 b=nan c=0 R2=-0.0129136185197
+combined | hD=a*measuredFr+c | n=8 a=0.349336545069 b=nan c=0.204493626027 R2=0.0763357259666
+combined | hD=a*measuredFr+b*dpStar+c | n=8 a=-1.22028333709 b=4.4834621239 c=9.20809270045 R2=0.94668068205
+
+Stability: 2/8 cases PASS on the common window.
+
+Reference slope = 1.30
+Reference critical Fr_m' = 1.17
+
+Paired H/D response
+-------------------
+Fr_target=0.2: delta(h/D)=-0.211335749045, relative=-0.995437869057
+Fr_target=0.4: delta(h/D)=-0.250739801687, relative=-0.748093370653
+Fr_target=0.660364520158: delta(h/D)=-0.284128845383, relative=-0.615191136581
+Fr_target=0.9: delta(h/D)=-0.295710150674, relative=-0.54934881175

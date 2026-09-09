@@ -14,11 +14,10 @@
 | `Q6-g` | CODE | CORE | Q6 force-aware | Introduit par x3, base de Q6-g-f |
 | `Q6-g-f` | CODE | CORE | Q6 force-aware + interface + face-particule + densité | Chaîne de projection de référence |
 
-## x14 : phase gaz explicite et transfert liquide-gaz
+## x14 couplage liquide-gaz explicite
 
 | ID | Nature | Domaine | Nom | Statut / portée |
 |---|---|---|---|---|
-| `x14a-x14j` | CODE | LIQUID_GAS | Thermostat séparé par espèce | Architecture x14 |
 | `x14d` | CODE | LIQUID_GAS | Collision commune + thermostats séparés | Actif dans x14 |
 | `x14g` | FIX | LIQUID_GAS | Cellules exactes post-stream/grid-shift | Correctif d'intégration actif |
 | `x14j` | BENCHMARK | LIQUID_GAS | Goutte deux températures | Benchmark d'intégration |
@@ -50,6 +49,8 @@
 | `x14ak` | BENCHMARK | LIQUID_GAS | Taylor-Culick diphasique - fluide x14 | REVIEW; ne pas utiliser pour isoler effet gaz |
 | `x14al` | BENCHMARK | LIQUID_GAS | Taylor-Culick apparié au point x13h | Contrôle liquide reproduit; branche gaz à relire car EOS global kBT avait été mal aligné dans le premier runner |
 | `x14am` | DIAGNOSTIC | LIQUID_GAS | Young-Laplace diphasique multi-rayons | REVIEW/non décisif à sigma=10000: kappa_active et pression sont déjà connus comme métrologie bruyante/non monotone dans ce régime |
+| `x14p` | DIAGNOSTIC | LIQUID_GAS | Audit offline alpha/volume gazeux accessible | Diagnostic offline; aucune loi CUDA proposée à ce stade |
+| `x14q` | DIAGNOSTIC | LIQUID_GAS | Fit offline de fraction de volume accessible | Diagnostic offline; explicitement pas une proposition CUDA |
 
 ## x0-x1 : dam-break bi-espèces et boîte fermée CUDA résidente
 
@@ -148,6 +149,43 @@
 | `x13zb3` | DIAGNOSTIC | TRANSPORT_SURFACE | Audit de stabilité et rebaseline Young–Laplace | Diagnostic de baseline; motive l’abandon de la référence libre longue sigma=0 |
 | `x13zc` | DIAGNOSTIC | TRANSPORT_SURFACE | Mécanique statique de goutte versus grille | Diagnostic de représentation; R_eff plus petit sur grille fine explique une part majeure du shift fréquentiel |
 | `x13zd` | QUALIFICATION | TRANSPORT_SURFACE | Validation croisée décisive et rollback | Invalide x13t+x13w comme chemin général; point de production ramené à surf-tension-qualified-x13h-20260831 |
+
+## x13ze post-rollback/run_ok
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x13ze` | DEMONSTRATION | FREE_SURFACE_KINETICS | Démonstrations run_ok impact/puddle stabilisées | Démonstration historique stabilisée; pas une nouvelle qualification physique |
+| `x13zf` | DEMONSTRATION | FREE_SURFACE_KINETICS | Démonstration run_ok dripping qualitative | Démonstration qualitative historique stabilisée; non benchmark quantitatif |
+| `x13zg` | TOOLING | FREE_SURFACE_KINETICS | Profil run_ok surface libre qualifié | Profil run_ok de référence; chaîne x13h explicitement figée |
+| `x13zj` | TOOLING | RUN_OK | Harmonisation fluide de référence et LiveVis run_ok | Harmonisation documentaire/outillage historique attestée par README Git |
+| `x13zk` | TOOLING | RUN_OK | Checker run_ok à sémantique physique | Contrôle sémantique run_ok; aucune nouvelle physique |
+| `x13zl` | TOOLING | RUN_OK | Collection run_ok canonique homogène | Collection run_ok homogénéisée |
+| `x13zn` | FIX | RUN_OK | Nettoyage runner injection | Correctif runner-only attesté; aucune modification solveur |
+
+## x14 thermostat multi-espèces
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x14a` | QUALIFICATION | LIQUID_GAS | Smoke thermostat deux types | PASS des smokes thermostat deux types |
+| `x14b` | QUALIFICATION | LIQUID_GAS | Qualification thermostat avec collision SRC active | PASS active-collision exact-grid |
+| `x14c` | QUALIFICATION | LIQUID_GAS | Probe thermostat en grille décalée | PASS production-like shifted-grid probe |
+| `x14e` | QUALIFICATION | LIQUID_GAS | Qualification thermostat sur chemin SRC de production | PASS chemin SRC production résident |
+| `x14f` | QUALIFICATION | LIQUID_GAS | Qualification exacte thermostat sur src-q6-g-f | PASS x14f-fix1 exact src-q6-g-f |
+| `x14i` | QUALIFICATION | LIQUID_GAS | Qualification finale thermostat src-q6-g-f avec grid shift | PASS production shifted-grid resident species thermostat |
+
+## x14 interaction jet gaz-liquide
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x14an` | CAMPAIGN | LIQUID_GAS | Jet gazeux plan sur bain liquide | Campagne de construction/qualification; aucun PASS physique autonome inféré du runner |
+| `x14ao` | CAMPAIGN | LIQUID_GAS | Buse planaire Darcy/chi paramétrable | Étape géométrique de campagne; pas de qualification autonome revendiquée |
+| `x14ap` | CAMPAIGN | LIQUID_GAS | Buse Darcy/chi aux défauts de similitude expérimentale | Point de similitude de campagne; pas de PASS autonome |
+| `x14aq` | CAMPAIGN | LIQUID_GAS | Réservoirs gazeux ambiants latéraux | Expérience de condition limite; non retenue comme validation autonome |
+| `x14ar` | CAMPAIGN | LIQUID_GAS | Atmosphère hard-density sur le dessus hors buse | Expérience de condition limite; pas de PASS physique autonome |
+| `x14as` | CAMPAIGN | LIQUID_GAS | Buse à sorties larges, pression gaz comme covariable | Topologie retenue pour x14at; pression gaz traitée comme covariable mesurée |
+| `x14at` | QUALIFICATION | LIQUID_GAS | Validation externe Sato Stage-A | Validation externe ciblée: H/D=0.8 et Fr_m≈0.49–0.59 à 4.8–9.9% de Sato; H/D=1.7 REVIEW; pas de similitude dynamique complète |
+| `x14au` | CALIBRATOR | LIQUID_GAS | Qualification viscosité associée au cas Sato | Liquide primaire INVALID; gaz REVIEW; cohérence d’échelle 2σ diagnostique seulement |
+| `x14av` | DEMONSTRATION | LIQUID_GAS | Démonstration atomiseur air-assisté | DEMONSTRATION_DIAGNOSTIC_ONLY; aucune qualification physique d’atomisation |
 
 ## x2-x4b : diagnostic gravitaire et séquençage Q6-g force-aware
 
@@ -451,23 +489,15 @@ Inclut la force dans la vitesse tentative avant le streaming afin que la project
 
 Chaîne: vitesse tentative forcée, interface physique alpha=0.5, condition de pression, reconstruction face-particule B1/RT0 et relaxation lente de densité dans le même solveur CG.
 
-### `x14a-x14j` — Thermostat séparé par espèce
-
-- **Clé unique :** `0493x14a-x14j`
-- **ID canonique :** `0493x14a-x14j`
-- **Nature / domaine :** `CODE` / `LIQUID_GAS`
-- **Statut :** Architecture x14
-- **Confiance :** `B`
-
-Ajoute des cibles kBT propres aux espèces après collision SRC commune, sans séparer la collision du mélange.
-
 ### `x14d` — Collision commune + thermostats séparés
 
 - **Clé unique :** `0493x14d`
 - **ID canonique :** `0493x14d`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Actif dans x14
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
 
 Conserve SRC commun au mélange; seule la remise à température est faite par type.
 
@@ -477,7 +507,9 @@ Conserve SRC commun au mélange; seule la remise à température est faite par t
 - **ID canonique :** `0493x14g`
 - **Nature / domaine :** `FIX` / `LIQUID_GAS`
 - **Statut :** Correctif d'intégration actif
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
 
 Utilise les identifiants de cellule SRC persistants exacts pour thermostat par espèce.
 
@@ -487,7 +519,9 @@ Utilise les identifiants de cellule SRC persistants exacts pour thermostat par e
 - **ID canonique :** `0493x14j`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Benchmark d'intégration
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Cas d'intégration thermostat liquide/gaz avant fermeture cinétique bilatérale.
 
@@ -502,7 +536,9 @@ Cas d'intégration thermostat liquide/gaz avant fermeture cinétique bilatérale
 - **ID canonique :** `0493x14k`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Opt-in; change le modèle d'interface
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Autorise le côté gaz à consommer la même géométrie de relocalisation x10 que le liquide, avec sens de phase inversé.
 
@@ -515,7 +551,9 @@ Autorise le côté gaz à consommer la même géométrie de relocalisation x10 q
 - **ID canonique :** `0493x14l`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Qualifié pour imperméabilité normale dans cas tests
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Réfléchit la composante normale relative du gaz à l'interface mobile; tangentielle inchangée.
 
@@ -528,7 +566,9 @@ Réfléchit la composante normale relative du gaz à l'interface mobile; tangent
 - **ID canonique :** `0493x14m`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Architecture intégrée
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Combine liquide x10/x12, gaz x14l et thermostat séparé; x12a reste côté liquide uniquement.
 
@@ -546,7 +586,9 @@ Combine liquide x10/x12, gaz x14l et thermostat séparé; x12a reste côté liqu
 - **ID canonique :** `0493x14n`
 - **Nature / domaine :** `ABLATION` / `LIQUID_GAS`
 - **Statut :** Ablation
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Coupe la fermeture cinétique gazeuse pour séparer pression et imperméabilité.
 
@@ -560,7 +602,9 @@ Coupe la fermeture cinétique gazeuse pour séparer pression et imperméabilité
 - **ID canonique :** `0493x14o`
 - **Nature / domaine :** `ABLATION` / `LIQUID_GAS`
 - **Statut :** Ablation
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Utilise une pression gazeuse constante choisie pour annuler la contribution de jauge.
 
@@ -573,11 +617,14 @@ Utilise une pression gazeuse constante choisie pour annuler la contribution de j
 - **ID canonique :** `0493x14r`
 - **Nature / domaine :** `ANALYZER` / `LIQUID_GAS`
 - **Statut :** Diagnostic conduisant à x14s
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Analyse offline montrant que p=N kBT/A_cell sous-estime la pression si seule une fraction de cellule est accessible au gaz.
 
 **Relations :**
+- `BUILDS_ON` → `x14q` — Fit offline de fraction de volume accessible
 - `REFERENCES` → `x14s` — EOS gaz volume accessible
 
 **Artefacts associés :**
@@ -589,9 +636,14 @@ Analyse offline montrant que p=N kBT/A_cell sous-estime la pression si seule une
 - **ID canonique :** `0493x14s`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Actif dans x14 récent
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
 
 Corrige la pression gazeuse par la fraction de volume accessible dérivée de alpha Q6.
+
+**Relations :**
+- `IMPLEMENTS_RESULT_OF` → `x14r` — Analyse volume accessible
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14s_drop_shape_fourier.cpython-312.pyc`
@@ -606,7 +658,9 @@ Corrige la pression gazeuse par la fraction de volume accessible dérivée de al
 - **ID canonique :** `0493x14t`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Qualification composante thermodynamique
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-03`
+- **Commit :** `5dd346136d2da9d69952b9cade7ed8eb91a2b93f`
 
 Benchmark plan qui qualifie la transmission moyenne de p_g par x6g/x14s sans terme impulsionnel direct.
 
@@ -627,7 +681,9 @@ Benchmark plan qui qualifie la transmission moyenne de p_g par x6g/x14s sans ter
 - **ID canonique :** `0493x14u`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Diagnostic conduisant à x14v
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-03`
+- **Commit :** `5dd346136d2da9d69952b9cade7ed8eb91a2b93f`
 
 Benchmark de flux de moment dirigé; montre que x14l seul rend imperméable mais ne restitue presque pas le moment perdu au liquide.
 
@@ -649,7 +705,9 @@ Benchmark de flux de moment dirigé; montre que x14l seul rend imperméable mais
 - **ID canonique :** `0493x14v`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Actif dans chaîne x14 candidate
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-03`
+- **Commit :** `5dd346136d2da9d69952b9cade7ed8eb91a2b93f`
 
 Transfère J_excess = J_raw - J_thermo au liquide afin d'ajouter le flux cinétique hors équilibre sans doubler la pression x6g.
 
@@ -670,7 +728,9 @@ Transfère J_excess = J_raw - J_thermo au liquide afin d'ajouter le flux cinéti
 - **ID canonique :** `0493x14w`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** PASS-like sur contrainte tangentielle
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-03`
+- **Commit :** `5dd346136d2da9d69952b9cade7ed8eb91a2b93f`
 
 Benchmark de transfert tangentiel; teste continuité de contrainte via collisions SRC communes sans frottement interfacial ad hoc.
 
@@ -686,7 +746,9 @@ Benchmark de transfert tangentiel; teste continuité de contrainte via collision
 - **ID canonique :** `0493x14x`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Qualification intégrée/tooling
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Runner intégré x6g+x9+x14l+x14v+chaîne liquide; banc pour forme, moment et fréquence.
 
@@ -711,7 +773,9 @@ Runner intégré x6g+x9+x14l+x14v+chaîne liquide; banc pour forme, moment et fr
 - **ID canonique :** `0493x14y`
 - **Nature / domaine :** `ABLATION` / `LIQUID_GAS`
 - **Statut :** Rejeté: double comptage pression équilibre
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Transfère J_raw directement et supprime la soustraction thermodynamique.
 
@@ -724,7 +788,9 @@ Transfère J_raw directement et supprime la soustraction thermodynamique.
 - **ID canonique :** `0493x14z`
 - **Nature / domaine :** `ABLATION` / `LIQUID_GAS`
 - **Statut :** Rejeté comme cause du défaut n=1
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Corrige la résultante du seul p_ref uniforme sur la polyligne x10n.
 
@@ -740,7 +806,9 @@ Corrige la résultante du seul p_ref uniforme sur la polyligne x10n.
 - **ID canonique :** `0493x14aa`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Non retenu: dégrade la géométrie locale de forme
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Déplace toute la traction sur la géométrie de faces Q6.
 
@@ -753,7 +821,9 @@ Déplace toute la traction sur la géométrie de faces Q6.
 - **ID canonique :** `0493x14ab`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Non retenu
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Sépare référence et jauge mais garde traction variable sur normales axiales Q6.
 
@@ -766,7 +836,9 @@ Sépare référence et jauge mais garde traction variable sur normales axiales Q
 - **ID canonique :** `0493x14ac`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Principe conservé, local supplanté par x14ad
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Garde l'ancien échantillonnage local et corrige uniquement la résultante globale.
 
@@ -782,7 +854,9 @@ Garde l'ancien échantillonnage local et corrige uniquement la résultante globa
 - **ID canonique :** `0493x14ad`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Retenu pour interfaces courbes x14
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Échantillonne la pression de jauge des faces représentées qui terminent chaque segment x10n, applique sur normale locale, puis corrige la résultante résiduelle.
 
@@ -798,7 +872,9 @@ Garde l'ancien échantillonnage local et corrige uniquement la résultante globa
 - **ID canonique :** `0493x14ae`
 - **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
 - **Statut :** Diagnostic; pertes nulles sur cas discriminant
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Compte les kicks x14v qui ne trouvent aucun support liquide après CIC/fallback.
 
@@ -814,7 +890,9 @@ Compte les kicks x14v qui ne trouvent aucun support liquide après CIC/fallback.
 - **ID canonique :** `0493x14af`
 - **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
 - **Statut :** Diagnostic causal
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Mesure J_Q6 applique, J_thermo et x14v; identifie le mismatch Q6/B1 - traction reconstruite comme source de dérive.
 
@@ -832,7 +910,9 @@ Mesure J_Q6 applique, J_thermo et x14v; identifie le mismatch Q6/B1 - traction r
 - **ID canonique :** `0493x14ag`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Abandonné
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Premier benchmark de traînée ouvert; évolution du gaz jusqu'à inversion du courant.
 
@@ -848,7 +928,9 @@ Premier benchmark de traînée ouvert; évolution du gaz jusqu'à inversion du c
 - **ID canonique :** `0493x14ah`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Benchmark intégré
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Canal périodique avec goutte entraînée par un profil gazeux; vérifie que la fermeture ne supprime pas la vraie traînée.
 
@@ -869,7 +951,9 @@ Canal périodique avec goutte entraînée par un profil gazeux; vérifie que la 
 - **ID canonique :** `0493x14ai`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Concept retenu mais version initiale supplantée
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Utilise la résultante B1/RT0 réellement appliquée comme cible globale de la projection de traction x14ad.
 
@@ -892,7 +976,9 @@ Utilise la résultante B1/RT0 réellement appliquée comme cible globale de la p
 - **ID canonique :** `0493x14ai-fix1`
 - **Nature / domaine :** `CODE` / `LIQUID_GAS`
 - **Statut :** Seulement composante liquide fermée et isolée des frontières Q6 externes
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-04`
+- **Commit :** `8a4fc4065a2682cebf0fe32cb9cdbd32de39aef5`
 
 Corrige la cible x14ai pour inclure la correction uniforme périodique B1; ferme le moment global au roundoff.
 
@@ -906,7 +992,9 @@ Corrige la cible x14ai pour inclure la correction uniforme périodique B1; ferme
 - **ID canonique :** `0493x14aj`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** REVIEW: fréquence ~12% lente dans campagne actuelle
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
 
 Qualification du mode n=3 de la chaîne x14ai-fix1.
 
@@ -925,7 +1013,9 @@ Qualification du mode n=3 de la chaîne x14ai-fix1.
 - **ID canonique :** `0493x14ak`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** REVIEW; ne pas utiliser pour isoler effet gaz
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
 
 TC avec paramètres liquide x14 (gamma=20, dt=0.002, etc.); comparaison historique confondait changement de fluide et effet gaz.
 
@@ -942,7 +1032,9 @@ TC avec paramètres liquide x14 (gamma=20, dt=0.002, etc.); comparaison historiq
 - **ID canonique :** `0493x14al`
 - **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
 - **Statut :** Contrôle liquide reproduit; branche gaz à relire car EOS global kBT avait été mal aligné dans le premier runner
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
 
 Deux runs avec liquide initial identique: liquide seul vs même liquide + gaz, pour isoler le couplage gaz.
 
@@ -962,7 +1054,9 @@ Deux runs avec liquide initial identique: liquide seul vs même liquide + gaz, p
 - **ID canonique :** `0493x14am`
 - **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
 - **Statut :** REVIEW/non décisif à sigma=10000: kappa_active et pression sont déjà connus comme métrologie bruyante/non monotone dans ce régime
-- **Confiance :** `B`
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
 
 Screening multi-rayons avec x9e sans baseline sigma=0 longue.
 
@@ -2445,6 +2539,355 @@ Teste la meilleure fermeture expérimentale x13t+x13w-fix3 sur gouttes oscillant
 - `REFERENCES` → `x13w` — Escape → inactive → reseed local
 - `REFERENCES` → `x13w-fix3` — Reseed sur moyenne pré-échappement
 
+### `x13ze` — Démonstrations run_ok impact/puddle stabilisées
+
+- **Clé unique :** `0493x13ze`
+- **ID canonique :** `0493x13ze`
+- **Nature / domaine :** `DEMONSTRATION` / `FREE_SURFACE_KINETICS`
+- **Statut :** Démonstration historique stabilisée; pas une nouvelle qualification physique
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Wrapper commun autour du cas splash historique, figé sur la chaîne surface libre qualifiée x10o+CIC+Q2+x10p/q+x10u+x10v full-vector swap+x12a.
+
+**Relations :**
+- `BUILDS_ON` → `x13h` — Point liquide de référence G08-120-L072
+- `REFERENCES` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `REFERENCES` → `x10p` — Résolution des recouvrements initiaux
+- `REFERENCES` → `x10u` — Relocalisation conservative one-for-one
+- `REFERENCES` → `x10v` — Swap local full-vector one-for-one
+- `REFERENCES` → `x12a` — Refroidissement thermique local des petites structures
+
+### `x13zf` — Démonstration run_ok dripping qualitative
+
+- **Clé unique :** `0493x13zf`
+- **ID canonique :** `0493x13zf`
+- **Nature / domaine :** `DEMONSTRATION` / `FREE_SURFACE_KINETICS`
+- **Statut :** Démonstration qualitative historique stabilisée; non benchmark quantitatif
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Réutilise la géométrie/forçage dripping retenus avec la chaîne surface libre qualifiée; montre croissance, pincement, chute et impact sans prétendre calibrer un robinet ni un Weber critique.
+
+**Relations :**
+- `BUILDS_ON` → `x13h` — Point liquide de référence G08-120-L072
+
+### `x13zg` — Profil run_ok surface libre qualifié
+
+- **Clé unique :** `0493x13zg`
+- **ID canonique :** `0493x13zg`
+- **Nature / domaine :** `TOOLING` / `FREE_SURFACE_KINETICS`
+- **Statut :** Profil run_ok de référence; chaîne x13h explicitement figée
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Bibliothèque shell commune qui impose aux démonstrations liquides le point de référence taggé x13h et désactive les fallbacks non qualifiés.
+
+**Relations :**
+- `BUILDS_ON` → `x13h` — Point liquide de référence G08-120-L072
+- `REFERENCES` → `x13h` — Point liquide de référence G08-120-L072
+
+### `x13zj` — Harmonisation fluide de référence et LiveVis run_ok
+
+- **Clé unique :** `0493x13zj`
+- **ID canonique :** `0493x13zj`
+- **Nature / domaine :** `TOOLING` / `RUN_OK`
+- **Statut :** Harmonisation documentaire/outillage historique attestée par README Git
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Harmonise la collection run_ok autour du fluide de référence et des conventions de visualisation, sans introduire de nouvelle physique solveur.
+
+### `x13zk` — Checker run_ok à sémantique physique
+
+- **Clé unique :** `0493x13zk`
+- **ID canonique :** `0493x13zk`
+- **Nature / domaine :** `TOOLING` / `RUN_OK`
+- **Statut :** Contrôle sémantique run_ok; aucune nouvelle physique
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Fait évoluer le checker vers la présence et la cohérence des paramètres physiques requis sans figer les anciennes valeurs littérales locales.
+
+### `x13zl` — Collection run_ok canonique homogène
+
+- **Clé unique :** `0493x13zl`
+- **ID canonique :** `0493x13zl`
+- **Nature / domaine :** `TOOLING` / `RUN_OK`
+- **Statut :** Collection run_ok homogénéisée
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Remplacement canonique de la collection run_ok par un ensemble homogène fondé sur le fluide de référence; jalon d’outillage historique, pas qualification solveur nouvelle.
+
+### `x13zn` — Nettoyage runner injection
+
+- **Clé unique :** `0493x13zn`
+- **ID canonique :** `0493x13zn`
+- **Nature / domaine :** `FIX` / `RUN_OK`
+- **Statut :** Correctif runner-only attesté; aucune modification solveur
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `a18d274ba28d0a8ce14432fdc5fa52a132b5410f`
+
+Supprime des doublons de configuration et corrige une collision de portée dynamique Bash dans le runner injection; portée outillage seulement.
+
+**Relations :**
+- `BUILDS_ON` → `x13zl` — Collection run_ok canonique homogène
+
+### `x14a` — Smoke thermostat deux types
+
+- **Clé unique :** `0493x14a`
+- **ID canonique :** `0493x14a`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS des smokes thermostat deux types
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Vérifie cibles thermiques par type, conservation du moment par type sans rotation SRC et rapport de vitesses thermiques attendu sur le chemin CUDA résident.
+
+### `x14an` — Jet gazeux plan sur bain liquide
+
+- **Clé unique :** `0493x14an`
+- **ID canonique :** `0493x14an`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Campagne de construction/qualification; aucun PASS physique autonome inféré du runner
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Premier runner application-scale du chargement normal gaz→liquide avec bain, jet supérieur et sorties latérales; x14ai est forcé OFF car le liquide touche des frontières externes.
+
+**Relations :**
+- `REFERENCES` → `x14ai` — Fermeture de résultante Q6 appliquée
+
+### `x14ao` — Buse planaire Darcy/chi paramétrable
+
+- **Clé unique :** `0493x14ao`
+- **ID canonique :** `0493x14ao`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Étape géométrique de campagne; pas de qualification autonome revendiquée
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Insère une buse de longueur finie via le chemin Darcy/Brinkman chi déjà qualifié tout en conservant la chaîne d’interaction x14.
+
+**Relations :**
+- `BUILDS_ON` → `x14an` — Jet gazeux plan sur bain liquide
+
+### `x14ap` — Buse Darcy/chi aux défauts de similitude expérimentale
+
+- **Clé unique :** `0493x14ap`
+- **ID canonique :** `0493x14ap`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Point de similitude de campagne; pas de PASS autonome
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Fixe les défauts géométriques et adimensionnels de la buse en vue d’une comparaison externe, sans modifier la chaîne solveur.
+
+**Relations :**
+- `BUILDS_ON` → `x14ao` — Buse planaire Darcy/chi paramétrable
+
+### `x14aq` — Réservoirs gazeux ambiants latéraux
+
+- **Clé unique :** `0493x14aq`
+- **ID canonique :** `0493x14aq`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Expérience de condition limite; non retenue comme validation autonome
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Teste une segmentation supérieure avec réservoirs hard-density à vitesse moyenne nulle aux extrémités et sorties passives conservées près de la buse.
+
+**Relations :**
+- `BUILDS_ON` → `x14ap` — Buse Darcy/chi aux défauts de similitude expérimentale
+
+### `x14ar` — Atmosphère hard-density sur le dessus hors buse
+
+- **Clé unique :** `0493x14ar`
+- **ID canonique :** `0493x14ar`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Expérience de condition limite; pas de PASS physique autonome
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Variante de condition limite où la zone supérieure accessible hors parois de buse est reconstruite comme atmosphère; test causal de la pression gazeuse ambiante.
+
+**Relations :**
+- `BUILDS_ON` → `x14ap` — Buse Darcy/chi aux défauts de similitude expérimentale
+
+### `x14as` — Buse à sorties larges, pression gaz comme covariable
+
+- **Clé unique :** `0493x14as`
+- **ID canonique :** `0493x14as`
+- **Nature / domaine :** `CAMPAIGN` / `LIQUID_GAS`
+- **Statut :** Topologie retenue pour x14at; pression gaz traitée comme covariable mesurée
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Fige la topologie à sorties larges qui fonctionne; la pression gazeuse n’est pas forcée à sa référence initiale mais mesurée comme condition génératrice de la cavité.
+
+**Relations :**
+- `BUILDS_ON` → `x14ap` — Buse Darcy/chi aux défauts de similitude expérimentale
+- `REFERENCES` → `x14at` — Validation externe Sato Stage-A
+
+### `x14at` — Validation externe Sato Stage-A
+
+- **Clé unique :** `0493x14at`
+- **ID canonique :** `0493x14at`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** Validation externe ciblée: H/D=0.8 et Fr_m≈0.49–0.59 à 4.8–9.9% de Sato; H/D=1.7 REVIEW; pas de similitude dynamique complète
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Compare la profondeur de cavité d’un jet gazeux incident à Sato et al. en similitude partielle géométrie/Bo_D/Fr_m mesuré.
+
+**Relations :**
+- `BUILDS_ON` → `x14as` — Buse à sorties larges, pression gaz comme covariable
+
+### `x14au` — Qualification viscosité associée au cas Sato
+
+- **Clé unique :** `0493x14au`
+- **ID canonique :** `0493x14au`
+- **Nature / domaine :** `CALIBRATOR` / `LIQUID_GAS`
+- **Statut :** Liquide primaire INVALID; gaz REVIEW; cohérence d’échelle 2σ diagnostique seulement
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Réévalue les viscosités liquide et gaz aux échelles primaire et application pour propager Re/Oh dans l’interprétation de x14at.
+
+**Relations :**
+- `DIAGNOSES` → `x14at` — Validation externe Sato Stage-A
+- `REFERENCES` → `x14at` — Validation externe Sato Stage-A
+
+### `x14av` — Démonstration atomiseur air-assisté
+
+- **Clé unique :** `0493x14av`
+- **ID canonique :** `0493x14av`
+- **Nature / domaine :** `DEMONSTRATION` / `LIQUID_GAS`
+- **Statut :** DEMONSTRATION_DIAGNOSTIC_ONLY; aucune qualification physique d’atomisation
+- **Confiance :** `A`
+- **Date :** `2026-09-07`
+- **Commit :** `75ea8907aa7d2d9f6a3e1d3d639a48e850ee0672`
+
+Assemble un jet liquide et deux arrivées gazeuses avec diagnostics de pénétration, largeur et composants détachés. Le runner/analyseur se déclare explicitement démonstration diagnostique, sans critère PASS/FAIL d’atomisation physique.
+
+**Relations :**
+- `BUILDS_ON` → `x14v` — Kick cinétique excédentaire
+
+### `x14b` — Qualification thermostat avec collision SRC active
+
+- **Clé unique :** `0493x14b`
+- **ID canonique :** `0493x14b`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS active-collision exact-grid
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Qualification dynamique sur grille non décalée afin de reconstruire exactement les cellules du thermostat final.
+
+### `x14c` — Probe thermostat en grille décalée
+
+- **Clé unique :** `0493x14c`
+- **ID canonique :** `0493x14c`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS production-like shifted-grid probe
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Probe production-like avec collision SRC, signe aléatoire et grid shift; contrôle exactement les invariants accessibles et rapporte la température apparente globale.
+
+### `x14e` — Qualification thermostat sur chemin SRC de production
+
+- **Clé unique :** `0493x14e`
+- **ID canonique :** `0493x14e`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS chemin SRC production résident
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Vérifie le thermostat séparé par type après collision SRC commune sur l’état particulaire/cellulaire CUDA résident partagé.
+
+**Relations :**
+- `QUALIFIES` → `x14d` — Collision commune + thermostats séparés
+
+### `x14f` — Qualification exacte thermostat sur src-q6-g-f
+
+- **Clé unique :** `0493x14f`
+- **ID canonique :** `0493x14f`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS x14f-fix1 exact src-q6-g-f
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Audit exact par cellule du thermostat séparé par type sur le chemin liquide/gaz src-q6-g-f, avec grid shift volontairement désactivé pour la métrologie.
+
+**Relations :**
+- `QUALIFIES` → `x14d` — Collision commune + thermostats séparés
+
+### `x14i` — Qualification finale thermostat src-q6-g-f avec grid shift
+
+- **Clé unique :** `0493x14i`
+- **ID canonique :** `0493x14i`
+- **Nature / domaine :** `QUALIFICATION` / `LIQUID_GAS`
+- **Statut :** PASS production shifted-grid resident species thermostat
+- **Confiance :** `A`
+- **Date :** `2026-09-01`
+- **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
+
+Reconstitue les cellules de collision SRC décalées depuis l’audit résident et ferme la qualification production du bridge x14g.
+
+**Relations :**
+- `QUALIFIES` → `x14g` — Cellules exactes post-stream/grid-shift
+- `REFERENCES` → `x14g` — Cellules exactes post-stream/grid-shift
+
+### `x14p` — Audit offline alpha/volume gazeux accessible
+
+- **Clé unique :** `0493x14p`
+- **ID canonique :** `0493x14p`
+- **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
+- **Statut :** Diagnostic offline; aucune loi CUDA proposée à ce stade
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
+
+Teste hors solveur si le déficit de comptage gazeux sur cellules de trace est expliqué par la fraction de volume accessible dérivée des champs alpha existants.
+
+### `x14q` — Fit offline de fraction de volume accessible
+
+- **Clé unique :** `0493x14q`
+- **ID canonique :** `0493x14q`
+- **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
+- **Statut :** Diagnostic offline; explicitement pas une proposition CUDA
+- **Confiance :** `A`
+- **Date :** `2026-09-02`
+- **Commit :** `20a59200575ca6ffc1e23e7d9211594cf24fe2ec`
+
+Compare une petite famille de lois identité/shift/scale/affine/power sur les échantillons x14p pour diagnostiquer le biais de pression interfacial.
+
+**Relations :**
+- `BUILDS_ON` → `x14p` — Audit offline alpha/volume gazeux accessible
+- `REFERENCES` → `x14p` — Audit offline alpha/volume gazeux accessible
+
 ### `x2` — Diagnostic liquide plein : force appliquée avant une projection Q6 trop tardive
 
 - **Clé unique :** `0493x2`
@@ -3544,17 +3987,7 @@ Complète la sortie Neumann au niveau particulaire : les sortants sont supprimé
 - `BUILDS_ON` → `x8l` — Première extrapolation Neumann passive de la vitesse de sortie
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_legacy.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_replica.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_species.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_strict.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_strict_400.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_strict_cont_200.avi`
 - `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_strict_cont_400.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_virtual.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_virtual_pressure.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_virtual_pressure2.avi`
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_zerodrift.avi`
 - `ASSOCIATED_WITH` — `scripts/check_0493x8q_neumann_smoke.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x8q_neumann_smoke.sh`
 
@@ -4104,10 +4537,11 @@ Individualise la mécanique x9y : chaque particule traversante utilise sa propre
 - **Statut :** QUALIFIED
 - **Confiance :** `A`
 - **Date :** `2026-09-07`
+- **Commit :** `e2fe1ca29042c2391cd5b6ee7f9eb7fe9a2065a8`
 
 Généralise les entrées/sorties segmentées aux axes x et y sur le chemin CUDA résident; crossing multi-axes chronologique, x8r quadriface, x8t généralisé, x8s séparable 1-D/2-D, gardes de coins/réservoirs et diagnostic low-face corrigé.
 
-**Notes.** Qualification Q1-Q7 et ablation x8s 2-D consolidées.
+**Notes.** Qualification Q1-Q7 et ablation x8s 2-D consolidées. | V4.24 Git reconciliation: surf commit e2fe1ca introduces the qualified segmented x/y CUDA-resident implementation.
 
 **Relations :**
 - `EXTENDS` → `x8k` — Inlet segmenté à profil de Poiseuille local
