@@ -1,0 +1,6 @@
+# SHA-256 of byte-exact historical inputs preserved in 0493x6h_original_patches.zip
+dbfbcc96b382be7983ffd4be2bd7afb35eed7a5a74d01f2feed10727d6aab544  0493x6h_patchA_low_wall_face_reconstruction.patch
+88b2a5129f3bcb8cb1b555939639cf8b3568ebe2b163ac9ffc207135a46ebc08  0493x6h_b0_postapply_region_diagnostic.patch
+7bd390e0168a74f93ae4213c83d2ec33d21ca949ec691db1c61ff524e5590b0c  0493x6h_b1_rt0_face_to_particle.patch
+
+# The sibling .patch files are text-normalized only by stripping trailing horizontal whitespace.

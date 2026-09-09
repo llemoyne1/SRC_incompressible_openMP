@@ -4,46 +4,43 @@
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x7a/x7b` | Kick viriel de densité | Q6_GF | Rejeté dans Q6-g-f; mutuellement exclusif avec x7d |
-| `x9i-x9l` | Prototypes angle de contact | SURFACE_TENSION | Ablations/supplantés |
-| `x10j` | Réflexion spéculaire labo | FREE_SURFACE_KINETICS | Ablation rejetée: bloque fortement le dripping |
-| `x10k` | Réflexion spéculaire repère interface | FREE_SURFACE_KINETICS | Ablation rejetée |
-| `x10m` | Paroi implicite mobile / scratch | FREE_SURFACE_KINETICS | Ablation/infrastructure |
-| `x10r` | Vitesses endpoints full-vector | FREE_SURFACE_KINETICS | Ablation rejetée: dripping dégradé |
-| `x10s` | Cinématique normale au segment | FREE_SURFACE_KINETICS | Ablation rejetée/OFF |
-| `x10t` | Cinématique tangentielle rigide | FREE_SURFACE_KINETICS | Ablation rejetée; impulse parasite aggravée |
-| `x13o` | Swap normal-only | TRANSPORT_SURFACE | OFF production |
-| `x13t` | Refroidissement progressif unifié | TRANSPORT_SURFACE | Rejetée comme chemin général |
-| `x13u/x13v` | Rétention one-for-one sous x13t | TRANSPORT_SURFACE | Expérimental/rejeté |
-| `x13w` | Escape -> inactive -> reseed | TRANSPORT_SURFACE | Rejeté: contraction artificielle du support |
 | `x14n` | Ablation fermeture gaz OFF | LIQUID_GAS | Ablation |
 | `x14o` | Ablation pression gaz constante | LIQUID_GAS | Ablation |
 | `x14y` | Ablation sans soustraction p_g | LIQUID_GAS | Rejeté: double comptage pression équilibre |
 | `x14z` | Fermeture géométrique p_ref | LIQUID_GAS | Rejeté comme cause du défaut n=1 |
+| `x10e` | Miroir tangent du endpoint final | FREE_SURFACE_KINETICS | Expérience de forme/isotropie historique, retirée avec la barrière universelle par x10h |
+| `x10f` | Ablation réaction exacte sur réservoir liquide global | FREE_SURFACE_KINETICS | Ablation causale; non production multi-gouttes, code conservé sans call-site actif |
+| `x10j` | Ablation spéculaire dans le repère laboratoire | FREE_SURFACE_KINETICS | Ablation rejetée : conservation de norme labo mais dripping fortement bloqué; OFF production |
+| `x10k` | Ablation spéculaire dans le repère liquide local | FREE_SURFACE_KINETICS | Ablation rejetée; améliore la covariance locale mais ne fournit pas la fermeture de production |
+| `x10m` | Paroi locale mobile alpha=0.5 | FREE_SURFACE_KINETICS | Étape architecturale/ablation OFF production; scratch et primitives seront réutilisés par les étapes continues |
+| `x10r` | Ablation vitesses endpoints full-vector | FREE_SURFACE_KINETICS | Ablation rejetée : dripping dégradé; OFF production |
+| `x10s` | Ablation cinématique normale au segment | FREE_SURFACE_KINETICS | Ablation rejetée/OFF; incompatible avec le vrai Q2 de production |
+| `x10t` | Ablation cinématique tangentielle rigide | FREE_SURFACE_KINETICS | Ablation rejetée : impulse parasite aggravée; OFF production |
+| `x13o` | Ablation swap normal-only | TRANSPORT_SURFACE | Ablation OFF production; le tag qualifié utilise le swap full-vector x10v |
+| `x13p` | Zone de crossing libre autour de l’interface | TRANSPORT_SURFACE | Expérience post-x13n; amélioration TC partielle mais non retenue |
+| `x13q` | Turnover des orphelins de fermeture cinétique | TRANSPORT_SURFACE | Expérience de confinement post-x13n; absente du commit qualifié 7655b81 |
+| `x13r` | Refroidissement direct des cellules interfaciales | TRANSPORT_SURFACE | Rejetée: fermeture discontinue et dépendante du masque; supersédée par x13t |
+| `x13s` | Refroidissement interfacial anisotrope | TRANSPORT_SURFACE | Rejetée comme fermeture générale; supersédée par x13t |
+| `x13t` | Refroidissement progressif unifié | TRANSPORT_SURFACE | Expérience causale rejetée comme chemin général après x13zd |
+| `x13u` | Combinaison x13t + relocalisation one-for-one | TRANSPORT_SURFACE | Expérimental/rejeté; x13u fixe la combinaison mais pas la fermeture générale |
+| `x13v` | Séparation position one-for-one / swap vitesse | TRANSPORT_SURFACE | Expérimental/rejeté; outil causal de séparation de x10u et x10v |
+| `x13w` | Escape → inactive → reseed local | TRANSPORT_SURFACE | Rejeté: contraction artificielle du support de phase |
+| `x13x` | Sweep de rétention probabiliste | TRANSPORT_SURFACE | Aucun compromis robuste vitesse/confinement; non production |
 
 ## ANALYZER
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x8j` | Analyse VK POD + sondes | OPEN_BOUNDARY | Tooling/qualification, pas une physique |
 | `x14r` | Analyse volume accessible | LIQUID_GAS | Diagnostic conduisant à x14s |
+| `x8b` | Attribution temporelle Darcy / résidu non-Darcy | Q6_GF | Analyseur hors ligne; aucune modification du solveur |
+| `x8i` | Analyse du sillage VK établi par POD et sondes | OPEN_BOUNDARY | Analyseur du sillage établi; aucune modification du solveur |
+| `x8j` | Nondimensionnalisation VK et comparaison bibliographique | OPEN_BOUNDARY | Analyse bibliographique/nondimensionnelle; enrichie plus tard par les diagnostics de flux x8n |
+| `x8n` | Diagnostic de conservation amont du débit et du flux massique | OPEN_BOUNDARY | Diagnostic hors ligne du conditionnement et de la conservation amont; aucune modification du solveur |
 
 ## BENCHMARK
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x7i` | Qualification multi-conditions-limites | Q6_GF | Benchmark de référence |
-| `x9r` | Cutoff de petite courbure résolue | SURFACE_TENSION | Actif selon benchmark; paramètre de résolution |
-| `x9s` | Impact/splash paramétrable | SURFACE_TENSION | Démonstration/qualification qualitative |
-| `x12b/x12c` | Construction benchmark JFM | FREE_SURFACE_KINETICS | Tooling historique |
-| `x12d` | Benchmark JFM 524 | FREE_SURFACE_KINETICS | Benchmark applicatif; similitude Re encore limitée |
-| `x13k` | Goutte oscillante n=2 | TRANSPORT_SURFACE | Qualifié historique |
-| `x13l` | Goutte oscillante n=3 | TRANSPORT_SURFACE | Qualifié historique |
-| `x13m` | Goutte oscillante n=4 | TRANSPORT_SURFACE | Qualifié historique |
-| `x13n` | Taylor-Culick 2D | TRANSPORT_SURFACE | Limite dynamique connue; référence G_TC ~0.795 au rollback |
-| `x13r/x13s` | Refroidissements locaux directs | TRANSPORT_SURFACE | Rejetées |
-| `x13x` | Rétention probabiliste | TRANSPORT_SURFACE | Aucun compromis robuste |
-| `x13z` | Changements de grille | TRANSPORT_SURFACE | Non suffisant pour validation |
 | `x14j` | Goutte deux températures | LIQUID_GAS | Benchmark d'intégration |
 | `x14t` | Piston pression thermodynamique | LIQUID_GAS | Qualification composante thermodynamique |
 | `x14u` | Gaz incident normal | LIQUID_GAS | Diagnostic conduisant à x14v |
@@ -54,14 +51,33 @@
 | `x14aj` | Goutte oscillante n=3 avec gaz | LIQUID_GAS | REVIEW: fréquence ~12% lente dans campagne actuelle |
 | `x14ak` | Taylor-Culick diphasique - fluide x14 | LIQUID_GAS | REVIEW; ne pas utiliser pour isoler effet gaz |
 | `x14al` | Taylor-Culick apparié au point x13h | LIQUID_GAS | Contrôle liquide reproduit; branche gaz à relire car EOS global kBT avait été mal aligné dans le premier runner |
+| `x12b` | Prototype JFM D=320h sur obstacle Darcy/chi | FREE_SURFACE_KINETICS | Benchmark exploratoire de construction; pas encore une reproduction quantitative JFM 524 |
+| `x12c` | Benchmark JFM compact-Y à physique inchangée | FREE_SURFACE_KINETICS | Étape de production/compaction du benchmark; physique identique à x12b |
+| `x12d` | Cas de mesure JFM 524 à géométrie/We/Fr ciblés | FREE_SURFACE_KINETICS | Benchmark applicatif de mesure; géométrie/We/Fr ciblés mais Re numérique ~649 au lieu de Re expérimental 12200 |
+| `x13n` | Benchmark Taylor–Culick 2-D | TRANSPORT_SURFACE | Limite dynamique connue; référence de rollback G_TC≈0.795 à sigma=10000 |
+| `x13z` | Exploration de changements de grille | TRANSPORT_SURFACE | Gains séduisants mais non suffisants pour validation |
+| `x7i` | Benchmark physique multi-cas SRC / Q6 / Q6-g-f | Q6_GF | Benchmark diagnostique de référence; sans seuil PASS/FAIL arbitraire |
+| `x8f` | Premier candidat von Karman Q6-g-f à inlet/outlet ouverts | OPEN_BOUNDARY | Premier candidat VK ouvert; runner-only, ensuite prolongé/raffiné |
+| `x8m` | Benchmark de production Zovatto-Pedrizzetti Re_H=280 | OPEN_BOUNDARY | Benchmark de production/restart Zovatto; première lignée sous x8l, ensuite réalignée sur la fermeture x8t |
+| `x9q` | Test de potentialité jet gravitaire / pincement / impact | SURFACE_TENSION | Benchmark exploratoire sans seuil physique dur; démontre des changements de topologie et expose la faiblesse de courbure sous-résolue traitée par x9r |
+| `x9s` | Benchmark paramétrable d'impact et splash | SURFACE_TENSION | Démonstration/qualification morphologique qualitative; pas une mesure convergée de Weber critique |
+| `0493O0` | Références SRC seules avant réparation locale du support | MULTISPECIES_RESAMPLING | Référence historique pré-réparation |
+| `0493W0` | Audit du régime cinétique du cas segmented-Darcy | SRC_CALIBRATION | Diagnostic historique du régime cinétique |
+| `0493W2` | Référence segmented-Darcy sur fluide SRC calibré | SRC_CALIBRATION | Référence physique calibrée |
 
 ## CALIBRATOR
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x12cal` | Calibrateur dynamique capillaire | FREE_SURFACE_KINETICS | Qualification dynamique |
-| `x12yl` | Calibrateur mécanique de sigma | FREE_SURFACE_KINETICS | Qualification mécanique historique |
-| `x13d` | Longue longueur d'onde / acoustique | TRANSPORT_SURFACE | Calibration |
+| `x12cal` | Calibrateur dynamique de tension superficielle | SURFACE_TENSION | Calibrateur dynamique courant; aucune nouvelle physique C++ |
+| `x12yl` | Calibrateur mécanique/statique de tension superficielle | SURFACE_TENSION | Calibrateur mécanique/statique courant; remplace x11a comme extraction scalaire de sigma_eff |
+| `x13a` | Pré-balayage intrinsèque SRC haut-Re | TRANSPORT_SURFACE | Pré-balayage constitutif scripts-only; aucune physique solveur nouvelle |
+| `x13d` | Follow-up longue longueur d’onde et amortissement | TRANSPORT_SURFACE | Calibration constitutive du point G08 de référence |
+| `x13f` | Optimisation locale du transport G08 | TRANSPORT_SURFACE | Optimisation/calibration du fluide, pas optimisation de code |
+| `x13i` | Loi d’échelle en kBT du fluide x13h | TRANSPORT_SURFACE | Calibration de similitude thermique du fluide x13h; scripts-only |
+| `x13j` | Calibrateur transport autonome + qualification Young–Laplace x13h | TRANSPORT_SURFACE | Double rôle historique documenté; aucune nouvelle physique C++ |
+| `x8e` | Recalibration viscosité Q6-g-f et raideur Darcy | Q6_GF | Calibration Q6-g-f et carte de raideur Darcy; aucun changement du solveur |
+| `0493W1` | Calibrateur constitutif du fluide SRC | SRC_CALIBRATION | Calibrateur historique |
 
 ## CODE
 
@@ -72,47 +88,6 @@
 | `Q9` | Relaxation basse fréquence du flux de masse | CORE | Historique / séparée du chemin Q6-g-f actuel |
 | `Q6-g` | Q6 force-aware | CORE | Introduit par x3, base de Q6-g-f |
 | `Q6-g-f` | Q6 force-aware + interface + face-particule + densité | CORE | Chaîne de projection de référence |
-| `x1` | Jalon ancien non individualisé dans le rapport consolidé | CORE | À retrouver dans l'historique Git si nécessaire |
-| `x2` | Test Q6 liquide seul / gravité | CORE | Historique; mène à x3 |
-| `x3` | Q6-g force-aware - preuve de concept | Q6_GF | Supplanté par x4a/x4b |
-| `x4a` | prestream_single | Q6_GF | Supplanté par x4b |
-| `x4b` | prestream_single_fused | Q6_GF | Séquençage de référence Q6-g-f |
-| `x5a` | free_surface_masked initial | Q6_GF | Étape historique |
-| `x5b` | Gaz explicite compressible | Q6_GF | Base du couplage gaz |
-| `x6c` | Alpha physique résident | Q6_GF | Actif, base géométrique Q6/capillarité |
-| `x6d` | Distance sous-maille 1/theta | Q6_GF | Supplanté par x6f |
-| `x6f` | Stencil physique d'interface | Q6_GF | Actif |
-| `x6g` | Pression gazeuse interfaciale | Q6_GF | Actif quand gaz explicite |
-| `x6h-A` | Reconstruction faces basses | Q6_GF | Actif dans Q6-g-f |
-| `x6h-B1` | Reconstruction face-particule RT0 | Q6_GF | Actif dans Q6-g-f |
-| `x7d` | Relaxation de densité dans le RHS | Q6_GF | Actif; tau_rho=0.25 dans profil qualifié |
-| `x7f` | Extension multi-topologies | Q6_GF | Actif |
-| `x7g` | Darcy avant projection | Q6_GF | Actif selon mode Darcy |
-| `x7m` | Correction topologie monophase | Q6_GF | Actif automatiquement |
-| `x7o` | Symétrisation Q6 indépendant | Q6_GF | Actif |
-| `x7p` | Symétrisation Q6 commun | Q6_GF | Actif |
-| `x7q` | Fermeture exacte du moment périodique | Q6_GF | Actif automatiquement seulement dans son domaine; pas sur dam-break partiel |
-| `x8k` | Inlet segmenté Poiseuille local | OPEN_BOUNDARY | Actif |
-| `x8q` | Continuation cinétique outlet | OPEN_BOUNDARY | Actif pour outlet Neumann |
-| `x8r` | Outlet pression Neumann | OPEN_BOUNDARY | Actif |
-| `x8t` | Relaxation densité sans mode moyen | OPEN_BOUNDARY | Actif dans cas applicable |
-| `x9a-x9c` | Choix de la géométrie de courbure | SURFACE_TENSION | Étapes de sélection; p3 retenu |
-| `x9d` | Activation du saut de Laplace | SURFACE_TENSION | Actif; coeur de la tension superficielle |
-| `x9g` | Sélecteurs de phases A/B | SURFACE_TENSION | Actif |
-| `x9h` | Géométrie de paroi pour mouillage | SURFACE_TENSION | Actif dans mouillage |
-| `x9m` | Fermeture statique de mouillage | SURFACE_TENSION | Bonne statique; dynamique ligne triple non fermée |
-| `x10a-x10e` | Premières barrières / seals / réactions | FREE_SURFACE_KINETICS | Historique, supplanté |
-| `x10f-x10g` | Réaction conservative globale | FREE_SURFACE_KINETICS | Code conservé sans call-site actif |
-| `x10o` | Paroi thermique / enveloppe locale | FREE_SURFACE_KINETICS | Socle actif de la fermeture liquide x12 |
-| `x10p/x10q` | Résolution recouvrements initiaux | FREE_SURFACE_KINETICS | Actif |
-| `x10cic` | Alpha cinétique CIC dédié | FREE_SURFACE_KINETICS | Actif; orchestration encore liée à Q6 |
-| `x10biq / Q2` | Reconstruction biquadratique tensorielle | FREE_SURFACE_KINETICS | Actif |
-| `x10u` | Relocalisation one-for-one | FREE_SURFACE_KINETICS | Actif dans chaîne liquide qualifiée |
-| `x10v` | Swap local full-vector | FREE_SURFACE_KINETICS | Actif; peut ajouter dispersion/dissipation interfaciale |
-| `x10w` | Limiter thermique pairwise | FREE_SURFACE_KINETICS | Implémenté mais OFF; exclusif avec x12a |
-| `x12a` | Refroidissement thermique local petites structures | FREE_SURFACE_KINETICS | Actif dans chaîne liquide qualifiée |
-| `x13e` | Sweep Mach | TRANSPORT_SURFACE | Calibration |
-| `x13g` | Reproductibilité statistique GPU | TRANSPORT_SURFACE | Règle méthodologique |
 | `x14a-x14j` | Thermostat séparé par espèce | LIQUID_GAS | Architecture x14 |
 | `x14d` | Collision commune + thermostats séparés | LIQUID_GAS | Actif dans x14 |
 | `x14k` | Géométrie cinétique bilatérale | LIQUID_GAS | Opt-in; change le modèle d'interface |
@@ -126,70 +101,215 @@
 | `x14ad` | Traction locale cohérente avec faces x6g | LIQUID_GAS | Retenu pour interfaces courbes x14 |
 | `x14ai` | Fermeture de résultante Q6 appliquée | LIQUID_GAS | Concept retenu mais version initiale supplantée |
 | `x14ai-fix1` | Fermeture B1 exacte post-correction périodique | LIQUID_GAS | Seulement composante liquide fermée et isolée des frontières Q6 externes |
+| `x1` | Chemin de frontières closed-box CUDA résident | BOUNDARY | Étape historique qualifiée pour la démonstration dam-break |
+| `x10a` | Géométrie de crossing et seal du endpoint réfléchi | FREE_SURFACE_KINETICS | Étape géométrique historique; fondation des essais de confinement x10b-x10e, ensuite supplantée par la paroi mobile continue |
+| `x10b` | Rétention hard-r1 des particules de shell | FREE_SURFACE_KINETICS | Étape historique hard-r1; sur-confinement ensuite corrigé par x10h |
+| `x10biq` | Reconstruction Q2 biquadratique tensorielle | FREE_SURFACE_KINETICS | Vrai Q2 actif dans la chaîne x12; x10r/s/t doivent être OFF |
+| `x10c` | Barrière universelle du endpoint final r=1 | FREE_SURFACE_KINETICS | Étape historique de confinement universel; retirée par x10h car incompatible avec une interface réellement mobile |
+| `x10cic` | Alpha cinétique CIC dédié | FREE_SURFACE_KINETICS | Composant actif de la chaîne x12; orchestration encore appelée depuis le chemin Q6 |
+| `x10d` | Réaction analytique locale exactement conservative P/K | FREE_SURFACE_KINETICS | Branche analytique historique; définition conservée mais orchestration hard-r1 courante la bypass au profit de x10i/x10o |
+| `x10i` | Réaction exacte par réservoirs mésoscopiques décalés | FREE_SURFACE_KINETICS | Fallback hard-r1 legacy encore actif hors ablations continues; bypassé par x10o dans la chaîne x12 |
+| `x10o` | Paroi cinétique Q6 hydrodynamique à enveloppe thermique | FREE_SURFACE_KINETICS | Socle actif de la chaîne liquide qualifiée x12; priorité sur x10j/k/m/n |
+| `x10u` | Relocalisation conservative one-for-one | FREE_SURFACE_KINETICS | Actif dans la chaîne liquide qualifiée; requiert Q2 et x10p |
+| `x10v` | Swap local full-vector one-for-one | FREE_SURFACE_KINETICS | Actif dans la chaîne liquide qualifiée; utilise un byte/particule et deux kernels conditionnels |
+| `x10w` | Limiter thermique local pairwise | FREE_SURFACE_KINETICS | Implémenté mais OFF production; exclusif avec x12a dans le snapshot audité |
+| `x12a` | Refroidissement thermique local des petites structures | FREE_SURFACE_KINETICS | Actif dans la chaîne liquide qualifiée; exclusif avec le limiter x10w |
+| `x3` | Q6-g force-aware — preuve de concept prestream à deux solves | Q6_GF | Preuve de concept validant la cause; supplantée par x4a |
+| `x4a` | Q6-g prestream_single — un solve Q6 par pas forcé | Q6_GF | Référence mono-solve; supplantée par la fusion x4b |
+| `x5a` | Q6-g free_surface_masked — premier liquide partiellement rempli | Q6_GF | Première fermeture liquide-vide; support numérique encore assimilé à l'interface |
+| `x6d` | Expérience cut-face 1/theta sur le bord du carrier | Q6_GF | Expérience active historique; architecture abandonnée au profit de x6f |
+| `x6f` | Stencil résident de pression sur l'interface physique alpha=0.5 | Q6_GF | Architecture d'interface retenue; géométrie bornée par x6f2 avant x6g |
+| `x6g` | Condition de pression gazeuse sur l'interface physique | Q6_GF | Couplage pression gaz actif sur interface résidente; base du futur terme capillaire |
+| `x6h-B1` | Reconstruction affine RT0/MAC des corrections face-vers-particule | Q6_GF | Reconstruction face-particule active dans le profil Q6-g-f qualifié |
+| `x7a` | Kick viriel de densité CUDA résident | Q6_GF | Expérience de restauration explicite; abandonnée au profit de la cible de divergence x7c/x7d |
+| `x7c` | Restauration de densité intégrée au RHS Q6 | Q6_GF | Mécanisme RHS retenu conceptuellement; paramétrage physique raffiné par x7d |
+| `x7d` | Constante de temps physique de restauration de densité | Q6_GF | Paramétrage physique retenu; tau_rho=0.25 dans la chaîne qualifiée |
+| `x7d-v2` | Gate cohérent de compression pour la restauration de densité | Q6_GF | Actif dans le profil Q6-g-f qualifié; gate désactivé = comportement x7d historique |
+| `x7d-v2-signed1` | Restauration de densité signée à gates cohérents | Q6_GF | Actif dans le profil final signé; qualifié avec la chaîne x7q |
+| `x7f` | Extension Q6-g-f aux familles statiques multi-BC | Q6_GF | Actif sur les familles statiques qualifiées; Darcy encore exclu à cette étape |
+| `x7g` | Darcy-Brinkman placé avant la projection Q6-g-f | Q6_GF | Actif sur le sous-ensemble Darcy/chi qualifié |
+| `x7m` | Garde topologique monophase par registre de phases | Q6_GF | Étape initiale; complétée par x7m-fix1 |
+| `x7o` | Symétrisation par réflexion du Q6 independent_masked | Q6_GF | Actif; corrige le biais est/nord du fullDomain independent_masked |
+| `x7p` | Symétrisation par réflexion du Q6 commun | Q6_GF | Actif; enlève l'orientation backward-difference historique du Q6 commun |
+| `x7q` | Fermeture exacte du moment périodique au niveau particulaire B1/RT0 | Q6_GF | Actif automatiquement pour B1 + fullDomain + direction périodique; chemin partiel/dam-break historique inchangé |
+| `x8k` | Inlet segmenté à profil de Poiseuille local | OPEN_BOUNDARY | Actif; sémantique de profil local retenue dans le benchmark Zovatto |
+| `x8l` | Première extrapolation Neumann passive de la vitesse de sortie | OPEN_BOUNDARY | Étape intermédiaire conservée : extrapolation de vitesse retenue comme base par x8r, mais sémantique de projection x8l seule supersédée |
+| `x8q` | Continuation cinétique locale de l'outlet Neumann | OPEN_BOUNDARY | Actif pour outlet Neumann; forme finale local-bath après les sous-révisions x8q-fix1..fix4 |
+| `x8r` | Outlet de pression Neumann Q6-g-f | OPEN_BOUNDARY | Actif; sémantique pression passive du mode openBoundaryOutletMode=neumann |
+| `x8t` | Cible de relaxation de densité sans mode moyen à outlet pression | OPEN_BOUNDARY | Actif dans le couplage fullDomain + x8r + relaxation densité; autres topologies inchangées |
+| `x9d` | Premier saut de Laplace actif dans Q6-g-f | SURFACE_TENSION | Coeur actif de la capillarité bulk; sigma=0 est un no-op exact |
+| `x9g` | Généralisation de l'interface aux paires de phases A/B | SURFACE_TENSION | Actif; abstraction de paire sans prétendre fournir un solveur immiscible symétrique général |
+| `x9h` | Provider géométrique résident de paroi | SURFACE_TENSION | Géométrie-only qualifiée; capillarité/mouillage avec B=wall encore interdits à cette étape |
+| `x9i` | Première fermeture d'angle de contact par normale imposée | SURFACE_TENSION | Prototype historique : angle local exact mais biais de div(n)/courbure; conservé comme baseline derrière un gate de test |
+| `x9j` | Fermeture d'angle par ghost-alpha de courbure | SURFACE_TENSION | Prototype historique supplanté : améliore certains angles mais ne préserve pas suffisamment la géométrie multi-couche |
+| `x9k` | Ghost-alpha par miroir cisaillé | SURFACE_TENSION | Prototype historique supplanté : angle robuste mais une transformation affine ne préserve pas un cercle, donc biais de courbure angle-dépendant |
+| `x9l` | Reconstruction de normale au mur-face | SURFACE_TENSION | Expérience négative hors voisinage de 90 degrés; gardée comme comparaison et supplantée par x9m |
+| `x9m` | Fermeture statique de mouillage par ancre hors support | SURFACE_TENSION | Fermeture statique préférée du cycle x9; robuste géométriquement, mais dynamique de ligne triple non universellement fermée |
+| `x9t` | Première rétention cinétique liquide-vide conservative | FREE_SURFACE_KINETICS | Prototype actif de rétention cinétique; première étape du pont x9 vers la fermeture de surface libre x10 |
+| `x9u` | Extension de la réflexion aux sorties de support | FREE_SURFACE_KINETICS | Étape active intermédiaire; couverture support-edge améliorée mais le choix de bain sera corrigé par x9w |
+| `x9x` | Réflexion au crossing physique prédit | FREE_SURFACE_KINETICS | Étape active intermédiaire : déclenchement géométrique au crossing physique, sans nouvelle passe globale |
+| `x9z` | Réflexion individuelle des donneurs et compensation affine du bain | FREE_SURFACE_KINETICS | Dernière étape x9 du mécanisme de rétention; loi individuelle explicitement réutilisée ensuite par x10a |
 | `0414` | Extension quadriface des open boundaries segmentées | OPEN_BOUNDARY | QUALIFIED |
+| `0490B` | Dépôt cellule–espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490C` | Resampling conservatif par espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490D` | Fermeture de masse sensible à la phase | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490E` | Garde de population par espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490F` | Refill d'espèces mixtes | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490G` | Transferts donneur–receveur par espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490H` | Dépôt cellule–espèce CUDA | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490I` | Fermeture de masse multi-espèces CUDA | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490J` | Garde de population multi-espèces CUDA | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490K` | Plan de transferts multi-espèces CUDA | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0490N` | Maintenance résidente multi-espèces | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0491B` | Dépôt partagé et shadow CUDA species-Q6 | SPECIES_Q6 | Jalon historique attesté par documentation technique |
+| `0491C` | Application CUDA opt-in du Q6 par espèce | SPECIES_Q6 | Jalon historique attesté par documentation technique |
+| `0493B` | Resampling CUDA résident activable par espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0493G` | Restauration locale des moments par espèce | MULTISPECIES_RESAMPLING | Correction physique historique |
+| `0493J` | Fermeture conservative de l'énergie cinétique par espèce | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0493O1` | Population effective cible : split local piloté par Neff | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0493W5` | Q6 multi-espèces independent_masked — étape périodique | SPECIES_Q6 | Jalon historique documenté |
+| `0493W7` | Q6 independent_masked sur toutes les familles de frontières résidentes | SPECIES_Q6 | Jalon historique documenté et qualifié |
 
 ## DIAGNOSTIC
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x6a` | Diagnostic EOS gaz | Q6_GF | Diagnostic historique |
-| `x6b` | Audit support vs interface | Q6_GF | Diagnostic historique |
-| `x6e` | Audit topologique des crossings | Q6_GF | Diagnostic architectural |
-| `x6h-B0` | Diagnostic post-application | Q6_GF | Diagnostic OFF production |
-| `x7k/x7l` | Réduction de télémétrie | Q6_GF | Actif |
-| `x9e` | Diagnostic pression goutte statique | SURFACE_TENSION | Diagnostic/qualification |
-| `x9f` | Diagnostic quadrupole signé | SURFACE_TENSION | Diagnostic/qualification |
-| `x10l` | Diagnostic pré-mur cinétique | FREE_SURFACE_KINETICS | Diagnostic passif |
-| `x13b` | Cisaillement transverse pur | TRANSPORT_SURFACE | Diagnostic historique |
-| `x13za-x13zc` | Dépendance de grille de l'interface | TRANSPORT_SURFACE | Diagnostic; révèle forte dépendance de kappa_active à forte sigma |
 | `x14ae` | Diagnostic pertes scatter | LIQUID_GAS | Diagnostic; pertes nulles sur cas discriminant |
 | `x14af` | Diagnostic bilan global | LIQUID_GAS | Diagnostic causal |
 | `x14am` | Young-Laplace diphasique multi-rayons | LIQUID_GAS | REVIEW/non décisif à sigma=10000: kappa_active et pression sont déjà connus comme métrologie bruyante/non monotone dans ce régime |
+| `x10l` | Diagnostic passif pré-paroi cinétique | FREE_SURFACE_KINETICS | Diagnostic observation-only encore activable; ON dans certains runners JFM, aucune modification vitesse/position |
+| `x11c` | Correction de protocole capillaire et baseline sigma=0 | SURFACE_TENSION | Correction analyse/protocole et support observation-only; aucune nouvelle physique capillaire |
+| `x13b` | Carte constitutive SRC H/C | TRANSPORT_SURFACE | Métrologie constitutive scripts-only; aucune modification src/include |
+| `x13za` | Comparaison gouttes oscillantes entre grilles | TRANSPORT_SURFACE | Diagnostic de dépendance de grille de la dynamique capillaire |
+| `x13zb` | Comparaison Young–Laplace entre grilles | TRANSPORT_SURFACE | Diagnostic; la régression brute forte-sigma n’est pas une mesure physique robuste de sigma_eff |
+| `x13zb2` | Baseline sigma=0 courte pour comparaison de grille | TRANSPORT_SURFACE | Essai de protocole; ne ferme pas le biais de baseline |
+| `x13zb3` | Audit de stabilité et rebaseline Young–Laplace | TRANSPORT_SURFACE | Diagnostic de baseline; motive l’abandon de la référence libre longue sigma=0 |
+| `x13zc` | Mécanique statique de goutte versus grille | TRANSPORT_SURFACE | Diagnostic de représentation; R_eff plus petit sur grille fine explique une part majeure du shift fréquentiel |
+| `x2` | Diagnostic liquide plein : force appliquée avant une projection Q6 trop tardive | Q6_GF | Diagnostic causal; mène directement à x3 |
+| `x6a` | Diagnostic EOS de pression gazeuse interfaciale | Q6_GF | Diagnostic EOS préparatoire; aucune rétroaction sur le solveur |
+| `x6b` | Diagnostic géométrique support Q6 / interface alpha=0.5 | Q6_GF | Diagnostic géométrique; prépare la matérialisation résidente x6c |
+| `x6e` | Audit topologique de l'interface physique alpha=0.5 | Q6_GF | Diagnostic architectural décisif; motive pressureMask séparé de x6f |
+| `x6h-B0` | Diagnostic régional de divergence après application aux particules | Q6_GF | Diagnostic sparse OFF en production; motive la reconstruction B1 |
+| `x7b` | Sémantique continue et diagnostic de grille du viriel | Q6_GF | Consolidation sémantique de l'ablation virielle; stratégie ensuite remplacée par x7c |
+| `x7n` | Calibrateur de fluide sélectionnable par chemin et diagnostic compression/bruit | Q6_GF | Diagnostic/calibrateur de chemin; précède les corrections x7d-v2 et la qualification x7q |
+| `x8a` | Diagnostic exact du moment Darcy | Q6_GF | Diagnostic opt-in; OFF en production |
+| `x8c` | Localisation temporaire du moment par étapes | Q6_GF | Instrumentation temporaire retirée après campagne; preuve historique conservée |
+| `x9a` | Premier scaffold passif de courbure résident | SURFACE_TENSION | Scaffold passif historique; géométrie seulement, sans tension superficielle active |
+| `x9b` | Courbure passive binomiale + Scharr et LiveVis résident | SURFACE_TENSION | Estimateur passif p1 conservé comme baseline; aucune physique capillaire active |
+| `x9e` | Qualification diagnostique de goutte statique | SURFACE_TENSION | Diagnostic/qualification au-dessus de x9d; physique inchangée |
+| `x9f` | Diagnostic de bande interfaciale vraie et relaxation elliptique | SURFACE_TENSION | Diagnostic de forme/relaxation au-dessus de x9e; aucune modification de la capillarité |
+| `x9v` | Diagnostic des voies de fuite de la fermeture x9u | FREE_SURFACE_KINETICS | Diagnostic passif; aucune nouvelle passe particulaire ni modification de physique |
+| `0490N-fix1` | Télémétrie résidente par espèce | MULTISPECIES_RESAMPLING | Diagnostic historique |
+| `0493W6` | Diagnostic de divergence après application du Q6 masqué | SPECIES_Q6 | Diagnostic historique documenté |
 
 ## FIX
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x7f-fix2` | Garde wall-simple | Q6_GF | Correctif actif |
-| `x13w-fix3` | Correctif reseed | TRANSPORT_SURFACE | Toujours invalidée physiquement |
 | `x14g` | Cellules exactes post-stream/grid-shift | LIQUID_GAS | Correctif d'intégration actif |
+| `x10h` | Rétention relative compatible avec interface mobile | FREE_SURFACE_KINETICS | Sémantique legacy intégrée; barrière universelle supprimée, chemin ensuite bypassé par x10o en production x12 |
+| `x10p` | Résolution des recouvrements initiaux | FREE_SURFACE_KINETICS | Actif en production x12; aucune passe particulaire supplémentaire |
+| `x10q` | Récupération large des recouvrements initiaux rares | FREE_SURFACE_KINETICS | Actif en production x12; complète x10p sans élargir le hot path normal |
+| `x13w-fix3` | Reseed sur moyenne pré-échappement | TRANSPORT_SURFACE | Correctif utilisé dans x13zd; mécanisme x13w reste invalidé physiquement |
+| `x6f2` | Correction : géométrie de phase bornée avant filtrage | Q6_GF | Correctif géométrique actif de la chaîne x6f/x6g |
+| `x6h-A` | Correctif des corrections de faces physiques basses | Q6_GF | Correctif de reconstruction des faces basses actif dans Q6-g-f |
+| `x7d-v2-fix2` | Première fermeture du moment périodique B1 au niveau cellule | Q6_GF | Correctif intermédiaire actif historiquement; fermeture k=0 centrée cellule ensuite rendue exacte au niveau particulaire par x7q |
+| `x7f-fix2` | Correctif de garde wall-simple pour canal mixte | Q6_GF | Correctif actif du périmètre x7f |
+| `x7m-fix1` | Domaine de pression monophase persistant | Q6_GF | Correctif structurel actif du chemin monophase |
+| `x9r` | Cutoff de résolution du saut capillaire | SURFACE_TENSION | Correctif actif de courbure sous-résolue; seuil à choisir selon résolution/campagne, non constante physique universelle |
+| `x9w` | Bain de recul strictement bulk | FREE_SURFACE_KINETICS | Correctif actif de sélection du bain; recherche bornée à deux cellules et conservation P/K maintenue |
+| `x9y` | Côté alpha pointwise et crossing par bissection bornée | FREE_SURFACE_KINETICS | Correctif géométrique actif de x9x; supprime l'aliasing centre-cellule sans buffer ou passe globale supplémentaire |
+| `0490M-fix2` | Fermeture conservative multi-espèces | MULTISPECIES_RESAMPLING | Correctif historique |
+| `0490N-fix2` | Matérialisation des transferts multiples | MULTISPECIES_RESAMPLING | Correctif historique |
+| `0491H-fix1` | Correctif final et qualification approfondie species-Q6 | SPECIES_Q6 | Correctif historique qualifié |
+| `0493C-fix3` | Alignement du population guard medium sur gamma | MULTISPECIES_RESAMPLING | Correctif historique attesté par Git |
+| `0493D-fix1` | Rejeu déterministe du state-update après sélection parallèle | MULTISPECIES_RESAMPLING | Correctif historique attesté par Git |
+| `0493F-fix2` | Cas deux-espèces physiquement neutre | MULTISPECIES_RESAMPLING | Correctif de qualification historique |
+| `0493I` | Fermeture conservative mono-espèce sur le chemin résident | MULTISPECIES_RESAMPLING | Correctif physique attesté par le code |
+| `0493O1-fix2` | Autorité CUDA du split-only local | MULTISPECIES_RESAMPLING | Correctif de sûreté résident attesté par le code |
+| `0493O2-fix1` | Runner TG mono/dual-espèces pour la réparation de support | MULTISPECIES_RESAMPLING | Sous-jalon historique explicitement attesté |
+| `0493W3` | Correction de l'injection sur cellule partielle d'une entrée segmentée | BOUNDARY | Correctif historique attesté par Git |
 
 ## INFRA
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
 | `Q6 multi-espèces` | Projection sélective par espèce | CORE | Socle multi-espèces |
-| `x7h` | Factorisation run_ok | Q6_GF | Infrastructure runner |
-| `x10n` | Polyligne continue marching-squares | FREE_SURFACE_KINETICS | Infrastructure active |
-| `x11a` | Validation Young-Laplace | FREE_SURFACE_KINETICS | Tooling de qualification |
-| `x11b` | Dispersion onde capillaire | FREE_SURFACE_KINETICS | Tooling de qualification |
-| `x13j` | Young-Laplace x13h smoke | TRANSPORT_SURFACE | Tooling |
+| `x10n` | Interface continue marching-squares mobile | FREE_SURFACE_KINETICS | Architecture continue OFF comme mode autonome; primitives réutilisées par x10o, Q2, x12a et suites |
+| `x6c` | Infrastructure résidente du champ de phase alpha | Q6_GF | Infrastructure géométrique résidente; base des stencils d'interface ultérieurs |
+| `x7h` | Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f | Q6_GF | Infrastructure de démonstration et régression |
+| `x8h` | Restart hydrodynamique pour les longs runs VK | OPEN_BOUNDARY | Infrastructure de continuation hydrodynamique; RNG non bitwise continu |
+| `x8u` | Réalignement du runner Zovatto sur la fermeture x8t | OPEN_BOUNDARY | Réintégration production de la fermeture x8t dans la lignée x8m; clôture documentaire du cycle x8 |
+| `0490A` | Registre des espèces | MULTISPECIES_RESAMPLING | Jalon historique documenté |
+| `0491A` | Contrat Q6 sensible à l'espèce | SPECIES_Q6 | Jalon historique documenté |
+| `0492` | Refresh et contrat des run_ok | RUN_OK_INFRA | Infrastructure runner historique qualifiée |
+| `0493A` | Routage universel du resampling multi-espèces résident | MULTISPECIES_RESAMPLING | Jalon historique documenté |
 
 ## PERF
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x7j` | CG coopératif CUDA résident | Q6_GF | Actif; optimisation majeure coût |
-| `x8s` | Déflation des modes lents du CG | OPEN_BOUNDARY | Actif dans cas applicable |
-| `x13a` | Pré-balayage analytique transport | TRANSPORT_SURFACE | Tooling/calibration |
-| `x13f` | Optimisation (angle, lambda/h) | TRANSPORT_SURFACE | Calibration |
+| `x10g` | Réduction GPU hiérarchique de la réaction globale | FREE_SURFACE_KINETICS | Optimisation performance-only de x10f; physique identique, code conservé sans call-site actif |
+| `x4b` | Q6-g prestream_single_fused — fusion CUDA force + projection | Q6_GF | Séquençage temporel Q6-g de référence pour la suite de 0493x |
+| `x7j` | CG Q6-g-f entièrement CUDA résident | Q6_GF | Optimisation majeure du solve Q6-g-f; fallback hôte conservé |
+| `x7k` | Stripping des diagnostics Q6-g-f en production | Q6_GF | Optimisation de télémétrie active en production |
+| `x7l` | Stripping de la télémétrie thermostat/espèces | Q6_GF | Optimisation de télémétrie active; thermostat physique inchangé |
+| `x8s` | Déflation exacte des modes longitudinaux lents du CG | OPEN_BOUNDARY | Actif uniquement dans la géométrie x8r pleine hauteur applicable; physique inchangée |
+| `0490M` | Chemin rapide résident multi-espèces | MULTISPECIES_RESAMPLING | Optimisation historique |
+| `0490P` | Politique cellule sur device / zéro CPU | MULTISPECIES_RESAMPLING | Architecture historique |
+| `0493D` | Sélection parallèle déterministe des transferts résidents | MULTISPECIES_RESAMPLING | Jalon d'optimisation attesté par le code |
+| `0493O3` | Early-exit résident lorsqu'aucune paire cellule/espèce n'est pauvre | MULTISPECIES_RESAMPLING | Optimisation résidente historique |
 
 ## QUALIFICATION
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
 | `Resampling` | Contrôle du support particulaire | CORE | Module séparé, OFF dans les qualifications surface libre récentes |
-| `x5a2` | Dam-break vide | Q6_GF | Historique / discriminant |
-| `x7e` | Qualification x6g+x7d | Q6_GF | Qualification historique |
-| `x13c` | Choix de gamma | TRANSPORT_SURFACE | Calibration |
-| `x13h-A` | Acoustique point final lambda/h=0.72 | TRANSPORT_SURFACE | Qualification constitutive |
-| `x13h-B` | Viscosité vs densité / localité | TRANSPORT_SURFACE | Qualification constitutive |
-| `x13h-C` | Domaine Mach final | TRANSPORT_SURFACE | Qualification constitutive |
-| `x13h` | Point liquide de référence | TRANSPORT_SURFACE | Référence liquide qualifiée 31/08/2026 |
-| `x13zd` | Validation croisée décisive | TRANSPORT_SURFACE | Invalide ces fermetures; motive rollback au tag qualifié |
+| `x10x` | Qualification de l’enveloppe thermique en C et sigma | FREE_SURFACE_KINETICS | Outil de qualification/campagne; aucun nouveau mode C++ |
+| `x10y` | Analyse loi taille-température de l’enveloppe | FREE_SURFACE_KINETICS | Analyse scripts-only; aucun nouveau mode C++ |
+| `x11a` | Qualification Young–Laplace quantitative | SURFACE_TENSION | Qualification historique quantitative; base de la calibration mécanique x12yl |
+| `x11b` | Qualification de dispersion des ondes capillaires | SURFACE_TENSION | Qualification dynamique historique; base méthodologique du calibrateur x12cal |
+| `x13c` | Qualification statistique du transport et choix gamma | TRANSPORT_SURFACE | Qualification constitutive multi-graines; gamma=8 retenu comme compromis coût/transport |
+| `x13e` | Qualification de portée Mach du point G08 | TRANSPORT_SURFACE | Qualification compressible scripts-only; aucune modification src/include |
+| `x13g` | Qualification de reproductibilité statistique GPU | TRANSPORT_SURFACE | Règle méthodologique de reproductibilité; aucune modification solveur |
+| `x13h` | Point liquide de référence G08-120-L072 | TRANSPORT_SURFACE | Référence liquide qualifiée; rollback final vers le tag surf-tension-qualified-x13h-20260831 |
+| `x13h-A` | Acoustique du point final lambda/h=0.72 | TRANSPORT_SURFACE | Sous-qualification constitutive A du fluide final |
+| `x13h-B` | Viscosité et dépendance en densité du point final | TRANSPORT_SURFACE | Sous-qualification constitutive B du fluide final |
+| `x13h-C` | Enveloppe Mach du point final | TRANSPORT_SURFACE | Sous-qualification constitutive C du fluide final |
+| `x13k` | Qualification goutte oscillante n=2 | TRANSPORT_SURFACE | Qualification dynamique historique du point surface libre |
+| `x13l` | Qualification goutte oscillante n=3 | TRANSPORT_SURFACE | Qualification dynamique historique |
+| `x13m` | Qualification goutte oscillante n=4 | TRANSPORT_SURFACE | Qualification dynamique historique |
+| `x13zd` | Validation croisée décisive et rollback | TRANSPORT_SURFACE | Invalide x13t+x13w comme chemin général; point de production ramené à surf-tension-qualified-x13h-20260831 |
+| `x5a2` | Qualification dam-break liquide-vide du free_surface_masked | Q6_GF | Qualification discriminante; motive la séparation support/interface de x6 |
+| `x5b` | Qualification liquide-gaz : Q6-g liquide et gaz compressible explicite | Q6_GF | Première qualification bi-espèces; couplage gaz-liquide encore collisionnel côté pression |
+| `x7e` | Qualification combinée pression gaz x6g + restauration de densité x7d | Q6_GF | Qualification de composition Q6-g-f; kick viriel explicite désactivé |
+| `x8d` | Qualification indépendante Q6-g-f par Poiseuille et Brinkman | Q6_GF | Qualification analytique du chemin Q6-g-f; aucun changement C++/CUDA |
+| `x8g` | Qualification full-face et bilan de masse du VK | OPEN_BOUNDARY | Qualification full-face/mass-balance du candidat VK; runner-only |
+| `x9c` | Qualification du support de lissage de courbure | SURFACE_TENSION | Qualification passive; sélectionne p3 pour la courbure de production, sans déplacer l'interface x6c |
+| `x9n` | Qualification géométrique étendue de x9m | SURFACE_TENSION | Qualification scripts-only de la robustesse géométrique statique x9m |
+| `x9o` | Qualification de phase sous-maille tangentielle de x9m | SURFACE_TENSION | Qualification scripts-only; quantifie la sensibilité résiduelle de x9m à la phase sous-maille |
+| `x9p` | Qualification dynamique de goutte sessile x9m | SURFACE_TENSION | Résultat dynamique partiel : sens mouillage/démouillage correct, mais équilibre comprimé vers 90 degrés et courbure de ligne triple encore bruitée |
+| `0490L` | Validation du resampling résident multi-espèces | MULTISPECIES_RESAMPLING | Qualification historique |
+| `0491D` | Matrice des chemins species-Q6 | SPECIES_Q6 | Qualification historique |
+| `0491E` | Audit strict du Q6 résident par espèce | SPECIES_Q6 | Qualification historique |
+| `0491F` | Validation énergie et thermostat du species-Q6 | SPECIES_Q6 | Qualification historique |
+| `0491G` | Qualification frontières ouvertes et Darcy du species-Q6 | SPECIES_Q6 | Qualification historique |
+| `0491H` | Campagne consolidée de validation species-Q6 | SPECIES_Q6 | Qualification historique consolidée |
+| `0493C` | Qualification du resampling multi-espèces résident | MULTISPECIES_RESAMPLING | Qualification historique |
+| `0493E` | Qualification physique mono-espèce du resampling | MULTISPECIES_RESAMPLING | Qualification physique historique |
+| `0493F` | Qualification physique à deux espèces du resampling | MULTISPECIES_RESAMPLING | Qualification physique historique |
+| `0493H` | Diagnostic physique par onde de cisaillement périodique | MULTISPECIES_RESAMPLING | Diagnostic physique historique |
+| `0493O4` | Qualification de la réparation de support en segmented-Darcy | MULTISPECIES_RESAMPLING | Qualification historique |
+| `0493W8` | Équivalence Taylor--Green mono / dual-identique du Q6 independent_masked | SPECIES_Q6 | Qualification historique consolidée |
 
 ## RUNNER
 
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
-| `x10h-x10i` | Critère relatif et réaction par blocs | FREE_SURFACE_KINETICS | Legacy; bypassé par x10o dans runners récents |
+| `0493W4` | Runner d'injection multi-espèces normalisé par famille de phase | MULTISPECIES_RUNNER | Jalon de runner attesté par le code et les inventaires |
+
+## VISUALIZATION
+
+| ID | Nom | Domaine | Statut |
+|---|---|---|---|
+| `x0` | Démonstration dam-break bi-espèces du Q6 independent_masked | SPECIES_Q6 | Démonstration historique d'intégration |

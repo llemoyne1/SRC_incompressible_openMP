@@ -1,0 +1,266 @@
+--- a/src/cuda_q6_resident_0400.cu
++++ b/src/cuda_q6_resident_0400.cu
+@@ -6556,7 +6556,8 @@
+     int refineNormal,
+     double* level,
+     double* nxOut,
+-    double* nyOut) {
++    double* nyOut,
++    double* gradMagOut) {
+     double bx = xiq;
+     double by = etaq;
+     double gx = 0.0, gy = 0.0, val = 0.0;
+@@ -6581,6 +6582,7 @@
+     if (level) *level = val - 0.5;
+     if (nxOut) *nxOut = -gx * invG;
+     if (nyOut) *nyOut = -gy * invG;
++    if (gradMagOut) *gradMagOut = 1.0 / invG;
+     return isfinite(val);
+ }
+
+@@ -6629,7 +6631,7 @@
+     double* level) {
+     return q6_x10biq_thermal_level(
+         q, xi0 + ux * tau, eta0 + uy * tau,
+-        thermalThickness, dx, dy, 0, level, nullptr, nullptr);
++        thermalThickness, dx, dy, 0, level, nullptr, nullptr, nullptr);
+ }
+
+ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
+@@ -6746,7 +6748,7 @@
+     if (!q6_x10biq_thermal_level(
+             q, xi0 + ux * tau, eta0 + uy * tau,
+             thermalThickness, dx, dy, 1,
+-            &finalLevel, &nxh, &nyh)) return false;
++            &finalLevel, &nxh, &nyh, nullptr)) return false;
+
+     const double reln = (vx - wallVxHit) * nxh +
+                         (vy - wallVyHit) * nyh;
+@@ -6768,6 +6770,154 @@
+     return isfinite(out->newVx) && isfinite(out->newVy);
+ }
+
++// =============================================================================
++// 0493x10biq-overlap — BIQUADRATIC INITIAL-OVERLAP GEOMETRY
++// =============================================================================
++// x10p keeps its existing physical policy (position correction, reflect only
++// when relative motion is outward).  Only its geometric query is replaced:
++// the closest marching-squares point is used as a cheap branch seed, then
++// projected onto the SAME CIC/Q2 thermal envelope used by swept collisions.
++//
++// Cost design:
++//   * no new buffer, kernel or global pass;
++//   * the owner Q2 patch is already built once per owner in the normal 3x3
++//     search and is reused here;
++//   * projection starts from the existing segment closest point, so three
++//     register-only Newton updates are sufficient and do not extrapolate the
++//     Q2 field from the particle position;
++//   * wide x10q search builds one Q2 patch per inspected owner, not per slot.
++
++__device__ __forceinline__ bool q6_x10biq_project_seed_to_thermal_wall(
++    const BiquadraticAlphaPatch0493x10biq& q,
++    double seedXGeom, double seedYGeom,
++    double thermalThickness,
++    double dx, double dy,
++    double lx, double ly,
++    int nx,
++    int periodicX, int periodicY,
++    double* qxGeom, double* qyGeom,
++    double* nxOut, double* nyOut) {
++    if (!q.valid || !qxGeom || !qyGeom || !nxOut || !nyOut)
++        return false;
++
++    double xi0 = 0.0, eta0 = 0.0;
++    q6_x10biq_local_coordinates(
++        seedXGeom, seedYGeom, q.owner, nx, dx, dy, lx, ly,
++        periodicX, periodicY, &xi0, &eta0);
++    double xi = xi0, eta = eta0;
++    const double h = fmin(dx, dy);
++    const double maxStep = 0.35 * h;
++
++    // Newton along the local outward normal.  thermal_level already computes
++    // |grad alpha| while refining the normal; expose and reuse it instead of
++    // adding finite-difference samples or another 3x3 load.
++    double level = 0.0, nxw = 0.0, nyw = 0.0, gmag = 0.0;
++    for (int it = 0; it < 3; ++it) {
++        if (!q6_x10biq_thermal_level(
++                q, xi, eta, thermalThickness, dx, dy, 1,
++                &level, &nxw, &nyw, &gmag)) return false;
++        if (!(gmag > 1.0e-14 / h) || !isfinite(gmag)) return false;
++        if (fabs(level) <= 1.0e-11) break;
++
++        // Along outward n, d(alpha-.5)/ds ~= -|grad alpha|.
++        // Newton therefore advances by (level/|grad|)*n.
++        double step = level / gmag;
++        step = fmin(maxStep, fmax(-maxStep, step));
++        xi += step * nxw / dx;
++        eta += step * nyw / dy;
++    }
++
++    if (!q6_x10biq_thermal_level(
++            q, xi, eta, thermalThickness, dx, dy, 1,
++            &level, &nxw, &nyw, &gmag)) return false;
++    if (!isfinite(level) || fabs(level) > 5.0e-5) return false;
++
++    const double shiftX = (xi - xi0) * dx;
++    const double shiftY = (eta - eta0) * dy;
++    const double shift2 = shiftX * shiftX + shiftY * shiftY;
++    // Q2 is a local reconstruction.  A seed requiring a large correction is
++    // not the same local branch and must not be accepted by extrapolation.
++    if (!(shift2 <= 0.5 * (dx * dx + dy * dy)) || !isfinite(shift2))
++        return false;
++
++    *qxGeom = seedXGeom + shiftX;
++    *qyGeom = seedYGeom + shiftY;
++    *nxOut = nxw;
++    *nyOut = nyw;
++    return isfinite(*qxGeom) && isfinite(*qyGeom) &&
++           isfinite(*nxOut) && isfinite(*nyOut);
++}
++
++__device__ __forceinline__ bool q6_x10biq_closest_current_wall(
++    double px, double py,
++    double tStart,
++    double thermalThickness,
++    double dx, double dy,
++    double lx, double ly,
++    int nx,
++    int periodicX, int periodicY,
++    const BiquadraticAlphaPatch0493x10biq& q,
++    const MovingSegment0493x10n& seg,
++    InitialOverlapNearest0493x10p* out) {
++    if (!out || !q.valid || q.owner != seg.ownerCell) return false;
++
++    // Segment geometry is only the branch-local initial guess.  This call is
++    // already part of the old x10p cost and gives the appropriate x10o local
++    // wall velocity without a search over the Q2 surface.
++    InitialOverlapNearest0493x10p seed{};
++    if (!q6_x10p_closest_current_segment(
++            px, py, tStart, lx, ly, periodicX, periodicY, seg, &seed))
++        return false;
++
++    // Map the branch seed to the alpha reconstruction frame.  initialOverlap
++    // is currently event==0 (tStart=0), but retaining this transform keeps the
++    // helper correct if that policy is generalized later.
++    const double seedXGeom = seed.qx - seed.wallVx * tStart;
++    const double seedYGeom = seed.qy - seed.wallVy * tStart;
++    double qxGeom = 0.0, qyGeom = 0.0, nxw = 0.0, nyw = 0.0;
++    if (!q6_x10biq_project_seed_to_thermal_wall(
++            q, seedXGeom, seedYGeom, thermalThickness,
++            dx, dy, lx, ly, nx, periodicX, periodicY,
++            &qxGeom, &qyGeom, &nxw, &nyw))
++        return false;
++
++    double qx = qxGeom + seed.wallVx * tStart;
++    double qy = qyGeom + seed.wallVy * tStart;
++
++    // Re-interpolate x10o wall velocity at the actual Q2 wall point and retain
++    // marching-squares solely as branch support/topology.
++    double wallVx = 0.0, wallVy = 0.0;
++    double lambdaRaw = 0.0, branchDistance2 = 0.0;
++    if (!q6_x10biq_segment_wall_velocity(
++            seg, qx, qy, tStart, lx, ly, periodicX, periodicY,
++            &wallVx, &wallVy, &lambdaRaw, &branchDistance2))
++        return false;
++    const double ltol = 1.0e-8;
++    if (lambdaRaw < -ltol || lambdaRaw > 1.0 + ltol) return false;
++    if (!(branchDistance2 <= 0.5 * (dx * dx + dy * dy)) ||
++        !isfinite(branchDistance2)) return false;
++
++    const double dxp = q6_x10m_minimum_image(px - qx, lx, periodicX);
++    const double dyp = q6_x10m_minimum_image(py - qy, ly, periodicY);
++    const double d2 = dxp * dxp + dyp * dyp;
++    if (!(d2 >= 0.0) || !isfinite(d2)) return false;
++    const double distance = sqrt(d2);
++    const double signedDistance = dxp * nxw + dyp * nyw;
++
++    out->valid = isfinite(distance) && isfinite(signedDistance);
++    out->distance = distance;
++    out->signedDistance = signedDistance;
++    out->lambda = fmin(1.0, fmax(0.0, lambdaRaw));
++    out->qx = qx;
++    out->qy = qy;
++    out->wallVx = wallVx;
++    out->wallVy = wallVy;
++    out->nx = nxw;
++    out->ny = nyw;
++    out->seg = seg;
++    return out->valid && isfinite(wallVx) && isfinite(wallVy);
++}
++
+ __device__ __forceinline__ int q6_x10n_position_cell(
+     double x, double y,
+     int nx, int ny, double lx, double ly,
+@@ -6903,9 +7053,26 @@
+                             continue;
+                         if (resolveInitialOverlap0493x10p && event == 0) {
+                             InitialOverlapNearest0493x10p q{};
+-                            if (q6_x10p_closest_current_segment(
+-                                    cx, cy, elapsed, lx, ly,
+-                                    periodicX, periodicY, seg, &q) &&
++                            bool overlapGeomOk0493x10biq = false;
++                            if (quadraticInterface0493x10poly &&
++                                patchValid0493x10poly) {
++                                overlapGeomOk0493x10biq =
++                                    q6_x10biq_closest_current_wall(
++                                        cx, cy, elapsed,
++                                        thermalThickness0493x10poly,
++                                        dx, dy, lx, ly, nx,
++                                        periodicX, periodicY,
++                                        patch0493x10poly, seg, &q);
++                            } else {
++                                // Numerical/stencil fallback only.  A valid
++                                // Q2 patch never mixes segment overlap geometry
++                                // back into the biquadratic path.
++                                overlapGeomOk0493x10biq =
++                                    q6_x10p_closest_current_segment(
++                                        cx, cy, elapsed, lx, ly,
++                                        periodicX, periodicY, seg, &q);
++                            }
++                            if (overlapGeomOk0493x10biq &&
+                                 q.distance < nearestDistance0493x10p) {
+                                 nearestDistance0493x10p = q.distance;
+                                 nearest = q;
+@@ -6966,6 +7133,12 @@
+                         if (owner0493x10q < 0) continue;
+                         const int ns0493x10q =
+                             static_cast<int>(segCount[owner0493x10q]);
++                        BiquadraticAlphaPatch0493x10biq patchWide0493x10biq{};
++                        const bool patchWideValid0493x10biq =
++                            !quadraticInterface0493x10poly || ns0493x10q <= 0 ||
++                            q6_x10biq_build_patch(
++                                alpha, owner0493x10q, nx, ny,
++                                periodicX, periodicY, &patchWide0493x10biq);
+                         for (int slot0493x10q = 0;
+                              slot0493x10q < ns0493x10q && slot0493x10q < 2;
+                              ++slot0493x10q) {
+@@ -6991,10 +7164,25 @@
+                                     &seg0493x10q, lx, ly, periodicX, periodicY))
+                                 continue;
+                             InitialOverlapNearest0493x10p q0493x10q{};
+-                            if (q6_x10p_closest_current_segment(
+-                                    cx, cy, elapsed, lx, ly,
+-                                    periodicX, periodicY,
+-                                    seg0493x10q, &q0493x10q) &&
++                            bool overlapWideOk0493x10biq = false;
++                            if (quadraticInterface0493x10poly &&
++                                patchWideValid0493x10biq) {
++                                overlapWideOk0493x10biq =
++                                    q6_x10biq_closest_current_wall(
++                                        cx, cy, elapsed,
++                                        thermalThickness0493x10poly,
++                                        dx, dy, lx, ly, nx,
++                                        periodicX, periodicY,
++                                        patchWide0493x10biq,
++                                        seg0493x10q, &q0493x10q);
++                            } else {
++                                overlapWideOk0493x10biq =
++                                    q6_x10p_closest_current_segment(
++                                        cx, cy, elapsed, lx, ly,
++                                        periodicX, periodicY,
++                                        seg0493x10q, &q0493x10q);
++                            }
++                            if (overlapWideOk0493x10biq &&
+                                 q0493x10q.distance < nearestDistance0493x10p) {
+                                 nearestDistance0493x10p = q0493x10q.distance;
+                                 nearest = q0493x10q;

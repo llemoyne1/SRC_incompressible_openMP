@@ -100,3 +100,35 @@ utilisées ultérieurement pour documenter l'évolution d'un jalon curaté.
 Cette règle est volontairement asymétrique : il vaut mieux manquer un candidat faible
 qui sera retrouvé par sujet/tag/README que créer plusieurs faux jalons à chaque mise à
 jour d'un runner historique.
+
+
+## Raffinement V4.5.1 : suffixes numériques `lettre+index`
+
+La première grammaire V3 des labels numériques couvrait `0175`, `0338`, `0414`,
+`0490A`, `0493C-fix3`, etc., mais pas les cycles historiques qui utilisent un suffixe
+composé d'une lettre puis d'un index numérique (`0493O1`, `0493O4`, `0493W0` …
+`0493W8`). Ces labels étaient donc absents de `git_milestone_candidates` même lorsque
+le sujet du commit ou un fichier nouvellement créé les attestait explicitement.
+
+V4.5.1 étend uniquement la reconnaissance lexicale de la famille `NUMERIC` à ces formes.
+Le préfixe `0493x...` est exclu explicitement et reste traité par la famille globale `X`.
+La politique V3.1 n'est pas relâchée : pour les chemins, seules une addition ou une
+rename/copy qui introduit réellement le label peuvent créer un candidat numérique ; les
+modifications et suppressions restent de simples traces dans `git_commit_files`.
+
+Conséquence attendue : après reconstruction sur le dépôt Git complet, les candidats O/W
+explicitement attestés réapparaissent et peuvent être réconciliés avec la curation V4.5,
+sans réintroduire les faux positifs de simples modifications de fichiers numérotés.
+
+
+## Raffinement V4.6.1 : `x0`/`x1` géométriques vs jalons 0493x
+
+La famille X est globalement agrégée, mais les formes purement numériques `x0`, `x1`,
+`x2`, ... sont trop ambiguës pour être reconnues sans contexte : des runners historiques
+emploient par exemple `x0` comme notation du bord `x=0`. À partir de V4.6.1, un label X
+purement numérique n'est extrait de Git que s'il est écrit avec le préfixe explicite
+`0493` (`0493x0`, `0493x1`, ...). Les labels portant un suffixe alphabétique (`x7q`,
+`x14ai`, etc.) restent reconnus sans préfixe. Cette règle modifie uniquement
+l'extraction des preuves X ; la politique V3.1 des candidats NUMERIC est inchangée.
+L’ancre des candidats X est en outre recalculée sur la première preuve Git chronologique,
+ce qui évite qu’un rename documentaire plus récent devienne artificiellement l’ancre.

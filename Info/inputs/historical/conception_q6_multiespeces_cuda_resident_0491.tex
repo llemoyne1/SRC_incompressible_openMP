@@ -1,0 +1,1032 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{margin=2.15cm}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs,longtable,tabularx,array,multirow}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{float}
+
+\definecolor{deepblue}{RGB}{31,78,121}
+\definecolor{softblue}{RGB}{230,240,249}
+\definecolor{softgray}{RGB}{245,246,247}
+\definecolor{darkgray}{RGB}{75,75,75}
+\definecolor{softgreen}{RGB}{232,245,235}
+\definecolor{softorange}{RGB}{252,241,222}
+\definecolor{softred}{RGB}{250,232,232}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=deepblue,
+  urlcolor=deepblue,
+  citecolor=deepblue,
+  pdftitle={Q6 multi-especes CUDA resident sensible aux types},
+  pdfauthor={Projet SRC/MPCD incompressible}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{SRC/MPCD incompressible}
+\rhead{Q6 multi-espèces CUDA résident}
+\cfoot{\thepage/\pageref{LastPage}}
+\setlength{\headheight}{14pt}
+
+\setlist[itemize]{topsep=3pt,itemsep=2pt,parsep=1pt,leftmargin=1.5em}
+\setlist[enumerate]{topsep=3pt,itemsep=2pt,parsep=1pt,leftmargin=1.8em}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\todo}[1]{\colorbox{softorange}{\parbox{0.93\linewidth}{\textbf{À décider :} #1}}}
+\newcommand{\criterion}[1]{\colorbox{softgreen}{\parbox{0.93\linewidth}{\textbf{Critère de sortie :} #1}}}
+\newcommand{\risk}[1]{\colorbox{softred}{\parbox{0.93\linewidth}{\textbf{Risque :} #1}}}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{softgray},
+  frame=single,
+  rulecolor=\color{gray!40},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  inputencoding=utf8,
+  extendedchars=true,
+  literate={é}{{\'e}}1 {è}{{\`e}}1 {ê}{{\^e}}1 {à}{{\`a}}1 {ù}{{\`u}}1 {ç}{{\c{c}}}1 {É}{{\'E}}1 {ô}{{\^o}}1 {î}{{\^i}}1 {ï}{{\"i}}1 {û}{{\^u}}1
+}
+
+\title{\vspace{-1.2cm}\textbf{Q6 multi-espèces CUDA résident sensible aux espèces/types}\\[0.4em]
+\large Approche mathématique, architecture logicielle et plan détaillé de développement}
+\author{Projet SRC/MPCD incompressible -- branche \code{surf}}
+\date{État de référence : commit \code{36abd23} (0490p) -- 24 juillet 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{center}
+\colorbox{softblue}{\parbox{0.94\linewidth}{
+\textbf{Objet du document.} Cette note définit l'extension multi-espèces de Q6 avec un objectif explicite : conserver les quatre chemins de simulation autorisés -- \textbf{SRC}, \textbf{SRC+resampling}, \textbf{SRC+Q6} et \textbf{SRC+resampling+Q6} -- tout en les rendant aptes à transporter plusieurs espèces physiques identifiées par le champ particulaire \code{type}. Le développement visé ne crée pas une cinquième méthode. Il rend la brique Q6 sensible aux espèces, puis l'intègre comme capacité orthogonale aux deux chemins qui activent Q6.
+}}
+\end{center}
+
+\tableofcontents
+\newpage
+
+\section{Résumé exécutif}
+
+Le chantier 0490a--0490p a rendu le resampling multi-espèces conservatif par \code{type} et entièrement résident CUDA dans son domaine actuellement qualifié. Les dépôts par cellule et par espèce, la fermeture de masse, la garde de population, le remplissage, le plan donneur--receveur, le pool de slots et la politique wet/poor/rich sont maintenant compatibles avec un mélange de plusieurs espèces. Le dernier audit 0490p se termine avec \code{remaining\_cpu\_scope=none} pour le resampling multi-espèces résident.
+
+Q6 reste en revanche barycentrique : le champ de vitesse cellulaire total est projeté, puis la même correction de vitesse est appliquée à toutes les particules d'une cellule. Cette règle est correcte pour une espèce unique et constitue une référence robuste pour un mélange parfaitement couplé, mais elle n'utilise pas encore le coefficient \code{q6StrengthDeclared} enregistré pour chaque espèce. L'étape suivante consiste à conserver une seule projection barycentrique -- donc une seule équation elliptique et une seule condition d'incompressibilité du mélange -- puis à répartir la correction finale entre les espèces de manière contrôlée.
+
+La proposition de base est :
+\begin{align}
+  \vect{u}_c &= \frac{1}{M_c}\sum_s \vect{P}_{c,s},
+  & M_c &= \sum_s M_{c,s}, \\
+  Y_{c,s} &= \frac{M_{c,s}}{M_c},
+  & \bar\alpha_c &= \sum_s Y_{c,s}\alpha_s, \\
+  w_{c,s} &= (1-\eta) + \eta\frac{\alpha_s}{\bar\alpha_c},
+  & \Delta\vect{u}_{c,s} &= w_{c,s}\,\Delta\vect{u}^{Q6}_c.
+\end{align}
+Ici, \(\alpha_s\) est le \code{q6StrengthDeclared} de l'espèce et \(\eta\in[0,1]\) mesure la sensibilité effective aux espèces. Cette construction impose exactement
+\begin{equation}
+  \sum_s Y_{c,s}\Delta\vect{u}_{c,s}=\Delta\vect{u}^{Q6}_c,
+\end{equation}
+si bien que le mouvement barycentrique obtenu après application reste strictement celui du Q6 actuel. Lorsque \(\eta=0\), ou lorsque tous les \(\alpha_s\) sont égaux, chaque espèce reçoit la même correction et le comportement historique est retrouvé. Lorsque \(\eta>0\) et que les coefficients diffèrent, Q6 modifie aussi les vitesses relatives entre espèces, sans changer la correction barycentrique imposée par le solveur elliptique.
+
+Le développement recommandé est progressif : référence CPU et contrat mathématique, shadow CUDA, application CUDA opt-in, intégration des quatre chemins, audit résident strict, puis extension aux frontières et géométries déjà prises en charge par Q6. Le premier objectif de production n'est pas une projection indépendante par espèce. Une telle approche imposerait \(\nabla\cdot\vect{u}_s=0\) pour chaque espèce et surcontraindrait le mélange. Le premier objectif est un Q6 barycentrique unique dont l'application particulaire devient sensible au \code{type}.
+
+\section{État de départ et périmètre}
+
+\subsection{Checkpoint logiciel}
+
+L'état de référence est le commit \code{36abd23} de la branche \code{surf}. À ce checkpoint :
+\begin{itemize}
+  \item le registre d'espèces est activable par \code{speciesRegistryEnable};
+  \item chaque définition \code{speciesK} contient \code{type}, nom, famille de phase, \code{q6StrengthDeclared}, force de fermeture de masse et masse cellulaire de référence ;
+  \item le champ \code{role} reste un état algorithmique de slot, distinct du champ physique \code{type};
+  \item le resampling multi-espèces est validé et résident CUDA jusqu'au jalon 0490p ;
+  \item Q6 dispose d'un chemin CPU/OpenMP et d'un chemin CUDA résident 0400 ;
+  \item la correction Q6 est encore commune à toutes les particules d'une cellule.
+\end{itemize}
+
+La syntaxe existante du registre est :
+\begin{lstlisting}
+speciesK = type name phaseFamily q6StrengthDeclared \
+           massClosureStrengthDeclared [referenceCellMassDeclared]
+\end{lstlisting}
+
+Le développement 0491 doit donc activer un champ déjà prévu dans la structure des données, sans modifier la signification du \code{type} et sans coupler artificiellement l'activation de Q6 à celle du resampling.
+
+\subsection{Les quatre chemins de simulation à préserver}
+
+Les options physiques restent deux commutateurs orthogonaux : resampling et Q6. Elles définissent exactement quatre chemins autorisés.
+
+\begin{table}[H]
+\centering
+\caption{Chemins de simulation à conserver.}
+\begin{tabularx}{\textwidth}{@{}lccX@{}}
+\toprule
+Chemin & Resampling & Q6 & Exigence multi-espèces \\
+\midrule
+SRC & non & non & Le \code{type} est transporté et préservé par streaming/collision ; diagnostics par espèce possibles. \\
+SRC+resampling & oui & non & Le chemin 0490p reste la référence : opérations de population et de masse conservatrices par espèce. \\
+SRC+Q6 & non & oui & Q6 doit déposer la composition et appliquer une correction sensible aux espèces sans dépendre du resampling. \\
+SRC+resampling+Q6 & oui & oui & Les deux briques partagent l'état résident, respectent l'ordre du pas et évitent les dépôts redondants inutiles. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La nouvelle capacité \code{speciesQ6} doit être inactive par défaut. Quand elle est inactive, les quatre chemins doivent conserver leur trajectoire actuelle dans les tolérances historiques, et idéalement de manière bitwise pour les cas déterministes de petite taille.
+
+\subsection{Hors périmètre initial}
+
+Le premier cycle 0491 ne vise pas :
+\begin{itemize}
+  \item une pression ou une équation elliptique indépendante pour chaque espèce ;
+  \item une diffusion moléculaire explicite ou un modèle Maxwell--Stefan ;
+  \item une tension superficielle ou une immiscibilité complète ;
+  \item un changement d'espèce lors d'une réaction chimique ;
+  \item une nouvelle règle de collision SRC dépendante de la paire d'espèces ;
+  \item une fermeture thermodynamique multiphasique complète.
+\end{itemize}
+
+Ces sujets pourront utiliser plus tard les dépôts et diagnostics introduits ici, mais ils ne doivent pas retarder la mise en place d'un Q6 barycentrique sensible aux espèces.
+
+\section{Pourquoi ne pas projeter chaque espèce séparément ?}
+
+Considérons une densité et une vitesse propres à chaque espèce : \(\rho_s\) et \(\vect{u}_s\). La vitesse barycentrique du mélange est
+\begin{equation}
+  \vect{u}=\frac{\sum_s \rho_s\vect{u}_s}{\rho},
+  \qquad \rho=\sum_s\rho_s.
+\end{equation}
+
+Imposer indépendamment
+\begin{equation}
+  \nabla\cdot\vect{u}_s=0 \qquad \forall s
+\end{equation}
+revient à imposer plusieurs contraintes elliptiques sur des champs qui ne disposent pas, dans le modèle courant, de plusieurs pressions indépendantes. Cette formulation risque de :
+\begin{itemize}
+  \item surcontraindre les vitesses relatives ;
+  \item supprimer des flux diffusifs ou de ségrégation qui devraient rester libres ;
+  \item introduire plusieurs corrections de pression incompatibles ;
+  \item rendre les cellules pures ou faiblement peuplées singulières ;
+  \item multiplier fortement le coût du solveur et les besoins mémoire.
+\end{itemize}
+
+Le contrat du premier Q6 multi-espèces est donc :
+\begin{quote}
+\textbf{Une seule projection barycentrique du mélange, suivie d'une distribution par espèce de la correction particulaire finale.}
+\end{quote}
+
+Cette séparation conserve le rôle mathématique de Q6 : réduire la divergence du flux barycentrique. La sensibilité aux espèces intervient uniquement dans la manière dont cette correction collective est portée par les particules de types différents.
+
+\section{Formulation proposée}
+
+\subsection{Dépôts cellulaires par espèce}
+
+Pour une cellule \(c\) et une espèce \(s\), on définit les quantités déjà utilisées par le chantier 0490 :
+\begin{align}
+  N_{c,s} &= \sum_{i\in(c,s)} 1, \\
+  M_{c,s} &= \sum_{i\in(c,s)} m_i, \\
+  \vect{P}_{c,s} &= \sum_{i\in(c,s)} m_i\vect{v}_i.
+\end{align}
+Les grandeurs totales sont
+\begin{equation}
+  M_c=\sum_s M_{c,s}, \qquad \vect{P}_c=\sum_s\vect{P}_{c,s},
+  \qquad \vect{u}_c=\frac{\vect{P}_c}{M_c}.
+\end{equation}
+
+Les fractions massiques cellulaires sont
+\begin{equation}
+  Y_{c,s}=\frac{M_{c,s}}{M_c}, \qquad \sum_sY_{c,s}=1.
+\end{equation}
+
+Le dépôt doit être disponible même lorsque \code{resamplingEnable=false}. Il doit donc devenir un service partagé de l'état CUDA résident, et non une fonctionnalité conceptuellement subordonnée au resampling.
+
+\subsection{Correction barycentrique Q6}
+
+Le solveur Q6 actuel construit une correction cellulaire finale
+\begin{equation}
+  \Delta\vect{u}^{Q6}_c,
+\end{equation}
+après projection des flux, conversion face--cellule et correction éventuelle de la quantité de mouvement globale. Cette correction est l'objet à distribuer. Il ne faut pas distribuer une correction intermédiaire avant les ajustements globaux, car cela compliquerait la preuve de conservation.
+
+La cible barycentrique reste
+\begin{equation}
+  \vect{u}'_c=\vect{u}_c+\Delta\vect{u}^{Q6}_c.
+\end{equation}
+
+\subsection{Coefficients d'espèce et paramètre de sensibilité}
+
+Chaque espèce possède un coefficient déclaré
+\begin{equation}
+  \alpha_s = \texttt{q6StrengthDeclared}_s \ge 0.
+\end{equation}
+
+Un paramètre global de sensibilité \(\eta\in[0,1]\) est proposé :
+\begin{itemize}
+  \item \(\eta=0\) : application commune historique ;
+  \item \(0<\eta<1\) : interpolation contrôlée ;
+  \item \(\eta=1\) : participation complètement pondérée par \(\alpha_s\).
+\end{itemize}
+
+Dans chaque cellule humide :
+\begin{equation}
+  \bar\alpha_c=\sum_sY_{c,s}\alpha_s.
+\end{equation}
+Puis
+\begin{equation}
+  w_{c,s}=(1-\eta)+\eta\frac{\alpha_s}{\bar\alpha_c}.
+  \label{eq:species_weight}
+\end{equation}
+Enfin :
+\begin{equation}
+  \Delta\vect{u}_{c,s}=w_{c,s}\Delta\vect{u}^{Q6}_c.
+  \label{eq:species_correction}
+\end{equation}
+
+La propriété clé est immédiate :
+\begin{align}
+ \sum_sY_{c,s}w_{c,s}
+ &= (1-\eta)\sum_sY_{c,s}
+   +\frac{\eta}{\bar\alpha_c}\sum_sY_{c,s}\alpha_s \\
+ &= (1-\eta)+\eta=1.
+\end{align}
+Donc
+\begin{equation}
+  \sum_sM_{c,s}\Delta\vect{u}_{c,s}
+  =M_c\Delta\vect{u}^{Q6}_c.
+  \label{eq:momentum_identity}
+\end{equation}
+
+Cette identité garantit que la correction de quantité de mouvement cellulaire recomposée est exactement celle du Q6 barycentrique.
+
+\subsection{Application particulaire}
+
+Pour chaque particule active \(i\) de type \(s(i)\) dans la cellule \(c(i)\) :
+\begin{equation}
+  \vect{v}'_i=\vect{v}_i+w_{c(i),s(i)}\Delta\vect{u}^{Q6}_{c(i)}.
+\end{equation}
+
+La masse, la position, le \code{role} et le \code{type} ne changent pas. La variation de quantité de mouvement de l'espèce \(s\) dans la cellule est
+\begin{equation}
+  \Delta\vect{P}_{c,s}=M_{c,s}w_{c,s}\Delta\vect{u}^{Q6}_c.
+\end{equation}
+
+Le changement de vitesse relative entre deux espèces \(s\) et \(r\) est
+\begin{equation}
+  \Delta(\vect{u}_{c,s}-\vect{u}_{c,r})
+  =(w_{c,s}-w_{c,r})\Delta\vect{u}^{Q6}_c.
+\end{equation}
+Il est nul dans le mode commun et non nul dans le mode sensible aux espèces. Ce point doit être diagnostiqué explicitement : il constitue l'effet nouveau recherché.
+
+\subsection{Cas limites et politique de repli}
+
+\begin{longtable}{@{}p{0.27\textwidth}p{0.65\textwidth}@{}}
+\toprule
+Cas & Règle proposée \\
+\midrule
+\endfirsthead
+\toprule
+Cas & Règle proposée \\
+\midrule
+\endhead
+Cellule vide & Aucun poids ni aucune application ; comportement Q6 existant pour cellule vide. \\
+Espèce absente & \(M_{c,s}=0\), donc aucun thread particulaire à corriger pour cette espèce. \\
+Cellule pure & \(Y_{c,s}=1\), donc \(w_{c,s}=1\), indépendamment de \(\alpha_s\). Le Q6 mono-espèce est exactement retrouvé. \\
+Tous les \(\alpha_s\) égaux & \(w_{c,s}=1\) pour toutes les espèces. \\
+\(\eta=0\) & Mode historique exact : \(w_{c,s}=1\). \\
+\(\bar\alpha_c<\varepsilon\) & Mode permissif : repli commun \(w=1\) avec compteur. Mode strict : erreur fatale, car aucune espèce présente ne participe à Q6. \\
+Type non enregistré & Si \code{speciesRequireRegisteredTypes=true}, erreur fatale. Sinon, coefficient implicite \(\alpha=1\) et compteur de type non enregistré. \\
+Espèce trace & Le poids peut devenir grand si elle porte seule une grande valeur de \(\alpha\). Un diagnostic de poids maximal est obligatoire ; un limiteur conservatif est reporté à une étape dédiée si les tests l'exigent. \\
+Poids non fini & Erreur fatale en mode strict ; repli commun uniquement dans un mode de diagnostic explicitement non production. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Option de limiteur conservatif}
+
+Un simple clamp indépendant de \(w_{c,s}\) casserait l'identité \eqref{eq:momentum_identity}. Si un plafonnement devient nécessaire, il devra utiliser une redistribution active-set conservant
+\begin{equation}
+  \sum_sY_{c,s}w_{c,s}=1
+\end{equation}
+après saturation des espèces extrêmes. Ce limiteur ne doit pas être introduit dans le premier patch d'application. Le premier cycle doit mesurer les distributions de poids réelles et décider sur données.
+
+\section{Architecture CUDA résidente cible}
+
+\subsection{Principe général}
+
+Le Q6 multi-espèces doit rester sur le même état particulaire CUDA partagé que le Q6 résident 0400 et le resampling 0490p. Le chemin ne doit télécharger ni tableau particulaire complet ni tableau cellule--espèce pour prendre une décision sur l'hôte.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=8mm and 12mm,
+  block/.style={draw=deepblue, rounded corners, fill=softblue, minimum height=9mm, text width=3.25cm, align=center},
+  gpu/.style={draw=green!50!black, rounded corners, fill=softgreen, minimum height=9mm, text width=3.25cm, align=center},
+  host/.style={draw=orange!70!black, rounded corners, fill=softorange, minimum height=9mm, text width=3.25cm, align=center},
+  arr/.style={-{Latex[length=2.2mm]}, thick}
+]
+  \node[block] (state) {État particulaire CUDA partagé\\$x,y,v_x,v_y,m,role,type$};
+  \node[gpu, right=of state] (deposit) {Dépôt cellule--espèce\\$N_{c,s},M_{c,s},\vect P_{c,s},Y_{c,s}$};
+  \node[gpu, right=of deposit] (q6) {Q6 barycentrique résident\\$\Delta\vect u_c^{Q6}$};
+  \node[gpu, below=of q6] (weights) {Poids d'espèce résidents\\$w_{c,s}$};
+  \node[gpu, left=of weights] (apply) {Application particulaire\\$\vect v_i\leftarrow\vect v_i+w_{c,s}\Delta\vect u_c$};
+  \node[host, below=of apply] (diag) {Résumé scalaire compact\\résidus, extrema, compteurs};
+
+  \draw[arr] (state) -- (deposit);
+  \draw[arr] (deposit) -- (q6);
+  \draw[arr] (deposit) -- (weights);
+  \draw[arr] (q6) -- (weights);
+  \draw[arr] (weights) -- (apply);
+  \draw[arr] (apply) -- (state);
+  \draw[arr] (apply) -- (diag);
+\end{tikzpicture}
+\caption{Chaîne cible du Q6 multi-espèces résident.}
+\end{figure}
+
+\subsection{Réutilisation du dépôt 0490h}
+
+Le dépôt 0490h est déjà capable de construire \(N_{c,s}\), \(M_{c,s}\) et \(\vect{P}_{c,s}\) sur CUDA. L'architecture recommandée est de le généraliser comme service partagé :
+\begin{itemize}
+  \item disponible avec ou sans resampling ;
+  \item invoqué par Q6 lorsque \code{speciesQ6Enable=true};
+  \item conservant son workspace alloué et sa table de correspondance \code{type -> speciesIndex};
+  \item ne téléchargeant les tableaux que dans les tests d'équivalence ;
+  \item exposant des pointeurs device en lecture au module Q6 0491.
+\end{itemize}
+
+Pour limiter les risques, le premier jalon peut conserver le nom 0490h et ajouter un adaptateur Q6, sans renommer immédiatement les fichiers existants. Une refactorisation de nom n'est justifiée qu'après validation des quatre chemins.
+
+\subsection{Workspace proposé}
+
+Un workspace conceptuel \code{CudaSpeciesQ6Workspace0491} peut contenir :
+\begin{lstlisting}
+struct CudaSpeciesQ6Workspace0491 {
+    // Dimensions and registry map
+    int cells;
+    int speciesCount;
+    uint32_t* d_registeredTypes;
+    double* d_q6Alpha;
+
+    // Reused/read-only species deposit
+    const double* d_speciesMass;      // M[c,s]
+    const double* d_speciesPx;        // Px[c,s]
+    const double* d_speciesPy;        // Py[c,s]
+    const double* d_massFraction;     // Y[c,s]
+
+    // Q6 species distribution
+    double* d_alphaBar;               // alpha_bar[c]
+    double* d_weight;                 // w[c,s]
+    double* d_speciesDeltaUx;         // optional diagnostic/cache
+    double* d_speciesDeltaUy;
+
+    // Device reductions and fixed-size diagnostics
+    SpeciesQ6DeviceSummary0491* d_summary;
+};
+\end{lstlisting}
+
+Les tableaux \code{d\_speciesDeltaU*} ne sont pas obligatoires en production : le kernel d'application peut lire \(w_{c,s}\) et la correction Q6 cellulaire. Ils sont néanmoins utiles pendant le shadow et l'équivalence CPU/CUDA.
+
+\subsection{Générations de validité}
+
+Les différentes opérations d'un pas n'invalident pas les mêmes composantes du dépôt. Une gestion explicite de validité est souhaitable.
+
+\begin{table}[H]
+\centering
+\caption{Invalidation du dépôt par opération.}
+\begin{tabularx}{\textwidth}{@{}lccccX@{}}
+\toprule
+Opération & $N$ & $M$ & $\vect P$ & $Y$ & Commentaire \\
+\midrule
+Streaming & oui & oui & oui & oui & Les particules changent de cellule. \\
+Collision SRC & non & non & oui & non & Vitesses modifiées, positions et masses inchangées. \\
+Q6 & non & non & oui & non & Vitesses modifiées ; la masse/fraction reste valide. \\
+Thermostat & non & non & oui & non & Rescale des vitesses relatives. \\
+Split/merge/refill & oui & oui & oui & oui & Rôles, masses ou population modifiés. \\
+Transfert donneur--receveur & oui & oui & oui & oui & Changement de cellule et éventuellement de slot actif. \\
+Fermeture de masse & non & oui & oui & oui & Masses particulaires modifiées. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Le premier patch peut reconstruire un dépôt complet à chaque point de consommation pour privilégier la correction. Un jalon ultérieur pourra ajouter des refresh partiels ou une mise à jour analytique de \(\vect P_{c,s}\) après Q6.
+
+\subsection{Ordre du pas et interaction avec le thermostat}
+
+L'ordre courant pertinent est :
+\begin{equation}
+  \text{streaming} \rightarrow \text{collision SRC} \rightarrow \text{Q6}
+  \rightarrow \text{thermostat/mean-flow} \rightarrow \text{resampling}.
+\end{equation}
+
+Le Q6 multi-espèces doit rester au même emplacement. Le thermostat cell-relative doit ensuite préserver le mouvement barycentrique obtenu par Q6 s'il rescale les vitesses par rapport à la moyenne cellulaire correcte. Cette propriété doit être testée ; elle ne doit pas être seulement supposée.
+
+Dans le chemin SRC+resampling+Q6, un dépôt effectué juste avant Q6 devient obsolète en quantité de mouvement après Q6 puis thermostat, mais reste valide en masse et composition. Pour le premier cycle, le resampling reconstruit son dépôt autoritaire au point post-thermostat existant. L'optimisation de partage partiel du dépôt viendra après la validation fonctionnelle.
+
+\section{Contrat des quatre chemins}
+
+\subsection{Chemin 1 : SRC}
+
+Le chemin SRC multi-espèces ne fait intervenir ni resampling ni Q6. Son contrat est :
+\begin{itemize}
+  \item le streaming conserve le \code{type};
+  \item la collision SRC peut coupler les espèces présentes dans la même cellule, mais ne change jamais leur identité ;
+  \item la masse totale de chaque espèce est constante en domaine fermé ;
+  \item les diagnostics par espèce peuvent être activés sans modifier la trajectoire ;
+  \item aucun workspace Q6 ou resampling n'est requis si les deux options sont désactivées.
+\end{itemize}
+
+Ce chemin sert de référence de transport et de collision pour toutes les comparaisons.
+
+\subsection{Chemin 2 : SRC+resampling}
+
+Ce chemin reste fondé sur 0490p. Le cycle 0491 doit uniquement vérifier qu'aucune refactorisation du dépôt partagé ne modifie :
+\begin{itemize}
+  \item les masses globales par espèce ;
+  \item les plans et opérations de resampling ;
+  \item le pool résident ;
+  \item les compteurs zéro-CPU ;
+  \item les résultats des campagnes 100, 1000 et 10000 pas déjà validées.
+\end{itemize}
+
+Le mode \code{speciesQ6Enable=false} doit produire une non-régression stricte de 0490p.
+
+\subsection{Chemin 3 : SRC+Q6}
+
+Ce chemin est la cible fonctionnelle principale du cycle 0491. Il doit :
+\begin{enumerate}
+  \item exécuter la collision SRC ;
+  \item construire ou rafraîchir le dépôt cellule--espèce sur l'état résident ;
+  \item calculer la projection Q6 barycentrique exactement comme le chemin 0400 ;
+  \item calculer \(\bar\alpha_c\) et \(w_{c,s}\) ;
+  \item appliquer la correction sensible au \code{type};
+  \item produire des diagnostics compacts ;
+  \item poursuivre avec thermostat et autres briques existantes.
+\end{enumerate}
+
+Il ne doit pas activer implicitement le resampling, ni exiger un pool de slots inactifs.
+
+\subsection{Chemin 4 : SRC+resampling+Q6}
+
+Ce chemin compose les deux briques. Les exigences supplémentaires sont :
+\begin{itemize}
+  \item une seule autorité sur l'état CUDA partagé ;
+  \item invalidations explicites entre Q6, thermostat et resampling ;
+  \item aucun téléchargement complet induit par le passage d'une brique à l'autre ;
+  \item conservation par espèce lors du resampling, indépendamment de la redistribution de quantité de mouvement par Q6 ;
+  \item possibilité de comparer la trajectoire avec SRC+Q6 sur un cas où le resampling ne déclenche aucune opération ;
+  \item ordre des opérations stable et documenté.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=5mm,
+  b/.style={draw=deepblue,rounded corners,fill=softblue,minimum width=2.5cm,minimum height=9mm,align=center},
+  opt/.style={draw=green!50!black,rounded corners,fill=softgreen,minimum width=2.7cm,minimum height=9mm,align=center},
+  arr/.style={-{Latex[length=2mm]},thick}
+]
+\node[b] (stream) {Streaming};
+\node[b, right=of stream] (src) {Collision SRC};
+\node[opt, right=of src] (q6) {Q6 barycentrique\\distribution par type};
+\node[b, right=of q6] (thermo) {Thermostat\\mean-flow};
+\node[opt, right=of thermo] (resamp) {Resampling\\multi-espèces 0490p};
+\draw[arr] (stream)--(src);
+\draw[arr] (src)--(q6);
+\draw[arr] (q6)--(thermo);
+\draw[arr] (thermo)--(resamp);
+\end{tikzpicture}
+\caption{Ordre cible du chemin SRC+resampling+Q6. Les blocs verts sont optionnels et orthogonaux.}
+\end{figure}
+
+\section{Paramètres et options proposés}
+
+\subsection{Paramètres utilisateur}
+
+La proposition minimale est la suivante.
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.13\textwidth}p{0.46\textwidth}@{}}
+\toprule
+Clé & Défaut & Rôle \\
+\midrule
+\endfirsthead
+\toprule
+Clé & Défaut & Rôle \\
+\midrule
+\endhead
+\code{speciesQ6Enable} & false & Active la distribution Q6 sensible aux espèces. N'active pas Q6 lui-même. \\
+\code{speciesQ6Mode} & common & Valeurs proposées : \code{common}, \code{weighted}. Le mode \code{common} sert de référence exacte. \\
+\code{speciesQ6Sensitivity} & 0 & Paramètre \(\eta\in[0,1]\). En mode \code{weighted}, contrôle l'écart au mode commun. \\
+\code{speciesQ6CudaEnable} & false & Active le calcul CUDA des poids et l'application sensible aux types. \\
+\shortstack[l]{\ttfamily speciesQ6CudaResident\\\ttfamily Strict} & false & Interdit le dépôt CPU, les tableaux cellule--espèce hôte et tout fallback d'application. \\
+\code{speciesQ6DiagnosticsEnable} & false & Active les diagnostics détaillés. \\
+\shortstack[l]{\ttfamily speciesQ6Diagnostics\\\ttfamily Filename} & \shortstack[l]{\ttfamily cuda\_species\_q6\\\ttfamily \_0491.csv} & Fichier de résumé par pas. \\
+\shortstack[l]{\ttfamily speciesQ6Comparison\\\ttfamily Tolerance} & $10^{-11}$ & Tolérance CPU/CUDA et recomposition barycentrique. \\
+\code{speciesQ6AlphaEpsilon} & $10^{-14}$ & Seuil sur \(\bar\alpha_c\). \\
+\code{speciesQ6FallbackMode} & common & Repli proposé : \code{common} ou \code{fatal}. En strict production, \code{fatal} est recommandé. \\
+\code{speciesQ6ThreadsPerBlock} & 256 & Configuration des kernels de poids/application. \\
+\bottomrule
+\end{longtable}
+
+Le coefficient propre à chaque espèce reste fourni par le champ existant \code{q6StrengthDeclared} de \code{speciesK}. Le paramètre global \code{q6ProjectionStrength} continue à contrôler l'amplitude totale de la projection. Les deux notions ne doivent pas être confondues :
+\begin{itemize}
+  \item \code{q6ProjectionStrength} : force barycentrique globale ;
+  \item \code{q6StrengthDeclared} : participation relative d'une espèce à cette correction ;
+  \item \code{speciesQ6Sensitivity} : intensité avec laquelle cette différence de participation est réellement utilisée.
+\end{itemize}
+
+\subsection{Compatibilité et validation des paramètres}
+
+\begin{itemize}
+  \item \code{speciesQ6Enable=true} exige \code{speciesRegistryEnable=true} ;
+  \item \code{speciesQ6CudaResidentStrict=true} exige le Q6 CUDA résident et le dépôt espèce CUDA ;
+  \item \code{speciesQ6Sensitivity} doit appartenir à \([0,1]\) ;
+  \item les \code{q6StrengthDeclared} restent finis et non négatifs ;
+  \item le mode \code{common} ignore les différences de coefficients mais les conserve dans les diagnostics ;
+  \item le mode \code{weighted} avec une seule espèce doit donner \(w=1\) ;
+  \item Q6 désactivé implique qu'aucune brique species-Q6 ne modifie l'état.
+\end{itemize}
+
+\subsection{Flag de compilation proposé}
+
+Pour isoler le développement :
+\begin{lstlisting}
+-DMPCD_ENABLE_CUDA_Q6_SPECIES_0491
+\end{lstlisting}
+
+Le build résident Q6 0400 doit inclure le nouveau fichier CUDA uniquement lorsque ce flag est présent. Le chemin historique doit continuer à compiler sans ce module.
+
+\section{Diagnostics et invariants}
+
+\subsection{Invariants durs}
+
+Pour chaque cellule humide :
+\begin{align}
+  r^{P_x}_c &= \sum_s M_{c,s}\Delta u_{x,c,s}-M_c\Delta u^{Q6}_{x,c}, \\
+  r^{P_y}_c &= \sum_s M_{c,s}\Delta u_{y,c,s}-M_c\Delta u^{Q6}_{y,c}.
+\end{align}
+Les maxima absolus doivent rester sous la tolérance configurée.
+
+Globalement :
+\begin{itemize}
+  \item masse de chaque espèce inchangée par Q6 ;
+  \item nombre de particules par \code{role} et par \code{type} inchangé par Q6 ;
+  \item \code{type} de chaque slot inchangé ;
+  \item correction barycentrique identique au Q6 de référence ;
+  \item propriété globale de quantité de mouvement de Q6 inchangée ;
+  \item divergence après projection identique à celle du Q6 barycentrique à tolérance près.
+\end{itemize}
+
+\subsection{Diagnostics proposés}
+
+Le CSV \code{cuda\_species\_q6\_0491.csv} devrait au minimum contenir :
+\begin{itemize}
+  \item pas, mode, sensibilité et nombre d'espèces ;
+  \item cellules humides, pures, mixtes, vides ;
+  \item cellules en repli pour \(\bar\alpha_c\) trop faible ;
+  \item poids minimal, maximal, moyen pondéré et poids RMS ;
+  \item nombre de types non enregistrés ;
+  \item résidu maximal de recomposition barycentrique en \(x\) et \(y\) ;
+  \item variations de quantité de mouvement par espèce ;
+  \item variation RMS des vitesses relatives ;
+  \item erreur CPU/CUDA du shadow ;
+  \item octets D2H/H2D ;
+  \item indicateurs \code{speciesDepositDeviceResident}, \code{speciesWeightDeviceResident}, \code{fullStateDownload}, \code{cpuFallback};
+  \item temps dépôt, poids, application, réduction diagnostique et total.
+\end{itemize}
+
+Un second CSV cellule--espèce n'est nécessaire que pour les smokes courts. Il ne doit pas être téléchargé dans les runs longs de production.
+
+\subsection{Équivalence de référence}
+
+Trois équivalences distinctes doivent être suivies :
+\begin{enumerate}
+  \item \textbf{Équivalence mono-espèce :} Q6 species-aware = Q6 historique ;
+  \item \textbf{Équivalence coefficients égaux :} mélange multi-espèces avec \(\alpha_s=\alpha\) = application commune ;
+  \item \textbf{Équivalence barycentrique :} même champ \(\vect u'_c\) après recomposition, même si les vitesses par espèce diffèrent.
+\end{enumerate}
+
+La troisième équivalence est la propriété physique essentielle. Elle ne signifie pas que toutes les vitesses particulaires restent identiques au chemin historique lorsque les coefficients diffèrent.
+
+\section{Plan détaillé de développement}
+
+\subsection{0491a -- contrat, paramètres et référence CPU}
+
+\textbf{But.} Introduire la sémantique species-Q6 sans modifier le chemin de production.
+
+\textbf{Travaux :}
+\begin{itemize}
+  \item ajouter les paramètres et leur validation ;
+  \item écrire une fonction CPU déterministe qui reçoit \(M_{c,s}\), \(\alpha_s\), \(\eta\) et \(\Delta\vect u_c^{Q6}\) ;
+  \item calculer \(\bar\alpha_c\), \(w_{c,s}\) et les résidus de recomposition ;
+  \item ajouter des diagnostics cellule--espèce de smoke ;
+  \item ne pas appliquer la correction aux particules dans le mode par défaut.
+\end{itemize}
+
+\textbf{Fichiers probables :}
+\begin{lstlisting}
+include/q6_species_distribution_0491a.h
+src/q6_species_distribution_0491a.cpp
+scripts/run_0491a_species_q6_cpu_reference.sh
+README_0491A_SPECIES_Q6_CONTRACT.md
+\end{lstlisting}
+
+\textbf{Tests :}
+\begin{itemize}
+  \item une espèce ;
+  \item deux espèces 50/50, coefficients égaux ;
+  \item deux espèces 25/75, coefficients différents ;
+  \item cellule pure voisine d'une cellule mixte ;
+  \item coefficient nul pour une espèce ;
+  \item tous coefficients nuls : repli et mode fatal.
+\end{itemize}
+
+\criterion{Toutes les identités analytiques sont vérifiées à $10^{-13}$ sur les cas construits. Aucun changement de trajectoire n'est produit lorsque l'application est désactivée.}
+
+\subsection{0491b -- dépôt partagé et shadow CUDA}
+
+\textbf{But.} Calculer les poids sur GPU à partir du dépôt 0490h, sans application dynamique.
+
+\textbf{Travaux :}
+\begin{itemize}
+  \item rendre le dépôt espèce invocable indépendamment de \code{resamplingEnable};
+  \item exposer les pointeurs device nécessaires au module Q6 ;
+  \item ajouter \code{CudaSpeciesQ6Workspace0491};
+  \item télécharger seulement les petits cas de comparaison ;
+  \item comparer chaque \(\bar\alpha_c\), \(w_{c,s}\) et résidu au CPU 0491a ;
+  \item mesurer les allocations et la réutilisation du workspace.
+\end{itemize}
+
+\textbf{Fichiers probables :}
+\begin{lstlisting}
+include/cuda_q6_species_0491b.h
+src/cuda_q6_species_0491b.cu
+scripts/run_0491b_cuda_species_q6_shadow.sh
+README_0491B_CUDA_SPECIES_Q6_SHADOW.md
+\end{lstlisting}
+
+\criterion{Erreur CPU/CUDA nulle ou inférieure à $10^{-11}$, workspace réutilisé, aucun téléchargement d'état particulaire complet.}
+
+\subsection{0491c -- application CUDA opt-in}
+
+\textbf{But.} Appliquer la correction pondérée aux particules dans le chemin SRC+Q6.
+
+\textbf{Travaux :}
+\begin{itemize}
+  \item consommer la correction cellulaire finale du Q6 résident 0400 ;
+  \item appliquer \eqref{eq:species_correction} selon le \code{type} ;
+  \item préserver le chemin commun historique comme référence ;
+  \item vérifier les invariants de masse, type, role et quantité de mouvement ;
+  \item ajouter un apply-gate strict et un rollback uniquement dans les smokes de validation, pas dans le fast path.
+\end{itemize}
+
+\textbf{Règle d'intégration importante :} le kernel species-aware remplace uniquement le kernel qui applique la correction de vitesse aux particules. Le dépôt barycentrique, le solveur CG, les conditions aux limites, la correction de quantité de mouvement globale et les diagnostics de divergence restent ceux du Q6 résident existant.
+
+\criterion{Mono-espèce et coefficients égaux reproduisent le Q6 historique ; coefficients différents changent seulement la distribution par espèce, avec recomposition barycentrique exacte.}
+
+\subsection{0491d -- intégration explicite des quatre chemins}
+
+\textbf{But.} Garantir que les quatre combinaisons restent valides et indépendantes.
+
+\textbf{Travaux :}
+\begin{itemize}
+  \item créer un runner matriciel 2x2 resampling/Q6 ;
+  \item vérifier que le registre et le dépôt ne forcent aucune option inactive ;
+  \item introduire des marqueurs de validité du dépôt ;
+  \item assurer l'ordre Q6 puis thermostat puis resampling ;
+  \item exécuter un cas où le resampling est activé mais ne déclenche aucune opération, pour comparer SRC+Q6 et SRC+resampling+Q6 ;
+  \item exécuter un cas où le resampling déclenche split/merge/transfert après une correction Q6 pondérée.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Matrice minimale du runner 0491d.}
+\begin{tabular}{@{}lcccl@{}}
+\toprule
+Cas & Resampling & Q6 & species-Q6 & Attendu \\
+\midrule
+A & non & non & non & Référence SRC \\
+B & oui & non & non & Non-régression 0490p \\
+C & non & oui & common & Équivalence Q6 historique \\
+D & non & oui & weighted & Effet par espèce, barycentre identique \\
+E & oui & oui & common & Composition des briques sans effet nouveau Q6 \\
+F & oui & oui & weighted & Chemin cible complet \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\criterion{Les six cas passent avec les invariants propres à leur chemin ; aucun chemin inactif n'alloue ou n'exécute une brique non demandée.}
+
+\subsection{0491e -- chemin résident strict zéro CPU}
+
+\textbf{But.} Éliminer les miroirs et fallbacks CPU du species-Q6.
+
+\textbf{Audit attendu :}
+\begin{lstlisting}
+species_q6_device_resident=1
+species_q6_host_cell_array_entries=0
+species_q6_weight_h2d=0
+species_q6_full_state_download=0
+species_q6_cpu_fallback=0
+species_q6_remaining_cpu_scope=none
+\end{lstlisting}
+
+\textbf{Travaux :}
+\begin{itemize}
+  \item plan de coefficients \code{type -> alpha} chargé une fois et réutilisé ;
+  \item poids calculés et consommés sur device ;
+  \item résumé diagnostique à taille fixe ;
+  \item aucun patchback particulaire requis, car Q6 modifie les vitesses de toutes les particules actives ;
+  \item synchronisation hôte uniquement aux points déjà imposés par la sortie ou un consommateur CPU non résident.
+\end{itemize}
+
+\criterion{Le runner strict échoue sur tout tableau cellule--espèce hôte, toute copie H2D des poids, tout fallback CPU ou téléchargement complet non explicitement autorisé par une sortie.}
+
+\subsection{0491f -- thermostat, mean-flow et conservation énergétique}
+
+\textbf{But.} Qualifier l'interaction avec les corrections post-Q6.
+
+\textbf{Tests :}
+\begin{itemize}
+  \item thermostat désactivé puis activé ;
+  \item \code{keepMeanFlowEnable} désactivé puis activé ;
+  \item vérification de la conservation du barycentre après thermostat ;
+  \item mesure de l'énergie injectée ou retirée par la redistribution species-Q6 ;
+  \item comparaison des températures cinétiques par espèce avant/après thermostat.
+\end{itemize}
+
+Le Q6 pondéré peut modifier l'énergie relative entre espèces. Cette variation n'est pas une erreur de quantité de mouvement, mais elle doit être quantifiée. Le thermostat ne doit pas annuler silencieusement tout l'effet species-Q6 sans diagnostic.
+
+\criterion{Le barycentre Q6 est conservé à travers le thermostat dans les tolérances ; l'effet énergétique par espèce est mesuré et documenté.}
+
+\subsection{0491g -- frontières et géométries prises en charge par Q6}
+
+\textbf{But.} Étendre la qualification au-delà du domaine périodique initial.
+
+Ordre recommandé :
+\begin{enumerate}
+  \item murs simples sans glissement ;
+  \item entrée/sortie pleine face ;
+  \item entrée/sortie segmentée avec type injecté ;
+  \item solides immergés rectangle et cercle ;
+  \item Darcy/Brinkman et champ \(\chi\) ;
+  \item cas combinés déjà supportés par Q6 résident.
+\end{enumerate}
+
+La projection barycentrique et ses conditions aux limites restent inchangées. La difficulté nouvelle porte sur la composition des cellules proches des frontières, les types injectés et les cellules momentanément pures.
+
+\criterion{Pour chaque géométrie déjà validée par Q6 résident, le mode common reproduit la référence et le mode weighted conserve exactement le flux barycentrique projeté.}
+
+\subsection{0491h -- qualification longue et performance}
+
+\textbf{But.} Déclarer le chemin prêt pour les études multi-espèces.
+
+\textbf{Campagne minimale :}
+\begin{itemize}
+  \item 3 graines x 1000 pas sur les quatre chemins ;
+  \item 1 graine x 10000 pas pour SRC+Q6 weighted ;
+  \item 1 graine x 10000 pas pour SRC+resampling+Q6 weighted ;
+  \item un cas d'interface persistante ;
+  \item un cas avec espèce trace ;
+  \item un cas avec injection d'une espèce différente si les frontières ouvertes sont déjà qualifiées.
+\end{itemize}
+
+\textbf{Mesures de performance :}
+\begin{itemize}
+  \item temps dépôt espèce ;
+  \item temps calcul des poids ;
+  \item temps application particulaire ;
+  \item surcoût relatif au Q6 commun ;
+  \item mémoire par cellule et par espèce ;
+  \item coût en fonction du nombre d'espèces ;
+  \item nombre de synchronisations et octets transférés.
+\end{itemize}
+
+\criterion{Aucune dérive de masse par espèce, aucun défaut de type/role, aucun résidu barycentrique croissant, aucune allocation par pas, et surcoût documenté.}
+
+\section{Plan de tests détaillé}
+
+\subsection{Smokes analytiques}
+
+\begin{longtable}{@{}p{0.06\textwidth}p{0.28\textwidth}p{0.28\textwidth}p{0.29\textwidth}@{}}
+\toprule
+ID & Configuration & Résultat analytique & Critère \\
+\midrule
+\endfirsthead
+\toprule
+ID & Configuration & Résultat analytique & Critère \\
+\midrule
+\endhead
+S1 & Une espèce, \(\alpha=0.2\), \(\eta=1\) & \(w=1\) & Équivalence Q6 mono-espèce \\
+S2 & Deux espèces 50/50, \(\alpha_1=\alpha_2\) & \(w_1=w_2=1\) & Équivalence commune \\
+S3 & Deux espèces 50/50, \(\alpha_1=0,\alpha_2=1,\eta=1\) & \(w_1=0,w_2=2\) & Barycentre exact \\
+S4 & Deux espèces 25/75, \(\alpha_1=0.5,\alpha_2=1\) & Poids calculables à la main & CPU/CUDA exact \\
+S5 & Cellule pure 1 puis cellule pure 2 & \(w=1\) dans chaque cellule & Pas d'effet artificiel aux cellules pures \\
+S6 & Tous \(\alpha=0\) & Repli common ou fatal selon mode & Compteur exact \\
+S7 & Type non enregistré & \(\alpha=1\) permissif ou fatal strict & Politique exacte \\
+S8 & Espèce trace \(Y=10^{-6}\) & Poids fini, diagnostic max & Pas de NaN/Inf \\
+\bottomrule
+\end{longtable}
+
+\subsection{Tests dynamiques}
+
+\begin{itemize}
+  \item \textbf{Taylor--Green multi-espèces homogène :} même composition partout, mesure de divergence et décroissance ;
+  \item \textbf{Poiseuille bi-espèces :} profils barycentrique et par espèce ;
+  \item \textbf{Interface verticale périodique :} cellules pures et mixtes, aucun changement de type ;
+  \item \textbf{Mélange aléatoire :} distribution large de \(Y_{c,s}\), recherche de poids extrêmes ;
+  \item \textbf{Resampling actif :} déclenchements répétés après Q6, conservation par espèce ;
+  \item \textbf{Espèce trace :} stabilité numérique et coût ;
+  \item \textbf{Injection multi-type :} lorsque le support frontière est qualifié.
+\end{itemize}
+
+\subsection{Comparaisons entre les quatre chemins}
+
+Pour un même état initial et une même graine :
+\begin{itemize}
+  \item SRC vs SRC+resampling avec resampling configuré pour ne rien modifier ;
+  \item SRC+Q6 common vs Q6 historique ;
+  \item SRC+Q6 weighted vs SRC+resampling+Q6 weighted sans opération de resampling ;
+  \item SRC+resampling vs SRC+resampling+Q6 avec \code{q6ProjectionStrength=0};
+  \item species-Q6 désactivé vs activé en mode common.
+\end{itemize}
+
+Ces croisements détectent les dépendances cachées entre options.
+
+\section{Risques techniques et mesures de maîtrise}
+
+\begin{longtable}{@{}p{0.23\textwidth}p{0.34\textwidth}p{0.34\textwidth}@{}}
+\toprule
+Risque & Symptôme & Mesure de maîtrise \\
+\midrule
+\endfirsthead
+\toprule
+Risque & Symptôme & Mesure de maîtrise \\
+\midrule
+\endhead
+Surcontrainte physique & Vitesses relatives artificiellement nulles & Une seule projection barycentrique ; pas de solveur indépendant par espèce. \\
+Poids extrêmes & Énergie ou vitesse d'une espèce trace excessive & Diagnostics min/max/RMS, campagne trace, limiteur conservatif seulement si nécessaire. \\
+Dépôt obsolète & Résidus barycentriques ou mauvaise composition & Marqueurs de validité et refresh aux points de mutation. \\
+Double dépôt coûteux & Surcoût important dans SRC+resampling+Q6 & Correction d'abord ; optimisation de partage seulement après validation. \\
+Thermostat annule l'effet & Différences d'espèce réduites ou inversées & Diagnostics avant/après thermostat et test dédié 0491f. \\
+Type non enregistré & Coefficient indéfini & Strict registry en production ; politique permissive uniquement pour transition. \\
+Divergence modifiée & Q6 weighted change le champ barycentrique & Résidu cellulaire dur et comparaison des divergences avant/après. \\
+Fallback CPU caché & Synchronisations et perte de performance & Runner strict 0491e avec compteurs fatals. \\
+Régression 0490p & Plans de resampling modifiés & Non-régression dédiée SRC+resampling avec species-Q6 désactivé. \\
+Frontières ouvertes & Cellules de composition transitoire ou type injecté incohérent & Étape 0491g séparée, type d'injection explicitement enregistré. \\
+\bottomrule
+\end{longtable}
+
+\section{Décisions recommandées avant le premier patch}
+
+\begin{enumerate}
+  \item \textbf{Conserver une projection barycentrique unique.} C'est une décision structurante.
+  \item \textbf{Utiliser le coefficient existant \code{q6StrengthDeclared}.} Aucun second coefficient par espèce n'est nécessaire.
+  \item \textbf{Introduire \code{speciesQ6Sensitivity}.} Il fournit un chemin continu entre référence commune et pondération complète.
+  \item \textbf{Garder \code{speciesQ6Enable=false} par défaut.} Les trajectoires historiques ne changent pas.
+  \item \textbf{Commencer par un shadow CPU/CUDA.} L'application dynamique ne doit arriver qu'après validation de l'identité de quantité de mouvement.
+  \item \textbf{Ne pas optimiser trop tôt le partage de dépôt avec le resampling.} Un dépôt complet clair vaut mieux qu'une invalidation subtile pendant les premiers jalons.
+  \item \textbf{Reporter le limiteur de poids.} Mesurer d'abord les poids réels ; tout limiteur devra être barycentriquement conservatif.
+  \item \textbf{Faire du mode common une référence permanente.} Il permet la non-régression même après activation du nouveau module.
+\end{enumerate}
+
+\section{Critères de qualification finale}
+
+Le Q6 multi-espèces CUDA résident pourra être déclaré qualifié lorsque les conditions suivantes seront simultanément remplies :
+
+\begin{enumerate}
+  \item les quatre chemins SRC, SRC+resampling, SRC+Q6 et SRC+resampling+Q6 passent une matrice commune de tests multi-espèces ;
+  \item le chemin SRC+resampling conserve les résultats 0490p lorsque species-Q6 est désactivé ;
+  \item le mode common reproduit le Q6 résident historique ;
+  \item le mode weighted conserve exactement la correction barycentrique et la divergence projetée ;
+  \item Q6 ne modifie jamais masse, type, role, position ou population ;
+  \item le resampling conserve ensuite les masses par espèce dans le chemin combiné ;
+  \item aucun tableau cellule--espèce ou tableau de poids n'est piloté par le CPU en mode strict ;
+  \item aucun téléchargement complet de l'état n'est introduit par species-Q6 ;
+  \item les interactions avec thermostat, mean-flow, frontières et géométries supportées sont qualifiées ;
+  \item les runs longs ne montrent ni dérive, ni NaN, ni croissance des résidus ;
+  \item le surcoût mémoire et temps est mesuré et jugé acceptable.
+\end{enumerate}
+
+\section{Séquence opérationnelle recommandée}
+
+La séquence de travail immédiate est :
+
+\begin{enumerate}
+  \item terminer la campagne de validation 0490q du resampling multi-espèces actuel ;
+  \item figer le checkpoint de production 0490 ;
+  \item développer 0491a, uniquement référence et diagnostics ;
+  \item développer 0491b, shadow CUDA sans mutation ;
+  \item valider les cas analytiques S1--S8 ;
+  \item développer 0491c, application opt-in sur SRC+Q6 périodique ;
+  \item développer 0491d, matrice complète des quatre chemins ;
+  \item établir 0491e, audit CUDA résident strict ;
+  \item qualifier thermostat et énergie en 0491f ;
+  \item étendre aux frontières et géométries en 0491g ;
+  \item réaliser les runs longs et la mesure de performance en 0491h.
+\end{enumerate}
+
+\begin{center}
+\colorbox{softblue}{\parbox{0.94\linewidth}{
+\textbf{Conclusion.} L'extension proposée rend Q6 sensible aux espèces sans changer la nature de la méthode. Le solveur elliptique reste barycentrique, donc compatible avec l'architecture et les validations existantes. La nouveauté est localisée dans le dépôt de composition, le calcul de poids conservatifs et l'application particulaire. Cette séparation permet de préserver les quatre chemins de simulation, d'assurer une non-régression stricte et de progresser vers un chemin SRC+resampling+Q6 entièrement multi-espèces et CUDA résident.
+}}
+\end{center}
+
+\appendix
+\section{Pseudocode du kernel d'application}
+
+\begin{lstlisting}
+for each active particle i in parallel:
+    c = physicalCell(i)
+    s = speciesIndex(type[i])
+
+    if c invalid or cellMass[c] <= 0:
+        continue
+
+    alphaBar = alphaBarCell[c]
+    if alphaBar < epsilon:
+        if strictFallback:
+            setFatalFlag(ALPHA_BAR_TOO_SMALL)
+            continue
+        weight = 1.0
+    else:
+        weight = (1.0 - eta) + eta * alpha[s] / alphaBar
+
+    vx[i] += weight * q6DeltaUx[c]
+    vy[i] += weight * q6DeltaUy[c]
+\end{lstlisting}
+
+Le calcul de \code{alphaBarCell} est séparé pour éviter une réduction par particule. Le mapping \code{type -> speciesIndex} doit être déterministe et résident.
+
+\section{Pseudocode de la réduction diagnostique}
+
+\begin{lstlisting}
+for each cell c in parallel:
+    sumDx = 0
+    sumDy = 0
+    for each species s:
+        dpX = M[c,s] * w[c,s] * q6DeltaUx[c]
+        dpY = M[c,s] * w[c,s] * q6DeltaUy[c]
+        sumDx += dpX
+        sumDy += dpY
+
+    residualX[c] = sumDx - M[c] * q6DeltaUx[c]
+    residualY[c] = sumDy - M[c] * q6DeltaUy[c]
+
+reduce maxAbs(residualX), maxAbs(residualY)
+reduce min/max/RMS(weight)
+reduce pureCells, mixedCells, fallbackCells
+\end{lstlisting}
+
+\section{Exemple de configuration cible}
+
+\begin{lstlisting}
+speciesRegistryEnable = true
+speciesCount = 2
+species0 = 1 liquid liquid 0.35 1.0 6.0
+species1 = 2 gas    gas    1.00 0.7 6.0
+speciesRequireRegisteredTypes = true
+
+# Q6 barycentrique global
+q6Enable = true
+q6ProjectionStrength = 1.0
+cudaQ6ResidentEnable = true
+
+# Distribution par espèce
+speciesQ6Enable = true
+speciesQ6Mode = weighted
+speciesQ6Sensitivity = 0.5
+speciesQ6CudaEnable = true
+speciesQ6CudaResidentStrict = true
+speciesQ6FallbackMode = fatal
+speciesQ6DiagnosticsEnable = true
+speciesQ6DiagnosticsFilename = cuda_species_q6_0491.csv
+
+# Orthogonal : active ou non le resampling
+resamplingEnable = true
+speciesResamplingCudaResidentFastPathEnable = true
+speciesResamplingCudaResidentDepositsEnable = true
+speciesResamplingCudaResidentPoolEnable = true
+speciesResamplingCudaResidentMaintenanceStrict = true
+\end{lstlisting}
+
+Les noms exacts des clés Q6 existantes devront être repris du parseur au moment du patch. Cet exemple fixe surtout la séparation conceptuelle entre l'activation de Q6, sa force barycentrique, la sensibilité aux espèces et l'activation indépendante du resampling.
+
+\end{document}

@@ -1,0 +1,221 @@
+llemoyne@ISAT-25042025:/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF$ cd /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF
+
+for REP in 1 2 3 4 5; do
+  echo "===== W=1h REP=${REP} ====="
+
+  MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY=1 \
+  MPCD_X10_KINETIC_INTERFACE_FREE_CROSSING_CELLS=0.0 \
+  KBT=0.125 \
+  THERMOSTAT_TARGET_KBT=0.125 \
+  MPCD_X12A_LOCAL_THERMAL_COOLING=1 \
+  DT=0.0063471328149122585 \
+  NX=896 NY=256 \
+  Lx=3.5 Ly=1.0 \
+  SHEET_LENGTH_CELLS=768 \
+  THICKNESS_CELLS=64 \
+  EDGE_ROUND_CELLS=8 \
+  CENTER_X=1.75 CENTER_Y=0.5 \
+  SIGMA_DECLARED=10000 \
+  SURFACE_TENSION_MIN_RADIUS_CELLS=4 \
+  SEED=4931501 \
+  STEPS=220 \
+  SUMMARY_EVERY=5 \
+  DUMP_STATE_EVERY=10 \
+  FIT_TAU_MIN=0.5 \
+  FIT_TAU_MAX=1.75 \
+  RUN_ROOT=runs/0493x13p_tc_freecross00h_rep${REP}_seed4931501 \
+  CLEAN_RUN_ROOT=1 \
+  LIVE_PROGRESS=1 \
+  LIVE_VIS_ENABLE=0 \
+  LIVE_VIS_RECORD_ENABLE=0 \
+donesh scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh
+===== W=1h REP=1 =====
+[0493x13n-generate] grid=896x256 h=0.00390625 gamma=8 N=392781
+[0493x13n-generate] sheet L/h=768 H/h=64 corner/h=8
+[0493x13n-generate] targetArea=0.749161711576 discreteArea=0.749170303345 relErr=+1.147e-05
+[0493x13n-generate] wall clearance x/h=64 y/h=96
+[0493x13n-generate] state=runs/0493x13p_tc_freecross00h_rep1_seed4931501/init/taylor_culick_sheet_2d_0493x13n.smpcd
+[0434-livevis] control=runs/0493x13p_tc_freecross00h_rep1_seed4931501/livevis_control_0493x13n.kv
+===== 0493x13n 2-D TAYLOR-CULICK SHEET / x13h =====
+[0493x13n] objective=nonlinear free-sheet retraction speed; no source modification
+[0493x13n] grid=896x256 L=3.5x1.0 h=0.00390625 gamma=8 dt=0.0063471328149122585 kBT=0.125
+[0493x13n] sheet L/h=768 H/h=64 edgeRound/h=8 xClear/h=64 yClear/h=96
+[0493x13n] sigma=10000 rho=524288 U_TC=0.390625 tau_TC=0.64000000000000001 Re_TC=191.48284313725489 Oh=0.0073855889081372523 Ca=0.010444800000000001 Udt/h=0.63471328149122586
+[0493x13n] x12a=1 flat-sheet (H/2)/Rc=1.2649110640673518 > 1; when x12a=1 cooling is initially inactive on planar core
+[0493x13n] LiveVis enable=0 every=1 record=0 recordEvery=20 fields=mass
+[0493x13n] fit window t/tau=[0.5,1.75]; edge thresholds 0.35/0.50/0.65 audited offline
+[0493x13n] steps=220 tEnd=1.39636922 summaryEvery=5 dumpStateEvery=10
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=closed_box binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=0 particleTypeFilter=1 speciesResampling=false speciesResident=off 0296=0
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x13p_tc_freecross00h_rep1_seed4931501/params/taylor_culick_sheet_2d_0493x13n.kv
+[0434-suite] output=runs/0493x13p_tc_freecross00h_rep1_seed4931501/output
+[src_mpcd_base] Np=409165 fluid=392781 latent=0 inactive=16384 grid=896x256 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=1 immersedSolid=off fluid=[0,3.5]x[0,1] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=220 threadsActive=8 threadsMax=8 outputDir=runs/0493x13p_tc_freecross00h_rep1_seed4931501/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=1 speciesDiagnostics=off speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=1 freeCrossingCells=0 semantics=position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged
+[0493x13p-free-crossing] cells=0 semantics=inside-zone:no-position/no-velocity-action;outside-zone:legacy-one-for-one-relocation reference=existing-Q2-kinetic-wall
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.574477 etaCap=0.0572433 scaleCap=0.0996443 deltaTOverH=1.72343 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[src_mpcd_base] step=220/220 t=1.396 kBT=1.550e-01 stdN=3.519 resM=0.00e+00 q6F=1.10e-03 q6A=2.71e+01 wall=26.8s
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=27.19 user=25.69 sys=1.35
+[0493x13n-analysis] U_TC=0.390625 tau=0.64 Re=191.483 Oh=0.00738559
+[0493x13n-analysis] MAIN U=0.31490997 G_TC=0.80616953 symmetry=6.038e-03 R2half=0.99959156
+[0493x13n-analysis] report=runs/0493x13p_tc_freecross00h_rep1_seed4931501/analysis_0493x13n/taylor_culick_report.txt
+[0493x13n-analysis] trace=runs/0493x13p_tc_freecross00h_rep1_seed4931501/analysis_0493x13n/taylor_culick_trace.csv
+[0493x13n] COMPLETE run=runs/0493x13p_tc_freecross00h_rep1_seed4931501 analysis=runs/0493x13p_tc_freecross00h_rep1_seed4931501/analysis_0493x13n
+===== W=1h REP=2 =====
+[0493x13n-generate] grid=896x256 h=0.00390625 gamma=8 N=392781
+[0493x13n-generate] sheet L/h=768 H/h=64 corner/h=8
+[0493x13n-generate] targetArea=0.749161711576 discreteArea=0.749170303345 relErr=+1.147e-05
+[0493x13n-generate] wall clearance x/h=64 y/h=96
+[0493x13n-generate] state=runs/0493x13p_tc_freecross00h_rep2_seed4931501/init/taylor_culick_sheet_2d_0493x13n.smpcd
+[0434-livevis] control=runs/0493x13p_tc_freecross00h_rep2_seed4931501/livevis_control_0493x13n.kv
+===== 0493x13n 2-D TAYLOR-CULICK SHEET / x13h =====
+[0493x13n] objective=nonlinear free-sheet retraction speed; no source modification
+[0493x13n] grid=896x256 L=3.5x1.0 h=0.00390625 gamma=8 dt=0.0063471328149122585 kBT=0.125
+[0493x13n] sheet L/h=768 H/h=64 edgeRound/h=8 xClear/h=64 yClear/h=96
+[0493x13n] sigma=10000 rho=524288 U_TC=0.390625 tau_TC=0.64000000000000001 Re_TC=191.48284313725489 Oh=0.0073855889081372523 Ca=0.010444800000000001 Udt/h=0.63471328149122586
+[0493x13n] x12a=1 flat-sheet (H/2)/Rc=1.2649110640673518 > 1; when x12a=1 cooling is initially inactive on planar core
+[0493x13n] LiveVis enable=0 every=1 record=0 recordEvery=20 fields=mass
+[0493x13n] fit window t/tau=[0.5,1.75]; edge thresholds 0.35/0.50/0.65 audited offline
+[0493x13n] steps=220 tEnd=1.39636922 summaryEvery=5 dumpStateEvery=10
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=closed_box binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=0 particleTypeFilter=1 speciesResampling=false speciesResident=off 0296=0
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x13p_tc_freecross00h_rep2_seed4931501/params/taylor_culick_sheet_2d_0493x13n.kv
+[0434-suite] output=runs/0493x13p_tc_freecross00h_rep2_seed4931501/output
+[src_mpcd_base] Np=409165 fluid=392781 latent=0 inactive=16384 grid=896x256 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=1 immersedSolid=off fluid=[0,3.5]x[0,1] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=220 threadsActive=8 threadsMax=8 outputDir=runs/0493x13p_tc_freecross00h_rep2_seed4931501/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=1 speciesDiagnostics=off speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=1 freeCrossingCells=0 semantics=position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged
+[0493x13p-free-crossing] cells=0 semantics=inside-zone:no-position/no-velocity-action;outside-zone:legacy-one-for-one-relocation reference=existing-Q2-kinetic-wall
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.574477 etaCap=0.0572433 scaleCap=0.0996443 deltaTOverH=1.72343 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[src_mpcd_base] step=220/220 t=1.396 kBT=1.558e-01 stdN=3.521 resM=0.00e+00 q6F=1.17e-03 q6A=2.67e+01 wall=27.1s
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=27.48 user=25.47 sys=1.45
+[0493x13n-analysis] U_TC=0.390625 tau=0.64 Re=191.483 Oh=0.00738559
+[0493x13n-analysis] MAIN U=0.31256977 G_TC=0.80017861 symmetry=-2.934e-03 R2half=0.99950434
+[0493x13n-analysis] report=runs/0493x13p_tc_freecross00h_rep2_seed4931501/analysis_0493x13n/taylor_culick_report.txt
+[0493x13n-analysis] trace=runs/0493x13p_tc_freecross00h_rep2_seed4931501/analysis_0493x13n/taylor_culick_trace.csv
+[0493x13n] COMPLETE run=runs/0493x13p_tc_freecross00h_rep2_seed4931501 analysis=runs/0493x13p_tc_freecross00h_rep2_seed4931501/analysis_0493x13n
+===== W=1h REP=3 =====
+[0493x13n-generate] grid=896x256 h=0.00390625 gamma=8 N=392781
+[0493x13n-generate] sheet L/h=768 H/h=64 corner/h=8
+[0493x13n-generate] targetArea=0.749161711576 discreteArea=0.749170303345 relErr=+1.147e-05
+[0493x13n-generate] wall clearance x/h=64 y/h=96
+[0493x13n-generate] state=runs/0493x13p_tc_freecross00h_rep3_seed4931501/init/taylor_culick_sheet_2d_0493x13n.smpcd
+[0434-livevis] control=runs/0493x13p_tc_freecross00h_rep3_seed4931501/livevis_control_0493x13n.kv
+===== 0493x13n 2-D TAYLOR-CULICK SHEET / x13h =====
+[0493x13n] objective=nonlinear free-sheet retraction speed; no source modification
+[0493x13n] grid=896x256 L=3.5x1.0 h=0.00390625 gamma=8 dt=0.0063471328149122585 kBT=0.125
+[0493x13n] sheet L/h=768 H/h=64 edgeRound/h=8 xClear/h=64 yClear/h=96
+[0493x13n] sigma=10000 rho=524288 U_TC=0.390625 tau_TC=0.64000000000000001 Re_TC=191.48284313725489 Oh=0.0073855889081372523 Ca=0.010444800000000001 Udt/h=0.63471328149122586
+[0493x13n] x12a=1 flat-sheet (H/2)/Rc=1.2649110640673518 > 1; when x12a=1 cooling is initially inactive on planar core
+[0493x13n] LiveVis enable=0 every=1 record=0 recordEvery=20 fields=mass
+[0493x13n] fit window t/tau=[0.5,1.75]; edge thresholds 0.35/0.50/0.65 audited offline
+[0493x13n] steps=220 tEnd=1.39636922 summaryEvery=5 dumpStateEvery=10
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=closed_box binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=0 particleTypeFilter=1 speciesResampling=false speciesResident=off 0296=0
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x13p_tc_freecross00h_rep3_seed4931501/params/taylor_culick_sheet_2d_0493x13n.kv
+[0434-suite] output=runs/0493x13p_tc_freecross00h_rep3_seed4931501/output
+[src_mpcd_base] Np=409165 fluid=392781 latent=0 inactive=16384 grid=896x256 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=1 immersedSolid=off fluid=[0,3.5]x[0,1] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=220 threadsActive=8 threadsMax=8 outputDir=runs/0493x13p_tc_freecross00h_rep3_seed4931501/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=1 speciesDiagnostics=off speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=1 freeCrossingCells=0 semantics=position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged
+[0493x13p-free-crossing] cells=0 semantics=inside-zone:no-position/no-velocity-action;outside-zone:legacy-one-for-one-relocation reference=existing-Q2-kinetic-wall
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.574477 etaCap=0.0572433 scaleCap=0.0996443 deltaTOverH=1.72343 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[src_mpcd_base] step=220/220 t=1.396 kBT=1.555e-01 stdN=3.510 resM=0.00e+00 q6F=1.10e-03 q6A=2.71e+01 wall=26.7s
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=27.04 user=25.50 sys=1.38
+[0493x13n-analysis] U_TC=0.390625 tau=0.64 Re=191.483 Oh=0.00738559
+[0493x13n-analysis] MAIN U=0.31323889 G_TC=0.80189157 symmetry=4.817e-03 R2half=0.99963039
+[0493x13n-analysis] report=runs/0493x13p_tc_freecross00h_rep3_seed4931501/analysis_0493x13n/taylor_culick_report.txt
+[0493x13n-analysis] trace=runs/0493x13p_tc_freecross00h_rep3_seed4931501/analysis_0493x13n/taylor_culick_trace.csv
+[0493x13n] COMPLETE run=runs/0493x13p_tc_freecross00h_rep3_seed4931501 analysis=runs/0493x13p_tc_freecross00h_rep3_seed4931501/analysis_0493x13n
+===== W=1h REP=4 =====
+[0493x13n-generate] grid=896x256 h=0.00390625 gamma=8 N=392781
+[0493x13n-generate] sheet L/h=768 H/h=64 corner/h=8
+[0493x13n-generate] targetArea=0.749161711576 discreteArea=0.749170303345 relErr=+1.147e-05
+[0493x13n-generate] wall clearance x/h=64 y/h=96
+[0493x13n-generate] state=runs/0493x13p_tc_freecross00h_rep4_seed4931501/init/taylor_culick_sheet_2d_0493x13n.smpcd
+[0434-livevis] control=runs/0493x13p_tc_freecross00h_rep4_seed4931501/livevis_control_0493x13n.kv
+===== 0493x13n 2-D TAYLOR-CULICK SHEET / x13h =====
+[0493x13n] objective=nonlinear free-sheet retraction speed; no source modification
+[0493x13n] grid=896x256 L=3.5x1.0 h=0.00390625 gamma=8 dt=0.0063471328149122585 kBT=0.125
+[0493x13n] sheet L/h=768 H/h=64 edgeRound/h=8 xClear/h=64 yClear/h=96
+[0493x13n] sigma=10000 rho=524288 U_TC=0.390625 tau_TC=0.64000000000000001 Re_TC=191.48284313725489 Oh=0.0073855889081372523 Ca=0.010444800000000001 Udt/h=0.63471328149122586
+[0493x13n] x12a=1 flat-sheet (H/2)/Rc=1.2649110640673518 > 1; when x12a=1 cooling is initially inactive on planar core
+[0493x13n] LiveVis enable=0 every=1 record=0 recordEvery=20 fields=mass
+[0493x13n] fit window t/tau=[0.5,1.75]; edge thresholds 0.35/0.50/0.65 audited offline
+[0493x13n] steps=220 tEnd=1.39636922 summaryEvery=5 dumpStateEvery=10
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=closed_box binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=0 particleTypeFilter=1 speciesResampling=false speciesResident=off 0296=0
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x13p_tc_freecross00h_rep4_seed4931501/params/taylor_culick_sheet_2d_0493x13n.kv
+[0434-suite] output=runs/0493x13p_tc_freecross00h_rep4_seed4931501/output
+[src_mpcd_base] Np=409165 fluid=392781 latent=0 inactive=16384 grid=896x256 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=1 immersedSolid=off fluid=[0,3.5]x[0,1] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=220 threadsActive=8 threadsMax=8 outputDir=runs/0493x13p_tc_freecross00h_rep4_seed4931501/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=1 speciesDiagnostics=off speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=1 freeCrossingCells=0 semantics=position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged
+[0493x13p-free-crossing] cells=0 semantics=inside-zone:no-position/no-velocity-action;outside-zone:legacy-one-for-one-relocation reference=existing-Q2-kinetic-wall
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.574477 etaCap=0.0572433 scaleCap=0.0996443 deltaTOverH=1.72343 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[src_mpcd_base] step=220/220 t=1.396 kBT=1.548e-01 stdN=3.520 resM=0.00e+00 q6F=1.06e-03 q6A=2.69e+01 wall=26.5s
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=26.86 user=25.34 sys=1.37
+[0493x13n-analysis] U_TC=0.390625 tau=0.64 Re=191.483 Oh=0.00738559
+[0493x13n-analysis] MAIN U=0.31166533 G_TC=0.79786324 symmetry=-1.119e-02 R2half=0.99952963
+[0493x13n-analysis] report=runs/0493x13p_tc_freecross00h_rep4_seed4931501/analysis_0493x13n/taylor_culick_report.txt
+[0493x13n-analysis] trace=runs/0493x13p_tc_freecross00h_rep4_seed4931501/analysis_0493x13n/taylor_culick_trace.csv
+[0493x13n] COMPLETE run=runs/0493x13p_tc_freecross00h_rep4_seed4931501 analysis=runs/0493x13p_tc_freecross00h_rep4_seed4931501/analysis_0493x13n
+===== W=1h REP=5 =====
+[0493x13n-generate] grid=896x256 h=0.00390625 gamma=8 N=392781
+[0493x13n-generate] sheet L/h=768 H/h=64 corner/h=8
+[0493x13n-generate] targetArea=0.749161711576 discreteArea=0.749170303345 relErr=+1.147e-05
+[0493x13n-generate] wall clearance x/h=64 y/h=96
+[0493x13n-generate] state=runs/0493x13p_tc_freecross00h_rep5_seed4931501/init/taylor_culick_sheet_2d_0493x13n.smpcd
+[0434-livevis] control=runs/0493x13p_tc_freecross00h_rep5_seed4931501/livevis_control_0493x13n.kv
+===== 0493x13n 2-D TAYLOR-CULICK SHEET / x13h =====
+[0493x13n] objective=nonlinear free-sheet retraction speed; no source modification
+[0493x13n] grid=896x256 L=3.5x1.0 h=0.00390625 gamma=8 dt=0.0063471328149122585 kBT=0.125
+[0493x13n] sheet L/h=768 H/h=64 edgeRound/h=8 xClear/h=64 yClear/h=96
+[0493x13n] sigma=10000 rho=524288 U_TC=0.390625 tau_TC=0.64000000000000001 Re_TC=191.48284313725489 Oh=0.0073855889081372523 Ca=0.010444800000000001 Udt/h=0.63471328149122586
+[0493x13n] x12a=1 flat-sheet (H/2)/Rc=1.2649110640673518 > 1; when x12a=1 cooling is initially inactive on planar core
+[0493x13n] LiveVis enable=0 every=1 record=0 recordEvery=20 fields=mass
+[0493x13n] fit window t/tau=[0.5,1.75]; edge thresholds 0.35/0.50/0.65 audited offline
+[0493x13n] steps=220 tEnd=1.39636922 summaryEvery=5 dumpStateEvery=10
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=closed_box binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=0 particleTypeFilter=1 speciesResampling=false speciesResident=off 0296=0
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x13p_tc_freecross00h_rep5_seed4931501/params/taylor_culick_sheet_2d_0493x13n.kv
+[0434-suite] output=runs/0493x13p_tc_freecross00h_rep5_seed4931501/output
+[src_mpcd_base] Np=409165 fluid=392781 latent=0 inactive=16384 grid=896x256 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=1 immersedSolid=off fluid=[0,3.5]x[0,1] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=220 threadsActive=8 threadsMax=8 outputDir=runs/0493x13p_tc_freecross00h_rep5_seed4931501/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=1 speciesDiagnostics=off speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=1 freeCrossingCells=0 semantics=position-mirror+local-equal-mass-normal-component-swap;tangential-unchanged
+[0493x13p-free-crossing] cells=0 semantics=inside-zone:no-position/no-velocity-action;outside-zone:legacy-one-for-one-relocation reference=existing-Q2-kinetic-wall
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.574477 etaCap=0.0572433 scaleCap=0.0996443 deltaTOverH=1.72343 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[src_mpcd_base] step=220/220 t=1.396 kBT=1.551e-01 stdN=3.518 resM=0.00e+00 q6F=1.23e-03 q6A=2.69e+01 wall=26.4s
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=26.79 user=25.39 sys=1.39
+[0493x13n-analysis] U_TC=0.390625 tau=0.64 Re=191.483 Oh=0.00738559
+[0493x13n-analysis] MAIN U=0.31369557 G_TC=0.80306066 symmetry=-4.904e-03 R2half=0.99936298
+[0493x13n-analysis] report=runs/0493x13p_tc_freecross00h_rep5_seed4931501/analysis_0493x13n/taylor_culick_report.txt
+[0493x13n-analysis] trace=runs/0493x13p_tc_freecross00h_rep5_seed4931501/analysis_0493x13n/taylor_culick_trace.csv
+[0493x13n] COMPLETE run=runs/0493x13p_tc_freecross00h_rep5_seed4931501 analysis=runs/0493x13p_tc_freecross00h_rep5_seed4931501/analysis_0493x13n

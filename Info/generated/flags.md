@@ -764,8 +764,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `CHI_FILE`
 
@@ -818,8 +818,8 @@ Supprime le run root avant une nouvelle campagne. | Contrôle le runner de quali
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `DARCY_ALPHA_MAX`
 
@@ -1146,11 +1146,11 @@ Contrôle tau_rho des anciens runners de raffinement.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7e_x6g_x7d_validation.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7d` — Relaxation de densité dans le RHS
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d` — Constante de temps physique de restauration de densité
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `DROP_CENTER_X`
 
@@ -1168,7 +1168,7 @@ Position initiale x du centre de goutte.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `DROP_CENTER_Y`
 
@@ -1186,7 +1186,7 @@ Position initiale y du centre de goutte.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `DROP_RADIUS_CELLS`
 
@@ -1204,7 +1204,7 @@ Rayon initial de la goutte en nombre de cellules.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `DROP_VX`
 
@@ -1222,7 +1222,7 @@ Vitesse initiale horizontale de la goutte.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `DROP_VY`
 
@@ -1240,7 +1240,7 @@ Vitesse initiale verticale de la goutte.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `DUMP_ROLE_FILTER`
 
@@ -1316,6 +1316,10 @@ Surcharge phaseInterfaceEvaporationTargetType.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12d_jfm524_measurement_case.sh`
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+
 ### `FILTERED_RECORDING_ENABLE`
 
 - **Type :** booléen shell | booléen/env truthy
@@ -1355,7 +1359,7 @@ Cible thermique du gaz et température de référence du mécanisme de paroi gaz
 **Remarques.** Les runners x14 utilisant l’EOS x6g alignent aussi la température globale utilisée par cette fermeture sur la cible gaz.
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `GAS_PRESSURE_CONSTANT`
 
@@ -1373,7 +1377,7 @@ Alias du runner vers MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x6g_validation.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `GAS_PRESSURE_MODE`
 
@@ -1390,7 +1394,7 @@ Alias du runner vers MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x6g_phase_gas_pressure.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `GAS_PRESSURE_REFERENCE`
 
@@ -1408,7 +1412,7 @@ Alias du runner vers MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x6g_phase_gas_pressure.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `GAS_PRESSURE_SCALE`
 
@@ -1426,7 +1430,7 @@ Alias du runner vers MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x6g_validation.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `GRID_CASES`
 
@@ -1626,7 +1630,9 @@ Surcharge phaseInterfaceKineticReflectionFraction.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `LIQUID_KBT`
 
@@ -1657,8 +1663,8 @@ Active l’affichage d’avancement des runs lorsque le runner commun le permet.
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2_empty.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `LIVE_VIS_ALPHA`
 
@@ -3884,10 +3890,10 @@ Force ou interdit le solveur CG mono-bloc 0407. Dans la campagne finale, Q6-g-f 
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7j` — CG coopératif CUDA résident
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7j` — CG Q6-g-f entièrement CUDA résident
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `MPCD_CUDA_Q6_RESIDENT_SINGLE_BLOCK_CG_MAX_CELLS_0407`
 
@@ -5826,8 +5832,8 @@ Autorise le sous-ensemble CUDA résident wall-simple/Q6 pour une boîte fermée 
 - `DEFINED_OR_USED_IN` — `src/src_collision.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x1` — Jalon ancien non individualisé dans le rapport consolidé
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x1` — Chemin de frontières closed-box CUDA résident
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `MPCD_DARCY_EXACT_MOMENTUM_DIAG_0493X8A`
 
@@ -5839,6 +5845,9 @@ Autorise le sous-ensemble CUDA résident wall-simple/Q6 pour une boîte fermée 
 Active les sommes exactes d'impulsion Darcy, le suivi cumulatif du mean-kick et le CSV exact 0493x8a.
 
 **Remarques.** Lu seulement si Darcy-Brinkman est activé. Les branches physiques de forcing ne sont pas sélectionnées par ce flag.
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8a` — Diagnostic exact du moment Darcy
 
 ### `MPCD_DARCY_FASTFLAGS_ENABLE`
 
@@ -6502,6 +6511,9 @@ Réactive la fermeture x9i qui impose directement la normale de Young près du m
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9i` — Première fermeture d'angle de contact par normale imposée
+
 ### `MPCD_Q6_CONTACT_ANGLE_OFFSUPPORT_0493X9M`
 
 - **Type :** booléen/env truthy
@@ -6517,7 +6529,7 @@ Active la courbure de contact x9m par ancre p3 hors support de paroi.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9m` — Fermeture statique de mouillage
+- `ASSOCIATED_WITH` → `x9m` — Fermeture statique de mouillage par ancre hors support
 
 ### `MPCD_Q6_CONTACT_ANGLE_WALL_FACE_0493X9L`
 
@@ -6532,6 +6544,9 @@ Active la reconstruction x9l de normale au mur avant div(n).
 
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9l` — Reconstruction de normale au mur-face
 
 ### `MPCD_Q6_ELLIPSE_DIAGNOSTICS_0493X9F`
 
@@ -6548,7 +6563,7 @@ Active les moments géométriques d’ellipse/goutte: rayons principaux, ellipti
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9f` — Diagnostic quadrupole signé
+- `ASSOCIATED_WITH` → `x9f` — Diagnostic de bande interfaciale vraie et relaxation elliptique
 
 ### `MPCD_Q6_EXACT_PERIODIC_B1_CLOSURE_0493X7Y`
 
@@ -6565,7 +6580,8 @@ Contrôle l'étape x7q de réduction exacte du résidu particulaire et la second
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2-fix2` — Première fermeture du moment périodique B1 au niveau cellule
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `MPCD_Q6_FACE_TO_PARTICLE_RT0_0493X6H_B1`
 
@@ -6583,9 +6599,9 @@ Active la reconstruction affine RT0/MAC-to-particle. En fullDomain périodique, 
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6h-B1` — Reconstruction face-particule RT0
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x6h-B1` — Reconstruction affine RT0/MAC des corrections face-vers-particule
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `MPCD_Q6_G_F_RESIDENT_CG_0493X7J`
 
@@ -6604,9 +6620,9 @@ Sélectionne le CG Q6-g-f coopératif entièrement device-resident; 0 force le f
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7j` — CG coopératif CUDA résident
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7j` — CG Q6-g-f entièrement CUDA résident
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `MPCD_Q6_PHASE_CURVATURE_AUDIT_WALL_MARGIN_CELLS_0493X9B`
 
@@ -6637,6 +6653,9 @@ Active les audits passifs de courbure/interface x9a.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9a_ellipse_curvature.sh`
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9a` — Premier scaffold passif de courbure résident
+
 ### `MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9B`
 
 - **Type :** booléen/env truthy
@@ -6651,6 +6670,9 @@ Active les diagnostics du champ de courbure p1/Scharr x9b.
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9b` — Courbure passive binomiale + Scharr et LiveVis résident
+
 ### `MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9C`
 
 - **Type :** booléen/env truthy
@@ -6664,6 +6686,9 @@ Active les diagnostics de sweep p1/p2/p3.
 
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9c` — Qualification du support de lissage de courbure
 
 ### `MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G`
 
@@ -6683,8 +6708,8 @@ Active la valeur Dirichlet de pression gazeuse sur les faces interfaciales prép
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14v` — Kick cinétique excédentaire
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GAS_PRESSURE_CONSTANT_0493X6G`
 
@@ -6702,7 +6727,7 @@ Valeur p_const utilisée lorsque MODE=constant.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G`
 
@@ -6722,8 +6747,8 @@ Choisit la source de pression interfaciale: eos, constant ou eos_accessible_volu
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14s` — EOS gaz volume accessible
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G`
 
@@ -6742,7 +6767,7 @@ Définit p_ref soustrait à p_g comme jauge avant conversion en phiGamma.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G`
 
@@ -6760,7 +6785,7 @@ Multiplie la différence de pression interfaciale avant conversion en phiGamma.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GEOMETRY_CUTFACE_0493X6D`
 
@@ -6778,10 +6803,10 @@ Active l’opérateur cut-face x6d sur le bord du carrier avec coefficient 1/the
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6d` — Distance sous-maille 1/theta
-- `ASSOCIATED_WITH` → `x6e` — Audit topologique des crossings
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6d` — Expérience cut-face 1/theta sur le bord du carrier
+- `ASSOCIATED_WITH` → `x6e` — Audit topologique de l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GEOMETRY_DIAGNOSTICS_0493X6B`
 
@@ -6800,8 +6825,8 @@ Active l’audit géométrique raw alpha/support/interface sans changer l’opé
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6b` — Audit support vs interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6b` — Diagnostic géométrique support Q6 / interface alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C`
 
@@ -6820,9 +6845,9 @@ Matérialise les champs CUDA résidents phaseFillRaw et alpha filtré utilisés 
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6c` — Alpha physique résident
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F`
 
@@ -6841,11 +6866,11 @@ Active le pressureMask alpha>=0.5 et le stencil de faces préparé une fois par 
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6c` — Alpha physique résident
-- `ASSOCIATED_WITH` → `x6d` — Distance sous-maille 1/theta
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
+- `ASSOCIATED_WITH` → `x6d` — Expérience cut-face 1/theta sur le bord du carrier
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
 
 ### `MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E`
 
@@ -6863,9 +6888,9 @@ Active l’audit de topologie de toutes les traversées alpha=0.5, indépendamme
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6e` — Audit topologique des crossings
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6e` — Audit topologique de l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A`
 
@@ -6884,8 +6909,8 @@ Active le diagnostic de pression gazeuse/interfaciale x6a sans modifier la physi
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6a` — Diagnostic EOS gaz
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6a` — Diagnostic EOS de pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0`
 
@@ -6903,8 +6928,8 @@ Active un audit sparse de la divergence redéposée par régions bulk/interface/
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6h-B0` — Diagnostic post-application
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
+- `ASSOCIATED_WITH` → `x6h-B0` — Diagnostic régional de divergence après application aux particules
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
 
 ### `MPCD_Q6_PROFILE`
 
@@ -6936,7 +6961,9 @@ Active les métriques goutte statique: Reff, pression Q6, vitesses RMS et résul
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9e` — Diagnostic pression goutte statique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x9e` — Qualification diagnostique de goutte statique
 
 ### `MPCD_RESAMPLING_DISABLED_DIAGNOSTICS_LEGACY_0315G`
 
@@ -7024,7 +7051,7 @@ Construit un alpha CIC dédié à l'interface cinétique, séparé des buffers a
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x10cic` — Alpha cinétique CIC dédié
-- `ASSOCIATED_WITH` → `x6c` — Alpha physique résident
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
 
 ### `MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE`
 
@@ -7043,10 +7070,11 @@ Remplace l'impulsion spéculaire Q2 par une relocalisation positionnelle one-for
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x13k` — Goutte oscillante n=2
-- `ASSOCIATED_WITH` → `x13n` — Taylor-Culick 2D
+- `ASSOCIATED_WITH` → `x10p` — Résolution des recouvrements initiaux
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x13k` — Qualification goutte oscillante n=2
+- `ASSOCIATED_WITH` → `x13n` — Benchmark Taylor–Culick 2-D
 
 ### `MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY`
 
@@ -7064,11 +7092,11 @@ Lorsque x10u+x10v sont actifs, échange uniquement la composante normale locale 
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x13k` — Goutte oscillante n=2
-- `ASSOCIATED_WITH` → `x13n` — Taylor-Culick 2D
-- `ASSOCIATED_WITH` → `x13o` — Swap normal-only
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x13k` — Qualification goutte oscillante n=2
+- `ASSOCIATED_WITH` → `x13n` — Benchmark Taylor–Culick 2-D
+- `ASSOCIATED_WITH` → `x13o` — Ablation swap normal-only
 
 ### `MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_SWAP`
 
@@ -7087,11 +7115,11 @@ Après x10u, échange le vecteur vitesse complet avec un partenaire liquide int�
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x13k` — Goutte oscillante n=2
-- `ASSOCIATED_WITH` → `x13n` — Taylor-Culick 2D
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x13k` — Qualification goutte oscillante n=2
+- `ASSOCIATED_WITH` → `x13n` — Benchmark Taylor–Culick 2-D
 
 ### `MPCD_X10_KINETIC_INTERFACE_QUADRATIC`
 
@@ -7109,10 +7137,11 @@ Active la reconstruction biquadratique tensorielle 3x3 de l'interface cinétique
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10r` — Vitesses endpoints full-vector
-- `ASSOCIATED_WITH` → `x10s` — Cinématique normale au segment
-- `ASSOCIATED_WITH` → `x10t` — Cinématique tangentielle rigide
+- `ASSOCIATED_WITH` → `x10biq` — Reconstruction Q2 biquadratique tensorielle
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10r` — Ablation vitesses endpoints full-vector
+- `ASSOCIATED_WITH` → `x10s` — Ablation cinématique normale au segment
+- `ASSOCIATED_WITH` → `x10t` — Ablation cinématique tangentielle rigide
 
 ### `MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER`
 
@@ -7129,10 +7158,10 @@ Active la redistribution thermique locale pairwise pré-stream, conservative P/K
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12d_jfm524_measurement_case.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
 
 ### `MPCD_X10_MICRO_REFLECTION_TRACE`
 
@@ -7149,7 +7178,7 @@ Active un printf/trace par réflexion pour de très petits runs.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
 
 ### `MPCD_X10I_REACTION_BLOCK_CELLS`
 
@@ -7166,11 +7195,12 @@ Fixe la taille des blocs mésoscopiques décalés déterministiquement utilisés
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10j` — Réflexion spéculaire labo
-- `ASSOCIATED_WITH` → `x10k` — Réflexion spéculaire repère interface
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10i` — Réaction exacte par réservoirs mésoscopiques décalés
+- `ASSOCIATED_WITH` → `x10j` — Ablation spéculaire dans le repère laboratoire
+- `ASSOCIATED_WITH` → `x10k` — Ablation spéculaire dans le repère liquide local
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
 
 ### `MPCD_X10J_SIMPLE_SPECULAR_ABLATION`
 
@@ -7188,10 +7218,13 @@ Sélectionne l’ablation de réflexion spéculaire simple en repère laboratoir
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10k` — Réflexion spéculaire repère interface
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10j` — Ablation spéculaire dans le repère laboratoire
+- `ASSOCIATED_WITH` → `x10k` — Ablation spéculaire dans le repère liquide local
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10K_LOCAL_FRAME_SPECULAR_ABLATION`
 
@@ -7209,9 +7242,12 @@ Sélectionne l’ablation spéculaire dans un repère liquide local.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10k` — Ablation spéculaire dans le repère liquide local
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS`
 
@@ -7230,9 +7266,12 @@ Accumule la vitesse normale liquide post-Q6/B1 avant le traitement cinétique.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12yl_young_laplace_calibrator.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
-- `ASSOCIATED_WITH` → `x12d` — Benchmark JFM 524
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
+- `ASSOCIATED_WITH` → `x10l` — Diagnostic passif pré-paroi cinétique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
+- `ASSOCIATED_WITH` → `x12d` — Cas de mesure JFM 524 à géométrie/We/Fr ciblés
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
 
 ### `MPCD_X10M_MOVING_INTERFACE_WALL`
 
@@ -7250,8 +7289,11 @@ Active l’ancienne géométrie locale de paroi mobile pilotée par Q6.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10N_Q6_CONTINUOUS_INTERFACE_WALL`
 
@@ -7269,9 +7311,11 @@ Active la polyligne continue alpha=0.5 sans enveloppe thermique x10o.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
 
 ### `MPCD_X10O_Q6_THERMAL_INTERFACE_WALL`
 
@@ -7289,13 +7333,16 @@ Active la surface continue pilotée par le champ hydro Q6 du même pas avec enve
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10j` — Réflexion spéculaire labo
-- `ASSOCIATED_WITH` → `x10k` — Réflexion spéculaire repère interface
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
+- `ASSOCIATED_WITH` → `x10j` — Ablation spéculaire dans le repère laboratoire
+- `ASSOCIATED_WITH` → `x10k` — Ablation spéculaire dans le repère liquide local
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
 
 ### `MPCD_X10O_THERMAL_MAX_CELLS`
 
@@ -7313,7 +7360,9 @@ Plafond de l’enveloppe thermique en nombre de cellules.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10O_THERMAL_PARTICLE_MASS`
 
@@ -7331,8 +7380,10 @@ Masse m dans delta=min(C dt sqrt(kBT/m), maxCells*h).
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10O_THERMAL_SIGMAS`
 
@@ -7350,8 +7401,10 @@ Coefficient C_T du déplacement balistique thermique C_T*dt*sqrt(kBT/m).
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10P_INITIAL_OVERLAP_RESOLUTION`
 
@@ -7368,8 +7421,11 @@ Active la résolution des particules déjà à l’extérieur de l’enveloppe a
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12d_jfm524_measurement_case.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10p` — Résolution des recouvrements initiaux
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
 ### `MPCD_X10R_Q6_THERMAL_FULL_VECTOR_ENDPOINT_VELOCITY`
 
@@ -7387,10 +7443,11 @@ Utilise la vitesse hydro Q6 vectorielle complète aux endpoints de la surface x1
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10r` — Vitesses endpoints full-vector
-- `ASSOCIATED_WITH` → `x10s` — Cinématique normale au segment
-- `ASSOCIATED_WITH` → `x10t` — Cinématique tangentielle rigide
+- `ASSOCIATED_WITH` → `x10biq` — Reconstruction Q2 biquadratique tensorielle
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10r` — Ablation vitesses endpoints full-vector
+- `ASSOCIATED_WITH` → `x10s` — Ablation cinématique normale au segment
+- `ASSOCIATED_WITH` → `x10t` — Ablation cinématique tangentielle rigide
 
 ### `MPCD_X10S_Q6_THERMAL_SEGMENT_NORMAL_KINEMATICS`
 
@@ -7407,10 +7464,11 @@ Projette la cinématique endpoint sur la normale du segment fini.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12d_jfm524_measurement_case.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10r` — Vitesses endpoints full-vector
-- `ASSOCIATED_WITH` → `x10s` — Cinématique normale au segment
-- `ASSOCIATED_WITH` → `x10t` — Cinématique tangentielle rigide
+- `ASSOCIATED_WITH` → `x10biq` — Reconstruction Q2 biquadratique tensorielle
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10r` — Ablation vitesses endpoints full-vector
+- `ASSOCIATED_WITH` → `x10s` — Ablation cinématique normale au segment
+- `ASSOCIATED_WITH` → `x10t` — Ablation cinématique tangentielle rigide
 
 ### `MPCD_X10T_Q6_THERMAL_RIGID_TANGENTIAL_KINEMATICS`
 
@@ -7428,10 +7486,11 @@ Active la variante de cinématique tangentielle rigide x10t.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10r` — Vitesses endpoints full-vector
-- `ASSOCIATED_WITH` → `x10s` — Cinématique normale au segment
-- `ASSOCIATED_WITH` → `x10t` — Cinématique tangentielle rigide
+- `ASSOCIATED_WITH` → `x10biq` — Reconstruction Q2 biquadratique tensorielle
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10r` — Ablation vitesses endpoints full-vector
+- `ASSOCIATED_WITH` → `x10s` — Ablation cinématique normale au segment
+- `ASSOCIATED_WITH` → `x10t` — Ablation cinématique tangentielle rigide
 
 ### `MPCD_X10W_THERMAL_PHASE_CHI_FULL`
 
@@ -7448,7 +7507,7 @@ Seuil supérieur chi du limiter x10w.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
 
 ### `MPCD_X10W_THERMAL_PHASE_CHI_ON`
 
@@ -7465,7 +7524,7 @@ Seuil inférieur chi=delta_th/Lloc du limiter x10w.
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
 
 ### `MPCD_X10W_THERMAL_PHASE_ETA_CAP`
 
@@ -7482,7 +7541,7 @@ Borne eta=(dt*sqrt(kBT/m))/h utilisée pour plafonner l'amplitude du limiter x10
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
 
 ### `MPCD_X11C_FORCE_X9E_SIGMA0`
 
@@ -7501,9 +7560,11 @@ Dans run_0493x9s_splash.sh, force MPCD_Q6_STATIC_DROP_DIAGNOSTICS_0493X9E=1 pour
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
-- `ASSOCIATED_WITH` → `x9e` — Diagnostic pression goutte statique
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
+- `ASSOCIATED_WITH` → `x9e` — Qualification diagnostique de goutte statique
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `MPCD_X12A_LOCAL_THERMAL_COOLING`
 
@@ -7522,12 +7583,12 @@ Active kBT_eff/kBT=min(1,(Lloc/Rc)^2) et réduit à la fois l'enveloppe thermiqu
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x10w` — Limiter thermique pairwise
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
-- `ASSOCIATED_WITH` → `x13k` — Goutte oscillante n=2
-- `ASSOCIATED_WITH` → `x13n` — Taylor-Culick 2D
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x10w` — Limiter thermique local pairwise
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
+- `ASSOCIATED_WITH` → `x13k` — Qualification goutte oscillante n=2
+- `ASSOCIATED_WITH` → `x13n` — Benchmark Taylor–Culick 2-D
 
 ### `MPCD_X12A_LOCAL_THERMAL_RADIUS_CELLS`
 
@@ -7547,10 +7608,10 @@ Rc/h dans la loi locale fT=min(1,(Lloc/Rc)^2).
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
-- `ASSOCIATED_WITH` → `x13k` — Goutte oscillante n=2
-- `ASSOCIATED_WITH` → `x13n` — Taylor-Culick 2D
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
+- `ASSOCIATED_WITH` → `x13k` — Qualification goutte oscillante n=2
+- `ASSOCIATED_WITH` → `x13n` — Benchmark Taylor–Culick 2-D
 
 ### `MPCD_X14L_GAS_SPECULAR_REFLECTION`
 
@@ -7570,7 +7631,7 @@ Active la réflexion spéculaire du gaz B sur la paroi cinétique liquide; compo
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
 - `ASSOCIATED_WITH` → `x14l` — Réflexion spéculaire du gaz
 - `ASSOCIATED_WITH` → `x14m` — Assemblage bilatéral + compatibilité x12a
 
@@ -7592,7 +7653,7 @@ Utilise comme cible de résultante x14ad l’impulsion Q6 réellement appliquée
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
@@ -7615,14 +7676,15 @@ Transfère collectivement au liquide l’impulsion normale réelle des réflexio
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
 - `ASSOCIATED_WITH` → `x14l` — Réflexion spéculaire du gaz
 - `ASSOCIATED_WITH` → `x14v` — Kick cinétique excédentaire
 - `ASSOCIATED_WITH` → `x14w` — Couette biphasique
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x9t` — Première rétention cinétique liquide-vide conservative
 
 ### `MPCD_X14V_GLOBAL_BALANCE_DIAGNOSTIC`
 
@@ -7660,7 +7722,7 @@ Projette la contribution uniforme p_ref reconstruite sur la polyligne x10n vers 
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
 - `ASSOCIATED_WITH` → `x14aa` — Traction thermodynamique absolue sur faces x6g
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
@@ -7704,7 +7766,7 @@ Soustrait de l’impulsion brute de réflexion gazeuse la traction thermodynamiq
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14v` — Kick cinétique excédentaire
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_X14V_X6G_FACE_THERMO_TRACTION`
 
@@ -7721,15 +7783,15 @@ Soustrait de l’impulsion brute de réflexion gazeuse la traction thermodynamiq
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
 - `ASSOCIATED_WITH` → `x14aa` — Traction thermodynamique absolue sur faces x6g
 - `ASSOCIATED_WITH` → `x14ab` — p_ref sur x10n + jauge sur faces x6g
 - `ASSOCIATED_WITH` → `x14ac` — Projection globale minimum-L2
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14v` — Kick cinétique excédentaire
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION`
 
@@ -7746,13 +7808,13 @@ Conserve p_ref sur les segments x10n/CIC mais soustrait la seule pression de jau
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
 - `ASSOCIATED_WITH` → `x14aa` — Traction thermodynamique absolue sur faces x6g
 - `ASSOCIATED_WITH` → `x14ab` — p_ref sur x10n + jauge sur faces x6g
 - `ASSOCIATED_WITH` → `x14ac` — Projection globale minimum-L2
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION`
 
@@ -7769,11 +7831,11 @@ Conserve la traction locale x10n et impose à sa pression de jauge la résultant
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
 - `ASSOCIATED_WITH` → `x14ac` — Projection globale minimum-L2
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION`
 
@@ -7792,15 +7854,15 @@ Conserve la traction locale x10n et impose à sa pression de jauge la résultant
 - `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10m` — Paroi implicite mobile / scratch
-- `ASSOCIATED_WITH` → `x10n` — Polyligne continue marching-squares
+- `ASSOCIATED_WITH` → `x10m` — Paroi locale mobile alpha=0.5
+- `ASSOCIATED_WITH` → `x10n` — Interface continue marching-squares mobile
 - `ASSOCIATED_WITH` → `x14aa` — Traction thermodynamique absolue sur faces x6g
 - `ASSOCIATED_WITH` → `x14ab` — p_ref sur x10n + jauge sur faces x6g
 - `ASSOCIATED_WITH` → `x14ac` — Projection globale minimum-L2
 - `ASSOCIATED_WITH` → `x14ad` — Traction locale cohérente avec faces x6g
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `NX`
 
@@ -8111,8 +8173,8 @@ Génère et valide les six branches sans exécuter les pas physiques. | Contrôl
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `PROJECTION_MOMENTUM_CORRECTION_ENABLE`
 
@@ -8148,11 +8210,11 @@ Alias shell écrit projectionTolerance dans params.kv généré.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x5b` — Gaz explicite compressible
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x5b` — Qualification liquide-gaz : Q6-g liquide et gaz compressible explicite
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `PUDDLE_DEPTH_CELLS`
 
@@ -8170,7 +8232,7 @@ Profondeur de la flaque liquide initiale pour TARGET=puddle.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `Q6_DENSITY_RELAXATION_BETA`
 
@@ -8190,8 +8252,9 @@ Alias shell écrit q6DensityRelaxationBeta dans params.kv.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x5b_liquid_gas_free_surface_dam_break.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7d` — Relaxation de densité dans le RHS
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
+- `ASSOCIATED_WITH` → `x7c` — Restauration de densité intégrée au RHS Q6
+- `ASSOCIATED_WITH` → `x7d` — Constante de temps physique de restauration de densité
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
 
 ### `Q6_DENSITY_RELAXATION_TIME`
 
@@ -8211,10 +8274,10 @@ Alias shell historique écrivant q6DensityRelaxationTime dans params.kv.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7d` — Relaxation de densité dans le RHS
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d` — Constante de temps physique de restauration de densité
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_FORCE_PROJECTION_MODE`
 
@@ -8235,8 +8298,8 @@ Alias shell écrit q6ForceProjectionMode dans le fichier params.kv généré.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x5a_partial_liquid_free_surface.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x3` — Q6-g force-aware - preuve de concept
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
+- `ASSOCIATED_WITH` → `x3` — Q6-g force-aware — preuve de concept prestream à deux solves
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
 
 ### `Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE`
 
@@ -8253,10 +8316,11 @@ Active le gate cohérent de compression dans params.kv.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES`
 
@@ -8273,10 +8337,11 @@ Convertit le seuil de compression exprimé en nombre de particules en fraction v
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_DENSITY_RELAXATION_TIME`
 
@@ -8294,10 +8359,10 @@ Convertit le seuil de compression exprimé en nombre de particules en fraction v
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_DENSITY_TRACTION_GAIN`
 
@@ -8315,10 +8380,11 @@ Convertit le seuil de compression exprimé en nombre de particules en fraction v
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2-signed1` — Restauration de densité signée à gates cohérents
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES`
 
@@ -8335,10 +8401,11 @@ Convertit le seuil de traction/déplétion exprimé en particules en fraction vi
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2-signed1` — Restauration de densité signée à gates cohérents
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_EXTERNAL_SPECIES`
 
@@ -8355,10 +8422,10 @@ Demande au helper de conserver un registre d’espèces fourni par le cas au lie
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_GAS_PRESSURE_REFERENCE`
 
@@ -8375,11 +8442,11 @@ Override la pression EOS de référence gaz utilisée par le helper lorsqu’une
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_HAS_GAS_PHASE`
 
@@ -8396,12 +8463,12 @@ Déclare au helper qu’une phase gaz est présente et active la configuration x
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7m` — Correction topologie monophase
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7m` — Garde topologique monophase par registre de phases
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_MIN_FILL_FRACTION`
 
@@ -8419,10 +8486,10 @@ Déclare au helper qu’une phase gaz est présente et active la configuration x
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_SINGLE_PHASE_PARTICLE_MASS`
 
@@ -8439,10 +8506,10 @@ Masse déclarée de l’espèce synthétisée.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_SINGLE_PHASE_TYPE`
 
@@ -8459,10 +8526,10 @@ Type de l’espèce synthétisée par le helper monophase.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_GF_SPECIES_DIAGNOSTICS_ENABLE`
 
@@ -8480,10 +8547,10 @@ Type de l’espèce synthétisée par le helper monophase.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `Q6_PRESSURE_OUTLET_DEFLATION_ENABLE`
 
@@ -8501,7 +8568,7 @@ Runner alias writing q6PressureOutletDeflationEnable.
 - `DEFINED_OR_USED_IN` — `scripts/run_0414_segmented_xy_neumann_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x8s` — Déflation des modes lents du CG
+- `ASSOCIATED_WITH` → `x8s` — Déflation exacte des modes longitudinaux lents du CG
 
 ### `QUAL_MODES`
 
@@ -8518,8 +8585,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `RECORD_FIELDS`
 
@@ -8598,10 +8665,10 @@ Force un état initial rempli commun pour comparer les modes sur les cas Darcy.
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7f` — Extension multi-topologies
-- `ASSOCIATED_WITH` → `x7h` — Factorisation run_ok
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7f` — Extension Q6-g-f aux familles statiques multi-BC
+- `ASSOCIATED_WITH` → `x7h` — Factorisation des comparaisons run_ok SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `RUN_ROOT`
 
@@ -8618,8 +8685,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `RUN_ZERO_REFERENCE`
 
@@ -8636,7 +8703,7 @@ Contrôle l’exécution de la référence appariée pGamma=0 dans le runner dam
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x6g_final_dam_break.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `SCENARIO_EXPECTATION`
 
@@ -8707,9 +8774,11 @@ Surcharge surfaceTensionSigma dans les runners capillaires/splash/JFM.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12d_jfm524_measurement_case.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
-- `ASSOCIATED_WITH` → `x12d` — Benchmark JFM 524
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
+- `ASSOCIATED_WITH` → `x12d` — Cas de mesure JFM 524 à géométrie/We/Fr ciblés
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
 
 ### `SPECIES_Q6_COMPARISON_TOLERANCE`
 
@@ -8774,9 +8843,9 @@ Alias shell écrit speciesQ6MinOccupancyFraction dans params.kv.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x5b_liquid_gas_free_surface_dam_break.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x5a` — free_surface_masked initial
-- `ASSOCIATED_WITH` → `x5b` — Gaz explicite compressible
-- `ASSOCIATED_WITH` → `x7e` — Qualification x6g+x7d
+- `ASSOCIATED_WITH` → `x5a` — Q6-g free_surface_masked — premier liquide partiellement rempli
+- `ASSOCIATED_WITH` → `x5b` — Qualification liquide-gaz : Q6-g liquide et gaz compressible explicite
+- `ASSOCIATED_WITH` → `x7e` — Qualification combinée pression gaz x6g + restauration de densité x7d
 
 ### `SPECIES_Q6_MIN_OCCUPANCY_FRACTION`
 
@@ -9551,7 +9620,9 @@ Surcharge surfaceTensionMinRadiusCells.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x12yl_young_laplace_calibrator.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
 
 ### `TARGET`
 
@@ -9570,7 +9641,7 @@ Choisit la cible du splash: paroi sèche ou flaque liquide initiale.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9s_splash_wall.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9s` — Impact/splash paramétrable
+- `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
 ### `THERMOSTAT_ENABLE`
 
@@ -9808,7 +9879,8 @@ Choisit un domaine initial sans particules gazeuses et phase B=vacuum dans les r
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x9r_dripping_jet_cutoff.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x9q` — Test de potentialité jet gravitaire / pincement / impact
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `WALL_KBT`
 
@@ -9861,7 +9933,7 @@ Sélectionne côté runner le mode x6g à exporter vers MPCD_Q6_PHASE_GAS_PRESSU
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14u` — Gaz incident normal
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `X7I_BEND_COMMON_FILLED_STATE`
 
@@ -9878,8 +9950,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_BEND_DUMP_EVERY`
 
@@ -9896,8 +9968,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_BEND_START_FROM_REST`
 
@@ -9914,8 +9986,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_BEND_STEPS`
 
@@ -9932,8 +10004,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_BEND_SUMMARY_EVERY`
 
@@ -9950,8 +10022,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_IO_BOX_DUMP_EVERY`
 
@@ -9968,8 +10040,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_IO_BOX_STEPS`
 
@@ -9986,8 +10058,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_IO_BOX_SUMMARY_EVERY`
 
@@ -10004,8 +10076,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_LIVE_VIS_ENABLE`
 
@@ -10022,8 +10094,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_LIVE_VIS_HOLD_ON_EXIT`
 
@@ -10040,8 +10112,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_BODY_AX`
 
@@ -10058,8 +10130,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_DUMP_EVERY`
 
@@ -10076,8 +10148,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_STEPS`
 
@@ -10094,8 +10166,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_SUMMARY_EVERY`
 
@@ -10112,8 +10184,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_U0`
 
@@ -10130,8 +10202,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_POISEUILLE_VELOCITY_MODE`
 
@@ -10148,8 +10220,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_PROJECTION_MAX_ITERATIONS`
 
@@ -10166,8 +10238,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_PROJECTION_TOLERANCE`
 
@@ -10184,8 +10256,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_G_F_RESIDENT_CG_0493X7J`
 
@@ -10202,8 +10274,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE`
 
@@ -10220,8 +10292,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES`
 
@@ -10238,8 +10310,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_DENSITY_RELAXATION_TIME`
 
@@ -10256,8 +10328,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_DENSITY_TRACTION_GAIN`
 
@@ -10274,8 +10346,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES`
 
@@ -10292,8 +10364,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_MIN_FILL_FRACTION`
 
@@ -10310,8 +10382,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_GF_SINGLE_BLOCK_CG_0407`
 
@@ -10328,8 +10400,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_LEGACY_SINGLE_BLOCK_CG_LARGE`
 
@@ -10346,8 +10418,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_LEGACY_SINGLE_BLOCK_CG_SMALL`
 
@@ -10364,8 +10436,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_Q6_STRICT`
 
@@ -10382,8 +10454,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_TG_DUMP_EVERY`
 
@@ -10400,8 +10472,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_TG_STEPS`
 
@@ -10418,8 +10490,8 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `X7I_TG_SUMMARY_EVERY`
 
@@ -10436,5 +10508,5 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `DEFINED_OR_USED_IN` — `scripts/run_0493x7i_q6_g_f_physical_qualification.sh`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0

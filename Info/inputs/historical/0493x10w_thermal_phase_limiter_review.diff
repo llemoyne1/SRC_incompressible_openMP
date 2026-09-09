@@ -1,0 +1,514 @@
+--- a/src/cuda_q6_resident_0400.cu
++++ b/src/cuda_q6_resident_0400.cu
+@@ -6648,6 +6648,7 @@
+     double lx, double ly,
+     int nx,
+     int periodicX, int periodicY,
++    double phaseNormalScale0493x10w,
+     const BiquadraticAlphaPatch0493x10biq& q,
+     const MovingSegment0493x10n& seg,
+     MovingSegmentCollision0493x10n* out) {
+@@ -6660,14 +6661,51 @@
+             seg, x0, y0, tStart, lx, ly, periodicX, periodicY,
+             &wallVx, &wallVy, nullptr, nullptr)) return false;
+
++    // 0493x10w: the stored particle velocity is NEVER modified here.
++    // Only the virtual trajectory used to decide phase transport may have its
++    // outward relative-normal thermal component reduced.  Tangential motion
++    // and the hydrodynamic wall-normal velocity are retained.
++    double phaseVx0493x10w = vx;
++    double phaseVy0493x10w = vy;
++    const double scale0493x10w =
++        fmin(1.0, fmax(0.0, phaseNormalScale0493x10w));
++    if (scale0493x10w < 1.0 - 1.0e-14) {
++        const double mx0493x10w =
++            0.5 * ((seg.ax + seg.uax * tStart) +
++                   (seg.bx + seg.ubx * tStart));
++        const double my0493x10w =
++            0.5 * ((seg.ay + seg.uay * tStart) +
++                   (seg.by + seg.uby * tStart));
++        double xiq0493x10w = 0.0, etaq0493x10w = 0.0;
++        q6_x10biq_local_coordinates(
++            mx0493x10w, my0493x10w, q.owner, nx, dx, dy, lx, ly,
++            periodicX, periodicY, &xiq0493x10w, &etaq0493x10w);
++        double level0493x10w = 0.0;
++        double nx0493x10w = 0.0, ny0493x10w = 0.0;
++        if (q6_x10biq_thermal_level(
++                q, xiq0493x10w, etaq0493x10w, thermalThickness,
++                dx, dy, 1, &level0493x10w,
++                &nx0493x10w, &ny0493x10w, nullptr)) {
++            const double reln0493x10w =
++                (vx - wallVx) * nx0493x10w +
++                (vy - wallVy) * ny0493x10w;
++            if (reln0493x10w > 0.0 && isfinite(reln0493x10w)) {
++                const double removed0493x10w =
++                    (1.0 - scale0493x10w) * reln0493x10w;
++                phaseVx0493x10w -= removed0493x10w * nx0493x10w;
++                phaseVy0493x10w -= removed0493x10w * ny0493x10w;
++            }
++        }
++    }
++
+     const double xGeom0 = x0 - wallVx * tStart;
+     const double yGeom0 = y0 - wallVy * tStart;
+     double xi0 = 0.0, eta0 = 0.0;
+     q6_x10biq_local_coordinates(
+         xGeom0, yGeom0, q.owner, nx, dx, dy, lx, ly,
+         periodicX, periodicY, &xi0, &eta0);
+-    const double ux = (vx - wallVx) / dx;
+-    const double uy = (vy - wallVy) / dy;
++    const double ux = (phaseVx0493x10w - wallVx) / dx;
++    const double uy = (phaseVy0493x10w - wallVy) / dy;
+
+     double f0 = 0.0, f1 = 0.0;
+     if (!q6_x10biq_level_at_tau(
+@@ -6731,8 +6769,8 @@
+     }
+     if (!isfinite(tau) || tau < 0.0 || tau > window) return false;
+
+-    const double xh = x0 + vx * tau;
+-    const double yh = y0 + vy * tau;
++    const double xh = x0 + phaseVx0493x10w * tau;
++    const double yh = y0 + phaseVy0493x10w * tau;
+     double wallVxHit = 0.0, wallVyHit = 0.0;
+     double lambdaRaw = 0.0, distance2 = 0.0;
+     if (!q6_x10biq_segment_wall_velocity(
+@@ -6771,6 +6809,203 @@
+     out->impulseWallX = impulse * nxh;
+     out->impulseWallY = impulse * nyh;
+     return isfinite(out->newVx) && isfinite(out->newVy);
++}
++
++// =============================================================================
++// 0493x10w-thermal-phase — LOCAL THERMAL PHASE-TRANSPORT LIMITER
++// =============================================================================
++// The physical particle velocity and kBT are unchanged.  This kernel computes
++// only a scale a in [a_cap,1] used by the Q2 crossing decision.  Lloc is the
++// minimum of a Q2 curvature radius and half the distance to the opposite
++// alpha=.5 interface along the inward normal.  The latter detects thin
++// ligaments/films even when their side curvature is nearly zero.
++//
++// scale scratch aliases x10m impulseX/Y BEFORE the relocation kernel.  x10u
++// produces zero wall impulse, and x10v aliases the same two buffers only AFTER
++// relocation, so no O(Ncell) allocation is added.
++
++__device__ __forceinline__ bool q6_x10w_curvature_radius_q2(
++    const BiquadraticAlphaPatch0493x10biq& q,
++    double xi, double eta, double dx, double dy,
++    double* radiusOut) {
++    if (!radiusOut || !q.valid) return false;
++    double rm=0.0, r0=0.0, rp=0.0;
++    double rxm=0.0, rx0=0.0, rxp=0.0;
++    q6_x10biq_quad1d(q.fmm, q.f0m, q.fpm, xi, &rm, &rxm);
++    q6_x10biq_quad1d(q.fm0, q.f00, q.fp0, xi, &r0, &rx0);
++    q6_x10biq_quad1d(q.fmp, q.f0p, q.fpp, xi, &rp, &rxp);
++
++    double f=0.0, fyEta=0.0;
++    q6_x10biq_quad1d(rm, r0, rp, eta, &f, &fyEta);
++    double fxXi=0.0, fxyXiEta=0.0;
++    q6_x10biq_quad1d(rxm, rx0, rxp, eta, &fxXi, &fxyXiEta);
++    const double rxxm = q.fpm - 2.0*q.f0m + q.fmm;
++    const double rxx0 = q.fp0 - 2.0*q.f00 + q.fm0;
++    const double rxxp = q.fpp - 2.0*q.f0p + q.fmp;
++    double fxxXi2=0.0;
++    q6_x10biq_quad1d(rxxm, rxx0, rxxp, eta, &fxxXi2, nullptr);
++    const double fyyEta2 = rp - 2.0*r0 + rm;
++
++    const double fx = fxXi / dx;
++    const double fy = fyEta / dy;
++    const double fxx = fxxXi2 / (dx*dx);
++    const double fxy = fxyXiEta / (dx*dy);
++    const double fyy = fyyEta2 / (dy*dy);
++    const double g2 = fx*fx + fy*fy;
++    if (!(g2 > 1.0e-24/(fmin(dx,dy)*fmin(dx,dy))) || !isfinite(g2))
++        return false;
++    const double denom = g2 * sqrt(g2);
++    const double kappa =
++        (fxx*fy*fy - 2.0*fxy*fx*fy + fyy*fx*fx) / denom;
++    const double ak = fabs(kappa);
++    if (!(ak > 1.0e-14/fmin(dx,dy)) || !isfinite(ak)) return false;
++    *radiusOut = 1.0 / ak;
++    return isfinite(*radiusOut) && *radiusOut > 0.0;
++}
++
++__device__ __forceinline__ double q6_x10w_segment_phase_scale(
++    const double* alpha,
++    const MovingSegment0493x10n& seg,
++    double thermalThickness,
++    double thermalDelta,
++    double chiOn,
++    double chiFull,
++    double scaleCap,
++    int nx, int ny,
++    double lx, double ly,
++    int periodicX, int periodicY) {
++    const double dx = lx / static_cast<double>(nx);
++    const double dy = ly / static_cast<double>(ny);
++    const double h = fmin(dx,dy);
++    const double cap = fmin(1.0, fmax(0.0, scaleCap));
++    if (!alpha || !(thermalDelta > 0.0) || !(chiFull > chiOn) ||
++        !(chiOn > 0.0) || cap >= 1.0 - 1.0e-14)
++        return 1.0;
++
++    BiquadraticAlphaPatch0493x10biq q{};
++    if (!q6_x10biq_build_patch(
++            alpha, seg.ownerCell, nx, ny, periodicX, periodicY, &q))
++        return 1.0;
++
++    const double mx = 0.5*(seg.ax + seg.bx);
++    const double my = 0.5*(seg.ay + seg.by);
++    double xiT=0.0, etaT=0.0;
++    q6_x10biq_local_coordinates(
++        mx, my, q.owner, nx, dx, dy, lx, ly,
++        periodicX, periodicY, &xiT, &etaT);
++    double level=0.0, nxo=0.0, nyo=0.0;
++    if (!q6_x10biq_thermal_level(
++            q, xiT, etaT, thermalThickness, dx, dy, 1,
++            &level, &nxo, &nyo, nullptr))
++        return 1.0;
++
++    // thermal wall q = base + delta*n_out
++    double bx = mx - thermalThickness*nxo;
++    double by = my - thermalThickness*nyo;
++    double xiB=0.0, etaB=0.0;
++    q6_x10biq_local_coordinates(
++        bx, by, q.owner, nx, dx, dy, lx, ly,
++        periodicX, periodicY, &xiB, &etaB);
++
++    double curvatureRadius = 1.0e300;
++    double rtmp=0.0;
++    if (q6_x10w_curvature_radius_q2(q, xiB, etaB, dx, dy, &rtmp))
++        curvatureRadius = rtmp;
++
++    // Verify the outward orientation from the CIC alpha itself. Fail open if
++    // neither side can be sampled cleanly.
++    double aIn=0.0, aOut=0.0;
++    const double orientStep = 0.5*h;
++    if (!q6_x9t_sample_alpha(alpha, bx-orientStep*nxo, by-orientStep*nyo,
++            nx, ny, lx, ly, periodicX, periodicY, &aIn) ||
++        !q6_x9t_sample_alpha(alpha, bx+orientStep*nxo, by+orientStep*nyo,
++            nx, ny, lx, ly, periodicX, periodicY, &aOut))
++        return 1.0;
++    if (aIn < aOut) { nxo = -nxo; nyo = -nyo; }
++
++    double oppositeHalf = 1.0e300;
++    const double ds = 0.5*h;
++    const double requiredFullDistance = 2.0*thermalDelta/chiOn;
++    const double maxDistance = fmin(64.0*h, requiredFullDistance + 2.0*h);
++    bool insideSeen = false;
++    double prevS = 0.0, prevA = 0.5;
++    for (int k=1; k<=128; ++k) {
++        const double s = static_cast<double>(k)*ds;
++        if (s > maxDistance + 1.0e-14) break;
++        double av=0.0;
++        if (!q6_x9t_sample_alpha(alpha, bx-s*nxo, by-s*nyo,
++                nx, ny, lx, ly, periodicX, periodicY, &av))
++            break;
++        if (!insideSeen) {
++            if (av >= 0.5) insideSeen = true;
++            prevS = s; prevA = av;
++            continue;
++        }
++        if (av < 0.5) {
++            double scross = s;
++            const double den = av - prevA;
++            if (fabs(den) > 1.0e-14 && isfinite(den)) {
++                const double frac = (0.5 - prevA)/den;
++                if (isfinite(frac) && frac >= 0.0 && frac <= 1.0)
++                    scross = prevS + frac*(s-prevS);
++            }
++            oppositeHalf = 0.5*scross;
++            break;
++        }
++        prevS = s; prevA = av;
++    }
++
++    const double localScale = fmin(curvatureRadius, oppositeHalf);
++    if (!(localScale > 0.0) || !isfinite(localScale) || localScale > 1.0e250)
++        return 1.0;
++    const double chi = thermalDelta/localScale;
++    if (!(chi > chiOn)) return 1.0;
++    if (chi >= chiFull) return cap;
++    double s = (chi-chiOn)/(chiFull-chiOn);
++    s = fmin(1.0, fmax(0.0, s));
++    const double w = s*s*(3.0-2.0*s);
++    return 1.0 - w*(1.0-cap);
++}
++
++__global__ void q6_x10w_build_thermal_phase_scales(
++    int numCells,
++    const double* alpha,
++    const unsigned char* segCount,
++    const double* segAx, const double* segAy,
++    const double* segBx, const double* segBy,
++    const double* segUax, const double* segUay,
++    const double* segUbx, const double* segUby,
++    double thermalThickness,
++    double thermalDelta,
++    double chiOn,
++    double chiFull,
++    double scaleCap,
++    int nx, int ny,
++    double lx, double ly,
++    int periodicX, int periodicY,
++    double* scale0,
++    double* scale1) {
++    const int idx = blockIdx.x*blockDim.x + threadIdx.x;
++    const int stride = blockDim.x*gridDim.x;
++    for (int owner=idx; owner<numCells; owner+=stride) {
++        const int ns = segCount ? static_cast<int>(segCount[owner]) : 0;
++        if (ns <= 0) continue;
++        for (int slot=0; slot<ns && slot<2; ++slot) {
++            const int s = 2*owner + slot;
++            MovingSegment0493x10n seg{};
++            seg.ax=segAx[s]; seg.ay=segAy[s];
++            seg.bx=segBx[s]; seg.by=segBy[s];
++            seg.uax=segUax[s]; seg.uay=segUay[s];
++            seg.ubx=segUbx[s]; seg.uby=segUby[s];
++            seg.ownerCell=owner;
++            const double a = q6_x10w_segment_phase_scale(
++                alpha, seg, thermalThickness, thermalDelta,
++                chiOn, chiFull, scaleCap,
++                nx, ny, lx, ly, periodicX, periodicY);
++            if (slot==0 && scale0) scale0[owner]=a;
++            if (slot==1 && scale1) scale1[owner]=a;
++        }
++    }
+ }
+
+ // =============================================================================
+@@ -6973,6 +7208,7 @@
+     double thermalThickness0493x10poly,
+     int quadraticInterface0493x10poly,
+     int oneForOneRelocation0493x10u,
++    int thermalPhaseLimiter0493x10w,
+     unsigned char* oneForOneRelocated0493x10v,
+     int microTraceStep0493x10diag,
+     KineticCrossingAccumulator0493x9x* audit) {
+@@ -7014,6 +7250,7 @@
+         int hitsTotal = 0;
+         bool sawAnySegment = false;
+         bool sawCandidateNoHit = false;
++        bool phaseTransportLimitedAny0493x10w = false;
+         int firstSearchCandidates = 0;
+
+         // Up to three local impacts handles a near-vertex hit without turning
+@@ -7032,6 +7269,9 @@
+             double bestTau = remaining + 1.0;
+             int validHits = 0;
+             int candidates = 0;
++            MovingSegmentCollision0493x10n suppressedRaw0493x10w{};
++            double suppressedTau0493x10w = remaining + 1.0;
++            double suppressedScale0493x10w = 1.0;
+
+             InitialOverlapNearest0493x10p nearest{};
+             double nearestDistance0493x10p = 1.0e300;
+@@ -7098,13 +7338,50 @@
+                         bool hitOk0493x10poly = false;
+                         if (quadraticInterface0493x10poly &&
+                             patchValid0493x10poly) {
++                            double phaseScale0493x10w = 1.0;
++                            if (thermalPhaseLimiter0493x10w) {
++                                phaseScale0493x10w = slot == 0
++                                    ? wallImpulseX[owner]
++                                    : wallImpulseY[owner];
++                                if (!isfinite(phaseScale0493x10w) ||
++                                    phaseScale0493x10w < 0.0 ||
++                                    phaseScale0493x10w > 1.0)
++                                    phaseScale0493x10w = 1.0; // fail open
++                            }
+                             hitOk0493x10poly = q6_x10biq_collide_moving_patch(
+                                 cx, cy, cvx, cvy, mass,
+                                 elapsed, remaining,
+                                 thermalThickness0493x10poly,
+                                 dx, dy, lx, ly, nx,
+                                 periodicX, periodicY,
++                                phaseScale0493x10w,
+                                 patch0493x10poly, seg, &hit);
++                            // A raw Q2 crossing that disappears under the
++                            // phase-transport scale is NOT a relocation/swap.
++                            // Remember only the earliest such event so that a
++                            // position-only support shift can cancel the
++                            // unresolved thermal normal excursion.
++                            if (!hitOk0493x10poly &&
++                                thermalPhaseLimiter0493x10w &&
++                                phaseScale0493x10w < 1.0 - 1.0e-14) {
++                                MovingSegmentCollision0493x10n raw0493x10w{};
++                                const bool rawOk0493x10w =
++                                    q6_x10biq_collide_moving_patch(
++                                        cx, cy, cvx, cvy, mass,
++                                        elapsed, remaining,
++                                        thermalThickness0493x10poly,
++                                        dx, dy, lx, ly, nx,
++                                        periodicX, periodicY,
++                                        1.0, patch0493x10poly, seg,
++                                        &raw0493x10w);
++                                if (rawOk0493x10w &&
++                                    raw0493x10w.tau < suppressedTau0493x10w) {
++                                    suppressedRaw0493x10w = raw0493x10w;
++                                    suppressedTau0493x10w = raw0493x10w.tau;
++                                    suppressedScale0493x10w =
++                                        phaseScale0493x10w;
++                                }
++                            }
+                         } else {
+                             // Numerical/stencil fallback only.  A valid
+                             // quadratic patch that reports no crossing does
+@@ -7263,6 +7540,27 @@
+                         // already finite and signedDistance>sideTol.
+                         atomicAdd(&audit->x10qOverlapResolveFailure, 1ull);
+                     }
++                }
++            }
++
++            if (!best.hit && suppressedRaw0493x10w.hit &&
++                thermalPhaseLimiter0493x10w) {
++                const double removedVn0493x10w =
++                    (1.0 - suppressedScale0493x10w) *
++                    fmax(0.0, suppressedRaw0493x10w.relnBefore);
++                if (removedVn0493x10w > 0.0 &&
++                    isfinite(removedVn0493x10w)) {
++                    // particles.x/y are pre-stream coordinates here. Shifting
++                    // by -removedVn*n*remaining makes the later ordinary
++                    // streaming end exactly at the filtered phase endpoint.
++                    // vx/vy are intentionally unchanged.
++                    cx -= removedVn0493x10w *
++                          suppressedRaw0493x10w.nx * remaining;
++                    cy -= removedVn0493x10w *
++                          suppressedRaw0493x10w.ny * remaining;
++                    phaseTransportLimitedAny0493x10w = true;
++                    sawCandidateNoHit = true;
++                    break;
+                 }
+             }
+
+@@ -7375,7 +7673,7 @@
+         if (audit && hitsTotal >= 3)
+             atomicAdd(&audit->continuousWallCollisionLimitReached, 1ull);
+
+-        if (hitsTotal == 0) continue;
++        if (hitsTotal == 0 && !phaseTransportLimitedAny0493x10w) continue;
+         const double remaining = fmax(0.0, dt - elapsed);
+         const double xf = cx + cvx * remaining;
+         const double yf = cy + cvy * remaining;
+@@ -7388,7 +7686,8 @@
+         // particle kinetic energy are invariant under the support correction.
+         particles.vx[p] = cvx;
+         particles.vy[p] = cvy;
+-        if (oneForOneRelocation0493x10u && oneForOneRelocated0493x10v)
++        if (hitsTotal > 0 && oneForOneRelocation0493x10u &&
++            oneForOneRelocated0493x10v)
+             oneForOneRelocated0493x10v[p] = 1u;
+         if (audit)
+             atomic_add_double_0400(
+@@ -16823,6 +17122,18 @@
+     }
+     const bool oneForOneVelocitySwap0493x10v =
+         oneForOneRelocation0493x10u && oneForOneVelocitySwapRequested0493x10v;
++    const bool thermalPhaseLimiterRequested0493x10w =
++        env_int_0400("MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER", 0) != 0;
++    if (thermalPhaseLimiterRequested0493x10w &&
++        !oneForOneVelocitySwap0493x10v) {
++        throw std::runtime_error(
++            "0493x10w thermal phase limiter requires x10v one-for-one velocity swap");
++    }
++    if (thermalPhaseLimiterRequested0493x10w &&
++        !q6ThermalInterfaceWall0493x10o) {
++        throw std::runtime_error(
++            "0493x10w thermal phase limiter requires x10o thermal Q6 interface wall");
++    }
+     static bool oneForOneRelocationReported0493x10u = false;
+     if (q6ThermalInterfaceWall0493x10o &&
+         !oneForOneRelocationReported0493x10u) {
+@@ -16876,6 +17187,53 @@
+             sqrt(fmax(0.0, thermalKBT0493x10o) / particleMass0493x10o);
+         thermalThickness0493x10o = fmin(
+             thermalMaxCells0493x10o * h0493x10o, ballistic0493x10o);
++    }
++
++    const double h0493x10w = fmin(
++        params.Lx / static_cast<double>(grid.Nx),
++        params.Ly / static_cast<double>(grid.Ny));
++    const double particleMass0493x10w = fmax(
++        1.0e-30, env_double_0400("MPCD_X10O_THERMAL_PARTICLE_MASS", 1.0));
++    const double thermalSigmas0493x10w = fmax(
++        0.0, env_double_0400("MPCD_X10O_THERMAL_SIGMAS", 3.0));
++    const double thermalKBT0493x10w =
++        params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
++    const double thermalStep0493x10w = params.dt *
++        sqrt(fmax(0.0, thermalKBT0493x10w) / particleMass0493x10w);
++    const double thermalDelta0493x10w = thermalSigmas0493x10w * thermalStep0493x10w;
++    const double eta0493x10w = h0493x10w > 0.0
++        ? thermalStep0493x10w / h0493x10w : 0.0;
++    const double chiOn0493x10w =
++        env_double_0400("MPCD_X10W_THERMAL_PHASE_CHI_ON", 0.022);
++    const double chiFull0493x10w =
++        env_double_0400("MPCD_X10W_THERMAL_PHASE_CHI_FULL", 0.028);
++    const double etaCap0493x10w =
++        env_double_0400("MPCD_X10W_THERMAL_PHASE_ETA_CAP", 0.05724334);
++    if (!(chiOn0493x10w > 0.0) || !(chiFull0493x10w > chiOn0493x10w) ||
++        !(etaCap0493x10w > 0.0)) {
++        throw std::runtime_error(
++            "0493x10w invalid thermal phase limiter thresholds");
++    }
++    const double phaseScaleCap0493x10w = eta0493x10w > 0.0
++        ? fmin(1.0, etaCap0493x10w / eta0493x10w) : 1.0;
++    const bool thermalPhaseLimiter0493x10w =
++        thermalPhaseLimiterRequested0493x10w &&
++        q6ThermalInterfaceWall0493x10o && quadraticInterface0493x10poly;
++    static bool thermalPhaseLimiterReported0493x10w = false;
++    if (q6ThermalInterfaceWall0493x10o &&
++        !thermalPhaseLimiterReported0493x10w) {
++        std::cout << "[0493x10w-thermal-phase] enabled="
++                  << (thermalPhaseLimiter0493x10w ? 1 : 0)
++                  << " chiOn=" << chiOn0493x10w
++                  << " chiFull=" << chiFull0493x10w
++                  << " eta=" << eta0493x10w
++                  << " etaCap=" << etaCap0493x10w
++                  << " scaleCap=" << phaseScaleCap0493x10w
++                  << " deltaTOverH="
++                  << (h0493x10w > 0.0 ? thermalDelta0493x10w/h0493x10w : 0.0)
++                  << " semantics=phase-position-normal-only;vx-vy-kBT-unchanged"
++                  << std::endl;
++        thermalPhaseLimiterReported0493x10w = true;
+     }
+
+     const int mesoBlockCells =
+@@ -17011,6 +17369,29 @@
+             auditDev);
+         check_cuda_0400(
+             cudaGetLastError(), "0493x10n continuous-interface build launch");
++        if (thermalPhaseLimiter0493x10w) {
++            q6_x10w_build_thermal_phase_scales<<<cellBlocks, threads>>>(
++                grid.numCells, phaseAlphaKinetic0493x10cic,
++                ws.kineticContinuousSegCount0493x10n.data(),
++                ws.kineticContinuousSegAx0493x10n.data(),
++                ws.kineticContinuousSegAy0493x10n.data(),
++                ws.kineticContinuousSegBx0493x10n.data(),
++                ws.kineticContinuousSegBy0493x10n.data(),
++                ws.kineticContinuousSegUax0493x10n.data(),
++                ws.kineticContinuousSegUay0493x10n.data(),
++                ws.kineticContinuousSegUbx0493x10n.data(),
++                ws.kineticContinuousSegUby0493x10n.data(),
++                thermalThickness0493x10o, thermalDelta0493x10w,
++                chiOn0493x10w, chiFull0493x10w,
++                phaseScaleCap0493x10w,
++                grid.Nx, grid.Ny, params.Lx, params.Ly,
++                periodicX, periodicY,
++                ws.kineticMovingWallImpulseX0493x10m.data(),
++                ws.kineticMovingWallImpulseY0493x10m.data());
++            check_cuda_0400(
++                cudaGetLastError(),
++                "0493x10w thermal phase-scale build launch");
++        }
+     } else if (movingInterfaceWall0493x10m) {
+         const std::size_t cellCount =
+             static_cast<std::size_t>(std::max(1, grid.numCells));
+@@ -17180,6 +17561,7 @@
+             thermalThickness0493x10o,
+             quadraticInterface0493x10poly ? 1 : 0,
+             oneForOneRelocation0493x10u ? 1 : 0,
++            thermalPhaseLimiter0493x10w ? 1 : 0,
+             oneForOneVelocitySwap0493x10v
+                 ? ws.kineticOneForOneRelocated0493x10v.data()
+                 : nullptr,

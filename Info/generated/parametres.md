@@ -454,7 +454,9 @@ Gain sans dimension de la fermeture EOS virielle continuum.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7a` — Kick viriel de densité CUDA résident
+- `ASSOCIATED_WITH` → `x7b` — Sémantique continue et diagnostic de grille du viriel
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `bodyAccelerationX`
 
@@ -2817,10 +2819,10 @@ Profil spatial de vitesse/flux imposé sur les entrées.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `inletVelocityWallTaperCells`
 
@@ -2929,7 +2931,9 @@ Module continuum du terme de pression/accélération virielle associé au défau
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7a` — Kick viriel de densité CUDA résident
+- `ASSOCIATED_WITH` → `x7b` — Sémantique continue et diagnostic de grille du viriel
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `leftOpenYMax`
 
@@ -3236,10 +3240,10 @@ Choisit le régime de sortie: sortie passive, extraction équilibrée ou extract
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `openBoundarySegmentCount`
 
@@ -3441,15 +3445,17 @@ Sélectionne la phase A: côté alpha>=0.5, référence de masse, orientation A-
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9g` — Sélecteurs de phases A/B
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9g` — Généralisation de l'interface aux paires de phases A/B
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `phaseInterfaceBSelector`
 
@@ -3473,17 +3479,20 @@ Sélectionne le côté extérieur B de l’interface; peut fournir la pression g
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9g` — Sélecteurs de phases A/B
-- `ASSOCIATED_WITH` → `x9h` — Géométrie de paroi pour mouillage
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9g` — Généralisation de l'interface aux paires de phases A/B
+- `ASSOCIATED_WITH` → `x9h` — Provider géométrique résident de paroi
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
+- `ASSOCIATED_WITH` → `x9t` — Première rétention cinétique liquide-vide conservative
 
 ### `phaseInterfaceContactAngleDegrees`
 
@@ -3509,13 +3518,19 @@ Prescrit l’angle de contact mesuré à travers A, avec nAB·nWall=-cos(thetaA)
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9m` — Fermeture statique de mouillage
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9i` — Première fermeture d'angle de contact par normale imposée
+- `ASSOCIATED_WITH` → `x9j` — Fermeture d'angle par ghost-alpha de courbure
+- `ASSOCIATED_WITH` → `x9k` — Ghost-alpha par miroir cisaillé
+- `ASSOCIATED_WITH` → `x9l` — Reconstruction de normale au mur-face
+- `ASSOCIATED_WITH` → `x9m` — Fermeture statique de mouillage par ancre hors support
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `phaseInterfaceEvaporationTargetType`
 
@@ -3539,11 +3554,20 @@ Type cible optionnel associé aux particules transmises par la loi cinétique lo
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
+- `ASSOCIATED_WITH` → `x9t` — Première rétention cinétique liquide-vide conservative
+- `ASSOCIATED_WITH` → `x9u` — Extension de la réflexion aux sorties de support
+- `ASSOCIATED_WITH` → `x9v` — Diagnostic des voies de fuite de la fermeture x9u
+- `ASSOCIATED_WITH` → `x9w` — Bain de recul strictement bulk
+- `ASSOCIATED_WITH` → `x9x` — Réflexion au crossing physique prédit
+- `ASSOCIATED_WITH` → `x9y` — Côté alpha pointwise et crossing par bissection bornée
+- `ASSOCIATED_WITH` → `x9z` — Réflexion individuelle des donneurs et compensation affine du bain
 
 ### `phaseInterfaceKineticBilateralRelocation`
 
@@ -3566,7 +3590,7 @@ Type cible optionnel associé aux particules transmises par la loi cinétique lo
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
@@ -3595,18 +3619,27 @@ Probabilité de réfléchir une tentative de franchissement sortante relative g=
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x10o` — Paroi thermique / enveloppe locale
-- `ASSOCIATED_WITH` → `x10u` — Relocalisation one-for-one
-- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
+- `ASSOCIATED_WITH` → `x10o` — Paroi cinétique Q6 hydrodynamique à enveloppe thermique
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x10u` — Relocalisation conservative one-for-one
+- `ASSOCIATED_WITH` → `x10v` — Swap local full-vector one-for-one
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
 - `ASSOCIATED_WITH` → `x14y` — Ablation sans soustraction p_g
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
+- `ASSOCIATED_WITH` → `x9t` — Première rétention cinétique liquide-vide conservative
+- `ASSOCIATED_WITH` → `x9u` — Extension de la réflexion aux sorties de support
+- `ASSOCIATED_WITH` → `x9v` — Diagnostic des voies de fuite de la fermeture x9u
+- `ASSOCIATED_WITH` → `x9w` — Bain de recul strictement bulk
+- `ASSOCIATED_WITH` → `x9x` — Réflexion au crossing physique prédit
+- `ASSOCIATED_WITH` → `x9y` — Côté alpha pointwise et crossing par bissection bornée
+- `ASSOCIATED_WITH` → `x9z` — Réflexion individuelle des donneurs et compensation affine du bain
 
 ### `projectionAllowUnmaskedImmersedSolid`
 
@@ -3791,9 +3824,9 @@ Tolérance relative/numérique du solveur de projection.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7j` — CG coopératif CUDA résident
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7j` — CG Q6-g-f entièrement CUDA résident
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationBeta`
 
@@ -3820,7 +3853,8 @@ Coefficient de relaxation de densité par pas; impose div(u_proj)=beta*(rawFill-
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7c` — Restauration de densité intégrée au RHS Q6
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationCompressionGateEnable`
 
@@ -3844,8 +3878,9 @@ Active l’admission cohérente de la branche positive: cellule et au moins un v
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7i` — Qualification multi-conditions-limites
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationCompressionThresholdFill`
 
@@ -3869,7 +3904,8 @@ Seuil du défaut positif de remplissage utilisé par le gate cohérent de compre
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationTime`
 
@@ -3895,8 +3931,9 @@ Constante de temps physique tau_rho de restauration de densité; impose div(u_pr
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7d` — Relaxation de densité dans le RHS
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7c` — Restauration de densité intégrée au RHS Q6
+- `ASSOCIATED_WITH` → `x7d` — Constante de temps physique de restauration de densité
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationTractionGain`
 
@@ -3921,7 +3958,9 @@ Multiplie la cible négative admise par le gate de traction; 0 est un no-op exac
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7d-v2-signed1` — Restauration de densité signée à gates cohérents
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6DensityRelaxationTractionThresholdFill`
 
@@ -3945,7 +3984,9 @@ Seuil en valeur absolue du défaut négatif pour la branche cohérente de tracti
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7d-v2` — Gate cohérent de compression pour la restauration de densité
+- `ASSOCIATED_WITH` → `x7d-v2-signed1` — Restauration de densité signée à gates cohérents
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6ForceProjectionMode`
 
@@ -3975,9 +4016,9 @@ Choisit l’ordre force/Q6/streaming; prestream_single_fused projette la vitesse
 - `DEFINED_OR_USED_IN` — `src/src_mpcd_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x3` — Q6-g force-aware - preuve de concept
-- `ASSOCIATED_WITH` → `x7g` — Darcy avant projection
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x3` — Q6-g force-aware — preuve de concept prestream à deux solves
+- `ASSOCIATED_WITH` → `x7g` — Darcy-Brinkman placé avant la projection Q6-g-f
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `q6PressureOutletDeflationEnable`
 
@@ -3995,9 +4036,9 @@ Active/désactive uniquement la déflation exacte x8s des modes lents des pressu
 **Remarques.** Switch d’ablation runtime; géométrie partielle non séparable désactive automatiquement la déflation spécialisée.
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x8r` — Outlet pression Neumann
-- `ASSOCIATED_WITH` → `x8s` — Déflation des modes lents du CG
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
+- `ASSOCIATED_WITH` → `x8r` — Outlet de pression Neumann Q6-g-f
+- `ASSOCIATED_WITH` → `x8s` — Déflation exacte des modes longitudinaux lents du CG
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
 
 ### `q6ProjectionStrength`
 
@@ -5014,9 +5055,9 @@ Seuil de support des modes Q6 masqués; sens dépend du mode.
 - `DEFINED_OR_USED_IN` — `src/q6_species_distribution_0491a.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x5a` — free_surface_masked initial
-- `ASSOCIATED_WITH` → `x7m` — Correction topologie monophase
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x5a` — Q6-g free_surface_masked — premier liquide partiellement rempli
+- `ASSOCIATED_WITH` → `x7m` — Garde topologique monophase par registre de phases
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `speciesQ6Mode`
 
@@ -5048,9 +5089,9 @@ Sélectionne l’opérateur Q6 multi-espèces / surface libre.
 - `DEFINED_OR_USED_IN` — `src/q6_species_distribution_0491a.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x5a` — free_surface_masked initial
-- `ASSOCIATED_WITH` → `x6f` — Stencil physique d'interface
-- `ASSOCIATED_WITH` → `x6g` — Pression gazeuse interfaciale
+- `ASSOCIATED_WITH` → `x5a` — Q6-g free_surface_masked — premier liquide partiellement rempli
+- `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
+- `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 ### `speciesQ6Sensitivity`
 
@@ -5493,14 +5534,18 @@ Rayon minimal résolu en cellules pour la courbure utilisée uniquement dans sig
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local petites structures
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
-- `ASSOCIATED_WITH` → `x12d` — Benchmark JFM 524
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12a` — Refroidissement thermique local des petites structures
+- `ASSOCIATED_WITH` → `x12b` — Prototype JFM D=320h sur obstacle Darcy/chi
+- `ASSOCIATED_WITH` → `x12c` — Benchmark JFM compact-Y à physique inchangée
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
+- `ASSOCIATED_WITH` → `x12d` — Cas de mesure JFM 524 à géométrie/We/Fr ciblés
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `surfaceTensionSigma`
 
@@ -5527,13 +5572,15 @@ Coefficient de tension superficielle utilisé dans le saut de Laplace p_A-p_B=si
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique capillaire
-- `ASSOCIATED_WITH` → `x12d` — Benchmark JFM 524
-- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique de sigma
-- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté Poiseuille local
-- `ASSOCIATED_WITH` → `x8t` — Relaxation densité sans mode moyen
-- `ASSOCIATED_WITH` → `x9d` — Activation du saut de Laplace
-- `ASSOCIATED_WITH` → `x9r` — Cutoff de petite courbure résolue
+- `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
+- `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
+- `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
+- `ASSOCIATED_WITH` → `x12d` — Cas de mesure JFM 524 à géométrie/We/Fr ciblés
+- `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
+- `ASSOCIATED_WITH` → `x8k` — Inlet segmenté à profil de Poiseuille local
+- `ASSOCIATED_WITH` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
+- `ASSOCIATED_WITH` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+- `ASSOCIATED_WITH` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `targetMeanUx`
 
@@ -5980,7 +6027,9 @@ Active le kick de densité viriel continuum avant/avec le chemin de projection Q
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7a` — Kick viriel de densité CUDA résident
+- `ASSOCIATED_WITH` → `x7b` — Sémantique continue et diagnostic de grille du viriel
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `virialMomentumCorrectionEnable`
 
@@ -6002,7 +6051,9 @@ Active la correction globale de moment associée au kick viriel explicite.
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
 
 **Jalons associés :**
-- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique
+- `ASSOCIATED_WITH` → `x7a` — Kick viriel de densité CUDA résident
+- `ASSOCIATED_WITH` → `x7b` — Sémantique continue et diagnostic de grille du viriel
+- `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
 ### `wallAccommodation`
 

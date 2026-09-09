@@ -78,3 +78,11 @@ Le Markdown d'audit développe seulement :
 - les candidats B à signal fort (plusieurs preuves ou commit unique hors mainline).
 
 Le CSV `candidats_git.csv` conserve l'inventaire complet.
+
+## Extension V4.1 — promotion historique contrôlée
+
+La curation `0002_0490_multispecies_resampling.sql` illustre le flux de promotion : le
+jalon est créé explicitement dans `milestones`, puis Git ne sert qu'à compléter sa
+provenance. Un candidat numérique n'est relié automatiquement que si son label est unique
+des deux côtés. Cette règle permet de faire disparaître les 0490 curés du backlog non
+résolu sans réintroduire la collision historique des labels comme `0414`.

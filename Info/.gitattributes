@@ -1,2 +1,5 @@
 *.sqlite binary
 inputs/snapshots/*.csv binary
+
+# Immutable historical evidence snapshots: preserve bytes; avoid whitespace/diff noise.
+inputs/historical/*.tex -diff

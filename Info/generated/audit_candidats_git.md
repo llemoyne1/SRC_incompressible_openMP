@@ -6,38 +6,109 @@
 
 | Statut | Confiance | Nombre |
 |---|---|---:|
-| CANDIDATE | A | 499 |
-| CANDIDATE | B | 565 |
-| CANDIDATE | C | 2 |
-| LINKED | A | 11 |
-| LINKED | B | 87 |
+| CANDIDATE | A | 467 |
+| CANDIDATE | B | 500 |
+| CANDIDATE | C | 3 |
+| CURATED | A | 43 |
+| CURATED | B | 8 |
+| LINKED | A | 13 |
+| LINKED | B | 151 |
 
 ## Candidats déjà reliés à un jalon canonique
 
 | Label | Candidat | Preuves |
 |---|---|---:|
+| `0490a` | `candidate:numeric:0490a:commit-cb8a4cbf8774` | 3 |
+| `0490b` | `candidate:numeric:0490b:commit-545fc6232939` | 5 |
+| `0490c` | `candidate:numeric:0490c:commit-58029bd58881` | 3 |
+| `0490d` | `candidate:numeric:0490d:commit-31666789d28d` | 3 |
+| `0490e` | `candidate:numeric:0490e:commit-4601ad492be5` | 3 |
+| `0490f` | `candidate:numeric:0490f:commit-6d9c83f0df4f` | 3 |
+| `0490g` | `candidate:numeric:0490g:commit-d30281e7a17c` | 3 |
+| `0490h` | `candidate:numeric:0490h:commit-12c471b1e292` | 5 |
+| `0490i` | `candidate:numeric:0490i:commit-1c3f10b53731` | 5 |
+| `0490j` | `candidate:numeric:0490j:commit-5295fc791617` | 3 |
+| `0490k` | `candidate:numeric:0490k:commit-3004c6f98ca7` | 5 |
+| `0490l` | `candidate:numeric:0490l:commit-d0c2de1fbc7a` | 3 |
+| `0490m` | `candidate:numeric:0490m:commit-3d7ce88b7893` | 5 |
+| `0490n` | `candidate:numeric:0490n:commit-ab945606f836` | 5 |
+| `0490n-fix1` | `candidate:numeric:0490n-fix1:commit-db9e0f45f9d0` | 2 |
+| `0490n-fix2` | `candidate:numeric:0490n-fix2:commit-e735f82f86f8` | 4 |
+| `0490p` | `candidate:numeric:0490p:commit-36abd23c9d53` | 4 |
+| `0491a` | `candidate:numeric:0491a:commit-a30faac79bc6` | 4 |
+| `0491h` | `candidate:numeric:0491h:commit-a30faac79bc6` | 4 |
+| `0491h-fix1` | `candidate:numeric:0491h-fix1:commit-2fb9c30bde70` | 5 |
+| `0492` | `candidate:numeric:0492:commit-aa0a4a0a42f3` | 2 |
+| `0493a` | `candidate:numeric:0493a:commit-aa0a4a0a42f3` | 2 |
+| `0493b` | `candidate:numeric:0493b:commit-7da2eec23657` | 4 |
+| `0493c` | `candidate:numeric:0493c:commit-95eda1899e8b` | 7 |
+| `0493c-fix3` | `candidate:numeric:0493c-fix3:commit-1a705cb78eb1` | 1 |
+| `0493d-fix1` | `candidate:numeric:0493d-fix1:commit-95f408ab1a21` | 1 |
+| `0493e` | `candidate:numeric:0493e:commit-7c5e63290ff4` | 4 |
+| `0493f` | `candidate:numeric:0493f:commit-7c5e63290ff4` | 3 |
+| `0493g` | `candidate:numeric:0493g:commit-7c5e63290ff4` | 3 |
+| `0493h` | `candidate:numeric:0493h:commit-6ee2e45825ef` | 4 |
+| `0493j` | `candidate:numeric:0493j:commit-6ee2e45825ef` | 1 |
+| `0493o0` | `candidate:numeric:0493o0:commit-eac470a5cca3` | 5 |
+| `0493o1` | `candidate:numeric:0493o1:commit-d57a68bb6fed` | 6 |
+| `0493o3` | `candidate:numeric:0493o3:commit-d57a68bb6fed` | 3 |
+| `0493o4` | `candidate:numeric:0493o4:commit-b65b44b29537` | 2 |
+| `0493w0` | `candidate:numeric:0493w0:commit-fcd24d9724e0` | 5 |
+| `0493w1` | `candidate:numeric:0493w1:commit-fcd24d9724e0` | 7 |
+| `0493w2` | `candidate:numeric:0493w2:commit-16ba34f537bf` | 2 |
+| `0493w3` | `candidate:numeric:0493w3:commit-9355b6be19ec` | 1 |
+| `0493w5` | `candidate:numeric:0493w5:commit-b389834cef39` | 3 |
+| `0493w6` | `candidate:numeric:0493w6:commit-b389834cef39` | 3 |
+| `0493w7` | `candidate:numeric:0493w7:commit-b389834cef39` | 4 |
+| `0493w8` | `candidate:numeric:0493w8:commit-caa5b6b632fd` | 5 |
 | `x1` | `candidate:x:x1` | 4 |
 | `x10o` | `candidate:x:x10o` | 10 |
+| `x10p` | `candidate:x:x10p` | 5 |
 | `x10u` | `candidate:x:x10u` | 2 |
 | `x10v` | `candidate:x:x10v` | 2 |
 | `x12a` | `candidate:x:x12a` | 22 |
 | `x14v` | `candidate:x:x14v` | 7 |
-| `x2` | `candidate:x:x2` | 3 |
+| `x6f2` | `candidate:x:x6f2` | 4 |
 | `x7j` | `candidate:x:x7j` | 3 |
+| `x8c` | `candidate:x:x8c` | 5 |
 | `x8k` | `candidate:x:x8k` | 3 |
 | `x9g` | `candidate:x:x9g` | 3 |
 | `x9h` | `candidate:x:x9h` | 3 |
+| `0490m-fix2` | `candidate:numeric:0490m-fix2:commit-3d7ce88b7893` | 1 |
+| `0491d` | `candidate:numeric:0491d:commit-a30faac79bc6` | 2 |
+| `0491e` | `candidate:numeric:0491e:commit-a30faac79bc6` | 2 |
+| `0491f` | `candidate:numeric:0491f:commit-a30faac79bc6` | 2 |
+| `0491g` | `candidate:numeric:0491g:commit-a30faac79bc6` | 2 |
+| `0493f-fix2` | `candidate:numeric:0493f-fix2:commit-7c5e63290ff4` | 1 |
+| `0493o1-fix2` | `candidate:numeric:0493o1-fix2:commit-d57a68bb6fed` | 2 |
+| `0493o2-fix1` | `candidate:numeric:0493o2-fix1:commit-d57a68bb6fed` | 2 |
+| `x0` | `candidate:x:x0` | 9 |
+| `x10a` | `candidate:x:x10a` | 3 |
+| `x10b` | `candidate:x:x10b` | 3 |
+| `x10c` | `candidate:x:x10c` | 3 |
+| `x10d` | `candidate:x:x10d` | 3 |
+| `x10e` | `candidate:x:x10e` | 3 |
+| `x10f` | `candidate:x:x10f` | 3 |
+| `x10g` | `candidate:x:x10g` | 5 |
+| `x10h` | `candidate:x:x10h` | 4 |
+| `x10i` | `candidate:x:x10i` | 4 |
 | `x10j` | `candidate:x:x10j` | 5 |
 | `x10k` | `candidate:x:x10k` | 5 |
 | `x10l` | `candidate:x:x10l` | 2 |
 | `x10m` | `candidate:x:x10m` | 5 |
 | `x10n` | `candidate:x:x10n` | 5 |
+| `x10q` | `candidate:x:x10q` | 2 |
 | `x10r` | `candidate:x:x10r` | 1 |
 | `x10s` | `candidate:x:x10s` | 1 |
 | `x10t` | `candidate:x:x10t` | 1 |
 | `x10w` | `candidate:x:x10w` | 6 |
+| `x10x` | `candidate:x:x10x` | 4 |
+| `x10y` | `candidate:x:x10y` | 1 |
 | `x11a` | `candidate:x:x11a` | 4 |
 | `x11b` | `candidate:x:x11b` | 4 |
+| `x11c` | `candidate:x:x11c` | 6 |
+| `x12b` | `candidate:x:x12b` | 1 |
+| `x12c` | `candidate:x:x12c` | 1 |
 | `x12cal` | `candidate:x:x12cal` | 4 |
 | `x12d` | `candidate:x:x12d` | 2 |
 | `x12yl` | `candidate:x:x12yl` | 4 |
@@ -49,15 +120,27 @@
 | `x13f` | `candidate:x:x13f` | 7 |
 | `x13g` | `candidate:x:x13g` | 5 |
 | `x13h` | `candidate:x:x13h` | 19 |
+| `x13i` | `candidate:x:x13i` | 3 |
 | `x13j` | `candidate:x:x13j` | 5 |
 | `x13k` | `candidate:x:x13k` | 3 |
 | `x13l` | `candidate:x:x13l` | 3 |
 | `x13m` | `candidate:x:x13m` | 3 |
 | `x13n` | `candidate:x:x13n` | 10 |
+| `x13p` | `candidate:x:x13p` | 3 |
+| `x13q` | `candidate:x:x13q` | 2 |
+| `x13r` | `candidate:x:x13r` | 3 |
+| `x13s` | `candidate:x:x13s` | 3 |
 | `x13t` | `candidate:x:x13t` | 10 |
+| `x13u` | `candidate:x:x13u` | 6 |
+| `x13v` | `candidate:x:x13v` | 3 |
 | `x13w` | `candidate:x:x13w` | 9 |
 | `x13x` | `candidate:x:x13x` | 7 |
 | `x13z` | `candidate:x:x13z` | 2 |
+| `x13za` | `candidate:x:x13za` | 3 |
+| `x13zb` | `candidate:x:x13zb` | 3 |
+| `x13zb2` | `candidate:x:x13zb2` | 3 |
+| `x13zb3` | `candidate:x:x13zb3` | 3 |
+| `x13zc` | `candidate:x:x13zc` | 3 |
 | `x13zd` | `candidate:x:x13zd` | 4 |
 | `x14aa` | `candidate:x:x14aa` | 1 |
 | `x14ab` | `candidate:x:x14ab` | 1 |
@@ -86,10 +169,12 @@
 | `x14x` | `candidate:x:x14x` | 6 |
 | `x14y` | `candidate:x:x14y` | 1 |
 | `x14z` | `candidate:x:x14z` | 1 |
+| `x2` | `candidate:x:x2` | 2 |
 | `x3` | `candidate:x:x3` | 5 |
 | `x4a` | `candidate:x:x4a` | 5 |
 | `x4b` | `candidate:x:x4b` | 5 |
 | `x5a` | `candidate:x:x5a` | 6 |
+| `x5a2` | `candidate:x:x5a2` | 6 |
 | `x5b` | `candidate:x:x5b` | 7 |
 | `x6a` | `candidate:x:x6a` | 4 |
 | `x6b` | `candidate:x:x6b` | 4 |
@@ -98,22 +183,56 @@
 | `x6e` | `candidate:x:x6e` | 4 |
 | `x6f` | `candidate:x:x6f` | 4 |
 | `x6g` | `candidate:x:x6g` | 20 |
+| `x7a` | `candidate:x:x7a` | 3 |
+| `x7b` | `candidate:x:x7b` | 3 |
+| `x7c` | `candidate:x:x7c` | 3 |
 | `x7d` | `candidate:x:x7d` | 10 |
 | `x7e` | `candidate:x:x7e` | 6 |
 | `x7f` | `candidate:x:x7f` | 4 |
 | `x7g` | `candidate:x:x7g` | 4 |
 | `x7h` | `candidate:x:x7h` | 2 |
 | `x7i` | `candidate:x:x7i` | 9 |
+| `x7k` | `candidate:x:x7k` | 2 |
+| `x7l` | `candidate:x:x7l` | 2 |
 | `x7m` | `candidate:x:x7m` | 2 |
+| `x7n` | `candidate:x:x7n` | 10 |
 | `x7q` | `candidate:x:x7q` | 6 |
+| `x8a` | `candidate:x:x8a` | 3 |
+| `x8b` | `candidate:x:x8b` | 1 |
+| `x8d` | `candidate:x:x8d` | 8 |
+| `x8e` | `candidate:x:x8e` | 9 |
+| `x8f` | `candidate:x:x8f` | 3 |
+| `x8g` | `candidate:x:x8g` | 1 |
+| `x8h` | `candidate:x:x8h` | 3 |
+| `x8i` | `candidate:x:x8i` | 3 |
 | `x8j` | `candidate:x:x8j` | 3 |
+| `x8m` | `candidate:x:x8m` | 5 |
+| `x8n` | `candidate:x:x8n` | 3 |
 | `x8q` | `candidate:x:x8q` | 2 |
+| `x9a` | `candidate:x:x9a` | 5 |
+| `x9b` | `candidate:x:x9b` | 8 |
+| `x9c` | `candidate:x:x9c` | 6 |
 | `x9d` | `candidate:x:x9d` | 4 |
 | `x9e` | `candidate:x:x9e` | 4 |
 | `x9f` | `candidate:x:x9f` | 6 |
+| `x9i` | `candidate:x:x9i` | 3 |
+| `x9j` | `candidate:x:x9j` | 2 |
+| `x9k` | `candidate:x:x9k` | 3 |
+| `x9l` | `candidate:x:x9l` | 3 |
 | `x9m` | `candidate:x:x9m` | 3 |
+| `x9n` | `candidate:x:x9n` | 4 |
+| `x9o` | `candidate:x:x9o` | 3 |
+| `x9p` | `candidate:x:x9p` | 3 |
+| `x9q` | `candidate:x:x9q` | 4 |
 | `x9r` | `candidate:x:x9r` | 3 |
 | `x9s` | `candidate:x:x9s` | 4 |
+| `x9t` | `candidate:x:x9t` | 4 |
+| `x9u` | `candidate:x:x9u` | 3 |
+| `x9v` | `candidate:x:x9v` | 2 |
+| `x9w` | `candidate:x:x9w` | 2 |
+| `x9x` | `candidate:x:x9x` | 3 |
+| `x9y` | `candidate:x:x9y` | 3 |
+| `x9z` | `candidate:x:x9z` | 3 |
 
 ## Priorité A — candidats non curés
 
@@ -576,48 +695,16 @@
 | `0487` | 2026-07-22T17:44:31+02:00 | `1681c6f704` modifications scripts run_ok_* pour validation | 2 | IN_MAINLINE |
 | `0487c` | 2026-07-05T22:37:05+02:00 | `9c5cdfbd17` 0487c: default run_ok scripts to livevis binary | 1 | IN_MAINLINE |
 | `0487c` | 2026-07-22T17:44:31+02:00 | `1681c6f704` modifications scripts run_ok_* pour validation | 1 | IN_MAINLINE |
-| `0490a` | 2026-07-22T18:55:21+02:00 | `cb8a4cbf87` 0490a: add species registry scaffold and diagnostics | 3 | IN_MAINLINE |
-| `0490b` | 2026-07-22T19:13:07+02:00 | `545fc62329` 0490b: add per-species cell deposit and composition diagnostics | 5 | IN_MAINLINE |
-| `0490c` | 2026-07-22T21:00:15+02:00 | `58029bd588` 0490c: make resampling species-conservative | 3 | IN_MAINLINE |
-| `0490d` | 2026-07-22T21:22:41+02:00 | `31666789d2` 0490d: add phase-aware species mass closure | 3 | IN_MAINLINE |
-| `0490e` | 2026-07-22T21:46:53+02:00 | `4601ad492b` 0490e: add species-aware population guard | 3 | IN_MAINLINE |
-| `0490f` | 2026-07-22T22:23:07+02:00 | `6d9c83f0df` 0490f: add mixed-species composition refill | 3 | IN_MAINLINE |
-| `0490g` | 2026-07-22T22:41:58+02:00 | `d30281e7a1` 0490g: add species-aware donor receiver transfers | 3 | IN_MAINLINE |
-| `0490h` | 2026-07-22T23:01:58+02:00 | `12c471b1e2` 0490h: add resident CUDA species cell deposit | 5 | IN_MAINLINE |
-| `0490i` | 2026-07-22T23:30:15+02:00 | `1c3f10b537` 0490i: add resident CUDA species mass closure | 5 | IN_MAINLINE |
-| `0490j` | 2026-07-23T00:01:20+02:00 | `5295fc7916` 0490j: add resident CUDA species population guard | 3 | IN_MAINLINE |
-| `0490k` | 2026-07-23T00:29:17+02:00 | `3004c6f98c` 0490k: add native CUDA species transfer plan | 5 | IN_MAINLINE |
-| `0490l` | 2026-07-23T17:37:22+02:00 | `d0c2de1fbc` 0490l: validate strict resident CUDA species resampling | 3 | IN_MAINLINE |
-| `0490m` | 2026-07-23T18:46:18+02:00 | `3d7ce88b78` 0490m: add fast resident CUDA species resampling path | 5 | IN_MAINLINE |
-| `0490n` | 2026-07-23T19:32:18+02:00 | `ab945606f8` 0490n: add resident CUDA species deposits and pool maintenance | 5 | IN_MAINLINE |
-| `0490n-fix1` | 2026-07-23T23:20:59+02:00 | `db9e0f45f9` 0490n-fix1: use resident species telemetry | 2 | IN_MAINLINE |
-| `0490n-fix2` | 2026-07-24T00:12:36+02:00 | `e735f82f86` 0490n-fix2: handle grouped multi-transfer coverage | 4 | IN_MAINLINE |
-| `0490p` | 2026-07-24T10:45:08+02:00 | `36abd23c9d` 0490p: move species cell policy fully to CUDA | 4 | IN_MAINLINE |
-| `0491a` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 4 | IN_MAINLINE |
-| `0491h` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 4 | IN_MAINLINE |
-| `0491h-fix1` | 2026-07-24T23:03:08+02:00 | `2fb9c30bde` 0491h-fix1: deepen species-sensitive Q6 qualification | 5 | IN_MAINLINE |
-| `0492` | 2026-07-25T17:42:41+02:00 | `aa0a4a0a42` etat intermediaire resampling multiespeces delete fast/compatible | 2 | IN_MAINLINE |
-| `0493a` | 2026-07-25T17:42:41+02:00 | `aa0a4a0a42` etat intermediaire resampling multiespeces delete fast/compatible | 2 | IN_MAINLINE |
-| `0493b` | 2026-07-25T22:25:25+02:00 | `7da2eec236` 0493b: universal CUDA-resident per-species resampling | 4 | IN_MAINLINE |
-| `0493c` | 2026-07-25T23:20:36+02:00 | `95eda1899e` 0493c: qualify resident resampling with Darcy chi scope | 7 | IN_MAINLINE |
-| `0493c-fix3` | 2026-07-25T23:48:20+02:00 | `1a705cb78e` 0493c-fix3: align medium population guard with gamma | 1 | IN_MAINLINE |
-| `0493d-fix1` | 2026-07-26T15:47:52+02:00 | `95f408ab1a` 0493d-fix1: parallelize resident species resampling selection | 1 | IN_MAINLINE |
-| `0493e` | 2026-07-26T15:53:22+02:00 | `7c5e63290f` 0493e-g: add mono and multi-species resampling physics qualification | 4 | IN_MAINLINE |
-| `0493f` | 2026-07-26T15:53:22+02:00 | `7c5e63290f` 0493e-g: add mono and multi-species resampling physics qualification | 3 | IN_MAINLINE |
 | `0493g` | 2026-07-26T15:49:36+02:00 | `33e60513a6` 0493g: restore moments independently per species | 1 | IN_MAINLINE |
-| `0493g` | 2026-07-26T15:53:22+02:00 | `7c5e63290f` 0493e-g: add mono and multi-species resampling physics qualification | 3 | IN_MAINLINE |
-| `0493h` | 2026-07-26T19:38:28+02:00 | `6ee2e45825` 0493h-j: conserve resident species kinetic energy | 4 | IN_MAINLINE |
-| `0493j` | 2026-07-26T19:38:28+02:00 | `6ee2e45825` 0493h-j: conserve resident species kinetic energy | 1 | IN_MAINLINE |
 | `0493k` | 2026-07-27T19:51:46+02:00 | `eac470a5cc` etat avant refonte du resampling | 4 | IN_MAINLINE |
 | `0493l` | 2026-07-27T19:51:46+02:00 | `eac470a5cc` etat avant refonte du resampling | 3 | IN_MAINLINE |
 | `0493m` | 2026-07-27T19:51:46+02:00 | `eac470a5cc` etat avant refonte du resampling | 4 | IN_MAINLINE |
 | `0493n` | 2026-07-27T19:51:46+02:00 | `eac470a5cc` etat avant refonte du resampling | 3 | IN_MAINLINE |
-| `x10p` | 2026-08-22T17:35:47+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 5 |  |
+| `0493o5` | 2026-07-28T23:25:09+02:00 | `d57a68bb6f` 0493o1-o3: checkpoint target-driven species Neff split guard | 1 | IN_MAINLINE |
 | `x13h-20260831` | 2026-08-29T21:42:43+02:00 | `7655b81b1b` one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 1 | IN_MAINLINE |
 | `x6h` | 2026-08-09T11:07:33+02:00 | `e2a947f7f6` 0493x6h: fix low-wall Q6 reconstruction and add RT0 face-to-particle mapping | 2 | IN_MAINLINE |
 | `x7k-x7l` | 2026-08-10T17:30:40+02:00 | `f12cfe7c65` 0493x7k-x7l: strip Q6-g-f production diagnostics telemetry | 1 | IN_MAINLINE |
-| `x8c` | 2026-08-14T14:35:17+02:00 | `423b1c2dc4` 0493x8c stage_momentum removed | 5 | IN_MAINLINE |
-| `x8q-x8t` | 2026-08-16T18:16:37+02:00 | `4b1f20301d` 0493x8q-x8t: complete passive Neumann kinetic-pressure outlet | 2 | IN_MAINLINE |
+| `x8q-x8t` | 2026-08-16T18:16:37+02:00 | `a34dfdc862` 0493x8q-x8t: complete passive Neumann outlet for Q6GF | 2 | IN_MAINLINE |
 
 ## Priorité B à signal fort
 
@@ -981,38 +1068,12 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `0475b` | 2026-07-05T11:26:55+02:00 | `473b7ca7d5` 0475: add shared-state cell-list materializer for CUDA resampling | 3 | IN_MAINLINE |
 | `0476` | 2026-07-05T12:31:33+02:00 | `835b79afe8` resampling remap cuda resident 477 | 2 | IN_MAINLINE |
 | `0490p` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 2 | IN_MAINLINE |
-| `0491d` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 2 | IN_MAINLINE |
-| `0491e` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 2 | IN_MAINLINE |
-| `0491f` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 2 | IN_MAINLINE |
-| `0491g` | 2026-07-24T16:12:12+02:00 | `a30faac79b` Q6 species sensitive | 2 | IN_MAINLINE |
-| `x0` | 2026-06-09T15:33:08+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 20 | IN_MAINLINE |
-| `x10` | 2026-08-26T22:36:11+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 5 | IN_MAINLINE |
-| `x10a` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10b` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10c` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10d` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10e` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10f` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x10g` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 5 | IN_MAINLINE |
-| `x10h` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
-| `x10i` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
-| `x10q` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 2 | IN_MAINLINE |
-| `x10x` | 2026-08-26T22:36:11+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 4 | IN_MAINLINE |
-| `x11` | 2026-08-22T17:35:47+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 6 | IN_MAINLINE |
-| `x11c` | 2026-08-22T17:35:47+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 6 | IN_MAINLINE |
-| `x12` | 2026-08-27T21:27:16+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 4 | IN_MAINLINE |
-| `x13i` | 2026-08-28T10:19:24+02:00 | `b532f5e446` Finalize autonomous SRC transport calibrator | 3 | IN_MAINLINE |
-| `x13p` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13q` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 2 |  |
-| `x13r` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13s` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
+| `0493w1` | 2026-08-29T21:42:43+02:00 | `7655b81b1b` one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 4 | IN_MAINLINE |
+| `0493w8` | 2026-07-31T00:03:05+02:00 | `2283f726b3` inventories updated | 2 | IN_MAINLINE |
+| `x10` | 2026-08-26T22:36:11+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
+| `x11` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
+| `x12` | 2026-08-27T21:27:16+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 2 | IN_MAINLINE |
 | `x13tw` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13u` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 6 |  |
-| `x13v` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13za` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13zb` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x13zc` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
-| `x14` | 2026-09-04T19:24:52+02:00 | `8a4fc4065a` correction dérive quantité de mouvement interface liquide/gaz | 2 | IN_MAINLINE |
 | `x14an` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
 | `x14aq` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
 | `x14as` | 2026-09-07T14:51:58+02:00 | `75ea8907aa` campagne qualification interaction liquide/air, comparaison SAto & et. | 2 | IN_MAINLINE |
@@ -1022,46 +1083,12 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x14b` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 2 | IN_MAINLINE |
 | `x14c` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 2 | IN_MAINLINE |
 | `x14f` | 2026-09-01T18:28:48+02:00 | `c3107ec1e4` Thermostat per type implemented for src and q6gf | 3 | IN_MAINLINE |
-| `x5` | 2026-08-26T22:36:11+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 4 | IN_MAINLINE |
-| `x6` | 2026-08-26T22:36:11+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 4 | IN_MAINLINE |
-| `x7a` | 2026-08-09T22:03:37+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x7b` | 2026-08-09T22:03:37+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x7c` | 2026-08-09T22:03:37+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x7k` | 2026-08-10T17:30:40+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 2 | IN_MAINLINE |
-| `x7l` | 2026-08-10T17:30:40+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 2 | IN_MAINLINE |
-| `x7n` | 2026-08-11T00:34:06+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 10 | IN_MAINLINE |
 | `x7s` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 | `x7t` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 2 | IN_MAINLINE |
-| `x7u` | 2026-08-14T14:35:17+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 7 | IN_MAINLINE |
-| `x7v` | 2026-08-14T14:35:17+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 7 | IN_MAINLINE |
-| `x7w` | 2026-08-14T14:35:17+02:00 | `7655b81b1b` one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 5 | IN_MAINLINE |
+| `x7u` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 7 | IN_MAINLINE |
+| `x7v` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 7 | IN_MAINLINE |
+| `x7w` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 5 | IN_MAINLINE |
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
-| `x7y` | 2026-08-14T14:35:17+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x8a` | 2026-08-14T14:35:17+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x8d` | 2026-08-15T16:38:42+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 8 | IN_MAINLINE |
-| `x8e` | 2026-08-15T16:38:42+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 9 | IN_MAINLINE |
-| `x8f` | 2026-08-15T16:38:42+02:00 | `4b1f20301d` 0493x8q-x8t: complete passive Neumann kinetic-pressure outlet | 3 | IN_MAINLINE |
-| `x8h` | 2026-08-15T16:38:42+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 3 | IN_MAINLINE |
-| `x8i` | 2026-08-15T16:38:42+02:00 | `eb6a7db1ba` last analysis VK Zovatto | 3 | IN_MAINLINE |
-| `x8m` | 2026-08-16T18:16:37+02:00 | `7c07321493` surface tension liquid/gas ellipse cases dev. | 5 | IN_MAINLINE |
-| `x8n` | 2026-08-16T18:16:37+02:00 | `eb6a7db1ba` last analysis VK Zovatto | 3 | IN_MAINLINE |
-| `x9a` | 2026-08-17T22:03:27+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 5 | IN_MAINLINE |
-| `x9b` | 2026-08-17T22:03:27+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 8 | IN_MAINLINE |
-| `x9c` | 2026-08-17T22:03:27+02:00 | `5fea55644b` force parasite corrigée par refroidissement de petites gouttes, calibrateur sigma à perfectionner, campagne JFM lancée | 6 | IN_MAINLINE |
-| `x9i` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 3 | IN_MAINLINE |
-| `x9j` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 2 | IN_MAINLINE |
-| `x9k` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 3 | IN_MAINLINE |
-| `x9l` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 3 | IN_MAINLINE |
-| `x9n` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 4 | IN_MAINLINE |
-| `x9o` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 3 | IN_MAINLINE |
-| `x9p` | 2026-08-18T23:58:44+02:00 | `f50dfb2242` surface tension dev. drop formation demonstrated | 3 | IN_MAINLINE |
-| `x9q` | 2026-08-18T23:58:44+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
-| `x9t` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
-| `x9u` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x9v` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 2 | IN_MAINLINE |
-| `x9w` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 2 | IN_MAINLINE |
-| `x9x` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x9y` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
-| `x9z` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 3 | IN_MAINLINE |
+| `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1164 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1185 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

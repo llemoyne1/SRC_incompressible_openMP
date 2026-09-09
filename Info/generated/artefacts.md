@@ -176,7 +176,7 @@
 | `scripts/analyze_0493x3_q6_force_projection_tg.py` | x3 | present |
 | `scripts/analyze_0493x4a_q6_force_single_tg.py` | x4a | present |
 | `scripts/analyze_0493x4b_q6_force_fusion_tg.py` | x4b | present |
-| `scripts/analyze_0493x5a2_dynamic_free_surface.py` |  | present |
+| `scripts/analyze_0493x5a2_dynamic_free_surface.py` | x5a2 | present |
 | `scripts/analyze_0493x5a_partial_liquid.py` | x5a | present |
 | `scripts/analyze_0493x5b_liquid_gas_free_surface.py` | x5b | present |
 | `scripts/analyze_0493x6a_phase_pressure.py` | x6a | present |
@@ -329,7 +329,7 @@
 | `scripts/check_0493x13h_L072_qualification.sh` | x13h | present |
 | `scripts/check_0493x13i_kbt_scaling.sh` |  | present |
 | `scripts/check_0493x13j_src_transport.sh` | x13j | present |
-| `scripts/check_0493x5a2_generator_profiles.py` |  | present |
+| `scripts/check_0493x5a2_generator_profiles.py` | x5a2 | present |
 | `scripts/check_0493x7b_virial_grid_scaling.py` |  | present |
 | `scripts/check_0493x7f_q6_g_f_multibc.py` | x7f | present |
 | `scripts/check_0493x7g_q6_g_f_darcy.py` | x7g | present |
@@ -667,7 +667,7 @@
 | `doc/README_0493X3_Q6_FORCE_PRESTREAM_TEST.md` | x3 | present |
 | `doc/README_0493X4A_Q6_FORCE_SINGLE_SOLVE.md` | x4a | present |
 | `doc/README_0493X4B_Q6_FORCE_CUDA_FUSION.md` | x4b | present |
-| `doc/README_0493X5A2_DYNAMIC_FREE_SURFACE_DAM_BREAK.md` |  | present |
+| `doc/README_0493X5A2_DYNAMIC_FREE_SURFACE_DAM_BREAK.md` | x5a2 | present |
 | `doc/README_0493X5A_PARTIAL_LIQUID_FREE_SURFACE.md` | x5a | present |
 | `doc/README_0493X5B_LIQUID_GAS_FREE_SURFACE.md` | x5b | present |
 | `doc/README_0493X6A_Q6_PHASE_PRESSURE_DIAGNOSTIC.md` | x6a | present |
@@ -1004,9 +1004,19 @@
 | `matlab/bin_smpcd_state.m` |  | present |
 | `matlab/compare_poiseuille_runs.m` |  | present |
 | `matlab/demo_immersed_circle_combined_motion.m` |  | present |
-| `matlab/inj_kk.avi` |  | present |
-| `matlab/inj_rho_bad.avi` |  | present |
-| `matlab/inj_uy_bad.avi` |  | present |
+| `matlab/inj_rho_x8q_legacy.avi` | x8q | present |
+| `matlab/inj_rho_x8q_replica.avi` | x8q | present |
+| `matlab/inj_rho_x8q_species.avi` | x8q | present |
+| `matlab/inj_rho_x8q_strict.avi` | x8q | present |
+| `matlab/inj_rho_x8q_strict_400.avi` | x8q | present |
+| `matlab/inj_rho_x8q_strict_cont_200.avi` | x8q | present |
+| `matlab/inj_rho_x8q_strict_cont_400.avi` | x8q | present |
+| `matlab/inj_rho_x8q_virtual.avi` | x8q | present |
+| `matlab/inj_rho_x8q_virtual_pressure.avi` | x8q | present |
+| `matlab/inj_rho_x8q_virtual_pressure2.avi` | x8q | present |
+| `matlab/inj_rho_x8q_zerodrift.avi` | x8q | present |
+| `matlab/inj_rho_x8qoff.avi` |  | present |
+| `matlab/inj_rho_x8qon.avi` |  | present |
 | `matlab/inspect_smpcd_particle_thresholds.m` |  | present |
 | `matlab/inspect_smpcd_state.m` |  | present |
 | `matlab/list_smpcd_dumps.m` |  | present |
@@ -1268,8 +1278,8 @@
 | `scripts/run_0493x4a_q6_force_single_tg.sh` | x4a | present |
 | `scripts/run_0493x4b_liquid_only_q6_force_fused.sh` | x4b | present |
 | `scripts/run_0493x4b_q6_force_fusion_tg.sh` | x4b | present |
-| `scripts/run_0493x5a2_dynamic_free_surface_dam_break.sh` |  | present |
-| `scripts/run_0493x5a2_nonregression.sh` |  | present |
+| `scripts/run_0493x5a2_dynamic_free_surface_dam_break.sh` | x5a2 | present |
+| `scripts/run_0493x5a2_nonregression.sh` | x5a2 | present |
 | `scripts/run_0493x5a_nonregression.sh` | x5a | present |
 | `scripts/run_0493x5a_partial_liquid_free_surface.sh` | x5a | present |
 | `scripts/run_0493x5b_liquid_gas_free_surface_dam_break.sh` | x5b | present |

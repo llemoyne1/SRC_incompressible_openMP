@@ -1,5 +1,8 @@
 # Info — base de référence SRC_GPU-SURF
 
+> **V4.16** — curation accélérée : clôture x8 par `x8u`, puis reconstruction/consolidation du scaffold capillaire `x9a` à `x9h` jusqu'au provider géométrique de paroi.
+
+
 `Info/` est le sous-système documentaire versionné du projet SRC_GPU-SURF. Il est volontairement séparé du code de calcul (`src/`, `include/`), des runners/analyseurs (`scripts/`, `matlab/`) et des outils temporaires (`tools/`).
 
 Son objectif est de maintenir **une seule base relationnelle** reliant :
@@ -26,12 +29,19 @@ Info/
 │   ├── src_reference.sqlite
 │   └── src_reference_dump.sql
 ├── inputs/
-│   └── snapshots/
-│       ├── referentiel_jalons_SRC_GPU_SURF_20260905.tex
-│       ├── src_mpcd_params_inventory_snapshot_040926_x14ai.csv
-│       └── src_mpcd_env_flags_inventory_snapshot_040926_x14ai.csv
+│   ├── snapshots/
+│   │   ├── referentiel_jalons_SRC_GPU_SURF_20260905.tex
+│   │   ├── src_mpcd_params_inventory_snapshot_040926_x14ai.csv
+│   │   └── src_mpcd_env_flags_inventory_snapshot_040926_x14ai.csv
+│   └── historical/
+│       ├── conception_q6_multiespeces_cuda_resident_0491.tex
+│       └── rapport_mpcd_incompressible_complete_0493w1_calibration_q6_multiespeces.tex
 ├── curations/
-│   └── 0001_current_0414_segmented_xy.sql
+│   ├── 0001_current_0414_segmented_xy.sql
+│   ├── 0002_0490_multispecies_resampling.sql
+│   ├── 0003_0491_species_q6.sql
+│   ├── 0004_0492_run_ok_refresh.sql
+│   └── 0005_0493_resident_species_physics.sql
 ├── scripts/
 │   ├── build_src_reference.py
 │   ├── publish_src_reference.py
@@ -50,7 +60,11 @@ Info/
     ├── ARCHITECTURE.md
     ├── BOOTSTRAP_AUDIT.md
     ├── GIT_AUDIT_V3.md
-    └── PUBLICATION_V4.md
+    ├── PUBLICATION_V4.md
+    ├── CURATION_0490_V4_1.md
+    ├── CURATION_0491_V4_2.md
+    ├── CURATION_0492_V4_3.md
+    └── CURATION_0493_V4_4.md
 ```
 
 ## Deux racines distinctes
@@ -71,16 +85,17 @@ La base opérationnelle est `Info/db/src_reference.sqlite`. Elle est **reconstru
 Les sources versionnées sont :
 
 1. `Info/db/schema.sql` — source unique du schéma SQL ;
-2. `Info/inputs/snapshots/` — inventaires/référentiels bruts conservés comme provenance ;
-3. `Info/reference_sources.json` — manifeste indiquant quels snapshots sont actifs ;
-4. `Info/curations/*.sql` — compléments/corrections documentaires versionnés ;
-5. le dépôt lui-même — arborescence du code et historique Git.
+2. `Info/inputs/snapshots/` — inventaires/référentiels bruts actifs ;
+3. `Info/inputs/historical/` — archives techniques historiques utilisées comme preuves de curation ;
+4. `Info/reference_sources.json` — manifeste indiquant quels snapshots sont actifs ;
+5. `Info/curations/*.sql` — compléments/corrections documentaires versionnés ;
+6. le dépôt lui-même — arborescence du code et historique Git.
 
 Les curations ne sont pas des migrations de schéma. Elles ajoutent ou corrigent de la connaissance documentaire sans modifier le builder. Les futures vraies migrations de schéma disposent d'une table séparée `schema_migrations`.
 
 Le builder travaille dans `src_reference.sqlite.tmp`, vérifie `PRAGMA quick_check` et `PRAGMA foreign_key_check`, puis remplace la base atomiquement. Une erreur d'import ne laisse donc jamais une base partiellement mise à jour.
 
-`src_reference_dump.sql` est produit en parallèle pour rendre les modifications de contenu inspectables dans Git. `src_reference.sqlite` est déclaré binaire par `Info/.gitattributes`.
+`src_reference_dump.sql` est produit en parallèle pour rendre les modifications de contenu inspectables dans Git. `src_reference.sqlite` est reconstructible et ignoré par Git ; le dump SQL et les publications textuelles sont versionnés.
 
 ## Reconstruction courante
 
@@ -110,9 +125,10 @@ Le builder :
 10. audite chaque branche `origin/*` contre `origin/surf` avec `git rev-list` et `git cherry` ;
 11. classe les commits comme `IN_MAINLINE`, `PATCH_EQUIVALENT_IN_MAINLINE` ou `UNIQUE_OUTSIDE_MAINLINE` ;
 12. construit les candidats-jalons à partir des sujets de commits, tags, branches et chemins historiques ;
-13. reconstruit l'index plein texte ;
-14. génère les vues humaines `Info/generated/` et les exports CSV ;
-15. valide l'intégrité puis remplace en lot la base, le dump et les publications avec rollback en cas d'échec.
+13. réconcilie les jalons numériques explicitement curés avec Git uniquement lorsqu'un seul candidat porte ce label ; les labels réutilisés restent ambigus ;
+14. reconstruit l'index plein texte ;
+15. génère les vues humaines `Info/generated/` et les exports CSV ;
+16. valide l'intégrité puis remplace en lot la base, le dump et les publications avec rollback en cas d'échec.
 
 Les chemins absolus de la machine ne sont pas écrits comme identité documentaire dans la base : `meta.repo_root='.'` et `meta.info_root='Info'` dans l'installation normale.
 
@@ -131,6 +147,46 @@ séparé avec leurs relations `SETS_PARAMETER`.
 Voir `Info/docs/PUBLICATION_V4.md`.
 
 
+
+## Curation V4.1 — série 0490A–P
+
+La première curation historique structurée promeut les 18 jalons documentés de la série
+`0490A` à `0490P` (y compris `0490M-fix2`, `0490N-fix1` et `0490N-fix2`).
+Ils sont regroupés sous le domaine `MULTISPECIES_RESAMPLING`. Les README dédiés sont
+la preuve documentaire primaire ; après l'import Git, le builder complète automatiquement
+la date et le commit d'introduction lorsque le candidat numérique est unique, ou lorsqu'un
+seul candidat a créé le fichier source dédié déclaré par la curation. Un label réutilisé
+comme `0414` reste donc ambigu tant qu'aucune source d'introduction ne le désambiguïse.
+
+Voir `Info/docs/CURATION_0490_V4_1.md`.
+
+
+### V4.1.1 — réconciliation par source d’introduction
+
+Lorsqu’un label numérique curé possède plusieurs candidats Git, la réconciliation peut
+encore être faite si un seul candidat a **créé le fichier source dédié** indiqué par la
+curation (par exemple `README_0490P_DEVICE_CELL_POLICY_ZERO_CPU.md`). Cela évite qu’un
+inventaire ou document ultérieur contenant le même numéro bloque le vrai jalon, sans
+relâcher la protection contre les numéros historiquement réutilisés.
+
+## Curation V4.2.1 — série 0491 species-Q6
+
+La curation suivante promeut sept jalons historiques explicitement attestés : `0491A`,
+`0491D`, `0491E`, `0491F`, `0491G`, `0491H` et `0491H-fix1`. Les labels `0491B` et
+`0491C` ne sont pas attestés comme jalons Git distincts dans l’historique réel et ne sont
+donc pas créés artificiellement. Le README `0491H_RUN_OK_LIVEVIS_VALIDATION` reste une
+preuve de validation et non un jalon autonome.
+
+Voir `Info/docs/CURATION_0491_V4_2.md`.
+
+## Curation V4.3 — jalon 0492 run_ok refresh
+
+La curation suivante retient un seul jalon canonique `0492`, correspondant au refresh et
+à l'homogénéisation de la suite `run_ok`. Les marqueurs internes `0492a` (résolution du
+mode species-resident) et `0492b` (checker sémantique d'injection) restent des sous-révisions
+techniques reliées à 0492 et ne sont pas promus comme jalons autonomes.
+
+Voir `Info/docs/CURATION_0492_V4_3.md`.
 
 ## Audit Git V3
 
@@ -225,3 +281,159 @@ destination. Les touches ultérieures restent intégralement disponibles dans
 `git_commit_files`. Cette règle évite notamment qu'un déplacement de README `0490A`
 ou qu'une modification tardive de l'ancien runner NACA `0414` soit interprété comme
 un nouveau jalon.
+
+## Curation V4.4 — correction 0491 et premier cycle 0493
+
+La V4.4 généralise la politique de preuve historique. Un jalon peut être canonique sans
+candidat Git numérique si une archive technique versionnée ou le code de production
+l'atteste explicitement. Cette règle restaure `0491B` et `0491C`, documentés par les
+archives placées sous `Info/inputs/historical/`.
+
+Elle ajoute également le premier cycle 0493 : `0493A`, `0493B`, `0493C`, `0493C-fix3`,
+`0493D`, `0493D-fix1`, `0493E`, `0493F`, `0493F-fix2`, `0493G`, `0493H`, `0493I` et
+`0493J`. Les numéros non attestés ne sont pas reconstruits artificiellement.
+
+Voir `Info/docs/CURATION_0491_V4_2.md` et `Info/docs/CURATION_0493_V4_4.md`.
+
+## Curation V4.5 — cycles 0493o et 0493w
+
+La V4.5 ajoute la transition entre le premier cycle 0493 résident et la série `0493x` :
+références SRC `0493O0`, réparation locale de support `O1` et ses correctifs/optimisations,
+qualification segmented-Darcy `O4`, puis audit/calibration du régime SRC `W0–W3`,
+normalisation des runners multi-espèces `W4` et construction/qualification du Q6
+`independent_masked` `W5–W8`.
+
+La curation conserve explicitement `0493O2-fix1` sans créer de `0493O2` autonome : le
+suffixe est attesté par son checker, alors qu'un jalon parent distinct ne l'est pas. `0493W4`
+est conservé avec confiance B à partir du runner et des inventaires; les étapes Git/README
+explicites restent en confiance A.
+
+Voir `Info/docs/CURATION_0493OW_V4_5.md`.
+
+### V4.5.1 — grammaire Git des jalons 0493O*/0493W*
+
+Le parseur de candidats Git accepte désormais les suffixes numériques `lettre+index`
+(`0493O1`, `0493O1-fix2`, `0493W0` … `0493W8`). La famille `0493x...` reste
+explicitement exclue de cette grammaire et continue d'être traitée comme famille `X`.
+La règle conservatrice V3.1 sur les chemins n'est pas modifiée : une simple modification
+d'un fichier numéroté ne crée toujours pas de nouveau candidat numérique.
+
+Ce correctif rétablit la provenance Git des cycles O/W sans changer les jalons canoniques
+curés en V4.5.
+
+## Curation V4.6 — entrée dans la série 0493x
+
+La V4.6 consolide `0493x0` et `0493x1` à partir de leurs README, runners et du checkpoint
+Git commun. `x0`, absent du référentiel consolidé initial, devient la démonstration dam-break
+bi-espèces du Q6 `independent_masked`. Le placeholder de confiance C `x1` est remplacé par
+le jalon réellement attesté : extension des frontières CUDA résidentes à une boîte statique
+fermée sur quatre faces, utilisée pour supprimer le vent gazeux artificiel de la première
+version de x0.
+
+Voir `Info/docs/CURATION_0493X01_V4_6.md`.
+
+
+## Correctif V4.6.1 — désambiguïsation des labels X purement numériques
+
+La V4.6.1 corrige la provenance Git des labels courts `x0`, `x1`, `x2`, etc. Ces
+chaînes sont aussi utilisées comme notation géométrique (par exemple `x0` pour le bord
+`x=0`) et ne doivent donc pas être agrégées globalement comme jalons X lorsqu'elles
+apparaissent seules dans un chemin ou un sujet Git. Pour les labels X sans suffixe
+alphabétique, le builder exige désormais la forme explicite `0493xN`. Les labels
+qualifiés comme `x7q` ou `x14ai-fix1` conservent leur reconnaissance historique avec ou
+sans préfixe `0493`. Pour les candidats X, `anchor_commit` est également recalculé
+comme la première preuve Git chronologique, au lieu de dépendre de l’ordre d’import.
+
+### V4.7 — x2 à x4b : séquençage Q6-g force-aware
+
+La curation `0008_0493x2_x4b_q6_force_ordering.sql` consolide le diagnostic gravitaire x2,
+la preuve de concept `prestream` x3, le mono-solve x4a et la fusion CUDA x4b. Ces jalons
+existaient déjà dans le référentiel : V4.7 améliore leur définition et leur provenance sans
+augmenter le nombre total de jalons. Voir `docs/CURATION_0493X2_X4B_V4_7.md`.
+
+### V4.8 — x5a / x5a2 / x5b : première surface libre et gaz explicite
+
+La curation `0009_0493x5_free_surface_and_explicit_gas.sql` consolide la première
+séquence surface libre de 0493x. `x5a` introduit `free_surface_masked` sur un liquide
+partiellement rempli en conservant le séquençage Q6-g fusionné de x4b. `x5a2` qualifie
+cet opérateur inchangé sur un dam-break liquide-vide et met en évidence la distinction
+nécessaire entre bord du support numérique et interface physique. `x5b` ajoute ensuite
+une qualification bi-espèces avec gaz compressible explicite (`q6Strength=0`) couplé au
+liquide par les collisions SRC mais sans pression gazeuse imposée au solve Q6.
+
+Le README x5b précise que ce jalon ne change pas l'opérateur CUDA; sa nature canonique
+passe donc de `CODE` à `QUALIFICATION`. V4.8 étend aussi la grammaire X aux suffixes
+`lettres+chiffres` (`x5a2`, `x6f2`, ...) afin que ces jalons conservent leur provenance Git.
+Aucun jalon nouveau n'est créé et le total reste inchangé. Voir
+`docs/CURATION_0493X5_V4_8.md`.
+
+### V4.9 — x6a à x6g : géométrie d’interface et pression gazeuse
+
+La curation `0010_0493x6_phase_interface_architecture.sql` consolide la séparation entre
+carrier numérique et interface physique : diagnostics EOS/géométrie x6a-x6b, champs
+résidents x6c, expérience cut-face x6d, diagnostic topologique x6e, stencil physique x6f,
+correctif géométrique x6f2 et condition de pression gazeuse x6g. `x6f2`, absent du canon
+initial, est ajouté comme jalon `FIX`; le total passe donc de 196 à 197. Voir
+`docs/CURATION_0493X6_V4_9.md`.
+
+
+### V4.11 — x7a à x7e : restauration de densité Q6-g-f
+
+La curation `0012_0493x7_density_restoration.sql` remplace l'ancienne entrée canonique agrégée `x7a/x7b` par les jalons réels x7a et x7b, ajoute x7c qui déplace la restauration de densité dans le RHS Q6, puis consolide x7d (constante de temps physique `tau_rho`) et x7e (qualification combinée avec la pression gaz x6g). La ligne brute x7a/x7b du snapshot historique reste conservée. Le total canonique passe de 197 à 199 jalons. Voir `docs/CURATION_0493X7A_X7E_V4_11.md`.
+
+### V4.12 — x7f à x7n : généralisation, coût et diagnostic Q6-g-f
+
+La curation `0013_0493x7f_x7n_postqualification.sql` consolide l'extension de Q6-g-f aux
+familles statiques multi-BC (x7f), son couplage Darcy correctement ordonné (x7g), la
+factorisation des comparaisons `run_ok` (x7h), le benchmark physique multi-cas (x7i) et
+le CG entièrement CUDA résident (x7j). Elle remplace ensuite le placeholder `x7k/x7l`
+par deux jalons PERF distincts, restaure `x7m-fix1` comme correctif canonique du domaine
+de pression monophase et ajoute x7n, calibrateur/diagnostic de chemin absent du
+référentiel initial.
+
+Le patch runner `x7f-fix1` est conservé comme provenance sans devenir un jalon ; les
+sous-fixes purement outillage de x7n restent regroupés sous x7n. La réparation physique
+qui suit (`x7d-v2`/signed, x7o, x7p, x7q) est volontairement reportée à la curation
+suivante afin de conserver la frontière diagnostic → correction. Voir
+`docs/CURATION_0493X7F_X7N_V4_12.md`.
+
+### V4.13 — x7d-v2 à x7q : restauration signée, symétrie et fermeture de moment
+
+La curation `0014_0493x7d_v2_x7q_repairs.sql` reconstruit la séquence de réparation
+ouverte par le diagnostic x7n. Elle ajoute trois jalons absents du canon (`x7d-v2`,
+`x7d-v2-fix2`, `x7d-v2-signed1`), puis consolide x7o/x7p comme corrections de symétrie
+par réflexion et x7q comme fermeture exacte du mode uniforme périodique au niveau de la
+reconstruction particulaire B1/RT0. `x7d-v2-fix1` (complétion d'un patch interrompu) et
+`x7d-v2-fix2a` (correction de gate) sont conservés comme preuves mais ne deviennent pas
+des jalons autonomes. Le total canonique passe de 202 à **205 jalons**. Voir
+`docs/CURATION_0493X7D_V2_X7Q_V4_13.md`.
+
+
+### V4.15 — x8k à x8t : inlet Poiseuille segmenté et outlet Neumann cinétique-pression
+
+La curation `0016_0493x8k_x8t_open_boundary.sql` reconstruit la seconde moitié du cycle x8. Elle consolide `x8k`, ajoute `x8l` (première extrapolation de vitesse Neumann), `x8m` (benchmark Zovatto Re_H=280) et `x8n` (diagnostic de conservation amont), puis consolide séparément `x8q`, `x8r`, `x8s` et `x8t` jusqu'à la fermeture passive complète : bain cinétique local, `phi_out=0`, déflation des modes lents et cible de densité sans mode moyen.
+
+Aucun `x8o`/`x8p` n'est créé faute de preuve autonome. Les sous-révisions `x8q-fix*` restent attachées à x8q, et le candidat Git composite `x8q-x8t` reste une preuve agrégée plutôt qu'un jalon canonique. `x8u`, qui réaligne ensuite le runner restartable x8m sur les BC x8t validées, est reporté à la curation suivante. Le total canonique passe de 214 à **217 jalons**. Voir `docs/CURATION_0493X8K_X8T_V4_15.md`.
+
+
+### V4.16 — x8u puis x9a à x9h : clôture VK et scaffold capillaire
+
+Cette curation ferme le cycle x8 par `x8u`, updater runner-only qui réaligne la lignée restartable `x8m` sur la fermeture Neumann validée `x8t`. Elle regroupe ensuite, pour accélérer la curation sans fusionner les identités, le premier bloc cohérent de x9 : `x9a` scaffold passif, `x9b` binomial+Scharr, `x9c` sweep qui retient p3, `x9d` premier saut de Laplace actif, `x9e/x9f` diagnostics goutte/ellipse, `x9g` abstraction A/B et `x9h` provider de géométrie murale. Les prototypes d'angle de contact `x9i+` restent hors de V4.16. Le total canonique passe de 217 à **221 jalons**. Voir `docs/CURATION_0493X8U_X9A_X9H_V4_16.md`.
+
+### V4.17 — clôture accélérée du cycle 0493x9 (x9i → x9z)
+
+La curation `0018_0493x9i_x9z_wetting_kinetic_bridge.sql` remplace les agrégats historiques `x9a-x9c` et `x9i-x9l` par les identités effectivement attestées, consolide le mouillage x9m et ses qualifications x9n/x9o/x9p, le dripping/splash x9q/x9r/x9s, puis individualise le pont cinétique x9t→x9z vers la fermeture de surface libre x10. Les prototypes x9i–x9l restent documentés comme étapes historiques supplantées; x9m est la fermeture statique préférée mais sa dynamique de ligne triple reste limitée. x9r est reclassé comme correctif actif de résolution du saut `sigma*kappa`, et x9t–x9z sont classés fonctionnellement `FREE_SURFACE_KINETICS` tout en conservant leur identité de cycle x9.
+
+Comme depuis V4.14, le patch de transition est **source-only** : `Info/db/src_reference_dump.sql` et `Info/generated/` sont reconstruits localement par `build_src_reference.py` et ne sont pas des préimages imposées par le patch.
+
+### V4.18 — curation x10a→x10y
+
+Individualise les agrégats x10, sépare ablations/diagnostics du chemin qualifié `x10o+CIC+Q2+x10p/q+x10u+x10v`, et clôt le cycle x10 de fermeture cinétique de surface libre. Voir `docs/CURATION_0493X10A_X10Y_V4_18.md`.
+
+### V4.19 — x11 + x12 : validation quantitative et chaîne de production capillaire
+
+La curation `0020_0493x11_x12_capillary_validation.sql` ferme x11 et x12 en un seul bloc : x11a/x11b deviennent des qualifications quantitatives, x11c est individualisé comme correction de protocole/diagnostic observation-only, x12a est identifié comme l’unique nouvelle physique runtime x12, l’agrégat x12b/x12c est séparé en deux benchmarks, puis x12d/x12yl/x12cal sont consolidés comme benchmark et calibrateurs. Le total canonique passe de 243 à **245 jalons**. Voir `docs/CURATION_0493X11_X12_V4_19.md`.
+
+### V4.20 — x13 : fluide de référence, qualification surface libre et rollback Taylor–Culick
+
+La curation `0021_0493x13_reference_tc_rollback.sql` ferme x13 jusqu’à `x13zd`. Elle requalifie x13a-h comme chaîne constitutive scripts-only, ajoute x13i, documente le double usage historique de x13j, consolide les qualifications gouttes/TC x13k-n, individualise les expériences x13p/q/r/s/u/v et la séquence de grille x13za/zb/zb2/zb3/zc, puis fixe x13zd comme validation croisée qui invalide x13t+x13w et motive le retour au tag `surf-tension-qualified-x13h-20260831`. Les agrégats x13r/x13s, x13u/x13v et x13za-x13zc disparaissent. Le total canonique passe de 245 à **254 jalons**. Voir `docs/CURATION_0493X13_V4_20.md`.

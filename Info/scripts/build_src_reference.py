@@ -286,10 +286,14 @@ def infer_env_param_links(db: sqlite3.Connection) -> int:
 
 
 X_MILESTONE_RE = re.compile(
-    r'(?i)(?<![A-Za-z0-9])(?:0493)?(x\d+[a-z]*(?:-[a-z0-9]+)*)(?![A-Za-z0-9])'
+    r'(?i)(?<![A-Za-z0-9])(0493)?(x\d+(?:[a-z]+\d*)?(?:-[a-z0-9]+)*)(?![A-Za-z0-9])'
 )
+# Historical numeric milestones are contextual, but their suffix grammar evolved:
+# 0490A/0491H use a single letter, while later pre-x cycles use letter+index
+# forms such as 0493O1 and 0493W8.  Exclude x explicitly: 0493x... belongs to
+# the globally identified X family handled by X_MILESTONE_RE above.
 NUMERIC_HINT_RE = re.compile(
-    r'(?i)(?<!\d)(0\d{3}(?:[a-z])?(?:(?:-|_)(?:fix\d+|doc))?)(?![A-Za-z0-9])'
+    r'(?i)(?<!\d)(0\d{3}(?:(?!x)[a-z](?:\d+)?)?(?:(?:-|_)(?:fix\d+|doc))?)(?![A-Za-z0-9])'
 )
 
 
@@ -301,7 +305,16 @@ def extract_candidate_mentions(text: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for m in X_MILESTONE_RE.finditer(text or ''):
-        label = normalize_candidate_label(m.group(1))
+        explicit_0493 = bool(m.group(1))
+        label = normalize_candidate_label(m.group(2))
+        # Bare numeric X tokens such as x0/x1 are common geometric shorthand
+        # (e.g. a boundary at x=0) and are not globally unique milestone IDs.
+        # Accept them only when Git spells the project milestone explicitly as
+        # 0493xN.  Letter-qualified X labels (x7q, x14ai, ...) remain globally
+        # recognizable with or without the 0493 prefix.
+        core = label.split('-', 1)[0]
+        if re.fullmatch(r'x\d+', core, re.I) and not explicit_0493:
+            continue
         item = (label, 'X')
         if item not in seen:
             seen.add(item)
@@ -593,9 +606,126 @@ def refresh_candidate_rollups(db: sqlite3.Connection) -> None:
                  SELECT max(c.authored_date) FROM git_candidate_evidence e
                  JOIN git_commits c ON c.hash=e.commit_hash
                  WHERE e.candidate_id=git_milestone_candidates.candidate_id
-               )"""
+               ),
+               anchor_commit=CASE WHEN candidate_family='X' THEN COALESCE((
+                 SELECT e.commit_hash FROM git_candidate_evidence e
+                 JOIN git_commits c ON c.hash=e.commit_hash
+                 WHERE e.candidate_id=git_milestone_candidates.candidate_id
+                   AND e.commit_hash IS NOT NULL
+                 ORDER BY c.authored_date ASC,
+                          CASE
+                            WHEN e.evidence_type='COMMIT_SUBJECT' THEN 1
+                            WHEN e.evidence_type='COMMIT_PATH' AND e.evidence_text LIKE 'A %' THEN 2
+                            WHEN e.evidence_type='COMMIT_PATH' AND (e.evidence_text LIKE 'R%' OR e.evidence_text LIKE 'C%') THEN 3
+                            WHEN e.evidence_type='TAG_NAME' THEN 4
+                            ELSE 5
+                          END ASC,
+                          CASE e.confidence WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END ASC,
+                          e.id ASC
+                 LIMIT 1
+               ), anchor_commit) ELSE anchor_commit END"""
     )
 
+
+
+def reconcile_unique_numeric_candidates(db: sqlite3.Connection) -> int:
+    """Link curated numeric milestones to their introduction Git candidate conservatively.
+
+    Historical 0xxx labels are not globally unique, so raw numeric candidates are never
+    auto-linked during Git import.  After curation, reconciliation uses two safe cases:
+
+    1. exactly one canonical milestone and exactly one NUMERIC candidate share the label;
+    2. several candidates share the label, but exactly one of them *introduced the
+       source file named by the curation* (README, implementation file or qualification runner).
+
+    Case (2) is important for later documentation snapshots such as
+    ``src_mpcd_*_0490p.csv``: those files legitimately mention 0490P but do not create a
+    second 0490P milestone.  Conversely, reused labels such as historical/current 0414
+    remain unresolved unless the curation supplies a source file whose introduction
+    identifies one candidate unambiguously.
+    """
+
+    def curated_source_intro_candidates(norm: str, source_file: str) -> list[tuple[str, str | None, str | None]]:
+        if not source_file:
+            return []
+        basename = Path(source_file).name.lower()
+        if not basename:
+            return []
+        rows = db.execute(
+            """SELECT DISTINCT c.candidate_id,c.anchor_commit,c.first_date
+               FROM git_milestone_candidates c
+               JOIN git_candidate_evidence e ON e.candidate_id=c.candidate_id
+               WHERE c.candidate_family='NUMERIC'
+                 AND c.normalized_label=?
+                 AND e.evidence_type='COMMIT_PATH'
+                 AND (lower(e.path)=? OR lower(e.path) LIKE ?)""",
+            (norm, basename, '%/' + basename),
+        ).fetchall()
+        return rows
+
+    linked = 0
+    rows = db.execute(
+        """SELECT lower(m.milestone_id) AS norm, m.object_id, COALESCE(m.source_file,'')
+           FROM milestones m
+           WHERE m.milestone_id GLOB '[0-9][0-9][0-9][0-9]*'
+           GROUP BY lower(m.milestone_id)
+           HAVING count(*)=1"""
+    ).fetchall()
+    for norm, moid, source_file in rows:
+        cands = db.execute(
+            """SELECT candidate_id,anchor_commit,first_date
+               FROM git_milestone_candidates
+               WHERE candidate_family='NUMERIC' AND normalized_label=?""",
+            (norm,),
+        ).fetchall()
+
+        resolution = ''
+        chosen: tuple[str, str | None, str | None] | None = None
+        if len(cands) == 1:
+            chosen = cands[0]
+            resolution = 'unique numeric-label curation'
+        elif len(cands) > 1:
+            intro = curated_source_intro_candidates(norm, source_file)
+            if len(intro) == 1:
+                chosen = intro[0]
+                resolution = 'curated source-file introduction evidence'
+
+        if chosen is None:
+            continue
+
+        cid, anchor, first_date = chosen
+        db.execute(
+            """UPDATE git_milestone_candidates
+               SET status='CURATED', linked_milestone_object_id=?,
+                   notes=trim(COALESCE(notes,'') || CASE WHEN COALESCE(notes,'')='' THEN '' ELSE '; ' END || ?)
+               WHERE candidate_id=?""",
+            (moid, 'linked by ' + resolution, cid),
+        )
+        if anchor:
+            coid = 'git:' + anchor
+            if db.execute('SELECT 1 FROM objects WHERE object_id=?', (coid,)).fetchone():
+                db.execute(
+                    """INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text)
+                       VALUES(?,?,?,?,?)""",
+                    (moid, 'EVIDENCED_BY_COMMIT', coid, 'A', resolution),
+                )
+                if not db.execute(
+                    "SELECT 1 FROM evidence WHERE object_id=? AND evidence_type='GIT_COMMIT' AND commit_hash=?",
+                    (moid, anchor),
+                ).fetchone():
+                    db.execute(
+                        "INSERT INTO evidence(object_id,evidence_type,commit_hash,confidence,notes) VALUES(?,?,?,?,?)",
+                        (moid, 'GIT_COMMIT', anchor, 'A', resolution),
+                    )
+        db.execute(
+            """UPDATE milestones
+               SET introduced_commit=COALESCE(NULLIF(introduced_commit,''),?),
+                   introduced_date=COALESCE(NULLIF(introduced_date,''),substr(?,1,10))
+               WHERE object_id=?""",
+            (anchor, first_date, moid),
+        )
+        linked += 1
+    return linked
 
 def import_git_commits(db: sqlite3.Connection, repo: Path) -> tuple[int, int]:
     fmt = '%H%x1f%aI%x1f%cI%x1f%an%x1f%ae%x1f%P%x1f%s'
@@ -1094,7 +1224,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
     db.executescript(args.schema.read_text(encoding='utf-8'))
     with db:
         db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '4'))
-        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.20'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('built_utc', dt.datetime.now(dt.timezone.utc).isoformat()))
         db.execute('INSERT INTO meta VALUES(?,?)', ('repo_root', '.'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('info_root', repo_relative_label(args.repo_root, args.info_root)))
@@ -1109,6 +1239,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
         milestone_links = infer_milestone_links(db)
         symbol_milestone_links = infer_symbol_milestone_links(db)
         git_stats = import_git(db, args.repo_root, args.mainline_ref)
+        git_candidates_reconciled = reconcile_unique_numeric_candidates(db)
         db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('git_import_status', str(git_stats['git_import_status'])))
         refresh_search(db)
 
@@ -1133,6 +1264,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
         'raw_params': db.execute('SELECT count(*) FROM raw_params_inventory').fetchone()[0],
         'raw_env': db.execute('SELECT count(*) FROM raw_env_inventory').fetchone()[0],
         **git_stats,
+        'git_candidates_reconciled': git_candidates_reconciled,
         'curations_applied': curations_applied,
         'artifact_links': artifact_links,
         'source_links': source_links,

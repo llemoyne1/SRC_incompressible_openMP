@@ -1,0 +1,110 @@
+AUDIT INVENTAIRES - commit 7655b81 / tag surf-tension-qualified-x13h-20260831
+================================================================================
+
+Reference
+---------
+Commit complet : 7655b81b1b2fd16eecefa8d8b3bebac4cd9f87f1
+Tag            : surf-tension-qualified-x13h-20260831
+Branche        : surf
+Chaîne surface libre qualifiée :
+  x10o + CIC + Q2 + x10p/q + x10u + x10v full-vector swap + x12a
+
+Sources GitHub vérifiées le 31/08/2026 :
+  https://github.com/llemoyne1/SRC_incompressible_openMP/commit/7655b81b1b2fd16eecefa8d8b3bebac4cd9f87f1
+  https://raw.githubusercontent.com/llemoyne1/SRC_incompressible_openMP/7655b81b1b2fd16eecefa8d8b3bebac4cd9f87f1/src/cuda_q6_resident_0400.cu
+  https://raw.githubusercontent.com/llemoyne1/SRC_incompressible_openMP/7655b81b1b2fd16eecefa8d8b3bebac4cd9f87f1/scripts/run_0493x13k_oscillating_drop_2d_x13h.sh
+  https://raw.githubusercontent.com/llemoyne1/SRC_incompressible_openMP/7655b81b1b2fd16eecefa8d8b3bebac4cd9f87f1/scripts/run_0493x13n_taylor_culick_sheet_2d_x13h.sh
+
+Le commit GitHub annonce 28 fichiers modifiés ; sous src/, seul
+src/cuda_q6_resident_0400.cu appartient à ce commit. Les développements x13r-x13x
+étudiés ensuite provenaient du working tree expérimental et ne font pas partie de
+ce point de référence.
+
+Inventaire variables d'environnement
+-------------------------------------
+Inventaire d'entrée : 506 lignes.
+Inventaire audité  : 507 lignes, 507 noms uniques, aucune ligne exacte dupliquée.
+
+Méthode : scan des appels littéraux à getenv et aux helpers typés d'environnement
+dans le snapshot expérimental postérieur, utilisé comme sur-ensemble du code de
+référence. Ce scan trouve 224 noms. Douze noms n'étaient pas présents dans
+l'inventaire consolidé du 26/08 :
+
+  MPCD_X10_KINETIC_INTERFACE_FREE_CROSSING_CELLS
+  MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY
+  MPCD_X10_KINETIC_INTERFACE_ORPHAN_TURNOVER
+  MPCD_X13R_INTERFACE_CELL_COOLING
+  MPCD_X13S_INTERFACE_ANISOTROPIC_COOLING
+  MPCD_X13S_INTERFACE_DEPTH_CELLS
+  MPCD_X13S_TANGENTIAL_VELOCITY_FRACTION
+  MPCD_X13T_INTERFACE_RECOVERY_CELLS
+  MPCD_X13T_ONE_FOR_ONE_SIMPLE
+  MPCD_X13T_THIN_RADIUS_CELLS
+  MPCD_X13T_UNIFIED_PROGRESSIVE_INTERFACE_COOLING
+  MPCD_X13W_ESCAPE_RESEED
+
+Classification contre le commit 7655b81 :
+- 11 noms appartiennent aux développements expérimentaux ultérieurs et sont absents
+  du commit qualifié ; ils NE sont donc PAS ajoutés à l'inventaire de référence.
+- MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY est présent dans le commit et
+  a été ajouté comme ablation x13o, défaut 0/OFF.
+
+Après correction, les 213 noms de cet ensemble appartenant au code commité sont
+couverts par l'inventaire : 213/213. PASS.
+
+Contrat x13o vérifié dans le commit :
+- cuda_q6_resident_0400.cu lignes 17154-17162 : NORMAL_ONLY est lu avec défaut 0
+  et exige le swap x10v ;
+- lignes 17207-17214 : lorsque NORMAL_ONLY=0, la sémantique annoncée est
+  position-mirror+local-equal-mass-full-vector-swap ;
+- les runners x13k et x13n activent ONE_FOR_ONE=1 et ONE_FOR_ONE_SWAP=1,
+  activent x12a et ne définissent pas NORMAL_ONLY.
+
+Inventaire paramètres
+---------------------
+Inventaire d'entrée/sortie : 848 lignes.
+Aucune ligne exacte dupliquée. Les répétitions de noms correspondent à des
+entry_type distincts (clé de fichier, champ canonique, variable runner, etc.) et
+sont donc structurelles dans l'inventaire consolidé.
+
+Scan de src/params_io_base.cpp :
+- 442 clés de parseur distinctes ;
+- 430 clés couvertes directement par un champ name de l'inventaire ;
+- 12 clés restantes couvertes explicitement par le champ aliases ;
+- 0 clé parseur non couverte.
+
+Les 12 alias parser sont :
+  Kvirial
+  densityRelaxationBeta
+  densityRelaxationCompressionGateEnable
+  densityRelaxationCompressionThresholdFill
+  densityRelaxationTau
+  densityRelaxationTime
+  densityRelaxationTractionGain
+  densityRelaxationTractionThresholdFill
+  evaporationTargetType
+  kineticReflectionFraction
+  virialBeta
+  virialEnable
+
+Deux alias importants pour la surface libre sont explicitement documentés :
+  kineticReflectionFraction -> phaseInterfaceKineticReflectionFraction
+  evaporationTargetType     -> phaseInterfaceEvaporationTargetType
+
+Couverture parseur : 442/442. PASS.
+
+Revalidation du rollback
+------------------------
+Binaire reconstruit depuis 7655b81 :
+- goutte oscillante n=2, sigma=10000 :
+    Gomega_inviscid = 1.00150857 ; R2 = 0.961425218
+- Taylor-Culick sigma=10000 :
+    G_TC = 0.79457172 ; R2half = 0.9995508 ; symétrie = -0.6092 %
+
+Conclusion
+----------
+Les deux inventaires audités sont cohérents avec le point de référence commité.
+Le seul ajout requis à l'inventaire d'environnement est l'ablation x13o
+NORMAL_ONLY. Les flags x13r-x13x restent volontairement exclus car ils ne sont
+pas dans le commit de production. L'inventaire des paramètres ne nécessite
+aucune nouvelle clé canonique.

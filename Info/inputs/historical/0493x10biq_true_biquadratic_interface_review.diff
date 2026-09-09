@@ -1,0 +1,562 @@
+--- a/src/cuda_q6_resident_0400.cu
++++ b/src/cuda_q6_resident_0400.cu
+@@ -6431,23 +6431,37 @@
+ }
+
+ // =============================================================================
+-// 0493x10poly — CIC LOCAL QUADRATIC KINETIC INTERFACE
++// 0493x10biq — CIC TRUE BIQUADRATIC KINETIC INTERFACE
+ // =============================================================================
+-// Marching-squares remains the topology/broad-phase owner.  Only the swept
+-// kinetic crossing and reflection normal are refined from the CIC alpha field.
+-// The polynomial is total degree 2, reconstructed on demand from a compact 3x3-neighborhood alpha
+-// stencil (six loads).  No coefficient buffer and no additional kernel are introduced.
+-struct QuadraticAlphaPatch0493x10poly {
+-    double a0 = 0.0;
+-    double ax = 0.0, ay = 0.0;
+-    double axx = 0.0, axy = 0.0, ayy = 0.0;
+-    double gradRefPhysical = 0.0;
+-    double normalSecondPhysical = 0.0;
++// This replaces the optimized total-degree-2 x10poly approximation with the
++// actual tensor-product Q2 reconstruction qualified offline.  The 3x3 CIC
++// alpha samples are interpolated exactly by
++//
++//   P(xi,eta) = sum_{i,j=-1..1} a_ij L_i(xi) L_j(eta),
++//
++// where L_i are the quadratic Lagrange basis functions on {-1,0,+1}.
++// Marching-squares is retained only for topology / branch support and the
++// already-qualified x10o wall kinematics.  Crossing position and reflection
++// normal come from the biquadratic field.
++//
++// Cost design:
++//   * exactly 9 alpha loads per active owner-cell patch;
++//   * no coefficient grid, no extra buffer, no extra kernel/global pass;
++//   * samples stay in registers and are reused by all local evaluations;
++//   * the thermal envelope is a geometric normal offset of alpha=.5, not a
++//     fixed surrogate alpha threshold;
++//   * crossing uses a bracketed secant/bisection hybrid (max 8 iterations),
++//     only for already-detected interface owner cells.
++struct BiquadraticAlphaPatch0493x10biq {
++    // first index: xi=-1,0,+1; second: eta=-1,0,+1
++    double fmm = 0.0, f0m = 0.0, fpm = 0.0;
++    double fm0 = 0.0, f00 = 0.0, fp0 = 0.0;
++    double fmp = 0.0, f0p = 0.0, fpp = 0.0;
+     int owner = -1;
+     bool valid = false;
+ };
+
+-__device__ __forceinline__ double q6_x10poly_alpha_or_center(
++__device__ __forceinline__ double q6_x10biq_alpha_or_center(
+     const double* alpha,
+     int i, int j,
+     int nx, int ny,
+@@ -6457,73 +6471,69 @@
+     return (c >= 0 && isfinite(alpha[c])) ? alpha[c] : center;
+ }
+
+-__device__ __forceinline__ bool q6_x10poly_build_patch(
++__device__ __forceinline__ bool q6_x10biq_build_patch(
+     const double* alpha,
+     int owner,
+     int nx, int ny,
+-    double dx, double dy,
+     int periodicX, int periodicY,
+-    QuadraticAlphaPatch0493x10poly* out) {
+-    if (!out || !alpha || owner < 0 || nx <= 0 || ny <= 0 ||
+-        !(dx > 0.0) || !(dy > 0.0)) return false;
++    BiquadraticAlphaPatch0493x10biq* out) {
++    if (!alpha || !out || owner < 0 || owner >= nx * ny) return false;
+     const int i = owner % nx;
+     const int j = owner / nx;
+-    const double ac = alpha[owner];
+-    if (!isfinite(ac)) return false;
++    const double c = alpha[owner];
++    if (!isfinite(c)) return false;
+
+-    const double aw = q6_x10poly_alpha_or_center(
+-        alpha, i - 1, j, nx, ny, periodicX, periodicY, ac);
+-    const double ae = q6_x10poly_alpha_or_center(
+-        alpha, i + 1, j, nx, ny, periodicX, periodicY, ac);
+-    const double as = q6_x10poly_alpha_or_center(
+-        alpha, i, j - 1, nx, ny, periodicX, periodicY, ac);
+-    const double an = q6_x10poly_alpha_or_center(
+-        alpha, i, j + 1, nx, ny, periodicX, periodicY, ac);
+-    const double ane = q6_x10poly_alpha_or_center(
+-        alpha, i + 1, j + 1, nx, ny, periodicX, periodicY, ac);
+-
+-    out->a0 = ac;
+-    out->axx = ae - 2.0 * ac + aw;
+-    out->ayy = an - 2.0 * ac + as;
+-    // ax/ay make P(1,0)=ae and P(0,1)=an exactly.
+-    out->ax = ae - ac - 0.5 * out->axx;
+-    out->ay = an - ac - 0.5 * out->ayy;
+-    // Mixed term makes P(1,1)=ane exactly.  Therefore the quadratic patch
+-    // preserves all four marching-squares corner values/signs by construction.
+-    out->axy = ane - ae - an + ac;
++    out->fmm = q6_x10biq_alpha_or_center(alpha, i-1, j-1, nx, ny, periodicX, periodicY, c);
++    out->f0m = q6_x10biq_alpha_or_center(alpha, i  , j-1, nx, ny, periodicX, periodicY, c);
++    out->fpm = q6_x10biq_alpha_or_center(alpha, i+1, j-1, nx, ny, periodicX, periodicY, c);
++    out->fm0 = q6_x10biq_alpha_or_center(alpha, i-1, j  , nx, ny, periodicX, periodicY, c);
++    out->f00 = c;
++    out->fp0 = q6_x10biq_alpha_or_center(alpha, i+1, j  , nx, ny, periodicX, periodicY, c);
++    out->fmp = q6_x10biq_alpha_or_center(alpha, i-1, j+1, nx, ny, periodicX, periodicY, c);
++    out->f0p = q6_x10biq_alpha_or_center(alpha, i  , j+1, nx, ny, periodicX, periodicY, c);
++    out->fpp = q6_x10biq_alpha_or_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+     out->owner = owner;
+-
+-    // Reference gradient at the centre of the owner dual square (xi=eta=.5).
+-    // It converts the physical thermal offset delta into a local alpha-level
+-    // shift to first order: alpha_wall ~= .5 - delta |grad alpha|.
+-    const double dxi = out->ax + 0.5 * out->axx + 0.5 * out->axy;
+-    const double deta = out->ay + 0.5 * out->axy + 0.5 * out->ayy;
+-    const double gx = dxi / dx;
+-    const double gy = deta / dy;
+-    const double g2 = gx * gx + gy * gy;
+-    out->gradRefPhysical = g2 > 0.0 && isfinite(g2) ? sqrt(g2) : 0.0;
+-    out->normalSecondPhysical = 0.0;
+-    if (out->gradRefPhysical > 0.0) {
+-        const double invG = 1.0 / out->gradRefPhysical;
+-        const double nxOut = -gx * invG;
+-        const double nyOut = -gy * invG;
+-        const double hxx = out->axx / (dx * dx);
+-        const double hxy = out->axy / (dx * dy);
+-        const double hyy = out->ayy / (dy * dy);
+-        out->normalSecondPhysical =
+-            nxOut * nxOut * hxx + 2.0 * nxOut * nyOut * hxy +
+-            nyOut * nyOut * hyy;
+-    }
+-
+-    out->valid = isfinite(out->a0) && isfinite(out->ax) &&
+-                 isfinite(out->ay) && isfinite(out->axx) &&
+-                 isfinite(out->axy) && isfinite(out->ayy) &&
+-                 isfinite(out->normalSecondPhysical) &&
+-                 out->gradRefPhysical > 1.0e-14 / fmax(dx, dy);
++    out->valid = isfinite(out->fmm) && isfinite(out->f0m) && isfinite(out->fpm) &&
++                 isfinite(out->fm0) && isfinite(out->f00) && isfinite(out->fp0) &&
++                 isfinite(out->fmp) && isfinite(out->f0p) && isfinite(out->fpp);
+     return out->valid;
+ }
+
+-__device__ __forceinline__ void q6_x10poly_local_coordinates(
++__device__ __forceinline__ void q6_x10biq_quad1d(
++    double fm, double f0, double fp, double x,
++    double* value, double* deriv) {
++    const double d1 = 0.5 * (fp - fm);
++    const double d2 = 0.5 * (fp - 2.0 * f0 + fm);
++    if (value) *value = f0 + d1 * x + d2 * x * x;
++    if (deriv) *deriv = d1 + 2.0 * d2 * x;
++}
++
++__device__ __forceinline__ void q6_x10biq_eval(
++    const BiquadraticAlphaPatch0493x10biq& q,
++    double xi, double eta,
++    double dx, double dy,
++    double* value,
++    double* gx,
++    double* gy) {
++    double rm = 0.0, r0 = 0.0, rp = 0.0;
++    double rxm = 0.0, rx0 = 0.0, rxp = 0.0;
++    q6_x10biq_quad1d(q.fmm, q.f0m, q.fpm, xi, &rm, &rxm);
++    q6_x10biq_quad1d(q.fm0, q.f00, q.fp0, xi, &r0, &rx0);
++    q6_x10biq_quad1d(q.fmp, q.f0p, q.fpp, xi, &rp, &rxp);
++
++    double py = 0.0, dpy = 0.0;
++    q6_x10biq_quad1d(rm, r0, rp, eta, &py, &dpy);
++    if (value) *value = py;
++
++    if (gx) {
++        double px = 0.0;
++        q6_x10biq_quad1d(rxm, rx0, rxp, eta, &px, nullptr);
++        *gx = px / dx;
++    }
++    if (gy) *gy = dpy / dy;
++}
++
++__device__ __forceinline__ void q6_x10biq_local_coordinates(
+     double x, double y,
+     int owner,
+     int nx,
+@@ -6541,25 +6551,50 @@
+     *eta = ry / dy;
+ }
+
+-__device__ __forceinline__ void q6_x10poly_eval(
+-    const QuadraticAlphaPatch0493x10poly& q,
+-    double xi, double eta,
++// Evaluate the geometrically offset thermal envelope.  For a query point q on
++// the kinetic wall there exists a base point b on P=.5 such that
++// q = b + delta*n_out(b).  One fixed-point normal update is sufficient for the
++// root iterations; the final hit performs a second update for its normal.
++// Return sign >0 on the liquid/inside side and <0 outside.
++__device__ __forceinline__ bool q6_x10biq_thermal_level(
++    const BiquadraticAlphaPatch0493x10biq& q,
++    double xiq, double etaq,
++    double thermalThickness,
+     double dx, double dy,
+-    double* value,
+-    double* gx, double* gy) {
+-    if (value) {
+-        *value = q.a0 + q.ax * xi + q.ay * eta +
+-                 0.5 * q.axx * xi * xi + q.axy * xi * eta +
+-                 0.5 * q.ayy * eta * eta;
+-    }
+-    if (gx) *gx = (q.ax + q.axx * xi + q.axy * eta) / dx;
+-    if (gy) *gy = (q.ay + q.axy * xi + q.ayy * eta) / dy;
++    int refineNormal,
++    double* level,
++    double* nxOut,
++    double* nyOut) {
++    double bx = xiq;
++    double by = etaq;
++    double gx = 0.0, gy = 0.0, val = 0.0;
++    const int iters = refineNormal ? 2 : 1;
++    for (int it = 0; it < iters; ++it) {
++        q6_x10biq_eval(q, bx, by, dx, dy, &val, &gx, &gy);
++        const double g2 = gx * gx + gy * gy;
++        if (!(g2 > 1.0e-24 / (fmin(dx,dy) * fmin(dx,dy))) || !isfinite(g2))
++            return false;
++        const double invG = 1.0 / sqrt(g2);
++        const double nx = -gx * invG;
++        const double ny = -gy * invG;
++        bx = xiq - thermalThickness * nx / dx;
++        by = etaq - thermalThickness * ny / dy;
++    }
++
++    q6_x10biq_eval(q, bx, by, dx, dy, &val, &gx, &gy);
++    const double g2 = gx * gx + gy * gy;
++    if (!(g2 > 1.0e-24 / (fmin(dx,dy) * fmin(dx,dy))) || !isfinite(g2))
++        return false;
++    const double invG = 1.0 / sqrt(g2);
++    if (level) *level = val - 0.5;
++    if (nxOut) *nxOut = -gx * invG;
++    if (nyOut) *nyOut = -gy * invG;
++    return isfinite(val);
+ }
+
+-// Cheap wall-velocity proxy from the already-built moving topology segment.
+-// No sqrt is required.  The segment continues to provide branch identity and
+-// x10o Q6 wall kinematics; only geometry/collision normal comes from alpha.
+-__device__ __forceinline__ bool q6_x10poly_segment_wall_velocity(
++// Reuse the already-built x10o thermal segment only for branch identity and
++// wall velocity.  It is not used for collision position/normal.
++__device__ __forceinline__ bool q6_x10biq_segment_wall_velocity(
+     const MovingSegment0493x10n& seg,
+     double px, double py,
+     double t,
+@@ -6592,41 +6627,20 @@
+     return (!wallVx || isfinite(*wallVx)) && (!wallVy || isfinite(*wallVy));
+ }
+
+-__device__ __forceinline__ int q6_x10poly_roots_in_window(
+-    double c0, double c1, double c2,
+-    double window,
+-    double* r0, double* r1) {
+-    if (!(window > 0.0) || !r0 || !r1) return 0;
+-    const double scale = fmax(1.0, fabs(c0) + fabs(c1) * window +
+-                                   fabs(c2) * window * window);
+-    const double eps = 1.0e-14 * scale;
+-    int nr = 0;
+-    if (fabs(c2) <= eps) {
+-        if (fabs(c1) <= eps) return 0;
+-        const double r = -c0 / c1;
+-        if (isfinite(r)) { *r0 = r; nr = 1; }
+-        return nr;
+-    }
+-    double disc = c1 * c1 - 4.0 * c2 * c0;
+-    const double dTol = 1.0e-14 * fmax(1.0, c1 * c1 + fabs(4.0 * c2 * c0));
+-    if (disc < -dTol) return 0;
+-    disc = fmax(0.0, disc);
+-    const double sd = sqrt(disc);
+-    // Stable quadratic formula avoids catastrophic cancellation for the
+-    // shallow-curvature limit; product-of-roots gives the second root.
+-    const double qv = -0.5 * (c1 + copysign(sd, c1));
+-    if (fabs(qv) > eps) {
+-        *r0 = qv / c2;
+-        *r1 = c0 / qv;
+-    } else {
+-        *r0 = (-c1 - sd) / (2.0 * c2);
+-        *r1 = (-c1 + sd) / (2.0 * c2);
+-    }
+-    if (*r1 < *r0) { const double t = *r0; *r0 = *r1; *r1 = t; }
+-    return (isfinite(*r0) && isfinite(*r1)) ? 2 : 0;
++__device__ __forceinline__ bool q6_x10biq_level_at_tau(
++    const BiquadraticAlphaPatch0493x10biq& q,
++    double xi0, double eta0,
++    double ux, double uy,
++    double tau,
++    double thermalThickness,
++    double dx, double dy,
++    double* level) {
++    return q6_x10biq_thermal_level(
++        q, xi0 + ux * tau, eta0 + uy * tau,
++        thermalThickness, dx, dy, 0, level, nullptr, nullptr);
+ }
+
+-__device__ __forceinline__ bool q6_x10poly_collide_moving_patch(
++__device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
+     double x0, double y0,
+     double vx, double vy,
+     double mass,
+@@ -6637,110 +6651,129 @@
+     double lx, double ly,
+     int nx,
+     int periodicX, int periodicY,
+-    const QuadraticAlphaPatch0493x10poly& q,
++    const BiquadraticAlphaPatch0493x10biq& q,
+     const MovingSegment0493x10n& seg,
+     MovingSegmentCollision0493x10n* out) {
+     if (!out || !q.valid || !(window > 0.0)) return false;
+
+-    // One local constant wall-velocity frame.  It is obtained from the current
+-    // moving segment without an extra nonlinear iteration; dt is already small
+-    // and endpoint velocities are the same qualified x10o kinematics.
++    // Keep the qualified x10o kinematic frame.  Geometry is biquadratic; the
++    // wall velocity still comes from the matching moving thermal segment.
+     double wallVx = 0.0, wallVy = 0.0;
+-    if (!q6_x10poly_segment_wall_velocity(
++    if (!q6_x10biq_segment_wall_velocity(
+             seg, x0, y0, tStart, lx, ly, periodicX, periodicY,
+             &wallVx, &wallVy, nullptr, nullptr)) return false;
+
+-    // Evaluate the alpha polynomial in the locally translated wall frame.
+-    // xGeom(t)=xParticle(t)-uWall*(tStart+t).
+     const double xGeom0 = x0 - wallVx * tStart;
+     const double yGeom0 = y0 - wallVy * tStart;
+     double xi0 = 0.0, eta0 = 0.0;
+-    q6_x10poly_local_coordinates(
++    q6_x10biq_local_coordinates(
+         xGeom0, yGeom0, q.owner, nx, dx, dy, lx, ly,
+         periodicX, periodicY, &xi0, &eta0);
+     const double ux = (vx - wallVx) / dx;
+     const double uy = (vy - wallVy) / dy;
+
+-    // Second-order normal Taylor offset of the alpha=.5 polynomial to the
+-    // x10o thermal wall.  This preserves the cheap quadratic-in-time solve
+-    // while reducing the O(delta^2*kappa) error on small/high-curvature drops.
+-    const double targetAlpha =
+-        0.5 - thermalThickness * q.gradRefPhysical +
+-        0.5 * thermalThickness * thermalThickness * q.normalSecondPhysical;
+-    const double c0 = q.a0 + q.ax * xi0 + q.ay * eta0 +
+-                      0.5 * q.axx * xi0 * xi0 + q.axy * xi0 * eta0 +
+-                      0.5 * q.ayy * eta0 * eta0 - targetAlpha;
+-    const double c1 = q.ax * ux + q.ay * uy +
+-                      q.axx * xi0 * ux +
+-                      q.axy * (xi0 * uy + eta0 * ux) +
+-                      q.ayy * eta0 * uy;
+-    const double c2 = 0.5 * q.axx * ux * ux +
+-                      q.axy * ux * uy +
+-                      0.5 * q.ayy * uy * uy;
+-
+-    // Initial-overlap handling remains the existing x10p segment path.  The
+-    // swept polynomial branch should therefore start on/inside its wall.
+-    const double alphaTol = 1.0e-10;
+-    if (c0 < -alphaTol) return false;
+-
+-    double roots[2] = {0.0, 0.0};
+-    const int nr = q6_x10poly_roots_in_window(
+-        c0, c1, c2, window, &roots[0], &roots[1]);
+-    const double tTol = 1.0e-11 * fmax(1.0, window);
+-    const double h = fmin(dx, dy);
+-    const double branchDistance2Max = 0.5 * (dx * dx + dy * dy);
++    double f0 = 0.0, f1 = 0.0;
++    if (!q6_x10biq_level_at_tau(
++            q, xi0, eta0, ux, uy, 0.0,
++            thermalThickness, dx, dy, &f0)) return false;
++    const double sideTol = 1.0e-10;
++    // x10p owns true initial-overlap handling.  Do not manufacture a swept
++    // hit from a particle already outside the reconstructed thermal envelope.
++    if (f0 < -sideTol) return false;
++    if (!q6_x10biq_level_at_tau(
++            q, xi0, eta0, ux, uy, window,
++            thermalThickness, dx, dy, &f1)) return false;
++
++    double lo = 0.0, hi = window;
++    double flo = f0, fhi = f1;
++    if (fhi > 0.0) {
++        // Rare cross-and-return safeguard without a global subdivision pass.
++        const double mid = 0.5 * window;
++        double fm = 0.0;
++        if (!q6_x10biq_level_at_tau(
++                q, xi0, eta0, ux, uy, mid,
++                thermalThickness, dx, dy, &fm)) return false;
++        if (fm >= 0.0) return false;
++        hi = mid; fhi = fm;
++    }
++    if (!(flo >= -sideTol && fhi <= 0.0)) return false;
++
++    // Safeguarded false-position.  Biquadratic P along a line is quartic, but
++    // an outward crossing from inside to outside is bracketed by sign, so no
++    // general quartic solver is needed.  Eight local iterations give sub-1e-2h
++    // worst-case spatial precision even under pure bisection at |v|~h/dt;
++    // ordinary false-position convergence is substantially faster.
++    double tau = hi;
++    for (int it = 0; it < 8; ++it) {
++        const double width = hi - lo;
++        if (!(width > 1.0e-14)) break;
++        const double den = fhi - flo;
++        double trial = 0.5 * (lo + hi);
++        if (fabs(den) > 1.0e-16 && isfinite(den)) {
++            const double sec = (lo * fhi - hi * flo) / den;
++            const double guard = 0.15 * width;
++            if (isfinite(sec) && sec > lo + guard && sec < hi - guard)
++                trial = sec;
++        }
++        double ft = 0.0;
++        if (!q6_x10biq_level_at_tau(
++                q, xi0, eta0, ux, uy, trial,
++                thermalThickness, dx, dy, &ft)) return false;
++        tau = trial;
++        if (ft >= 0.0) { lo = trial; flo = ft; }
++        else { hi = trial; fhi = ft; }
++    }
++    // One final bracket interpolation improves time accuracy almost for free.
++    const double den = fhi - flo;
++    if (fabs(den) > 1.0e-16 && isfinite(den)) {
++        const double sec = (lo * fhi - hi * flo) / den;
++        if (isfinite(sec) && sec >= lo && sec <= hi) tau = sec;
++        else tau = 0.5 * (lo + hi);
++    } else {
++        tau = 0.5 * (lo + hi);
++    }
++    if (!isfinite(tau) || tau < 0.0 || tau > window) return false;
+
+-    for (int ir = 0; ir < nr; ++ir) {
+-        double tau = roots[ir];
+-        if (!isfinite(tau) || tau < -tTol || tau > window + tTol) continue;
+-        tau = fmin(window, fmax(0.0, tau));
+-
+-        const double xi = xi0 + ux * tau;
+-        const double eta = eta0 + uy * tau;
+-        double gx = 0.0, gy = 0.0;
+-        q6_x10poly_eval(q, xi, eta, dx, dy, nullptr, &gx, &gy);
+-        const double g2 = gx * gx + gy * gy;
+-        if (!(g2 > 1.0e-24 / (h * h)) || !isfinite(g2)) continue;
+-        const double invG = 1.0 / sqrt(g2);
+-        const double nxh = -gx * invG;
+-        const double nyh = -gy * invG;
++    const double xh = x0 + vx * tau;
++    const double yh = y0 + vy * tau;
++    double wallVxHit = 0.0, wallVyHit = 0.0;
++    double lambdaRaw = 0.0, distance2 = 0.0;
++    if (!q6_x10biq_segment_wall_velocity(
++            seg, xh, yh, tStart + tau,
++            lx, ly, periodicX, periodicY,
++            &wallVxHit, &wallVyHit, &lambdaRaw, &distance2)) return false;
++
++    // Marching-squares remains topology/branch support only.
++    const double ltol = 1.0e-8;
++    if (lambdaRaw < -ltol || lambdaRaw > 1.0 + ltol) return false;
++    const double branchDistance2Max = 0.5 * (dx * dx + dy * dy);
++    if (!(distance2 <= branchDistance2Max) || !isfinite(distance2)) return false;
+
+-        const double xh = x0 + vx * tau;
+-        const double yh = y0 + vy * tau;
+-        double wallVxHit = 0.0, wallVyHit = 0.0;
+-        double lambdaRaw = 0.0, distance2 = 0.0;
+-        if (!q6_x10poly_segment_wall_velocity(
+-                seg, xh, yh, tStart + tau,
+-                lx, ly, periodicX, periodicY,
+-                &wallVxHit, &wallVyHit, &lambdaRaw, &distance2)) continue;
+-
+-        // Marching-squares is retained strictly as local topology/branch
+-        // support.  A valid polynomial hit must project onto this finite branch
+-        // and remain within half a dual-cell diagonal of its predictor chord.
+-        const double ltol = 1.0e-8;
+-        if (lambdaRaw < -ltol || lambdaRaw > 1.0 + ltol) continue;
+-        if (!(distance2 <= branchDistance2Max) || !isfinite(distance2)) continue;
+-
+-        const double reln = (vx - wallVxHit) * nxh +
+-                            (vy - wallVyHit) * nyh;
+-        if (!(reln > 1.0e-13) || !isfinite(reln)) continue;
+-
+-        out->hit = true;
+-        out->tau = tau;
+-        out->lambda = fmin(1.0, fmax(0.0, lambdaRaw));
+-        out->wallVx = wallVxHit;
+-        out->wallVy = wallVyHit;
+-        out->nx = nxh;
+-        out->ny = nyh;
+-        out->relnBefore = reln;
+-        out->newVx = vx - 2.0 * reln * nxh;
+-        out->newVy = vy - 2.0 * reln * nyh;
+-        const double impulse = 2.0 * mass * reln;
+-        out->impulseWallX = impulse * nxh;
+-        out->impulseWallY = impulse * nyh;
+-        return isfinite(out->newVx) && isfinite(out->newVy);
+-    }
+-    return false;
++    // Refine the normal from the actual geometrically-offset biquadratic wall.
++    double nxh = 0.0, nyh = 0.0, finalLevel = 0.0;
++    if (!q6_x10biq_thermal_level(
++            q, xi0 + ux * tau, eta0 + uy * tau,
++            thermalThickness, dx, dy, 1,
++            &finalLevel, &nxh, &nyh)) return false;
++
++    const double reln = (vx - wallVxHit) * nxh +
++                        (vy - wallVyHit) * nyh;
++    if (!(reln > 1.0e-13) || !isfinite(reln)) return false;
++
++    out->hit = true;
++    out->tau = tau;
++    out->lambda = fmin(1.0, fmax(0.0, lambdaRaw));
++    out->wallVx = wallVxHit;
++    out->wallVy = wallVyHit;
++    out->nx = nxh;
++    out->ny = nyh;
++    out->relnBefore = reln;
++    out->newVx = vx - 2.0 * reln * nxh;
++    out->newVy = vy - 2.0 * reln * nyh;
++    const double impulse = 2.0 * mass * reln;
++    out->impulseWallX = impulse * nxh;
++    out->impulseWallY = impulse * nyh;
++    return isfinite(out->newVx) && isfinite(out->newVy);
+ }
+
+ __device__ __forceinline__ int q6_x10n_position_cell(
+@@ -6852,11 +6885,11 @@
+                         ci + di, cj + dj, nx, ny, periodicX, periodicY);
+                     if (owner < 0) continue;
+                     const int ns = static_cast<int>(segCount[owner]);
+-                    QuadraticAlphaPatch0493x10poly patch0493x10poly{};
++                    BiquadraticAlphaPatch0493x10biq patch0493x10poly{};
+                     const bool patchValid0493x10poly =
+                         !quadraticInterface0493x10poly || ns <= 0 ||
+-                        q6_x10poly_build_patch(
+-                            alpha, owner, nx, ny, dx, dy,
++                        q6_x10biq_build_patch(
++                            alpha, owner, nx, ny,
+                             periodicX, periodicY, &patch0493x10poly);
+                     for (int slot = 0; slot < ns && slot < 2; ++slot) {
+                         ++candidates;
+@@ -6891,7 +6924,7 @@
+                         bool hitOk0493x10poly = false;
+                         if (quadraticInterface0493x10poly &&
+                             patchValid0493x10poly) {
+-                            hitOk0493x10poly = q6_x10poly_collide_moving_patch(
++                            hitOk0493x10poly = q6_x10biq_collide_moving_patch(
+                                 cx, cy, cvx, cvy, mass,
+                                 elapsed, remaining,
+                                 thermalThickness0493x10poly,
+@@ -16413,19 +16446,19 @@
+         env_int_0400("MPCD_X10_KINETIC_INTERFACE_QUADRATIC", 0) != 0;
+     if (quadraticInterface0493x10poly && !kineticInterfaceCIC0493x10cic) {
+         throw std::runtime_error(
+-            "0493x10poly requires MPCD_X10_KINETIC_INTERFACE_CIC=1");
++            "0493x10biq requires MPCD_X10_KINETIC_INTERFACE_CIC=1");
+     }
+     if (quadraticInterface0493x10poly &&
+         (fullVectorEndpointVelocity0493x10r ||
+          segmentNormalKinematics0493x10s ||
+          rigidTangentialKinematics0493x10t)) {
+         throw std::runtime_error(
+-            "0493x10poly validation requires x10r/x10s/x10t all disabled");
++            "0493x10biq validation requires x10r/x10s/x10t all disabled");
+     }
+     static bool quadraticInterfaceReported0493x10poly = false;
+     if (q6ThermalInterfaceWall0493x10o &&
+         !quadraticInterfaceReported0493x10poly) {
+-        std::cout << "[0493x10poly] kineticQuadraticInterface="
++        std::cout << "[0493x10biq] kineticBiquadraticInterface="
+                   << (quadraticInterface0493x10poly ? 1 : 0)
+                   << " cic=" << (kineticInterfaceCIC0493x10cic ? 1 : 0)
+                   << " env="

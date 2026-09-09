@@ -1,0 +1,986 @@
+--- a/include/simulation_params.h
++++ b/include/simulation_params.h
+@@ -495,6 +495,16 @@
+     std::string phaseInterfaceASelector = "family:liquid";
+     std::string phaseInterfaceBSelector = "family:gas";
+
++    // 0493x9i: prescribed static contact angle for an A/B interface meeting
++    // the independent wall geometry provider from x9h.  -1 disables wetting
++    // and preserves the qualified free-interface path exactly.  Values in
++    // [0,180] are degrees measured through phase A.  With the conventions
++    // nAB=A->B and nWall=fluid->solid, the enforced relation is
++    //     nAB . nWall = -cos(thetaA).
++    // A and B remain the two capillary fluid phases; `wall` is the third
++    // geometry provider and therefore B=wall is not a contact-angle pair.
++    double phaseInterfaceContactAngleDegrees = -1.0;
++
+     // 0493x7d-v2 experimental compression/noise discriminator. Disabled by
+     // default: false preserves the historical rawFill x7d target bit-for-bit.
+     // When enabled, positive density relaxation is admitted only when the
+--- a/src/params_io_base.cpp
++++ b/src/params_io_base.cpp
+@@ -557,6 +557,8 @@
+             p.phaseInterfaceASelector = canonical_phase_selector_0493x9g(value, key);
+         else if (key == "phaseInterfaceBSelector" || key == "capillaryPhaseBSelector")
+             p.phaseInterfaceBSelector = canonical_phase_selector_0493x9g(value, key);
++        else if (key == "phaseInterfaceContactAngleDegrees" || key == "contactAngleDegrees" || key == "capillaryContactAngleDegrees")
++            p.phaseInterfaceContactAngleDegrees = parse_double(value, key);
+         else if (key == "q6DensityRelaxationCompressionGateEnable" || key == "densityRelaxationCompressionGateEnable") p.q6DensityRelaxationCompressionGateEnable = parse_bool(value, key);
+         else if (key == "q6DensityRelaxationCompressionThresholdFill" || key == "densityRelaxationCompressionThresholdFill") p.q6DensityRelaxationCompressionThresholdFill = parse_double(value, key);
+         else if (key == "q6DensityRelaxationTractionThresholdFill" || key == "densityRelaxationTractionThresholdFill") p.q6DensityRelaxationTractionThresholdFill = parse_double(value, key);
+@@ -1385,6 +1387,15 @@
+         throw std::runtime_error(
+             "0493x9d surfaceTensionSigma must be finite and non-negative");
+     }
++    if (!std::isfinite(p.phaseInterfaceContactAngleDegrees) ||
++        !(p.phaseInterfaceContactAngleDegrees == -1.0 ||
++          (p.phaseInterfaceContactAngleDegrees >= 0.0 &&
++           p.phaseInterfaceContactAngleDegrees <= 180.0))) {
++        throw std::runtime_error(
++            "0493x9i phaseInterfaceContactAngleDegrees must be -1 (disabled) or lie in [0,180]");
++    }
++    const bool contactAngleActive0493x9i =
++        p.phaseInterfaceContactAngleDegrees >= 0.0;
+     // Validate/canonicalize through local values too: SimulationParams may be
+     // assembled directly by tests instead of passing through the key parser.
+     const std::string phaseASelector0493x9g = canonical_phase_selector_0493x9g(
+@@ -1397,7 +1408,8 @@
+             "0493x9g phaseInterfaceASelector must select registered particle species");
+     }
+     const bool phasePairRelevant0493x9g =
+-        p.speciesQ6Mode == "free_surface_masked" || p.surfaceTensionSigma > 0.0;
++        p.speciesQ6Mode == "free_surface_masked" || p.surfaceTensionSigma > 0.0 ||
++        contactAngleActive0493x9i;
+     if (phasePairRelevant0493x9g && p.speciesRegistryEnable) {
+         int phaseACount0493x9g = 0;
+         int phaseBCount0493x9g = 0;
+@@ -1434,22 +1446,40 @@
+             throw std::runtime_error(
+                 "0493x9g explicit phase B type selector must match exactly one registered species");
+         }
++        const bool domainWallGeometry0493x9h =
++            is_wall_mode(p.bcLeft) || is_wall_mode(p.bcRight) ||
++            is_wall_mode(p.bcBottom) || is_wall_mode(p.bcTop);
++        // Do not silently reinterpret every Darcy/porous design field as a
++        // material wall.  The existing chi-collision wallVP opt-in is the
++        // declaration that this chi field supplies solid-wall geometry.
++        const bool chiWallGeometry0493x9h =
++            p.darcyBrinkmanEnable && p.darcyChiCollisionVpEnable;
+         if (phaseBSelector0493x9g == "wall") {
+-            const bool domainWallGeometry0493x9h =
+-                is_wall_mode(p.bcLeft) || is_wall_mode(p.bcRight) ||
+-                is_wall_mode(p.bcBottom) || is_wall_mode(p.bcTop);
+-            // Do not silently reinterpret every Darcy/porous design field as a
+-            // material wall.  The existing chi-collision wallVP opt-in is the
+-            // declaration that this chi field supplies solid-wall geometry.
+-            const bool chiWallGeometry0493x9h =
+-                p.darcyBrinkmanEnable && p.darcyChiCollisionVpEnable;
+             if (!domainWallGeometry0493x9h && !chiWallGeometry0493x9h) {
+                 throw std::runtime_error(
+                     "0493x9h phaseInterfaceBSelector=wall requires a static domain wall or darcyChiCollisionVpEnable=true");
+             }
+             if (p.surfaceTensionSigma > 0.0) {
+                 throw std::runtime_error(
+-                    "0493x9h phaseInterfaceBSelector=wall is geometry-only; surfaceTensionSigma must be 0 until the wall/contact-angle closure");
++                    "0493x9i B=wall remains a geometry-only phase pair; capillary wetting uses particle/vacuum A/B plus the separate wall provider");
++            }
++            if (contactAngleActive0493x9i) {
++                throw std::runtime_error(
++                    "0493x9i contact angle is a three-medium A/B/wall closure; phaseInterfaceBSelector must not be wall");
++            }
++        }
++        if (contactAngleActive0493x9i) {
++            if (!(p.surfaceTensionSigma > 0.0)) {
++                throw std::runtime_error(
++                    "0493x9i active contact angle requires surfaceTensionSigma>0");
++            }
++            if (!domainWallGeometry0493x9h && !chiWallGeometry0493x9h) {
++                throw std::runtime_error(
++                    "0493x9i active contact angle requires a static domain wall or darcyChiCollisionVpEnable=true");
++            }
++            if (phaseBSelector0493x9g == "wall") {
++                throw std::runtime_error(
++                    "0493x9i active contact angle requires a particle/vacuum phase B distinct from wall");
+             }
+         }
+         (void)phaseBAllGas0493x9g;
+--- a/src/cuda_q6_resident_0400.cu
++++ b/src/cuda_q6_resident_0400.cu
+@@ -2006,6 +2006,18 @@
+     double normalUnitErrorSqSum = 0.0;
+ };
+
++struct ContactAngleAccumulator0493x9i {
++    unsigned long long candidateCells = 0ull;
++    unsigned long long correctedCells = 0ull;
++    unsigned long long curvatureCells = 0ull;
++    double rawAngleSum = 0.0;
++    double correctedAngleSum = 0.0;
++    double correctedAngleErrorSqSum = 0.0;
++    double correctedDotErrorSqSum = 0.0;
++    double curvatureSum = 0.0;
++    double curvatureSqSum = 0.0;
++};
++
+ struct ResidentWorkspace0400 {
+     CudaCellWorkspace cells;
+     DeviceBuffer0400<double> rhs;
+@@ -2044,6 +2056,9 @@
+     DeviceBuffer0400<double> phaseWallNormalX0493x9h;
+     DeviceBuffer0400<double> phaseWallNormalY0493x9h;
+     DeviceBuffer0400<WallGeometryAccumulator0493x9h> phaseWallGeometryAccum0493x9h;
++    // x9i keeps only one scalar accumulator; corrected normals reuse the
++    // production p3 normal arrays and do not allocate another cell field.
++    DeviceBuffer0400<ContactAngleAccumulator0493x9i> contactAngleAccum0493x9i;
+     // 0493x9a passive capillary geometry.  These arrays are allocated only
+     // behind the x9a gate and are not consumed by the projection in this patch.
+     DeviceBuffer0400<double> phaseNormalX0493x9a;
+@@ -2149,6 +2164,7 @@
+         phaseGeometryAccum0493x6b.ensure(1u);
+         phaseGeometryResidentAccum0493x6c.ensure(1u);
+         phaseWallGeometryAccum0493x9h.ensure(1u);
++        contactAngleAccum0493x9i.ensure(1u);
+         phaseCurvatureAccum0493x9a.ensure(1u);
+         phaseCurvatureAccum0493x9b.ensure(1u);
+         phaseInterfaceStencilAccum0493x6f.ensure(1u);
+@@ -4084,6 +4100,58 @@
+            "solidFraction=1-chi;normal=fluidToSolid;passiveGeometryOnly" << '\n';
+ }
+
++struct ContactAngleAudit0493x9i {
++    int projectedSpeciesIndex = -1;
++    std::uint32_t projectedType = 0u;
++    double prescribedAngleDegrees = -1.0;
++    double targetNormalWallDot = 0.0;
++    std::uint64_t candidateCells = 0u;
++    std::uint64_t correctedCells = 0u;
++    std::uint64_t curvatureCells = 0u;
++    double rawAngleMean = 0.0;
++    double correctedAngleMean = 0.0;
++    double correctedAngleErrorRms = 0.0;
++    double correctedDotErrorRms = 0.0;
++    double contactCurvatureMean = 0.0;
++    double contactCurvatureRms = 0.0;
++    double contactCurvatureStd = 0.0;
++};
++
++void append_contact_angle_audit_0493x9i(
++    const SimulationParams& params,
++    int step,
++    double time,
++    const ContactAngleAudit0493x9i& a) {
++    if (params.outputDir.empty()) return;
++    const std::filesystem::path path = std::filesystem::path(params.outputDir) /
++        "cuda_contact_angle_0493x9i.csv";
++    std::filesystem::create_directories(path.parent_path());
++    const bool header = !std::filesystem::exists(path) ||
++                        std::filesystem::file_size(path) == 0u;
++    std::ofstream out(path, std::ios::app);
++    if (!out) {
++        throw std::runtime_error(
++            "0493x9i failed to open contact-angle audit CSV: " + path.string());
++    }
++    if (header) {
++        out << "step,time,projectedSpeciesIndex,projectedType,prescribedAngleDegrees,"
++               "targetNormalWallDot,candidateCells,correctedCells,curvatureCells,"
++               "rawAngleMean,correctedAngleMean,correctedAngleErrorRms,"
++               "correctedDotErrorRms,contactCurvatureMean,contactCurvatureRms,"
++               "contactCurvatureStd,contract\n";
++    }
++    out << std::setprecision(17)
++        << step << ',' << time << ',' << a.projectedSpeciesIndex << ',' << a.projectedType << ','
++        << a.prescribedAngleDegrees << ',' << a.targetNormalWallDot << ','
++        << a.candidateCells << ',' << a.correctedCells << ',' << a.curvatureCells << ','
++        << a.rawAngleMean << ',' << a.correctedAngleMean << ','
++        << a.correctedAngleErrorRms << ',' << a.correctedDotErrorRms << ','
++        << a.contactCurvatureMean << ',' << a.contactCurvatureRms << ','
++        << a.contactCurvatureStd << ','
++        << "thetaMeasuredThroughA;nAB=AtoB;nWall=fluidToSolid;dot=-cos(theta);"
++           "normalOnly/p3;physicalAlphaUnchanged" << '\n';
++}
++
+ __global__ void q6_phase_interface_geometry_stats_0493x6b(
+     CudaSpeciesCellDeviceView0490h species,
+     const unsigned char* liquidMask,
+@@ -4432,6 +4500,151 @@
+     if (unitErrSqLocal != 0.0) atomic_add_double_0400(&accum->normalUnitErrorSqSum, unitErrSqLocal);
+ }
+
++// 0493x9i prescribed contact angle.  The physical x6c alpha field is never
++// changed.  Only the curvature-only p3 normal is replaced in cells that are
++// simultaneously in the x9h wall-normal band and in a 3x3 alpha=0.5 interface
++// neighbourhood.  theta is measured through phase A.  Since nAB points A->B
++// while nWall points fluid->solid, Young geometry is nAB.nWall=-cos(theta).
++__device__ __forceinline__ int q6_contact_index_0493x9i(
++    int ix, int iy, int nx, int ny, int periodicX, int periodicY) {
++    if (periodicX) ix = wrap_cell_index_0400(ix, nx);
++    else ix = max(0, min(nx - 1, ix));
++    if (periodicY) iy = wrap_cell_index_0400(iy, ny);
++    else iy = max(0, min(ny - 1, iy));
++    return iy * nx + ix;
++}
++
++__device__ __forceinline__ bool q6_contact_interface_band_0493x9i(
++    const double* alpha,
++    int ix,
++    int iy,
++    int nx,
++    int ny,
++    int periodicX,
++    int periodicY) {
++    double amin = 1.0;
++    double amax = 0.0;
++    for (int oy = -1; oy <= 1; ++oy) {
++        for (int ox = -1; ox <= 1; ++ox) {
++            const int q = q6_contact_index_0493x9i(
++                ix + ox, iy + oy, nx, ny, periodicX, periodicY);
++            const double a = fmin(1.0, fmax(0.0, alpha[q]));
++            amin = fmin(amin, a);
++            amax = fmax(amax, a);
++        }
++    }
++    return amin < 0.5 && amax >= 0.5;
++}
++
++__global__ void q6_apply_contact_angle_normals_0493x9i(
++    const double* alphaPhysical,
++    const double* wallNormalX,
++    const double* wallNormalY,
++    double* phaseNormalX,
++    double* phaseNormalY,
++    ContactAngleAccumulator0493x9i* accum,
++    int nx,
++    int ny,
++    int periodicX,
++    int periodicY,
++    double contactAngleDegrees) {
++    const int n = nx * ny;
++    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    const int stride = blockDim.x * gridDim.x;
++    constexpr double pi = 3.141592653589793238462643383279502884;
++    const double theta = contactAngleDegrees * (pi / 180.0);
++    const double targetDot = -cos(theta);
++    const double tangentMagnitude = sqrt(fmax(0.0, 1.0 - targetDot * targetDot));
++    unsigned long long candidateLocal = 0ull;
++    unsigned long long correctedLocal = 0ull;
++    double rawAngleSumLocal = 0.0;
++    double correctedAngleSumLocal = 0.0;
++    double angleErrSqLocal = 0.0;
++    double dotErrSqLocal = 0.0;
++    for (int c = idx; c < n; c += stride) {
++        const int ix = c % nx;
++        const int iy = c / nx;
++        const double nwx = wallNormalX[c];
++        const double nwy = wallNormalY[c];
++        const double wg = sqrt(nwx*nwx + nwy*nwy);
++        if (!(wg > 0.5)) continue;
++        if (!q6_contact_interface_band_0493x9i(
++                alphaPhysical, ix, iy, nx, ny, periodicX, periodicY)) continue;
++        const double rx = phaseNormalX[c];
++        const double ry = phaseNormalY[c];
++        const double rg = sqrt(rx*rx + ry*ry);
++        if (!(rg > 0.5)) continue;
++        ++candidateLocal;
++        const double wx = nwx / wg;
++        const double wy = nwy / wg;
++        const double rnx = rx / rg;
++        const double rny = ry / rg;
++        const double rawDot = fmax(-1.0, fmin(1.0, rnx*wx + rny*wy));
++        const double rawAngle = acos(fmax(-1.0, fmin(1.0, -rawDot))) * (180.0/pi);
++        rawAngleSumLocal += rawAngle;
++        const double tx = -wy;
++        const double ty = wx;
++        const double tangentialRaw = rnx*tx + rny*ty;
++        const double signT = tangentialRaw < 0.0 ? -1.0 : 1.0;
++        double nxNew = targetDot*wx + signT*tangentMagnitude*tx;
++        double nyNew = targetDot*wy + signT*tangentMagnitude*ty;
++        const double ng = sqrt(nxNew*nxNew + nyNew*nyNew);
++        if (!(ng > 1.0e-14)) continue;
++        nxNew /= ng;
++        nyNew /= ng;
++        phaseNormalX[c] = nxNew;
++        phaseNormalY[c] = nyNew;
++        ++correctedLocal;
++        const double dot = fmax(-1.0, fmin(1.0, nxNew*wx + nyNew*wy));
++        const double measuredAngle = acos(fmax(-1.0, fmin(1.0, -dot))) * (180.0/pi);
++        correctedAngleSumLocal += measuredAngle;
++        const double ae = measuredAngle - contactAngleDegrees;
++        const double de = dot - targetDot;
++        angleErrSqLocal += ae*ae;
++        dotErrSqLocal += de*de;
++    }
++    if (candidateLocal) atomicAdd(&accum->candidateCells, candidateLocal);
++    if (correctedLocal) atomicAdd(&accum->correctedCells, correctedLocal);
++    if (rawAngleSumLocal != 0.0) atomic_add_double_0400(&accum->rawAngleSum, rawAngleSumLocal);
++    if (correctedAngleSumLocal != 0.0) atomic_add_double_0400(&accum->correctedAngleSum, correctedAngleSumLocal);
++    if (angleErrSqLocal != 0.0) atomic_add_double_0400(&accum->correctedAngleErrorSqSum, angleErrSqLocal);
++    if (dotErrSqLocal != 0.0) atomic_add_double_0400(&accum->correctedDotErrorSqSum, dotErrSqLocal);
++}
++
++__global__ void q6_contact_angle_curvature_audit_0493x9i(
++    const double* alphaPhysical,
++    const double* wallNormalX,
++    const double* wallNormalY,
++    const double* curvature,
++    ContactAngleAccumulator0493x9i* accum,
++    int nx,
++    int ny,
++    int periodicX,
++    int periodicY) {
++    const int n = nx * ny;
++    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    const int stride = blockDim.x * gridDim.x;
++    unsigned long long countLocal = 0ull;
++    double sumLocal = 0.0;
++    double sqLocal = 0.0;
++    for (int c = idx; c < n; c += stride) {
++        const int ix = c % nx;
++        const int iy = c / nx;
++        const double wg = sqrt(wallNormalX[c]*wallNormalX[c] + wallNormalY[c]*wallNormalY[c]);
++        if (!(wg > 0.5)) continue;
++        if (!q6_contact_interface_band_0493x9i(
++                alphaPhysical, ix, iy, nx, ny, periodicX, periodicY)) continue;
++        const double k = curvature[c];
++        if (!isfinite(k)) continue;
++        ++countLocal;
++        sumLocal += k;
++        sqLocal += k*k;
++    }
++    if (countLocal) atomicAdd(&accum->curvatureCells, countLocal);
++    if (sumLocal != 0.0) atomic_add_double_0400(&accum->curvatureSum, sumLocal);
++    if (sqLocal != 0.0) atomic_add_double_0400(&accum->curvatureSqSum, sqLocal);
++}
++
+ __global__ void q6_build_phase_fill_resident_0493x6c(
+     CudaSpeciesCellDeviceView0490h species,
+     int phaseASelectorKind0493x9g,
+@@ -8508,6 +8721,8 @@
+         cuda_q6_phase_gas_pressure_0493x6g_requested();
+     const bool surfaceTensionActive0493x9d =
+         freeSurfaceMode0493x5a && params.surfaceTensionSigma > 0.0;
++    const bool contactAngleActive0493x9i =
++        freeSurfaceMode0493x5a && params.phaseInterfaceContactAngleDegrees >= 0.0;
+     const bool phaseCurvatureDiagnostics0493x9a =
+         freeSurfaceMode0493x5a &&
+         cuda_q6_phase_curvature_diagnostics_0493x9a_requested();
+@@ -8679,6 +8894,16 @@
+     }
+     const bool phaseBWall0493x9h =
+         phaseB0493x9g.kind == PhaseSelectorKind0493x9g::Wall;
++    if (contactAngleActive0493x9i && phaseBWall0493x9h) {
++        diag.reason = "0493x9i contact angle requires A/B fluid phases plus a separate wall provider";
++        return false;
++    }
++    if (contactAngleActive0493x9i && !surfaceTensionActive0493x9d) {
++        diag.reason = "0493x9i contact angle requires active surface tension";
++        return false;
++    }
++    const bool wallGeometryRequested0493x9i =
++        phaseBWall0493x9h || contactAngleActive0493x9i;
+     const int wallLeft0493x9h = q6_wall_like_0409(params.bcLeft) ? 1 : 0;
+     const int wallRight0493x9h = q6_wall_like_0409(params.bcRight) ? 1 : 0;
+     const int wallBottom0493x9h = q6_wall_like_0409(params.bcBottom) ? 1 : 0;
+@@ -8686,7 +8911,7 @@
+     const bool domainWallGeometry0493x9h =
+         wallLeft0493x9h || wallRight0493x9h || wallBottom0493x9h || wallTop0493x9h;
+     const bool chiWallGeometryRequested0493x9h =
+-        phaseBWall0493x9h && params.darcyBrinkmanEnable &&
++        wallGeometryRequested0493x9i && params.darcyBrinkmanEnable &&
+         params.darcyChiCollisionVpEnable;
+     const float* wallChi0493x9h = nullptr;
+     int wallChiNx0493x9h = 0;
+@@ -8701,17 +8926,19 @@
+             return false;
+         }
+     }
+-    if (phaseBWall0493x9h && !domainWallGeometry0493x9h &&
++    if (wallGeometryRequested0493x9i && !domainWallGeometry0493x9h &&
+         !chiWallGeometry0493x9h) {
+-        diag.reason = "0493x9h B=wall resolved without domain-wall or chi-wallVP geometry";
++        diag.reason = phaseBWall0493x9h
++            ? "0493x9h B=wall resolved without domain-wall or chi-wallVP geometry"
++            : "0493x9i contact angle resolved without domain-wall or chi-wallVP geometry";
+         return false;
+     }
+-    if (phaseBWall0493x9h && !phaseGeometryResident0493x6c) {
+-        diag.reason = "0493x9h B=wall requires x6c resident geometry so the wall provider has a resident lifecycle";
++    if (wallGeometryRequested0493x9i && !phaseGeometryResident0493x6c) {
++        diag.reason = "0493x9i wall/contact geometry requires x6c resident geometry";
+         return false;
+     }
+     if (phaseBWall0493x9h && surfaceTensionActive0493x9d) {
+-        diag.reason = "0493x9h B=wall is passive geometry only; surface tension/contact-angle closure is not implemented";
++        diag.reason = "0493x9i B=wall remains passive geometry; wetting uses A/B plus separate wall geometry";
+         return false;
+     }
+     if (phaseBWall0493x9h &&
+@@ -8919,7 +9146,7 @@
+                                 "0493x6c geometry start event record");
+             }
+
+-            if (phaseBWall0493x9h) {
++            if (wallGeometryRequested0493x9i) {
+                 ws.phaseWallFraction0493x9h.ensure(geometryCells0493x6c);
+                 ws.phaseWallNormalX0493x9h.ensure(geometryCells0493x6c);
+                 ws.phaseWallNormalY0493x9h.ensure(geometryCells0493x6c);
+@@ -9527,12 +9754,83 @@
+                     grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                 check_cuda_0400(cudaGetLastError(),
+                                 "0493x9d p3 normal build launch");
++                if (contactAngleActive0493x9i) {
++                    if (!ws.phaseWallGeometryValid0493x9h ||
++                        ws.phaseWallGeometryStep0493x9h != step) {
++                        diag.reason = "0493x9i contact-angle production normal requested without current wall geometry";
++                        append_independent_masked_species_audit_0493w5(params, step, time, audits);
++                        return false;
++                    }
++                    check_cuda_0400(cudaMemset(
++                                        ws.contactAngleAccum0493x9i.data(), 0,
++                                        sizeof(ContactAngleAccumulator0493x9i)),
++                                    "0493x9i contact-angle accumulator zero");
++                    q6_apply_contact_angle_normals_0493x9i<<<cellBlocks, threads>>>(
++                        ws.phaseAlphaFiltered0493x6c.data(),
++                        ws.phaseWallNormalX0493x9h.data(),
++                        ws.phaseWallNormalY0493x9h.data(),
++                        ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
++                        ws.contactAngleAccum0493x9i.data(),
++                        grid.Nx, grid.Ny, periodicX, periodicY,
++                        params.phaseInterfaceContactAngleDegrees);
++                    check_cuda_0400(cudaGetLastError(),
++                                    "0493x9i contact-angle normal closure launch");
++                }
+                 q6_build_phase_curvature_scharr_0493x9b<<<cellBlocks, threads>>>(
+                     ws.phaseNormalX0493x9b.data(), ws.phaseNormalY0493x9b.data(),
+                     ws.phaseCurvature3Pass0493x9c.data(),
+                     grid.Nx, grid.Ny, dx, dy, periodicX, periodicY);
+                 check_cuda_0400(cudaGetLastError(),
+                                 "0493x9d p3 curvature build launch");
++                if (contactAngleActive0493x9i) {
++                    q6_contact_angle_curvature_audit_0493x9i<<<cellBlocks, threads>>>(
++                        ws.phaseAlphaFiltered0493x6c.data(),
++                        ws.phaseWallNormalX0493x9h.data(),
++                        ws.phaseWallNormalY0493x9h.data(),
++                        ws.phaseCurvature3Pass0493x9c.data(),
++                        ws.contactAngleAccum0493x9i.data(),
++                        grid.Nx, grid.Ny, periodicX, periodicY);
++                    check_cuda_0400(cudaGetLastError(),
++                                    "0493x9i contact-angle curvature audit launch");
++                    if (geometryAuditThisStep0493x6c) {
++                        ContactAngleAccumulator0493x9i ca{};
++                        check_cuda_0400(cudaMemcpy(
++                                            &ca, ws.contactAngleAccum0493x9i.data(),
++                                            sizeof(ca), cudaMemcpyDeviceToHost),
++                                        "0493x9i contact-angle audit download");
++                        ContactAngleAudit0493x9i a{};
++                        a.projectedSpeciesIndex = s;
++                        a.projectedType = audit.type;
++                        a.prescribedAngleDegrees = params.phaseInterfaceContactAngleDegrees;
++                        constexpr double pi0493x9i = 3.141592653589793238462643383279502884;
++                        a.targetNormalWallDot = -std::cos(
++                            params.phaseInterfaceContactAngleDegrees * (pi0493x9i / 180.0));
++                        a.candidateCells = static_cast<std::uint64_t>(ca.candidateCells);
++                        a.correctedCells = static_cast<std::uint64_t>(ca.correctedCells);
++                        a.curvatureCells = static_cast<std::uint64_t>(ca.curvatureCells);
++                        if (ca.candidateCells > 0ull) {
++                            a.rawAngleMean = ca.rawAngleSum /
++                                static_cast<double>(ca.candidateCells);
++                        }
++                        if (ca.correctedCells > 0ull) {
++                            const double inv = 1.0 / static_cast<double>(ca.correctedCells);
++                            a.correctedAngleMean = ca.correctedAngleSum * inv;
++                            a.correctedAngleErrorRms = std::sqrt(
++                                std::max(0.0, ca.correctedAngleErrorSqSum * inv));
++                            a.correctedDotErrorRms = std::sqrt(
++                                std::max(0.0, ca.correctedDotErrorSqSum * inv));
++                        }
++                        if (ca.curvatureCells > 0ull) {
++                            const double inv = 1.0 / static_cast<double>(ca.curvatureCells);
++                            a.contactCurvatureMean = ca.curvatureSum * inv;
++                            const double ms = ca.curvatureSqSum * inv;
++                            a.contactCurvatureRms = std::sqrt(std::max(0.0, ms));
++                            a.contactCurvatureStd = std::sqrt(std::max(
++                                0.0, ms - a.contactCurvatureMean*a.contactCurvatureMean));
++                        }
++                        append_contact_angle_audit_0493x9i(params, step, time, a);
++                    }
++                }
+                 ws.phaseCurvature3PassValid0493x9d = true;
+                 ws.phaseCurvature3PassNx0493x9d = grid.Nx;
+                 ws.phaseCurvature3PassNy0493x9d = grid.Ny;
+--- /dev/null
++++ b/scripts/generate_0493x9i_sessile_cap_state.py
+@@ -0,0 +1,159 @@
++#!/usr/bin/env python3
++"""Generate a deterministic two-species circular sessile cap for 0493x9i.
++
++The physical wall is y=0 (outside the computational domain).  The liquid A cap
++is the part of a circle inside y>=0.  For a prescribed contact angle theta
++measured through liquid A, the circle centre is y_c=-R*cos(theta).  Therefore
++its tangent meets the bottom wall at theta and the exact interface curvature is
+++1/R with the x9d convention nAB=A->B.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import math
++import random
++import struct
++import sys
++from array import array
++from pathlib import Path
++
++MAGIC = b"SRCMPCD_STATE" + b"\0" * (16 - len("SRCMPCD_STATE"))
++
++
++def pos_int(s):
++    v=int(s)
++    if v<=0: raise argparse.ArgumentTypeError('expected positive integer')
++    return v
++
++
++def pos_float(s):
++    v=float(s)
++    if not math.isfinite(v) or v<=0: raise argparse.ArgumentTypeError('expected finite positive number')
++    return v
++
++
++def nonneg_float(s):
++    v=float(s)
++    if not math.isfinite(v) or v<0: raise argparse.ArgumentTypeError('expected finite non-negative number')
++    return v
++
++
++def coprime_multiplier(modulus,start,avoid=-1):
++    for off in range(modulus):
++        c=1+((start+off-1)%modulus)
++        if c!=avoid and math.gcd(c,modulus)==1: return c
++    return 1
++
++
++def paired_velocities(rng,count,mass,kbt):
++    if count<=0: return []
++    if kbt==0.0 or count==1: return [(0.0,0.0)]*count
++    vals=[]
++    for _ in range(count//2):
++        gx,gy=rng.gauss(0.0,1.0),rng.gauss(0.0,1.0)
++        vals.extend(((gx,gy),(-gx,-gy)))
++    if count%2: vals.append((0.0,0.0))
++    s2=sum(x*x+y*y for x,y in vals)
++    scale=math.sqrt((2.0*count*kbt)/(mass*s2)) if s2>0 else 0.0
++    return [(scale*x,scale*y) for x,y in vals]
++
++
++def write_state(path,x,y,vx,vy,typ,mass,role):
++    n=len(x)
++    reserved=[0]*8; reserved[0]=1; reserved[1]=1
++    path.parent.mkdir(parents=True,exist_ok=True)
++    if sys.byteorder=='big':
++        for a in (x,y,vx,vy,typ,mass): a.byteswap()
++    try:
++        with path.open('wb') as f:
++            f.write(MAGIC)
++            f.write(struct.pack('<IIIIQIIII',2,0x01020304,2,1,n,1,1,8,4))
++            f.write(struct.pack('<8Q',*reserved))
++            for a in (x,y,vx,vy,typ,mass): a.tofile(f)
++            f.write(role)
++    finally:
++        if sys.byteorder=='big':
++            for a in (x,y,vx,vy,typ,mass): a.byteswap()
++
++
++def main():
++    ap=argparse.ArgumentParser()
++    ap.add_argument('--output',type=Path,required=True)
++    ap.add_argument('--Lx',type=pos_float,default=1.6)
++    ap.add_argument('--Ly',type=pos_float,default=1.0)
++    ap.add_argument('--nx',type=pos_int,default=320)
++    ap.add_argument('--ny',type=pos_int,default=200)
++    ap.add_argument('--gamma',type=pos_int,default=20)
++    ap.add_argument('--center-x',type=float,default=None)
++    ap.add_argument('--radius',type=pos_float,default=0.25)
++    ap.add_argument('--contact-angle-deg',type=float,default=90.0)
++    ap.add_argument('--liquid-type',type=pos_int,default=1)
++    ap.add_argument('--gas-type',type=pos_int,default=2)
++    ap.add_argument('--liquid-mass',type=pos_float,default=1.0)
++    ap.add_argument('--gas-mass',type=pos_float,default=1.0)
++    ap.add_argument('--kBT',type=nonneg_float,default=0.125)
++    ap.add_argument('--seed',type=int,default=493930)
++    args=ap.parse_args()
++    if args.gamma<2: ap.error('gamma must be >=2')
++    if args.liquid_type==args.gas_type: ap.error('liquid and gas types must differ')
++    if not math.isfinite(args.contact_angle_deg) or not (0.0<args.contact_angle_deg<180.0):
++        ap.error('contact angle must lie strictly between 0 and 180 for this cap generator')
++    cx=args.Lx*0.5 if args.center_x is None else float(args.center_x)
++    theta=math.radians(args.contact_angle_deg)
++    cy=-args.radius*math.cos(theta)
++    half_width=args.radius*math.sin(theta)
++    cap_height=args.radius*(1.0-math.cos(theta))
++    if cx-half_width<=0.0 or cx+half_width>=args.Lx:
++        ap.error('cap contact points must remain away from side walls')
++    if cap_height>=args.Ly:
++        ap.error('cap must remain below the top wall')
++    dx,dy=args.Lx/args.nx,args.Ly/args.ny
++    if abs(dx-dy)>1e-12*max(1.0,abs(dx),abs(dy)):
++        ap.error('square cells required')
++    ax=coprime_multiplier(args.gamma,3); ay=coprime_multiplier(args.gamma,7,avoid=ax)
++    rng=random.Random(args.seed)
++    x=array('d'); y=array('d'); vx=array('d'); vy=array('d')
++    typ=array('I'); mass=array('d'); role=bytearray()
++    nl_tot=ng_tot=mixed=0
++    for iy in range(args.ny):
++        for ix in range(args.nx):
++            positions=[]; types=[]
++            for k in range(args.gamma):
++                fx=((ax*k)%args.gamma+0.5)/args.gamma
++                fy=((ay*k)%args.gamma+0.5)/args.gamma
++                px,py=(ix+fx)*dx,(iy+fy)*dy
++                inside=(px-cx)**2+(py-cy)**2 <= args.radius**2
++                positions.append((px,py)); types.append(args.liquid_type if inside else args.gas_type)
++            nl=sum(t==args.liquid_type for t in types); ng=args.gamma-nl
++            mixed += int(nl>0 and ng>0); nl_tot+=nl; ng_tot+=ng
++            vl=paired_velocities(rng,nl,args.liquid_mass,args.kBT)
++            vg=paired_velocities(rng,ng,args.gas_mass,args.kBT)
++            il=ig=0
++            for (px,py),t in zip(positions,types):
++                if t==args.liquid_type:
++                    ux,uy=vl[il]; il+=1; m=args.liquid_mass
++                else:
++                    ux,uy=vg[ig]; ig+=1; m=args.gas_mass
++                x.append(px); y.append(py); vx.append(ux); vy.append(uy)
++                typ.append(t); mass.append(m); role.append(1)
++    write_state(args.output,x,y,vx,vy,typ,mass,role)
++    meta={
++        'profile':'sessile_circular_cap_0493x9i','Lx':args.Lx,'Ly':args.Ly,
++        'nx':args.nx,'ny':args.ny,'dx':dx,'dy':dy,'gamma':args.gamma,
++        'centerX':cx,'centerY':cy,'radius':args.radius,
++        'contactAngleDegrees':args.contact_angle_deg,
++        'contactHalfWidth':half_width,'capHeight':cap_height,
++        'exactCurvature':1.0/args.radius,
++        'liquidType':args.liquid_type,'gasType':args.gas_type,
++        'liquidMass':args.liquid_mass,'gasMass':args.gas_mass,'kBT':args.kBT,
++        'seed':args.seed,'particles':len(x),'liquidParticles':nl_tot,'gasParticles':ng_tot,
++        'mixedCells':mixed,'liquidFractionParticles':nl_tot/max(1,len(x)),
++    }
++    mp=args.output.with_suffix(args.output.suffix+'.json'); mp.write_text(json.dumps(meta,indent=2)+'\n')
++    print(f"[0493x9i-generate] grid={args.nx}x{args.ny} gamma={args.gamma} N={len(x)} theta={args.contact_angle_deg:g} R={args.radius:g} center=({cx:g},{cy:g}) capHeight={cap_height:g} mixedCells={mixed}")
++    print(f"[0493x9i-generate] exactKappa={1.0/args.radius:.17g} state={args.output}")
++    print(f"[0493x9i-generate] metadata={mp}")
++    return 0
++
++if __name__=='__main__': raise SystemExit(main())
+--- /dev/null
++++ b/scripts/run_0493x9i_contact_angle.sh
+@@ -0,0 +1,100 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
++source "$ROOT/scripts/src_mpcd_run_common_0434.sh"
++suite_root_cd_0434
++
++RUN_MODE="${RUN_MODE:-src-q6-g-f}"; TOPOLOGY=closed_box
++RUN_ROOT="${RUN_ROOT:-runs/0493x9i_contact_angle}"
++ANGLES="${ANGLES:-60 90 120}"
++NX="${NX:-320}"; NY="${NY:-200}"; Lx="${Lx:-1.6}"; Ly="${Ly:-1.0}"
++GAMMA="${GAMMA:-20}"; DT="${DT:-0.002}"; KBT="${KBT:-0.125}"; STEPS="${STEPS:-1}"; SEED="${SEED:-493930}"
++RADIUS_CELLS="${RADIUS_CELLS:-50}"; SIGMA="${SIGMA:-256.0}"
++LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"; LIQUID_MASS="${LIQUID_MASS:-1.0}"; GAS_MASS="${GAS_MASS:-1.0}"
++LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"; GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
++SPECIES_Q6_MIN_FILL_FRACTION="${SPECIES_Q6_MIN_FILL_FRACTION:-0.10}"
++SUMMARY_EVERY="${SUMMARY_EVERY:-1}"; DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-0}"; PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
++LIVE_PROGRESS="${LIVE_PROGRESS:-1}"; LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"; LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-0}"; FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-0}"
++LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-curvature_interface}"; LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-1}"; PARTICLE_TYPE_FILTER="$LIQUID_TYPE"
++THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"; THERMOSTAT_MODE=cell_relative_rescale; THERMOSTAT_EVERY=1; THERMOSTAT_TARGET_KBT="$KBT"; THERMOSTAT_MIN_PARTICLES=3
++ROTATION_ANGLE="${ROTATION_ANGLE:-1.5707963267948966}"; RANDOM_ROTATION_SIGN=true; GRID_SHIFT_ENABLE=true
++PROJECTION_BACKEND=cuda; PROJECTION_MAX_ITERATIONS="${PROJECTION_MAX_ITERATIONS:-800}"; PROJECTION_TOLERANCE="${PROJECTION_TOLERANCE:-1e-5}"; Q6_PROJECTION_STRENGTH=1.0; Q6_STRICT="${Q6_STRICT:-1}"
++Q6_GF_EXTERNAL_SPECIES=1; Q6_GF_HAS_GAS_PHASE=1; Q6_GF_DENSITY_RELAXATION_TIME="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"; Q6_GF_MIN_FILL_FRACTION="$SPECIES_Q6_MIN_FILL_FRACTION"
++Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE=1; Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES=3.0; Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES=6.0; Q6_GF_DENSITY_TRACTION_GAIN=1.0
++SPECIES_RESAMPLING_ENABLE=false; LIQUID_RESAMPLING_ENABLE=false; GAS_RESAMPLING_ENABLE=false; VIRIAL_DENSITY_KICK_ENABLE=false; WEIGHTED_RESAMPLING_ENABLE_OVERRIDE=false; CUDA_EMPTY_REFILL_ENABLE_OVERRIDE=false
++GEN_CASE=tg; U0=0.0; VELOCITY_MODE=zero; PARTICLE_MASS="$GAS_MASS"; BACKGROUND_TYPE="$GAS_TYPE"; INACTIVE_TYPE="$GAS_TYPE"; TG_HOLE_ENABLE=false
++suite_defaults_common_0434; suite_compute_derived_0434
++
++RADIUS="$(awk -v lx="$Lx" -v nx="$NX" -v rc="$RADIUS_CELLS" 'BEGIN{printf "%.17g",lx/nx*rc}')"
++python3 - "$Lx" "$Ly" "$NX" "$NY" "$RADIUS" "$SIGMA" <<'PY'
++import math,sys
++lx,ly=map(float,sys.argv[1:3]); nx,ny=map(int,sys.argv[3:5]); r,s=map(float,sys.argv[5:7])
++if abs(lx/nx-ly/ny)>1e-12: raise SystemExit('[0493x9i] square cells required')
++if not (r>0 and s>0): raise SystemExit('[0493x9i] radius and sigma must be positive')
++PY
++if suite_truthy_0434 "${CLEAN_RUN_ROOT:-1}"; then rm -rf "$RUN_ROOT"; fi
++mkdir -p "$RUN_ROOT"
++LIQUID_REFERENCE_CELL_MASS="$(awk -v g="$GAMMA" -v m="$LIQUID_MASS" 'BEGIN{printf "%.17g",g*m}')"
++GAS_REFERENCE_CELL_MASS="$(awk -v g="$GAMMA" -v m="$GAS_MASS" 'BEGIN{printf "%.17g",g*m}')"
++
++run_one(){
++  local theta="$1" label="theta${1//./p}" dir="$RUN_ROOT/theta${1//./p}"
++  mkdir -p "$dir/init" "$dir/params" "$dir/output" "$dir/logs"
++  local state="$dir/init/sessile_cap_0493x9i.smpcd" params="$dir/params/contact_angle_0493x9i.kv" log="$dir/logs/contact_angle_0493x9i.log" tf="$dir/logs/contact_angle_0493x9i.time"
++  python3 scripts/generate_0493x9i_sessile_cap_state.py --output "$state" --Lx "$Lx" --Ly "$Ly" --nx "$NX" --ny "$NY" --gamma "$GAMMA" --radius "$RADIUS" --contact-angle-deg "$theta" --liquid-type "$LIQUID_TYPE" --gas-type "$GAS_TYPE" --liquid-mass "$LIQUID_MASS" --gas-mass "$GAS_MASS" --kBT "$KBT" --seed "$SEED"
++  cat > "$params" <<EOF
++inputState = $state
++outputDir = $dir/output
++Lx = $Lx
++Ly = $Ly
++Nx = $NX
++Ny = $NY
++dt = $DT
++nSteps = $STEPS
++bcLeft = specular
++bcRight = specular
++bcBottom = specular
++bcTop = specular
++bcX = wall
++bcY = wall
++openBoundarySegmentsEnable = false
++openBoundarySegmentCount = 0
++bodyAccelerationX = 0.0
++bodyAccelerationY = 0.0
++wallVpEnable = false
++wallAccommodation = 1.0
++wallThermalNoise = 0.0
++surfaceTensionSigma = $SIGMA
++phaseInterfaceASelector = type:$LIQUID_TYPE
++phaseInterfaceBSelector = type:$GAS_TYPE
++phaseInterfaceContactAngleDegrees = $theta
++speciesRegistryEnable = true
++speciesCount = 2
++species0 = $LIQUID_TYPE incompressible_liquid liquid $LIQUID_Q6_STRENGTH 1.0 $LIQUID_REFERENCE_CELL_MASS
++species0ResamplingEnable = false
++species1 = $GAS_TYPE compressible_gas gas $GAS_Q6_STRENGTH 0.0 $GAS_REFERENCE_CELL_MASS
++species1ResamplingEnable = false
++speciesRequireRegisteredTypes = true
++speciesDiagnosticsEnable = true
++speciesDiagnosticsFilename = species_runtime_0493x9i.csv
++speciesCellDiagnosticsEnable = false
++speciesQ6Enable = true
++speciesQ6Mode = free_surface_masked
++speciesQ6Sensitivity = 1.0
++speciesQ6FallbackMode = common
++speciesQ6ComparisonTolerance = 1e-11
++speciesQ6MinOccupancyFraction = $SPECIES_Q6_MIN_FILL_FRACTION
++EOF
++  suite_write_common_params_0434 "$RUN_MODE" >> "$params"
++  suite_export_cuda_flags_0434 "$RUN_MODE" "$TOPOLOGY"
++  export MPCD_Q6_STATIC_DROP_DIAGNOSTICS_0493X9E=1
++  export MPCD_Q6_ELLIPSE_DIAGNOSTICS_0493X9F=0
++  export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9A=0
++  export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9B=0
++  export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9C=0
++  BASE_RUN_ROOT="$dir"; LIVE_VIS_CONTROL_FILE="$dir/livevis_control_0493x9i.kv"; suite_prepare_livevis_control_0434 "$dir" "$RUN_MODE"; suite_export_livevis_0434
++  echo "[0493x9i-suite] theta=$theta radius=$RADIUS exactKappa=$(awk -v r="$RADIUS" 'BEGIN{printf "%.8g",1/r}') sigma=$SIGMA"
++  suite_run_binary_0434 "$params" "$log" "$tf" "$dir/output"
++}
++for a in $ANGLES; do run_one "$a"; done
++if ! suite_truthy_0434 "$PREFLIGHT_ONLY"; then python3 scripts/analyze_0493x9i_contact_angle.py --root "$RUN_ROOT" --angles "$ANGLES" --radius "$RADIUS" --liquid-type "$LIQUID_TYPE" --gas-type "$GAS_TYPE"; fi
+--- /dev/null
++++ b/scripts/analyze_0493x9i_contact_angle.py
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python3
++import argparse,csv,math
++from pathlib import Path
++
++def last(path):
++    if not path.exists(): raise SystemExit(f'[0493x9i-check] MISSING {path}')
++    with path.open(newline='') as f: rows=list(csv.DictReader(f))
++    if not rows: raise SystemExit(f'[0493x9i-check] EMPTY {path}')
++    return rows[-1]
++def iv(r,k): return int(float(r[k]))
++def fv(r,k): return float(r[k])
++
++def main():
++    ap=argparse.ArgumentParser(); ap.add_argument('--root',required=True); ap.add_argument('--angles',default='60 90 120'); ap.add_argument('--radius',type=float,required=True); ap.add_argument('--liquid-type',type=int,default=1); ap.add_argument('--gas-type',type=int,default=2)
++    a=ap.parse_args(); root=Path(a.root); ok=True; exact_k=1.0/a.radius
++    for tok in a.angles.split():
++        theta=float(tok); label=f'theta{tok.replace(".","p")}'
++        d=root/label
++        ca=last(d/'output/cuda_contact_angle_0493x9i.csv')
++        pp=last(d/'output/cuda_phase_pair_0493x9g.csv')
++        wg=last(d/'output/cuda_wall_geometry_0493x9h.csv')
++        pair_ok=(pp['phaseASelector']==f'type:{a.liquid_type}' and pp['phaseBSelector']==f'type:{a.gas_type}' and iv(pp,'phaseInterfaceEnabled')==1 and fv(pp,'surfaceTensionSigma')>0.0)
++        corr=iv(ca,'correctedCells'); cand=iv(ca,'candidateCells'); curv=iv(ca,'curvatureCells')
++        angle_err=fv(ca,'correctedAngleErrorRms'); dot_err=fv(ca,'correctedDotErrorRms'); measured=fv(ca,'correctedAngleMean'); raw=fv(ca,'rawAngleMean')
++        closure_ok=(cand>0 and corr==cand and curv>0 and abs(measured-theta)<1e-8 and angle_err<1e-8 and dot_err<1e-12)
++        wall_ok=(iv(wg,'domainWallBottom')==1 and iv(wg,'normalValidCells')>0 and fv(wg,'normalUnitErrorRms')<1e-12)
++        case_ok=pair_ok and closure_ok and wall_ok; ok &= case_ok
++        km=fv(ca,'contactCurvatureMean'); ks=fv(ca,'contactCurvatureStd')
++        rel=(km-exact_k)/exact_k
++        print(f'[0493x9i-check] theta={theta:g} rawMean={raw:.6f} correctedMean={measured:.12g} angleErrRms={angle_err:.3e} dotErrRms={dot_err:.3e} candidates={cand} corrected={corr} pass={int(case_ok)}')
++        print(f'[0493x9i-check]   contactKappa={km:.8g} exactCircle={exact_k:.8g} relBias={rel:+.3%} std={ks:.8g} [INFO: curvature not a hard gate in x9i]')
++    print(f'[0493x9i-check] status={"PASS" if ok else "FAIL"}')
++    raise SystemExit(0 if ok else 1)
++if __name__=='__main__': main()
+--- /dev/null
++++ b/README_0493X9I_CONTACT_ANGLE.md
+@@ -0,0 +1,172 @@
++# 0493x9i — prescribed contact angle on the generic x9h wall provider
++
++Incremental patch on top of **0493x9h**.  x9g remains the A/B phase-pair
++abstraction and x9h remains the mechanism-independent wall geometry provider.
++x9i adds the first wetting closure without changing physical x6c alpha, the x6f
++interface location, the Q6 CG solve, B1, streaming, collision, thermostat or
++resampling.
++
++## Physical convention
++
++New parameter:
++
++```text
++phaseInterfaceContactAngleDegrees = -1
++```
++
++`-1` disables wetting and preserves the qualified free-interface path.  Values
++in `[0,180]` activate a prescribed static angle measured **through phase A**.
++
++The two capillary phases remain A and B, e.g.
++
++```text
++phaseInterfaceASelector = type:1
++phaseInterfaceBSelector = type:2
++```
++
++The wall is a third geometry provider.  Therefore an active contact angle does
++**not** use `phaseInterfaceBSelector=wall`.  `B=wall` remains the passive x9h
++geometry-only mode.
++
++With the existing orientation conventions
++
++- `nAB`: A -> B (`-grad(alphaA)`),
++- `nWall`: fluid -> solid (`grad(solidFraction)`),
++
++x9i enforces
++
++```text
++nAB . nWall = -cos(thetaA)
++```
++
++in the wall/interface contact band.
++
++## Numerical closure
++
++The production capillary chain remains
++
++```text
++physical alpha_x6c
++  -> curvature-only p3 alphaK
++  -> Scharr nAB(raw)
++  -> x9i wall/contact-band normal replacement
++  -> Scharr div(nAB)
++  -> kappa
++  -> sigma*kappa
++  -> phiGamma
++```
++
++Only the p3 normal is modified.  `alpha_x6c` and the x6f `alpha=0.5` geometry
++are untouched.
++
++A cell is eligible when
++
++1. the x9h wall normal is valid;
++2. a 3x3 neighbourhood of physical x6c alpha brackets `0.5`;
++3. the raw p3 phase normal is valid.
++
++For a unit wall tangent `t=(-nWall_y,nWall_x)`, the tangent sign is taken from
++the raw A->B normal to preserve the local interface orientation, then
++
++```text
++d = -cos(thetaA)
++s = sign(nRaw . t)
++nAB = d*nWall + s*sqrt(1-d*d)*t
++```
++
++is written back to the production p3 normal field.
++
++## Wall source
++
++x9i requests exactly the x9h provider.  It therefore works with
++
++- static domain walls (`solid`, `specular`, `bounceback` geometry), and
++- a Darcy/chi geometry only when the existing
++  `darcyChiCollisionVpEnable=true` declaration says that chi represents wall
++  geometry.
++
++No generic porous Darcy field is silently converted into a wetting wall.
++
++## Diagnostics
++
++New summary-cadence file:
++
++```text
++output/cuda_contact_angle_0493x9i.csv
++```
++
++It reports the prescribed angle, target dot product, candidate/corrected cell
++counts, raw and corrected mean angles, closure RMS errors, and contact-band
++curvature statistics.
++
++The angle/dot closure is a hard structural validation.  Contact-band curvature
++is printed as information in x9i: detailed wall-curvature bias and sessile-drop
++equilibrium belong to the subsequent physical qualification.
++
++## Qualification runner
++
++`run_0493x9i_contact_angle.sh` generates circular sessile caps at 60, 90 and
++120 degrees.  For a bottom wall at `y=0`, a circle of radius `R` with
++
++```text
++yCenter = -R*cos(theta)
++```
++
++has the requested contact angle through A and exact free-interface curvature
++`1/R`.
++
++Default campaign is deliberately short (`STEPS=1`): it qualifies the initial
++geometry/closure before dynamic relaxation can obscure the wall reconstruction.
++LiveVis is ON and filtered recording is OFF by default.
++
++## Apply
++
++From repository root after extracting the bundle:
++
++```bash
++python3 x9i_bundle/tools/apply_0493x9i_contact_angle.py
++bash -n scripts/run_0493x9i_contact_angle.sh
++python3 -m py_compile \
++  scripts/generate_0493x9i_sessile_cap_state.py \
++  scripts/analyze_0493x9i_contact_angle.py
++g++ -std=c++17 -Iinclude -fsyntax-only src/params_io_base.cpp
++bash scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh
++```
++
++The installer is semantic/idempotent and does not impose a Git working-tree
++guard.
++
++## Preflight
++
++```bash
++PREFLIGHT_ONLY=1 LIVE_VIS_ENABLE=0 LIVE_PROGRESS=1 \
++  bash scripts/run_0493x9i_contact_angle.sh
++```
++
++## First CUDA validation
++
++```bash
++LIVE_VIS_ENABLE=1 \
++LIVE_VIS_HOLD_ON_EXIT=0 \
++LIVE_PROGRESS=1 \
++FILTERED_RECORDING_ENABLE=0 \
++bash scripts/run_0493x9i_contact_angle.sh
++```
++
++Expected final line:
++
++```text
++[0493x9i-check] status=PASS
++```
++
++## Deliberate limits of x9i
++
++x9i is a **prescribed static contact-angle normal closure**, not yet a complete
++wall free-energy model.  It does not add contact-angle hysteresis, dynamic
++contact-angle laws, slip/contact-line mobility, wall surface energies, or a
++special corner model.  It also does not redefine wall particle kinetics.
++
++The next physical qualification should inspect the INFO curvature bias for the
++60/90/120 caps, then run longer sessile-drop relaxations to verify equilibrium
++angle, area conservation and parasitic currents.  Only after that is it useful
++to tune/refine the near-wall curvature reconstruction if necessary.
