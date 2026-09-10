@@ -33,7 +33,7 @@
 # Aliases generally accepted by recent builds:
 #   grey/grayscale/greyscale -> gray
 #   heat/hot                 -> thermal
-colormap = hot 
+colormap = blue_red 
 
 # clip:
 #   >0 fixes color saturation scale.
@@ -49,7 +49,7 @@ gain = 1
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
 smoothPasses = 0
 
-particleTypeFilter = 2
+particleTypeFilter = 1
 
 # =============================================================================
 # 2. Live grid and cadence
@@ -60,7 +60,7 @@ particleTypeFilter = 2
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
  liveGridNx = 800    # unset by default: inherit solver Nx/Ny
- liveGridNy = 500    # unset by default: inherit solver Nx/Ny
+ liveGridNy = 400    # unset by default: inherit solver Nx/Ny
 
 # liveEvery:
 #   live frame cadence in solver steps.

@@ -1,6 +1,6 @@
 # Paramètres canoniques SRC_GPU-SURF
 
-> Une fiche correspond à un **concept canonique**. Les différentes clés `.kv`, champs C++ et alias sont regroupés sous cette fiche.
+> Une fiche correspond à un **concept canonique**. Les différentes clés `.kv`, champs C++ et alias sont regroupés sous cette fiche. Le classement est alphabétique naturel.
 
 | Paramètre | Type | Défaut | Catégorie | Statut |
 |---|---|---|---|---|

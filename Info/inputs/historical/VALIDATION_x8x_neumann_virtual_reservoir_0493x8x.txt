@@ -1,0 +1,35 @@
+0493x8x validation performed in the ChatGPT execution environment
+=================================================================
+
+Base reconstruction
+-------------------
+- clean snap_070926_2.zip
+- x8r_multispecies_from_snapshot.patch applied
+- x8v_replica_after_x8r.patch applied
+- x8w_virtual_cells_source_after_x8v.patch applied
+- resulting source committed as the x8w patch base
+
+Patch checks
+------------
+- git diff --check: PASS
+- full x8x patch git apply --check on clean x8w base: PASS
+- full x8x patch application and byte comparison to authored source: PASS
+- wrapper bash -n: PASS
+- isolated C++ syntax check of the complete x8x device block with CUDA stubs: PASS
+
+Analytic/statistical check
+--------------------------
+Atomizer gas parameters used:
+  gamma=8, m=0.1, kBT=0.004, sigma=0.2
+  h=1.5625/400=0.00390625, dt=0.00635, virtual layers=2
+
+Analytic zero-mean incoming half-flux:
+  1.0376329136 particles / boundary cell / step
+
+Monte-Carlo (200000 independent virtual-cell trials of Poisson occupancy,
+uniform virtual position, Gaussian normal velocity, geometric crossing):
+  mean incoming count = 1.037345
+  variance            = 1.04039035
+
+No nvcc compiler is available in this environment. Real CUDA compilation on
+the target worktree is therefore the first mandatory local check.

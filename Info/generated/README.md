@@ -10,9 +10,9 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 
 - [`lexique_jalons.md`](lexique_jalons.md) — décodage rapide des jalons, tri naturel, fonction/statut/support.
 - [`jalons.md`](jalons.md) — référentiel canonique détaillé des jalons/phases.
-- [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature.
-- [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias.
-- [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés.
+- [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature, tri naturel dans chaque groupe.
+- [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias, tri alphabétique naturel.
+- [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés, tri alphabétique naturel.
 - [`cles_controle_sorties.md`](cles_controle_sorties.md) — clés de contrôle externes et métadonnées de sortie.
 - [`artefacts.md`](artefacts.md) — runners, analyseurs, générateurs et autres artefacts utiles.
 - [`audit_candidats_git.md`](audit_candidats_git.md) — backlog de candidats historiques à curer.
@@ -22,11 +22,11 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 
 | Objet | Nombre |
 |---|---:|
-| Jalons canoniques | 277 |
+| Jalons canoniques | 292 |
 | Paramètres canoniques | 314 |
-| Flags / variables runner | 625 |
-| Artefacts indexés | 1677 |
-| Candidats Git | 1185 |
+| Flags / variables runner | 650 |
+| Artefacts indexés | 1674 |
+| Candidats Git | 1187 |
 
 ## Règle de publication
 

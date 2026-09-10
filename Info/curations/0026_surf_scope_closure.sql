@@ -1,10 +1,9 @@
--- V4.25: close the documentary scope of branch surf.
+-- V4.25 historical scope-closure marker.
 --
--- V4.22/V4.23 were provisional curations sourced from the separate
--- SRC_GPU-SURF-x8q-ablation worktree.  Their SQL files and source evidence are
--- removed from the surf corpus by the V4.25 source patch itself, so no DELETE
--- statements are needed during a clean rebuild.
+-- At V4.25, V4.22/V4.23 were correctly removed because their implementation
+-- existed only in SRC_GPU-SURF-x8q-ablation and was not yet integrated into surf.
+-- V4.27 later restores those curations after the autonomous Neumann lineage was
+-- cherry-picked into the canonical surf branch and extends it through x9e-fix3.
 --
--- This curation intentionally creates no milestone and changes no solver fact.
--- The final surf frontier remains V4.21 physics plus the V4.24 exact Git
--- reconciliation of 20260907-0414-segmented-xy with e2fe1ca.
+-- This file intentionally has no SQL effect: it preserves the documentary fact
+-- that V4.25 was a branch-boundary correction at that point in history.

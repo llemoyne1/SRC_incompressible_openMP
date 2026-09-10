@@ -290,6 +290,20 @@
 | `x8s` | PERF | OPEN_BOUNDARY | Déflation exacte des modes longitudinaux lents du CG | Actif uniquement dans la géométrie x8r pleine hauteur applicable; physique inchangée |
 | `x8t` | CODE | OPEN_BOUNDARY | Cible de relaxation de densité sans mode moyen à outlet pression | Actif dans le couplage fullDomain + x8r + relaxation densité; autres topologies inchangées |
 
+## post-x14av : Neumann multiphasique atomiseur
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x8r-neumann-species` | EXPERIMENT | OPEN_BOUNDARY_MULTIPHASE | Variante x8r Neumann cinétique séparée par espèce | Tentative expérimentale post-x14av; construction et checks statiques PASS, mais la famille de reconstruction par bain reste non retenue après échec à l'arrivée de l'interface; supersédée par x8v. |
+| `x8v` | EXPERIMENT | OPEN_BOUNDARY_MULTIPHASE | Réplique microscopique miroir pour Neumann cinétique | Prototype physics-first; checks de packaging PASS mais échec runtime précoce rapporté par x8w; non retenu, supersédé par x8w. |
+| `x8w` | EXPERIMENT | OPEN_BOUNDARY_MULTIPHASE | Cellules virtuelles statistiques Neumann | Échec expérimental documenté: la copie de l'occupation instantanée de la cellule de bord crée une couche de densité précoce; supersédé par x8x. |
+| `x8x` | EXPERIMENT | OPEN_BOUNDARY_MULTIPHASE | Réservoir virtuel Neumann coarse-grained | Améliore le défaut x8w et passe les checks analytiques de demi-flux, mais la densité de réservoir suit encore le déficit de densité intérieur; supersédé par x8y. |
+| `x8y` | EXPERIMENT | OPEN_BOUNDARY_MULTIPHASE | Réservoir de pression Neumann à densité de référence | Échec post-contact documenté: un ux liquide intérieur négatif est recopié dans le Maxwellien extérieur et transforme le réservoir en injecteur macroscopique; supersédé par x8z. |
+| `x8z` | FIX | OPEN_BOUNDARY_MULTIPHASE | Clamp du backflow normal du réservoir Neumann | Correction partielle: le mode catastrophique normal est ciblé, mais le run 200x400 montre encore une propagation tangentielle du liquide à l'outlet; supersédé par x9a-neumann. |
+| `x9a-neumann` | FIX | OPEN_BOUNDARY_MULTIPHASE | Annulation du drift complet du réservoir en backflow | Correction partielle: supprime le mode backflow/sliding dominant, mais le test 200x400 laisse un obstacle cinétique résiduel à la sortie du liquide; supersédée par x9b-neumann. |
+| `x9b-neumann` | FIX | OPEN_BOUNDARY_MULTIPHASE | Réservoir gaz avec outflow liquide strict | Amélioration forte du déchargement liquide sur 200x400 et 400x400, mais révèle un artefact topologique de type 'hachoir': perte de support alpha au dernier maillon et création d'un end-cap artificiel; supersédée par x9c-outlet. |
+| `x9c-outlet` | FIX | OPEN_BOUNDARY_MULTIPHASE | Prolongation du support de phase à l'outlet Neumann | Candidat physics-first retenu après runs applicatifs 200x400 et 400x400: comportement de frontière jugé convaincant et réduction nette du hachage visuel; petites détachements résiduels possibles au 200x400, non évidents au 400x400. Qualification qualitative ciblée seulement; l'analyseur x14av reste DEMONSTRATION_DIAGNOSTIC_ONLY. |
+
 ## x8 : conditions limites ouvertes et benchmark von Karman
 
 | ID | Nature | Domaine | Nom | Statut / portée |
@@ -319,6 +333,17 @@
 | `x9q` | BENCHMARK | SURFACE_TENSION | Test de potentialité jet gravitaire / pincement / impact | Benchmark exploratoire sans seuil physique dur; démontre des changements de topologie et expose la faiblesse de courbure sous-résolue traitée par x9r |
 | `x9r` | FIX | SURFACE_TENSION | Cutoff de résolution du saut capillaire | Correctif actif de courbure sous-résolue; seuil à choisir selon résolution/campagne, non constante physique universelle |
 | `x9s` | BENCHMARK | SURFACE_TENSION | Benchmark paramétrable d'impact et splash | Démonstration/qualification morphologique qualitative; pas une mesure convergée de Weber critique |
+
+## post-x14av : optimisation Neumann multiphasique
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x9d-fix1-neumann` | PERF | OPEN_BOUNDARY_MULTIPHASE | Workspace résident et comptages exacts pour la continuation Neumann | Optimisation structurelle attestée et smoke physique court cohérent avec x9c-outlet; gain de performance NON QUALIFIE car le triplet baseline/optimisé/baseline présente une dispersion murale supérieure à l'effet mesuré. |
+| `x9e-fix1` | FIX | OPEN_BOUNDARY_MULTIPHASE | Correction de compilation du banner x9e-neumann | Correctif de compilation historique; aucune loi physique ni logique de performance modifiée. |
+| `x9e-fix2` | PERF | OPEN_BOUNDARY_MULTIPHASE | Fast path par invariant comptable de compacité | Optimisation intermédiaire; l’hypothèse de pas équilibré s’avère trop restrictive pour le hard-reservoir réel et est remplacée par x9e-fix2b puis x9e-fix3. |
+| `x9e-fix2b` | FIX | OPEN_BOUNDARY_MULTIPHASE | Invariant ciblé sur la liste des slots supprimés | Correctif intermédiaire de x9e-fix2; le diagnostic de premier fallback montre qu’un pas hard-reservoir légitime peut avoir un bilan net négatif et motive x9e-fix3. |
+| `x9e-fix3` | PERF | OPEN_BOUNDARY_MULTIPHASE | Réparation ciblée exacte du préfixe actif | Chemin de production intégré à surf et qualifié au niveau implémentation/non-régression: algorithme pré-cleanup passé sur 3000 pas; cleanup final passé sur smoke surf 400x400 250/250 avec fast path ciblé actif et sans fallback observé. Physique x9c-outlet inchangée; aucune qualification universelle de toutes les sorties Neumann n’est revendiquée. |
+| `x9e-neumann` | PERF | OPEN_BOUNDARY_MULTIPHASE | Pool résident de recyclage des slots supprimés | Optimisation de base intégrée à surf; physique x9c-outlet inchangée. La réparation de préfixe initiale est ensuite raffinée par x9e-fix2, x9e-fix2b puis x9e-fix3. |
 
 ## x9 : tension superficielle, courbure, mouillage et prélude cinétique
 
@@ -3981,13 +4006,12 @@ Analyse hors ligne les enregistrements rho/ux du benchmark x8m et reconstruit pa
 
 Complète la sortie Neumann au niveau particulaire : les sortants sont supprimés et la demi-distribution entrante est reconstruite dans la forme finale x8q-fix4 par un bain maxwellien local issu des moments pré-stream des deux couches intérieures, avec échantillonnage pondéré par le flux normal.
 
-**Notes.** La première implémentation x8q miroir/copie puis le sampler particule-à-particule de fix3 étaient des étapes internes. fix4 supprime la rétroaction auto-excitante et définit la fermeture cinétique retenue; les suffixes fix ne sont pas promus comme jalons autonomes.
+**Notes.** La première implémentation x8q miroir/copie puis le sampler particule-à-particule de fix3 étaient des étapes internes. fix4 supprime la rétroaction auto-excitante et définit la fermeture cinétique retenue; les suffixes fix ne sont pas promus comme jalons autonomes. | V4.22 post-x14av: the air-assisted liquid/gas atomizer exposed that the historical x8q local-bath kinetic continuation is not a general multiphase outlet closure. The x8q-OFF ablation remains diagnostic only; the original x8q single-phase/open-boundary qualification is not retroactively invalidated.
 
 **Relations :**
 - `BUILDS_ON` → `x8l` — Première extrapolation Neumann passive de la vitesse de sortie
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `matlab/inj_rho_x8q_strict_cont_400.avi`
 - `ASSOCIATED_WITH` — `scripts/check_0493x8q_neumann_smoke.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x8q_neumann_smoke.sh`
 
@@ -4006,6 +4030,25 @@ Conserve u*_out=u*_cell comme extrapolation de vitesse prédicteur, mais cesse d
 **Relations :**
 - `BUILDS_ON` → `x8q` — Continuation cinétique locale de l'outlet Neumann
 - `FIXES` → `x8l` — Première extrapolation Neumann passive de la vitesse de sortie
+
+### `x8r-neumann-species` — Variante x8r Neumann cinétique séparée par espèce
+
+- **Clé unique :** `0493x8r-neumann-species`
+- **ID canonique :** `0493x8r-neumann-species`
+- **Nature / domaine :** `EXPERIMENT` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Tentative expérimentale post-x14av; construction et checks statiques PASS, mais la famille de reconstruction par bain reste non retenue après échec à l'arrivée de l'interface; supersédée par x8v.
+- **Confiance :** `A`
+- **Date :** `2026-09-08`
+
+Remplace le bain cinétique x8q agrégé par un bain [cellule frontière][espèce] afin d'empêcher le mélange de type, masse, moment et température dans la continuation multiphasique.
+
+**Notes.** La source historique s'auto-étiquette 0493x8r. Le suffixe canonique '-neumann-species' est une désambiguïsation documentaire V4.22 uniquement, nécessaire car 0493x8r désigne déjà l'outlet de pression Q6-g-f du cycle d'août.
+
+**Relations :**
+- `BUILDS_ON` → `x8q` — Continuation cinétique locale de l'outlet Neumann
+- `REFERENCES` → `x14av` — Démonstration atomiseur air-assisté
+- `REFERENCES` → `x8q` — Continuation cinétique locale de l'outlet Neumann
+- `REFERENCES` → `x8v` — Réplique microscopique miroir pour Neumann cinétique
 
 ### `x8s` — Déflation exacte des modes longitudinaux lents du CG
 
@@ -4058,6 +4101,95 @@ Met à jour le runner restartable x8m pour utiliser explicitement la fermeture N
 - `REFERENCES` → `x8m` — Benchmark de production Zovatto-Pedrizzetti Re_H=280
 - `REFERENCES` → `x8t` — Cible de relaxation de densité sans mode moyen à outlet pression
 
+### `x8v` — Réplique microscopique miroir pour Neumann cinétique
+
+- **Clé unique :** `0493x8v`
+- **ID canonique :** `0493x8v`
+- **Nature / domaine :** `EXPERIMENT` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Prototype physics-first; checks de packaging PASS mais échec runtime précoce rapporté par x8w; non retenu, supersédé par x8w.
+- **Confiance :** `A`
+- **Date :** `2026-09-08`
+
+Teste une demi-population entrante construite par miroir géométrique de particules réelles proches de la face, sans fit Maxwellien ni bain agrégé.
+
+**Notes.** L'archive x8w indique explicitement qu'elle remplace les continuations x8q/x8r/x8v devenues instables dans le cas atomiseur multiphasique.
+
+**Relations :**
+- `BUILDS_ON` → `x8r-neumann-species` — Variante x8r Neumann cinétique séparée par espèce
+- `REFERENCES` → `x8w` — Cellules virtuelles statistiques Neumann
+
+### `x8w` — Cellules virtuelles statistiques Neumann
+
+- **Clé unique :** `0493x8w`
+- **ID canonique :** `0493x8w`
+- **Nature / domaine :** `EXPERIMENT` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Échec expérimental documenté: la copie de l'occupation instantanée de la cellule de bord crée une couche de densité précoce; supersédé par x8x.
+- **Confiance :** `A`
+- **Date :** `2026-09-08`
+
+Génère par cellule de face et espèce des particules virtuelles extérieures à partir de l'état de la cellule physique adjacente, puis matérialise uniquement les trajectoires qui recroisent l'outlet.
+
+**Notes.** La mécanique de pool/synchronisation hôte reste volontairement non optimisée afin d'isoler la physique.
+
+**Relations :**
+- `BUILDS_ON` → `x8v` — Réplique microscopique miroir pour Neumann cinétique
+- `REFERENCES` → `x8x` — Réservoir virtuel Neumann coarse-grained
+
+### `x8x` — Réservoir virtuel Neumann coarse-grained
+
+- **Clé unique :** `0493x8x`
+- **ID canonique :** `0493x8x`
+- **Nature / domaine :** `EXPERIMENT` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Améliore le défaut x8w et passe les checks analytiques de demi-flux, mais la densité de réservoir suit encore le déficit de densité intérieur; supersédé par x8y.
+- **Confiance :** `A`
+- **Date :** `2026-09-08`
+
+Sépare support de phase local à la face et état macroscopique du réservoir: fraction d'espèce depuis la cellule frontière, densité et moments depuis un moyennage normal intérieur, population extérieure Poisson indépendante.
+
+**Notes.** Le test Monte-Carlo du package retrouve le demi-flux Maxwellien analytique; cela valide le sampler, pas la fermeture multiphasique globale.
+
+**Relations :**
+- `BUILDS_ON` → `x8w` — Cellules virtuelles statistiques Neumann
+- `FIXES` → `x8w` — Cellules virtuelles statistiques Neumann
+- `REFERENCES` → `x8w` — Cellules virtuelles statistiques Neumann
+- `REFERENCES` → `x8y` — Réservoir de pression Neumann à densité de référence
+
+### `x8y` — Réservoir de pression Neumann à densité de référence
+
+- **Clé unique :** `0493x8y`
+- **ID canonique :** `0493x8y`
+- **Nature / domaine :** `EXPERIMENT` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Échec post-contact documenté: un ux liquide intérieur négatif est recopié dans le Maxwellien extérieur et transforme le réservoir en injecteur macroscopique; supersédé par x8z.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Remplace la densité coarse-grained x8x par une occupation de référence Nref, tout en conservant support de phase de face et moments cinétiques coarse-grained par espèce.
+
+**Notes.** Le diagnostic causal est formulé explicitement dans le README x8z sur le long run x8y.
+
+**Relations :**
+- `BUILDS_ON` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `REFERENCES` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `REFERENCES` → `x8z` — Clamp du backflow normal du réservoir Neumann
+
+### `x8z` — Clamp du backflow normal du réservoir Neumann
+
+- **Clé unique :** `0493x8z`
+- **ID canonique :** `0493x8z`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Correction partielle: le mode catastrophique normal est ciblé, mais le run 200x400 montre encore une propagation tangentielle du liquide à l'outlet; supersédé par x9a-neumann.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Impose u_n,ghost=max(u_n,interior,0) dans le repère de normale sortante afin d'interdire une injection macroscopique normale tout en conservant la variance thermique.
+
+**Notes.** Le run x8z 200x400 conservé dans la provenance atteint 1500 pas et montre une population liquide très élevée et ux moyen négatif en fin de run; il s'agit d'un jalon de diagnostic/correction, pas d'une BC qualifiée.
+
+**Relations :**
+- `BUILDS_ON` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `FIXES` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `REFERENCES` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+
 ### `x9a` — Premier scaffold passif de courbure résident
 
 - **Clé unique :** `0493x9a`
@@ -4073,6 +4205,24 @@ Construit à partir du champ physique alpha x6c une normale sortante et une cour
 **Relations :**
 - `BUILDS_ON` → `x6c` — Infrastructure résidente du champ de phase alpha
 - `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
+
+### `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+
+- **Clé unique :** `0493x9a-neumann`
+- **ID canonique :** `0493x9a-neumann`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Correction partielle: supprime le mode backflow/sliding dominant, mais le test 200x400 laisse un obstacle cinétique résiduel à la sortie du liquide; supersédée par x9b-neumann.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Lorsque le coarse state indique un backflow, annule les deux composantes de vitesse moyenne du réservoir tout en conservant la variance thermique et donc les recroisements microscopiques Maxwelliens.
+
+**Notes.** Le log marker historique est [0493x9a-neumann]. Le suffixe '-neumann' est donc attesté et évite toute collision avec le x9a capillaire déjà canonique.
+
+**Relations :**
+- `BUILDS_ON` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `FIXES` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `REFERENCES` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
 
 ### `x9b` — Courbure passive binomiale + Scharr et LiveVis résident
 
@@ -4090,6 +4240,25 @@ Ajoute un champ alphaK réservé à la courbure : une passe binomiale 3x3 sur al
 - `BUILDS_ON` → `x9a` — Premier scaffold passif de courbure résident
 - `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
 
+### `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+
+- **Clé unique :** `0493x9b-neumann`
+- **ID canonique :** `0493x9b-neumann`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Amélioration forte du déchargement liquide sur 200x400 et 400x400, mais révèle un artefact topologique de type 'hachoir': perte de support alpha au dernier maillon et création d'un end-cap artificiel; supersédée par x9c-outlet.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Conserve le réservoir de pression x9a-neumann pour le gaz mais désactive toute génération de candidats virtuels pour le liquide; les particules liquides qui traversent l'outlet restent supprimées par le chemin physique crossing→inactive.
+
+**Notes.** Le log marker historique est [0493x9b-neumann]. Le suffixe '-neumann' est conservé comme identifiant canonique pour ne pas écraser x9b courbure passive.
+
+**Relations :**
+- `BUILDS_ON` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `FIXES` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `REFERENCES` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `REFERENCES` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+
 ### `x9c` — Qualification du support de lissage de courbure
 
 - **Clé unique :** `0493x9c`
@@ -4106,6 +4275,25 @@ Compare passivement, avec le même opérateur Scharr, une, deux et trois passes 
 - `BUILDS_ON` → `x9b` — Courbure passive binomiale + Scharr et LiveVis résident
 - `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
 - `REFERENCES` → `x9d` — Premier saut de Laplace actif dans Q6-g-f
+
+### `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+
+- **Clé unique :** `0493x9c-outlet`
+- **ID canonique :** `0493x9c-outlet`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Candidat physics-first retenu après runs applicatifs 200x400 et 400x400: comportement de frontière jugé convaincant et réduction nette du hachage visuel; petites détachements résiduels possibles au 200x400, non évidents au 400x400. Qualification qualitative ciblée seulement; l'analyseur x14av reste DEMONSTRATION_DIAGNOSTIC_ONLY.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Étend d'une cellule le support alpha liquide sur les cellules d'outlet segmenté Neumann par alpha_boundary=max(alpha_boundary,alpha_inward), sur x6c et x10-CIC, sans créer masse, quantité de mouvement ni énergie.
+
+**Notes.** La source emploie explicitement '0493x9c-outlet'/'0493X9C_OUTLET' parce que x9c désigne déjà le sweep de courbure capillaire. La branche n'est pas présentée comme une qualification générale de toutes les sorties Neumann; l'optimisation de coût demandée ensuite n'est pas incluse faute d'artefact primaire complet dans ce bloc.
+
+**Relations :**
+- `BUILDS_ON` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+- `FIXES` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+- `REFERENCES` → `x14av` — Démonstration atomiseur air-assisté
+- `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
 
 ### `x9d` — Premier saut de Laplace actif dans Q6-g-f
 
@@ -4130,6 +4318,26 @@ Ajoute surfaceTensionSigma et utilise la courbure p3 qualifiée par x9c pour imp
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x9d_static_drop.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x9d_static_drop.sh`
 
+### `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+
+- **Clé unique :** `0493x9d-fix1-neumann`
+- **ID canonique :** `0493x9d-fix1-neumann`
+- **Nature / domaine :** `PERF` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Optimisation structurelle attestée et smoke physique court cohérent avec x9c-outlet; gain de performance NON QUALIFIE car le triplet baseline/optimisé/baseline présente une dispersion murale supérieure à l'effet mesuré.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Optimise l'implémentation x9c-outlet/x9b-neumann sans changer la physique: compteurs et tail-pool persistants, métadonnées espèce mises à jour seulement sur changement, synchronisation pré-candidats supprimée, comptages candidats/inactifs exacts et géométrie de lancement ajustée au compte exact.
+
+**Notes.** Le marqueur runtime est explicite: mode=resident_workspace_exact_counts, physics=x9c_unchanged, counters=persistent, tailPool=persistent_exact, speciesMetadata=change_only, preCandidateSync=elided, candidateCount=host_exact, inactiveCount=host_exact, launchGeometry=exact, candidateBuffer=preserved, fallback=legacy_exact. Les trois runs de 250 pas donnent 92.53 s (baseline x9c), 61.10 s (x9d-fix1) et 49.73 s (baseline x9c répétée): cette dispersion interdit de convertir le premier ratio en qualification de vitesse.
+
+**Relations :**
+- `BUILDS_ON` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `OPTIMIZES` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `REFERENCES` → `x14av` — Démonstration atomiseur air-assisté
+- `REFERENCES` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+- `REFERENCES` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+
 ### `x9e` — Qualification diagnostique de goutte statique
 
 - **Clé unique :** `0493x9e`
@@ -4151,6 +4359,107 @@ Ajoute à cadence de résumé des réductions CUDA strictement observationnelles
 - `ASSOCIATED_WITH` — `doc/README_0493X9E_STATIC_DROP_DIAGNOSTICS.md`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x9e_static_drop.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x9e_static_drop.sh`
+
+### `x9e-fix1` — Correction de compilation du banner x9e-neumann
+
+- **Clé unique :** `0493x9e-fix1`
+- **ID canonique :** `0493x9e-fix1`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Correctif de compilation historique; aucune loi physique ni logique de performance modifiée.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Corrige uniquement un retour à la ligne source inséré dans le littéral C/C++ du banner runtime x9e-neumann, qui provoquait une erreur nvcc de quote non fermée.
+
+**Notes.** Jalon volontairement conservé dans le lexique car le label 0493x9e-fix1 est explicitement attesté et peut apparaître dans l’historique; il ne représente aucune nouvelle physique.
+
+**Relations :**
+- `FIXES` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+- `REFERENCES` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `x9e-fix2` — Fast path par invariant comptable de compacité
+
+- **Clé unique :** `0493x9e-fix2`
+- **ID canonique :** `0493x9e-fix2`
+- **Nature / domaine :** `PERF` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Optimisation intermédiaire; l’hypothèse de pas équilibré s’avère trop restrictive pour le hard-reservoir réel et est remplacée par x9e-fix2b puis x9e-fix3.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Supprime du chemin normal x9e-neumann le scan O(Nactive) de role[] lorsque les comptages insertion/suppression prouvent un pas exactement équilibré; conserve un oracle full-prefix optionnel et le fallback exact 0315c.
+
+**Notes.** La physique, le pool [deleted|tail], les candidats, RNG et kernels d’insertion restent inchangés. L’optimisation ne s’applique que lorsque toutes les conditions comptables A-F du README sont satisfaites.
+
+**Relations :**
+- `BUILDS_ON` → `x9e-fix1` — Correction de compilation du banner x9e-neumann
+- `OPTIMIZES` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+- `REFERENCES` → `x9e-fix2b` — Invariant ciblé sur la liste des slots supprimés
+- `REFERENCES` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+- `REFERENCES` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `x9e-fix2b` — Invariant ciblé sur la liste des slots supprimés
+
+- **Clé unique :** `0493x9e-fix2b`
+- **ID canonique :** `0493x9e-fix2b`
+- **Nature / domaine :** `FIX` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Correctif intermédiaire de x9e-fix2; le diagnostic de premier fallback montre qu’un pas hard-reservoir légitime peut avoir un bilan net négatif et motive x9e-fix3.
+- **Confiance :** `A`
+- **Date :** `2026-09-10`
+
+Remplace le critère dense de x9e-fix2 par une vérification CUDA O(deletedCount) des seuls slots supprimés et réutilisés; le fast path exige encore expectedActive=oldActive et conserve l’oracle full-prefix optionnel ainsi que le fallback 0315c.
+
+**Notes.** Le package exact a été régénéré contre la vraie préimage x9e-fix2 après échec d’un diff fondé sur un contexte synthétique. Le diagnostic temporaire first-fallback est conservé comme provenance mais n’est pas un jalon autonome.
+
+**Relations :**
+- `BUILDS_ON` → `x9e-fix2` — Fast path par invariant comptable de compacité
+- `FIXES` → `x9e-fix2` — Fast path par invariant comptable de compacité
+- `REFERENCES` → `x9e-fix2` — Fast path par invariant comptable de compacité
+- `REFERENCES` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+
+### `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+
+- **Clé unique :** `0493x9e-fix3`
+- **ID canonique :** `0493x9e-fix3`
+- **Nature / domaine :** `PERF` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Chemin de production intégré à surf et qualifié au niveau implémentation/non-régression: algorithme pré-cleanup passé sur 3000 pas; cleanup final passé sur smoke surf 400x400 250/250 avec fast path ciblé actif et sans fallback observé. Physique x9c-outlet inchangée; aucune qualification universelle de toutes les sorties Neumann n’est revendiquée.
+- **Confiance :** `A`
+- **Date :** `2026-09-10`
+- **Commit :** `6dfda0404c2066f3db378a5d27c30a6dcc898d39`
+- **Tag :** `surf-neumann-qualified-x9e-fix3-20260910`
+
+Remplace la réparation globale 0315c du chemin normal par une réparation exacte bornée au support muté: trous dérivés de deletedIndices, donneurs bornés par le tail du pool, appariement lowest-hole/highest-donor compatible 0315c, vérification exacte du support et fallback 0315c sur tout cas atypique.
+
+**Notes.** Le cleanup production retire l’oracle full-prefix et la télémétrie chantier après validation, conserve les statuts exacts 8/9 sur support muté, le work-cap et le fallback compact_active_prefix_device_0315c. Le smoke final fourni donne t=1.587, kBT=4.082e-03, stdN=2.927, resM=0, q6F=1.16e-04, q6A=1.12e+01, wall=20.1 s à 250/250. | V4.28 Git closure: canonical surf commit 6dfda0404c2066f3db378a5d27c30a6dcc898d39; official tag surf-neumann-qualified-x9e-fix3-20260910. The dated candidate x9e-fix3-20260910 is a tag alias of x9e-fix3, not a new milestone.
+
+**Relations :**
+- `BUILDS_ON` → `x9e-fix2b` — Invariant ciblé sur la liste des slots supprimés
+- `FIXES` → `x9e-fix2b` — Invariant ciblé sur la liste des slots supprimés
+- `OPTIMIZES` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+- `REFERENCES` → `x14av` — Démonstration atomiseur air-assisté
+- `REFERENCES` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+
+### `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+- **Clé unique :** `0493x9e-neumann`
+- **ID canonique :** `0493x9e-neumann`
+- **Nature / domaine :** `PERF` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Optimisation de base intégrée à surf; physique x9c-outlet inchangée. La réparation de préfixe initiale est ensuite raffinée par x9e-fix2, x9e-fix2b puis x9e-fix3.
+- **Confiance :** `A`
+- **Date :** `2026-09-09`
+
+Ajoute à x9d-fix1-neumann un pool résident [slots supprimés du pas | tail inactif compact] réutilisé pour les insertions Neumann/réservoir et un fast path de réparation du préfixe actif; la physique reste explicitement celle de x9c-outlet.
+
+**Notes.** Le runner unifié sélectionne x9c, x9d-fix1 ou x9e et prend x9e comme candidat optimisé par défaut. Le suffixe canonique -neumann évite toute collision avec le jalon capillaire historique x9e.
+
+**Relations :**
+- `BUILDS_ON` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `OPTIMIZES` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `REFERENCES` → `x14av` — Démonstration atomiseur air-assisté
+- `REFERENCES` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `REFERENCES` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `REFERENCES` → `x9e-fix2` — Fast path par invariant comptable de compacité
+- `REFERENCES` → `x9e-fix2b` — Invariant ciblé sur la liste des slots supprimés
+- `REFERENCES` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
 
 ### `x9f` — Diagnostic de bande interfaciale vraie et relaxation elliptique
 

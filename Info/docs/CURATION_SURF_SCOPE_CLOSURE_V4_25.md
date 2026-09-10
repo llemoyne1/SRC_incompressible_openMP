@@ -44,3 +44,11 @@ les changements correspondants ne sont pas intégrés à cette branche.
 Le patch V4.25 reste strictement **source-only** : aucune base SQLite, aucun dump SQL,
 aucun `Info/generated/*`, aucun fichier `src/*`, `include/*`, runner solveur ou
 `livevis_control.kv` n'est livré.
+
+## Addendum V4.27 — périmètre rouvert par intégration dans `surf`
+
+La règle ci-dessus était correcte pour l'état du dépôt au moment de V4.25. Le 10 septembre
+2026, la lignée autonome Neumann a ensuite été cherry-pickée dans `surf`. V4.27 restaure
+donc V4.22/V4.23 dans le canon et poursuit la documentation jusqu'à `x9e-fix3`. Cet
+addendum ne réécrit pas l'audit V4.25 : il indique seulement que sa condition d'exclusion
+(« code absent de surf ») n'est plus vraie dans l'état courant.

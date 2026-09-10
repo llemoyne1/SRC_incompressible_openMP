@@ -1,6 +1,6 @@
 # Flags et variables d’environnement / runners
 
-> Ces entrées sont séparées des paramètres `.kv`. Lorsqu’un flag écrit un paramètre canonique, la relation est indiquée explicitement.
+> Ces entrées sont séparées des paramètres `.kv`. Lorsqu’un flag écrit un paramètre canonique, la relation est indiquée explicitement. Le classement est alphabétique naturel.
 
 | Nom | Type | Défaut | Paramètre(s) ciblé(s) | Catégorie | Statut |
 |---|---|---|---|---|---|
@@ -165,6 +165,26 @@
 | `MPCD_CUDA_INLET_OUTLET_FULLFACE_0249A_THREADS` | entier | 256 le plus souvent |  | CUDA SRC classic — inlet/outlet full-face | réglage performance/interne |
 | `MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B` | booléen/env truthy sauf mention contraire | false/off sauf activation par scripts validés |  | CUDA SRC classic — inlet/outlet segmenté | interne/runtime |
 | `MPCD_CUDA_INLET_OUTLET_SEGMENTED_0249B_THREADS` | entier | 256 le plus souvent |  | CUDA SRC classic — inlet/outlet segmenté | réglage performance/interne |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_KINETIC_0493X8Q_DISABLE` | booléen/env truthy | false/off |  | Neumann multiphasique — x8q ablation | historique/diagnostic; backend conservé |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_STRICT_OUTFLOW_0493X9B` | booléen/env truthy | false/off backend; 1 dans runner x9c/x9e |  | Neumann multiphasique — x9b sortie liquide stricte | actif dans le profil x9c/x9e |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_TYPE_0493X9B` | entier type particulaire >=0 | -1 backend; LIQUID_TYPE dans runner |  | Neumann multiphasique — x9b sortie liquide stricte | actif/configurable |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_NO_BACKFLOW_0493X8Z` | booléen/env truthy | false/off backend; 1 dans runner x9c/x9e |  | Neumann multiphasique — x8z garde de backflow | actif dans le profil x9c/x9e |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y` | booléen/env truthy | false/off backend; 1 dans runner x9c/x9e |  | Neumann multiphasique — x8y réservoir de pression | actif dans le profil x9c/x9e |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY` | entier >0 ou non défini | non défini => inletTargetOccupancy (GAMMA dans runner) |  | Neumann multiphasique — x8y réservoir de pression | actif/configurable |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_POOL_0493X9E` | booléen/env truthy | false/off backend; 1 pour profil x9e |  | Neumann multiphasique — x9e recycle pool | actif sous le profil x9e |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_VERIFY_PREFIX_0493X9E_FIX2` | booléen/env truthy | false/off |  | Neumann multiphasique — oracle de qualification x9e-fix2/fix2b | historique; supprimé du binaire par cleanup x9e-fix3 |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V` | booléen/env truthy | false/off |  | Neumann multiphasique — x8v réplique microscopique | historique/rejeté |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V_SOURCE_LAYERS` | entier 1..4 | 1 |  | Neumann multiphasique — x8v réplique microscopique | historique/rejeté |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D` | booléen/env truthy | false/off |  | Neumann multiphasique — x9d fast path v1 | historique/supplanté par x9d-fix1; gate backend retiré du chemin courant |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1` | booléen/env truthy | false/off backend; 1 pour profils x9d-fix1/x9e |  | Neumann multiphasique — x9d-fix1 workspace exact | actif sous le profil x9d-fix1/x9e |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_SPECIES_0493X8R_DISABLE` | booléen/env truthy | false/off |  | Neumann multiphasique — x8r species bath | historique; utilisé pour neutraliser x8r dans les profils ultérieurs |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_TARGETED_REPAIR_MAX_WORK_0493X9E_FIX3` | entier >=1000 | 4000000 |  | Neumann multiphasique — x9e-fix3 réparation ciblée | actif production x9e-fix3 |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W` | booléen/env truthy | false/off |  | Neumann multiphasique — x8w cellules virtuelles | historique/rejeté |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W_LAYERS` | entier 1..4 | 2 |  | Neumann multiphasique — x8w cellules virtuelles | historique/rejeté |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X` | booléen/env truthy | false/off |  | Neumann multiphasique — x8x/x8y réservoir virtuel | infrastructure historique; base des réservoirs x8y+ |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_COARSE_LAYERS` | entier >=1 | 8 |  | Neumann multiphasique — x8x/x8y réservoir virtuel | actif dans le profil x9c/x9e via runner |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_LAYERS` | entier >=1 | 2 |  | Neumann multiphasique — x8x/x8y réservoir virtuel | actif dans le profil x9c/x9e via runner |
+| `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_ZERO_DRIFT_ON_BACKFLOW_0493X9A` | booléen/env truthy | false/off backend; 1 dans runner x9c/x9e |  | Neumann multiphasique — x9a dérive de réservoir | actif dans le profil x9c/x9e |
 | `MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT` | booléen/env truthy sauf mention contraire | souvent true dans validateurs; dépend du module |  | CUDA moments/workspace cellule | debug/comparaison |
 | `MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_USE` | booléen/env truthy sauf mention contraire | false/off sauf activation par scripts validés |  | CUDA moments/workspace cellule | interne/runtime \| propagé scripts Darcy 0426 |
 | `MPCD_CUDA_PERSISTENT_PARTICLE_METADATA_CACHE` | booléen/env truthy sauf mention contraire | false/off sauf activation par scripts validés |  | Autres variables internes | interne/runtime \| propagé scripts Darcy 0426 |
@@ -427,6 +447,7 @@
 | `MPCD_Q6_PHASE_GEOMETRY_RESIDENT_0493X6C` | booléen/env truthy | false/off |  | Q6 phase/interface 0493x6 | ajout 0493x6c |
 | `MPCD_Q6_PHASE_INTERFACE_STENCIL_0493X6F` | booléen/env truthy | false/off |  | Q6 phase/interface 0493x6 | ajout 0493x6f; correctif partition near-half conservé dans Q6-g-f |
 | `MPCD_Q6_PHASE_INTERFACE_TOPOLOGY_0493X6E` | booléen/env truthy | false/off |  | Q6 phase/interface 0493x6 | ajout 0493x6e |
+| `MPCD_Q6_PHASE_OUTLET_GHOST_CONTINUATION_0493X9C_OUTLET` | booléen/env truthy | false/off backend; 1 dans runner x9c/x9e |  | Neumann multiphasique — x9c continuation de support de phase | actif dans le profil x9c/x9e |
 | `MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A` | booléen/env truthy | false/off |  | Q6 phase/interface 0493x6 | ajout 0493x6a |
 | `MPCD_Q6_POSTAPPLY_REGION_DIAGNOSTICS_0493X6H_B0` | booléen/env truthy | false/off |  | Q6-g-f / diagnostic post-application | ajout 0493x6h-B0; diagnostic seulement |
 | `MPCD_Q6_PROFILE` | booléen/env truthy sauf mention contraire | false/off |  | CUDA Q6 — prototype/chantiers futurs | diagnostic/profilage |
@@ -474,6 +495,10 @@
 | `MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION` | booléen entier 0/1 | 0 |  | Interface liquide/gaz x14ab — prototype hybride | prototype x14ab non retenu; OFF production |
 | `MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION` | booléen entier 0/1 | 0 |  | Interface liquide/gaz x14ac — projection de résultante | prototype x14ac supplanté par x14ad; OFF production |
 | `MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION` | booléen entier 0/1 | 0 |  | Interface liquide/gaz x14ad — traction locale retenue | retenu x14ad; prérequis x14ai-fix1 pour composante liquide fermée |
+| `NEUMANN_COARSE_LAYERS` | entier >=1 | 8 |  | Runner atomiseur — moments coarse Neumann | actif runner unifié |
+| `NEUMANN_PROFILE` | enum x9c\|x9d-fix1\|x9e | x9e |  | Runner atomiseur — sélection fermeture Neumann | actif runner unifié |
+| `NEUMANN_TARGET_OCCUPANCY` | entier >0 ou chaîne vide | vide |  | Runner atomiseur — occupation cible Neumann | actif runner unifié |
+| `NEUMANN_VIRTUAL_LAYERS` | entier >=1 | 2 |  | Runner atomiseur — géométrie réservoir Neumann | actif runner unifié |
 | `NX` | entier >0 | 64 | Nx | Validateurs CUDA resampling — géométrie | lecture C++ directe dans validateurs shadow; également variable shell courante des runners |
 | `NY` | entier >0 | 32 | Ny | Validateurs CUDA resampling — géométrie | lecture C++ directe dans validateurs shadow; également variable shell courante des runners |
 | `OMP_DYNAMIC` | booléen OpenMP | false |  | OpenMP runtime | documenté 0426 |
@@ -3039,6 +3064,389 @@ Variable interne de contrôle du backend CUDA.
 Nombre de threads CUDA par bloc pour le noyau associé.
 
 **Remarques.** Ne se place pas dans params.kv; à passer dans l’environnement du shell ou dans les scripts de validation/démo.
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_KINETIC_0493X8Q_DISABLE`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x8q ablation
+- **Statut :** historique/diagnostic; backend conservé
+
+Désactive la continuation cinétique extérieure x8q tout en conservant les autres briques de sortie afin d’isoler son effet.
+
+**Remarques.** Ablation de diagnostic; le profil x9c/x9e courant ne l’active pas.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8q` — Continuation cinétique locale de l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_STRICT_OUTFLOW_0493X9B`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 dans runner x9c/x9e`
+- **Catégorie :** Neumann multiphasique — x9b sortie liquide stricte
+- **Statut :** actif dans le profil x9c/x9e
+
+Interdit les candidats virtuels entrants pour le type liquide sélectionné tout en conservant le réservoir gaz.
+
+**Remarques.** La masse liquide ne peut plus être synthétisée depuis le réservoir; x9c complète ensuite uniquement le support alpha.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_TYPE_0493X9B`
+
+- **Type :** entier type particulaire >=0
+- **Défaut :** `-1 backend; LIQUID_TYPE dans runner`
+- **Catégorie :** Neumann multiphasique — x9b sortie liquide stricte
+- **Statut :** actif/configurable
+
+Sélectionne le type liquide auquel s’applique la politique strict-outflow x9b.
+
+**Remarques.** x9b n’est effectif que si le type est valide et les gardes de réservoir antérieures sont actives.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_NO_BACKFLOW_0493X8Z`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 dans runner x9c/x9e`
+- **Catégorie :** Neumann multiphasique — x8z garde de backflow
+- **Statut :** actif dans le profil x9c/x9e
+
+Annule la composante normale moyenne entrante du réservoir lorsqu’un backflow macroscopique serait recopié vers l’extérieur.
+
+**Remarques.** Corrige l’injection macroscopique observée avec x8y; ne supprime pas à lui seul la dérive tangentielle.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `ASSOCIATED_WITH` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 dans runner x9c/x9e`
+- **Catégorie :** Neumann multiphasique — x8y réservoir de pression
+- **Statut :** actif dans le profil x9c/x9e
+
+Remplace la densité coarse x8x par une occupation de référence pour la population virtuelle du réservoir.
+
+**Remarques.** La vitesse coarse reste traitée par les gardes x8z/x9a; c’est la fermeture gaz conservée par x9c/x9e.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `ASSOCIATED_WITH` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `ASSOCIATED_WITH` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY`
+
+- **Type :** entier >0 ou non défini
+- **Défaut :** `non défini => inletTargetOccupancy (GAMMA dans runner)`
+- **Catégorie :** Neumann multiphasique — x8y réservoir de pression
+- **Statut :** actif/configurable
+
+Surcharge l’occupation cible Nref du réservoir de pression x8y.
+
+**Remarques.** Le runner ne l’exporte que si NEUMANN_TARGET_OCCUPANCY est non vide.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_POOL_0493X9E`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 pour profil x9e`
+- **Catégorie :** Neumann multiphasique — x9e recycle pool
+- **Statut :** actif sous le profil x9e
+
+Active le pool résident [slots supprimés du pas | tail inactif compact] utilisé par les insertions Neumann/réservoir.
+
+**Remarques.** Requiert x9d-fix1; le cleanup x9e-fix3 conserve ce pool et change seulement la réparation de préfixe.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `ASSOCIATED_WITH` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_VERIFY_PREFIX_0493X9E_FIX2`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — oracle de qualification x9e-fix2/fix2b
+- **Statut :** historique; supprimé du binaire par cleanup x9e-fix3
+
+Réactivait un scan complet role[0:prefix] après le fast path pour vérifier l’invariant de compacité pendant la qualification.
+
+**Remarques.** Qualification-only; explicitement retiré du chemin production après la validation longue de x9e-fix3.
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9e-fix2` — Fast path par invariant comptable de compacité
+- `ASSOCIATED_WITH` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x8v réplique microscopique
+- **Statut :** historique/rejeté
+
+Active la continuation cinétique x8v par répliques miroir microscopiques de particules proches de l’outlet.
+
+**Remarques.** Prototype abandonné après instabilité précoce sur l’atomiseur; conservé pour ablation.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8v` — Réplique microscopique miroir pour Neumann cinétique
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V_SOURCE_LAYERS`
+
+- **Type :** entier 1..4
+- **Défaut :** `1`
+- **Catégorie :** Neumann multiphasique — x8v réplique microscopique
+- **Statut :** historique/rejeté
+
+Nombre de couches intérieures utilisées comme source des répliques x8v.
+
+**Remarques.** Sans effet lorsque MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V=0.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8v` — Réplique microscopique miroir pour Neumann cinétique
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x9d fast path v1
+- **Statut :** historique/supplanté par x9d-fix1; gate backend retiré du chemin courant
+
+Activait le premier fast path résident x9d avec comptages device et dimensionnement conservatif par capacité.
+
+**Remarques.** x9d v1 s’est révélé plus lent sur 200×400; le runner courant neutralise explicitement ce sélecteur.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 pour profils x9d-fix1/x9e`
+- **Catégorie :** Neumann multiphasique — x9d-fix1 workspace exact
+- **Statut :** actif sous le profil x9d-fix1/x9e
+
+Active les allocations persistantes de compteurs/tail-pool, metadata upload-on-change et géométries exactes conservant les comptages hôte x9c.
+
+**Remarques.** Base d’exécution de x9e; physique x9c-outlet inchangée.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_SPECIES_0493X8R_DISABLE`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x8r species bath
+- **Statut :** historique; utilisé pour neutraliser x8r dans les profils ultérieurs
+
+Désactive le bain Neumann séparé par espèce x8r lorsque les branches x8v+ ou le profil x9c/x9e sont sélectionnés.
+
+**Remarques.** Le runner unifié x9e force cette désactivation pour éviter un état de fermeture mixte.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8r-neumann-species` — Variante x8r Neumann cinétique séparée par espèce
+- `ASSOCIATED_WITH` → `x8v` — Réplique microscopique miroir pour Neumann cinétique
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_TARGETED_REPAIR_MAX_WORK_0493X9E_FIX3`
+
+- **Type :** entier >=1000
+- **Défaut :** `4000000`
+- **Catégorie :** Neumann multiphasique — x9e-fix3 réparation ciblée
+- **Statut :** actif production x9e-fix3
+
+Borne le travail de la réparation ciblée exacte du préfixe actif; au-delà, le chemin retombe sur 0315c exact.
+
+**Remarques.** La valeur est lue/cachée au premier usage dans le cleanup production.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x8w cellules virtuelles
+- **Statut :** historique/rejeté
+
+Active les cellules virtuelles statistiques extérieures x8w, alimentées depuis l’état instantané de la cellule frontière.
+
+**Remarques.** Rejeté car le feedback de l’occupation frontière crée une couche de densité.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8w` — Cellules virtuelles statistiques Neumann
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W_LAYERS`
+
+- **Type :** entier 1..4
+- **Défaut :** `2`
+- **Catégorie :** Neumann multiphasique — x8w cellules virtuelles
+- **Statut :** historique/rejeté
+
+Épaisseur extérieure en couches utilisée par x8w.
+
+**Remarques.** Sans effet lorsque x8w est désactivé.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8w` — Cellules virtuelles statistiques Neumann
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off`
+- **Catégorie :** Neumann multiphasique — x8x/x8y réservoir virtuel
+- **Statut :** infrastructure historique; base des réservoirs x8y+
+
+Active le réservoir virtuel coarse-grained x8x servant de base aux variantes de pression x8y/x8z/x9a/x9b.
+
+**Remarques.** Le profil courant active la fermeture de pression x8y qui s’appuie sur cette infrastructure.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `ASSOCIATED_WITH` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `ASSOCIATED_WITH` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `ASSOCIATED_WITH` → `x9b-neumann` — Réservoir gaz avec outflow liquide strict
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_COARSE_LAYERS`
+
+- **Type :** entier >=1
+- **Défaut :** `8`
+- **Catégorie :** Neumann multiphasique — x8x/x8y réservoir virtuel
+- **Statut :** actif dans le profil x9c/x9e via runner
+
+Profondeur intérieure utilisée pour les moments coarse-grained du réservoir Neumann.
+
+**Remarques.** Alias runner NEUMANN_COARSE_LAYERS dans le runner unifié.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_LAYERS`
+
+- **Type :** entier >=1
+- **Défaut :** `2`
+- **Catégorie :** Neumann multiphasique — x8x/x8y réservoir virtuel
+- **Statut :** actif dans le profil x9c/x9e via runner
+
+Nombre de couches virtuelles extérieures du réservoir Neumann.
+
+**Remarques.** Alias runner NEUMANN_VIRTUAL_LAYERS dans le runner unifié.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_ZERO_DRIFT_ON_BACKFLOW_0493X9A`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 dans runner x9c/x9e`
+- **Catégorie :** Neumann multiphasique — x9a dérive de réservoir
+- **Statut :** actif dans le profil x9c/x9e
+
+Force la dérive moyenne complète du réservoir à zéro pendant le backflow, y compris la composante tangentielle.
+
+**Remarques.** Construit sur x8z; supprime le glissement macroscopique dominant mais pas la barrière cinétique liquide.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8z` — Clamp du backflow normal du réservoir Neumann
+- `ASSOCIATED_WITH` → `x9a-neumann` — Annulation du drift complet du réservoir en backflow
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
 
 ### `MPCD_CUDA_PERSISTENT_CELL_WORKSPACE_STRICT`
 
@@ -6892,6 +7300,26 @@ Active l’audit de topologie de toutes les traversées alpha=0.5, indépendamme
 - `ASSOCIATED_WITH` → `x6f` — Stencil résident de pression sur l'interface physique alpha=0.5
 - `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
+### `MPCD_Q6_PHASE_OUTLET_GHOST_CONTINUATION_0493X9C_OUTLET`
+
+- **Type :** booléen/env truthy
+- **Défaut :** `false/off backend; 1 dans runner x9c/x9e`
+- **Catégorie :** Neumann multiphasique — x9c continuation de support de phase
+- **Statut :** actif dans le profil x9c/x9e
+
+Prolonge d’une cellule le support alpha de phase A à l’outlet Neumann segmenté pour éviter le bouchon/hachoir topologique.
+
+**Remarques.** Modifie le support géométrique x6c/x10 CIC à l’outlet sans synthétiser masse ni moment.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
 ### `MPCD_Q6_PHASE_PRESSURE_DIAGNOSTICS_0493X6A`
 
 - **Type :** booléen/env truthy
@@ -7863,6 +8291,80 @@ Conserve la traction locale x10n et impose à sa pression de jauge la résultant
 - `ASSOCIATED_WITH` → `x14ai` — Fermeture de résultante Q6 appliquée
 - `ASSOCIATED_WITH` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 - `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+
+### `NEUMANN_COARSE_LAYERS`
+
+- **Type :** entier >=1
+- **Défaut :** `8`
+- **Catégorie :** Runner atomiseur — moments coarse Neumann
+- **Statut :** actif runner unifié
+
+Alias runner vers MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_COARSE_LAYERS.
+
+**Remarques.** Contrôle la profondeur intérieure utilisée pour les moments cinétiques du réservoir.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+
+### `NEUMANN_PROFILE`
+
+- **Type :** enum x9c|x9d-fix1|x9e
+- **Défaut :** `x9e`
+- **Catégorie :** Runner atomiseur — sélection fermeture Neumann
+- **Statut :** actif runner unifié
+
+Sélectionne la variante d’exécution Neumann du runner atomiseur sans changer le jeu de physique commun x9c.
+
+**Remarques.** Le profil x9e active x9d-fix1 + recycle pool; après cleanup il utilise automatiquement l’algorithme x9e-fix3.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `ASSOCIATED_WITH` → `x9e-fix3` — Réparation ciblée exacte du préfixe actif
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
+
+### `NEUMANN_TARGET_OCCUPANCY`
+
+- **Type :** entier >0 ou chaîne vide
+- **Défaut :** `vide`
+- **Catégorie :** Runner atomiseur — occupation cible Neumann
+- **Statut :** actif runner unifié
+
+Alias runner optionnel vers MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY.
+
+**Remarques.** Vide signifie utiliser la cible résolue du runner, normalement GAMMA.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8y` — Réservoir de pression Neumann à densité de référence
+
+### `NEUMANN_VIRTUAL_LAYERS`
+
+- **Type :** entier >=1
+- **Défaut :** `2`
+- **Catégorie :** Runner atomiseur — géométrie réservoir Neumann
+- **Statut :** actif runner unifié
+
+Alias runner vers MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_LAYERS.
+
+**Remarques.** Contrôle l’épaisseur virtuelle du réservoir gaz commun aux profils x9c/x9d-fix1/x9e.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_ok_air_assisted_atomizer.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x8x` — Réservoir virtuel Neumann coarse-grained
+- `ASSOCIATED_WITH` → `x9c-outlet` — Prolongation du support de phase à l'outlet Neumann
+- `ASSOCIATED_WITH` → `x9d-fix1-neumann` — Workspace résident et comptages exacts pour la continuation Neumann
+- `ASSOCIATED_WITH` → `x9e-neumann` — Pool résident de recyclage des slots supprimés
 
 ### `NX`
 

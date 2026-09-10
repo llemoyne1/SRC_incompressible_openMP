@@ -9,10 +9,10 @@
 | CANDIDATE | A | 466 |
 | CANDIDATE | B | 476 |
 | CANDIDATE | C | 3 |
-| CURATED | A | 44 |
+| CURATED | A | 45 |
 | CURATED | B | 8 |
-| LINKED | A | 13 |
-| LINKED | B | 175 |
+| LINKED | A | 16 |
+| LINKED | B | 173 |
 
 ## Candidats déjà reliés à un jalon canonique
 
@@ -73,6 +73,10 @@
 | `x7j` | `candidate:x:x7j` | 3 |
 | `x8c` | `candidate:x:x8c` | 5 |
 | `x8k` | `candidate:x:x8k` | 3 |
+| `x9c` | `candidate:x:x9c` | 7 |
+| `x9e` | `candidate:x:x9e` | 5 |
+| `x9e-fix3` | `candidate:x:x9e-fix3` | 3 |
+| `x9e-fix3-20260910` | `candidate:x:x9e-fix3-20260910` | 1 |
 | `x9g` | `candidate:x:x9g` | 3 |
 | `x9h` | `candidate:x:x9h` | 3 |
 | `0490m-fix2` | `candidate:numeric:0490m-fix2:commit-3d7ce88b7893` | 1 |
@@ -236,9 +240,7 @@
 | `x8q` | `candidate:x:x8q` | 2 |
 | `x9a` | `candidate:x:x9a` | 5 |
 | `x9b` | `candidate:x:x9b` | 8 |
-| `x9c` | `candidate:x:x9c` | 6 |
 | `x9d` | `candidate:x:x9d` | 4 |
-| `x9e` | `candidate:x:x9e` | 4 |
 | `x9f` | `candidate:x:x9f` | 6 |
 | `x9i` | `candidate:x:x9i` | 3 |
 | `x9j` | `candidate:x:x9j` | 2 |
@@ -1106,4 +1108,4 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
 | `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1185 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1187 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

@@ -1,0 +1,17 @@
+0493x9c-outlet validation performed in this environment
+========================================================
+
+PASS  git diff --check on the generated source/wrappers.
+PASS  git apply --check against a reconstructed x9b baseline.
+PASS  Full patch applied cleanly to that baseline.
+PASS  Applied source and wrappers are byte-identical to the development tree.
+PASS  bash -n on all three x9c-outlet wrappers.
+PASS  Static call-site audit: the sole apply_kinetic_interface_reflection_0493x9x
+      call was updated with Q6SegmentedIo0409, and both x6c and x10-CIC alpha
+      paths invoke the same continuation kernel.
+PASS  Contract audit: x14v liquidMassCIC remains populated from raw real-particle
+      CIC before alpha continuation; no fake liquid mass is introduced there.
+
+NOT RUN: nvcc compilation. CUDA toolkit/nvcc is unavailable in this execution
+         environment. Local CUDA compilation is mandatory before the run.
+NOT RUN: physical simulation. The 200x400 run is the intended first qualification.

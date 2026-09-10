@@ -259,9 +259,9 @@ def publish_index(db: sqlite3.Connection, out: Path) -> None:
         '## Contenu', '',
         '- [`lexique_jalons.md`](lexique_jalons.md) — décodage rapide des jalons, tri naturel, fonction/statut/support.',
         '- [`jalons.md`](jalons.md) — référentiel canonique détaillé des jalons/phases.',
-        '- [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature.',
-        '- [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias.',
-        '- [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés.',
+        '- [`jalons_par_nature.md`](jalons_par_nature.md) — index des jalons par nature, tri naturel dans chaque groupe.',
+        '- [`parametres.md`](parametres.md) — paramètres canoniques, clés `.kv`, champs C++ et alias, tri alphabétique naturel.',
+        '- [`flags.md`](flags.md) — variables d’environnement / alias de runners et paramètres ciblés, tri alphabétique naturel.',
         '- [`cles_controle_sorties.md`](cles_controle_sorties.md) — clés de contrôle externes et métadonnées de sortie.',
         '- [`artefacts.md`](artefacts.md) — runners, analyseurs, générateurs et autres artefacts utiles.',
         '- [`audit_candidats_git.md`](audit_candidats_git.md) — backlog de candidats historiques à curer.',
@@ -339,10 +339,11 @@ def publish_milestones(db: sqlite3.Connection, out: Path) -> None:
     by_nat: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for r in rows:
         by_nat[_text(r['nature']) or 'UNCLASSIFIED'].append(r)
-    lines = ['# Jalons par nature', '']
+    lines = ['# Jalons par nature', '',
+             '> Les jalons sont regroupés par **nature canonique** puis triés, dans chaque groupe, en ordre **naturel numérique et alphabétique** (`x9z < x10a`, `fix2 < fix10`).', '']
     for nature in sorted(by_nat):
         lines += [f'## {nature}', '', '| ID | Nom | Domaine | Statut |', '|---|---|---|---|']
-        for r in by_nat[nature]:
+        for r in sorted(by_nat[nature], key=lambda r: (_natural_key(r['milestone_id']), _natural_key(r['milestone_key']))):
             lines.append(f"| `{_md(r['milestone_id'])}` | {_md(r['name'])} | {_md(r['domain'])} | {_md(r['status'])} |")
         lines.append('')
     _write(out / 'jalons_par_nature.md', '\n'.join(lines))
@@ -356,9 +357,10 @@ def publish_milestones(db: sqlite3.Connection, out: Path) -> None:
 
 
 def publish_parameters(db: sqlite3.Connection, out: Path) -> None:
-    rows = db.execute("SELECT * FROM symbols WHERE namespace='PARAM' ORDER BY lower(canonical_name),canonical_name").fetchall()
+    rows = db.execute("SELECT * FROM symbols WHERE namespace='PARAM'").fetchall()
+    rows = sorted(rows, key=lambda r: _natural_key(r['canonical_name']))
     lines = ['# Paramètres canoniques SRC_GPU-SURF', '',
-             '> Une fiche correspond à un **concept canonique**. Les différentes clés `.kv`, champs C++ et alias sont regroupés sous cette fiche.', '',
+             '> Une fiche correspond à un **concept canonique**. Les différentes clés `.kv`, champs C++ et alias sont regroupés sous cette fiche. Le classement est alphabétique naturel.', '',
              '| Paramètre | Type | Défaut | Catégorie | Statut |', '|---|---|---|---|---|']
     for r in rows:
         lines.append(f"| `{_md(r['canonical_name'])}` | {_md(_dedupe_pipe(r['expected_type']))} | {_md(_dedupe_pipe(r['default_value']))} | {_md(_dedupe_pipe(r['category']))} | {_md(_dedupe_pipe(r['status']))} |")
@@ -415,9 +417,10 @@ def publish_parameters(db: sqlite3.Connection, out: Path) -> None:
 
 
 def publish_flags(db: sqlite3.Connection, out: Path) -> None:
-    rows = db.execute("SELECT * FROM symbols WHERE namespace='ENV' ORDER BY lower(canonical_name),canonical_name").fetchall()
+    rows = db.execute("SELECT * FROM symbols WHERE namespace='ENV'").fetchall()
+    rows = sorted(rows, key=lambda r: _natural_key(r['canonical_name']))
     lines = ['# Flags et variables d’environnement / runners', '',
-             '> Ces entrées sont séparées des paramètres `.kv`. Lorsqu’un flag écrit un paramètre canonique, la relation est indiquée explicitement.', '',
+             '> Ces entrées sont séparées des paramètres `.kv`. Lorsqu’un flag écrit un paramètre canonique, la relation est indiquée explicitement. Le classement est alphabétique naturel.', '',
              '| Nom | Type | Défaut | Paramètre(s) ciblé(s) | Catégorie | Statut |', '|---|---|---|---|---|---|']
     csv_rows = []
     for r in rows:

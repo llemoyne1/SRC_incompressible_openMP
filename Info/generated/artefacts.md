@@ -1004,10 +1004,6 @@
 | `matlab/bin_smpcd_state.m` |  | present |
 | `matlab/compare_poiseuille_runs.m` |  | present |
 | `matlab/demo_immersed_circle_combined_motion.m` |  | present |
-| `matlab/inj_rho_400.avi` |  | present |
-| `matlab/inj_rho_kk.avi` |  | present |
-| `matlab/inj_rho_kk2.avi` |  | present |
-| `matlab/inj_rho_x8q_strict_cont_400.avi` | x8q | present |
 | `matlab/inspect_smpcd_particle_thresholds.m` |  | present |
 | `matlab/inspect_smpcd_state.m` |  | present |
 | `matlab/list_smpcd_dumps.m` |  | present |
@@ -1346,6 +1342,7 @@
 | `scripts/run_0493x9z_vacuum_drop_individual.sh` |  | present |
 | `scripts/run_backward_step_io_ablation_0425.sh` |  | present |
 | `scripts/run_boundary_equivalence_summary_0435c.sh` |  | present |
+| `scripts/run_crash_segmented_neumann_outlet.sh` |  | present |
 | `scripts/run_dambreak_gas.sh` |  | present |
 | `scripts/run_high_re_tg_reaudit.sh` |  | present |
 | `scripts/run_injection_fill_resampling_validation_0342a_livevis.sh` |  | present |

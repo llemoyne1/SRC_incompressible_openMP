@@ -1,0 +1,20 @@
+0493x8y package validation
+==========================
+
+Performed in the construction environment:
+
+- Reconstructed the supplied source snapshot and sequentially applied the prior
+  experimental patches x8q, x8r, x8v, x8w and x8x.
+- Generated x8y as a diff against the resulting x8x HEAD.
+- git apply --check x8y_pressure_reservoir_after_x8x.patch : PASS
+- Applied the patch to a detached clean x8x worktree: PASS
+- git diff --check after application: PASS
+- bash -n run_x8y_pressure_reservoir_neumann_air_assisted_atomizer.sh : PASS
+- bash -n run_x8y_pressure_reservoir_long_air_assisted_atomizer.sh : PASS
+- Patched CUDA source compared byte-for-byte with authored source: PASS
+
+Not performed:
+- Real nvcc compilation (nvcc unavailable in this environment).
+- Runtime CUDA execution.
+
+The local CUDA build is therefore the first mandatory test.

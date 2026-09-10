@@ -1,0 +1,5 @@
+0493x14av air-assisted atomizer demo
+=====================================
+Status: DEMONSTRATION_DIAGNOSTIC_ONLY
+latest step=3000 liquidX99=1.55639422 downstreamWidth80=0.499716486 detachedComponents=4
+No physical atomization PASS/FAIL criterion is asserted by this analyzer.

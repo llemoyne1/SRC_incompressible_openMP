@@ -1,0 +1,33 @@
+{
+  "status": "DEMONSTRATION_DIAGNOSTIC_ONLY",
+  "runRoot": "runs/0493x14av_0414_air_assisted_atomizer_x8x_virtual_reservoir_seed_493215",
+  "componentThresholdParticles": 2,
+  "downstreamProbeX": 0.4375,
+  "latest": {
+    "step": 500,
+    "liquidParticles": 13405,
+    "liquidMass": 13405.0,
+    "liquidX50": 0.36247080926876607,
+    "liquidX90": 0.4742220733156519,
+    "liquidX99": 0.5003808985781363,
+    "liquidXMax": 0.5127288114362935,
+    "liquidY10": 0.7527019364100512,
+    "liquidY50": 0.7846851242772985,
+    "liquidY90": 0.8303866077390561,
+    "downstreamParticles": 3681,
+    "downstreamY10": 0.7333694418363046,
+    "downstreamY90": 0.8423418633086662,
+    "downstreamWidth80": 0.10897242147236164,
+    "wetComponents": 2,
+    "coreComponents": 1,
+    "detachedComponents": 1,
+    "largestDetachedCells": 2,
+    "largestDetachedParticles": 44,
+    "meanLiquidVx": 0.14916833589564552,
+    "meanLiquidVy": 0.002878306799525389
+  },
+  "interpretation": {
+    "detachedComponents": "number of >=min-detached-cells liquid components not connected to the left boundary",
+    "downstreamWidth80": "y90-y10 of liquid particles downstream of airCenterX+2*airDiameter"
+  }
+}

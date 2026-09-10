@@ -1,0 +1,15 @@
+0493x9a package validation
+==========================
+
+Performed in the artifact environment:
+
+1. Patch generated against the complete current x8z tree.
+2. git diff --check: PASS.
+3. git apply --check against a fresh copy of the x8z tree: PASS.
+4. Applied patch reproduces the modified source and both x9a wrappers byte-for-byte: PASS.
+5. bash -n on both x9a wrappers: PASS.
+6. Static face logic checked for left/right/top/bottom:
+   - outward or zero normal mean: preserve complete interior mean vector;
+   - inward normal mean with x9a: set both reservoir mean components to zero;
+   - x9a disabled: retain x8z normal-only clamp.
+7. No CUDA/nvcc compilation performed in this environment; local CUDA build is mandatory before running.

@@ -1,0 +1,17 @@
+0493x9b package validation
+===========================
+
+Performed in the artifact environment:
+- source patch generated as a minimal diff against an x9a-shaped source context;
+- git apply --check on the reconstructed x9a context: PASS;
+- git diff --check on the patch: PASS;
+- bash -n on both wrappers: PASS;
+- x9b-off behavior: source change is gated; candidate generation remains x9a;
+- x9b-on selected type: candidate kernel returns before any virtual population
+  generation for that particle type;
+- other registered species continue through the unchanged x9a reservoir path.
+
+Not performed here:
+- real project nvcc/CUDA compilation;
+- runtime GPU qualification.
+Those remain mandatory on the SRC_GPU-SURF experimental worktree.

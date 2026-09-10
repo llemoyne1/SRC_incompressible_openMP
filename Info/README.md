@@ -1,6 +1,6 @@
 # Info — base de référence SRC_GPU-SURF
 
-> **V4.26** — publication de consultation rapide : lexique des jalons trié naturellement et glossaire des sigles/notions du projet.
+> **V4.27** — réintégration canonique de la lignée Neumann multiphasique après cherry-pick dans `surf`, restauration V4.22/V4.23 et documentation x9e→x9e-fix3.
 
 
 `Info/` est le sous-système documentaire versionné du projet SRC_GPU-SURF. Il est volontairement séparé du code de calcul (`src/`, `include/`), des runners/analyseurs (`scripts/`, `matlab/`) et des outils temporaires (`tools/`).
@@ -449,6 +449,43 @@ Le statut reste volontairement différencié : x14at est une validation externe 
 Comme les curations récentes, le patch livré est strictement **source-only** : les bases/dumps et `Info/generated/*` sont reconstruits après application et ne font pas partie du patch de curation.
 
 
+### V4.22 — branche Neumann multiphasique post-x14av
+
+La curation `0023_post_x14av_neumann_multiphase.sql` documente la reconstruction
+expérimentale de la sortie Neumann déclenchée par l'atomiseur x14av. Elle conserve
+`x8q` comme jalon historique dans son domaine initial, ajoute la variante désambiguïsée
+`x8r-neumann-species`, puis la séquence `x8v→x8z` et les branches
+`x9a-neumann`, `x9b-neumann`, `x9c-outlet`. Les suffixes Neumann/outlet sont
+indispensables : `x8r`, `x9a`, `x9b` et `x9c` désignent déjà des jalons historiques
+antérieurs et ne sont pas retargetés.
+
+La progression est conservée comme une chaîne de diagnostics et de corrections, et non
+comme neuf PASS successifs : x8w réinjecte le bruit d'occupation de la cellule frontière,
+x8y devient injecteur macroscopique en backflow, x8z/x9a-neumann ne ferment que
+partiellement la cinématique du réservoir, et x9b-neumann révèle l'artefact topologique
+« hachoir » lorsque le support de phase disparaît au dernier maillon. `x9c-outlet`
+prolonge alors uniquement `alpha` d'une cellule sur l'outlet, sans synthétiser masse ni
+moment; les runs 200×400 et 400×400 en font le candidat physics-first retenu, avec une
+qualification applicative qualitative seulement. L'optimisation demandée ensuite reste
+hors V4.22 faute d'artefact primaire complet. Voir
+`docs/CURATION_POST_X14AV_NEUMANN_MULTIPHASE_V4_22.md`.
+
+Le patch reste strictement **source-only** : `Info/db/src_reference_dump.sql`, la base
+SQLite et `Info/generated/*` sont régénérés localement et ne sont pas livrés.
+
+### V4.23 — x9d-fix1-neumann : optimisation résidente à physique x9c inchangée
+
+La curation `0024_0493x9d_fix1_neumann_resident_opt.sql` ajoute un unique jalon PERF
+post-V4.22. Le marqueur runtime atteste `physics=x9c_unchanged` et remplace plusieurs
+coûts de gestion de l’outlet par un workspace persistant et des comptages exacts. Le
+smoke B/O/B de 250 pas soutient la non-régression physique courte, mais **ne qualifie
+pas le gain de performance** : les temps muraux 92.53/61.10/49.73 s montrent une
+dispersion baseline supérieure à l’effet recherché. Aucun `x9e-neumann` n’est créé
+sans preuve primaire. Voir `docs/CURATION_0493X9D_FIX1_NEUMANN_RESIDENT_OPT_V4_23.md`.
+
+Le patch reste strictement **source-only** : les bases/dumps et `Info/generated/*`
+sont reconstruits localement après application.
+
 ### V4.24 — fermeture Git de 0414 sur `surf`
 
 La curation `0025_20260907_0414_git_reconciliation.sql` ne crée aucun nouveau jalon :
@@ -477,7 +514,9 @@ le commit `e2fe1ca`. Aucun nouveau jalon physique n'est créé en V4.25. Voir
 `docs/CURATION_SURF_SCOPE_CLOSURE_V4_25.md`.
 
 Le patch reste strictement **source-only** : aucune base SQLite, aucun dump SQL ni
-`Info/generated/*` n'est livré.
+`Info/generated/*` n'est livré. **Cette section décrit l'état V4.25** ; après le cherry-pick
+du 10 septembre, cette frontière est rouverte par V4.27 et les curations V4.22/V4.23 sont
+réintégrées au canon.
 
 ### V4.26 — lexique rapide des jalons et glossaire des sigles
 
@@ -490,3 +529,50 @@ calibrateur, etc.), sa nature canonique, sa fonction et son statut.
 `Info/docs/GLOSSAIRE_SIGLES.md` complète ce lexique par une liste alphabétique des
 sigles et notions récurrents (`Q6-g-f`, `CIC`, `RT0`, `TC`, `TG`, `VK`, etc.). Le lexique
 est généré depuis SQLite; le glossaire est volontairement curé manuellement.
+
+### V4.27 — réintégration Neumann multiphasique après cherry-pick
+
+La lignée développée initialement dans `SRC_GPU-SURF-x8q-ablation` a désormais été
+intégrée au dépôt canonique `surf`. V4.27 restaure donc sans les réécrire les curations
+`0023` (x8r-neumann-species→x9c-outlet) et `0024` (x9d-fix1-neumann), que V4.25 avait
+correctement retirées tant que leur code restait hors branche. La curation
+`0027_0493x9e_neumann_optimization.sql` poursuit ensuite la chaîne avec `x9e-neumann`,
+`x9e-fix1`, `x9e-fix2`, `x9e-fix2b` et `x9e-fix3`.
+
+`x9e-fix3` est le chemin d'optimisation final : pool de recyclage x9e inchangé, réparation
+exacte ciblée sur le support muté et fallback `0315c` exact. Le package de cleanup atteste
+une validation longue pré-cleanup de 3000 pas; le smoke final après intégration `surf`
+termine 250/250 en 400×400 avec le fast path `targeted_deleted_list_exact` actif et sans
+fallback observé. La physique reste explicitement celle de `x9c-outlet`; aucune
+qualification universelle de toute sortie Neumann n'est extrapolée.
+
+Le total canonique attendu passe de 277 à **292 jalons**. Le snapshot ENV x14ai historique
+reste intact; un nouvel inventaire actif du 10 septembre ajoute 25 contrôles Neumann et
+porte `raw_env_inventory` de 524 à **549** lignes, sans nouveau paramètre `.kv`.
+`Info/generated/lexique_jalons.md`, `flags.md` et les autres publications sont régénérés
+automatiquement par le builder. Voir `docs/CURATION_0493X9E_NEUMANN_OPT_V4_27.md`.
+
+### V4.28 — fermeture Git de x9e-fix3
+
+Aucun jalon n'est ajouté. La curation `0028_0493x9e_fix3_git_reconciliation.sql`
+ancre `0493x9e-fix3` sur le commit canonique
+`6dfda0404c2066f3db378a5d27c30a6dcc898d39` et sur le tag officiel
+`surf-neumann-qualified-x9e-fix3-20260910`. Après import Git, le builder réconcilie
+le candidat daté `x9e-fix3-20260910`, produit par le nom du tag, vers le jalon
+`x9e-fix3` : le suffixe `20260910` est une date de qualification et non un nouveau
+jalon. La résolution exige le tag et le SHA exacts et n'élargit pas l'heuristique
+générique des labels X. Voir
+`docs/CURATION_0493X9E_FIX3_GIT_RECONCILIATION_V4_28.md`.
+
+### V4.29 — inventaires courants et classement naturel des vues
+
+V4.29 ne modifie aucune donnée scientifique. Elle rafraîchit le snapshot paramètres au
+10 septembre 2026 en attestant explicitement qu'aucune nouvelle clé `.kv` n'a été introduite
+par la chaîne Neumann x8q→x9e-fix3 : le nouveau snapshot paramètres est byte-identique à celui
+du 4 septembre et `raw_params_inventory` reste 854. Le snapshot ENV x9e-fix3 reste la source
+active à 549 entrées brutes et 650 symboles ENV publiés.
+
+Les vues `parametres.md` et `flags.md` utilisent désormais un tri alphabétique naturel.
+`jalons_par_nature.md` conserve le regroupement par nature mais trie chaque groupe en ordre
+naturel numérique/alphanumérique. Le lexique global `lexique_jalons.md` reste le point d'entrée
+rapide pour les 292 jalons. Voir `docs/INVENTAIRES_PUBLICATION_V4_29.md`.

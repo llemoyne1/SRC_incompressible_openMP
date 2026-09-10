@@ -1,0 +1,23 @@
+0493x8z package validation
+===========================
+
+Performed in the artifact environment:
+
+* Baseline reconstructed as the final x8y patch applied on x8x.
+* x8z patch generated as a delta strictly from that x8y baseline.
+* git diff --check: PASS.
+* bash -n on both x8z wrappers: PASS.
+* git apply --check of x8z_no_backflow_after_x8y.patch on a clean x8y tree: PASS.
+* Applied patch tree compared against authored x8z tree for patched source and wrappers: PASS.
+* No C++/CUDA production compilation was performed because nvcc is not available in this artifact environment; local nvcc build is mandatory before running.
+
+Deliberately NOT changed:
+* phase-support law,
+* pressure/reference target occupancy,
+* coarseLayers=8 default,
+* virtualLayers=2 default,
+* Poisson sampling,
+* thermal variance,
+* tangential mean velocity,
+* pool allocation / host count synchronization,
+* solver runner itself.

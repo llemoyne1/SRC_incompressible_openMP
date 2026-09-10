@@ -1,0 +1,264 @@
+llemoyne@ISAT-25042025:/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation$ STEPS=250 CLEAN_RUN_ROOT=1 \
+bash scripts/run_x9c_outlet_phase_continuation_200x400.sh
+
+STEPS=250 CLEAN_RUN_ROOT=1 \
+bash scripts/run_x9d_fix1_neumann_resident_opt_200x400.sh
+
+STEPS=250 CLEAN_RUN_ROOT=1 \
+bash scripts/run_x9c_outlet_phase_continuation_200x400.sh
+[0493x14av] WARNING max flight=0.8185763917484258 cells/step > diagnostic threshold 0.80
+[0493x14av-0414-generate] grid=200x400 h=0.00390625 gamma=8 N=640000 chiOnly=0
+[0493x14av-0414-generate] liquid D=0.046875 L=0.125 exitX=0.125
+[0493x14av-0414-generate] top gas face=top centerX=0.34375 aperture=0.046875 length=0.546875 exitY=1.015625
+[0493x14av-0414-generate] bottom gas face=bottom centerX=0.34375 aperture=0.046875 length=0.546875 exitY=0.546875
+[0493x14av-0414-generate] openAxes=x+y gapY=0.46875 chiSolidCells=9376
+[0493x14av] openBoundarySegment0 = left inlet 0.485 0.515 0.15 0.0 1 1.0
+[0493x14av] openBoundarySegment1 = bottom inlet 0.41 0.47 0.0 0.0 2 0.1
+[0493x14av] openBoundarySegment2 = top inlet 0.41 0.47 0.0 -0.0 2 0.1
+[0493x14av] openBoundarySegment3 = right outlet 0.0 1.0 0.0 0.0 0 0.1
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[run-ok-common] surfaceProfile=air-assisted atomizer: gas pressure + Laplace tension + liquid interface support + gas specular/excess impulse + local traction sigma=35 rmin/h=4 A=type:1 B=type:2
+[run-ok-common] kineticReflection=1.0 contact=-1 x12aRc/h=25.298221281347036
+===== 0493x14av-s2 AIR-ASSISTED ATOMIZER DEMO =====
+PATHS: runner=scripts/run_ok_air_assisted_atomizer.sh
+       generator=embedded analyzer=embedded binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.smpcd chi=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_200x400.f32 geometry=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_geometry.svg
+DOMAIN: 0.78125x1.5625 grid=200x400 h=0.00390625 gamma=8 dt=0.00635 steps=250
+LIQUID NOZZLE: left -> right centerY=0.78125 Dcells=12 D=0.046875 Lcells=32 L=0.125 U=0.15
+AIR TOP: direct TOP inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=1.015625 inwardUy=-0.0
+AIR BOTTOM: direct BOTTOM inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=0.546875 inwardUy=0.0
+BOUNDARIES(0414): segmented LEFT liquid inlet + BOTTOM/TOP gas inlets + full RIGHT Neumann outlet; x+y open axes
+DARCY(run_ok common): alpha=[0.0,800000.0] lambdaSolidPerStep=1.0 forcing=mean_outward_bath chiCollisionVP=true
+                    q=0.1 initialDeactivateEffective=-1 commonFilled=1 VPmode=interface_band VPgamma=-1 VPmass=1.0
+Q6(run_ok profile): projection=auto_fv_cg tol=1.0e-5 maxIt=1600 strict=1 tau=0.25 minFill=0.10
+RESOLUTION: gasThermal=0.32512 h/step gasTopTotal=0.32512 gasBottomTotal=0.32512 liquidTotal=0.8185763917484258
+DIMENSIONLESS(ref nu): WeGtop=0.0 WeGbottom=0.0 WeL=15.798857142857145 ReGtop=0.0 ReGbottom=0.0 ReL=5.638532477947072
+ASSIST momentum ratio rhoG*Ug^2/(rhoL*Ul^2): top=0.0 bottom=0.0
+PHYSICS: x6g+x9+x10o/CIC/Q2/x10u/x10v/x12a+x14l+x14v+x14ad; x14ai OFF; resampling OFF; virial OFF
+OUTPUT: LiveVis every=1; recording every=50; restart dumps every=250
+NOTE: ./livevis_control.kv is authoritative/read-only and is not modified
+RESTART: active=0 state=none; STEPS is segment length on a restart
+PARAMETERS: fully resolved solver file=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv
+=====================================================
+[0493x14av-0414] open-boundary contract: left liquid + bottom/top gas + right Neumann outlet PASS
+[0493x14av-s2] Darcy contract: suite_write_darcy_params_0434 PASS
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=segmented binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=1 particleTypeFilter=-1 speciesResampling=false speciesResident=off 0296=0
+===== RUN_OK 0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400 =====
+PATHS: runner=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/scripts/run_ok_air_assisted_atomizer.sh generator=/tmp/src_mpcd_0493x14av_11143/generate_0493x14av_air_assisted_atomizer_state.py binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.smpcd params=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv output=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output log=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/logs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.log livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+FLUID: domain=0.78125x1.5625 grid=200x400 hx=0.00390625 hy=0.00390625 gamma=8 referenceMass=1.0
+       activeProviderMass=0.1 (secondary/background phase)
+       kBT=0.004 dt=0.00635 rotation=1.5707963267948966 lambda/h=0.1288557 gridShift=true thermostat=cell_relative_rescale/every1
+RUN:   mode=src-q6-g-f steps=250 summaryEvery=25 dumpEvery=250 preflight=0
+LIVE:  grid=400x400 liveEvery=1 recordEnable=true recordFields=rho,rho2,ux,uy recordEvery=100 filterSampleEvery=-1
+================================
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv
+[0434-suite] output=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output
+[livevis0335] enabled field=mass grid=256x128 every=1 colormap=thermal alpha=0.08 clip=-1 quantile=0.995 gain=1 quiver=0 quiverGrid=60x32 quiverScale=-1 quiverMinSpeed=0 quiverSmoothPasses=1 particleTypeFilter=-1 controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+[filtered-record0432] enabled controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv outputRoot=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output
+[src_mpcd_base] Np=1040000 fluid=640000 latent=0 inactive=400000 grid=200x400 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=0 immersedSolid=off fluid=[0,0.78125]x[0,1.5625] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=250 threadsActive=8 threadsMax=8 outputDir=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=2 speciesDiagnostics=species_runtime_0493x14av.csv speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x9c-outlet] mode=phase_support_continuation mass=unchanged liquidReservoir=off boundaryAlpha=max(boundary,inward) consumers=x6c+x6f+surfaceTension+x10CIC outlet=segmented_neumann
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x14v-gas-kinetic-excess] enabled=1 raw=gas-specular-owner-aggregate subtract=x6g-thermodynamic-traction thermoGeometry=x10n-local-x6g-face-gauge+residual-resultant-projection refPressureClosure=off transfer=collective-liquid-CIC storage=reused-x9t/x10m newBufferBytes-x14aa=0 newBufferBytes-x14ab=0 newScratchBytes-x14ac=56 x14adEdgeMetadata=reused-x10m-active-byte newBufferBytes-x14ad=0 scatterLossDiag=off newScratchBytes-x14ae=0 globalBalanceDiag=off newScratchBytes-x14af=0 deviceAppliedQ6ResultantClosure=off newScratchBytes-x14ai=0 x14aiScope=isolated-liquid-component-no-external-Q6-contact newKernelLaunch=0 newCellPass=0 newParticlePass=0 liquidLaws=UNCHANGED
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=0 semantics=position-mirror+local-equal-mass-full-vector-swap
+[0493x14k-bilateral-x10u] enabled=1 AType=1 BType=2 semantics=shared-liquid-defined-x10o-Q2-wall;A-position-mirror-only;B-response=x14l-specular;mass-type-unchanged;liquid-x10v/x12a=runtime;no-orphan-guard
+[0493x14l-gas-specular] enabled=1 AType=1 BType=2 liquid=x10u-position-only-UNCHANGED gas=local-moving-frame-specular-normal-reflection tangential=unchanged wallImpulseFeedback=NOT_APPLIED liquidX10v=ON-phase-A-only liquidX12a=ON-phase-A-only no-orphan-guard
+[0493x14m-full-liquid-gas-compat] enabled=1 liquid=x10o+CIC+Q2+x10p/q+x10u+x10v-full-vector+x12a liquidLaws=UNCHANGED gas=x14l-local-moving-frame-specular gasWallImpulseFeedback=NOT_APPLIED x12aKineticEnvelope=phase-A-only x12aSpeciesThermostat=phase-A-only
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.102812 etaCap=0.0572433 scaleCap=0.556777 deltaTOverH=0.308436 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[0493x9b-neumann] mode=gas_virtual_pressure_reservoir_liquid_strict_outflow liquidType=1 liquidReservoir=off physicalLiquidCrossing=inactive gasReservoir=x9a thermalGasInflow=preserved layers=2 coarseLayers=8 targetN=8 candidateCount=host_legacy pool=legacy species=2
+
+[livevis0335] resized live grid=400x400 (filter reset)
+
+[filtered-record0432] start session=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output/recordings/record_step_0000000001 fields=rho,rho2,ux,uy grid=400x400 every=100 recordEverySource=override filter=none tau=0 sampleEvery=1
+[0493x9a-neumann] mode=virtual_pressure_reservoir_zero_drift_on_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse backflowGuard=zero_full_mean_drift thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8z-neumann] mode=virtual_pressure_reservoir_no_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse normalMean=outward_clamp thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8y-neumann] mode=virtual_pressure_reservoir_cells layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[src_mpcd_base] step=250/250 t=1.587 kBT=4.200e-03 stdN=3.260 resM=0.00e+00 q6F=1.00e-04 q6A=9.64e+00 wall=49.2s
+[filtered-record0432] stop session=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output/recordings/record_step_0000000001 step=250 frames=3
+[livevis0335] hold-on-exit enabled; close the livevis window to exit
+
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=92.53 user=44.61 sys=1.57
+[0493x14av-analysis] step=0 Nliq=3456 x99=0.139404 width80=nan components=1 detached=0
+[0493x14av-analysis] step=250 Nliq=8542 x99=0.309473 width80=nan components=1 detached=0
+[0493x14av-analysis] history=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/analysis/atomizer_history.csv
+[0493x14av-s2] COMPLETE root=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215
+[0493x14av-s2] compact=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/0493x14av_air_assisted_atomizer_compact.tar.gz
+[0493x14av] WARNING max flight=0.8185763917484258 cells/step > diagnostic threshold 0.80
+[0493x14av-0414-generate] grid=200x400 h=0.00390625 gamma=8 N=640000 chiOnly=0
+[0493x14av-0414-generate] liquid D=0.046875 L=0.125 exitX=0.125
+[0493x14av-0414-generate] top gas face=top centerX=0.34375 aperture=0.046875 length=0.546875 exitY=1.015625
+[0493x14av-0414-generate] bottom gas face=bottom centerX=0.34375 aperture=0.046875 length=0.546875 exitY=0.546875
+[0493x14av-0414-generate] openAxes=x+y gapY=0.46875 chiSolidCells=9376
+[0493x14av] openBoundarySegment0 = left inlet 0.485 0.515 0.15 0.0 1 1.0
+[0493x14av] openBoundarySegment1 = bottom inlet 0.41 0.47 0.0 0.0 2 0.1
+[0493x14av] openBoundarySegment2 = top inlet 0.41 0.47 0.0 -0.0 2 0.1
+[0493x14av] openBoundarySegment3 = right outlet 0.0 1.0 0.0 0.0 0 0.1
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[run-ok-common] surfaceProfile=air-assisted atomizer: gas pressure + Laplace tension + liquid interface support + gas specular/excess impulse + local traction sigma=35 rmin/h=4 A=type:1 B=type:2
+[run-ok-common] kineticReflection=1.0 contact=-1 x12aRc/h=25.298221281347036
+===== 0493x14av-s2 AIR-ASSISTED ATOMIZER DEMO =====
+PATHS: runner=scripts/run_ok_air_assisted_atomizer.sh
+       generator=embedded analyzer=embedded binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.smpcd chi=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_200x400.f32 geometry=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_geometry.svg
+DOMAIN: 0.78125x1.5625 grid=200x400 h=0.00390625 gamma=8 dt=0.00635 steps=250
+LIQUID NOZZLE: left -> right centerY=0.78125 Dcells=12 D=0.046875 Lcells=32 L=0.125 U=0.15
+AIR TOP: direct TOP inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=1.015625 inwardUy=-0.0
+AIR BOTTOM: direct BOTTOM inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=0.546875 inwardUy=0.0
+BOUNDARIES(0414): segmented LEFT liquid inlet + BOTTOM/TOP gas inlets + full RIGHT Neumann outlet; x+y open axes
+DARCY(run_ok common): alpha=[0.0,800000.0] lambdaSolidPerStep=1.0 forcing=mean_outward_bath chiCollisionVP=true
+                    q=0.1 initialDeactivateEffective=-1 commonFilled=1 VPmode=interface_band VPgamma=-1 VPmass=1.0
+Q6(run_ok profile): projection=auto_fv_cg tol=1.0e-5 maxIt=1600 strict=1 tau=0.25 minFill=0.10
+RESOLUTION: gasThermal=0.32512 h/step gasTopTotal=0.32512 gasBottomTotal=0.32512 liquidTotal=0.8185763917484258
+DIMENSIONLESS(ref nu): WeGtop=0.0 WeGbottom=0.0 WeL=15.798857142857145 ReGtop=0.0 ReGbottom=0.0 ReL=5.638532477947072
+ASSIST momentum ratio rhoG*Ug^2/(rhoL*Ul^2): top=0.0 bottom=0.0
+PHYSICS: x6g+x9+x10o/CIC/Q2/x10u/x10v/x12a+x14l+x14v+x14ad; x14ai OFF; resampling OFF; virial OFF
+OUTPUT: LiveVis every=1; recording every=50; restart dumps every=250
+NOTE: ./livevis_control.kv is authoritative/read-only and is not modified
+RESTART: active=0 state=none; STEPS is segment length on a restart
+PARAMETERS: fully resolved solver file=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.kv
+=====================================================
+[0493x14av-0414] open-boundary contract: left liquid + bottom/top gas + right Neumann outlet PASS
+[0493x14av-s2] Darcy contract: suite_write_darcy_params_0434 PASS
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=segmented binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=1 particleTypeFilter=-1 speciesResampling=false speciesResident=off 0296=0
+===== RUN_OK 0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400 =====
+PATHS: runner=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/scripts/run_ok_air_assisted_atomizer.sh generator=/tmp/src_mpcd_0493x14av_11274/generate_0493x14av_air_assisted_atomizer_state.py binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.smpcd params=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.kv output=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output log=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/logs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.log livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+FLUID: domain=0.78125x1.5625 grid=200x400 hx=0.00390625 hy=0.00390625 gamma=8 referenceMass=1.0
+       activeProviderMass=0.1 (secondary/background phase)
+       kBT=0.004 dt=0.00635 rotation=1.5707963267948966 lambda/h=0.1288557 gridShift=true thermostat=cell_relative_rescale/every1
+RUN:   mode=src-q6-g-f steps=250 summaryEvery=25 dumpEvery=250 preflight=0
+LIVE:  grid=400x400 liveEvery=1 recordEnable=true recordFields=rho,rho2,ux,uy recordEvery=100 filterSampleEvery=-1
+================================
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400.kv
+[0434-suite] output=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output
+[livevis0335] enabled field=mass grid=256x128 every=1 colormap=thermal alpha=0.08 clip=-1 quantile=0.995 gain=1 quiver=0 quiverGrid=60x32 quiverScale=-1 quiverMinSpeed=0 quiverSmoothPasses=1 particleTypeFilter=-1 controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+[filtered-record0432] enabled controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv outputRoot=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output
+[src_mpcd_base] Np=1040000 fluid=640000 latent=0 inactive=400000 grid=200x400 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=0 immersedSolid=off fluid=[0,0.78125]x[0,1.5625] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=250 threadsActive=8 threadsMax=8 outputDir=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=2 speciesDiagnostics=species_runtime_0493x14av.csv speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x9c-outlet] mode=phase_support_continuation mass=unchanged liquidReservoir=off boundaryAlpha=max(boundary,inward) consumers=x6c+x6f+surfaceTension+x10CIC outlet=segmented_neumann
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x14v-gas-kinetic-excess] enabled=1 raw=gas-specular-owner-aggregate subtract=x6g-thermodynamic-traction thermoGeometry=x10n-local-x6g-face-gauge+residual-resultant-projection refPressureClosure=off transfer=collective-liquid-CIC storage=reused-x9t/x10m newBufferBytes-x14aa=0 newBufferBytes-x14ab=0 newScratchBytes-x14ac=56 x14adEdgeMetadata=reused-x10m-active-byte newBufferBytes-x14ad=0 scatterLossDiag=off newScratchBytes-x14ae=0 globalBalanceDiag=off newScratchBytes-x14af=0 deviceAppliedQ6ResultantClosure=off newScratchBytes-x14ai=0 x14aiScope=isolated-liquid-component-no-external-Q6-contact newKernelLaunch=0 newCellPass=0 newParticlePass=0 liquidLaws=UNCHANGED
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=0 semantics=position-mirror+local-equal-mass-full-vector-swap
+[0493x14k-bilateral-x10u] enabled=1 AType=1 BType=2 semantics=shared-liquid-defined-x10o-Q2-wall;A-position-mirror-only;B-response=x14l-specular;mass-type-unchanged;liquid-x10v/x12a=runtime;no-orphan-guard
+[0493x14l-gas-specular] enabled=1 AType=1 BType=2 liquid=x10u-position-only-UNCHANGED gas=local-moving-frame-specular-normal-reflection tangential=unchanged wallImpulseFeedback=NOT_APPLIED liquidX10v=ON-phase-A-only liquidX12a=ON-phase-A-only no-orphan-guard
+[0493x14m-full-liquid-gas-compat] enabled=1 liquid=x10o+CIC+Q2+x10p/q+x10u+x10v-full-vector+x12a liquidLaws=UNCHANGED gas=x14l-local-moving-frame-specular gasWallImpulseFeedback=NOT_APPLIED x12aKineticEnvelope=phase-A-only x12aSpeciesThermostat=phase-A-only
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.102812 etaCap=0.0572433 scaleCap=0.556777 deltaTOverH=0.308436 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[0493x9d-fix1-neumann] mode=resident_workspace_exact_counts physics=x9c_unchanged counters=persistent tailPool=persistent_exact speciesMetadata=change_only preCandidateSync=elided candidateCount=host_exact inactiveCount=host_exact launchGeometry=exact candidateBuffer=preserved fallback=legacy_exact
+[0493x9b-neumann] mode=gas_virtual_pressure_reservoir_liquid_strict_outflow liquidType=1 liquidReservoir=off physicalLiquidCrossing=inactive gasReservoir=x9a thermalGasInflow=preserved layers=2 coarseLayers=8 targetN=8 candidateCount=host_exact pool=persistent_exact_tail species=2
+
+[livevis0335] resized live grid=400x400 (filter reset)
+
+[filtered-record0432] start session=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output/recordings/record_step_0000000001 fields=rho,rho2,ux,uy grid=400x400 every=100 recordEverySource=override filter=none tau=0 sampleEvery=1
+[0493x9a-neumann] mode=virtual_pressure_reservoir_zero_drift_on_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse backflowGuard=zero_full_mean_drift thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8z-neumann] mode=virtual_pressure_reservoir_no_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse normalMean=outward_clamp thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8y-neumann] mode=virtual_pressure_reservoir_cells layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[src_mpcd_base] step=250/250 t=1.587 kBT=4.222e-03 stdN=3.256 resM=0.00e+00 q6F=1.11e-04 q6A=1.05e+01 wall=44.6s
+[filtered-record0432] stop session=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/output/recordings/record_step_0000000001 step=250 frames=3
+[livevis0335] hold-on-exit enabled; close the livevis window to exit
+
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=61.10 user=41.38 sys=1.15
+[0493x14av-analysis] step=0 Nliq=3456 x99=0.139404 width80=nan components=1 detached=0
+[0493x14av-analysis] step=250 Nliq=8578 x99=0.308004 width80=nan components=1 detached=0
+[0493x14av-analysis] history=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/analysis/atomizer_history.csv
+[0493x14av-s2] COMPLETE root=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215
+[0493x14av-s2] compact=runs/0493x14av_0414_air_assisted_atomizer_x9d_fix1_neumann_resident_opt_200x400_seed_493215/0493x14av_air_assisted_atomizer_compact.tar.gz
+[0493x14av] WARNING max flight=0.8185763917484258 cells/step > diagnostic threshold 0.80
+[0493x14av-0414-generate] grid=200x400 h=0.00390625 gamma=8 N=640000 chiOnly=0
+[0493x14av-0414-generate] liquid D=0.046875 L=0.125 exitX=0.125
+[0493x14av-0414-generate] top gas face=top centerX=0.34375 aperture=0.046875 length=0.546875 exitY=1.015625
+[0493x14av-0414-generate] bottom gas face=bottom centerX=0.34375 aperture=0.046875 length=0.546875 exitY=0.546875
+[0493x14av-0414-generate] openAxes=x+y gapY=0.46875 chiSolidCells=9376
+[0493x14av] openBoundarySegment0 = left inlet 0.485 0.515 0.15 0.0 1 1.0
+[0493x14av] openBoundarySegment1 = bottom inlet 0.41 0.47 0.0 0.0 2 0.1
+[0493x14av] openBoundarySegment2 = top inlet 0.41 0.47 0.0 -0.0 2 0.1
+[0493x14av] openBoundarySegment3 = right outlet 0.0 1.0 0.0 0.0 0 0.1
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[run-ok-common] surfaceProfile=air-assisted atomizer: gas pressure + Laplace tension + liquid interface support + gas specular/excess impulse + local traction sigma=35 rmin/h=4 A=type:1 B=type:2
+[run-ok-common] kineticReflection=1.0 contact=-1 x12aRc/h=25.298221281347036
+===== 0493x14av-s2 AIR-ASSISTED ATOMIZER DEMO =====
+PATHS: runner=scripts/run_ok_air_assisted_atomizer.sh
+       generator=embedded analyzer=embedded binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.smpcd chi=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_200x400.f32 geometry=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/chi/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_geometry.svg
+DOMAIN: 0.78125x1.5625 grid=200x400 h=0.00390625 gamma=8 dt=0.00635 steps=250
+LIQUID NOZZLE: left -> right centerY=0.78125 Dcells=12 D=0.046875 Lcells=32 L=0.125 U=0.15
+AIR TOP: direct TOP inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=1.015625 inwardUy=-0.0
+AIR BOTTOM: direct BOTTOM inlet centerX=0.34375 centerCells=88 thicknessCells=12 thickness=0.046875 lengthCells=140 length=0.546875 exitY=0.546875 inwardUy=0.0
+BOUNDARIES(0414): segmented LEFT liquid inlet + BOTTOM/TOP gas inlets + full RIGHT Neumann outlet; x+y open axes
+DARCY(run_ok common): alpha=[0.0,800000.0] lambdaSolidPerStep=1.0 forcing=mean_outward_bath chiCollisionVP=true
+                    q=0.1 initialDeactivateEffective=-1 commonFilled=1 VPmode=interface_band VPgamma=-1 VPmass=1.0
+Q6(run_ok profile): projection=auto_fv_cg tol=1.0e-5 maxIt=1600 strict=1 tau=0.25 minFill=0.10
+RESOLUTION: gasThermal=0.32512 h/step gasTopTotal=0.32512 gasBottomTotal=0.32512 liquidTotal=0.8185763917484258
+DIMENSIONLESS(ref nu): WeGtop=0.0 WeGbottom=0.0 WeL=15.798857142857145 ReGtop=0.0 ReGbottom=0.0 ReL=5.638532477947072
+ASSIST momentum ratio rhoG*Ug^2/(rhoL*Ul^2): top=0.0 bottom=0.0
+PHYSICS: x6g+x9+x10o/CIC/Q2/x10u/x10v/x12a+x14l+x14v+x14ad; x14ai OFF; resampling OFF; virial OFF
+OUTPUT: LiveVis every=1; recording every=50; restart dumps every=250
+NOTE: ./livevis_control.kv is authoritative/read-only and is not modified
+RESTART: active=0 state=none; STEPS is segment length on a restart
+PARAMETERS: fully resolved solver file=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv
+=====================================================
+[0493x14av-0414] open-boundary contract: left liquid + bottom/top gas + right Neumann outlet PASS
+[0493x14av-s2] Darcy contract: suite_write_darcy_params_0434 PASS
+[run-ok-common] livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv sha256=f501b2709e38989dc038f401ac07008950bf5773d04e5e192f08cdfb1b664d68
+[0493a-run-ok] preflight=PASS mode=src-q6-g-f topology=segmented binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486 livevis=1 particleTypeFilter=-1 speciesResampling=false speciesResident=off 0296=0
+===== RUN_OK 0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400 =====
+PATHS: runner=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/scripts/run_ok_air_assisted_atomizer.sh generator=/tmp/src_mpcd_0493x14av_11404/generate_0493x14av_air_assisted_atomizer_state.py binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+       state=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/init/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.smpcd params=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv output=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output log=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/logs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.log livevis=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+FLUID: domain=0.78125x1.5625 grid=200x400 hx=0.00390625 hy=0.00390625 gamma=8 referenceMass=1.0
+       activeProviderMass=0.1 (secondary/background phase)
+       kBT=0.004 dt=0.00635 rotation=1.5707963267948966 lambda/h=0.1288557 gridShift=true thermostat=cell_relative_rescale/every1
+RUN:   mode=src-q6-g-f steps=250 summaryEvery=25 dumpEvery=250 preflight=0
+LIVE:  grid=400x400 liveEvery=1 recordEnable=true recordFields=rho,rho2,ux,uy recordEvery=100 filterSampleEvery=-1
+================================
+[0434-suite] binary=build/src_mpcd_base_cuda_q6_resident_livevis_0486
+[0434-suite] params=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/params/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400.kv
+[0434-suite] output=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output
+[livevis0335] enabled field=mass grid=256x128 every=1 colormap=thermal alpha=0.08 clip=-1 quantile=0.995 gain=1 quiver=0 quiverGrid=60x32 quiverScale=-1 quiverMinSpeed=0 quiverSmoothPasses=1 particleTypeFilter=-1 controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv
+[filtered-record0432] enabled controlFile=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF-x8q-ablation/livevis_control.kv outputRoot=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output
+[src_mpcd_base] Np=1040000 fluid=640000 latent=0 inactive=400000 grid=200x400 bc=[L:solid, R:solid, B:solid, T:solid] wallAccommodation=0 immersedSolid=off fluid=[0,0.78125]x[0,1.5625] projection=auto_fv_cg q6ForceProjection=prestream_single_fused resampling=off thermostat=cell_relative_rescale steps=250 threadsActive=8 threadsMax=8 outputDir=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output dumpRoleFilter=fluid summaryRoleFilter=fluid speciesRegistry=on speciesCount=2 speciesDiagnostics=species_runtime_0493x14av.csv speciesCellDiagnostics=off speciesCellCudaDeposit=off speciesMassClosure=off speciesMassClosureCuda=off speciesPopulationGuard=off speciesPopulationGuardCuda=off speciesMixedRefill=off speciesTransfer=off speciesTransferCuda=off speciesCudaResidentValidation=off speciesCudaResidentFastPath=off speciesCudaResidentDeposits=off speciesCudaResidentPool=off speciesCudaResidentMaintenanceStrict=off
+[0493x9c-outlet] mode=phase_support_continuation mass=unchanged liquidReservoir=off boundaryAlpha=max(boundary,inward) consumers=x6c+x6f+surfaceTension+x10CIC outlet=segmented_neumann
+[0493x10s] q6ThermalSegmentNormalKinematics=0 env=0
+[0493x10t] q6ThermalRigidTangentialKinematics=0 env=0
+[0493x10r] q6ThermalFullVectorEndpointVelocity=0 env=0
+[0493x14v-gas-kinetic-excess] enabled=1 raw=gas-specular-owner-aggregate subtract=x6g-thermodynamic-traction thermoGeometry=x10n-local-x6g-face-gauge+residual-resultant-projection refPressureClosure=off transfer=collective-liquid-CIC storage=reused-x9t/x10m newBufferBytes-x14aa=0 newBufferBytes-x14ab=0 newScratchBytes-x14ac=56 x14adEdgeMetadata=reused-x10m-active-byte newBufferBytes-x14ad=0 scatterLossDiag=off newScratchBytes-x14ae=0 globalBalanceDiag=off newScratchBytes-x14af=0 deviceAppliedQ6ResultantClosure=off newScratchBytes-x14ai=0 x14aiScope=isolated-liquid-component-no-external-Q6-contact newKernelLaunch=0 newCellPass=0 newParticlePass=0 liquidLaws=UNCHANGED
+[0493x10u-oneforone] enabled=1 cic=1 biq=1 swap=1 swapNormalOnly=0 semantics=position-mirror+local-equal-mass-full-vector-swap
+[0493x14k-bilateral-x10u] enabled=1 AType=1 BType=2 semantics=shared-liquid-defined-x10o-Q2-wall;A-position-mirror-only;B-response=x14l-specular;mass-type-unchanged;liquid-x10v/x12a=runtime;no-orphan-guard
+[0493x14l-gas-specular] enabled=1 AType=1 BType=2 liquid=x10u-position-only-UNCHANGED gas=local-moving-frame-specular-normal-reflection tangential=unchanged wallImpulseFeedback=NOT_APPLIED liquidX10v=ON-phase-A-only liquidX12a=ON-phase-A-only no-orphan-guard
+[0493x14m-full-liquid-gas-compat] enabled=1 liquid=x10o+CIC+Q2+x10p/q+x10u+x10v-full-vector+x12a liquidLaws=UNCHANGED gas=x14l-local-moving-frame-specular gasWallImpulseFeedback=NOT_APPLIED x12aKineticEnvelope=phase-A-only x12aSpeciesThermostat=phase-A-only
+[0493x12a-local-thermal] enabled=1 radiusCutCells=25.2982 law=kBT_eff/kBT=min(1,(Lloc/Rc)^2) Lloc=opposite-interface-half-distance envelope=recomputed-from-local-sqrt-kBT
+[0493x10biq] kineticBiquadraticInterface=1 cic=1 env=1
+[0493x10w-thermal-phase] enabled=0 chiOn=0.022 chiFull=0.028 eta=0.102812 etaCap=0.0572433 scaleCap=0.556777 deltaTOverH=0.308436 semantics=prestream-local-pair-rotation;P-K-conservative;Lloc=opposite-half-thickness
+[0493x9b-neumann] mode=gas_virtual_pressure_reservoir_liquid_strict_outflow liquidType=1 liquidReservoir=off physicalLiquidCrossing=inactive gasReservoir=x9a thermalGasInflow=preserved layers=2 coarseLayers=8 targetN=8 candidateCount=host_legacy pool=legacy species=2
+
+[livevis0335] resized live grid=400x400 (filter reset)
+
+[filtered-record0432] start session=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output/recordings/record_step_0000000001 fields=rho,rho2,ux,uy grid=400x400 every=100 recordEverySource=override filter=none tau=0 sampleEvery=1
+[0493x9a-neumann] mode=virtual_pressure_reservoir_zero_drift_on_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse backflowGuard=zero_full_mean_drift thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8z-neumann] mode=virtual_pressure_reservoir_no_backflow layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse normalMean=outward_clamp thermalInflow=preserved independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[0493x8y-neumann] mode=virtual_pressure_reservoir_cells layers=2 coarseLayers=8 support=face_count_fraction density=reference_target_occupancy targetN=8 population=poisson moments=species_coarse independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=2
+[src_mpcd_base] step=250/250 t=1.587 kBT=4.221e-03 stdN=3.251 resM=0.00e+00 q6F=1.15e-04 q6A=1.08e+01 wall=46.4s
+[filtered-record0432] stop session=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/output/recordings/record_step_0000000001 step=250 frames=3
+[livevis0335] hold-on-exit enabled; close the livevis window to exit
+
+[src_mpcd_base] internal profile CSV disabled (set MPCD_INTERNAL_PROFILES=1 to enable)
+[src_mpcd_base] done
+[0434-suite] time=elapsed=49.73 user=43.18 sys=1.15
+[0493x14av-analysis] step=0 Nliq=3456 x99=0.139404 width80=nan components=1 detached=0
+[0493x14av-analysis] step=250 Nliq=8577 x99=0.311155 width80=nan components=1 detached=0
+[0493x14av-analysis] history=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/analysis/atomizer_history.csv
+[0493x14av-s2] COMPLETE root=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215
+[0493x14av-s2] compact=runs/0493x14av_0414_air_assisted_atomizer_x9c_outlet_phase_continuation_200x400_seed_493215/0493x14av_air_assisted_atomizer_compact.tar.gz

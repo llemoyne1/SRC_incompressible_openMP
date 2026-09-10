@@ -472,8 +472,15 @@ def infer_milestone_links(db: sqlite3.Connection) -> int:
                 (oid, rel, target, 'C', 'inferred from milestone summary/status'),
             )
             count += 1
-    # Stronger structural relation for -fixN names.
-    for oid, mid in db.execute("SELECT object_id,milestone_id FROM milestones WHERE milestone_id LIKE '%-fix%'"):
+    # Stronger structural relation for -fixN names.  Do not apply this generic
+    # inference inside OPEN_BOUNDARY_MULTIPHASE: the post-x14av Neumann lineage
+    # deliberately reuses stems such as x9d/x9e that already identify capillary
+    # milestones.  Those curations carry explicit FIXES/BUILDS_ON relations.
+    for oid, mid, domain in db.execute(
+        "SELECT object_id,milestone_id,domain FROM milestones WHERE milestone_id LIKE '%-fix%'"
+    ):
+        if (domain or '').upper() == 'OPEN_BOUNDARY_MULTIPHASE':
+            continue
         base = re.sub(r'-fix\d+.*$', '', mid, flags=re.I)
         target = resolve_milestone_label(db, base)
         if target:
@@ -485,6 +492,32 @@ def infer_milestone_links(db: sqlite3.Connection) -> int:
     return count
 
 
+NEUMANN_SYMBOL_MILESTONE_ALIASES: dict[str, str | None] = {
+    # The post-x14av Neumann lineage deliberately reused historical x8/x9
+    # labels already present in other domains.  Inventory metadata therefore
+    # needs the same canonical disambiguation as the curated milestones.
+    'x8q': 'x8q',
+    'x8r': 'x8r-neumann-species',
+    'x8v': 'x8v',
+    'x8w': 'x8w',
+    'x8x': 'x8x',
+    'x8y': 'x8y',
+    'x8z': 'x8z',
+    'x9a': 'x9a-neumann',
+    'x9b': 'x9b-neumann',
+    'x9c': 'x9c-outlet',
+    # x9d v1 is retained only as an implementation experiment and has no
+    # canonical milestone of its own; do not fall through to capillary x9d.
+    'x9d': None,
+    'x9d-fix1': 'x9d-fix1-neumann',
+    'x9e': 'x9e-neumann',
+    'x9e-fix1': 'x9e-fix1',
+    'x9e-fix2': 'x9e-fix2',
+    'x9e-fix2b': 'x9e-fix2b',
+    'x9e-fix3': 'x9e-fix3',
+}
+
+
 def infer_symbol_milestone_links(db: sqlite3.Connection) -> int:
     count = 0
     rows = db.execute(
@@ -492,17 +525,33 @@ def infer_symbol_milestone_links(db: sqlite3.Connection) -> int:
     ).fetchall()
     for oid, namespace, name, category, status, effect, remarks, source_inventory in rows:
         text = ' '.join(x or '' for x in (category, status, effect, remarks, source_inventory))
+        category_low = (category or '').lower()
+        name_up = (name or '').upper()
+        neumann_scope = (
+            'neumann' in category_low
+            and ('multiphasique' in category_low or name_up.startswith('NEUMANN_') or '_NEUMANN_' in name_up)
+        )
         seen = set()
         for hint in extract_hints(text):
             if not hint.startswith('x'):
                 continue
-            target = resolve_milestone_label(db, hint)
+            resolved_hint = hint
+            if neumann_scope:
+                norm = normalize_candidate_label(hint)
+                if norm in NEUMANN_SYMBOL_MILESTONE_ALIASES:
+                    alias = NEUMANN_SYMBOL_MILESTONE_ALIASES[norm]
+                    if alias is None:
+                        continue
+                    resolved_hint = alias
+            target = resolve_milestone_label(db, resolved_hint)
             if not target or target in seen:
                 continue
             seen.add(target)
             db.execute(
                 'INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text) VALUES(?,?,?,?,?)',
-                (oid, 'ASSOCIATED_WITH', target, 'B', f'{namespace} metadata mentions {hint}'),
+                (oid, 'ASSOCIATED_WITH', target, 'B',
+                 f'{namespace} metadata mentions {hint}' +
+                 (f' (Neumann canonical alias {resolved_hint})' if resolved_hint != hint else '')),
             )
             count += 1
     return count
@@ -629,7 +678,10 @@ def refresh_candidate_rollups(db: sqlite3.Connection) -> None:
 
 
 def reconcile_unique_numeric_candidates(db: sqlite3.Connection) -> int:
-    """Link curated numeric milestones to their introduction Git candidate conservatively.
+    """Reconcile curated post-Git candidates conservatively.
+
+    The historical function name is retained for compatibility.  Its main job remains
+    numeric-label reconciliation; V4.28 also handles one exact dated X-tag alias.
 
     Historical 0xxx labels are not globally unique, so raw numeric candidates are never
     auto-linked during Git import.  After curation, reconciliation uses two safe cases:
@@ -783,6 +835,75 @@ def reconcile_unique_numeric_candidates(db: sqlite3.Connection) -> int:
                    introduced_date=COALESCE(NULLIF(introduced_date,''),substr(?,1,10))
                WHERE object_id=?""",
             (anchor, first_date, moid),
+        )
+        if not already:
+            linked += 1
+
+    # V4.28: exact reconciliation for the qualified x9e-fix3 tag alias.
+    # The canonical milestone is x9e-fix3.  The lightweight tag deliberately
+    # appends a YYYYMMDD qualification date, which the generic X-label parser
+    # preserves as x9e-fix3-20260910.  That dated token is a tag alias, not a
+    # second milestone.  Require the exact official tag and its exact surf
+    # commit before linking it; do not broaden generic X-label resolution.
+    exact_tagged_x_aliases = (
+        (
+            'x9e-fix3-20260910',
+            'surf-neumann-qualified-x9e-fix3-20260910',
+            '6dfda0404c2066f3db378a5d27c30a6dcc898d39',
+            'milestone:0493x9e-fix3',
+            'exact tagged-X alias curation: qualified x9e-fix3 surf tag dated 20260910',
+        ),
+    )
+    for norm, tag_name, anchor, moid, resolution in exact_tagged_x_aliases:
+        if not db.execute('SELECT 1 FROM milestones WHERE object_id=?', (moid,)).fetchone():
+            continue
+        tag_row = db.execute(
+            'SELECT commit_hash,tagged_date FROM git_tags WHERE tag=?',
+            (tag_name,),
+        ).fetchone()
+        if tag_row is None or tag_row[0] != anchor:
+            continue
+        row = db.execute(
+            """SELECT candidate_id,status,linked_milestone_object_id
+               FROM git_milestone_candidates
+               WHERE candidate_family='X' AND normalized_label=? AND anchor_commit=?""",
+            (norm, anchor),
+        ).fetchone()
+        if row is None:
+            continue
+        cid, old_status, old_link = row
+        already = old_status == 'CURATED' and old_link == moid
+        db.execute(
+            """UPDATE git_milestone_candidates
+               SET status='CURATED', linked_milestone_object_id=?,
+                   notes=trim(COALESCE(notes,'') ||
+                     CASE WHEN instr(COALESCE(notes,''),?)>0 THEN ''
+                          WHEN COALESCE(notes,'')='' THEN ? ELSE '; ' || ? END)
+               WHERE candidate_id=?""",
+            (moid, resolution, 'linked by ' + resolution, 'linked by ' + resolution, cid),
+        )
+        coid = 'git:' + anchor
+        if db.execute('SELECT 1 FROM objects WHERE object_id=?', (coid,)).fetchone():
+            db.execute(
+                """INSERT OR IGNORE INTO relations(source_object_id,relation_type,target_object_id,confidence,evidence_text)
+                   VALUES(?,?,?,?,?)""",
+                (moid, 'EVIDENCED_BY_COMMIT', coid, 'A', resolution),
+            )
+        if not db.execute(
+            "SELECT 1 FROM evidence WHERE object_id=? AND evidence_type='GIT_TAG' AND tag=?",
+            (moid, tag_name),
+        ).fetchone():
+            db.execute(
+                """INSERT INTO evidence(object_id,evidence_type,commit_hash,tag,confidence,notes)
+                   VALUES(?,?,?,?,?,?)""",
+                (moid, 'GIT_TAG', anchor, tag_name, 'A', resolution),
+            )
+        db.execute(
+            """UPDATE milestones
+               SET introduced_commit=?, tag=?,
+                   introduced_date=COALESCE(NULLIF(introduced_date,''),substr(?,1,10))
+               WHERE object_id=?""",
+            (anchor, tag_name, tag_row[1] or '', moid),
         )
         if not already:
             linked += 1
@@ -1286,7 +1407,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
     db.executescript(args.schema.read_text(encoding='utf-8'))
     with db:
         db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '4'))
-        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.26'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.29'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('built_utc', dt.datetime.now(dt.timezone.utc).isoformat()))
         db.execute('INSERT INTO meta VALUES(?,?)', ('repo_root', '.'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('info_root', repo_relative_label(args.repo_root, args.info_root)))

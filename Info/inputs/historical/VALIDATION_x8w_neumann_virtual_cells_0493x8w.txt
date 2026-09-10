@@ -1,0 +1,12 @@
+Validation performed before packaging
+=====================================
+
+PASS  git diff --check on x8w commit
+PASS  x8w_virtual_cells_after_x8v.patch applies with git apply --check to the
+      exact x8v state used to generate it
+PASS  applied result matches generated x8w source byte-for-byte
+PASS  bash -n scripts/run_x8w_virtual_cells_neumann_air_assisted_atomizer.sh
+PASS  bash -n scripts/run_x8q_legacy_control_air_assisted_atomizer.sh
+PASS  new 0493x8w CUDA block extracted and parsed as C++17 with CUDA qualifiers,
+      atomics and built-ins stubbed (syntax-level check)
+NOT RUN real CUDA/nvcc compilation: nvcc/CUDA toolkit unavailable here

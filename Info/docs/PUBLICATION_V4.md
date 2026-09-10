@@ -112,3 +112,22 @@ jalon est créé explicitement dans `milestones`, puis Git ne sert qu'à complé
 provenance. Un candidat numérique n'est relié automatiquement que si son label est unique
 des deux côtés. Cette règle permet de faire disparaître les 0490 curés du backlog non
 résolu sans réintroduire la collision historique des labels comme `0414`.
+
+## V4.27 — réintégration après cherry-pick
+
+La restauration des curations Neumann V4.22/V4.23 et l'ajout de la lignée x9e sont des
+modifications des sources documentaires, pas des fichiers publiés. Une reconstruction
+normale régénère `jalons.md`, `jalons_par_nature.md`, `lexique_jalons.md`, les CSV,
+l'audit Git et les inventaires à partir du nouveau `surf`. Le lexique attendu contient
+292 lignes de jalons canoniques.
+
+## V4.29 — inventaires courants et ordre naturel
+
+Le snapshot paramètres actif est rafraîchi au 10 septembre 2026. Il est byte-identique au
+snapshot x14ai du 4 septembre, ce qui matérialise l'audit concluant à **zéro nouvelle clé `.kv`**
+dans la lignée Neumann. Le snapshot ENV x9e-fix3 reste actif avec 549 entrées brutes.
+
+Les publications de paramètres et de flags sont triées par clé naturelle sur le nom canonique.
+L'index `jalons_par_nature.md` trie désormais les identifiants naturellement dans chaque nature,
+ce qui évite par exemple de placer `x14*` avant `x10*` pour des raisons d'ordre de curation.
+Les nombres attendus restent 292 jalons, 314 paramètres canoniques et 650 flags.

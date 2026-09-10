@@ -1,0 +1,13 @@
+0493x8v package validation
+===========================
+
+[1] shell syntax
+PASS run_x8q_legacy_neumann_air_assisted_atomizer.sh
+PASS run_x8q_off_neumann_air_assisted_atomizer.sh
+PASS run_x8v_replica_neumann_air_assisted_atomizer.sh
+
+[2] patch whitespace
+git diff --check passed in both generated source trees before patch export.
+
+[3] CUDA compiler
+NOT AVAILABLE in this environment; local CUDA build remains required.

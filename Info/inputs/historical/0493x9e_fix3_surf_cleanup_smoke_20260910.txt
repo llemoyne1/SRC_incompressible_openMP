@@ -1,0 +1,30 @@
+0493x9e-fix3 — final surf cleanup smoke (curated transcript summary)
+===================================================================
+
+Source note
+-----------
+This file transcribes the decisive lines supplied by the user in the terminal
+conversation on 2026-09-10 after the final x9e-fix3 cleanup was integrated into
+`surf`. It is a curated summary, NOT a byte-for-byte copy of the original log.
+
+Observed production markers
+---------------------------
+[0493x9e-neumann] ... prefixRepair=targeted_deleted_list_exact fallback=0315c_exact ...
+[0493x9e-fastpath] prefixRepair=targeted_deleted_list_exact fallback=0315c_exact
+
+Final progress / completion
+---------------------------
+[src_mpcd_base] step=250/250 t=1.587 kBT=4.082e-03 stdN=2.927 resM=0 q6F=1.16e-04 q6A=1.12e+01 wall=20.1s
+[src_mpcd_base] done
+
+Interpretation
+--------------
+- production targeted-repair path selected;
+- exact 0315c fallback remains available;
+- no x9e fallback marker was observed in the supplied smoke output;
+- 250/250 steps completed.
+
+The x9e-fix3 cleanup package separately states that the pre-cleanup targeted
+algorithm had already passed a 3000-step run. V4.27 therefore treats this as
+implementation-path qualification/non-regression evidence, not as a universal
+physical qualification of all Neumann outlet configurations.
