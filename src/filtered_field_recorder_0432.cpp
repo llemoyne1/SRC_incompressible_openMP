@@ -149,11 +149,11 @@ std::string step_string_0432(std::uint64_t step) {
     return oss.str();
 }
 
-void smooth_scalar_0432(std::vector<float>& field, int nx, int ny, int passes) {
+void smooth_scalar_0432(std::vector<double>& field, int nx, int ny, int passes) {
     if (nx <= 0 || ny <= 0 || passes <= 0) return;
     const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
     if (field.size() < n) return;
-    std::vector<float> tmp(n, 0.0f);
+    std::vector<double> tmp(n, 0.0);
     for (int pass = 0; pass < passes; ++pass) {
         tmp = field;
         for (int iy = 0; iy < ny; ++iy) {
@@ -171,7 +171,7 @@ void smooth_scalar_0432(std::vector<float>& field, int nx, int ny, int passes) {
                     }
                 }
                 field[static_cast<std::size_t>(iy) * static_cast<std::size_t>(nx) + static_cast<std::size_t>(ix)] =
-                    cnt > 0 ? static_cast<float>(acc / static_cast<double>(cnt)) : 0.0f;
+                    cnt > 0 ? acc / static_cast<double>(cnt) : 0.0;
             }
         }
     }
@@ -186,6 +186,7 @@ struct FilteredFieldRecorder0432::Impl {
         bool recordEnable = false;
         std::string recordSession;
         std::string recordFieldsRaw = "current";
+        int liveEvery = 10;
         int recordEvery = 0; // <=0 means follow livevis liveEvery.
         bool recordEveryExplicit = false;
         std::string recordFormat = "f32";
@@ -195,6 +196,7 @@ struct FilteredFieldRecorder0432::Impl {
         std::string filterMode = "ema";
         double filterTau = 0.0;
         int filterSampleEvery = 1;
+        bool filterSampleEveryAuto = false; // <=0 in control means follow recordEvery.
         int smoothPasses = 0;
         int particleTypeFilter = -1;
     };
@@ -251,20 +253,42 @@ struct FilteredFieldRecorder0432::Impl {
     ConservedFields ema;
     bool emaInitialized = false;
 
-    void parse_control_file(const LiveVisualization0335RuntimeControls& liveControls) {
-        if (!liveControls.field.empty()) preview.field = liveControls.field;
-        if (liveControls.nx > 0) preview.liveGridNx = liveControls.nx;
-        if (liveControls.ny > 0) preview.liveGridNy = liveControls.ny;
-        preview.smoothPasses = std::max(0, liveControls.smoothPasses);
-        preview.particleTypeFilter = liveControls.particleTypeFilter;
+    void resolve_derived_controls() {
         if (!preview.recordEveryExplicit || preview.recordEvery <= 0) {
-            preview.recordEvery = std::max(1, liveControls.every);
+            preview.recordEvery = std::max(1, preview.liveEvery);
             preview.recordEveryExplicit = false;
         }
+        if (preview.filterSampleEveryAuto) {
+            const bool temporalEmaActive =
+                lower_0432(preview.filterMode) == "ema" && preview.filterTau > 0.0;
+            preview.filterSampleEvery = std::max(1, temporalEmaActive ? preview.liveEvery : preview.recordEvery);
+        }
+    }
 
-        if (controlFile.empty()) return;
+    void parse_control_file(const LiveVisualization0335RuntimeControls& liveControls) {
+        // The viewer is optional.  Only inherit its runtime controls when it is
+        // actually initialized (the no-LiveVis stub reports nx=ny=0).  In
+        // headless mode the recorder keeps its environment defaults and then
+        // reads the same livevis_control.kv directly.
+        const bool haveLiveControls = liveControls.nx > 0 && liveControls.ny > 0;
+        if (haveLiveControls) {
+            if (!liveControls.field.empty()) preview.field = liveControls.field;
+            preview.liveGridNx = liveControls.nx;
+            preview.liveGridNy = liveControls.ny;
+            preview.liveEvery = std::max(1, liveControls.every);
+            preview.smoothPasses = std::max(0, liveControls.smoothPasses);
+            preview.particleTypeFilter = liveControls.particleTypeFilter;
+        }
+
+        if (controlFile.empty()) {
+            resolve_derived_controls();
+            return;
+        }
         std::ifstream in(controlFile);
-        if (!in) return;
+        if (!in) {
+            resolve_derived_controls();
+            return;
+        }
         std::string line;
         while (std::getline(in, line)) {
             const std::size_t comment = line.find('#');
@@ -280,6 +304,10 @@ struct FilteredFieldRecorder0432::Impl {
                 preview.recordSession = value;
             } else if (key == "recordfields" || key == "record_fields") {
                 preview.recordFieldsRaw = value;
+            } else if (key == "liveevery" || key == "every" || key == "visualevery" ||
+                       key == "live_vis_every" || key == "src_live_vis_every" || key == "mpcd_live_vis_every") {
+                int parsed = preview.liveEvery;
+                if (parse_int_0432(value, parsed)) preview.liveEvery = std::max(1, parsed);
             } else if (key == "recordevery" || key == "record_every") {
                 int parsed = preview.recordEvery;
                 if (parse_int_0432(value, parsed)) {
@@ -287,14 +315,14 @@ struct FilteredFieldRecorder0432::Impl {
                         preview.recordEvery = parsed;
                         preview.recordEveryExplicit = true;
                     } else {
-                        preview.recordEvery = std::max(1, liveControls.every);
+                        preview.recordEvery = std::max(1, preview.liveEvery);
                         preview.recordEveryExplicit = false;
                     }
                 }
             } else if (key == "recordstride" || key == "record_stride") {
                 int parsed = 1;
                 if (parse_int_0432(value, parsed)) {
-                    preview.recordEvery = std::max(1, liveControls.every) * std::max(1, parsed);
+                    preview.recordEvery = std::max(1, preview.liveEvery) * std::max(1, parsed);
                     preview.recordEveryExplicit = true;
                 }
             } else if (key == "recordformat" || key == "record_format") {
@@ -314,7 +342,14 @@ struct FilteredFieldRecorder0432::Impl {
                 if (parse_double_0432(value, parsed)) preview.filterTau = std::max(0.0, parsed);
             } else if (key == "filtersampleevery" || key == "filter_sample_every") {
                 int parsed = preview.filterSampleEvery;
-                if (parse_int_0432(value, parsed)) preview.filterSampleEvery = std::max(1, parsed);
+                if (parse_int_0432(value, parsed)) {
+                    if (parsed <= 0) {
+                        preview.filterSampleEveryAuto = true;
+                    } else {
+                        preview.filterSampleEvery = parsed;
+                        preview.filterSampleEveryAuto = false;
+                    }
+                }
             } else if (key == "smoothpasses" || key == "smooth_passes" || key == "smooth") {
                 int parsed = preview.smoothPasses;
                 if (parse_int_0432(value, parsed)) preview.smoothPasses = std::max(0, parsed);
@@ -324,6 +359,7 @@ struct FilteredFieldRecorder0432::Impl {
                 if (parse_int_0432(value, parsed)) preview.particleTypeFilter = parsed;
             }
         }
+        resolve_derived_controls();
     }
 
     std::vector<std::string> resolve_fields() const {
@@ -359,8 +395,8 @@ struct FilteredFieldRecorder0432::Impl {
                lower_0432(preview.filterMode) != lower_0432(locked.filterMode) ||
                std::abs(preview.filterTau - locked.filterTau) > 0.0 ||
                preview.filterSampleEvery != locked.filterSampleEvery ||
-               preview.smoothPasses != locked.smoothPasses ||
-               preview.particleTypeFilter != locked.particleTypeFilter;
+               preview.filterSampleEveryAuto != locked.filterSampleEveryAuto ||
+               preview.smoothPasses != locked.smoothPasses;
     }
 
     void start_session(std::uint64_t step, double time, const SimulationParams& params) {
@@ -373,7 +409,7 @@ struct FilteredFieldRecorder0432::Impl {
         locked.filterMode = lower_0432(locked.filterMode);
         locked.recordFormat = lower_0432(locked.recordFormat);
         if (locked.recordFormat != "f32" && locked.recordFormat != "float32") {
-            throw std::runtime_error("filtered recorder 0432 supports recordFormat=f32 only in 0432a");
+            throw std::runtime_error("filtered recorder 0432 supports recordFormat=f32 only in 0432b");
         }
         lockedFields = resolve_fields();
         const std::size_t ncell = static_cast<std::size_t>(locked.liveGridNx) * static_cast<std::size_t>(locked.liveGridNy);
@@ -402,7 +438,11 @@ struct FilteredFieldRecorder0432::Impl {
                   << " every=" << locked.recordEvery
                   << " recordEverySource=" << (locked.recordEveryExplicit ? "override" : "liveEvery")
                   << " filter=" << locked.filterMode << " tau=" << locked.filterTau
-                  << " sampleEvery=" << locked.filterSampleEvery << '\n';
+                  << " sampleEvery=" << locked.filterSampleEvery
+                  << " sampleEverySource="
+                  << (locked.filterSampleEveryAuto
+                      ? ((locked.filterMode == "ema" && locked.filterTau > 0.0) ? "liveEvery" : "recordEvery")
+                      : "explicit") << '\n';
     }
 
     void stop_session(std::uint64_t step, double time) {
@@ -418,7 +458,7 @@ struct FilteredFieldRecorder0432::Impl {
 
     void write_manifest_start(std::uint64_t step, double time, const SimulationParams& params) const {
         std::ofstream out(sessionDir / "manifest.kv");
-        out << "version = 0432a\n";
+        out << "version = 0432b\n";
         out << "startStep = " << step << "\n";
         out << "startTime = " << std::setprecision(17) << time << "\n";
         out << "solverNx = " << params.Nx << "\n";
@@ -430,14 +470,22 @@ struct FilteredFieldRecorder0432::Impl {
         out << "recordFieldCount = " << lockedFields.size() << "\n";
         out << "recordFields = " << join_fields_0432(lockedFields) << "\n";
         out << "currentFieldAtStart = " << normalize_field_0432(locked.field) << "\n";
+        out << "liveEveryAtStart = " << locked.liveEvery << "\n";
         out << "recordEvery = " << locked.recordEvery << "\n";
         out << "recordEverySource = " << (locked.recordEveryExplicit ? "override" : "liveEvery") << "\n";
         out << "recordFormat = f32\n";
         out << "filterMode = " << locked.filterMode << "\n";
         out << "filterTau = " << std::setprecision(17) << locked.filterTau << "\n";
         out << "filterSampleEvery = " << locked.filterSampleEvery << "\n";
+        out << "filterSampleEverySource = "
+            << (locked.filterSampleEveryAuto
+                ? ((locked.filterMode == "ema" && locked.filterTau > 0.0) ? "liveEvery" : "recordEvery")
+                : "explicit") << "\n";
         out << "smoothPasses = " << locked.smoothPasses << "\n";
+        // Kept for provenance/backward readers: this is now a viewer-only value.
         out << "particleTypeFilter = " << locked.particleTypeFilter << "\n";
+        out << "particleTypeFilterAffectsRecording = false\n";
+        out << "recordParticleSelection = all_fluid_types\n";
         out << "layout = row_major\n";
         out << "filePattern = step_<step>_field_<field>.f32\n";
         out << "observationOnly = true\n";
@@ -468,10 +516,9 @@ struct FilteredFieldRecorder0432::Impl {
             const int ix = std::clamp(static_cast<int>(std::floor(x * invLx * locked.liveGridNx)), 0, locked.liveGridNx - 1);
             const int iy = std::clamp(static_cast<int>(std::floor(y * invLy * locked.liveGridNy)), 0, locked.liveGridNy - 1);
             const std::size_t c = static_cast<std::size_t>(iy) * static_cast<std::size_t>(locked.liveGridNx) + static_cast<std::size_t>(ix);
-            // 0436: filtered recorder particle type filter; -1 keeps all types.
-            if (locked.particleTypeFilter >= 0) {
-                if (i >= state.type.size() || static_cast<int>(state.type[i]) != locked.particleTypeFilter) continue;
-            }
+            // 0432b: recording fields have intrinsic definitions.  The
+            // LiveVis particleTypeFilter is display-only and must not remove
+            // species before rho/rho1/rho2 are accumulated.
             const double m = state.mass.empty() ? 1.0 : state.mass[i];
             const std::uint32_t typ = state.type.empty() ? 0u : state.type[i];
             instant.rho[c] += m;
@@ -519,7 +566,9 @@ struct FilteredFieldRecorder0432::Impl {
 
     std::vector<float> build_field(const std::string& field) const {
         const std::size_t ncell = ema.rho.size();
-        std::vector<float> out(ncell, 0.0f);
+        // Keep the same order and precision as LiveVis: construct the scalar in
+        // double, apply smoothPasses on that scalar grid, then quantize to f32.
+        std::vector<double> scalar(ncell, 0.0);
         for (std::size_t c = 0; c < ncell; ++c) {
             const double rho = ema.rho[c];
             double value = 0.0;
@@ -538,9 +587,11 @@ struct FilteredFieldRecorder0432::Impl {
             else if (field == "n1") value = ema.n1[c];
             else if (field == "n2") value = ema.n2[c];
             if (!std::isfinite(value)) value = 0.0;
-            out[c] = static_cast<float>(value);
+            scalar[c] = value;
         }
-        smooth_scalar_0432(out, locked.liveGridNx, locked.liveGridNy, locked.smoothPasses);
+        smooth_scalar_0432(scalar, locked.liveGridNx, locked.liveGridNy, locked.smoothPasses);
+        std::vector<float> out(ncell, 0.0f);
+        for (std::size_t c = 0; c < ncell; ++c) out[c] = static_cast<float>(scalar[c]);
         return out;
     }
 
@@ -571,10 +622,13 @@ void FilteredFieldRecorder0432::maybe_initialize(const SimulationParams& params)
     r.outputRoot = params.outputDir;
     r.preview.liveGridNx = std::max(16, env_int_0432("SRC_LIVE_VIS_NX", env_int_0432("MPCD_LIVE_VIS_NX", 300)));
     r.preview.liveGridNy = std::max(16, env_int_0432("SRC_LIVE_VIS_NY", env_int_0432("MPCD_LIVE_VIS_NY", 80)));
+    r.preview.liveEvery = std::max(1, env_int_0432("SRC_LIVE_VIS_EVERY", env_int_0432("MPCD_LIVE_VIS_EVERY", 10)));
     r.preview.field = env_string_0432("SRC_LIVE_VIS_FIELD", env_string_0432("MPCD_LIVE_VIS_FIELD", "ux"));
     r.preview.smoothPasses = std::max(0, env_int_0432("SRC_LIVE_VIS_SMOOTH_PASSES", env_int_0432("MPCD_LIVE_VIS_SMOOTH_PASSES", 0)));
     r.preview.filterTau = std::max(0.0, env_double_0432("SRC_FILTERED_FIELD_TAU", env_double_0432("MPCD_FILTERED_FIELD_TAU", 0.0)));
-    r.preview.filterSampleEvery = std::max(1, env_int_0432("SRC_FILTERED_FIELD_SAMPLE_EVERY", env_int_0432("MPCD_FILTERED_FIELD_SAMPLE_EVERY", 1)));
+    r.preview.filterSampleEvery = env_int_0432("SRC_FILTERED_FIELD_SAMPLE_EVERY", env_int_0432("MPCD_FILTERED_FIELD_SAMPLE_EVERY", 1));
+    r.preview.filterSampleEveryAuto = r.preview.filterSampleEvery <= 0;
+    if (r.preview.filterSampleEveryAuto) r.preview.filterSampleEvery = 1;
     r.preview.recordEvery = 0;
     r.preview.recordEveryExplicit = false;
     const char* recordEveryEnv0433 = std::getenv("SRC_FILTERED_FIELD_RECORD_EVERY");
@@ -617,7 +671,7 @@ void FilteredFieldRecorder0432::poll_controls(std::uint64_t step,
     if (r.preview.recordEnable) {
         // The physical time is supplied at the first sample; use step*dt there.
         // A zero time in the initial manifest is corrected by sample_and_maybe_write.
-        // The manifest start time is informational only in 0432a.
+        // The manifest start time is informational only in 0432b.
         // session actually starts below with the correct time if sample is called.
     }
 }
@@ -628,7 +682,13 @@ bool FilteredFieldRecorder0432::needs_host_state(std::uint64_t step) const {
     if (!r.active && r.preview.recordEnable) return true;
     if (!r.active) return false;
     if (r.lastSampleStep == std::numeric_limits<std::uint64_t>::max()) return true;
-    return (step - r.lastSampleStep) >= static_cast<std::uint64_t>(std::max(1, r.locked.filterSampleEvery));
+    const bool sampleDue =
+        (step - r.lastSampleStep) >= static_cast<std::uint64_t>(std::max(1, r.locked.filterSampleEvery));
+    const bool writeDue =
+        ((step - r.startStep) % static_cast<std::uint64_t>(std::max(1, r.locked.recordEvery))) == 0u;
+    // A recorded frame is always sampled at its exact step, even when the
+    // temporal-filter cadence does not divide recordEvery.
+    return sampleDue || writeDue;
 }
 
 void FilteredFieldRecorder0432::sample_and_maybe_write(const ParticleState& state,
@@ -641,14 +701,16 @@ void FilteredFieldRecorder0432::sample_and_maybe_write(const ParticleState& stat
         r.start_session(step, time, params);
     }
     if (!r.active) return;
-    const bool shouldSample = r.lastSampleStep == std::numeric_limits<std::uint64_t>::max() ||
+    const bool writeDue =
+        ((step - r.startStep) % static_cast<std::uint64_t>(std::max(1, r.locked.recordEvery))) == 0u;
+    const bool sampleDue = r.lastSampleStep == std::numeric_limits<std::uint64_t>::max() ||
         (step - r.lastSampleStep) >= static_cast<std::uint64_t>(std::max(1, r.locked.filterSampleEvery));
+    const bool shouldSample = sampleDue || writeDue;
     if (shouldSample) {
         r.deposit(state, params);
         r.update_filter(step, time);
     }
-    const bool shouldWrite = r.emaInitialized && ((step - r.startStep) % static_cast<std::uint64_t>(r.locked.recordEvery) == 0u);
-    if (shouldWrite) {
+    if (r.emaInitialized && writeDue) {
         r.write_frame(step, time);
     }
 }

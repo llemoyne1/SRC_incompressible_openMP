@@ -636,6 +636,20 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
     }
 
     const std::string field = lower_0335(trim_0335(v.field));
+    const bool cpuFieldSupported0335 =
+        field == "ux" || field == "vx" || field == "uy" || field == "vy" ||
+        field == "speed" || field == "n" || field == "count" || field == "population" ||
+        field == "particle_count" || field == "cell_count" || field == "mass" ||
+        field == "density" || field == "rho" || field == "vorticity" || field == "omega" ||
+        field == "curl";
+    if (!cpuFieldSupported0335) {
+        static std::string lastUnsupportedField0335;
+        if (lastUnsupportedField0335 != field) {
+            std::cerr << "\n[livevis0335] CPU fallback does not support field='" << v.field
+                      << "'; displaying zero instead of silently substituting another field\n";
+            lastUnsupportedField0335 = field;
+        }
+    }
     for (std::size_t c = 0; c < v.scalar.size(); ++c) {
         const double m = v.sumMass[c];
         const double ux = m > 0.0 ? v.sumUx[c] / m : 0.0;
@@ -645,8 +659,8 @@ void LiveVisualization0335::update(const ParticleState& state, const SimulationP
         else if (field == "speed") v.scalar[c] = std::sqrt(ux * ux + uy * uy);
         else if (field == "n" || field == "count" || field == "population" ||
                  field == "particle_count" || field == "cell_count") v.scalar[c] = v.sumCount[c];
-        else if (field == "mass" || field == "density") v.scalar[c] = m;
-        else v.scalar[c] = m;
+        else if (field == "mass" || field == "density" || field == "rho") v.scalar[c] = m;
+        else v.scalar[c] = 0.0;
     }
 
     if (field == "vorticity" || field == "omega" || field == "curl") {

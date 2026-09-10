@@ -125,7 +125,7 @@ int field_code_0337(const std::string& rawField) {
     if (f == "uy" || f == "vy") return 1;
     if (f == "speed") return 2;
     if (f == "vorticity" || f == "omega" || f == "curl") return 3;
-    if (f == "mass" || f == "density") return 4;
+    if (f == "mass" || f == "density" || f == "rho") return 4;
     if (f == "chi" || f == "topo_chi") return 5;
     if (f == "alpha" || f == "darcy_alpha") return 6;
     if (f == "darcy_power" || f == "darcy" || f == "brinkman_power") return 7;
@@ -135,7 +135,7 @@ int field_code_0337(const std::string& rawField) {
     if (f == "curvature_x9b" || f == "kappa_x9b" || f == "curvature_p1" || f == "kappa_p1") return 10;
     if (f == "curvature_interface" || f == "kappa_interface" ||
         f == "interface_curvature" || f == "interface_kappa") return 11;
-    return 0;
+    return -1;
 }
 
 bool signed_field_0337(int code) { return code == 0 || code == 1 || code == 3 || code == 9 || code == 10 || code == 11; }
@@ -587,6 +587,12 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         CudaLiveQuiver0337* quiver) {
     CudaLiveField0337Diagnostics local{};
     const int fcode = field_code_0337(field);
+    if (fcode < 0) {
+        // Unknown fields must never silently alias ux (historical code 0).
+        local.attempted = 1;
+        if (diag) *diag = local;
+        return false;
+    }
     const bool residentCurvatureInterface0493x9e = (fcode == 11);
     const bool residentCurvatureP30493x9d = (fcode == 9) || residentCurvatureInterface0493x9e;
     const bool residentCurvatureP10493x9b = (fcode == 10);

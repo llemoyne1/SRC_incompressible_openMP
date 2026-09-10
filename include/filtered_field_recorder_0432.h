@@ -10,7 +10,9 @@ struct ParticleState;
 struct SimulationParams;
 struct LiveVisualization0335RuntimeControls;
 
-// 0432a: livevis-control driven, observation-only filtered field recorder.
+// 0432b: livevis-control driven, observation-only filtered field recorder.
+// It can run with the LiveVis window disabled/headless and reads the same
+// livevis_control.kv; no second control file is required.
 // The recorder never mutates particles, solver fields, roles, masses or types.
 // When disabled it must leave the validated strict code path unchanged.
 class FilteredFieldRecorder0432 {
