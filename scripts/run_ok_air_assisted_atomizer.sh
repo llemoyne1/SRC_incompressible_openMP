@@ -409,7 +409,10 @@ chmod +x "$GENERATOR" "$ANALYZER"
 # No C++/CUDA modification. LiveVis control remains user-owned/read-only.
 # =============================================================================
 
-CASE_LABEL="${CASE_LABEL:-0493x14av_0414_air_assisted_atomizer_demo}"
+# One runner, one Neumann selector.  x9e is the current optimized candidate;
+# x9c and x9d-fix1 remain selectable controls with identical boundary physics.
+NEUMANN_PROFILE="${NEUMANN_PROFILE:-x9e}"
+CASE_LABEL="${CASE_LABEL:-0493x14av_0414_air_assisted_atomizer_${NEUMANN_PROFILE}}"
 RUN_MODE="src-q6-g-f"
 TOPOLOGY="segmented"
 
@@ -423,7 +426,7 @@ TOPOLOGY="segmented"
 Lx="${Lx:-3.125}"; Ly="${Ly:-1.5625}"; NX="${NX:-800}"; NY="${NY:-400}"
 GAMMA="${GAMMA:-8}"
 DT="${DT:-0.00635}"
-STEPS="${STEPS:-7000}"
+STEPS="${STEPS:-7500}"
 GRAVITY_Y="${GRAVITY_Y:-0.0}"
 
 LIQUID_TYPE="${LIQUID_TYPE:-1}"; GAS_TYPE="${GAS_TYPE:-2}"
@@ -510,6 +513,18 @@ OUTLET_SMIN="${OUTLET_SMIN:-0.0}"
 OUTLET_SMAX="${OUTLET_SMAX:-1.0}"
 OUTLET_FEEDBACK_GAIN="${OUTLET_FEEDBACK_GAIN:-0.0}"
 
+# ---- Neumann multiphase implementation ---------------------------------------
+# Single control knob for the current x9c physics and its performance variants:
+#   x9c       : reference physics, legacy workspace/pool path
+#   x9d-fix1  : x9c physics + conservative persistent-workspace optimization
+#   x9e       : x9c physics + x9d-fix1 + deleted-slot recycle/prefix fast path
+# x9e is the default production candidate.  Direct historical experiment flags
+# are sanitized below so stale shell variables cannot create a hybrid closure.
+NEUMANN_VIRTUAL_LAYERS="${NEUMANN_VIRTUAL_LAYERS:-2}"
+NEUMANN_COARSE_LAYERS="${NEUMANN_COARSE_LAYERS:-8}"
+# Empty means: use inletTargetOccupancy from the resolved params (= GAMMA here).
+NEUMANN_TARGET_OCCUPANCY="${NEUMANN_TARGET_OCCUPANCY:-}"
+
 # ---- chi-Darcy walls: 0434/run_ok_* common profile ---------------------------
 # Use exactly the variable names consumed by suite_write_darcy_params_0434.
 # Common run_ok defaults (used by STEP unless explicitly overridden):
@@ -547,6 +562,16 @@ if ! awk -v x="$INLET_THERMAL_NOISE" 'BEGIN{exit !(x==0)}'; then
 fi
 if [[ "$OUTLET_MODE" != "neumann" ]]; then
   echo '[0493x14av] ERROR demonstration freezes the full-right outlet on OUTLET_MODE=neumann' >&2; exit 2
+fi
+case "$NEUMANN_PROFILE" in
+  x9c|x9d-fix1|x9e) ;;
+  *) echo "[0493x14av] ERROR NEUMANN_PROFILE=$NEUMANN_PROFILE; expected x9c|x9d-fix1|x9e" >&2; exit 2 ;;
+esac
+for v in NEUMANN_VIRTUAL_LAYERS NEUMANN_COARSE_LAYERS; do
+  [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || { echo "[0493x14av] ERROR $v=${!v}; expected positive integer" >&2; exit 2; }
+done
+if [[ -n "$NEUMANN_TARGET_OCCUPANCY" ]]; then
+  awk -v x="$NEUMANN_TARGET_OCCUPANCY" 'BEGIN{exit !(x>0)}' || { echo '[0493x14av] ERROR NEUMANN_TARGET_OCCUPANCY must be >0 or empty' >&2; exit 2; }
 fi
 
 # Wall collisions are slip/specular-like.  Using one virtual-wall particle mass
@@ -625,7 +650,7 @@ RECORD_EVERY="${RECORD_EVERY:-100}"
 RECORD_FIELDS="${RECORD_FIELDS:-mass,ux,uy}"
 FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-100}"
 
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-${CAMPAIGN_ROOT:-runs/0493x14av_0414_air_assisted_atomizer_seed_noair_${SEED}}}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-${CAMPAIGN_ROOT:-runs/${CASE_LABEL}_seed_${SEED}}}"
 if [[ "$RESTART" == "1" ]]; then
   [[ -n "$RESTART_STATE" && -s "$RESTART_STATE" ]] || { echo '[0493x14av] ERROR RESTART=1 requires RESTART_STATE=/path/state_step_N.smpcd' >&2; exit 2; }
   RUN_ROOT="$BASE_RUN_ROOT/restart_${RESTART_TAG}"
@@ -897,6 +922,45 @@ export MPCD_X14V_GLOBAL_BALANCE_DIAGNOSTIC=0
 export MPCD_X14V_DEVICE_APPLIED_Q6_RESULTANT_CLOSURE=0
 export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272=1
 
+# ---- Unified Neumann x9c/x9d-fix1/x9e selection ------------------------------
+# Sanitize all historical/experimental selectors first.  This runner owns the
+# complete Neumann closure selection and must not inherit a mixed shell state.
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_KINETIC_0493X8Q_DISABLE || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1 || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_POOL_0493X9E || true
+unset MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY || true
+
+# Common x9c physical closure: pressure reservoir for gas; no macroscopic
+# backflow/drift; strict liquid mass outflow; phase-support continuation only.
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_NO_BACKFLOW_0493X8Z=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_ZERO_DRIFT_ON_BACKFLOW_0493X9A=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_STRICT_OUTFLOW_0493X9B=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_TYPE_0493X9B="$LIQUID_TYPE"
+export MPCD_Q6_PHASE_OUTLET_GHOST_CONTINUATION_0493X9C_OUTLET=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_SPECIES_0493X8R_DISABLE=1
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_LAYERS="$NEUMANN_VIRTUAL_LAYERS"
+export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_COARSE_LAYERS="$NEUMANN_COARSE_LAYERS"
+if [[ -n "$NEUMANN_TARGET_OCCUPANCY" ]]; then
+  export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY="$NEUMANN_TARGET_OCCUPANCY"
+fi
+
+case "$NEUMANN_PROFILE" in
+  x9c)
+    ;;
+  x9d-fix1)
+    export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1=1
+    ;;
+  x9e)
+    export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1=1
+    export MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_POOL_0493X9E=1
+    ;;
+esac
+
 suite_prepare_livevis_control_0434 "$RUN_ROOT" "$RUN_MODE"
 suite_export_livevis_0434
 suite_write_env_file_0434 "$RUN_ROOT/logs/environment_${CASE_LABEL}.env" "$RUN_MODE"
@@ -921,6 +985,10 @@ AIR_BOTTOM_NOZZLE_WALL_CELLS=$AIR_BOTTOM_NOZZLE_WALL_CELLS
 AIR_TOP_SPEED=$AIR_TOP_SPEED
 AIR_BOTTOM_SPEED=$AIR_BOTTOM_SPEED
 RIGHT_OUTLET_MODE=$OUTLET_MODE
+NEUMANN_PROFILE=$NEUMANN_PROFILE
+NEUMANN_VIRTUAL_LAYERS=$NEUMANN_VIRTUAL_LAYERS
+NEUMANN_COARSE_LAYERS=$NEUMANN_COARSE_LAYERS
+NEUMANN_TARGET_OCCUPANCY=${NEUMANN_TARGET_OCCUPANCY:-auto_inletTargetOccupancy}
 RUN_OK_PROFILE=0493x14av_0414_run_ok_homogeneous
 RUN_OK_DARCY_PROFILE=0434_common
 ALPHA=$ALPHA
@@ -947,6 +1015,7 @@ echo "LIQUID NOZZLE: left -> right centerY=$LIQUID_NOZZLE_CENTER_Y Dcells=$LIQUI
 echo "AIR TOP: direct TOP inlet centerX=$AIR_TOP_CX centerCells=$AIR_TOP_NOZZLE_CENTER_X_CELLS thicknessCells=$AIR_TOP_NOZZLE_THICKNESS_CELLS thickness=$AIR_TOP_D lengthCells=$AIR_TOP_NOZZLE_LENGTH_CELLS length=$AIR_TOP_L exitY=$AIR_TOP_EXIT inwardUy=-$AIR_TOP_SPEED"
 echo "AIR BOTTOM: direct BOTTOM inlet centerX=$AIR_BOT_CX centerCells=$AIR_BOTTOM_NOZZLE_CENTER_X_CELLS thicknessCells=$AIR_BOTTOM_NOZZLE_THICKNESS_CELLS thickness=$AIR_BOT_D lengthCells=$AIR_BOTTOM_NOZZLE_LENGTH_CELLS length=$AIR_BOT_L exitY=$AIR_BOT_EXIT inwardUy=$AIR_BOTTOM_SPEED"
 echo "BOUNDARIES(0414): segmented LEFT liquid inlet + BOTTOM/TOP gas inlets + full RIGHT Neumann outlet; x+y open axes"
+echo "NEUMANN: profile=$NEUMANN_PROFILE physics=x9c gasReservoir=pressure liquidMass=strict_outflow phaseContinuation=on layers=$NEUMANN_VIRTUAL_LAYERS coarseLayers=$NEUMANN_COARSE_LAYERS targetOccupancy=${NEUMANN_TARGET_OCCUPANCY:-auto(GAMMA=$GAMMA)}"
 echo "DARCY(run_ok common): alpha=[$ALPHA_MIN,$ALPHA] lambdaSolidPerStep=$DARCY_LAMBDA forcing=$DARCY_BRINKMAN_FORCING_MODE chiCollisionVP=$DARCY_CHI_COLLISION_VP_ENABLE"
 echo "                    q=$DARCY_Q initialDeactivateEffective=-1 commonFilled=$RUN_OK_DARCY_COMMON_FILLED_STATE VPmode=$DARCY_CHI_COLLISION_VP_MODE VPgamma=$DARCY_CHI_COLLISION_VP_GAMMA VPmass=$DARCY_CHI_COLLISION_VP_MASS"
 echo "Q6(run_ok profile): projection=$PROJECTION_OPERATOR tol=$PROJECTION_TOLERANCE maxIt=$PROJECTION_MAX_ITERATIONS strict=$Q6_STRICT tau=$Q6_GF_DENSITY_RELAXATION_TIME minFill=$Q6_GF_MIN_FILL_FRACTION"

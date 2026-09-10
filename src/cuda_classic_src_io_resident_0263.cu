@@ -14,9 +14,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace mpcd {
 namespace {
@@ -44,6 +46,24 @@ int env_int_0263(const char* name, int defaultValue) {
     if (v == nullptr || *v == '\0') return defaultValue;
     try { return std::max(1, std::stoi(std::string(v))); }
     catch (...) { return defaultValue; }
+}
+
+// 0493x9d-fix1: conservative performance-only gate.  Unlike the first x9d
+// attempt, fix1 deliberately keeps the exact host-visible candidate count so
+// tail-pool sizing and insertion launch geometry remain identical to x9c.
+bool neumann_resident_opt_0493x9d_fix1_enabled() {
+    return env_truthy_0263(
+        "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RESIDENT_OPT_0493X9D_FIX1");
+}
+
+// 0493x9e: resident recycle optimization. Deleted fluid slots are recycled
+// first for ghost/inlet insertion, then the compact inactive tail is used.
+// x9e-fix3 restores the compact prefix with a targeted repair over the mutation
+// support and keeps 0315c as the exact fallback for atypical steps.
+bool neumann_recycle_pool_0493x9e_enabled() {
+    return neumann_resident_opt_0493x9d_fix1_enabled() &&
+           env_truthy_0263(
+               "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_RECYCLE_POOL_0493X9E");
 }
 
 std::string normalized_inlet_reservoir_mode_0263(const SimulationParams& params) {
@@ -158,7 +178,20 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double segmentMass[kOpenBoundaryMaxSegments]{};
     std::uint32_t segmentType[kOpenBoundaryMaxSegments]{};
     int outletRegimeCode = 0; // 0 natural crossing, 1 equilibrium_flux, 2 forced_flux
-    int outletNeumannKinetic0493x8q = 0; // mirror exterior kinetic continuation
+    int outletNeumannKinetic0493x8q = 0; // kinetic Neumann continuation enabled
+    int outletNeumannReplica0493x8v = 0; // microscopic mirror-replica continuation
+    int outletNeumannReplicaSourceLayers0493x8v = 1; // local phase-trace proxy depth
+    int outletNeumannVirtualCells0493x8w = 0; // independent virtual-cell continuation
+    int outletNeumannVirtualLayers0493x8w = 2; // exterior cell layers sampled each step
+    int outletNeumannVirtualReservoir0493x8x = 0; // coarse-grained virtual reservoir cells
+    int outletNeumannReservoirLayers0493x8x = 2; // exterior layers populated statistically
+    int outletNeumannReservoirCoarseLayers0493x8x = 8; // interior normal layers for macroscopic state
+    int outletNeumannPressureReservoir0493x8y = 0; // pressure/reference-density virtual reservoir
+    double outletNeumannReservoirTargetOccupancy0493x8y = 0.0; // mean total occupancy per exterior cell
+    int outletNeumannNoBackflowReservoir0493x8z = 0; // clamp reservoir mean normal velocity to outward/nonnegative
+    int outletNeumannZeroDriftOnBackflow0493x9a = 0; // when x8z clamps, also suppress tangential reservoir drift
+    int outletNeumannLiquidStrictOutflow0493x9b = 0; // disable virtual reservoir candidates for selected liquid type
+    int outletNeumannLiquidType0493x9b = -1; // particle type treated as strict-outflow liquid
     double outletForcedMassPerStep = 0.0;
     unsigned long long outletForcedParticlesPerStep = 0ULL;
     int outletForcedLayerCells = 1;
@@ -184,6 +217,85 @@ struct CudaClassicSrcIoCounters0263 {
     int failureFlag = 0;
     int overflowFlag = 0;
 };
+
+// 0493x9d-fix1: allocation-only optimization.  Boundary counters are cleared
+// every boundary application but their storage size never changes, so retain a
+// single process-persistent device object.  The legacy malloc/free path remains
+// available when the fix1 gate is disabled.
+CudaClassicSrcIoCounters0263* acquire_boundary_counters_0493x9d_fix1(
+    const char* allocateLabel, const char* clearLabel)
+{
+    static CudaClassicSrcIoCounters0263* cached = nullptr;
+    if (cached == nullptr) {
+        check_cuda_0263(cudaMalloc(&cached, sizeof(CudaClassicSrcIoCounters0263)),
+                        allocateLabel);
+    }
+    check_cuda_0263(cudaMemset(cached, 0, sizeof(CudaClassicSrcIoCounters0263)),
+                    clearLabel);
+    return cached;
+}
+
+// 0493x9e persistent recycle workspace.  deletedIndices records holes created
+// inside the active prefix during the boundary pass.  poolIndices is rebuilt
+// each step as [deleted holes first | compact inactive tail].  This preserves
+// the physical candidate generation and insertion kernels while avoiding the
+// role[] tail scan on the balanced fast path.
+struct NeumannRecycleWorkspace0493x9e {
+    std::uint64_t* deletedIndices = nullptr;
+    unsigned int* deletedCount = nullptr;
+    std::uint64_t deletedCapacity = 0u;
+    std::uint64_t* poolIndices = nullptr;
+    std::uint64_t poolCapacity = 0u;
+    int* targetedRepairStatus0493x9eFix3 = nullptr;
+};
+
+NeumannRecycleWorkspace0493x9e& neumann_recycle_workspace_0493x9e() {
+    static NeumannRecycleWorkspace0493x9e w{};
+    return w;
+}
+
+NeumannRecycleWorkspace0493x9e& prepare_neumann_recycle_workspace_0493x9e(
+    std::uint64_t activeCapacity)
+{
+    NeumannRecycleWorkspace0493x9e& w = neumann_recycle_workspace_0493x9e();
+    if (w.deletedIndices == nullptr || w.deletedCapacity < activeCapacity) {
+        if (w.deletedIndices != nullptr)
+            check_cuda_0263(cudaFree(w.deletedIndices),
+                            "resize 0493x9e deleted-slot buffer");
+        if (activeCapacity > 0u) {
+            check_cuda_0263(cudaMalloc(
+                &w.deletedIndices,
+                sizeof(std::uint64_t) * static_cast<std::size_t>(activeCapacity)),
+                "allocate 0493x9e deleted-slot buffer");
+        }
+        w.deletedCapacity = activeCapacity;
+    }
+    if (w.deletedCount == nullptr)
+        check_cuda_0263(cudaMalloc(&w.deletedCount, sizeof(unsigned int)),
+                        "allocate 0493x9e deleted-slot count");
+    if (w.targetedRepairStatus0493x9eFix3 == nullptr)
+        check_cuda_0263(cudaMalloc(&w.targetedRepairStatus0493x9eFix3, sizeof(int)),
+                        "allocate 0493x9e-fix3 targeted-repair status");
+    check_cuda_0263(cudaMemset(w.deletedCount, 0, sizeof(unsigned int)),
+                    "clear 0493x9e deleted-slot count");
+    return w;
+}
+
+std::uint64_t* ensure_neumann_recycle_pool_0493x9e(std::uint64_t need) {
+    NeumannRecycleWorkspace0493x9e& w = neumann_recycle_workspace_0493x9e();
+    if (w.poolIndices == nullptr || w.poolCapacity < need) {
+        if (w.poolIndices != nullptr)
+            check_cuda_0263(cudaFree(w.poolIndices),
+                            "resize 0493x9e recycle pool");
+        if (need > 0u)
+            check_cuda_0263(cudaMalloc(
+                &w.poolIndices,
+                sizeof(std::uint64_t) * static_cast<std::size_t>(need)),
+                "allocate 0493x9e recycle pool");
+        w.poolCapacity = need;
+    }
+    return w.poolIndices;
+}
 
 struct CudaForcedOutletBudget0291 {
     double targetMass = 0.0;
@@ -1251,6 +1363,22 @@ __device__ inline void merge_particle_boundary_counter_0267(CudaClassicSrcIoCoun
     if (local.maxYReflections != 0) atomicMax(&counters->maxYReflections, local.maxYReflections);
 }
 
+__device__ inline void record_recycled_deleted_slot_0493x9e(
+    std::uint64_t slot,
+    std::uint64_t* deletedIndices,
+    unsigned int* deletedCount,
+    std::uint64_t deletedCapacity,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    if (deletedIndices == nullptr || deletedCount == nullptr) return;
+    const unsigned int pos = atomicAdd(deletedCount, 1u);
+    if (static_cast<std::uint64_t>(pos) < deletedCapacity) {
+        deletedIndices[pos] = slot;
+    } else if (counters != nullptr) {
+        atomicMax(&counters->overflowFlag, 31);
+    }
+}
+
 __global__ void io_forced_outlet_extraction_kernel_0291(
     std::uint64_t n,
     const double* __restrict__ x,
@@ -1261,7 +1389,10 @@ __global__ void io_forced_outlet_extraction_kernel_0291(
     unsigned char inactiveRole,
     CudaClassicSrcIoFullfaceConfig0263 cfg,
     CudaForcedOutletBudget0291* budget,
-    CudaClassicSrcIoCounters0263* counters)
+    CudaClassicSrcIoCounters0263* counters,
+    std::uint64_t* recycleDeletedIndices0493x9e,
+    unsigned int* recycleDeletedCount0493x9e,
+    std::uint64_t recycleDeletedCapacity0493x9e)
 {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
                             static_cast<std::uint64_t>(threadIdx.x);
@@ -1281,6 +1412,9 @@ __global__ void io_forced_outlet_extraction_kernel_0291(
 
     if (remove) {
         role[i] = inactiveRole;
+        record_recycled_deleted_slot_0493x9e(
+            i, recycleDeletedIndices0493x9e, recycleDeletedCount0493x9e,
+            recycleDeletedCapacity0493x9e, counters);
         add_counter_ull_0267(&counters->outletParticlesDeleted, 1ULL);
     }
 }
@@ -1417,6 +1551,1015 @@ __device__ inline void record_neumann_ghost_candidate_0493x8q(
     }
 }
 
+
+
+
+// -----------------------------------------------------------------------------
+// 0493x8w -- virtual-cell kinetic Neumann continuation (physics-first).
+//
+// This path follows the finite-volume ghost-cell idea at the particle level.
+// For every outlet boundary cell and registered species, the immediately
+// adjacent physical cell provides the Neumann state (N, mean velocity, kBT,
+// mean particle mass). One or more exterior virtual cells are populated with
+// an INDEPENDENT statistical realization of that state. Virtual particles are
+// streamed for dt; only those that cross the outlet into the physical domain
+// are materialized in inactive resident slots. Virtual particles that remain
+// outside are never resident particles and consume no inactive slot.
+//
+// This first implementation deliberately keeps the existing x8q host-side
+// count synchronization and inactive-pool machinery. Performance optimization
+// is deferred until the physical boundary contract is qualified.
+struct CudaNeumannVirtualCellMoments0493x8w {
+    unsigned int count = 0u;
+    double sumMass = 0.0;
+    double sumMomX = 0.0;
+    double sumMomY = 0.0;
+    double sumMvv = 0.0;
+};
+
+struct CudaNeumannVirtualCellCandidate0493x8w {
+    double x = 0.0;
+    double y = 0.0;
+    double vx = 0.0;
+    double vy = 0.0;
+    double particleMass = 1.0;
+    std::uint32_t particleType = 0u;
+    int face = -1;
+};
+
+__host__ __device__ inline unsigned int neumann_virtual_spatial_count_0493x8w(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg)
+{
+    const unsigned int nx = static_cast<unsigned int>(cfg.Nx > 0 ? cfg.Nx : 1);
+    const unsigned int ny = static_cast<unsigned int>(cfg.Ny > 0 ? cfg.Ny : 1);
+    return 2u * (nx + ny);
+}
+
+__host__ __device__ inline unsigned int neumann_virtual_spatial_index_0493x8w(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    int face,
+    int tangentialCell)
+{
+    const unsigned int nx = static_cast<unsigned int>(cfg.Nx > 0 ? cfg.Nx : 1);
+    const unsigned int ny = static_cast<unsigned int>(cfg.Ny > 0 ? cfg.Ny : 1);
+    if (face == 0) return static_cast<unsigned int>(tangentialCell);
+    if (face == 1) return ny + static_cast<unsigned int>(tangentialCell);
+    if (face == 2) return 2u * ny + static_cast<unsigned int>(tangentialCell);
+    return 2u * ny + nx + static_cast<unsigned int>(tangentialCell);
+}
+
+__host__ __device__ inline bool neumann_virtual_spatial_decode_0493x8w(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    unsigned int spatialCell,
+    int& face,
+    int& tangentialCell)
+{
+    const unsigned int nx = static_cast<unsigned int>(cfg.Nx > 0 ? cfg.Nx : 1);
+    const unsigned int ny = static_cast<unsigned int>(cfg.Ny > 0 ? cfg.Ny : 1);
+    if (spatialCell < ny) {
+        face = 0; tangentialCell = static_cast<int>(spatialCell); return true;
+    }
+    spatialCell -= ny;
+    if (spatialCell < ny) {
+        face = 1; tangentialCell = static_cast<int>(spatialCell); return true;
+    }
+    spatialCell -= ny;
+    if (spatialCell < nx) {
+        face = 2; tangentialCell = static_cast<int>(spatialCell); return true;
+    }
+    spatialCell -= nx;
+    if (spatialCell < nx) {
+        face = 3; tangentialCell = static_cast<int>(spatialCell); return true;
+    }
+    return false;
+}
+
+__device__ inline double uniform_from_u64_0493x8w(std::uint64_t z)
+{
+    return static_cast<double>(z >> 11) * 0x1.0p-53;
+}
+
+__device__ inline void accumulate_one_neumann_virtual_cell_0493x8w(
+    int face,
+    int tangentialCell,
+    unsigned int speciesIndex,
+    unsigned int speciesCount,
+    double xp,
+    double yp,
+    double vxp,
+    double vyp,
+    double particleMass,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaNeumannVirtualCellMoments0493x8w* moments,
+    unsigned int momentEntryCount)
+{
+    if (moments == nullptr || speciesCount == 0u || speciesIndex >= speciesCount)
+        return;
+    if (outlet_mode_at_particle_0493x8q(cfg, face, xp, yp) != 2) return;
+
+    const unsigned int spatial =
+        neumann_virtual_spatial_index_0493x8w(cfg, face, tangentialCell);
+    const unsigned long long flat64 =
+        static_cast<unsigned long long>(spatial) *
+            static_cast<unsigned long long>(speciesCount) +
+        static_cast<unsigned long long>(speciesIndex);
+    if (flat64 >= static_cast<unsigned long long>(momentEntryCount)) return;
+
+    CudaNeumannVirtualCellMoments0493x8w* b =
+        moments + static_cast<unsigned int>(flat64);
+    const double m = isfinite(particleMass) && particleMass > 0.0
+        ? particleMass : cfg.refMass;
+    atomicAdd(&b->count, 1u);
+    atomicAdd(&b->sumMass, m);
+    atomicAdd(&b->sumMomX, m * vxp);
+    atomicAdd(&b->sumMomY, m * vyp);
+    atomicAdd(&b->sumMvv, m * (vxp * vxp + vyp * vyp));
+}
+
+__global__ void io_neumann_virtual_cell_accumulate_kernel_0493x8w(
+    std::uint64_t n,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const double* __restrict__ mass,
+    const std::uint32_t* __restrict__ type,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const std::uint32_t* __restrict__ speciesTypes,
+    unsigned int speciesCount,
+    CudaNeumannVirtualCellMoments0493x8w* __restrict__ moments,
+    unsigned int momentEntryCount)
+{
+    const std::uint64_t i =
+        static_cast<std::uint64_t>(blockIdx.x) *
+            static_cast<std::uint64_t>(blockDim.x) +
+        static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n || role[i] != fluidRole || speciesCount == 0u ||
+        speciesTypes == nullptr || moments == nullptr) return;
+    if (!isfinite(x[i]) || !isfinite(y[i]) ||
+        !isfinite(vx[i]) || !isfinite(vy[i])) return;
+
+    // The force/stream kernel has already advanced x,y. Recover the position at
+    // the start of this streaming step so the copied cell is the physical cell
+    // adjacent to the outlet before boundary deletion/reflection is applied.
+    const double xpre = x[i] - vx[i] * cfg.dt;
+    const double ypre = y[i] - vy[i] * cfg.dt;
+    if (!(xpre >= cfg.xMin && xpre <= cfg.xMax &&
+          ypre >= cfg.yMin && ypre <= cfg.yMax)) return;
+
+    int speciesIndex = -1;
+    for (unsigned int s = 0u; s < speciesCount; ++s) {
+        if (speciesTypes[s] == type[i]) {
+            speciesIndex = static_cast<int>(s);
+            break;
+        }
+    }
+    if (speciesIndex < 0) return;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0)) return;
+
+    int ix = static_cast<int>(floor((xpre - cfg.xMin) / dx));
+    int iy = static_cast<int>(floor((ypre - cfg.yMin) / dy));
+    ix = imax_device_0263(0, imin_device_0263(nx - 1, ix));
+    iy = imax_device_0263(0, imin_device_0263(ny - 1, iy));
+
+    // A Neumann ghost cell copies ONLY the immediately adjacent physical cell.
+    // Extra exterior layers duplicate that same boundary-cell state; they do not
+    // widen the interior averaging stencil.
+    if (xpre < cfg.xMin + dx) {
+        accumulate_one_neumann_virtual_cell_0493x8w(
+            0, iy, static_cast<unsigned int>(speciesIndex), speciesCount,
+            xpre, ypre, vx[i], vy[i], mass[i], cfg, moments, momentEntryCount);
+    }
+    if (xpre >= cfg.xMax - dx) {
+        accumulate_one_neumann_virtual_cell_0493x8w(
+            1, iy, static_cast<unsigned int>(speciesIndex), speciesCount,
+            xpre, ypre, vx[i], vy[i], mass[i], cfg, moments, momentEntryCount);
+    }
+    if (ypre < cfg.yMin + dy) {
+        accumulate_one_neumann_virtual_cell_0493x8w(
+            2, ix, static_cast<unsigned int>(speciesIndex), speciesCount,
+            xpre, ypre, vx[i], vy[i], mass[i], cfg, moments, momentEntryCount);
+    }
+    if (ypre >= cfg.yMax - dy) {
+        accumulate_one_neumann_virtual_cell_0493x8w(
+            3, ix, static_cast<unsigned int>(speciesIndex), speciesCount,
+            xpre, ypre, vx[i], vy[i], mass[i], cfg, moments, momentEntryCount);
+    }
+}
+
+__device__ inline bool stream_virtual_particle_through_face_0493x8w(
+    int face,
+    double x0,
+    double y0,
+    double vxp,
+    double vyp,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    double& x1,
+    double& y1)
+{
+    x1 = x0 + vxp * cfg.dt;
+    y1 = y0 + vyp * cfg.dt;
+
+    double tc = -1.0;
+    if (face == 0) {
+        if (!(vxp > 0.0 && x0 < cfg.xMin && x1 > cfg.xMin)) return false;
+        tc = (cfg.xMin - x0) / vxp;
+    } else if (face == 1) {
+        if (!(vxp < 0.0 && x0 > cfg.xMax && x1 < cfg.xMax)) return false;
+        tc = (cfg.xMax - x0) / vxp;
+    } else if (face == 2) {
+        if (!(vyp > 0.0 && y0 < cfg.yMin && y1 > cfg.yMin)) return false;
+        tc = (cfg.yMin - y0) / vyp;
+    } else if (face == 3) {
+        if (!(vyp < 0.0 && y0 > cfg.yMax && y1 < cfg.yMax)) return false;
+        tc = (cfg.yMax - y0) / vyp;
+    } else {
+        return false;
+    }
+    if (!(tc >= 0.0 && tc <= cfg.dt) || !isfinite(tc)) return false;
+
+    const double xc = x0 + vxp * tc;
+    const double yc = y0 + vyp * tc;
+    if (!(xc >= cfg.xMin && xc <= cfg.xMax &&
+          yc >= cfg.yMin && yc <= cfg.yMax)) return false;
+    if (outlet_mode_at_particle_0493x8q(cfg, face, xc, yc) != 2) return false;
+
+    // Physics-first restriction: a virtual particle is materialized only when
+    // its streamed endpoint lies inside the physical domain. Very rare paths
+    // crossing two boundaries within one dt are skipped rather than subjected
+    // to a second virtual boundary solver.
+    return x1 > cfg.xMin && x1 < cfg.xMax &&
+           y1 > cfg.yMin && y1 < cfg.yMax &&
+           isfinite(x1) && isfinite(y1);
+}
+
+__global__ void io_neumann_virtual_cell_candidates_kernel_0493x8w(
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const CudaNeumannVirtualCellMoments0493x8w* __restrict__ moments,
+    unsigned int momentEntryCount,
+    const std::uint32_t* __restrict__ speciesTypes,
+    const double* __restrict__ speciesFallbackKBT,
+    unsigned int speciesCount,
+    CudaNeumannVirtualCellCandidate0493x8w* __restrict__ candidates,
+    unsigned int* candidateCount,
+    unsigned int candidateCapacity)
+{
+    const unsigned int entry = blockIdx.x * blockDim.x + threadIdx.x;
+    if (entry >= momentEntryCount || speciesCount == 0u ||
+        speciesTypes == nullptr || moments == nullptr || candidates == nullptr ||
+        candidateCount == nullptr) return;
+
+    const CudaNeumannVirtualCellMoments0493x8w b = moments[entry];
+    const unsigned int N = b.count;
+    if (N == 0u || !(b.sumMass > 0.0)) return;
+
+    const unsigned int speciesIndex = entry % speciesCount;
+    const unsigned int spatialCell = entry / speciesCount;
+    int face = -1;
+    int tangentialCell = -1;
+    if (speciesIndex >= speciesCount ||
+        !neumann_virtual_spatial_decode_0493x8w(cfg, spatialCell, face, tangentialCell))
+        return;
+
+    const double sumM = b.sumMass;
+    const double ux = b.sumMomX / sumM;
+    const double uy = b.sumMomY / sumM;
+    const double rel =
+        b.sumMvv - (b.sumMomX * b.sumMomX + b.sumMomY * b.sumMomY) / sumM;
+    const double fallbackKBT = speciesFallbackKBT != nullptr
+        ? speciesFallbackKBT[speciesIndex] : cfg.inletKBT;
+    double kBTlocal = N >= 2u
+        ? 0.5 * fmax(0.0, rel) / static_cast<double>(N)
+        : fmax(0.0, fallbackKBT);
+    if (!isfinite(kBTlocal) || !(kBTlocal > 0.0))
+        kBTlocal = fmax(0.0, fallbackKBT);
+
+    const double particleMass = sumM / static_cast<double>(N);
+    if (!(particleMass > 0.0) || !isfinite(particleMass)) return;
+    const double sigma = kBTlocal > 0.0 ? sqrt(kBTlocal / particleMass) : 0.0;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0) || !(cfg.dt > 0.0)) return;
+
+    const unsigned int layers = static_cast<unsigned int>(
+        cfg.outletNeumannVirtualLayers0493x8w > 0
+            ? cfg.outletNeumannVirtualLayers0493x8w : 1);
+
+    // Every exterior layer has the same macroscopic state as the adjacent
+    // physical cell (zero normal gradient). Each layer contains N independent
+    // virtual particles. Streaming decides the incoming half-space naturally.
+    for (unsigned int layer = 0u; layer < layers; ++layer) {
+        for (unsigned int k = 0u; k < N; ++k) {
+            const std::uint64_t base =
+                cfg.rngSeed ^
+                (cfg.step * 0xd2b74407b1ce6e93ULL) ^
+                (static_cast<std::uint64_t>(entry + 1u) * 0x9e3779b97f4a7c15ULL) ^
+                (static_cast<std::uint64_t>(layer + 1u) * 0xbf58476d1ce4e5b9ULL) ^
+                (static_cast<std::uint64_t>(k + 1u) * 0x94d049bb133111ebULL);
+            const std::uint64_t z0 = splitmix64_device_0263(base);
+            const std::uint64_t z1 = splitmix64_device_0263(z0 ^ 0x243f6a8885a308d3ULL);
+            const std::uint64_t z2 = splitmix64_device_0263(z1 ^ 0x13198a2e03707344ULL);
+            const std::uint64_t z3 = splitmix64_device_0263(z2 ^ 0xa4093822299f31d0ULL);
+
+            const double rNormal = uniform_from_u64_0493x8w(z0);
+            const double rTangential = uniform_from_u64_0493x8w(z1);
+            const double rG1 = fmax(1.0e-15, uniform_from_u64_0493x8w(z2));
+            const double rG2 = uniform_from_u64_0493x8w(z3);
+            const double radius = sqrt(-2.0 * log(rG1));
+            const double angle = 6.28318530717958647693 * rG2;
+            const double g0 = radius * cos(angle);
+            const double g1 = radius * sin(angle);
+            const double vxp = ux + sigma * g0;
+            const double vyp = uy + sigma * g1;
+
+            double x0 = 0.5 * (cfg.xMin + cfg.xMax);
+            double y0 = 0.5 * (cfg.yMin + cfg.yMax);
+            if (face == 0 || face == 1) {
+                y0 = cfg.yMin +
+                    (static_cast<double>(tangentialCell) + rTangential) * dy;
+                const double d = (static_cast<double>(layer) + rNormal) * dx;
+                x0 = face == 0 ? cfg.xMin - d : cfg.xMax + d;
+            } else {
+                x0 = cfg.xMin +
+                    (static_cast<double>(tangentialCell) + rTangential) * dx;
+                const double d = (static_cast<double>(layer) + rNormal) * dy;
+                y0 = face == 2 ? cfg.yMin - d : cfg.yMax + d;
+            }
+
+            double x1 = 0.0;
+            double y1 = 0.0;
+            if (!stream_virtual_particle_through_face_0493x8w(
+                    face, x0, y0, vxp, vyp, cfg, x1, y1)) continue;
+
+            const unsigned int j = atomicAdd(candidateCount, 1u);
+            if (j >= candidateCapacity) continue;
+            CudaNeumannVirtualCellCandidate0493x8w& c = candidates[j];
+            c.x = x1;
+            c.y = y1;
+            c.vx = vxp;
+            c.vy = vyp;
+            c.particleMass = particleMass;
+            c.particleType = speciesTypes[speciesIndex];
+            c.face = face;
+        }
+    }
+}
+
+__global__ void io_neumann_virtual_cell_insert_kernel_0493x8w(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    const CudaNeumannVirtualCellCandidate0493x8w* __restrict__ candidates,
+    unsigned int candidateCount,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= candidateCount) return;
+    if (j >= inactiveCount) {
+        atomicMax(&counters->overflowFlag, 14);
+        return;
+    }
+    const CudaNeumannVirtualCellCandidate0493x8w c = candidates[j];
+    if (!(c.particleMass > 0.0) || c.face < 0 || c.face > 3 ||
+        !isfinite(c.x) || !isfinite(c.y) ||
+        !isfinite(c.vx) || !isfinite(c.vy)) {
+        atomicMax(&counters->failureFlag, 12);
+        return;
+    }
+    const std::uint64_t slot = inactiveIndices[j];
+    if (slot >= n || role[slot] != inactiveRole) {
+        atomicMax(&counters->overflowFlag, 15);
+        return;
+    }
+
+    x[slot] = c.x;
+    y[slot] = c.y;
+    vx[slot] = c.vx;
+    vy[slot] = c.vy;
+    mass[slot] = c.particleMass;
+    type[slot] = c.particleType;
+    role[slot] = fluidRole;
+    add_counter_ull_0267(&counters->outletParticlesInserted, 1ULL);
+    add_counter_ull_0267(&counters->fluidParticles, 1ULL);
+}
+
+
+// -----------------------------------------------------------------------------
+// 0493x8x -- coarse-grained virtual-reservoir Neumann continuation.
+//
+// x8w showed that copying the instantaneous occupancy of the boundary-adjacent
+// MPCD cell makes the external reservoir follow O(1/sqrt(gamma)) cell noise and
+// can create a positive rarefaction feedback. x8x therefore separates:
+//   (a) phase support at the outlet face, measured ONLY in the adjacent cell;
+//   (b) macroscopic kinetic state, coarse-grained over several inward normal
+//       layers at the same tangential location;
+//   (c) an independent exterior realization, drawn anew each step.
+//
+// The expected total occupancy of an exterior cell is the coarse-grained total
+// occupancy. Species composition is the face-cell number fraction. Hence
+//     lambda_s = alpha_s^Gamma * Nbar_total_bulk.
+// If the face cell is momentarily empty, alpha falls back to the coarse-grained
+// species fraction instead of interpreting one empty MPCD sample as vacuum.
+// Virtual occupancy is Poisson sampled, positions are uniform in each exterior
+// cell, and velocities are independent Gaussian samples from the species-resolved
+// coarse moments. Only streamed particles that actually cross an outlet become
+// resident candidates; exterior particles otherwise remain virtual.
+struct CudaNeumannVirtualReservoirMoments0493x8x {
+    unsigned int faceCount = 0u;
+    unsigned int bulkCount = 0u;
+    double sumMass = 0.0;
+    double sumMomX = 0.0;
+    double sumMomY = 0.0;
+    double sumMvv = 0.0;
+};
+
+__device__ inline unsigned int poisson_small_or_normal_0493x8x(
+    double lambda,
+    std::uint64_t seed)
+{
+    if (!(lambda > 0.0) || !isfinite(lambda)) return 0u;
+    if (lambda < 30.0) {
+        const double stop = exp(-lambda);
+        double product = 1.0;
+        unsigned int k = 0u;
+        std::uint64_t state = seed;
+        do {
+            state = splitmix64_device_0263(state ^ 0x9e3779b97f4a7c15ULL);
+            const double u = fmax(1.0e-15, uniform_from_u64_0493x8w(state));
+            product *= u;
+            ++k;
+        } while (product > stop && k < 256u);
+        return k > 0u ? k - 1u : 0u;
+    }
+
+    // Large lambda is not expected for the qualified gamma~O(10) cases, but a
+    // Gaussian approximation avoids an unbounded Knuth loop in compressed cells.
+    const std::uint64_t z0 = splitmix64_device_0263(seed ^ 0x243f6a8885a308d3ULL);
+    const std::uint64_t z1 = splitmix64_device_0263(z0 ^ 0x13198a2e03707344ULL);
+    const double u0 = fmax(1.0e-15, uniform_from_u64_0493x8w(z0));
+    const double u1 = uniform_from_u64_0493x8w(z1);
+    const double g = sqrt(-2.0 * log(u0)) * cos(6.28318530717958647693 * u1);
+    const double sample = lambda + sqrt(lambda) * g;
+    if (!(sample > 0.0) || !isfinite(sample)) return 0u;
+    const double rounded = floor(sample + 0.5);
+    if (rounded >= static_cast<double>(0xffffffffu)) return 0xffffffffu;
+    return static_cast<unsigned int>(rounded);
+}
+
+__device__ inline void accumulate_one_neumann_virtual_reservoir_0493x8x(
+    int face,
+    int tangentialCell,
+    bool faceLayer,
+    unsigned int speciesIndex,
+    unsigned int speciesCount,
+    double xp,
+    double yp,
+    double vxp,
+    double vyp,
+    double particleMass,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaNeumannVirtualReservoirMoments0493x8x* moments,
+    unsigned int momentEntryCount)
+{
+    if (moments == nullptr || speciesCount == 0u || speciesIndex >= speciesCount)
+        return;
+    if (outlet_mode_at_particle_0493x8q(cfg, face, xp, yp) != 2) return;
+
+    const unsigned int spatial =
+        neumann_virtual_spatial_index_0493x8w(cfg, face, tangentialCell);
+    const unsigned long long flat64 =
+        static_cast<unsigned long long>(spatial) *
+            static_cast<unsigned long long>(speciesCount) +
+        static_cast<unsigned long long>(speciesIndex);
+    if (flat64 >= static_cast<unsigned long long>(momentEntryCount)) return;
+
+    CudaNeumannVirtualReservoirMoments0493x8x* b =
+        moments + static_cast<unsigned int>(flat64);
+    const double m = isfinite(particleMass) && particleMass > 0.0
+        ? particleMass : cfg.refMass;
+    if (faceLayer) atomicAdd(&b->faceCount, 1u);
+    atomicAdd(&b->bulkCount, 1u);
+    atomicAdd(&b->sumMass, m);
+    atomicAdd(&b->sumMomX, m * vxp);
+    atomicAdd(&b->sumMomY, m * vyp);
+    atomicAdd(&b->sumMvv, m * (vxp * vxp + vyp * vyp));
+}
+
+__global__ void io_neumann_virtual_reservoir_accumulate_kernel_0493x8x(
+    std::uint64_t n,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const double* __restrict__ mass,
+    const std::uint32_t* __restrict__ type,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const std::uint32_t* __restrict__ speciesTypes,
+    unsigned int speciesCount,
+    CudaNeumannVirtualReservoirMoments0493x8x* __restrict__ moments,
+    unsigned int momentEntryCount)
+{
+    const std::uint64_t i =
+        static_cast<std::uint64_t>(blockIdx.x) *
+            static_cast<std::uint64_t>(blockDim.x) +
+        static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n || role[i] != fluidRole || speciesCount == 0u ||
+        speciesTypes == nullptr || moments == nullptr) return;
+    if (!isfinite(x[i]) || !isfinite(y[i]) ||
+        !isfinite(vx[i]) || !isfinite(vy[i])) return;
+
+    // Boundary kernels run after streaming. Recover the pre-stream position so
+    // the reservoir state is based on physical cells before crossing deletion.
+    const double xpre = x[i] - vx[i] * cfg.dt;
+    const double ypre = y[i] - vy[i] * cfg.dt;
+    if (!(xpre >= cfg.xMin && xpre <= cfg.xMax &&
+          ypre >= cfg.yMin && ypre <= cfg.yMax)) return;
+
+    int speciesIndex = -1;
+    for (unsigned int s = 0u; s < speciesCount; ++s) {
+        if (speciesTypes[s] == type[i]) {
+            speciesIndex = static_cast<int>(s);
+            break;
+        }
+    }
+    if (speciesIndex < 0) return;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0)) return;
+
+    int ix = static_cast<int>(floor((xpre - cfg.xMin) / dx));
+    int iy = static_cast<int>(floor((ypre - cfg.yMin) / dy));
+    ix = imax_device_0263(0, imin_device_0263(nx - 1, ix));
+    iy = imax_device_0263(0, imin_device_0263(ny - 1, iy));
+
+    const int requested = cfg.outletNeumannReservoirCoarseLayers0493x8x > 0
+        ? cfg.outletNeumannReservoirCoarseLayers0493x8x : 1;
+    const int kx = imin_device_0263(nx, requested);
+    const int ky = imin_device_0263(ny, requested);
+
+    const int leftLayer = ix;
+    const int rightLayer = nx - 1 - ix;
+    const int bottomLayer = iy;
+    const int topLayer = ny - 1 - iy;
+
+    if (leftLayer < kx) {
+        accumulate_one_neumann_virtual_reservoir_0493x8x(
+            0, iy, leftLayer == 0, static_cast<unsigned int>(speciesIndex),
+            speciesCount, xpre, ypre, vx[i], vy[i], mass[i], cfg,
+            moments, momentEntryCount);
+    }
+    if (rightLayer < kx) {
+        accumulate_one_neumann_virtual_reservoir_0493x8x(
+            1, iy, rightLayer == 0, static_cast<unsigned int>(speciesIndex),
+            speciesCount, xpre, ypre, vx[i], vy[i], mass[i], cfg,
+            moments, momentEntryCount);
+    }
+    if (bottomLayer < ky) {
+        accumulate_one_neumann_virtual_reservoir_0493x8x(
+            2, ix, bottomLayer == 0, static_cast<unsigned int>(speciesIndex),
+            speciesCount, xpre, ypre, vx[i], vy[i], mass[i], cfg,
+            moments, momentEntryCount);
+    }
+    if (topLayer < ky) {
+        accumulate_one_neumann_virtual_reservoir_0493x8x(
+            3, ix, topLayer == 0, static_cast<unsigned int>(speciesIndex),
+            speciesCount, xpre, ypre, vx[i], vy[i], mass[i], cfg,
+            moments, momentEntryCount);
+    }
+}
+
+__global__ void io_neumann_virtual_reservoir_candidates_kernel_0493x8x(
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const CudaNeumannVirtualReservoirMoments0493x8x* __restrict__ moments,
+    unsigned int momentEntryCount,
+    const std::uint32_t* __restrict__ speciesTypes,
+    const double* __restrict__ speciesFallbackKBT,
+    unsigned int speciesCount,
+    CudaNeumannVirtualCellCandidate0493x8w* __restrict__ candidates,
+    unsigned int* candidateCount,
+    unsigned int candidateCapacity)
+{
+    const unsigned int entry = blockIdx.x * blockDim.x + threadIdx.x;
+    if (entry >= momentEntryCount || speciesCount == 0u ||
+        speciesTypes == nullptr || moments == nullptr || candidates == nullptr ||
+        candidateCount == nullptr) return;
+
+    const unsigned int speciesIndex = entry % speciesCount;
+    const unsigned int spatialCell = entry / speciesCount;
+    int face = -1;
+    int tangentialCell = -1;
+    if (speciesIndex >= speciesCount ||
+        !neumann_virtual_spatial_decode_0493x8w(
+            cfg, spatialCell, face, tangentialCell)) return;
+
+    // 0493x9b ablation: the selected liquid species is strict outflow on an
+    // outlet. Physical liquid particles may leave and become inactive through
+    // the existing streaming/deletion path, but the exterior virtual reservoir
+    // never synthesizes liquid candidates entering the physical domain.
+    if (cfg.outletNeumannLiquidStrictOutflow0493x9b != 0 &&
+        cfg.outletNeumannLiquidType0493x9b >= 0 &&
+        speciesTypes[speciesIndex] ==
+            static_cast<std::uint32_t>(cfg.outletNeumannLiquidType0493x9b)) return;
+
+    const unsigned int base = spatialCell * speciesCount;
+    unsigned int faceTotal = 0u;
+    unsigned int bulkTotal = 0u;
+    for (unsigned int s = 0u; s < speciesCount; ++s) {
+        const CudaNeumannVirtualReservoirMoments0493x8x q = moments[base + s];
+        faceTotal += q.faceCount;
+        bulkTotal += q.bulkCount;
+    }
+    if (bulkTotal == 0u) return;
+
+    const CudaNeumannVirtualReservoirMoments0493x8x b = moments[entry];
+    if (b.bulkCount == 0u || !(b.sumMass > 0.0)) return;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const int requested = cfg.outletNeumannReservoirCoarseLayers0493x8x > 0
+        ? cfg.outletNeumannReservoirCoarseLayers0493x8x : 1;
+    const unsigned int coarseLayers = static_cast<unsigned int>(
+        face == 0 || face == 1 ? imin_device_0263(nx, requested)
+                               : imin_device_0263(ny, requested));
+    if (coarseLayers == 0u) return;
+
+    const double alpha = faceTotal > 0u
+        ? static_cast<double>(b.faceCount) / static_cast<double>(faceTotal)
+        : static_cast<double>(b.bulkCount) / static_cast<double>(bulkTotal);
+    if (!(alpha > 0.0) || !isfinite(alpha)) return;
+
+    // x8x density uses the inward coarse stencil. x8y keeps exactly the same
+    // phase support and kinetic moments but decouples the exterior pressure
+    // reservoir density from an outlet rarefaction: its expected total
+    // occupancy is prescribed by the qualified reference occupancy.
+    const double meanTotalOccupancy =
+        static_cast<double>(bulkTotal) / static_cast<double>(coarseLayers);
+    const double reservoirTotalOccupancy =
+        (cfg.outletNeumannPressureReservoir0493x8y != 0 &&
+         cfg.outletNeumannReservoirTargetOccupancy0493x8y > 0.0)
+            ? cfg.outletNeumannReservoirTargetOccupancy0493x8y
+            : meanTotalOccupancy;
+    const double lambdaSpecies = alpha * reservoirTotalOccupancy;
+    if (!(lambdaSpecies > 0.0) || !isfinite(lambdaSpecies)) return;
+
+    const double sumM = b.sumMass;
+    const unsigned int Nbulk = b.bulkCount;
+    const double uxInterior = b.sumMomX / sumM;
+    const double uyInterior = b.sumMomY / sumM;
+
+    // 0493x8z: an outlet reservoir may preserve thermal inward crossings, but
+    // its MACROSCOPIC mean velocity must never point into the physical domain.
+    // x8z clamps only the normal mean component. 0493x9a is a stricter guard:
+    // if the interior coarse mean is in macroscopic backflow, suppress the
+    // complete reservoir drift vector for that face. The thermal variance is
+    // still inherited unchanged, so microscopic thermal inward crossings remain.
+    double uxReservoir = uxInterior;
+    double uyReservoir = uyInterior;
+    if (cfg.outletNeumannNoBackflowReservoir0493x8z != 0) {
+        bool macroscopicBackflow = false;
+        if (face == 0) macroscopicBackflow = uxInterior > 0.0;       // left: outward is -x
+        else if (face == 1) macroscopicBackflow = uxInterior < 0.0;  // right: outward is +x
+        else if (face == 2) macroscopicBackflow = uyInterior > 0.0;  // bottom: outward is -y
+        else if (face == 3) macroscopicBackflow = uyInterior < 0.0;  // top: outward is +y
+
+        if (cfg.outletNeumannZeroDriftOnBackflow0493x9a != 0 && macroscopicBackflow) {
+            uxReservoir = 0.0;
+            uyReservoir = 0.0;
+        } else {
+            if (face == 0) uxReservoir = fmin(uxReservoir, 0.0);
+            else if (face == 1) uxReservoir = fmax(uxReservoir, 0.0);
+            else if (face == 2) uyReservoir = fmin(uyReservoir, 0.0);
+            else if (face == 3) uyReservoir = fmax(uyReservoir, 0.0);
+        }
+    }
+
+    const double rel =
+        b.sumMvv - (b.sumMomX * b.sumMomX + b.sumMomY * b.sumMomY) / sumM;
+    const double fallbackKBT = speciesFallbackKBT != nullptr
+        ? speciesFallbackKBT[speciesIndex] : cfg.inletKBT;
+    double kBTlocal = Nbulk >= 4u
+        ? 0.5 * fmax(0.0, rel) / static_cast<double>(Nbulk)
+        : fmax(0.0, fallbackKBT);
+    if (!isfinite(kBTlocal) || !(kBTlocal > 0.0))
+        kBTlocal = fmax(0.0, fallbackKBT);
+
+    const double particleMass = sumM / static_cast<double>(Nbulk);
+    if (!(particleMass > 0.0) || !isfinite(particleMass)) return;
+    const double sigma = kBTlocal > 0.0 ? sqrt(kBTlocal / particleMass) : 0.0;
+
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0) || !(cfg.dt > 0.0)) return;
+
+    const unsigned int layers = static_cast<unsigned int>(
+        cfg.outletNeumannReservoirLayers0493x8x > 0
+            ? cfg.outletNeumannReservoirLayers0493x8x : 1);
+
+    for (unsigned int layer = 0u; layer < layers; ++layer) {
+        const std::uint64_t populationSeed =
+            cfg.rngSeed ^
+            (cfg.step * 0x6a09e667f3bcc909ULL) ^
+            (static_cast<std::uint64_t>(entry + 1u) * 0xbb67ae8584caa73bULL) ^
+            (static_cast<std::uint64_t>(layer + 1u) * 0x3c6ef372fe94f82bULL);
+        const unsigned int Nvirtual =
+            poisson_small_or_normal_0493x8x(lambdaSpecies, populationSeed);
+
+        for (unsigned int k = 0u; k < Nvirtual; ++k) {
+            const std::uint64_t baseSeed =
+                populationSeed ^
+                (static_cast<std::uint64_t>(k + 1u) * 0xa54ff53a5f1d36f1ULL);
+            const std::uint64_t z0 = splitmix64_device_0263(baseSeed);
+            const std::uint64_t z1 = splitmix64_device_0263(z0 ^ 0x510e527fade682d1ULL);
+            const std::uint64_t z2 = splitmix64_device_0263(z1 ^ 0x9b05688c2b3e6c1fULL);
+            const std::uint64_t z3 = splitmix64_device_0263(z2 ^ 0x1f83d9abfb41bd6bULL);
+
+            const double rNormal = uniform_from_u64_0493x8w(z0);
+            const double rTangential = uniform_from_u64_0493x8w(z1);
+            const double rG1 = fmax(1.0e-15, uniform_from_u64_0493x8w(z2));
+            const double rG2 = uniform_from_u64_0493x8w(z3);
+            const double radius = sqrt(-2.0 * log(rG1));
+            const double angle = 6.28318530717958647693 * rG2;
+            const double g0 = radius * cos(angle);
+            const double g1 = radius * sin(angle);
+            const double vxp = uxReservoir + sigma * g0;
+            const double vyp = uyReservoir + sigma * g1;
+
+            double x0 = 0.5 * (cfg.xMin + cfg.xMax);
+            double y0 = 0.5 * (cfg.yMin + cfg.yMax);
+            if (face == 0 || face == 1) {
+                y0 = cfg.yMin +
+                    (static_cast<double>(tangentialCell) + rTangential) * dy;
+                const double d = (static_cast<double>(layer) + rNormal) * dx;
+                x0 = face == 0 ? cfg.xMin - d : cfg.xMax + d;
+            } else {
+                x0 = cfg.xMin +
+                    (static_cast<double>(tangentialCell) + rTangential) * dx;
+                const double d = (static_cast<double>(layer) + rNormal) * dy;
+                y0 = face == 2 ? cfg.yMin - d : cfg.yMax + d;
+            }
+
+            double x1 = 0.0;
+            double y1 = 0.0;
+            if (!stream_virtual_particle_through_face_0493x8w(
+                    face, x0, y0, vxp, vyp, cfg, x1, y1)) continue;
+
+            const unsigned int j = atomicAdd(candidateCount, 1u);
+            if (j >= candidateCapacity) continue;
+            CudaNeumannVirtualCellCandidate0493x8w& c = candidates[j];
+            c.x = x1;
+            c.y = y1;
+            c.vx = vxp;
+            c.vy = vyp;
+            c.particleMass = particleMass;
+            c.particleType = speciesTypes[speciesIndex];
+            c.face = face;
+        }
+    }
+}
+
+
+// 0493x8v -- microscopic Neumann replica.
+//
+// Unlike x8q/x8r, this path does not fit bath moments and does not synthesize
+// a Maxwellian.  A real, surviving interior particle is extended across an
+// outlet by mirror symmetry at its PRE-stream position.  A ghost is materialized
+// only if that virtual exterior copy streams back through the same outlet during
+// this dt.  Type, mass and velocity are therefore inherited from one labelled
+// microscopic source.  Restricting sources to the boundary-adjacent cell
+// (default one layer) is the phase-support/trace proxy: a phase deeper in the
+// domain cannot seed the outlet merely because it was present in a two-cell bath.
+struct CudaNeumannReplicaCandidate0493x8v {
+    std::uint64_t source = 0ULL;
+    double x = 0.0;
+    double y = 0.0;
+    double vx = 0.0;
+    double vy = 0.0;
+    int face = -1;
+};
+
+__device__ inline void record_one_neumann_replica_0493x8v(
+    std::uint64_t source,
+    int face,
+    double xpre,
+    double ypre,
+    double vxp,
+    double vyp,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaNeumannReplicaCandidate0493x8v* candidates,
+    unsigned int* candidateCount,
+    unsigned int candidateCapacity,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    if (!cfg.outletNeumannReplica0493x8v || face < 0 || face > 3 ||
+        candidates == nullptr || candidateCount == nullptr ||
+        !(cfg.dt > 0.0)) return;
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0)) return;
+    const double sourceLayers = static_cast<double>(
+        cfg.outletNeumannReplicaSourceLayers0493x8v > 0
+            ? cfg.outletNeumannReplicaSourceLayers0493x8v : 1);
+
+    double distance = 0.0;
+    double inwardSpeed = 0.0;
+    double normalCell = dx;
+    double xCross = xpre;
+    double yCross = ypre;
+    double xGhost = xpre;
+    double yGhost = ypre;
+
+    if (face == 0) {
+        if (!(vxp > 0.0)) return;
+        distance = xpre - cfg.xMin;
+        inwardSpeed = vxp;
+        normalCell = dx;
+        if (!(distance >= 0.0 && distance <= sourceLayers * normalCell)) return;
+        const double tc = distance / inwardSpeed;
+        if (!(tc >= 0.0 && tc < cfg.dt)) return;
+        xCross = cfg.xMin;
+        yCross = ypre + vyp * tc;
+        xGhost = 2.0 * cfg.xMin - xpre + vxp * cfg.dt;
+        yGhost = ypre + vyp * cfg.dt;
+    } else if (face == 1) {
+        if (!(vxp < 0.0)) return;
+        distance = cfg.xMax - xpre;
+        inwardSpeed = -vxp;
+        normalCell = dx;
+        if (!(distance >= 0.0 && distance <= sourceLayers * normalCell)) return;
+        const double tc = distance / inwardSpeed;
+        if (!(tc >= 0.0 && tc < cfg.dt)) return;
+        xCross = cfg.xMax;
+        yCross = ypre + vyp * tc;
+        xGhost = 2.0 * cfg.xMax - xpre + vxp * cfg.dt;
+        yGhost = ypre + vyp * cfg.dt;
+    } else if (face == 2) {
+        if (!(vyp > 0.0)) return;
+        distance = ypre - cfg.yMin;
+        inwardSpeed = vyp;
+        normalCell = dy;
+        if (!(distance >= 0.0 && distance <= sourceLayers * normalCell)) return;
+        const double tc = distance / inwardSpeed;
+        if (!(tc >= 0.0 && tc < cfg.dt)) return;
+        xCross = xpre + vxp * tc;
+        yCross = cfg.yMin;
+        xGhost = xpre + vxp * cfg.dt;
+        yGhost = 2.0 * cfg.yMin - ypre + vyp * cfg.dt;
+    } else {
+        if (!(vyp < 0.0)) return;
+        distance = cfg.yMax - ypre;
+        inwardSpeed = -vyp;
+        normalCell = dy;
+        if (!(distance >= 0.0 && distance <= sourceLayers * normalCell)) return;
+        const double tc = distance / inwardSpeed;
+        if (!(tc >= 0.0 && tc < cfg.dt)) return;
+        xCross = xpre + vxp * tc;
+        yCross = cfg.yMax;
+        xGhost = xpre + vxp * cfg.dt;
+        yGhost = 2.0 * cfg.yMax - ypre + vyp * cfg.dt;
+    }
+
+    // The virtual particle must cross an actual outlet segment.  Evaluate the
+    // segment at the crossing point, not at the source-cell centre.
+    if (!(xCross >= cfg.xMin && xCross <= cfg.xMax &&
+          yCross >= cfg.yMin && yCross <= cfg.yMax)) return;
+    if (outlet_mode_at_particle_0493x8q(cfg, face, xCross, yCross) != 2) return;
+
+    // x8v-physics deliberately avoids a second chronological boundary solver
+    // for the virtual particle.  Corner-crossing replicas are skipped rather
+    // than clamped or reflected.  This is negligible for a non-corner outlet
+    // and makes the first experiment unambiguous.
+    if (!(xGhost > cfg.xMin && xGhost < cfg.xMax &&
+          yGhost > cfg.yMin && yGhost < cfg.yMax)) return;
+    if (!isfinite(xGhost) || !isfinite(yGhost) ||
+        !isfinite(vxp) || !isfinite(vyp)) return;
+
+    const unsigned int j = atomicAdd(candidateCount, 1u);
+    if (j >= candidateCapacity) {
+        atomicMax(&counters->overflowFlag, 11);
+        return;
+    }
+    CudaNeumannReplicaCandidate0493x8v& c = candidates[j];
+    c.source = source;
+    c.x = xGhost;
+    c.y = yGhost;
+    c.vx = vxp;
+    c.vy = vyp;
+    c.face = face;
+}
+
+__device__ inline void record_neumann_replicas_for_survivor_0493x8v(
+    std::uint64_t source,
+    double xpre,
+    double ypre,
+    double vxp,
+    double vyp,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaNeumannReplicaCandidate0493x8v* candidates,
+    unsigned int* candidateCount,
+    unsigned int candidateCapacity,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    if (!cfg.outletNeumannReplica0493x8v ||
+        !(xpre >= cfg.xMin && xpre <= cfg.xMax &&
+          ypre >= cfg.yMin && ypre <= cfg.yMax)) return;
+
+    // More than one face can be an outlet in the 0414 multi-axis contract.
+    // Each geometrically valid mirror crossing is an independent exterior copy.
+    record_one_neumann_replica_0493x8v(
+        source, 0, xpre, ypre, vxp, vyp, cfg,
+        candidates, candidateCount, candidateCapacity, counters);
+    record_one_neumann_replica_0493x8v(
+        source, 1, xpre, ypre, vxp, vyp, cfg,
+        candidates, candidateCount, candidateCapacity, counters);
+    record_one_neumann_replica_0493x8v(
+        source, 2, xpre, ypre, vxp, vyp, cfg,
+        candidates, candidateCount, candidateCapacity, counters);
+    record_one_neumann_replica_0493x8v(
+        source, 3, xpre, ypre, vxp, vyp, cfg,
+        candidates, candidateCount, candidateCapacity, counters);
+}
+
+__global__ void io_neumann_replica_insert_kernel_0493x8v(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const CudaNeumannReplicaCandidate0493x8v* __restrict__ candidates,
+    unsigned int candidateCount,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= candidateCount) return;
+    if (j >= inactiveCount) {
+        atomicMax(&counters->overflowFlag, 12);
+        return;
+    }
+
+    const CudaNeumannReplicaCandidate0493x8v c = candidates[j];
+    if (c.source >= n || c.face < 0 || c.face > 3 ||
+        role[c.source] != fluidRole) {
+        atomicMax(&counters->failureFlag, 10);
+        return;
+    }
+    const std::uint64_t slot = inactiveIndices[j];
+    if (slot >= n || role[slot] != inactiveRole) {
+        atomicMax(&counters->overflowFlag, 13);
+        return;
+    }
+
+    const double m = mass[c.source];
+    if (!(m > 0.0) || !isfinite(m)) {
+        atomicMax(&counters->failureFlag, 11);
+        return;
+    }
+
+    x[slot] = clamp_strictly_inside_device_0263(c.x, cfg.xMin, cfg.xMax);
+    y[slot] = clamp_strictly_inside_device_0263(c.y, cfg.yMin, cfg.yMax);
+    vx[slot] = c.vx;
+    vy[slot] = c.vy;
+    mass[slot] = m;
+    type[slot] = type[c.source];
+    role[slot] = fluidRole;
+
+    add_counter_ull_0267(&counters->outletParticlesInserted, 1ULL);
+    add_counter_ull_0267(&counters->fluidParticles, 1ULL);
+}
 
 
 
@@ -1580,6 +2723,177 @@ __device__ inline void accumulate_neumann_bath_moments_0493x8q(
     }
 }
 
+// -----------------------------------------------------------------------------
+// 0493x8r -- species-resolved Neumann kinetic continuation.
+//
+// The legacy x8q kernels above remain unchanged. x8r is a separate path selected
+// only for a strict registered multi-species state. Its bath layout is
+// [spatial boundary cell][registered species], so no kinetic moment or metadata
+// source can mix particle types.
+// -----------------------------------------------------------------------------
+
+__device__ inline int neumann_species_index_0493x8r(
+    std::uint32_t particleType,
+    const std::uint32_t* speciesTypes,
+    unsigned int speciesCount)
+{
+    if (speciesTypes == nullptr || speciesCount == 0u) return -1;
+    for (unsigned int s = 0u; s < speciesCount; ++s) {
+        if (speciesTypes[s] == particleType) return static_cast<int>(s);
+    }
+    return -1;
+}
+
+__device__ inline void accumulate_one_neumann_species_bath_0493x8r(
+    std::uint64_t particleIndex,
+    int face,
+    int tangentialCell,
+    unsigned int speciesIndex,
+    unsigned int speciesCount,
+    double xp,
+    double yp,
+    double vxp,
+    double vyp,
+    double particleMass,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    CudaNeumannBathMoments0493x8q* bath,
+    unsigned int bathEntryCount)
+{
+    if (outlet_mode_at_particle_0493x8q(cfg, face, xp, yp) != 2) return;
+    if (speciesIndex >= speciesCount || speciesCount == 0u) return;
+
+    const unsigned int spatial =
+        neumann_bath_index_0493x8q(cfg, face, tangentialCell);
+    const unsigned long long flat64 =
+        static_cast<unsigned long long>(spatial) *
+            static_cast<unsigned long long>(speciesCount) +
+        static_cast<unsigned long long>(speciesIndex);
+    if (flat64 >= static_cast<unsigned long long>(bathEntryCount)) return;
+    const unsigned int bidx = static_cast<unsigned int>(flat64);
+
+    CudaNeumannBathMoments0493x8q* b = bath + bidx;
+    const double m = isfinite(particleMass) && particleMass > 0.0
+        ? particleMass : cfg.refMass;
+
+    atomicAdd(&b->count, 1u);
+    atomicAdd(&b->sumMass, m);
+    atomicAdd(&b->sumMomX, m * vxp);
+    atomicAdd(&b->sumMomY, m * vyp);
+    atomicAdd(&b->sumMvv, m * (vxp * vxp + vyp * vyp));
+
+    // The metadata source is selected only from this species-resolved entry.
+    if (particleIndex <= 0xffffffffULL) {
+        const std::uint64_t z = splitmix64_device_0263(
+            cfg.rngSeed ^
+            (cfg.step * 0x9e3779b97f4a7c15ULL) ^
+            (particleIndex * 0xbf58476d1ce4e5b9ULL) ^
+            (static_cast<std::uint64_t>(bidx + 1u) * 0x94d049bb133111ebULL));
+        const unsigned long long priority =
+            static_cast<unsigned long long>(static_cast<unsigned int>(z >> 32));
+        const unsigned long long packed =
+            ((priority | 1ULL) << 32) |
+            static_cast<unsigned long long>(
+                static_cast<unsigned int>(particleIndex));
+        atomicMax(&b->sourcePacked, packed);
+    }
+}
+
+__device__ inline void accumulate_neumann_species_bath_moments_0493x8r(
+    std::uint64_t particleIndex,
+    double xpre,
+    double ypre,
+    double vxp,
+    double vyp,
+    double particleMass,
+    std::uint32_t particleType,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    const std::uint32_t* speciesTypes,
+    unsigned int speciesCount,
+    CudaNeumannBathMoments0493x8q* bath,
+    unsigned int bathEntryCount)
+{
+    if (!cfg.outletNeumannKinetic0493x8q || bath == nullptr ||
+        bathEntryCount == 0u || speciesCount == 0u) return;
+    if (!(xpre >= cfg.xMin && xpre <= cfg.xMax &&
+          ypre >= cfg.yMin && ypre <= cfg.yMax)) return;
+
+    const int speciesIndexSigned =
+        neumann_species_index_0493x8r(particleType, speciesTypes, speciesCount);
+    if (speciesIndexSigned < 0) return;
+    const unsigned int speciesIndex =
+        static_cast<unsigned int>(speciesIndexSigned);
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    if (!(dx > 0.0) || !(dy > 0.0)) return;
+
+    constexpr int layers = 2;
+    const bool nearLeft   = xpre <  cfg.xMin + layers * dx;
+    const bool nearRight  = xpre >= cfg.xMax - layers * dx;
+    const bool nearBottom = ypre <  cfg.yMin + layers * dy;
+    const bool nearTop    = ypre >= cfg.yMax - layers * dy;
+    if (!(nearLeft || nearRight || nearBottom || nearTop)) return;
+
+    int ix = static_cast<int>(floor((xpre - cfg.xMin) / dx));
+    int iy = static_cast<int>(floor((ypre - cfg.yMin) / dy));
+    ix = imax_device_0263(0, imin_device_0263(nx - 1, ix));
+    iy = imax_device_0263(0, imin_device_0263(ny - 1, iy));
+
+    if (nearLeft) {
+        accumulate_one_neumann_species_bath_0493x8r(
+            particleIndex, 0, iy, speciesIndex, speciesCount,
+            xpre, ypre, vxp, vyp, particleMass, cfg, bath, bathEntryCount);
+    }
+    if (nearRight) {
+        accumulate_one_neumann_species_bath_0493x8r(
+            particleIndex, 1, iy, speciesIndex, speciesCount,
+            xpre, ypre, vxp, vyp, particleMass, cfg, bath, bathEntryCount);
+    }
+    if (nearBottom) {
+        accumulate_one_neumann_species_bath_0493x8r(
+            particleIndex, 2, ix, speciesIndex, speciesCount,
+            xpre, ypre, vxp, vyp, particleMass, cfg, bath, bathEntryCount);
+    }
+    if (nearTop) {
+        accumulate_one_neumann_species_bath_0493x8r(
+            particleIndex, 3, ix, speciesIndex, speciesCount,
+            xpre, ypre, vxp, vyp, particleMass, cfg, bath, bathEntryCount);
+    }
+}
+
+__global__ void io_neumann_species_bath_accumulate_kernel_0493x8r(
+    std::uint64_t n,
+    const double* __restrict__ x,
+    const double* __restrict__ y,
+    const double* __restrict__ vx,
+    const double* __restrict__ vy,
+    const double* __restrict__ mass,
+    const std::uint32_t* __restrict__ type,
+    const unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const std::uint32_t* __restrict__ speciesTypes,
+    unsigned int speciesCount,
+    CudaNeumannBathMoments0493x8q* __restrict__ bath,
+    unsigned int bathEntryCount)
+{
+    const std::uint64_t i =
+        static_cast<std::uint64_t>(blockIdx.x) *
+            static_cast<std::uint64_t>(blockDim.x) +
+        static_cast<std::uint64_t>(threadIdx.x);
+    if (i >= n || role[i] != fluidRole) return;
+    if (!isfinite(x[i]) || !isfinite(y[i]) ||
+        !isfinite(vx[i]) || !isfinite(vy[i])) return;
+
+    const double xpre = x[i] - vx[i] * cfg.dt;
+    const double ypre = y[i] - vy[i] * cfg.dt;
+    accumulate_neumann_species_bath_moments_0493x8r(
+        i, xpre, ypre, vx[i], vy[i], mass[i], type[i], cfg,
+        speciesTypes, speciesCount, bath, bathEntryCount);
+}
+
 __device__ inline double normal_pdf_0493x8q(double z)
 {
     return 0.39894228040143267794 * exp(-0.5 * z * z);
@@ -1732,6 +3046,117 @@ __global__ void io_neumann_bath_candidates_kernel_0493x8q(
     }
 }
 
+__global__ void io_neumann_species_bath_candidates_kernel_0493x8r(
+    std::uint64_t n,
+    const double* __restrict__ mass,
+    const std::uint32_t* __restrict__ type,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    CudaNeumannBathMoments0493x8q* __restrict__ bath,
+    unsigned int bathEntryCount,
+    const std::uint32_t* __restrict__ speciesTypes,
+    const double* __restrict__ speciesFallbackKBT,
+    unsigned int speciesCount,
+    CudaNeumannGhostCandidate0493x8q* __restrict__ candidates,
+    unsigned int* candidateCount,
+    unsigned int candidateCapacity)
+{
+    const unsigned int bidx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (bidx >= bathEntryCount || speciesCount == 0u) return;
+
+    CudaNeumannBathMoments0493x8q& b = bath[bidx];
+    const unsigned int N = b.count;
+    if (N < 2u || !(b.sumMass > 0.0) || b.sourcePacked == 0ULL) return;
+
+    const unsigned int speciesIndex = bidx % speciesCount;
+    const unsigned int spatialBidx = bidx / speciesCount;
+    if (speciesIndex >= speciesCount) return;
+
+    int face = -1;
+    int tangentialCell = -1;
+    if (!neumann_bath_decode_0493x8q(
+            cfg, spatialBidx, face, tangentialCell)) return;
+
+    const double sumM = b.sumMass;
+    const double ux = b.sumMomX / sumM;
+    const double uy = b.sumMomY / sumM;
+    const double rel =
+        b.sumMvv - (b.sumMomX * b.sumMomX + b.sumMomY * b.sumMomY) / sumM;
+
+    const double fallbackKBT = speciesFallbackKBT != nullptr
+        ? speciesFallbackKBT[speciesIndex] : cfg.inletKBT;
+    double kBTlocal = 0.5 * fmax(0.0, rel) / static_cast<double>(N);
+    if (!isfinite(kBTlocal) || kBTlocal < 0.0)
+        kBTlocal = fmax(0.0, fallbackKBT);
+    if (!(kBTlocal > 0.0) && fallbackKBT > 0.0)
+        kBTlocal = fallbackKBT;
+
+    const double mbar = sumM / static_cast<double>(N);
+    const double sigmaBar =
+        (kBTlocal > 0.0 && mbar > 0.0) ? sqrt(kBTlocal / mbar) : 0.0;
+
+    double un = 0.0;
+    double normalWidth = 1.0;
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    constexpr double layers = 2.0;
+
+    if (face == 0) { un = -ux; normalWidth = layers * dx; }
+    else if (face == 1) { un = ux; normalWidth = layers * dx; }
+    else if (face == 2) { un = -uy; normalWidth = layers * dy; }
+    else if (face == 3) { un = uy; normalWidth = layers * dy; }
+    else return;
+
+    if (!(normalWidth > 0.0) || !(cfg.dt > 0.0)) return;
+
+    const double oneWay = incoming_normal_moment_0493x8q(un, sigmaBar);
+    const double lambda =
+        static_cast<double>(N) * (cfg.dt / normalWidth) * oneWay;
+    if (!(lambda > 0.0) || !isfinite(lambda)) return;
+
+    const double baseD = floor(lambda);
+    if (baseD > static_cast<double>(0xffffffffu - 1u)) return;
+    unsigned int copies = static_cast<unsigned int>(baseD);
+    const double frac = lambda - baseD;
+
+    std::uint64_t z = splitmix64_device_0263(
+        cfg.rngSeed ^
+        (cfg.step * 0xd2b74407b1ce6e93ULL) ^
+        (static_cast<std::uint64_t>(bidx + 1u) * 0x9e3779b97f4a7c15ULL));
+    if (uniform_from_u64_0493x8q(z) < frac) ++copies;
+
+    b.sumMass = mbar;
+    b.sumMomX = ux;
+    b.sumMomY = uy;
+    b.sumMvv = kBTlocal;
+
+    if (copies == 0u) return;
+
+    const std::uint64_t source =
+        static_cast<std::uint64_t>(
+            static_cast<unsigned int>(b.sourcePacked & 0xffffffffULL));
+    if (source >= n) return;
+    if (speciesTypes == nullptr || type[source] != speciesTypes[speciesIndex])
+        return;
+
+    const double particleMass =
+        isfinite(mass[source]) && mass[source] > 0.0 ? mass[source] : mbar;
+    const std::uint32_t particleType = speciesTypes[speciesIndex];
+
+    const unsigned int first = atomicAdd(candidateCount, copies);
+    if (first > candidateCapacity || copies > candidateCapacity - first) return;
+
+    for (unsigned int k = 0u; k < copies; ++k) {
+        CudaNeumannGhostCandidate0493x8q& c = candidates[first + k];
+        c.source = source;
+        c.bathCell = bidx;
+        c.face = face;
+        c.particleMass = particleMass;
+        c.particleType = particleType;
+    }
+}
+
 __global__ void io_neumann_ghost_insert_kernel_0493x8q(
     std::uint64_t n,
     double* __restrict__ x,
@@ -1862,6 +3287,139 @@ __global__ void io_neumann_ghost_insert_kernel_0493x8q(
     add_counter_ull_0267(&counters->fluidParticles, 1ULL);
 }
 
+__global__ void io_neumann_species_ghost_insert_kernel_0493x8r(
+    std::uint64_t n,
+    double* __restrict__ x,
+    double* __restrict__ y,
+    double* __restrict__ vx,
+    double* __restrict__ vy,
+    double* __restrict__ mass,
+    std::uint32_t* __restrict__ type,
+    unsigned char* __restrict__ role,
+    unsigned char fluidRole,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoFullfaceConfig0263 cfg,
+    const CudaNeumannGhostCandidate0493x8q* __restrict__ candidates,
+    unsigned int candidateCount,
+    const CudaNeumannBathMoments0493x8q* __restrict__ bath,
+    unsigned int bathEntryCount,
+    unsigned int speciesCount,
+    const std::uint64_t* __restrict__ inactiveIndices,
+    unsigned int inactiveCount,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= candidateCount) return;
+    if (j >= inactiveCount) {
+        atomicMax(&counters->overflowFlag, 9);
+        return;
+    }
+
+    const CudaNeumannGhostCandidate0493x8q c = candidates[j];
+    if (c.bathCell >= bathEntryCount || c.face < 0 || c.face > 3 ||
+        speciesCount == 0u) {
+        atomicMax(&counters->failureFlag, 8);
+        return;
+    }
+
+    const std::uint64_t slot = inactiveIndices[j];
+    if (slot >= n || role[slot] != inactiveRole) {
+        atomicMax(&counters->overflowFlag, 10);
+        return;
+    }
+
+    const CudaNeumannBathMoments0493x8q b = bath[c.bathCell];
+    const double ux = b.sumMomX;
+    const double uy = b.sumMomY;
+    const double kBTlocal = fmax(0.0, b.sumMvv);
+    const double particleMass =
+        c.particleMass > 0.0 ? c.particleMass :
+        (b.sumMass > 0.0 ? b.sumMass : cfg.refMass);
+    const double sigma =
+        (kBTlocal > 0.0 && particleMass > 0.0)
+        ? sqrt(kBTlocal / particleMass) : 0.0;
+
+    double un = 0.0;
+    double ut = 0.0;
+    if (c.face == 0) { un = -ux; ut = uy; }
+    else if (c.face == 1) { un = ux; ut = uy; }
+    else if (c.face == 2) { un = -uy; ut = ux; }
+    else { un = uy; ut = ux; }
+
+    std::uint64_t z1 = splitmix64_device_0263(
+        cfg.rngSeed ^
+        (cfg.step * 0x94d049bb133111ebULL) ^
+        (static_cast<std::uint64_t>(j + 1u) * 0x369dea0f31a53f85ULL) ^
+        (static_cast<std::uint64_t>(c.bathCell + 1u) * 0x9e3779b97f4a7c15ULL));
+    const std::uint64_t z2 = splitmix64_device_0263(z1 ^ 0x243f6a8885a308d3ULL);
+    const std::uint64_t z3 = splitmix64_device_0263(z2 ^ 0x13198a2e03707344ULL);
+    const std::uint64_t z4 = splitmix64_device_0263(z3 ^ 0xa4093822299f31d0ULL);
+    const std::uint64_t z5 = splitmix64_device_0263(z4 ^ 0x082efa98ec4e6c89ULL);
+
+    const double rFlux = uniform_from_u64_0493x8q(z1);
+    const double r1 = fmax(1.0e-15, uniform_from_u64_0493x8q(z2));
+    const double r2 = uniform_from_u64_0493x8q(z3);
+    const double rNormalPos = uniform_from_u64_0493x8q(z4);
+    const double rTangentialPos = uniform_from_u64_0493x8q(z5);
+
+    const double vn =
+        sample_incoming_normal_velocity_0493x8q(un, sigma, rFlux);
+    const double gaussian =
+        sqrt(-2.0 * log(r1)) *
+        cos(6.28318530717958647693 * r2);
+    const double vt = ut + sigma * gaussian;
+
+    double vxp = 0.0;
+    double vyp = 0.0;
+    if (c.face == 0) { vxp = -vn; vyp = vt; }
+    else if (c.face == 1) { vxp = vn; vyp = vt; }
+    else if (c.face == 2) { vxp = vt; vyp = -vn; }
+    else { vxp = vt; vyp = vn; }
+
+    const unsigned int spatialBathCell = c.bathCell / speciesCount;
+    int decodedFace = -1;
+    int tangentialCell = -1;
+    if (!neumann_bath_decode_0493x8q(
+            cfg, spatialBathCell, decodedFace, tangentialCell) ||
+        decodedFace != c.face) {
+        atomicMax(&counters->failureFlag, 9);
+        return;
+    }
+
+    const int nx = cfg.Nx > 0 ? cfg.Nx : 1;
+    const int ny = cfg.Ny > 0 ? cfg.Ny : 1;
+    const double dx = (cfg.xMax - cfg.xMin) / static_cast<double>(nx);
+    const double dy = (cfg.yMax - cfg.yMin) / static_cast<double>(ny);
+    const double penetration = rNormalPos * fmax(0.0, -vn) * cfg.dt;
+
+    double xp = 0.5 * (cfg.xMin + cfg.xMax);
+    double yp = 0.5 * (cfg.yMin + cfg.yMax);
+
+    if (c.face == 0 || c.face == 1) {
+        yp = cfg.yMin +
+            (static_cast<double>(tangentialCell) + rTangentialPos) * dy;
+        xp = c.face == 0 ? cfg.xMin + penetration : cfg.xMax - penetration;
+    } else {
+        xp = cfg.xMin +
+            (static_cast<double>(tangentialCell) + rTangentialPos) * dx;
+        yp = c.face == 2 ? cfg.yMin + penetration : cfg.yMax - penetration;
+    }
+
+    xp = clamp_strictly_inside_device_0263(xp, cfg.xMin, cfg.xMax);
+    yp = clamp_strictly_inside_device_0263(yp, cfg.yMin, cfg.yMax);
+
+    x[slot] = xp;
+    y[slot] = yp;
+    vx[slot] = vxp;
+    vy[slot] = vyp;
+    mass[slot] = particleMass;
+    type[slot] = c.particleType;
+    role[slot] = fluidRole;
+
+    add_counter_ull_0267(&counters->outletParticlesInserted, 1ULL);
+    add_counter_ull_0267(&counters->fluidParticles, 1ULL);
+}
+
 
 
 __global__ void io_fullface_boundary_particles_kernel_0267(
@@ -1880,7 +3438,13 @@ __global__ void io_fullface_boundary_particles_kernel_0267(
     unsigned int* ghostCandidateCount,
     unsigned int ghostCandidateCapacity,
     CudaNeumannBathMoments0493x8q* bathMoments0493x8q,
-    unsigned int bathCellCount0493x8q)
+    unsigned int bathCellCount0493x8q,
+    CudaNeumannReplicaCandidate0493x8v* replicaCandidates0493x8v,
+    unsigned int* replicaCandidateCount0493x8v,
+    unsigned int replicaCandidateCapacity0493x8v,
+    std::uint64_t* recycleDeletedIndices0493x9e,
+    unsigned int* recycleDeletedCount0493x9e,
+    std::uint64_t recycleDeletedCapacity0493x9e)
 {
     const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) +
                             static_cast<std::uint64_t>(threadIdx.x);
@@ -1896,10 +3460,12 @@ __global__ void io_fullface_boundary_particles_kernel_0267(
         return;
     }
 
-    const double xpre0493x8q = x[i] - vx[i] * cfg.dt;
-    const double ypre0493x8q = y[i] - vy[i] * cfg.dt;
+    const double vxSource0493x8v = vx[i];
+    const double vySource0493x8v = vy[i];
+    const double xpre0493x8q = x[i] - vxSource0493x8v * cfg.dt;
+    const double ypre0493x8q = y[i] - vySource0493x8v * cfg.dt;
     accumulate_neumann_bath_moments_0493x8q(
-        i, xpre0493x8q, ypre0493x8q, vx[i], vy[i], mass[i],
+        i, xpre0493x8q, ypre0493x8q, vxSource0493x8v, vySource0493x8v, mass[i],
         cfg, bathMoments0493x8q, bathCellCount0493x8q);
 
     bool remove = false;
@@ -1974,10 +3540,21 @@ __global__ void io_fullface_boundary_particles_kernel_0267(
         remove = true;
     }
 
+    if (!remove) {
+        record_neumann_replicas_for_survivor_0493x8v(
+            i, xpre0493x8q, ypre0493x8q,
+            vxSource0493x8v, vySource0493x8v, cfg,
+            replicaCandidates0493x8v, replicaCandidateCount0493x8v,
+            replicaCandidateCapacity0493x8v, counters);
+    }
+
     if (remove) {
         x[i] = clamp_device_0263(x[i], cfg.xMin, cfg.xMax);
         y[i] = clamp_device_0263(y[i], cfg.yMin, cfg.yMax);
         role[i] = inactiveRole;
+        record_recycled_deleted_slot_0493x9e(
+            i, recycleDeletedIndices0493x9e, recycleDeletedCount0493x9e,
+            recycleDeletedCapacity0493x9e, counters);
         if (removeMode == 1) local.inletBackflowDeleted += 1ULL;
         else if (removeMode == 2) local.outletParticlesDeleted += 1ULL;
     } else {
@@ -2195,31 +3772,74 @@ std::uint64_t inactive_tail_scan_count_0313(std::uint64_t n, std::uint64_t need)
     return scan;
 }
 
+// 0493x9d-fix1 persistent workspace for the *exactly sized* 0313 tail scan.
+// This is intentionally different from x9d v1: the required tailScan is still
+// computed from the real host-visible candidate count.  Only the allocations
+// are retained between steps.
+struct InactiveTailPoolWorkspace0493x9dFix1 {
+    std::uint64_t* indices = nullptr;
+    unsigned int* count = nullptr;
+    std::uint64_t capacity = 0u;
+};
+
+InactiveTailPoolWorkspace0493x9dFix1& inactive_tail_pool_workspace_0493x9d_fix1() {
+    static InactiveTailPoolWorkspace0493x9dFix1 w{};
+    return w;
+}
+
 bool collect_tail_inactive_pool_0313(std::uint64_t n,
                                       unsigned char* dRole,
                                       unsigned char inactiveRole,
                                       std::uint64_t need,
                                       int threads,
                                       std::uint64_t** dInactiveIndicesOut,
-                                      unsigned int* inactiveCountOut) {
+                                      unsigned int* inactiveCountOut,
+                                      bool* persistentWorkspaceOut = nullptr) {
+    if (persistentWorkspaceOut != nullptr) *persistentWorkspaceOut = false;
     const char* enableEnv0313 = std::getenv("MPCD_CUDA_INACTIVE_TAIL_POOL_0313");
     if (enableEnv0313 != nullptr && !env_truthy_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_0313")) return false;
     if (n == 0u || need == 0u || dRole == nullptr || dInactiveIndicesOut == nullptr || inactiveCountOut == nullptr) return false;
     const std::uint64_t tailScan = inactive_tail_scan_count_0313(n, need);
     if (tailScan == 0u || tailScan > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) return false;
+
+    const bool persistent0493x9dFix1 = neumann_resident_opt_0493x9d_fix1_enabled();
     std::uint64_t* dInactiveIndices = nullptr;
     unsigned int* dInactiveCount = nullptr;
-    check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(tailScan)),
-                    "allocate 0313 inactive tail index pool");
-    check_cuda_0263(cudaMalloc(&dInactiveCount, sizeof(unsigned int)),
-                    "allocate 0313 inactive tail count");
+    if (persistent0493x9dFix1) {
+        InactiveTailPoolWorkspace0493x9dFix1& w = inactive_tail_pool_workspace_0493x9d_fix1();
+        if (w.indices == nullptr || w.capacity < tailScan) {
+            if (w.indices != nullptr)
+                check_cuda_0263(cudaFree(w.indices),
+                                "resize 0493x9d-fix1 inactive tail index pool");
+            check_cuda_0263(cudaMalloc(
+                &w.indices, sizeof(std::uint64_t) * static_cast<std::size_t>(tailScan)),
+                "allocate 0493x9d-fix1 inactive tail index pool");
+            w.capacity = tailScan;
+        }
+        if (w.count == nullptr) {
+            check_cuda_0263(cudaMalloc(&w.count, sizeof(unsigned int)),
+                            "allocate 0493x9d-fix1 inactive tail count");
+        }
+        dInactiveIndices = w.indices;
+        dInactiveCount = w.count;
+    } else {
+        check_cuda_0263(cudaMalloc(&dInactiveIndices, sizeof(std::uint64_t) * static_cast<std::size_t>(tailScan)),
+                        "allocate 0313 inactive tail index pool");
+        check_cuda_0263(cudaMalloc(&dInactiveCount, sizeof(unsigned int)),
+                        "allocate 0313 inactive tail count");
+    }
+
     check_cuda_0263(cudaMemset(dInactiveCount, 0, sizeof(unsigned int)),
-                    "clear 0313 inactive tail count");
+                    persistent0493x9dFix1
+                        ? "clear 0493x9d-fix1 inactive tail count"
+                        : "clear 0313 inactive tail count");
     const int block = std::max(32, threads);
     const std::uint64_t blocks64 = (tailScan + static_cast<std::uint64_t>(block) - 1u) / static_cast<std::uint64_t>(block);
     if (blocks64 > static_cast<std::uint64_t>(2147483647)) {
-        cudaFree(dInactiveIndices);
-        cudaFree(dInactiveCount);
+        if (!persistent0493x9dFix1) {
+            cudaFree(dInactiveIndices);
+            cudaFree(dInactiveCount);
+        }
         throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0313 inactive tail pool launch");
     }
     io_collect_tail_inactive_slots_kernel_0313<<<static_cast<unsigned int>(blocks64), block>>>(
@@ -2228,16 +3848,223 @@ bool collect_tail_inactive_pool_0313(std::uint64_t n,
     unsigned int count = 0u;
     check_cuda_0263(cudaMemcpy(&count, dInactiveCount, sizeof(unsigned int), cudaMemcpyDeviceToHost),
                     "copy 0313 inactive tail count");
-    cudaFree(dInactiveCount);
+    if (!persistent0493x9dFix1) cudaFree(dInactiveCount);
     if (count < need && !env_truthy_0263("MPCD_CUDA_INACTIVE_TAIL_POOL_NO_FALLBACK_0313")) {
-        cudaFree(dInactiveIndices);
+        if (!persistent0493x9dFix1) cudaFree(dInactiveIndices);
         return false;
     }
     *dInactiveIndicesOut = dInactiveIndices;
     *inactiveCountOut = count;
+    if (persistentWorkspaceOut != nullptr) *persistentWorkspaceOut = persistent0493x9dFix1;
     return true;
 }
 
+// 0493x9e: build an insertion pool without scanning role[] over the inactive
+// tail.  Slots deleted during the boundary pass are recycled first.  Any
+// additional slots come from the compact inactive tail starting at oldActive.
+// The previous timestep's targeted repair (or exact 0315c fallback) guarantees
+// that this tail is inactive; each chosen slot is nevertheless checked on GPU.
+__global__ void io_build_recycled_inactive_pool_kernel_0493x9e(
+    std::uint64_t need,
+    std::uint64_t oldActive,
+    std::uint64_t nTotal,
+    const unsigned char* __restrict__ role,
+    unsigned char inactiveRole,
+    const std::uint64_t* __restrict__ deletedIndices,
+    const unsigned int* __restrict__ deletedCount,
+    std::uint64_t* __restrict__ poolIndices,
+    CudaClassicSrcIoCounters0263* counters)
+{
+    const std::uint64_t j = static_cast<std::uint64_t>(blockIdx.x) *
+                            static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    if (j >= need) return;
+    const unsigned int dRaw = deletedCount != nullptr ? *deletedCount : 0u;
+    const std::uint64_t dRaw64 = static_cast<std::uint64_t>(dRaw);
+    const std::uint64_t d = dRaw64 < need ? dRaw64 : need;
+    std::uint64_t slot = nTotal;
+    if (j < d) {
+        slot = deletedIndices[j];
+    } else {
+        slot = oldActive + (j - d);
+    }
+    if (slot >= nTotal || role[slot] != inactiveRole) {
+        poolIndices[j] = nTotal;
+        atomicMax(&counters->overflowFlag, 32);
+        return;
+    }
+    poolIndices[j] = slot;
+}
+
+std::uint64_t* build_recycled_inactive_pool_0493x9e(
+    std::uint64_t need,
+    std::uint64_t oldActive,
+    const CudaParticleDeviceView& view,
+    unsigned char inactiveRole,
+    CudaClassicSrcIoCounters0263* dCounters,
+    int threads)
+{
+    if (need == 0u) return nullptr;
+    if (need > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max()))
+        throw std::runtime_error("0493x9e recycle-pool need exceeds unsigned int");
+    NeumannRecycleWorkspace0493x9e& w = neumann_recycle_workspace_0493x9e();
+    std::uint64_t* pool = ensure_neumann_recycle_pool_0493x9e(need);
+    const int block = std::max(32, threads);
+    const std::uint64_t blocks64 =
+        (need + static_cast<std::uint64_t>(block) - 1u) /
+        static_cast<std::uint64_t>(block);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647))
+        throw std::runtime_error("0493x9e recycle-pool launch too large");
+    io_build_recycled_inactive_pool_kernel_0493x9e<<<
+        static_cast<unsigned int>(blocks64), block>>>(
+        need, oldActive, view.n, view.role, inactiveRole,
+        w.deletedIndices, w.deletedCount, pool, dCounters);
+    check_cuda_0263(cudaGetLastError(),
+                    "io_build_recycled_inactive_pool_kernel_0493x9e launch");
+    return pool;
+}
+
+__device__ inline void io_swap_particle_slots_device_0493x9e_fix3(
+    std::uint64_t a, std::uint64_t b,
+    double* x, double* y, double* vx, double* vy, double* mass,
+    std::uint32_t* type, unsigned char* role)
+{
+    if (a == b) return;
+    double td = x[a]; x[a] = x[b]; x[b] = td;
+    td = y[a]; y[a] = y[b]; y[b] = td;
+    td = vx[a]; vx[a] = vx[b]; vx[b] = td;
+    td = vy[a]; vy[a] = vy[b]; vy[b] = td;
+    td = mass[a]; mass[a] = mass[b]; mass[b] = td;
+    std::uint32_t tt = type[a]; type[a] = type[b]; type[b] = tt;
+    unsigned char tr = role[a]; role[a] = role[b]; role[b] = tr;
+}
+
+// 0493x9e-fix3: exact targeted prefix repair on the x9e recycle path.
+// The previous step ends compact. New holes can only be recorded deletions or,
+// for net growth, gaps in the bounded pool tail. Donors can only live in the
+// same bounded tail. Lowest holes are paired with highest donors, matching the
+// ordering of the exact 0315c swap repair. Large atypical work falls back.
+__global__ void io_targeted_prefix_repair_kernel_0493x9e_fix3(
+    std::uint64_t nTotal, std::uint64_t oldActive, std::uint64_t expectedActive,
+    std::uint64_t repairUpper, const std::uint64_t* __restrict__ deletedIndices,
+    const unsigned int* __restrict__ deletedCountDevice,
+    std::uint64_t expectedDeletedCount, unsigned long long maxWork,
+    double* x, double* y, double* vx, double* vy, double* mass,
+    std::uint32_t* type, unsigned char* role, unsigned char fluidRole,
+    int* status)
+{
+    if (blockIdx.x != 0 || threadIdx.x != 0 || status == nullptr) return;
+    *status = 0;
+    if (expectedActive > nTotal || oldActive > nTotal || repairUpper > nTotal ||
+        repairUpper < expectedActive || deletedIndices == nullptr ||
+        deletedCountDevice == nullptr) {
+        *status = 2; return;
+    }
+    const std::uint64_t deletedCount = static_cast<std::uint64_t>(*deletedCountDevice);
+    if (deletedCount != expectedDeletedCount) { *status = 10; return; }
+    if (deletedCount > oldActive) { *status = 3; return; }
+
+    const std::uint64_t oldPrefixLimit = expectedActive < oldActive ? expectedActive : oldActive;
+    unsigned long long holes = 0ULL;
+    for (std::uint64_t j = 0; j < deletedCount; ++j) {
+        const std::uint64_t s = deletedIndices[j];
+        if (s >= oldActive) { *status = 4; return; }
+        if (s < oldPrefixLimit && role[s] != fluidRole) ++holes;
+    }
+    if (expectedActive > oldActive) {
+        for (std::uint64_t s = oldActive; s < expectedActive; ++s)
+            if (role[s] != fluidRole) ++holes;
+    }
+    unsigned long long donors = 0ULL;
+    for (std::uint64_t s = expectedActive; s < repairUpper; ++s)
+        if (role[s] == fluidRole) ++donors;
+
+    const unsigned long long searchWidth = static_cast<unsigned long long>(deletedCount) +
+        static_cast<unsigned long long>(expectedActive > oldActive ? expectedActive - oldActive : 0u);
+    const unsigned long long work = holes > 0ULL && searchWidth > 0ULL && holes > (~0ULL / searchWidth)
+        ? ~0ULL : holes * searchWidth;
+    if (holes != donors) { *status = 6; return; }
+    if (work > maxWork) { *status = 5; return; }
+
+    std::uint64_t donorCursor = repairUpper;
+    for (;;) {
+        std::uint64_t minHole = expectedActive;
+        for (std::uint64_t j = 0; j < deletedCount; ++j) {
+            const std::uint64_t s = deletedIndices[j];
+            if (s < oldPrefixLimit && role[s] != fluidRole && s < minHole) minHole = s;
+        }
+        if (expectedActive > oldActive && minHole == expectedActive) {
+            for (std::uint64_t s = oldActive; s < expectedActive; ++s) {
+                if (role[s] != fluidRole) { minHole = s; break; }
+            }
+        }
+        if (minHole == expectedActive) break;
+        bool foundDonor = false;
+        while (donorCursor > expectedActive) {
+            --donorCursor;
+            if (role[donorCursor] == fluidRole) { foundDonor = true; break; }
+        }
+        if (!foundDonor) { *status = 7; return; }
+        io_swap_particle_slots_device_0493x9e_fix3(
+            minHole, donorCursor, x, y, vx, vy, mass, type, role);
+    }
+
+    // Production correctness check over the only regions this step could have
+    // changed.  This is intentionally retained: it is O(mutation support), not
+    // the removed O(Nactive) qualification oracle.
+    for (std::uint64_t j = 0; j < deletedCount; ++j) {
+        const std::uint64_t s = deletedIndices[j];
+        if (s < oldPrefixLimit && role[s] != fluidRole) { *status = 8; return; }
+    }
+    if (expectedActive > oldActive) {
+        for (std::uint64_t s = oldActive; s < expectedActive; ++s) {
+            if (role[s] != fluidRole) { *status = 8; return; }
+        }
+    }
+    for (std::uint64_t s = expectedActive; s < repairUpper; ++s) {
+        if (role[s] == fluidRole) { *status = 9; return; }
+    }
+    *status = 1;
+}
+
+bool try_targeted_prefix_repair_0493x9e_fix3(
+    CudaParticleState& gpuState, ParticleState& state,
+    std::uint64_t oldActive, std::uint64_t expectedActive,
+    std::uint64_t recyclePoolNeed, std::uint64_t expectedDeleted,
+    CudaParticleStateDiagnostics& diag, int& hostStatus)
+{
+    CudaParticleDeviceView view = gpuState.device_view();
+    NeumannRecycleWorkspace0493x9e& w = neumann_recycle_workspace_0493x9e();
+    hostStatus = 0;
+    if (w.targetedRepairStatus0493x9eFix3 == nullptr || w.deletedIndices == nullptr ||
+        w.deletedCount == nullptr) return false;
+    if (recyclePoolNeed == 0u) return false;
+    if (expectedActive > view.n || oldActive > view.n || expectedDeleted > oldActive) return false;
+    const std::uint64_t recycledHead = std::min<std::uint64_t>(expectedDeleted, recyclePoolNeed);
+    const std::uint64_t tailExtent = recyclePoolNeed - recycledHead;
+    if (tailExtent > view.n - oldActive) return false;
+    const std::uint64_t repairUpper = oldActive + tailExtent;
+    if (expectedActive > repairUpper) return false;
+    static const unsigned long long maxWork = static_cast<unsigned long long>(std::max(
+        1000, env_int_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_TARGETED_REPAIR_MAX_WORK_0493X9E_FIX3", 4000000)));
+    const auto t0 = Clock::now();
+    io_targeted_prefix_repair_kernel_0493x9e_fix3<<<1, 1>>>(
+        view.n, oldActive, expectedActive, repairUpper, w.deletedIndices,
+        w.deletedCount, expectedDeleted, maxWork,
+        view.x, view.y, view.vx, view.vy, view.mass,
+        view.type, view.role, kParticleRoleFluid, w.targetedRepairStatus0493x9eFix3);
+    check_cuda_0263(cudaGetLastError(), "io_targeted_prefix_repair_kernel_0493x9e_fix3 launch");
+    check_cuda_0263(cudaMemcpy(&hostStatus, w.targetedRepairStatus0493x9eFix3,
+                              sizeof(hostStatus), cudaMemcpyDeviceToHost),
+                    "copy 0493x9e-fix3 targeted-repair status");
+    if (hostStatus != 1) return false;
+
+    gpuState.set_active_fluid_size(expectedActive);
+    state.NactiveFluid = expectedActive;
+    diag.kernelSeconds += elapsed_0263(t0, Clock::now());
+    diag.particles = expectedActive; diag.capacity = view.capacity;
+    return true;
+}
 
 // 0315c: device-side active-fluid prefix repair used after inlet/outlet
 // mutations. It replaces the 0315b-fix02 host roundtrip. 0315c-fix04 counts
@@ -3448,7 +5275,63 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     {
         std::string mode0493x8q = params.openBoundaryOutletMode;
         std::replace(mode0493x8q.begin(), mode0493x8q.end(), '-', '_');
-        cfg.outletNeumannKinetic0493x8q = mode0493x8q == "neumann" ? 1 : 0;
+        // Diagnostic ablation gate: preserve the qualified Neumann pressure/Q6
+        // boundary while disabling only the x8q kinetic exterior continuation.
+        // OFF by default, so existing runners are bit-for-bit unchanged unless
+        // the dedicated environment variable is explicitly enabled.
+        const bool disableKinetic0493x8q =
+            env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_KINETIC_0493X8Q_DISABLE");
+        cfg.outletNeumannKinetic0493x8q =
+            (mode0493x8q == "neumann" && !disableKinetic0493x8q) ? 1 : 0;
+        cfg.outletNeumannPressureReservoir0493x8y =
+            (cfg.outletNeumannKinetic0493x8q &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y")) ? 1 : 0;
+        cfg.outletNeumannNoBackflowReservoir0493x8z =
+            (cfg.outletNeumannPressureReservoir0493x8y &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_NO_BACKFLOW_0493X8Z")) ? 1 : 0;
+        cfg.outletNeumannZeroDriftOnBackflow0493x9a =
+            (cfg.outletNeumannNoBackflowReservoir0493x8z &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_ZERO_DRIFT_ON_BACKFLOW_0493X9A")) ? 1 : 0;
+        cfg.outletNeumannLiquidType0493x9b = env_int_0263(
+            "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_TYPE_0493X9B", -1);
+        cfg.outletNeumannLiquidStrictOutflow0493x9b =
+            (cfg.outletNeumannZeroDriftOnBackflow0493x9a &&
+             cfg.outletNeumannLiquidType0493x9b >= 0 &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_LIQUID_STRICT_OUTFLOW_0493X9B")) ? 1 : 0;
+        cfg.outletNeumannVirtualReservoir0493x8x =
+            (cfg.outletNeumannKinetic0493x8q &&
+             (cfg.outletNeumannPressureReservoir0493x8y ||
+              env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X"))) ? 1 : 0;
+        cfg.outletNeumannReservoirTargetOccupancy0493x8y =
+            static_cast<double>(std::max(0, env_int_0263(
+                "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_PRESSURE_RESERVOIR_0493X8Y_TARGET_OCCUPANCY",
+                cfg.inletTargetOccupancy)));
+        if (cfg.outletNeumannPressureReservoir0493x8y &&
+            !(cfg.outletNeumannReservoirTargetOccupancy0493x8y > 0.0)) {
+            throw std::runtime_error(
+                "0493x8y pressure-reservoir Neumann requires positive target occupancy");
+        }
+        cfg.outletNeumannReservoirLayers0493x8x = std::max(
+            1, std::min(4, env_int_0263(
+                "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_LAYERS", 2)));
+        cfg.outletNeumannReservoirCoarseLayers0493x8x = std::max(
+            1, std::min(32, env_int_0263(
+                "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_RESERVOIR_0493X8X_COARSE_LAYERS", 8)));
+        cfg.outletNeumannVirtualCells0493x8w =
+            (cfg.outletNeumannKinetic0493x8q &&
+             !cfg.outletNeumannVirtualReservoir0493x8x &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W")) ? 1 : 0;
+        cfg.outletNeumannVirtualLayers0493x8w = std::max(
+            1, std::min(4, env_int_0263(
+                "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_VIRTUAL_CELLS_0493X8W_LAYERS", 2)));
+        cfg.outletNeumannReplica0493x8v =
+            (cfg.outletNeumannKinetic0493x8q &&
+             !cfg.outletNeumannVirtualReservoir0493x8x &&
+             !cfg.outletNeumannVirtualCells0493x8w &&
+             env_truthy_0263("MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V")) ? 1 : 0;
+        cfg.outletNeumannReplicaSourceLayers0493x8v = std::min(
+            4, env_int_0263(
+                "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_REPLICA_0493X8V_SOURCE_LAYERS", 1));
     }
     cfg.outletForcedMassPerStep = std::max(0.0, params.openBoundaryOutletForcedMassPerStep);
     if (params.openBoundaryOutletForcedMassFlux > 0.0) {
@@ -3609,7 +5492,10 @@ void maybe_apply_forced_outlet_extraction_0291(
     const CudaClassicSrcIoFullfaceConfig0263& cfg,
     CudaClassicSrcIoCounters0263* dCounters,
     const char* context,
-    unsigned long long equilibriumPredictedInletInsertions = 0ULL)
+    unsigned long long equilibriumPredictedInletInsertions = 0ULL,
+    std::uint64_t* recycleDeletedIndices0493x9e = nullptr,
+    unsigned int* recycleDeletedCount0493x9e = nullptr,
+    std::uint64_t recycleDeletedCapacity0493x9e = 0u)
 {
     const std::uint64_t nActiveFluid = view.nActiveFluid;
     if (cfg.outletRegimeCode == 0 || nActiveFluid == 0u) return;
@@ -3651,7 +5537,9 @@ void maybe_apply_forced_outlet_extraction_0291(
     }
     io_forced_outlet_extraction_kernel_0291<<<static_cast<unsigned int>(blocks64), threads>>>(
         nActiveFluid, view.x, view.y, view.mass, view.role,
-        kParticleRoleFluid, kParticleRoleInactive, cfg, dBudget, dCounters);
+        kParticleRoleFluid, kParticleRoleInactive, cfg, dBudget, dCounters,
+        recycleDeletedIndices0493x9e, recycleDeletedCount0493x9e,
+        recycleDeletedCapacity0493x9e);
     check_cuda_0263(cudaGetLastError(), context);
     check_cuda_0263(cudaFree(dBudget), "free forced outlet budget 0291");
 }
@@ -3735,16 +5623,513 @@ struct NeumannGhostWorkspace0493x8q {
     CudaNeumannBathMoments0493x8q* bath = nullptr;
     unsigned int bathCells = 0u;
     unsigned int bathCapacity = 0u;
+
+    // 0493x8r device metadata. speciesCount==0 means dispatch the untouched
+    // legacy x8q path.
+    std::uint32_t* speciesTypes0493x8r = nullptr;
+    double* speciesFallbackKBT0493x8r = nullptr;
+    unsigned int speciesCount0493x8r = 0u;
+    unsigned int speciesCapacity0493x8r = 0u;
+
+    // 0493x8v uses a separate lightweight candidate buffer: no bath moments.
+    CudaNeumannReplicaCandidate0493x8v* replicaCandidates0493x8v = nullptr;
+    unsigned int* replicaCount0493x8v = nullptr;
+    unsigned int replicaCapacity0493x8v = 0u;
+    int replicaActive0493x8v = 0;
+
+    // 0493x8w virtual-cell workspace. The exterior population itself is
+    // ephemeral: only moments and the particles that actually cross inward
+    // are stored. This is semantically a virtual-cell population without
+    // consuming resident inactive slots for particles that stay outside.
+    CudaNeumannVirtualCellMoments0493x8w* virtualMoments0493x8w = nullptr;
+    unsigned int virtualMomentEntries0493x8w = 0u;
+    unsigned int virtualMomentCapacity0493x8w = 0u;
+    CudaNeumannVirtualCellCandidate0493x8w* virtualCandidates0493x8w = nullptr;
+    unsigned int* virtualCount0493x8w = nullptr;
+    unsigned int virtualCapacity0493x8w = 0u;
+    std::uint32_t* virtualSpeciesTypes0493x8w = nullptr;
+    double* virtualSpeciesFallbackKBT0493x8w = nullptr;
+    unsigned int virtualSpeciesCount0493x8w = 0u;
+    unsigned int virtualSpeciesCapacity0493x8w = 0u;
+    int virtualCellsActive0493x8w = 0;
+
+    // 0493x8x coarse-grained virtual-reservoir workspace.
+    CudaNeumannVirtualReservoirMoments0493x8x* reservoirMoments0493x8x = nullptr;
+    unsigned int reservoirMomentEntries0493x8x = 0u;
+    unsigned int reservoirMomentCapacity0493x8x = 0u;
+    CudaNeumannVirtualCellCandidate0493x8w* reservoirCandidates0493x8x = nullptr;
+    unsigned int* reservoirCount0493x8x = nullptr;
+    unsigned int reservoirCapacity0493x8x = 0u;
+    std::uint32_t* reservoirSpeciesTypes0493x8x = nullptr;
+    double* reservoirSpeciesFallbackKBT0493x8x = nullptr;
+    unsigned int reservoirSpeciesCount0493x8x = 0u;
+    unsigned int reservoirSpeciesCapacity0493x8x = 0u;
+    int reservoirActive0493x8x = 0;
 };
 
 
 NeumannGhostWorkspace0493x8q prepare_neumann_ghost_candidates_0493x8q(
     const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    const SimulationParams& params,
     std::uint64_t nActiveFluid)
 {
     static NeumannGhostWorkspace0493x8q cached{};
     if (!cfg.outletNeumannKinetic0493x8q || nActiveFluid == 0ULL)
         return NeumannGhostWorkspace0493x8q{};
+
+    // x8x/x8w are explicit experimental opt-ins and require a strict registry:
+    // every transported physical type must have a well-defined exterior identity
+    // and a per-species thermal fallback. x8x has precedence over x8w.
+    const bool reservoirActive0493x8x =
+        cfg.outletNeumannVirtualReservoir0493x8x != 0;
+    const bool virtualCellsActive0493x8w =
+        !reservoirActive0493x8x && cfg.outletNeumannVirtualCells0493x8w != 0;
+    if ((reservoirActive0493x8x || virtualCellsActive0493x8w) &&
+        !(params.speciesRegistryEnable && params.speciesRequireRegisteredTypes &&
+          !params.speciesDefinitions.empty())) {
+        throw std::runtime_error(
+            reservoirActive0493x8x
+                ? "0493x8x virtual-reservoir Neumann requires strict species registry"
+                : "0493x8w virtual-cell Neumann requires strict species registry");
+    }
+
+    // Automatic x8r selection requires a strict multi-species registry. This
+    // makes an unregistered transported type impossible by contract. The
+    // disable switch provides a direct legacy-x8q A/B control.
+    const bool replicaActive0493x8v =
+        !reservoirActive0493x8x && !virtualCellsActive0493x8w &&
+        cfg.outletNeumannReplica0493x8v != 0;
+    const bool speciesResolved0493x8r =
+        !reservoirActive0493x8x && !virtualCellsActive0493x8w &&
+        !replicaActive0493x8v &&
+        params.speciesRegistryEnable && params.speciesRequireRegisteredTypes &&
+        params.speciesDefinitions.size() > 1u &&
+        !env_truthy_0263(
+            "MPCD_CUDA_OPEN_BOUNDARY_NEUMANN_SPECIES_0493X8R_DISABLE");
+    const std::size_t speciesCountSize0493x8r = speciesResolved0493x8r
+        ? params.speciesDefinitions.size() : 0u;
+    if (speciesCountSize0493x8r >
+        static_cast<std::size_t>(std::numeric_limits<unsigned int>::max()))
+        throw std::runtime_error(
+            "0493x8r Neumann species count exceeds unsigned int");
+    const unsigned int speciesCount0493x8r =
+        static_cast<unsigned int>(speciesCountSize0493x8r);
+
+    if (speciesCount0493x8r > 0u) {
+        if (cached.speciesCapacity0493x8r < speciesCount0493x8r ||
+            cached.speciesTypes0493x8r == nullptr ||
+            cached.speciesFallbackKBT0493x8r == nullptr) {
+            if (cached.speciesTypes0493x8r)
+                check_cuda_0263(cudaFree(cached.speciesTypes0493x8r),
+                                "resize 0493x8r Neumann species types");
+            if (cached.speciesFallbackKBT0493x8r)
+                check_cuda_0263(cudaFree(cached.speciesFallbackKBT0493x8r),
+                                "resize 0493x8r Neumann species kBT");
+            check_cuda_0263(cudaMalloc(
+                &cached.speciesTypes0493x8r,
+                sizeof(std::uint32_t) *
+                    static_cast<std::size_t>(speciesCount0493x8r)),
+                "allocate 0493x8r Neumann species types");
+            check_cuda_0263(cudaMalloc(
+                &cached.speciesFallbackKBT0493x8r,
+                sizeof(double) *
+                    static_cast<std::size_t>(speciesCount0493x8r)),
+                "allocate 0493x8r Neumann species kBT");
+            cached.speciesCapacity0493x8r = speciesCount0493x8r;
+        }
+
+        std::vector<std::uint32_t> typesH(speciesCount0493x8r);
+        std::vector<double> kbtH(speciesCount0493x8r);
+        const double inheritedTarget = params.thermostatTargetKBT > 0.0
+            ? params.thermostatTargetKBT : params.kBT;
+        for (unsigned int s = 0u; s < speciesCount0493x8r; ++s) {
+            const SpeciesDefinition& d =
+                params.speciesDefinitions[static_cast<std::size_t>(s)];
+            typesH[s] = d.type;
+            double target = cfg.inletKBT;
+            if (params.speciesThermostatEnable) {
+                target = d.thermostatTargetKBTDeclared > 0.0
+                    ? d.thermostatTargetKBTDeclared : inheritedTarget;
+            }
+            kbtH[s] = std::isfinite(target) && target > 0.0 ? target : 0.0;
+        }
+        check_cuda_0263(cudaMemcpy(
+            cached.speciesTypes0493x8r, typesH.data(),
+            sizeof(std::uint32_t) *
+                static_cast<std::size_t>(speciesCount0493x8r),
+            cudaMemcpyHostToDevice),
+            "upload 0493x8r Neumann species types");
+        check_cuda_0263(cudaMemcpy(
+            cached.speciesFallbackKBT0493x8r, kbtH.data(),
+            sizeof(double) * static_cast<std::size_t>(speciesCount0493x8r),
+            cudaMemcpyHostToDevice),
+            "upload 0493x8r Neumann species kBT");
+    }
+    cached.speciesCount0493x8r = speciesCount0493x8r;
+
+    if (reservoirActive0493x8x) {
+        const std::size_t scSize = params.speciesDefinitions.size();
+        if (scSize > static_cast<std::size_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8x virtual-reservoir species count exceeds unsigned int");
+        const unsigned int sc = static_cast<unsigned int>(scSize);
+        bool reservoirMetadataReallocated0493x9dFix1 = false;
+        if (cached.reservoirSpeciesCapacity0493x8x < sc ||
+            cached.reservoirSpeciesTypes0493x8x == nullptr ||
+            cached.reservoirSpeciesFallbackKBT0493x8x == nullptr) {
+            if (cached.reservoirSpeciesTypes0493x8x)
+                check_cuda_0263(cudaFree(cached.reservoirSpeciesTypes0493x8x),
+                                "resize 0493x8x reservoir species types");
+            if (cached.reservoirSpeciesFallbackKBT0493x8x)
+                check_cuda_0263(cudaFree(cached.reservoirSpeciesFallbackKBT0493x8x),
+                                "resize 0493x8x reservoir species kBT");
+            check_cuda_0263(cudaMalloc(
+                &cached.reservoirSpeciesTypes0493x8x,
+                sizeof(std::uint32_t) * static_cast<std::size_t>(sc)),
+                "allocate 0493x8x reservoir species types");
+            check_cuda_0263(cudaMalloc(
+                &cached.reservoirSpeciesFallbackKBT0493x8x,
+                sizeof(double) * static_cast<std::size_t>(sc)),
+                "allocate 0493x8x reservoir species kBT");
+            cached.reservoirSpeciesCapacity0493x8x = sc;
+            reservoirMetadataReallocated0493x9dFix1 = true;
+        }
+
+        std::vector<std::uint32_t> typesH(sc);
+        std::vector<double> kbtH(sc);
+        const double inheritedTarget = params.thermostatTargetKBT > 0.0
+            ? params.thermostatTargetKBT : params.kBT;
+        for (unsigned int si = 0u; si < sc; ++si) {
+            const SpeciesDefinition& d =
+                params.speciesDefinitions[static_cast<std::size_t>(si)];
+            typesH[si] = d.type;
+            double target = cfg.inletKBT;
+            if (params.speciesThermostatEnable) {
+                target = d.thermostatTargetKBTDeclared > 0.0
+                    ? d.thermostatTargetKBTDeclared : inheritedTarget;
+            }
+            kbtH[si] = std::isfinite(target) && target > 0.0 ? target : 0.0;
+        }
+        // 0493x9d-fix1: these arrays are invariant in the atomizer and normally
+        // invariant in a run.  Keep a host mirror and skip the two tiny H->D
+        // copies unless the species configuration actually changes.
+        static std::vector<std::uint32_t> cachedTypesH0493x9dFix1;
+        static std::vector<double> cachedKbtH0493x9dFix1;
+        const bool metadataChanged0493x9dFix1 =
+            reservoirMetadataReallocated0493x9dFix1 ||
+            cachedTypesH0493x9dFix1 != typesH || cachedKbtH0493x9dFix1 != kbtH;
+        if (!neumann_resident_opt_0493x9d_fix1_enabled() || metadataChanged0493x9dFix1) {
+            check_cuda_0263(cudaMemcpy(
+                cached.reservoirSpeciesTypes0493x8x, typesH.data(),
+                sizeof(std::uint32_t) * static_cast<std::size_t>(sc),
+                cudaMemcpyHostToDevice),
+                "upload 0493x8x reservoir species types");
+            check_cuda_0263(cudaMemcpy(
+                cached.reservoirSpeciesFallbackKBT0493x8x, kbtH.data(),
+                sizeof(double) * static_cast<std::size_t>(sc),
+                cudaMemcpyHostToDevice),
+                "upload 0493x8x reservoir species kBT");
+            if (neumann_resident_opt_0493x9d_fix1_enabled()) {
+                cachedTypesH0493x9dFix1 = typesH;
+                cachedKbtH0493x9dFix1 = kbtH;
+            }
+        }
+        cached.reservoirSpeciesCount0493x8x = sc;
+
+        const unsigned int spatial = neumann_virtual_spatial_count_0493x8w(cfg);
+        const std::uint64_t entries64 =
+            static_cast<std::uint64_t>(spatial) * static_cast<std::uint64_t>(sc);
+        if (entries64 > static_cast<std::uint64_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8x virtual-reservoir moment size exceeds unsigned int");
+        const unsigned int entries = static_cast<unsigned int>(entries64);
+        if (cached.reservoirMomentCapacity0493x8x < entries ||
+            cached.reservoirMoments0493x8x == nullptr) {
+            if (cached.reservoirMoments0493x8x)
+                check_cuda_0263(cudaFree(cached.reservoirMoments0493x8x),
+                                "resize 0493x8x reservoir moments");
+            check_cuda_0263(cudaMalloc(
+                &cached.reservoirMoments0493x8x,
+                sizeof(CudaNeumannVirtualReservoirMoments0493x8x) *
+                    static_cast<std::size_t>(entries)),
+                "allocate 0493x8x reservoir moments");
+            cached.reservoirMomentCapacity0493x8x = entries;
+        }
+        cached.reservoirMomentEntries0493x8x = entries;
+        check_cuda_0263(cudaMemset(
+            cached.reservoirMoments0493x8x, 0,
+            sizeof(CudaNeumannVirtualReservoirMoments0493x8x) *
+                static_cast<std::size_t>(entries)),
+            "clear 0493x8x reservoir moments");
+
+        const std::uint64_t layers = static_cast<std::uint64_t>(
+            std::max(1, cfg.outletNeumannReservoirLayers0493x8x));
+        const std::uint64_t perSpatial = static_cast<std::uint64_t>(
+            std::max(64, 8 * std::max(1, cfg.inletTargetOccupancy) *
+                             static_cast<int>(layers)));
+        const std::uint64_t cap64 = std::max<std::uint64_t>(
+            1024ULL, static_cast<std::uint64_t>(spatial) * perSpatial);
+        if (cap64 > static_cast<std::uint64_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8x reservoir candidate capacity exceeds unsigned int");
+        const unsigned int cap = static_cast<unsigned int>(cap64);
+        if (cached.reservoirCapacity0493x8x < cap ||
+            cached.reservoirCandidates0493x8x == nullptr) {
+            if (cached.reservoirCandidates0493x8x)
+                check_cuda_0263(cudaFree(cached.reservoirCandidates0493x8x),
+                                "resize 0493x8x reservoir candidates");
+            check_cuda_0263(cudaMalloc(
+                &cached.reservoirCandidates0493x8x,
+                sizeof(CudaNeumannVirtualCellCandidate0493x8w) *
+                    static_cast<std::size_t>(cap)),
+                "allocate 0493x8x reservoir candidates");
+            cached.reservoirCapacity0493x8x = cap;
+        }
+        if (cached.reservoirCount0493x8x == nullptr) {
+            check_cuda_0263(cudaMalloc(
+                &cached.reservoirCount0493x8x, sizeof(unsigned int)),
+                "allocate 0493x8x reservoir candidate count");
+        }
+        check_cuda_0263(cudaMemset(
+            cached.reservoirCount0493x8x, 0, sizeof(unsigned int)),
+            "clear 0493x8x reservoir candidate count");
+
+        cached.reservoirActive0493x8x = 1;
+        cached.virtualCellsActive0493x8w = 0;
+        cached.replicaActive0493x8v = 0;
+        cached.speciesCount0493x8r = 0u;
+        cached.bathCells = 0u;
+        static bool announced0493x8x = false;
+        static bool announced0493x8y = false;
+        static bool announced0493x8z = false;
+        static bool announced0493x9a = false;
+        static bool announced0493x9b = false;
+        static bool announced0493x9dFix1 = false;
+        static bool announced0493x9e = false;
+        if (neumann_recycle_pool_0493x9e_enabled() && !announced0493x9e) {
+            std::fprintf(
+                stderr,
+                "[0493x9e-neumann] mode=recycle_deleted_slots physics=x9c_unchanged "
+                "pool=deleted_first_plus_compact_tail prefixRepair=targeted_deleted_list_exact "
+                "fallback=0315c_exact candidateCount=host_exact\n");
+            announced0493x9e = true;
+        }
+        if (neumann_resident_opt_0493x9d_fix1_enabled() && !announced0493x9dFix1) {
+            std::fprintf(
+                stderr,
+                "[0493x9d-fix1-neumann] mode=resident_workspace_exact_counts physics=x9c_unchanged "
+                "counters=persistent tailPool=persistent_exact speciesMetadata=change_only "
+                "preCandidateSync=elided candidateCount=host_exact inactiveCount=host_exact "
+                "launchGeometry=exact candidateBuffer=preserved fallback=legacy_exact\n");
+            announced0493x9dFix1 = true;
+        }
+        if (cfg.outletNeumannLiquidStrictOutflow0493x9b && !announced0493x9b) {
+            std::fprintf(
+                stderr,
+                "[0493x9b-neumann] mode=gas_virtual_pressure_reservoir_liquid_strict_outflow "
+                "liquidType=%d liquidReservoir=off physicalLiquidCrossing=inactive "
+                "gasReservoir=x9a thermalGasInflow=preserved layers=%d coarseLayers=%d "
+                "targetN=%.9g candidateCount=%s pool=%s species=%u\n",
+                cfg.outletNeumannLiquidType0493x9b,
+                cfg.outletNeumannReservoirLayers0493x8x,
+                cfg.outletNeumannReservoirCoarseLayers0493x8x,
+                cfg.outletNeumannReservoirTargetOccupancy0493x8y,
+                neumann_resident_opt_0493x9d_fix1_enabled() ? "host_exact" : "host_legacy",
+                neumann_recycle_pool_0493x9e_enabled() ? "recycle_deleted_plus_tail" :
+                    (neumann_resident_opt_0493x9d_fix1_enabled() ? "persistent_exact_tail" : "legacy"),
+                sc);
+            announced0493x9b = true;
+        } else if (cfg.outletNeumannZeroDriftOnBackflow0493x9a && !announced0493x9a) {
+            std::fprintf(
+                stderr,
+                "[0493x9a-neumann] mode=virtual_pressure_reservoir_zero_drift_on_backflow "
+                "layers=%d coarseLayers=%d support=face_count_fraction "
+                "density=reference_target_occupancy targetN=%.9g population=poisson "
+                "moments=species_coarse backflowGuard=zero_full_mean_drift thermalInflow=preserved "
+                "independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=%u\n",
+                cfg.outletNeumannReservoirLayers0493x8x,
+                cfg.outletNeumannReservoirCoarseLayers0493x8x,
+                cfg.outletNeumannReservoirTargetOccupancy0493x8y, sc);
+            announced0493x9a = true;
+        } else if (cfg.outletNeumannNoBackflowReservoir0493x8z && !announced0493x8z) {
+            std::fprintf(
+                stderr,
+                "[0493x8z-neumann] mode=virtual_pressure_reservoir_no_backflow "
+                "layers=%d coarseLayers=%d support=face_count_fraction "
+                "density=reference_target_occupancy targetN=%.9g population=poisson "
+                "moments=species_coarse normalMean=outward_clamp thermalInflow=preserved "
+                "independent=1 residentOutside=0 hostCountSync=legacy pool=legacy species=%u\n",
+                cfg.outletNeumannReservoirLayers0493x8x,
+                cfg.outletNeumannReservoirCoarseLayers0493x8x,
+                cfg.outletNeumannReservoirTargetOccupancy0493x8y, sc);
+            announced0493x8z = true;
+        } else if (cfg.outletNeumannPressureReservoir0493x8y && !announced0493x8y) {
+            std::fprintf(
+                stderr,
+                "[0493x8y-neumann] mode=virtual_pressure_reservoir_cells "
+                "layers=%d coarseLayers=%d support=face_count_fraction "
+                "density=reference_target_occupancy targetN=%.9g population=poisson "
+                "moments=species_coarse independent=1 residentOutside=0 "
+                "hostCountSync=legacy pool=legacy species=%u\n",
+                cfg.outletNeumannReservoirLayers0493x8x,
+                cfg.outletNeumannReservoirCoarseLayers0493x8x,
+                cfg.outletNeumannReservoirTargetOccupancy0493x8y, sc);
+            announced0493x8y = true;
+        } else if (!cfg.outletNeumannPressureReservoir0493x8y && !announced0493x8x) {
+            std::fprintf(
+                stderr,
+                "[0493x8x-neumann] mode=virtual_reservoir_cells "
+                "layers=%d coarseLayers=%d support=face_count_fraction "
+                "density=coarse_total_occupancy population=poisson "
+                "moments=species_coarse independent=1 residentOutside=0 "
+                "hostCountSync=legacy pool=legacy species=%u\n",
+                cfg.outletNeumannReservoirLayers0493x8x,
+                cfg.outletNeumannReservoirCoarseLayers0493x8x, sc);
+            announced0493x8x = true;
+        }
+        return cached;
+    }
+    cached.reservoirActive0493x8x = 0;
+    cached.reservoirSpeciesCount0493x8x = 0u;
+
+    if (virtualCellsActive0493x8w) {
+        const std::size_t scSize = params.speciesDefinitions.size();
+        if (scSize > static_cast<std::size_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8w virtual-cell species count exceeds unsigned int");
+        const unsigned int sc = static_cast<unsigned int>(scSize);
+        if (cached.virtualSpeciesCapacity0493x8w < sc ||
+            cached.virtualSpeciesTypes0493x8w == nullptr ||
+            cached.virtualSpeciesFallbackKBT0493x8w == nullptr) {
+            if (cached.virtualSpeciesTypes0493x8w)
+                check_cuda_0263(cudaFree(cached.virtualSpeciesTypes0493x8w),
+                                "resize 0493x8w virtual species types");
+            if (cached.virtualSpeciesFallbackKBT0493x8w)
+                check_cuda_0263(cudaFree(cached.virtualSpeciesFallbackKBT0493x8w),
+                                "resize 0493x8w virtual species kBT");
+            check_cuda_0263(cudaMalloc(
+                &cached.virtualSpeciesTypes0493x8w,
+                sizeof(std::uint32_t) * static_cast<std::size_t>(sc)),
+                "allocate 0493x8w virtual species types");
+            check_cuda_0263(cudaMalloc(
+                &cached.virtualSpeciesFallbackKBT0493x8w,
+                sizeof(double) * static_cast<std::size_t>(sc)),
+                "allocate 0493x8w virtual species kBT");
+            cached.virtualSpeciesCapacity0493x8w = sc;
+        }
+
+        std::vector<std::uint32_t> typesH(sc);
+        std::vector<double> kbtH(sc);
+        const double inheritedTarget = params.thermostatTargetKBT > 0.0
+            ? params.thermostatTargetKBT : params.kBT;
+        for (unsigned int si = 0u; si < sc; ++si) {
+            const SpeciesDefinition& d =
+                params.speciesDefinitions[static_cast<std::size_t>(si)];
+            typesH[si] = d.type;
+            double target = cfg.inletKBT;
+            if (params.speciesThermostatEnable) {
+                target = d.thermostatTargetKBTDeclared > 0.0
+                    ? d.thermostatTargetKBTDeclared : inheritedTarget;
+            }
+            kbtH[si] = std::isfinite(target) && target > 0.0 ? target : 0.0;
+        }
+        check_cuda_0263(cudaMemcpy(
+            cached.virtualSpeciesTypes0493x8w, typesH.data(),
+            sizeof(std::uint32_t) * static_cast<std::size_t>(sc),
+            cudaMemcpyHostToDevice),
+            "upload 0493x8w virtual species types");
+        check_cuda_0263(cudaMemcpy(
+            cached.virtualSpeciesFallbackKBT0493x8w, kbtH.data(),
+            sizeof(double) * static_cast<std::size_t>(sc),
+            cudaMemcpyHostToDevice),
+            "upload 0493x8w virtual species kBT");
+        cached.virtualSpeciesCount0493x8w = sc;
+
+        const unsigned int spatial = neumann_virtual_spatial_count_0493x8w(cfg);
+        const std::uint64_t entries64 =
+            static_cast<std::uint64_t>(spatial) * static_cast<std::uint64_t>(sc);
+        if (entries64 > static_cast<std::uint64_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8w virtual-cell moment size exceeds unsigned int");
+        const unsigned int entries = static_cast<unsigned int>(entries64);
+        if (cached.virtualMomentCapacity0493x8w < entries ||
+            cached.virtualMoments0493x8w == nullptr) {
+            if (cached.virtualMoments0493x8w)
+                check_cuda_0263(cudaFree(cached.virtualMoments0493x8w),
+                                "resize 0493x8w virtual moments");
+            check_cuda_0263(cudaMalloc(
+                &cached.virtualMoments0493x8w,
+                sizeof(CudaNeumannVirtualCellMoments0493x8w) *
+                    static_cast<std::size_t>(entries)),
+                "allocate 0493x8w virtual moments");
+            cached.virtualMomentCapacity0493x8w = entries;
+        }
+        cached.virtualMomentEntries0493x8w = entries;
+        check_cuda_0263(cudaMemset(
+            cached.virtualMoments0493x8w, 0,
+            sizeof(CudaNeumannVirtualCellMoments0493x8w) *
+                static_cast<std::size_t>(entries)),
+            "clear 0493x8w virtual moments");
+
+        // Candidate capacity is deliberately generous in the physics-first
+        // implementation. It is based on all boundary cells, target occupancy
+        // and virtual depth, not on the total resident particle count.
+        const std::uint64_t layers = static_cast<std::uint64_t>(
+            std::max(1, cfg.outletNeumannVirtualLayers0493x8w));
+        const std::uint64_t perSpatial = static_cast<std::uint64_t>(
+            std::max(64, 8 * std::max(1, cfg.inletTargetOccupancy) *
+                             static_cast<int>(layers)));
+        const std::uint64_t cap64 = std::max<std::uint64_t>(
+            1024ULL, static_cast<std::uint64_t>(spatial) * perSpatial);
+        if (cap64 > static_cast<std::uint64_t>(
+                std::numeric_limits<unsigned int>::max()))
+            throw std::runtime_error(
+                "0493x8w virtual-cell candidate capacity exceeds unsigned int");
+        const unsigned int cap = static_cast<unsigned int>(cap64);
+        if (cached.virtualCapacity0493x8w < cap ||
+            cached.virtualCandidates0493x8w == nullptr) {
+            if (cached.virtualCandidates0493x8w)
+                check_cuda_0263(cudaFree(cached.virtualCandidates0493x8w),
+                                "resize 0493x8w virtual candidates");
+            check_cuda_0263(cudaMalloc(
+                &cached.virtualCandidates0493x8w,
+                sizeof(CudaNeumannVirtualCellCandidate0493x8w) *
+                    static_cast<std::size_t>(cap)),
+                "allocate 0493x8w virtual candidates");
+            cached.virtualCapacity0493x8w = cap;
+        }
+        if (cached.virtualCount0493x8w == nullptr) {
+            check_cuda_0263(cudaMalloc(
+                &cached.virtualCount0493x8w, sizeof(unsigned int)),
+                "allocate 0493x8w virtual candidate count");
+        }
+        check_cuda_0263(cudaMemset(
+            cached.virtualCount0493x8w, 0, sizeof(unsigned int)),
+            "clear 0493x8w virtual candidate count");
+
+        cached.virtualCellsActive0493x8w = 1;
+        cached.replicaActive0493x8v = 0;
+        cached.speciesCount0493x8r = 0u;
+        cached.bathCells = 0u;
+        static bool announced0493x8w = false;
+        if (!announced0493x8w) {
+            std::fprintf(
+                stderr,
+                "[0493x8w-neumann] mode=virtual_cells physics=streamed_independent "
+                "layers=%d sourceCellLayers=1 species=%u "
+                "residentOutside=0 hostCountSync=legacy pool=legacy\n",
+                cfg.outletNeumannVirtualLayers0493x8w, sc);
+            announced0493x8w = true;
+        }
+        return cached;
+    }
+    cached.virtualCellsActive0493x8w = 0;
+    cached.virtualSpeciesCount0493x8w = 0u;
 
     const std::uint64_t boundaryCells =
         static_cast<std::uint64_t>(std::max(cfg.Nx, cfg.Ny));
@@ -3758,6 +6143,45 @@ NeumannGhostWorkspace0493x8q prepare_neumann_ghost_candidates_0493x8q(
             "0493x8q Neumann candidate capacity exceeds unsigned int");
 
     const unsigned int wanted = static_cast<unsigned int>(cap64);
+
+    if (replicaActive0493x8v) {
+        if (cached.replicaCapacity0493x8v < wanted ||
+            cached.replicaCandidates0493x8v == nullptr) {
+            if (cached.replicaCandidates0493x8v)
+                check_cuda_0263(cudaFree(cached.replicaCandidates0493x8v),
+                                "resize 0493x8v Neumann replica candidates");
+            check_cuda_0263(cudaMalloc(
+                &cached.replicaCandidates0493x8v,
+                sizeof(CudaNeumannReplicaCandidate0493x8v) *
+                    static_cast<std::size_t>(wanted)),
+                "allocate 0493x8v Neumann replica candidates");
+            cached.replicaCapacity0493x8v = wanted;
+        }
+        if (cached.replicaCount0493x8v == nullptr) {
+            check_cuda_0263(cudaMalloc(
+                &cached.replicaCount0493x8v, sizeof(unsigned int)),
+                "allocate 0493x8v Neumann replica count");
+        }
+        check_cuda_0263(cudaMemset(
+            cached.replicaCount0493x8v, 0, sizeof(unsigned int)),
+            "clear 0493x8v Neumann replica count");
+        cached.replicaActive0493x8v = 1;
+        cached.speciesCount0493x8r = 0u;
+        cached.bathCells = 0u;
+        static bool announced0493x8v = false;
+        if (!announced0493x8v) {
+            std::fprintf(
+                stderr,
+                "[0493x8v-neumann] mode=microscopic_mirror_replica "
+                "sourceLayers=%d bathMoments=off maxwellFit=off "
+                "phaseSupport=labelled_local_source hostCountSync=legacy\n",
+                cfg.outletNeumannReplicaSourceLayers0493x8v);
+            announced0493x8v = true;
+        }
+        return cached;
+    }
+    cached.replicaActive0493x8v = 0;
+
     if (cached.capacity < wanted || cached.candidates == nullptr) {
         if (cached.candidates)
             check_cuda_0263(cudaFree(cached.candidates),
@@ -3774,7 +6198,16 @@ NeumannGhostWorkspace0493x8q prepare_neumann_ghost_candidates_0493x8q(
                         "allocate 0493x8q Neumann count");
     }
 
-    const unsigned int wantedBath = neumann_bath_cell_count_0493x8q(cfg);
+    const unsigned int spatialBathCount = neumann_bath_cell_count_0493x8q(cfg);
+    const std::uint64_t wantedBath64 =
+        static_cast<std::uint64_t>(spatialBathCount) *
+        static_cast<std::uint64_t>(speciesCount0493x8r > 0u
+            ? speciesCount0493x8r : 1u);
+    if (wantedBath64 > static_cast<std::uint64_t>(
+            std::numeric_limits<unsigned int>::max()))
+        throw std::runtime_error(
+            "0493x8r Neumann bath size exceeds unsigned int");
+    const unsigned int wantedBath = static_cast<unsigned int>(wantedBath64);
     if (cached.bathCapacity < wantedBath || cached.bath == nullptr) {
         if (cached.bath)
             check_cuda_0263(cudaFree(cached.bath),
@@ -3801,11 +6234,161 @@ NeumannGhostWorkspace0493x8q prepare_neumann_ghost_candidates_0493x8q(
 
 
 
+void launch_neumann_virtual_reservoir_accumulate_0493x8x(
+    CudaParticleDeviceView view,
+    std::uint64_t nActiveFluid,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    const NeumannGhostWorkspace0493x8q& w,
+    int threads,
+    const char* label)
+{
+    if (!w.reservoirActive0493x8x ||
+        w.reservoirSpeciesCount0493x8x == 0u || nActiveFluid == 0u) return;
+    const std::uint64_t blocks64 =
+        (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
+        static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647))
+        throw std::runtime_error(
+            "0493x8x virtual-reservoir accumulation grid too large");
+    io_neumann_virtual_reservoir_accumulate_kernel_0493x8x<<<
+        static_cast<unsigned int>(blocks64), threads>>>(
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.mass, view.type,
+        view.role, kParticleRoleFluid, cfg,
+        w.reservoirSpeciesTypes0493x8x, w.reservoirSpeciesCount0493x8x,
+        w.reservoirMoments0493x8x, w.reservoirMomentEntries0493x8x);
+    check_cuda_0263(cudaGetLastError(), label);
+}
+
+void launch_neumann_virtual_cell_accumulate_0493x8w(
+    CudaParticleDeviceView view,
+    std::uint64_t nActiveFluid,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    const NeumannGhostWorkspace0493x8q& w,
+    int threads,
+    const char* label)
+{
+    if (!w.virtualCellsActive0493x8w ||
+        w.virtualSpeciesCount0493x8w == 0u || nActiveFluid == 0u) return;
+    const std::uint64_t blocks64 =
+        (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
+        static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647))
+        throw std::runtime_error(
+            "0493x8w virtual-cell accumulation grid too large");
+    io_neumann_virtual_cell_accumulate_kernel_0493x8w<<<
+        static_cast<unsigned int>(blocks64), threads>>>(
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.mass, view.type,
+        view.role, kParticleRoleFluid, cfg,
+        w.virtualSpeciesTypes0493x8w, w.virtualSpeciesCount0493x8w,
+        w.virtualMoments0493x8w, w.virtualMomentEntries0493x8w);
+    check_cuda_0263(cudaGetLastError(), label);
+}
+
+void launch_neumann_species_bath_accumulate_0493x8r(
+    CudaParticleDeviceView view,
+    std::uint64_t nActiveFluid,
+    const CudaClassicSrcIoFullfaceConfig0263& cfg,
+    const NeumannGhostWorkspace0493x8q& w,
+    int threads,
+    const char* label)
+{
+    if (w.speciesCount0493x8r == 0u || nActiveFluid == 0u) return;
+    const std::uint64_t blocks64 =
+        (nActiveFluid + static_cast<std::uint64_t>(threads) - 1u) /
+        static_cast<std::uint64_t>(threads);
+    if (blocks64 > static_cast<std::uint64_t>(2147483647))
+        throw std::runtime_error(
+            "0493x8r Neumann species bath grid too large");
+    io_neumann_species_bath_accumulate_kernel_0493x8r<<<
+        static_cast<unsigned int>(blocks64), threads>>>(
+        nActiveFluid, view.x, view.y, view.vx, view.vy, view.mass, view.type,
+        view.role, kParticleRoleFluid, cfg,
+        w.speciesTypes0493x8r, w.speciesCount0493x8r,
+        w.bath, w.bathCells);
+    check_cuda_0263(cudaGetLastError(), label);
+}
+
 unsigned int read_neumann_ghost_count_0493x8q(
     const NeumannGhostWorkspace0493x8q& w,
     const CudaClassicSrcIoFullfaceConfig0263& cfg,
     CudaParticleDeviceView view)
 {
+    if (w.reservoirActive0493x8x) {
+        if (w.reservoirCount0493x8x == nullptr ||
+            w.reservoirMoments0493x8x == nullptr ||
+            w.reservoirMomentEntries0493x8x == 0u) return 0u;
+        const int threads = 128;
+        const unsigned int blocks =
+            (w.reservoirMomentEntries0493x8x +
+             static_cast<unsigned int>(threads) - 1u) /
+            static_cast<unsigned int>(threads);
+        io_neumann_virtual_reservoir_candidates_kernel_0493x8x<<<blocks, threads>>>(
+            cfg, w.reservoirMoments0493x8x,
+            w.reservoirMomentEntries0493x8x,
+            w.reservoirSpeciesTypes0493x8x,
+            w.reservoirSpeciesFallbackKBT0493x8x,
+            w.reservoirSpeciesCount0493x8x,
+            w.reservoirCandidates0493x8x, w.reservoirCount0493x8x,
+            w.reservoirCapacity0493x8x);
+        check_cuda_0263(cudaGetLastError(),
+                        "io_neumann_virtual_reservoir_candidates_kernel_0493x8x launch");
+        unsigned int n = 0u;
+        check_cuda_0263(cudaMemcpy(
+            &n, w.reservoirCount0493x8x, sizeof(unsigned int),
+            cudaMemcpyDeviceToHost),
+            "read 0493x8x virtual-reservoir candidate count");
+        if (n > w.reservoirCapacity0493x8x)
+            throw std::runtime_error(
+                "0493x8x reservoir candidate buffer overflow count=" +
+                std::to_string(n) + " capacity=" +
+                std::to_string(w.reservoirCapacity0493x8x));
+        return n;
+    }
+
+    if (w.virtualCellsActive0493x8w) {
+        if (w.virtualCount0493x8w == nullptr ||
+            w.virtualMoments0493x8w == nullptr ||
+            w.virtualMomentEntries0493x8w == 0u) return 0u;
+        const int threads = 128;
+        const unsigned int blocks =
+            (w.virtualMomentEntries0493x8w +
+             static_cast<unsigned int>(threads) - 1u) /
+            static_cast<unsigned int>(threads);
+        io_neumann_virtual_cell_candidates_kernel_0493x8w<<<blocks, threads>>>(
+            cfg, w.virtualMoments0493x8w, w.virtualMomentEntries0493x8w,
+            w.virtualSpeciesTypes0493x8w,
+            w.virtualSpeciesFallbackKBT0493x8w,
+            w.virtualSpeciesCount0493x8w,
+            w.virtualCandidates0493x8w, w.virtualCount0493x8w,
+            w.virtualCapacity0493x8w);
+        check_cuda_0263(cudaGetLastError(),
+                        "io_neumann_virtual_cell_candidates_kernel_0493x8w launch");
+        unsigned int n = 0u;
+        check_cuda_0263(cudaMemcpy(
+            &n, w.virtualCount0493x8w, sizeof(unsigned int),
+            cudaMemcpyDeviceToHost),
+            "read 0493x8w virtual-cell candidate count");
+        if (n > w.virtualCapacity0493x8w)
+            throw std::runtime_error(
+                "0493x8w virtual-cell candidate buffer overflow count=" +
+                std::to_string(n) + " capacity=" +
+                std::to_string(w.virtualCapacity0493x8w));
+        return n;
+    }
+
+    if (w.replicaActive0493x8v) {
+        if (w.replicaCount0493x8v == nullptr) return 0u;
+        unsigned int n = 0u;
+        check_cuda_0263(cudaMemcpy(
+            &n, w.replicaCount0493x8v, sizeof(unsigned int), cudaMemcpyDeviceToHost),
+            "read 0493x8v Neumann replica count");
+        if (n > w.replicaCapacity0493x8v)
+            throw std::runtime_error(
+                "0493x8v Neumann replica buffer overflow count=" +
+                std::to_string(n) + " capacity=" +
+                std::to_string(w.replicaCapacity0493x8v));
+        return n;
+    }
     if (w.count == nullptr || w.bath == nullptr || w.bathCells == 0u)
         return 0u;
 
@@ -3813,12 +6396,22 @@ unsigned int read_neumann_ghost_count_0493x8q(
     const unsigned int blocks =
         (w.bathCells + static_cast<unsigned int>(threads) - 1u) /
         static_cast<unsigned int>(threads);
-    io_neumann_bath_candidates_kernel_0493x8q<<<blocks, threads>>>(
-        view.n, view.mass, view.type, cfg,
-        w.bath, w.bathCells,
-        w.candidates, w.count, w.capacity);
-    check_cuda_0263(cudaGetLastError(),
-                    "io_neumann_bath_candidates_kernel_0493x8q launch");
+    if (w.speciesCount0493x8r > 0u) {
+        io_neumann_species_bath_candidates_kernel_0493x8r<<<blocks, threads>>>(
+            view.n, view.mass, view.type, cfg,
+            w.bath, w.bathCells, w.speciesTypes0493x8r,
+            w.speciesFallbackKBT0493x8r, w.speciesCount0493x8r,
+            w.candidates, w.count, w.capacity);
+        check_cuda_0263(cudaGetLastError(),
+                        "io_neumann_species_bath_candidates_kernel_0493x8r launch");
+    } else {
+        io_neumann_bath_candidates_kernel_0493x8q<<<blocks, threads>>>(
+            view.n, view.mass, view.type, cfg,
+            w.bath, w.bathCells,
+            w.candidates, w.count, w.capacity);
+        check_cuda_0263(cudaGetLastError(),
+                        "io_neumann_bath_candidates_kernel_0493x8q launch");
+    }
 
     unsigned int n = 0u;
     check_cuda_0263(cudaMemcpy(
@@ -3860,11 +6453,38 @@ void launch_neumann_ghost_insert_0493x8q(
     const unsigned int blocks =
         (ghostCount + static_cast<unsigned int>(threads) - 1u) /
         static_cast<unsigned int>(threads);
-    io_neumann_ghost_insert_kernel_0493x8q<<<blocks, threads>>>(
-        view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
-        kParticleRoleFluid, kParticleRoleInactive, cfg,
-        w.candidates, ghostCount, w.bath, w.bathCells,
-        dInactiveIndices, inactiveCount, dCounters);
+    if (w.reservoirActive0493x8x) {
+        io_neumann_virtual_cell_insert_kernel_0493x8w<<<blocks, threads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive,
+            w.reservoirCandidates0493x8x, ghostCount,
+            dInactiveIndices, inactiveCount, dCounters);
+    } else if (w.virtualCellsActive0493x8w) {
+        io_neumann_virtual_cell_insert_kernel_0493x8w<<<blocks, threads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive,
+            w.virtualCandidates0493x8w, ghostCount,
+            dInactiveIndices, inactiveCount, dCounters);
+    } else if (w.replicaActive0493x8v) {
+        io_neumann_replica_insert_kernel_0493x8v<<<blocks, threads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg,
+            w.replicaCandidates0493x8v, ghostCount,
+            dInactiveIndices, inactiveCount, dCounters);
+    } else if (w.speciesCount0493x8r > 0u) {
+        io_neumann_species_ghost_insert_kernel_0493x8r<<<blocks, threads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg,
+            w.candidates, ghostCount, w.bath, w.bathCells,
+            w.speciesCount0493x8r,
+            dInactiveIndices, inactiveCount, dCounters);
+    } else {
+        io_neumann_ghost_insert_kernel_0493x8q<<<blocks, threads>>>(
+            view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
+            kParticleRoleFluid, kParticleRoleInactive, cfg,
+            w.candidates, ghostCount, w.bath, w.bathCells,
+            dInactiveIndices, inactiveCount, dCounters);
+    }
     check_cuda_0263(cudaGetLastError(), label);
 }
 
@@ -3898,19 +6518,32 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     CudaParticleState& gpuState = shared_state_0263();
     const auto tAfterUpload = Clock::now();
 
+    const bool residentOpt0493x9dFix1 = neumann_resident_opt_0493x9d_fix1_enabled();
+    const bool recycleOpt0493x9e = neumann_recycle_pool_0493x9e_enabled();
+    NeumannRecycleWorkspace0493x9e* recycleWorkspace0493x9e = nullptr;
+    if (recycleOpt0493x9e) {
+        recycleWorkspace0493x9e = &prepare_neumann_recycle_workspace_0493x9e(nActiveFluid);
+    }
     CudaClassicSrcIoCounters0263* dCounters = nullptr;
-    check_cuda_0263(cudaMalloc(&dCounters, sizeof(CudaClassicSrcIoCounters0263)), "allocate counters");
-    check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear counters");
+    if (residentOpt0493x9dFix1) {
+        dCounters = acquire_boundary_counters_0493x9d_fix1(
+            "allocate 0493x9d-fix1 counters",
+            "clear 0493x9d-fix1 counters");
+    } else {
+        check_cuda_0263(cudaMalloc(&dCounters, sizeof(CudaClassicSrcIoCounters0263)), "allocate counters");
+        check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear counters");
+    }
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
     std::uint64_t activePrefixCompactTailScan0315c = 0u;
     const std::uint64_t oldActivePrefix0315c = nActiveFluid;
+    std::uint64_t recyclePoolNeed0493x9eFix3 = 0u;
     const bool serialBoundary0267 =
         env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY") &&
         !cfg.outletNeumannKinetic0493x8q &&
         !cfg.segmentedMultiAxis0414;
     NeumannGhostWorkspace0493x8q ghostWorkspace0493x8q =
-        prepare_neumann_ghost_candidates_0493x8q(cfg, nActiveFluid);
+        prepare_neumann_ghost_candidates_0493x8q(cfg, params, nActiveFluid);
     if (serialBoundary0267) {
         io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
             view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
@@ -3924,12 +6557,32 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
         if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
             throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 full-face boundary launch");
         }
+        launch_neumann_virtual_reservoir_accumulate_0493x8x(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_fullface_neumann_virtual_reservoir_accumulate_kernel_0493x8x launch");
+        launch_neumann_virtual_cell_accumulate_0493x8w(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_fullface_neumann_virtual_cell_accumulate_kernel_0493x8w launch");
+        launch_neumann_species_bath_accumulate_0493x8r(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_fullface_neumann_species_bath_accumulate_kernel_0493x8r launch");
+        CudaClassicSrcIoFullfaceConfig0263 boundaryCfgNeumann0493x8x = cfg;
+        if (ghostWorkspace0493x8q.reservoirActive0493x8x ||
+            ghostWorkspace0493x8q.virtualCellsActive0493x8w ||
+            ghostWorkspace0493x8q.speciesCount0493x8r > 0u)
+            boundaryCfgNeumann0493x8x.outletNeumannKinetic0493x8q = 0;
         io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
             nActiveFluid, view.x, view.y, view.vx, view.vy, view.mass, view.role,
-            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters,
+            kParticleRoleFluid, kParticleRoleInactive, boundaryCfgNeumann0493x8x, dCounters,
             ghostWorkspace0493x8q.candidates, ghostWorkspace0493x8q.count,
             ghostWorkspace0493x8q.capacity,
-            ghostWorkspace0493x8q.bath, ghostWorkspace0493x8q.bathCells);
+            ghostWorkspace0493x8q.bath, ghostWorkspace0493x8q.bathCells,
+            ghostWorkspace0493x8q.replicaCandidates0493x8v,
+            ghostWorkspace0493x8q.replicaCount0493x8v,
+            ghostWorkspace0493x8q.replicaCapacity0493x8v,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedIndices : nullptr,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCount : nullptr,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCapacity : 0u);
         check_cuda_0263(cudaGetLastError(), "io_fullface_boundary_particles_kernel_0267 launch");
 
         const bool usePoolInsert0268 = !cfg.segmentedEnable &&
@@ -3943,8 +6596,16 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
         // extraction was requested for the same step.
         maybe_apply_forced_outlet_extraction_0291(view, cfg, dCounters,
                                                   "io_fullface_pre_insert_outlet_extraction_kernel_0293 launch",
-                                                  equilibriumPredictedInsertions0293);
-        check_cuda_0263(cudaDeviceSynchronize(), "io_fullface_pre_insert_outlet_extraction_kernel_0293 synchronize");
+                                                  equilibriumPredictedInsertions0293,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedIndices : nullptr,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCount : nullptr,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCapacity : 0u);
+        // x9d-fix1: read_neumann_ghost_count_0493x8q() performs a blocking
+        // D->H copy on the same default stream, so this explicit device-wide
+        // synchronization is redundant.  Keep it for the exact x9c path.
+        if (!residentOpt0493x9dFix1)
+            check_cuda_0263(cudaDeviceSynchronize(),
+                            "io_fullface_pre_insert_outlet_extraction_kernel_0293 synchronize");
         const unsigned int ghostCount0493x8q =
             read_neumann_ghost_count_0493x8q(ghostWorkspace0493x8q, cfg, view);
         if (usePoolInsert0268) {
@@ -3957,15 +6618,26 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
                 static_cast<std::uint64_t>(ghostCount0493x8q) + reservoirPoolNeed0493x8q;
             std::uint64_t* dInactiveIndices = nullptr;
             unsigned int inactiveCount = 0u;
-            const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
-            bool usedTailPool0313 = collect_tail_inactive_pool_0313(
-                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
-                &dInactiveIndices, &inactiveCount);
-            if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
-
+            bool persistentTailPool0493x9dFix1 = false;
+            bool usedTailPool0313 = false;
+            bool usedRecyclePool0493x9e = false;
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
-            if (!usedTailPool0313) {
+            if (recycleOpt0493x9e) {
+                recyclePoolNeed0493x9eFix3 = neededInactive;
+                dInactiveIndices = build_recycled_inactive_pool_0493x9e(
+                    neededInactive, oldActivePrefix0315c, view,
+                    kParticleRoleInactive, dCounters, poolThreads);
+                inactiveCount = static_cast<unsigned int>(neededInactive);
+                usedRecyclePool0493x9e = true;
+            } else {
+                const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
+                usedTailPool0313 = collect_tail_inactive_pool_0313(
+                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
+                    &dInactiveIndices, &inactiveCount, &persistentTailPool0493x9dFix1);
+                if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
+
+                if (!usedTailPool0313) {
                 if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
                     throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0268 inactive-prefix pool");
                 }
@@ -3999,7 +6671,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
                     check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (n32 - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
                                     "copy 0268 inactive last prefix");
                 }
-                inactiveCount = lastPrefix + lastFlag;
+                    inactiveCount = lastPrefix + lastFlag;
+                }
             }
 
             launch_neumann_ghost_insert_0493x8q(
@@ -4022,7 +6695,10 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
             }
             if (dInactiveFlags != nullptr) check_cuda_0263(cudaFree(dInactiveFlags), "free 0268 inactive flags");
             if (dInactivePrefix != nullptr) check_cuda_0263(cudaFree(dInactivePrefix), "free 0268 inactive prefix");
-            if (dInactiveIndices != nullptr) check_cuda_0263(cudaFree(dInactiveIndices), usedTailPool0313 ? "free 0313 inactive tail index pool" : "free 0268 inactive index pool");
+            if (dInactiveIndices != nullptr && !usedRecyclePool0493x9e && !persistentTailPool0493x9dFix1)
+                check_cuda_0263(cudaFree(dInactiveIndices),
+                                usedTailPool0313 ? "free 0313 inactive tail index pool"
+                                                : "free 0268 inactive index pool");
         } else {
             io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
                 view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
@@ -4038,7 +6714,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
 
     CudaClassicSrcIoCounters0263 h{};
     check_cuda_0263(cudaMemcpy(&h, dCounters, sizeof(CudaClassicSrcIoCounters0263), cudaMemcpyDeviceToHost), "copy counters");
-    check_cuda_0263(cudaFree(dCounters), "free counters");
+    if (!residentOpt0493x9dFix1)
+        check_cuda_0263(cudaFree(dCounters), "free counters");
     if (h.failureFlag != 0) {
         throw std::runtime_error("cuda_classic_src_io_resident_0263: non-finite particle or too many wall reflections in boundary kernel");
     }
@@ -4062,9 +6739,35 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_fullface_b
     }
     const std::uint64_t expectedActive0315c = oldActivePrefix0315c - deleted0315c +
                                              static_cast<std::uint64_t>(h.inletParticlesInserted + h.outletParticlesInserted);
-    const std::uint64_t actualActive0315c = compact_active_prefix_device_0315c(
-        gpuState, state, oldActivePrefix0315c, expectedActive0315c,
-        activePrefixCompactTailScan0315c, prefixRepairDiag);
+    int targetedRepairStatus0493x9eFix3 = 0;
+    const bool targetedRepair0493x9eFix3 = recycleOpt0493x9e &&
+        try_targeted_prefix_repair_0493x9e_fix3(
+            gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+            recyclePoolNeed0493x9eFix3, deleted0315c,
+            prefixRepairDiag, targetedRepairStatus0493x9eFix3);
+
+    std::uint64_t actualActive0315c = expectedActive0315c;
+    if (targetedRepair0493x9eFix3) {
+        static bool announcedTargetedRepair0493x9eFix3 = false;
+        if (!announcedTargetedRepair0493x9eFix3) {
+            std::fprintf(stderr,
+                "[0493x9e-fastpath] prefixRepair=targeted_deleted_list_exact fallback=0315c_exact\n");
+            announcedTargetedRepair0493x9eFix3 = true;
+        }
+    } else {
+        if (recycleOpt0493x9e) {
+            static bool announcedTargetedFallback0493x9eFix3 = false;
+            if (!announcedTargetedFallback0493x9eFix3) {
+                std::fprintf(stderr,
+                    "[0493x9e-fallback] prefixRepair=0315c_exact targetedStatus=%d\n",
+                    targetedRepairStatus0493x9eFix3);
+                announcedTargetedFallback0493x9eFix3 = true;
+            }
+        }
+        actualActive0315c = compact_active_prefix_device_0315c(
+            gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+            activePrefixCompactTailScan0315c, prefixRepairDiag);
+    }
     // 0315d: keep the device state authoritative after inlet/outlet mutation.
     // The 0315c-fix06 eager host mirror was functionally safe but expensive
     // for large active prefixes.  By default we now update only the logical
@@ -4202,19 +6905,32 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     CudaParticleState& gpuState = shared_state_0263();
     const auto tAfterUpload = Clock::now();
 
+    const bool residentOpt0493x9dFix1 = neumann_resident_opt_0493x9d_fix1_enabled();
+    const bool recycleOpt0493x9e = neumann_recycle_pool_0493x9e_enabled();
+    NeumannRecycleWorkspace0493x9e* recycleWorkspace0493x9e = nullptr;
+    if (recycleOpt0493x9e) {
+        recycleWorkspace0493x9e = &prepare_neumann_recycle_workspace_0493x9e(nActiveFluid);
+    }
     CudaClassicSrcIoCounters0263* dCounters = nullptr;
-    check_cuda_0263(cudaMalloc(&dCounters, sizeof(CudaClassicSrcIoCounters0263)), "allocate segmented counters");
-    check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear segmented counters");
+    if (residentOpt0493x9dFix1) {
+        dCounters = acquire_boundary_counters_0493x9d_fix1(
+            "allocate 0493x9d-fix1 segmented counters",
+            "clear 0493x9d-fix1 segmented counters");
+    } else {
+        check_cuda_0263(cudaMalloc(&dCounters, sizeof(CudaClassicSrcIoCounters0263)), "allocate segmented counters");
+        check_cuda_0263(cudaMemset(dCounters, 0, sizeof(CudaClassicSrcIoCounters0263)), "clear segmented counters");
+    }
     const CudaClassicSrcIoFullfaceConfig0263 cfg = make_config_0263(state, params, domain, step, time);
     CudaParticleDeviceView view = gpuState.device_view();
     std::uint64_t activePrefixCompactTailScan0315c = 0u;
     const std::uint64_t oldActivePrefix0315c = nActiveFluid;
+    std::uint64_t recyclePoolNeed0493x9eFix3 = 0u;
     const bool serialBoundary0267 =
         env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0267_SERIAL_BOUNDARY") &&
         !cfg.outletNeumannKinetic0493x8q &&
         !cfg.segmentedMultiAxis0414;
     NeumannGhostWorkspace0493x8q ghostWorkspace0493x8q =
-        prepare_neumann_ghost_candidates_0493x8q(cfg, nActiveFluid);
+        prepare_neumann_ghost_candidates_0493x8q(cfg, params, nActiveFluid);
     if (serialBoundary0267) {
         io_fullface_hard_reservoir_kernel_0263<<<1, 1>>>(
             view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
@@ -4229,12 +6945,32 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
         if (boundaryBlocks64 > static_cast<std::uint64_t>(2147483647)) {
             throw std::runtime_error("cuda_classic_src_io_resident_0263: grid too large for 0267 segmented boundary launch");
         }
+        launch_neumann_virtual_reservoir_accumulate_0493x8x(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_segmented_neumann_virtual_reservoir_accumulate_kernel_0493x8x launch");
+        launch_neumann_virtual_cell_accumulate_0493x8w(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_segmented_neumann_virtual_cell_accumulate_kernel_0493x8w launch");
+        launch_neumann_species_bath_accumulate_0493x8r(
+            view, nActiveFluid, cfg, ghostWorkspace0493x8q, boundaryThreads,
+            "io_segmented_neumann_species_bath_accumulate_kernel_0493x8r launch");
+        CudaClassicSrcIoFullfaceConfig0263 boundaryCfgNeumann0493x8x = cfg;
+        if (ghostWorkspace0493x8q.reservoirActive0493x8x ||
+            ghostWorkspace0493x8q.virtualCellsActive0493x8w ||
+            ghostWorkspace0493x8q.speciesCount0493x8r > 0u)
+            boundaryCfgNeumann0493x8x.outletNeumannKinetic0493x8q = 0;
         io_fullface_boundary_particles_kernel_0267<<<static_cast<unsigned int>(boundaryBlocks64), boundaryThreads>>>(
             nActiveFluid, view.x, view.y, view.vx, view.vy, view.mass, view.role,
-            kParticleRoleFluid, kParticleRoleInactive, cfg, dCounters,
+            kParticleRoleFluid, kParticleRoleInactive, boundaryCfgNeumann0493x8x, dCounters,
             ghostWorkspace0493x8q.candidates, ghostWorkspace0493x8q.count,
             ghostWorkspace0493x8q.capacity,
-            ghostWorkspace0493x8q.bath, ghostWorkspace0493x8q.bathCells);
+            ghostWorkspace0493x8q.bath, ghostWorkspace0493x8q.bathCells,
+            ghostWorkspace0493x8q.replicaCandidates0493x8v,
+            ghostWorkspace0493x8q.replicaCount0493x8v,
+            ghostWorkspace0493x8q.replicaCapacity0493x8v,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedIndices : nullptr,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCount : nullptr,
+            recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCapacity : 0u);
         check_cuda_0263(cudaGetLastError(), "io_segmented_boundary_particles_kernel_0267 launch");
 
         const bool useSegmentedPool0269 = !env_truthy_0263("MPCD_CUDA_CLASSIC_SRC_IO_RESIDENT_0269_DISABLE_SEGMENTED_POOL");
@@ -4244,8 +6980,13 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
         // reservoir insertion consumes the pool.
         maybe_apply_forced_outlet_extraction_0291(view, cfg, dCounters,
                                                   "io_segmented_pre_insert_outlet_extraction_kernel_0293 launch",
-                                                  equilibriumPredictedInsertions0293);
-        check_cuda_0263(cudaDeviceSynchronize(), "io_segmented_pre_insert_outlet_extraction_kernel_0293 synchronize");
+                                                  equilibriumPredictedInsertions0293,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedIndices : nullptr,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCount : nullptr,
+                                                  recycleWorkspace0493x9e != nullptr ? recycleWorkspace0493x9e->deletedCapacity : 0u);
+        if (!residentOpt0493x9dFix1)
+            check_cuda_0263(cudaDeviceSynchronize(),
+                            "io_segmented_pre_insert_outlet_extraction_kernel_0293 synchronize");
         const unsigned int ghostCount0493x8q =
             read_neumann_ghost_count_0493x8q(ghostWorkspace0493x8q, cfg, view);
         if (useSegmentedPool0269) {
@@ -4258,15 +6999,26 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
                 static_cast<std::uint64_t>(ghostCount0493x8q) + reservoirPoolNeed0493x8q;
             std::uint64_t* dInactiveIndices = nullptr;
             unsigned int inactiveCount = 0u;
-            const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
-            bool usedTailPool0313 = collect_tail_inactive_pool_0313(
-                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
-                &dInactiveIndices, &inactiveCount);
-            if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
-
+            bool persistentTailPool0493x9dFix1 = false;
+            bool usedTailPool0313 = false;
+            bool usedRecyclePool0493x9e = false;
             unsigned int* dInactiveFlags = nullptr;
             unsigned int* dInactivePrefix = nullptr;
-            if (!usedTailPool0313) {
+            if (recycleOpt0493x9e) {
+                recyclePoolNeed0493x9eFix3 = neededInactive;
+                dInactiveIndices = build_recycled_inactive_pool_0493x9e(
+                    neededInactive, oldActivePrefix0315c, view,
+                    kParticleRoleInactive, dCounters, poolThreads);
+                inactiveCount = static_cast<unsigned int>(neededInactive);
+                usedRecyclePool0493x9e = true;
+            } else {
+                const std::uint64_t tailScanForPool0315c = inactive_tail_scan_count_0313(view.n, neededInactive);
+                usedTailPool0313 = collect_tail_inactive_pool_0313(
+                view.n, view.role, kParticleRoleInactive, neededInactive, poolThreads,
+                    &dInactiveIndices, &inactiveCount, &persistentTailPool0493x9dFix1);
+                if (usedTailPool0313) activePrefixCompactTailScan0315c = std::max(activePrefixCompactTailScan0315c, tailScanForPool0315c);
+
+                if (!usedTailPool0313) {
                 if (view.n > static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max())) {
                     throw std::runtime_error("cuda_classic_src_io_resident_0263: too many particles for 0269 segmented inactive-prefix pool");
                 }
@@ -4297,7 +7049,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
                     check_cuda_0263(cudaMemcpy(&lastPrefix, dInactivePrefix + (view.n - 1u), sizeof(unsigned int), cudaMemcpyDeviceToHost),
                                     "copy 0269 segmented inactive last prefix");
                 }
-                inactiveCount = lastPrefix + lastFlag;
+                    inactiveCount = lastPrefix + lastFlag;
+                }
             }
 
             launch_neumann_ghost_insert_0493x8q(
@@ -4320,7 +7073,10 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
             }
             if (dInactiveFlags != nullptr) check_cuda_0263(cudaFree(dInactiveFlags), "free 0269 segmented inactive flags");
             if (dInactivePrefix != nullptr) check_cuda_0263(cudaFree(dInactivePrefix), "free 0269 segmented inactive prefix");
-            if (dInactiveIndices != nullptr) check_cuda_0263(cudaFree(dInactiveIndices), usedTailPool0313 ? "free 0313 segmented inactive tail index pool" : "free 0269 segmented inactive index pool");
+            if (dInactiveIndices != nullptr && !usedRecyclePool0493x9e && !persistentTailPool0493x9dFix1)
+                check_cuda_0263(cudaFree(dInactiveIndices),
+                                usedTailPool0313 ? "free 0313 segmented inactive tail index pool"
+                                                : "free 0269 segmented inactive index pool");
         } else {
             io_fullface_hard_reservoir_insert_kernel_0267<<<1, 1>>>(
                 view.n, view.x, view.y, view.vx, view.vy, view.mass, view.type, view.role,
@@ -4336,7 +7092,8 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
 
     CudaClassicSrcIoCounters0263 h{};
     check_cuda_0263(cudaMemcpy(&h, dCounters, sizeof(CudaClassicSrcIoCounters0263), cudaMemcpyDeviceToHost), "copy segmented counters");
-    check_cuda_0263(cudaFree(dCounters), "free segmented counters");
+    if (!residentOpt0493x9dFix1)
+        check_cuda_0263(cudaFree(dCounters), "free segmented counters");
     if (h.failureFlag != 0) {
         throw std::runtime_error("cuda_classic_src_io_resident_0263: non-finite particle or too many wall reflections in segmented boundary kernel");
     }
@@ -4360,9 +7117,35 @@ CudaClassicSrcIoResident0263Diagnostics try_apply_cuda_classic_src_io_segmented_
     }
     const std::uint64_t expectedActive0315c = oldActivePrefix0315c - deleted0315c +
                                              static_cast<std::uint64_t>(h.inletParticlesInserted + h.outletParticlesInserted);
-    const std::uint64_t actualActive0315c = compact_active_prefix_device_0315c(
-        gpuState, state, oldActivePrefix0315c, expectedActive0315c,
-        activePrefixCompactTailScan0315c, prefixRepairDiag);
+    int targetedRepairStatus0493x9eFix3 = 0;
+    const bool targetedRepair0493x9eFix3 = recycleOpt0493x9e &&
+        try_targeted_prefix_repair_0493x9e_fix3(
+            gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+            recyclePoolNeed0493x9eFix3, deleted0315c,
+            prefixRepairDiag, targetedRepairStatus0493x9eFix3);
+
+    std::uint64_t actualActive0315c = expectedActive0315c;
+    if (targetedRepair0493x9eFix3) {
+        static bool announcedTargetedRepair0493x9eFix3 = false;
+        if (!announcedTargetedRepair0493x9eFix3) {
+            std::fprintf(stderr,
+                "[0493x9e-fastpath] prefixRepair=targeted_deleted_list_exact fallback=0315c_exact\n");
+            announcedTargetedRepair0493x9eFix3 = true;
+        }
+    } else {
+        if (recycleOpt0493x9e) {
+            static bool announcedTargetedFallback0493x9eFix3 = false;
+            if (!announcedTargetedFallback0493x9eFix3) {
+                std::fprintf(stderr,
+                    "[0493x9e-fallback] prefixRepair=0315c_exact targetedStatus=%d\n",
+                    targetedRepairStatus0493x9eFix3);
+                announcedTargetedFallback0493x9eFix3 = true;
+            }
+        }
+        actualActive0315c = compact_active_prefix_device_0315c(
+            gpuState, state, oldActivePrefix0315c, expectedActive0315c,
+            activePrefixCompactTailScan0315c, prefixRepairDiag);
+    }
     // 0315d: lazy host mirror for segmented inlet/outlet as well.  Keep only
     // the logical active count on the host during normal resident execution;
     // summaries/dumps synchronize the active prefix on demand.
