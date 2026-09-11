@@ -61,6 +61,7 @@
 | `x14aj` | Goutte oscillante n=3 avec gaz | LIQUID_GAS | REVIEW: fréquence ~12% lente dans campagne actuelle |
 | `x14ak` | Taylor-Culick diphasique - fluide x14 | LIQUID_GAS | REVIEW; ne pas utiliser pour isoler effet gaz |
 | `x14al` | Taylor-Culick apparié au point x13h | LIQUID_GAS | Contrôle liquide reproduit; branche gaz à relire car EOS global kBT avait été mal aligné dans le premier runner |
+| `x14aw` | Analogue 2-D Basilisk atomisation ReL=500 / WeG=200 | LIQUID_GAS | Benchmark exploratoire 2-D; géométrie et nombres sans revendication d’équivalence 3-D exacte avec Basilisk. |
 | `x14j` | Goutte deux températures | LIQUID_GAS | Benchmark d'intégration |
 | `x14t` | Piston pression thermodynamique | LIQUID_GAS | Qualification composante thermodynamique |
 | `x14u` | Gaz incident normal | LIQUID_GAS | Diagnostic conduisant à x14v |
@@ -176,6 +177,7 @@
 | `x14ad` | Traction locale cohérente avec faces x6g | LIQUID_GAS | Retenu pour interfaces courbes x14 |
 | `x14ai` | Fermeture de résultante Q6 appliquée | LIQUID_GAS | Concept retenu mais version initiale supplantée |
 | `x14ai-fix1` | Fermeture B1 exacte post-correction périodique | LIQUID_GAS | Seulement composante liquide fermée et isolée des frontières Q6 externes |
+| `x14ba` | Oscillation globale sinusoïdale de vitesse d’entrée | OPEN_BOUNDARY_MULTIPHASE | Chemin désactivé strictement neutre; checker statique/maths PASS et chemin pulsé exercé ensuite par le smoke x14bc. Qualification longue du breakup non encore revendiquée. |
 | `x14d` | Collision commune + thermostats séparés | LIQUID_GAS | Actif dans x14 |
 | `x14k` | Géométrie cinétique bilatérale | LIQUID_GAS | Opt-in; change le modèle d'interface |
 | `x14l` | Réflexion spéculaire du gaz | LIQUID_GAS | Qualifié pour imperméabilité normale dans cas tests |
@@ -222,6 +224,7 @@
 | `x14ae` | Diagnostic pertes scatter | LIQUID_GAS | Diagnostic; pertes nulles sur cas discriminant |
 | `x14af` | Diagnostic bilan global | LIQUID_GAS | Diagnostic causal |
 | `x14am` | Young-Laplace diphasique multi-rayons | LIQUID_GAS | REVIEW/non décisif à sigma=10000: kappa_active et pression sont déjà connus comme métrologie bruyante/non monotone dans ce régime |
+| `x14ax` | Recorder alpha_x6c du champ liquide physique résident | LIQUID_GAS | Diagnostic intégré et utilisé dans les campagnes d’interface; ne modifie pas la fermeture physique lorsque le champ n’est pas demandé. |
 | `x14p` | Audit offline alpha/volume gazeux accessible | LIQUID_GAS | Diagnostic offline; aucune loi CUDA proposée à ce stade |
 | `x14q` | Fit offline de fraction de volume accessible | LIQUID_GAS | Diagnostic offline; explicitement pas une proposition CUDA |
 
@@ -234,6 +237,7 @@
 | `x8w` | Cellules virtuelles statistiques Neumann | OPEN_BOUNDARY_MULTIPHASE | Échec expérimental documenté: la copie de l'occupation instantanée de la cellule de bord crée une couche de densité précoce; supersédé par x8x. |
 | `x8x` | Réservoir virtuel Neumann coarse-grained | OPEN_BOUNDARY_MULTIPHASE | Améliore le défaut x8w et passe les checks analytiques de demi-flux, mais la densité de réservoir suit encore le déficit de densité intérieur; supersédé par x8y. |
 | `x8y` | Réservoir de pression Neumann à densité de référence | OPEN_BOUNDARY_MULTIPHASE | Échec post-contact documenté: un ux liquide intérieur négatif est recopié dans le Maxwellien extérieur et transforme le réservoir en injecteur macroscopique; supersédé par x8z. |
+| `x14ay` | Raffinement particulaire gamma 12/16 à similitude thermique | LIQUID_GAS | Smoke gamma=12 exploitable mais amélioration interfaciale jugée trop faible face au surcoût; gamma=12/16 non retenu pour le benchmark courant. |
 
 ## FIX
 
@@ -358,6 +362,7 @@
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
 | `0493W4` | Runner d'injection multi-espèces normalisé par famille de phase | MULTISPECIES_RUNNER | Jalon de runner attesté par le code et les inventaires |
+| `x14bc` | Benchmark Basilisk froid pulsé ReL=500 | LIQUID_GAS | Calibration liquide TG128 8 graines PASS, CV=2.2%; smoke pulsé 300 pas PASS intégration/visualisation. Production longue 4758 pas planifiée, non encore qualifiée statistiquement. |
 
 ## TOOLING
 
@@ -373,3 +378,4 @@
 | ID | Nom | Domaine | Statut |
 |---|---|---|---|
 | `x0` | Démonstration dam-break bi-espèces du Q6 independent_masked | SPECIES_Q6 | Démonstration historique d'intégration |
+| `x14az` | Affichage LiveVis direct de alpha_x6c | LIQUID_GAS | Diagnostic LiveVis opérationnel; smoothPasses neutralisé pour alpha_x6c afin de montrer le champ physique x6c sans lissage LiveVis additionnel. |

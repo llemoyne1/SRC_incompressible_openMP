@@ -22,11 +22,11 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 
 | Objet | Nombre |
 |---|---:|
-| Jalons canoniques | 292 |
-| Paramètres canoniques | 314 |
-| Flags / variables runner | 650 |
-| Artefacts indexés | 1674 |
-| Candidats Git | 1187 |
+| Jalons canoniques | 298 |
+| Paramètres canoniques | 320 |
+| Flags / variables runner | 679 |
+| Artefacts indexés | 1682 |
+| Candidats Git | 1188 |
 
 ## Règle de publication
 

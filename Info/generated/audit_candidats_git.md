@@ -6,7 +6,7 @@
 
 | Statut | Confiance | Nombre |
 |---|---|---:|
-| CANDIDATE | A | 466 |
+| CANDIDATE | A | 467 |
 | CANDIDATE | B | 476 |
 | CANDIDATE | C | 3 |
 | CURATED | A | 45 |
@@ -656,6 +656,7 @@
 | `0431` | 2026-06-30T23:54:39+02:00 | `4ec6b3add0` 0433a: align filtered recording cadence with livevis controls | 2 | IN_MAINLINE |
 | `0432a` | 2026-06-29T21:57:00+02:00 | `ac0582a7b2` 0432a: add livevis-driven filtered field recording | 3 | PATCH_EQUIVALENT_IN_MAINLINE |
 | `0432a` | 2026-06-29T22:50:42+02:00 | `94c0857e35` 0432a integ: add livevis-driven filtered field recording | 2 | IN_MAINLINE |
+| `0432b` | 2026-09-10T22:18:05+02:00 | `406e1394b0` 0432b fix LiveVis field recording and headless output | 1 | IN_MAINLINE |
 | `0433a` | 2026-06-30T22:56:32+02:00 | `879023590f` 0433a: align filtered recording cadence with livevis controls | 2 | PATCH_EQUIVALENT_IN_MAINLINE |
 | `0433a` | 2026-06-30T22:56:32+02:00 | `a8e8c61653` 0433a: align filtered recording cadence with livevis controls | 1 | IN_MAINLINE |
 | `0433a` | 2026-06-30T23:54:39+02:00 | `4ec6b3add0` 0433a: align filtered recording cadence with livevis controls | 1 | IN_MAINLINE |
@@ -1108,4 +1109,4 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
 | `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1187 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1188 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

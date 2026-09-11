@@ -187,6 +187,17 @@
 | `x14au` | CALIBRATOR | LIQUID_GAS | Qualification viscosité associée au cas Sato | Liquide primaire INVALID; gaz REVIEW; cohérence d’échelle 2σ diagnostique seulement |
 | `x14av` | DEMONSTRATION | LIQUID_GAS | Démonstration atomiseur air-assisté | DEMONSTRATION_DIAGNOSTIC_ONLY; aucune qualification physique d’atomisation |
 
+## post-x14av : benchmark Basilisk et interface froide
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x14aw` | BENCHMARK | LIQUID_GAS | Analogue 2-D Basilisk atomisation ReL=500 / WeG=200 | Benchmark exploratoire 2-D; géométrie et nombres sans revendication d’équivalence 3-D exacte avec Basilisk. |
+| `x14ax` | DIAGNOSTIC | LIQUID_GAS | Recorder alpha_x6c du champ liquide physique résident | Diagnostic intégré et utilisé dans les campagnes d’interface; ne modifie pas la fermeture physique lorsque le champ n’est pas demandé. |
+| `x14ay` | EXPERIMENT | LIQUID_GAS | Raffinement particulaire gamma 12/16 à similitude thermique | Smoke gamma=12 exploitable mais amélioration interfaciale jugée trop faible face au surcoût; gamma=12/16 non retenu pour le benchmark courant. |
+| `x14az` | VISUALIZATION | LIQUID_GAS | Affichage LiveVis direct de alpha_x6c | Diagnostic LiveVis opérationnel; smoothPasses neutralisé pour alpha_x6c afin de montrer le champ physique x6c sans lissage LiveVis additionnel. |
+| `x14ba` | CODE | OPEN_BOUNDARY_MULTIPHASE | Oscillation globale sinusoïdale de vitesse d’entrée | Chemin désactivé strictement neutre; checker statique/maths PASS et chemin pulsé exercé ensuite par le smoke x14bc. Qualification longue du breakup non encore revendiquée. |
+| `x14bc` | RUNNER | LIQUID_GAS | Benchmark Basilisk froid pulsé ReL=500 | Calibration liquide TG128 8 graines PASS, CV=2.2%; smoke pulsé 300 pas PASS intégration/visualisation. Production longue 4758 pas planifiée, non encore qualifiée statistiquement. |
+
 ## x2-x4b : diagnostic gravitaire et séquençage Q6-g force-aware
 
 | ID | Nature | Domaine | Nom | Statut / portée |
@@ -2815,6 +2826,75 @@ Assemble un jet liquide et deux arrivées gazeuses avec diagnostics de pénétra
 **Relations :**
 - `BUILDS_ON` → `x14v` — Kick cinétique excédentaire
 
+### `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+
+- **Clé unique :** `0493x14aw`
+- **ID canonique :** `0493x14aw`
+- **Nature / domaine :** `BENCHMARK` / `LIQUID_GAS`
+- **Statut :** Benchmark exploratoire 2-D; géométrie et nombres sans revendication d’équivalence 3-D exacte avec Basilisk.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Introduit un jet liquide rectiligne dans gaz stagnant, rhoL/rhoG=27.84, D/h=96, domaine 18D x 18D, avec la chaîne liquide/gaz x14 existante. Le premier point liquide retenu utilise gamma=8, alpha=90 deg, kBTL=0.03125 et nuL=0.0003303602194; l’entrée est d’abord stationnaire.
+
+**Notes.** Runner exact conservé dans l’archive historique V4.30. Le cas devient la base des diagnostics x14ax/x14ay/x14az et de la pulsation x14ba.
+
+**Relations :**
+- `BUILDS_ON` → `x14av` — Démonstration atomiseur air-assisté
+
+### `x14ax` — Recorder alpha_x6c du champ liquide physique résident
+
+- **Clé unique :** `0493x14ax`
+- **ID canonique :** `0493x14ax`
+- **Nature / domaine :** `DIAGNOSTIC` / `LIQUID_GAS`
+- **Statut :** Diagnostic intégré et utilisé dans les campagnes d’interface; ne modifie pas la fermeture physique lorsque le champ n’est pas demandé.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Expose phaseAlphaFiltered0493x6c au filtered recorder sous le nom alpha_x6c avec alias phase_alpha, phase_alpha_x6c et liquid_fraction_x6c, via remapping conservatif par aire vers la grille recorder sans téléchargement hôte du champ solveur complet.
+
+**Notes.** Aucun lissage recorder supplémentaire sur alpha_x6c; le root livevis_control.kv reste user-owned.
+
+**Relations :**
+- `BUILDS_ON` → `x6c` — Infrastructure résidente du champ de phase alpha
+- `DIAGNOSES` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
+
+### `x14ay` — Raffinement particulaire gamma 12/16 à similitude thermique
+
+- **Clé unique :** `0493x14ay`
+- **ID canonique :** `0493x14ay`
+- **Nature / domaine :** `EXPERIMENT` / `LIQUID_GAS`
+- **Statut :** Smoke gamma=12 exploitable mais amélioration interfaciale jugée trop faible face au surcoût; gamma=12/16 non retenu pour le benchmark courant.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Runner d’ablation qui augmente gamma en diminuant masse et kBT selon m->m/s et kBT->kBT/s afin de préserver gamma*m, gamma*kBT, kBT/m et lambda/h dans les grandes lignes.
+
+**Notes.** Le runner reste une ablation documentée. La décision de campagne revient à gamma=8 et agit ensuite directement sur kBTL/mL.
+
+**Relations :**
+- `BUILDS_ON` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `DIAGNOSES` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+
+### `x14az` — Affichage LiveVis direct de alpha_x6c
+
+- **Clé unique :** `0493x14az`
+- **ID canonique :** `0493x14az`
+- **Nature / domaine :** `VISUALIZATION` / `LIQUID_GAS`
+- **Statut :** Diagnostic LiveVis opérationnel; smoothPasses neutralisé pour alpha_x6c afin de montrer le champ physique x6c sans lissage LiveVis additionnel.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Complète x14ax en rendant alpha_x6c et ses alias visualisables directement par le renderer LiveVis à partir du champ x6c résident; l’ancien champ alpha reste l’alpha Darcy.
+
+**Notes.** Le root livevis_control.kv n’est pas modifié par le patch.
+
+**Relations :**
+- `BUILDS_ON` → `x14ax` — Recorder alpha_x6c du champ liquide physique résident
+- `REFERENCES` → `x14ax` — Recorder alpha_x6c du champ liquide physique résident
+- `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
+
 ### `x14b` — Qualification thermostat avec collision SRC active
 
 - **Clé unique :** `0493x14b`
@@ -2826,6 +2906,43 @@ Assemble un jet liquide et deux arrivées gazeuses avec diagnostics de pénétra
 - **Commit :** `c3107ec1e486ce1c5b9829c4a7a2473c16438908`
 
 Qualification dynamique sur grille non décalée afin de reconstruire exactement les cellules du thermostat final.
+
+### `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+- **Clé unique :** `0493x14ba`
+- **ID canonique :** `0493x14ba`
+- **Nature / domaine :** `CODE` / `OPEN_BOUNDARY_MULTIPHASE`
+- **Statut :** Chemin désactivé strictement neutre; checker statique/maths PASS et chemin pulsé exercé ensuite par le smoke x14bc. Qualification longue du breakup non encore revendiquée.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Ajoute un multiplicateur d’entrée Fosc=1+A sin(2*pi*(t+offset-start)/T+phase), combiné au ramp existant et propagé aux injections particulaires ainsi qu’aux flux Q6 host/CUDA pour conserver le verrouillage de phase.
+
+**Notes.** Six paramètres canoniques inletVelocityOscillation*; alias inletOscillation*. Amplitude bornée [0,1], période >0; timeOffset assure la continuité de phase au restart.
+
+**Relations :**
+- `BUILDS_ON` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `REFERENCES` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+- **Clé unique :** `0493x14bc`
+- **ID canonique :** `0493x14bc`
+- **Nature / domaine :** `RUNNER` / `LIQUID_GAS`
+- **Statut :** Calibration liquide TG128 8 graines PASS, CV=2.2%; smoke pulsé 300 pas PASS intégration/visualisation. Production longue 4758 pas planifiée, non encore qualifiée statistiquement.
+- **Confiance :** `A`
+- **Date :** `2026-09-11`
+
+Runner final courant du benchmark ReL=500/WeG=200 à gamma=8 avec liquide froid calibré kBTL=0.0078125, nuL=0.0002122268985, gaz conservé kBTG=0.00575, nuG=0.0003536191886, pulse x14ba à +/-5% et St=5/3.
+
+**Notes.** Valeurs dérivées: U≈0.282969198, sigma≈2.827354642, ReG≈300, nuG/nuL≈1.67, période≈0.79514≈125.2 pas. Coût long ~2 h: stratégie retenue d’un seed long de référence et analyse temporelle/phase-folded, pas ensemble multi-seed.
+
+**Relations :**
+- `BUILDS_ON` → `x14az` — Affichage LiveVis direct de alpha_x6c
+- `BUILDS_ON` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `REFERENCES` → `x14ay` — Raffinement particulaire gamma 12/16 à similitude thermique
+- `REFERENCES` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `SUPERSEDES` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 
 ### `x14c` — Probe thermostat en grille décalée
 

@@ -4,6 +4,7 @@
 
 | Nom | Type | Défaut | Paramètre(s) ciblé(s) | Catégorie | Statut |
 |---|---|---|---|---|---|
+| `ALLOW_LARGE_DUMPS` | booléen | 1 dans x14bc |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `ALPHA` | double | DARCY_ALPHA_MAX ou valeur script |  | Alias script Darcy | ajout/documenté 0426 |
 | `ALPHA_MIN` | double | DARCY_ALPHA_MIN ou 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `ANALYZE_ONLY` | booléen/int | 0 |  | Alias runner / analyse | ajout/normalisé 0493w4–0493w8 |
@@ -11,6 +12,9 @@
 | `BACKGROUND_MASS_CLOSURE_STRENGTH` | double | 0.0 pour gas; 1.0 pour liquid |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `BACKGROUND_PHASE` | liquid\|gas | gas |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `BACKGROUND_Q6_STRENGTH` | double | 0.0 pour gas; 1.0 pour liquid |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
+| `BASE_RUN_ROOT` | chemin | runs/0493x14bc_basilisk_atomisation_Re500_cold_seed${SEED} |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
+| `BASILISK_PULSE_REL_AMPLITUDE` | double [0,1] | 0.05 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `BASILISK_PULSE_RUNTIME_ENABLE` | booléen 0\|1 | 1 dans x14bc; 0 dans x14ay par défaut |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `BIN` | chemin exécutable | build/src_mpcd_base_cuda_q6_resident_livevis_0486 dans les runners 0493w4–0493w8 |  | Alias script / binaire | mis à jour 0337 livevis |
 | `CASES` | liste/chaîne | tg poiseuille bend_pipe io_box |  | Runner qualification 0493x7i / sélection de cas | profil final x7q/x7i |
 | `CHI_FILE` | chemin fichier | DARCY_CHI_FILE ou chemin par défaut |  | Alias script Darcy | ajout/documenté 0426 |
@@ -35,37 +39,52 @@
 | `DARCY_USOLID_X` | double | 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_USOLID_Y` | double | 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `DENSITY_RELAXATION_TIME` | double >0 | 0.25 |  | Alias runner de qualification 0493x7d/x7e | historique x7d/x7e; valeur reprise dans profil x7q |
+| `DESIGN_ONLY` | booléen | 0 |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
+| `DOMAIN_DIAMETERS_X` | entier >0 | 18 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `DOMAIN_DIAMETERS_Y` | entier >0 | 18 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `DROP_CENTER_X` | double dans domaine | centre du domaine en x |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_CENTER_Y` | double dans domaine | 1.25 pour le domaine x9s par défaut |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_RADIUS_CELLS` | double >0 | 40 |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_VX` | double | 0 |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_VY` | double | -0.35 |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DUMP_ROLE_FILTER` | all\|fluid \| alias script utilisateur | fluid dans scripts visual 0309+ \| fluid dans scripts visuels 0309+ | dumpRoleFilter | Alias script \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | ajout 0314 \| script 0314 |
+| `DUMP_STATE_EVERY` | entier >=0 | 1000 dans x14bc | dumpStateEvery | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `EMPTY_INITIAL_MASS` | double >0 | PARTICLE_MASS |  | Alias script état initial / injection empty refill 0434 | option locale/proposée 0434; documenté 0436 |
 | `EMPTY_INITIAL_SLOTS` | entier >=0 | gamma*Nx*Ny si vide |  | Alias script état initial / injection empty refill 0434 | option locale/proposée 0434; documenté 0436 |
 | `EMPTY_INITIAL_TYPE` | entier type particulaire | BACKGROUND_TYPE |  | Alias script état initial / injection empty refill 0434 | option locale/proposée 0434; documenté 0436 |
 | `EVAPORATION_TARGET_TYPE` | entier | -1 (runners x12 et SimulationParams) | phaseInterfaceEvaporationTargetType | Alias runner — interface cinétique / évaporation | runner alias courant; production x12 = -1 |
+| `FILTER_SAMPLE_EVERY` | entier >0 | 100 runner |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
 | `FILTERED_RECORDING_ENABLE` | booléen shell \| booléen/env truthy | 0 ou valeur script \| 0 sauf script/profil |  | Alias script filtered recording 0434/0436 | documenté 0436 |
+| `FLIGHT_WARN_CELLS` | double >0 | 0.80 |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
 | `GAMMA` | entier >0 | 20 |  | Validateurs CUDA resampling — population | lecture C++ directe dans validateurs shadow; également variable shell courante des runners |
-| `GAS_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.08 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
+| `GAMMA_SCALE` | double >0 | GAMMA/8 |  | Runner x14ay — raffinement particulaire | ajout 0493x14ay |
+| `GAS_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.08; x14bc: 0.00575 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
+| `GAS_NU_REFERENCE` | double >0 | 0.0003536191886 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `GAS_PRESSURE_CONSTANT` | double fini | GAS_PRESSURE_REFERENCE |  | Alias script 0493x6g | ajout runner 0493x6g |
 | `GAS_PRESSURE_MODE` | enum string | eos |  | Alias script 0493x6g | ajout runner 0493x6g |
 | `GAS_PRESSURE_REFERENCE` | double fini | pression EOS uniforme initiale |  | Alias script 0493x6g | ajout runner 0493x6g |
 | `GAS_PRESSURE_SCALE` | double >= 0 | 1.0 |  | Alias script 0493x6g | ajout runner 0493x6g |
 | `GRID_CASES` | liste/chaîne de cas | défini par le validateur |  | Validateurs CUDA resampling — entrée de test | présent code; ajouté consolidation 0493w8 |
+| `H_TARGET` | double >0 | 0.00390625 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `INACTIVE_SLOTS` | entier \| alias script utilisateur | 50k-120k selon cas; pas de défaut universel \| selon script; éviter les millions | dumpRoleFilter | Capacité particulaire \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | consolidé 0311-0312 \| script/demo/audit |
 | `INACTIVE_SLOTS_RESAMPLING` | entier | 750000 pour certains scripts |  | Alias script livevis/benchmark | confirmé 0337 |
 | `INITIAL_DOMAIN_MODE` | full \| empty \| empty\|full | full \| empty dans le runner partagé; full dans le wrapper biphasique |  | Alias script état initial / injection empty refill 0434 \| Alias runner / injection multi-espèces | option locale/proposée 0434; documenté 0436 \| ajout/normalisé 0493w4–0493w8 |
+| `INITIAL_JET_LENGTH_OVER_D` | double >=0 | 0.15 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `INJECT_MASS_CLOSURE_STRENGTH` | double | 1.0 pour liquid; 0.0 pour gas |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `INJECT_PHASE` | liquid\|gas | liquid pour le wrapper type1_into_type2 |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `INJECT_Q6_STRENGTH` | double | 1.0 pour liquid; 0.0 pour gas |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `INJECT_TO_BACKGROUND_MASS_RATIO` | double >0 | 100 liquid->gas; 0.01 gas->liquid; 10 sinon |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `INLET_FACE` | double/chaîne selon variable | left |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
+| `INLET_OSCILLATION_PHASE` | double radians | 0.0 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `INLET_OSCILLATION_START_TIME` | double | 0.0 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `INLET_OSCILLATION_TIME_OFFSET` | double ou vide(auto) | vide(auto) |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `INLET_SMAX` | double/chaîne selon variable | 1.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `INLET_SMIN` | double/chaîne selon variable | STEP_YMAX/Ly |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `INPUT_STATE` | chemin fichier | selon cas | inputState | Alias script état initial | ajout/documenté 0426 |
+| `JET_DIAMETER_CELLS` | entier >0 | 96 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `KINETIC_REFLECTION_FRACTION` | double [0,1] | 1.0 dans runners x12 de production; défaut SimulationParams=0.0 | phaseInterfaceKineticReflectionFraction, q6ForceProjectionMode, speciesQ6Mode | Alias runner — interface cinétique / évaporation | runner alias courant; production x12 = 1.0 |
-| `LIQUID_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.02 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
+| `LIQUID_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.02; x14bc cold benchmark: 0.0078125 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
+| `LIQUID_NU_REFERENCE` | double >0 | 0.0002122268985 dans x14bc |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `LIVE_PROGRESS` | booléen/int \| booléen | 1 |  | Alias runner / ergonomie \| Runner qualification 0493x7i / progression | ajout/normalisé 0493w4–0493w8 \| profil final x7q/x7i |
 | `LIVE_VIS_ALPHA` | double | 0.08 |  | Alias script livevis 0337 | ajout 0337 \| précisé 0436b |
 | `LIVE_VIS_CLIP` | double; <=0 auto | -1 |  | Alias script livevis 0337 | ajout 0337 |
@@ -80,8 +99,8 @@
 | `LIVE_VIS_CUDA_FIELD` | booléen | 1 |  | Alias script livevis 0337 | ajout 0337a |
 | `LIVE_VIS_CUDA_SNAPSHOT` | booléen | 0 |  | Alias script livevis 0337 | ajout 0336/0337 |
 | `LIVE_VIS_ENABLE` | booléen \| booléen/int 0\|1 | 1 \| 0 dans le runner final x6g |  | Alias script livevis 0337 \| Alias script LiveVis / runners 0493x | ajout 0337 \| documenté/fix runner 0493x6g-fix3 |
-| `LIVE_VIS_EVERY` | entier >0 | 25 \| 20 |  | Alias script livevis 0337 | ajout 0337 \| mis à jour 0339a \| mis à jour 0433a |
-| `LIVE_VIS_FIELD` | ux\|uy\|speed\|vorticity\|mass\|density | dépend du script |  | Alias script livevis 0337 | ajout 0337 |
+| `LIVE_VIS_EVERY` | entier >0 | 25 \| 20 \| 1 |  | Alias script livevis 0337 \| Runner x14 — LiveVis/recording | ajout 0337 \| mis à jour 0339a \| mis à jour 0433a \| ajout 0493x14aw/x14bc |
+| `LIVE_VIS_FIELD` | ux\|uy\|speed\|vorticity\|mass\|density \| nom de champ | dépend du script \| alpha_x6c dans x14bc |  | Alias script livevis 0337 \| Runner x14 — LiveVis/recording | ajout 0337 \| ajout 0493x14aw/x14bc |
 | `LIVE_VIS_FORCE_HOST_MIRROR` | booléen | 0 |  | Alias script livevis 0337 | ajout 0335c |
 | `LIVE_VIS_GAIN` | double >0 | 1.0 |  | Alias script livevis 0337 | ajout 0337 |
 | `LIVE_VIS_HOLD_ON_EXIT` | booléen \| booléen/int 0\|1 | 1 \| 0 dans le runner final x6g |  | Alias script livevis \| Alias script LiveVis / runners 0493x | ajout/documenté 0426 \| documenté/fix runner 0493x6g-fix3 |
@@ -539,9 +558,14 @@
 | `Q6_GF_SPECIES_DIAGNOSTICS_ENABLE` | booléen texte | false | speciesDiagnosticsEnable | Alias run_ok Q6-g-f / diagnostics espèces | documenté helper commun 0493x7h; profil final x7q/x7i |
 | `Q6_PRESSURE_OUTLET_DEFLATION_ENABLE` | booléen | true | q6PressureOutletDeflationEnable | Runner 0414 / x8s ablation | ajout 0414d |
 | `QUAL_MODES` | liste/chaîne | src src-q6 src-q6-g-f |  | Runner qualification 0493x7i / sélection de modes | profil final x7q/x7i |
+| `RECORD_ENABLE` | booléen | true dans x14bc |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
+| `RECORD_EVERY` | entier >0 | 100 runner; 25 recommandé pour run long pulsé |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
 | `RECORD_FIELDS` | liste CSV de champs | rho,ux,uy dans les profils 0434 récents \| rho,ux,uy dans les profils récents |  | Alias script filtered recording 0434/0436 | documenté 0436 |
 | `REQUIRE_MIXED_CELL_AT_END` | booléen | false | speciesCellDiagnosticsEnable | Alias runner / validation injection | ajout/normalisé 0493w4–0493w8 |
 | `REQUIRE_VALIDATED_SEGMENTED_RESIDENT` | booléen | 1 |  | Alias script sécurité CUDA | ajout/documenté 0426 |
+| `RESTART` | booléen 0\|1 | 0 |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
+| `RESTART_STATE` | chemin .smpcd | vide |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
+| `RESTART_TAG` | chaîne | segment |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `RUN_MODES` | liste de modes: src; src-q6; src-resampling; src-q6-resampling | dépend du runner; src src-q6 pour les comparaisons injection/TG |  | Alias script / cas de run | existant; utilisé scripts portables |
 | `RUN_OK_DARCY_COMMON_FILLED_STATE` | booléen | 0 |  | Alias run_ok Darcy / qualification | documenté helper commun 0493x7h; profil final x7q/x7i |
 | `RUN_ROOT` | chaîne chemin | runs/0493x7q_q6_g_f_physical_qualification |  | Runner qualification 0493x7i / racine de sortie | profil final x7q/x7i |
@@ -601,9 +625,14 @@
 | `STEP_XMIN` | double/chaîne selon variable | 0.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `STEP_YMAX` | double/chaîne selon variable | 0.52 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `STEP_YMIN` | double/chaîne selon variable | 0.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
+| `STRICT_FLIGHT_GUARD` | booléen | 0 |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
 | `SUMMARY_ROLE_FILTER` | all\|fluid \| alias script utilisateur | fluid dans scripts visual 0309+ \| fluid dans scripts visuels 0309+ | summaryRoleFilter | Alias script \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | ajout 0314 \| script 0314 |
 | `SURFACE_TENSION_MIN_RADIUS_CELLS` | double >=0 | source Params=0.0; x12b/x12c/x12d JFM et x12yl: 4; x12cal dynamique et anciens splash x12a obstacle: 3 | surfaceTensionMinRadiusCells | Alias runner — tension superficielle | runner alias courant; valeur dépend de la campagne x12 |
 | `TARGET` | wall \| puddle | wall dans runner principal; wrappers dédiés disponibles |  | Alias runner — splash x9s | ajout 0493x9s |
+| `TARGET_DENSITY_RATIO` | double >0 | 27.84 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `TARGET_RE_L` | double >0 | 500 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `TARGET_ST` | double >0 | 1.6666666666666667 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `TARGET_WE_G` | double >0 | 200 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `THERMOSTAT_ENABLE` | booléen/env truthy | 1 dans les démos CUDA isothermes; 0 désactive | thermostatEnable | Scripts démo 0283/0291b — thermostat | contrôle utilisateur script |
 | `TOL_ABS` | double >=0 | 2e-10 |  | Validateurs CUDA resampling — tolérance | lecture C++ directe dans validateurs shadow uniquement |
 | `TOL_REL` | double >=0 | 2e-12 |  | Validateurs CUDA resampling — tolérance | lecture C++ directe dans validateurs shadow uniquement |
@@ -656,6 +685,25 @@
 | `X7I_TG_SUMMARY_EVERY` | entier >0 | 100 |  | Runner qualification 0493x7i / TG | profil final x7q/x7i |
 
 ## Fiches détaillées
+
+### `ALLOW_LARGE_DUMPS`
+
+- **Type :** booléen
+- **Défaut :** `1 dans x14bc`
+- **Catégorie :** Runner x14 — dumps/restart
+- **Statut :** ajout 0493x14aw/x14bc
+
+Autorise explicitement les dumps d’état volumineux du benchmark 1728^2.
+
+**Remarques.** Doit être activé pour les gros runs/restarts de cette campagne.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `ALPHA`
 
@@ -758,6 +806,65 @@ Définit q6StrengthDeclared de l’espèce de fond.
 
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2_empty.sh`
+
+### `BASE_RUN_ROOT`
+
+- **Type :** chemin
+- **Défaut :** `runs/0493x14bc_basilisk_atomisation_Re500_cold_seed${SEED}`
+- **Catégorie :** Runner x14 — contrôle de campagne
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe la racine stable d’un run et de ses segments restart.
+
+**Remarques.** Évite d’écraser des campagnes précédentes et regroupe les restarts.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `BASILISK_PULSE_REL_AMPLITUDE`
+
+- **Type :** double [0,1]
+- **Défaut :** `0.05`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe A/U du pulse d’entrée x14ba.
+
+**Remarques.** Transmis à inletVelocityOscillationAmplitude quand le pulse runtime est actif.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `BASILISK_PULSE_RUNTIME_ENABLE`
+
+- **Type :** booléen 0|1
+- **Défaut :** `1 dans x14bc; 0 dans x14ay par défaut`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Active/désactive la loi x14ba dans les runners benchmark.
+
+**Remarques.** x14bc l’active par défaut; le wrapper steady l’impose à 0.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500_steady.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `BIN`
 
@@ -1177,6 +1284,63 @@ Contrôle tau_rho des anciens runners de raffinement.
 - `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
 - `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
+### `DESIGN_ONLY`
+
+- **Type :** booléen
+- **Défaut :** `0`
+- **Catégorie :** Runner x14 — contrôle de campagne
+- **Statut :** ajout 0493x14aw/x14bc
+
+Arrête le runner après calcul/affichage des grandeurs de design sans générer l’état ni lancer le solveur.
+
+**Remarques.** Utilisé pour contrôler U, sigma et période avant les gros runs.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `DOMAIN_DIAMETERS_X`
+
+- **Type :** entier >0
+- **Défaut :** `18`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe Lx/D du domaine.
+
+**Remarques.** Reproduit l’étendue 18D du benchmark Basilisk en 2-D.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `DOMAIN_DIAMETERS_Y`
+
+- **Type :** entier >0
+- **Défaut :** `18`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe Ly/D du domaine.
+
+**Remarques.** Reproduit l’étendue 18D du benchmark Basilisk en 2-D.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `DROP_CENTER_X`
 
 - **Type :** double dans domaine
@@ -1282,6 +1446,25 @@ Alias exporté par les scripts vers dumpRoleFilter. | Alias script vers dumpRole
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
 
+### `DUMP_STATE_EVERY`
+
+- **Type :** entier >=0
+- **Défaut :** `1000 dans x14bc`
+- **Catégorie :** Runner x14 — dumps/restart
+- **Statut :** ajout 0493x14aw/x14bc
+- **Écrit / contrôle :** `dumpStateEvery`
+
+Cadence des dumps restart/diagnostic.
+
+**Remarques.** Campagne longue: environ tous les 1000 pas.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `EMPTY_INITIAL_MASS`
 
 - **Type :** double >0
@@ -1345,6 +1528,25 @@ Surcharge phaseInterfaceEvaporationTargetType.
 - `ASSOCIATED_WITH` → `x10q` — Récupération large des recouvrements initiaux rares
 - `ASSOCIATED_WITH` → `x11c` — Correction de protocole capillaire et baseline sigma=0
 
+### `FILTER_SAMPLE_EVERY`
+
+- **Type :** entier >0
+- **Défaut :** `100 runner`
+- **Catégorie :** Runner x14 — LiveVis/recording
+- **Statut :** ajout 0493x14aw/x14bc
+
+Cadence d’échantillonnage du filtre recorder lorsqu’un filtre l’utilise.
+
+**Remarques.** Sans filtrage temporel effectif, ce réglage n’altère pas alpha_x6c.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
+
 ### `FILTERED_RECORDING_ENABLE`
 
 - **Type :** booléen shell | booléen/env truthy
@@ -1361,6 +1563,25 @@ Active les dumps filtrés .f32 dans les scripts homogènes 0434/0436. | Alias de
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 - `DEFINED_OR_USED_IN` — `src/filtered_field_recorder_0432.cpp`
 
+### `FLIGHT_WARN_CELLS`
+
+- **Type :** double >0
+- **Défaut :** `0.80`
+- **Catégorie :** Runner x14 — contrôle de campagne
+- **Statut :** ajout 0493x14aw/x14bc
+
+Seuil d’avertissement sur déplacement thermique+advectif liquide par pas en cellules.
+
+**Remarques.** Diagnostic de robustesse cinétique du runner.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `GAMMA`
 
 - **Type :** entier >0
@@ -1372,19 +1593,60 @@ Occupation moyenne gamma utilisée par les exécutables de validation CUDA resam
 
 **Remarques.** La lecture getenv directe identifiée dans le C++ est limitée aux exécutables de validation CUDA resampling shadow. Le même nom est aussi utilisé comme variable shell par de nombreux runners qui l'écrivent ensuite dans les paramètres; ne pas le confondre avec un getenv du binaire de production.
 
+### `GAMMA_SCALE`
+
+- **Type :** double >0
+- **Défaut :** `GAMMA/8`
+- **Catégorie :** Runner x14ay — raffinement particulaire
+- **Statut :** ajout 0493x14ay
+
+Facteur de similitude particulaire du runner x14ay.
+
+**Remarques.** Utilisé pour m->m/s et kBT->kBT/s; gamma12/16 non retenu comme fluide courant.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14ay` — Raffinement particulaire gamma 12/16 à similitude thermique
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `GAS_KBT`
 
 - **Type :** double >0
-- **Défaut :** `dépend du benchmark; Couette x14w: 0.08`
+- **Défaut :** `dépend du benchmark; Couette x14w: 0.08; x14bc: 0.00575`
 - **Catégorie :** Runner x14 — propriétés de phase
 - **Statut :** paramètre visible des runners x14
 
 Cible thermique du gaz et température de référence du mécanisme de paroi gaz; écrite dans la déclaration thermostat de l’espèce gaz.
 
-**Remarques.** Les runners x14 utilisant l’EOS x6g alignent aussi la température globale utilisée par cette fermeture sur la cible gaz.
+**Remarques.** Les runners x14 utilisant l’EOS x6g alignent aussi la température globale utilisée par cette fermeture sur la cible gaz. | x14bc conserve la calibration gaz existante; égalité stricte nuG=nuL non imposée.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
 
 **Jalons associés :**
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 - `ASSOCIATED_WITH` → `x6g` — Condition de pression gazeuse sur l'interface physique
+
+### `GAS_NU_REFERENCE`
+
+- **Type :** double >0
+- **Défaut :** `0.0003536191886`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fournit la viscosité gaz de référence pour ReG et le ratio nuG/nuL.
+
+**Remarques.** Calibration gaz TG64 REVIEW conservée; égalité stricte avec nuL non exigée.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `GAS_PRESSURE_CONSTANT`
 
@@ -1474,6 +1736,24 @@ Sélectionne les cas de grille exécutés par plusieurs binaires de validation d
 - `DEFINED_OR_USED_IN` — `src/main_validate_cuda_resampling_plan_0228.cpp`
 - `DEFINED_OR_USED_IN` — `src/main_validate_cuda_resampling_shadow_transfer_0233.cpp`
 
+### `H_TARGET`
+
+- **Type :** double >0
+- **Défaut :** `0.00390625`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe la taille de cellule h du benchmark.
+
+**Remarques.** x14bc est calibré pour h=1/256.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `INACTIVE_SLOTS`
 
 - **Type :** entier | alias script utilisateur
@@ -1515,6 +1795,25 @@ Permet de démarrer un cas injection/fill avec domaine initialement vide pour te
 - `DEFINED_OR_USED_IN` — `scripts/run_0434_injection_type1_into_type2.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2_empty.sh`
+
+### `INITIAL_JET_LENGTH_OVER_D`
+
+- **Type :** double >=0
+- **Défaut :** `0.15`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe la longueur initiale du bouchon liquide en unités D.
+
+**Remarques.** Analogue du jet initial court du cas Basilisk.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `INJECT_MASS_CLOSURE_STRENGTH`
 
@@ -1588,6 +1887,65 @@ Face portant le segment inlet.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
 
+### `INLET_OSCILLATION_PHASE`
+
+- **Type :** double radians
+- **Défaut :** `0.0`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Configure la phase de la loi x14ba écrite dans le .kv.
+
+**Remarques.** Phase 0 démarre à la vitesse moyenne avec dérivée positive.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `INLET_OSCILLATION_START_TIME`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Configure le temps de début x14ba.
+
+**Remarques.** Avant ce temps le multiplicateur oscillant vaut 1.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `INLET_OSCILLATION_TIME_OFFSET`
+
+- **Type :** double ou vide(auto)
+- **Défaut :** `vide(auto)`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Configure la continuité de phase au restart.
+
+**Remarques.** Vide: 0 en run frais ou dérivation depuis state_step_N lorsque le runner peut l’établir; explicite recommandé pour restarts chaînés.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `INLET_SMAX`
 
 - **Type :** double/chaîne selon variable
@@ -1636,6 +1994,25 @@ Alias de STATE_SOURCE pour fournir l’état initial .smpcd.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
 
+### `JET_DIAMETER_CELLS`
+
+- **Type :** entier >0
+- **Défaut :** `96`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe D/h du jet.
+
+**Remarques.** Avec h=1/256, D=0.375.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `KINETIC_REFLECTION_FRACTION`
 
 - **Type :** double [0,1]
@@ -1662,13 +2039,37 @@ Surcharge phaseInterfaceKineticReflectionFraction.
 ### `LIQUID_KBT`
 
 - **Type :** double >0
-- **Défaut :** `dépend du benchmark; Couette x14w: 0.02`
+- **Défaut :** `dépend du benchmark; Couette x14w: 0.02; x14bc cold benchmark: 0.0078125`
 - **Catégorie :** Runner x14 — propriétés de phase
 - **Statut :** paramètre visible des runners x14
 
 Cible thermique de la phase liquide; écrite dans species0ThermostatTargetKBT selon le mapping de types.
 
-**Remarques.** Alias runner, non lu directement par le C++.
+**Remarques.** Alias runner, non lu directement par le C++. | x14bc retient kBT_L=0.0078125 après étude de rugosité et calibration TG128.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `LIQUID_NU_REFERENCE`
+
+- **Type :** double >0
+- **Défaut :** `0.0002122268985 dans x14bc`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fournit la viscosité liquide calibrée utilisée pour calculer U et les nombres dérivés.
+
+**Remarques.** x14bc: TG128 8 seeds PASS, CV=2.2%.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `LIVE_PROGRESS`
 
@@ -1862,28 +2263,41 @@ Active la visualisation dans les scripts portables livevis. | Contrôle l’acti
 ### `LIVE_VIS_EVERY`
 
 - **Type :** entier >0
-- **Défaut :** `25 | 20`
-- **Catégorie :** Alias script livevis 0337
-- **Statut :** ajout 0337 | mis à jour 0339a | mis à jour 0433a
+- **Défaut :** `25 | 20 | 1`
+- **Catégorie :** Alias script livevis 0337 | Runner x14 — LiveVis/recording
+- **Statut :** ajout 0337 | mis à jour 0339a | mis à jour 0433a | ajout 0493x14aw/x14bc
 
-Cadence de visualisation live : une frame toutes les N étapes. | Depuis 0433a, cette cadence est aussi la valeur suivie par recordEvery quand recordEvery est absent ou <=0. | Cadence de rendu livevis.
+Cadence de visualisation live : une frame toutes les N étapes. | Depuis 0433a, cette cadence est aussi la valeur suivie par recordEvery quand recordEvery est absent ou <=0. | Cadence de rendu livevis. | Cadence LiveVis demandée par le runner.
 
-**Remarques.** Exporté vers SRC_LIVE_VIS_EVERY. | 0339a: défaut réduit à 25 pour limiter le coût livevis; mesures indicatives 500 steps: every1≈45.4s, every25≈32.8–38.7s selon bruit. Override possible par environnement. | 0433a: initialise SRC_LIVE_VIS_EVERY au démarrage; peut ensuite être remplacé à chaud par livevis_control.kv:liveEvery/every/visualEvery.
+**Remarques.** Exporté vers SRC_LIVE_VIS_EVERY. | 0339a: défaut réduit à 25 pour limiter le coût livevis; mesures indicatives 500 steps: every1≈45.4s, every25≈32.8–38.7s selon bruit. Override possible par environnement. | 0433a: initialise SRC_LIVE_VIS_EVERY au démarrage; peut ensuite être remplacé à chaud par livevis_control.kv:liveEvery/every/visualEvery. | Campagne x14bc: visualisation chaque pas.
 
 **Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
 - `DEFINED_OR_USED_IN` — `src/filtered_field_recorder_0432.cpp`
 - `DEFINED_OR_USED_IN` — `src/live_visualization_0335.cpp`
 
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `LIVE_VIS_FIELD`
 
-- **Type :** ux|uy|speed|vorticity|mass|density
-- **Défaut :** `dépend du script`
-- **Catégorie :** Alias script livevis 0337
-- **Statut :** ajout 0337
+- **Type :** ux|uy|speed|vorticity|mass|density | nom de champ
+- **Défaut :** `dépend du script | alpha_x6c dans x14bc`
+- **Catégorie :** Alias script livevis 0337 | Runner x14 — LiveVis/recording
+- **Statut :** ajout 0337 | ajout 0493x14aw/x14bc
 
-Champ affiché par défaut dans la fenêtre live.
+Champ affiché par défaut dans la fenêtre live. | Sélectionne le champ LiveVis demandé par le runner.
 
-**Remarques.** Par défaut: VK/TG=vorticity, Poiseuille=ux, backward-step/box=speed. | 0341b/0341d: sert aussi à initialiser le fichier livevis_control.kv généré par les scripts.
+**Remarques.** Par défaut: VK/TG=vorticity, Poiseuille=ux, backward-step/box=speed. | 0341b/0341d: sert aussi à initialiser le fichier livevis_control.kv généré par les scripts. | x14bc choisit alpha_x6c par défaut; le fichier livevis_control.kv peut rester autoritaire à chaud selon le backend.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
 
 ### `LIVE_VIS_FORCE_HOST_MIRROR`
 
@@ -9090,6 +9504,42 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 - `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
 - `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
 
+### `RECORD_ENABLE`
+
+- **Type :** booléen
+- **Défaut :** `true dans x14bc`
+- **Catégorie :** Runner x14 — LiveVis/recording
+- **Statut :** ajout 0493x14aw/x14bc
+
+Active la session recorder via le contrôle LiveVis existant.
+
+**Remarques.** Le root livevis_control.kv reste user-owned.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `RECORD_EVERY`
+
+- **Type :** entier >0
+- **Défaut :** `100 runner; 25 recommandé pour run long pulsé`
+- **Catégorie :** Runner x14 — LiveVis/recording
+- **Statut :** ajout 0493x14aw/x14bc
+
+Cadence recorder demandée par le runner/profil.
+
+**Remarques.** La cadence effective reste soumise au contrôle recorder; 25 donne ~5 échantillons par période x14bc.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `RECORD_FIELDS`
 
 - **Type :** liste CSV de champs
@@ -9099,11 +9549,17 @@ Contrôle le runner de qualification physique sans ajouter de clé backend propr
 
 Sélectionne les champs enregistrés par les dumps filtrés .f32. | Alias de script pour choisir les champs dumpés par filtered_field_recorder_0432.
 
-**Remarques.** Pour les comparaisons type1/type2/total, utiliser au minimum rho,ux,uy; particleTypeFilter est tracé dans manifest.kv. | À utiliser avec PARTICLE_TYPE_FILTER pour produire les comparaisons total/type1/type2.
+**Remarques.** Pour les comparaisons type1/type2/total, utiliser au minimum rho,ux,uy; particleTypeFilter est tracé dans manifest.kv. | Depuis 0493x14ax, alpha_x6c est un champ recorder supporté lorsque la géométrie x6c résidente est courante. | À utiliser avec PARTICLE_TYPE_FILTER pour produire les comparaisons total/type1/type2. | x14bc utilise par défaut rho1,alpha_x6c,ux,uy.
 
 **Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
 - `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
 - `DEFINED_OR_USED_IN` — `src/filtered_field_recorder_0432.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ax` — Recorder alpha_x6c du champ liquide physique résident
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+- `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
 
 ### `REQUIRE_MIXED_CELL_AT_END`
 
@@ -9136,6 +9592,60 @@ Force le strict mode du chemin segmented resident 0264.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_backward_step_0425.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
+
+### `RESTART`
+
+- **Type :** booléen 0|1
+- **Défaut :** `0`
+- **Catégorie :** Runner x14 — dumps/restart
+- **Statut :** ajout 0493x14aw/x14bc
+
+Active le lancement depuis RESTART_STATE dans x14bc.
+
+**Remarques.** Le runner crée un sous-répertoire restart_${RESTART_TAG}.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `RESTART_STATE`
+
+- **Type :** chemin .smpcd
+- **Défaut :** `vide`
+- **Catégorie :** Runner x14 — dumps/restart
+- **Statut :** ajout 0493x14aw/x14bc
+
+Désigne l’état de reprise lorsque RESTART=1.
+
+**Remarques.** Doit exister et être non vide.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `RESTART_TAG`
+
+- **Type :** chaîne
+- **Défaut :** `segment`
+- **Catégorie :** Runner x14 — dumps/restart
+- **Statut :** ajout 0493x14aw/x14bc
+
+Étiquette le sous-répertoire de restart.
+
+**Remarques.** N’affecte pas la physique.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `RUN_MODES`
 
@@ -10088,6 +10598,25 @@ Borne y minimale du rectangle solide step généré en chi.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
 
+### `STRICT_FLIGHT_GUARD`
+
+- **Type :** booléen
+- **Défaut :** `0`
+- **Catégorie :** Runner x14 — contrôle de campagne
+- **Statut :** ajout 0493x14aw/x14bc
+
+Transforme le dépassement FLIGHT_WARN_CELLS en erreur fatale.
+
+**Remarques.** Par défaut le dépassement n’est qu’un warning.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
 ### `SUMMARY_ROLE_FILTER`
 
 - **Type :** all|fluid | alias script utilisateur
@@ -10144,6 +10673,82 @@ Choisit la cible du splash: paroi sèche ou flaque liquide initiale.
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
+
+### `TARGET_DENSITY_RATIO`
+
+- **Type :** double >0
+- **Défaut :** `27.84`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe rhoL/rhoG du benchmark Basilisk.
+
+**Remarques.** Avec gamma commun, le runner choisit les masses particulaires pour ce rapport.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `TARGET_RE_L`
+
+- **Type :** double >0
+- **Défaut :** `500`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe la cible Reynolds liquide utilisée pour déduire U à partir de nuL et D.
+
+**Remarques.** Valeur de design du runner; la valeur réellement obtenue dépend de la calibration nuL fournie.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `TARGET_ST`
+
+- **Type :** double >0
+- **Défaut :** `1.6666666666666667`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe le Strouhal du pulse Basilisk et donc sa période T=D/(St U).
+
+**Remarques.** Correspond à 5/3 pour le cas de référence.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `TARGET_WE_G`
+
+- **Type :** double >0
+- **Défaut :** `200`
+- **Catégorie :** Runner x14aw/x14bc — benchmark Basilisk
+- **Statut :** ajout 0493x14aw/x14bc
+
+Fixe la cible Weber gaz utilisée pour déduire sigma.
+
+**Remarques.** WeG=rhoG U^2 D/sigma dans le runner.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14aw_basilisk_atomisation_re500.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `THERMOSTAT_ENABLE`
 

@@ -232,6 +232,12 @@
 | `rightOpenYMin` | clé supprimée | (non applicable) | Clés supprimées — migration vers segments 0143 | supprimé 0143; rejet explicite; recensé 0490p |
 | `rngSeed` | uint64 | 12345 | Temps et collision SRC | existant catalogue 0292 \| canonique |
 | `rotationAngle` | double | 2.0943951023931953 rad | Temps et collision SRC | existant catalogue 0292 \| alias accepté \| canonique |
+| `SimulationParams::inletVelocityOscillationAmplitude` | double | 0.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
+| `SimulationParams::inletVelocityOscillationEnable` | booléen | false | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
+| `SimulationParams::inletVelocityOscillationPeriod` | double | 1.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
+| `SimulationParams::inletVelocityOscillationPhase` | double | 0.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
+| `SimulationParams::inletVelocityOscillationStartTime` | double | 0.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
+| `SimulationParams::inletVelocityOscillationTimeOffset` | double | 0.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
 | `speciesCellCudaComparisonFilename` | chaîne | species_cell_cuda_equivalence_0490h.csv | Multi-espèces — dépôt et diagnostics | ajout 0490a–0490p |
 | `speciesCellCudaComparisonTolerance` | double | 1.0e-11 | Multi-espèces — dépôt et diagnostics | ajout 0490a–0490p |
 | `speciesCellCudaDepositEnable` | booléen | false | Multi-espèces — dépôt et diagnostics | ajout 0490a–0490p |
@@ -1814,6 +1820,7 @@ Contrôle si les dumps .smpcd écrivent tous les slots ou seulement les particul
 - **Statut :** existant catalogue 0292 | canonique
 - **Clé(s) `.kv` :** `dumpStateEvery`
 - **Champ(s) C++ :** `dumpStateEvery`
+- **Variables runner qui écrivent ce paramètre :** `DUMP_STATE_EVERY`
 
 Cadence d’écriture des états .smpcd pour post-traitement.
 
@@ -4612,6 +4619,151 @@ Angle de rotation SRD/MPCD.
 **Sources / usages :**
 - `DEFINED_OR_USED_IN` — `include/simulation_params.h`
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+### `SimulationParams::inletVelocityOscillationAmplitude`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini; si activé 0 <= A <= 1
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationAmplitude`, `inletVelocityOscillationAmplitude`
+
+Fixe l’amplitude relative A de l’oscillation F=1+A sin(...).
+
+**Remarques.** La borne A<=1 empêche l’inversion de direction de l’entrée.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+### `SimulationParams::inletVelocityOscillationEnable`
+
+- **Type :** booléen
+- **Défaut :** `false`
+- **Contraintes / valeurs :** true/false
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationEnable`, `inletVelocityOscillationEnable`
+
+Active le multiplicateur sinusoïdal global de vitesse d’entrée.
+
+**Remarques.** Désactivé, le multiplicateur x14ba vaut exactement 1.0 et préserve le comportement antérieur.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+### `SimulationParams::inletVelocityOscillationPeriod`
+
+- **Type :** double
+- **Défaut :** `1.0`
+- **Contraintes / valeurs :** fini; si activé > 0
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationPeriod`, `inletVelocityOscillationPeriod`
+
+Fixe la période physique T de l’oscillation d’entrée.
+
+**Remarques.** Même unité de temps que dt/temps solveur.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+### `SimulationParams::inletVelocityOscillationPhase`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini; radians
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationPhase`, `inletVelocityOscillationPhase`
+
+Fixe la phase initiale de l’oscillation sinusoïdale.
+
+**Remarques.** Phase 0: l’entrée démarre à la vitesse moyenne et croît initialement.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+### `SimulationParams::inletVelocityOscillationStartTime`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationStartTime`, `inletVelocityOscillationStartTime`
+
+Fixe le temps effectif à partir duquel l’oscillation est appliquée.
+
+**Remarques.** Avant startTime, le facteur oscillant vaut 1.0.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+
+### `SimulationParams::inletVelocityOscillationTimeOffset`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini
+- **Catégorie :** Entrée globale oscillante 0493x14ba
+- **Statut :** ajout 0493x14ba
+- **Autres alias :** `inletOscillationTimeOffset`, `inletVelocityOscillationTimeOffset`
+
+Ajoute un offset de temps global pour conserver la phase lors d’un restart.
+
+**Remarques.** t_eff=t+offset; les runners x14ba/x14bc peuvent le déduire d’un state_step_N ou l’imposer explicitement pour des restarts chaînés.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/boundary_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/q6_projection_adapter.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x14ba` — Oscillation globale sinusoïdale de vitesse d’entrée
+- `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
 ### `speciesCellCudaComparisonFilename`
 

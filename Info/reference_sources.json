@@ -1,5 +1,5 @@
 {
   "milestones": "inputs/snapshots/referentiel_jalons_SRC_GPU_SURF_20260905.tex",
-  "params_inventory": "inputs/snapshots/src_mpcd_params_inventory_snapshot_100926_x9e_fix3.csv",
-  "env_inventory": "inputs/snapshots/src_mpcd_env_flags_inventory_snapshot_100926_x9e_fix3.csv"
+  "params_inventory": "inputs/snapshots/src_mpcd_params_inventory_snapshot_110926_x14bc.csv",
+  "env_inventory": "inputs/snapshots/src_mpcd_env_flags_inventory_snapshot_110926_x14bc.csv"
 }

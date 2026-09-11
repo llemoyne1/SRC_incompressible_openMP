@@ -1407,7 +1407,7 @@ def build(args: argparse.Namespace) -> dict[str, int | str]:
     db.executescript(args.schema.read_text(encoding='utf-8'))
     with db:
         db.execute('INSERT INTO meta VALUES(?,?)', ('schema_version', '4'))
-        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.29'))
+        db.execute('INSERT INTO meta VALUES(?,?)', ('reference_version', 'V4.30'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('built_utc', dt.datetime.now(dt.timezone.utc).isoformat()))
         db.execute('INSERT INTO meta VALUES(?,?)', ('repo_root', '.'))
         db.execute('INSERT INTO meta VALUES(?,?)', ('info_root', repo_relative_label(args.repo_root, args.info_root)))

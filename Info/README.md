@@ -576,3 +576,24 @@ Les vues `parametres.md` et `flags.md` utilisent désormais un tri alphabétique
 `jalons_par_nature.md` conserve le regroupement par nature mais trie chaque groupe en ordre
 naturel numérique/alphanumérique. Le lexique global `lexique_jalons.md` reste le point d'entrée
 rapide pour les 292 jalons. Voir `docs/INVENTAIRES_PUBLICATION_V4_29.md`.
+
+### V4.30 — x14aw→x14bc : benchmark Basilisk, alpha_x6c, pulsation et liquide froid
+
+V4.30 documente la séquence expérimentale du 11 septembre 2026 sans inventer les labels
+intermédiaires absents. La curation `0029_0493x14aw_x14bc_basilisk_cold.sql` ajoute exactement
+les jalons attestés `x14aw`, `x14ax`, `x14ay`, `x14az`, `x14ba` et `x14bc`. Les labels
+`x14bb`/`x14bb2` ne sont pas promus : `0493x14bb2` n'était qu'un label de campagne de
+calibration.
+
+La séquence couvre l'analogue 2-D Basilisk ReL=500/WeG=200 (`x14aw`), l'accès recorder
+`alpha_x6c` (`x14ax`), l'ablation gamma 12/16 non retenue (`x14ay`), l'affichage LiveVis
+`alpha_x6c` (`x14az`), la loi sinusoïdale globale d'entrée et sa continuité de phase au restart
+(`x14ba`), puis le runner froid pulsé `x14bc`. La calibration liquide finale est TG128, 8 graines,
+PASS : `kBT_L=0.0078125`, `nu_L=0.0002122268985`, `CV=2.2%`. Le gaz conserve
+`nu_G=0.0003536191886`; l'égalité stricte des viscosités cinématiques n'est pas imposée.
+
+Les six nouvelles clés solveur `inletVelocityOscillation*` sont ajoutées au snapshot paramètres.
+Le snapshot ENV est rafraîchi avec les contrôles explicites du benchmark/restart/recording x14aw–x14bc.
+Les sources primaires exactes, le log TG et les captures qualitatives sélectionnées sont archivés sous
+`inputs/historical/0493x14aw_x14bc_20260911_original_sources.zip`. Voir
+`docs/CURATION_0493X14AW_X14BC_BASILISK_COLD_V4_30.md`.

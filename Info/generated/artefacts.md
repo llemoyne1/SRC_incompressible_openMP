@@ -329,6 +329,7 @@
 | `scripts/check_0493x13h_L072_qualification.sh` | x13h | present |
 | `scripts/check_0493x13i_kbt_scaling.sh` |  | present |
 | `scripts/check_0493x13j_src_transport.sh` | x13j | present |
+| `scripts/check_0493x14ba_inlet_oscillation.py` |  | present |
 | `scripts/check_0493x5a2_generator_profiles.py` | x5a2 | present |
 | `scripts/check_0493x7b_virial_grid_scaling.py` |  | present |
 | `scripts/check_0493x7f_q6_g_f_multibc.py` | x7f | present |
@@ -715,6 +716,7 @@
 | `doc/README_0493x13zn.txt` |  | present |
 | `doc/README_0493x14an_PLANAR_GAS_JET_LIQUID_BATH.md` |  | present |
 | `doc/README_0493x14b_x14c.txt` |  | present |
+| `doc/README_0493x14ba_global_inlet_oscillation.txt` |  | present |
 | `doc/README_0493x14f_fix1.txt` |  | present |
 | `doc/README_APPLY_0070_Q9_RAMP_FLOOR.md` |  | present |
 | `doc/README_PARAMS_CUDA_0287.md` |  | present |
@@ -1254,6 +1256,11 @@
 | `scripts/run_0493x14au_sato_liquid_viscosity.sh` |  | present |
 | `scripts/run_0493x14au_sato_viscosity_campaign.sh` |  | present |
 | `scripts/run_0493x14av_air_assisted_atomizer_demo.sh` |  | present |
+| `scripts/run_0493x14aw_basilisk_atomisation_re500.sh` |  | present |
+| `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh` |  | present |
+| `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh` |  | present |
+| `scripts/run_0493x14bc_basilisk_atomisation_cold_re500_pulsed.sh` |  | present |
+| `scripts/run_0493x14bc_basilisk_atomisation_cold_re500_steady.sh` |  | present |
 | `scripts/run_0493x14s_multiseed6_shape_step1000.sh` | x14s | present |
 | `scripts/run_0493x14s_multiseed6_sigma256.sh` | x14s | present |
 | `scripts/run_0493x1_closed_box_smoke.sh` | x1 | present |
@@ -1442,4 +1449,5 @@
 | `matlab/play_livevis_fields_old.m` |  | present |
 | `matlab/play_smpcd_dumps.m` |  | present |
 | `matlab/play_smpcd_filtered_animation.m` |  | present |
+| `matlab/show_livevis_field.m` |  | present |
 | `src/live_visualization_0335.cpp.bak_0436b_livevis_reset` |  | present |

@@ -131,3 +131,14 @@ Les publications de paramètres et de flags sont triées par clé naturelle sur 
 L'index `jalons_par_nature.md` trie désormais les identifiants naturellement dans chaque nature,
 ce qui évite par exemple de placer `x14*` avant `x10*` pour des raisons d'ordre de curation.
 Les nombres attendus restent 292 jalons, 314 paramètres canoniques et 650 flags.
+
+## V4.30 — benchmark x14aw→x14bc et inventaires associés
+
+V4.30 est une curation scientifique/documentaire réelle : six jalons explicitement attestés sont
+ajoutés et les inventaires actifs sont rafraîchis. Le snapshot paramètres ajoute les six clés
+`inletVelocityOscillation*` de x14ba et étend les valeurs documentées de `field`/`recordFields`
+avec `alpha_x6c`. Le snapshot ENV ajoute les contrôles propres aux runners Basilisk, à la pulsation,
+aux gros dumps/restarts et au recording de campagne.
+
+Les publications `Info/generated/*` et le dump SQL ne font pas partie du patch source-only; ils
+doivent être régénérés par `build_src_reference.py` sur le checkout réel après application.
