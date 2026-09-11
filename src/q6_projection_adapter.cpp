@@ -610,8 +610,25 @@ double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
            a * params.inletVelocityRampFinalFactor;
 }
 
+// 0493x14ba: keep Q6 flux targets phase-locked with particle inlet velocity.
+double inlet_velocity_oscillation_factor_0493x14ba(const SimulationParams& params, double time) {
+    if (!params.inletVelocityOscillationEnable) return 1.0;
+    const double effectiveTime = time + params.inletVelocityOscillationTimeOffset;
+    if (effectiveTime < params.inletVelocityOscillationStartTime) return 1.0;
+    constexpr double twoPi = 6.283185307179586476925286766559;
+    const double theta = twoPi *
+        (effectiveTime - params.inletVelocityOscillationStartTime) /
+        params.inletVelocityOscillationPeriod + params.inletVelocityOscillationPhase;
+    return 1.0 + params.inletVelocityOscillationAmplitude * std::sin(theta);
+}
+
+double inlet_velocity_time_factor_0493x14ba(const SimulationParams& params, double time) {
+    return inlet_velocity_ramp_factor(params, time) *
+           inlet_velocity_oscillation_factor_0493x14ba(params, time);
+}
+
 double q6_inlet_x_flux_for_face(const SimulationParams& params, const char* face, double time) {
-    const double f = inlet_velocity_ramp_factor(params, time);
+    const double f = inlet_velocity_time_factor_0493x14ba(params, time);
     const std::string name(face);
     if (name == "left" && is_inlet_boundary_mode(params.bcLeft)) return f * params.inletUxLeft;
     if (name == "right" && is_inlet_boundary_mode(params.bcRight)) return f * params.inletUxRight;
@@ -619,7 +636,7 @@ double q6_inlet_x_flux_for_face(const SimulationParams& params, const char* face
 }
 
 double q6_inlet_y_flux_for_face(const SimulationParams& params, const char* face, double time) {
-    const double f = inlet_velocity_ramp_factor(params, time);
+    const double f = inlet_velocity_time_factor_0493x14ba(params, time);
     const std::string name(face);
     if (name == "bottom" && is_inlet_boundary_mode(params.bcBottom)) return f * params.inletUyBottom;
     if (name == "top" && is_inlet_boundary_mode(params.bcTop)) return f * params.inletUyTop;
@@ -898,7 +915,7 @@ void set_segmented_face_fluxes(EllipticProjectionBC& bc,
                                const PeriodicFaceField& baseFlux,
                                const SimulationParams& params,
                                double time) {
-    const double ramp = inlet_velocity_ramp_factor(params, time);
+    const double ramp = inlet_velocity_time_factor_0493x14ba(params, time);
     for (const auto& seg : params.openBoundarySegments) {
         std::vector<double>& profile = profile_for_segment_face(bc, seg.face);
         if (open_boundary_face_is_x(seg.face)) {

@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-  field = rho
+field = alpha_x6c
 
 # colormap:
 #   blue_red, gray, thermal
@@ -49,7 +49,7 @@ gain = 1
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
 smoothPasses = 0
 
-particleTypeFilter = 1
+particleTypeFilter = 2
 
 # =============================================================================
 # 2. Live grid and cadence
@@ -59,8 +59,8 @@ particleTypeFilter = 1
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
- liveGridNx = 800    # unset by default: inherit solver Nx/Ny
- liveGridNy = 400    # unset by default: inherit solver Nx/Ny
+ liveGridNx = 864    # unset by default: inherit solver Nx/Ny
+ liveGridNy = 480    # unset by default: inherit solver Nx/Ny
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -91,7 +91,7 @@ quiverMinSpeed = 0.0
 #   -1 reuses smoothPasses.
 #    0 disables quiver smoothing.
 #   >0 smooths vectors independently from the scalar field.
-quiverSmoothPasses = 5
+quiverSmoothPasses = 2
 
 
 # =============================================================================
@@ -114,7 +114,7 @@ recordSession = record
 #   or comma-separated list:
 #     rho,density,mass,rho1,rho2,y1,y2,ux,uy,speed,n,n1,n2
 #   For comparisons, rho,ux,uy is the robust default.
-recordFields = rho,rho2,ux,uy
+recordFields = rho1,rho2,ux,uy,alpha_x6c
 
 # recordFormat:
 #   f32 or float32. Current supported binary dump format is float32 raw field.
@@ -123,7 +123,7 @@ recordFormat = f32
 # recordEvery:
 #   <=0 or absent: follow liveEvery, WYSIWYR default.
 #   >0: explicit absolute dump cadence in solver steps.
-recordEvery = 100
+recordEvery = 10
 
 # recordStride:
 #   relative WYSIWYR override.
@@ -150,7 +150,7 @@ filterTau = 0.0
 # filterSampleEvery:
 #   internal sampling cadence for the recorder filter. Can be more frequent than
 #   recordEvery to smooth without dumping every sample.
-filterSampleEvery = -1
+filterSampleEvery = 10
 
 
 # =============================================================================

@@ -1774,6 +1774,23 @@ double inlet_velocity_ramp_factor_0400(const SimulationParams& params, double ti
            a * params.inletVelocityRampFinalFactor;
 }
 
+// 0493x14ba: identical global oscillation factor for resident Q6 inlet fluxes.
+double inlet_velocity_oscillation_factor_0493x14ba_0400(const SimulationParams& params, double time) {
+    if (!params.inletVelocityOscillationEnable) return 1.0;
+    const double effectiveTime = time + params.inletVelocityOscillationTimeOffset;
+    if (effectiveTime < params.inletVelocityOscillationStartTime) return 1.0;
+    constexpr double twoPi = 6.283185307179586476925286766559;
+    const double theta = twoPi *
+        (effectiveTime - params.inletVelocityOscillationStartTime) /
+        params.inletVelocityOscillationPeriod + params.inletVelocityOscillationPhase;
+    return 1.0 + params.inletVelocityOscillationAmplitude * std::sin(theta);
+}
+
+double inlet_velocity_time_factor_0493x14ba_0400(const SimulationParams& params, double time) {
+    return inlet_velocity_ramp_factor_0400(params, time) *
+           inlet_velocity_oscillation_factor_0493x14ba_0400(params, time);
+}
+
 bool q6_wall_like_0409(const std::string& mode) {
     return mode == "solid" || mode == "specular" || mode == "bounceback";
 }
@@ -1811,7 +1828,7 @@ void q6_open_fullface_flux_0404(const SimulationParams& params,
                                 double& xHighFlux,
                                 double& yLowFlux,
                                 double& yHighFlux) {
-    const double ramp = inlet_velocity_ramp_factor_0400(params, time);
+    const double ramp = inlet_velocity_time_factor_0493x14ba_0400(params, time);
     xLowFlux = 0.0;
     xHighFlux = 0.0;
     yLowFlux = 0.0;
@@ -1871,7 +1888,7 @@ bool q6_open_segmented_0409_supported(const SimulationParams& params) {
 Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double time) {
     Q6SegmentedIo0409 cfg{};
     if (!q6_open_segmented_0409_supported(params)) return cfg;
-    const double ramp = inlet_velocity_ramp_factor_0400(params, time);
+    const double ramp = inlet_velocity_time_factor_0493x14ba_0400(params, time);
     cfg.enabled = 1;
     cfg.count = std::min(static_cast<int>(params.openBoundarySegments.size()), kOpenBoundaryMaxSegments);
     cfg.inletProfileCode = q6_segmented_profile_code_0493x8k(params);
@@ -2684,6 +2701,10 @@ struct ResidentWorkspace0400 {
     int phaseInterfaceStencilStep0493x6f = -1;
     bool phaseGeometryResidentValid0493x6c = false;
     int phaseGeometryResidentStep0493x6c = -1;
+    // 0493x14ax: dimensions are retained only so read-only diagnostics can
+    // resample the resident x6c alpha without reconstructing it from particles.
+    int phaseGeometryResidentNx0493x6c = 0;
+    int phaseGeometryResidentNy0493x6c = 0;
     bool phaseWallGeometryValid0493x9h = false;
     int phaseWallGeometryStep0493x9h = -1;
     double phaseGeometryReferenceCellMass0493x6c = 0.0;
@@ -21049,6 +21070,8 @@ bool apply_independent_masked_species_q6_0493w5(
     if (phaseGeometryResident0493x6c) {
         ws.phaseGeometryResidentValid0493x6c = false;
         ws.phaseGeometryResidentStep0493x6c = -1;
+        ws.phaseGeometryResidentNx0493x6c = 0;
+        ws.phaseGeometryResidentNy0493x6c = 0;
         ws.phaseWallGeometryValid0493x9h = false;
         ws.phaseWallGeometryStep0493x9h = -1;
     }
@@ -22290,6 +22313,8 @@ bool apply_independent_masked_species_q6_0493w5(
 
             ws.phaseGeometryResidentValid0493x6c = true;
             ws.phaseGeometryResidentStep0493x6c = step;
+            ws.phaseGeometryResidentNx0493x6c = grid.Nx;
+            ws.phaseGeometryResidentNy0493x6c = grid.Ny;
             // Historical workspace field names are retained for ABI/locality;
             // under x9g they carry phase-A reference/count semantics.
             ws.phaseGeometryReferenceCellMass0493x6c =
@@ -24686,6 +24711,24 @@ bool supported_subset_0400(const SimulationParams& params,
 }
 
 } // namespace
+
+CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c() {
+    CudaQ6PhaseAlphaView0493x6c view{};
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.phaseGeometryResidentValid0493x6c ||
+        ws.phaseAlphaFiltered0493x6c.data() == nullptr ||
+        ws.phaseGeometryResidentNx0493x6c <= 0 ||
+        ws.phaseGeometryResidentNy0493x6c <= 0 ||
+        ws.phaseGeometryResidentStep0493x6c < 0) {
+        return view;
+    }
+    view.deviceAlpha = ws.phaseAlphaFiltered0493x6c.data();
+    view.nx = ws.phaseGeometryResidentNx0493x6c;
+    view.ny = ws.phaseGeometryResidentNy0493x6c;
+    view.step = ws.phaseGeometryResidentStep0493x6c;
+    view.valid = true;
+    return view;
+}
 
 CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
     CudaQ6PhaseCurvatureView0493x9b view{};

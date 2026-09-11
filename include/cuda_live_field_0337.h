@@ -38,6 +38,16 @@ struct CudaLiveField0337Diagnostics {
     double fieldScale = 0.0;
 };
 
+// 0493x14ax: export the instantaneous physical x6c phase fraction on the
+// requested LiveVis grid.  The remap is conservative area averaging of the
+// solver-cell piecewise-constant alpha.  No LiveVis smoothPasses or temporal
+// recorder filtering is applied.  expectedStep < 0 disables the freshness
+// check; recorder callers should pass the current solver step.
+bool cuda_live_phase_alpha_x6c_0493x14ax(std::vector<float>& alpha,
+                                          int nx,
+                                          int ny,
+                                          int expectedStep = -1);
+
 bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         int nx,
                                         int ny,

@@ -530,6 +530,12 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "inletVelocityRampInitialFactor" || key == "inletRampInitialFactor") p.inletVelocityRampInitialFactor = parse_double(value, key);
         else if (key == "inletVelocityRampFinalFactor" || key == "inletRampFinalFactor") p.inletVelocityRampFinalFactor = parse_double(value, key);
         else if (key == "inletVelocityRampProfile" || key == "inletRampProfile") p.inletVelocityRampProfile = get_lower(kv, key);
+        else if (key == "inletVelocityOscillationEnable" || key == "inletOscillationEnable") p.inletVelocityOscillationEnable = parse_bool(value, key);
+        else if (key == "inletVelocityOscillationAmplitude" || key == "inletOscillationAmplitude") p.inletVelocityOscillationAmplitude = parse_double(value, key);
+        else if (key == "inletVelocityOscillationPeriod" || key == "inletOscillationPeriod") p.inletVelocityOscillationPeriod = parse_double(value, key);
+        else if (key == "inletVelocityOscillationPhase" || key == "inletOscillationPhase") p.inletVelocityOscillationPhase = parse_double(value, key);
+        else if (key == "inletVelocityOscillationStartTime" || key == "inletOscillationStartTime") p.inletVelocityOscillationStartTime = parse_double(value, key);
+        else if (key == "inletVelocityOscillationTimeOffset" || key == "inletOscillationTimeOffset") p.inletVelocityOscillationTimeOffset = parse_double(value, key);
         else if (key == "inletVelocitySpatialProfile" || key == "inletSpatialProfile" ||
                  key == "inletProfile" || key == "openBoundaryVelocityProfile") {
             p.inletVelocitySpatialProfile = get_lower(kv, key);
@@ -1209,6 +1215,22 @@ void validate_simulation_params(const SimulationParams& p) {
             if (p.inletVelocityRampProfile != "linear" &&
                 p.inletVelocityRampProfile != "smoothstep") {
                 throw std::runtime_error("inletVelocityRampProfile must be linear or smoothstep");
+            }
+        }
+        if (p.inletVelocityOscillationEnable) {
+            if (!std::isfinite(p.inletVelocityOscillationAmplitude) ||
+                !std::isfinite(p.inletVelocityOscillationPeriod) ||
+                !std::isfinite(p.inletVelocityOscillationPhase) ||
+                !std::isfinite(p.inletVelocityOscillationStartTime) ||
+                !std::isfinite(p.inletVelocityOscillationTimeOffset)) {
+                throw std::runtime_error("inlet velocity oscillation parameters must be finite");
+            }
+            if (p.inletVelocityOscillationAmplitude < 0.0 ||
+                p.inletVelocityOscillationAmplitude > 1.0) {
+                throw std::runtime_error("inletVelocityOscillationAmplitude must be in [0,1]");
+            }
+            if (!(p.inletVelocityOscillationPeriod > 0.0)) {
+                throw std::runtime_error("inletVelocityOscillationPeriod must be > 0");
             }
         }
         {

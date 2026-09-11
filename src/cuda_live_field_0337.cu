@@ -135,6 +135,10 @@ int field_code_0337(const std::string& rawField) {
     if (f == "curvature_x9b" || f == "kappa_x9b" || f == "curvature_p1" || f == "kappa_p1") return 10;
     if (f == "curvature_interface" || f == "kappa_interface" ||
         f == "interface_curvature" || f == "interface_kappa") return 11;
+    // 0493x14az: physical x6c liquid phase fraction.  Keep `alpha` reserved
+    // for the historical Darcy alpha field (code 6).
+    if (f == "alpha_x6c" || f == "phase_alpha" || f == "phase_alpha_x6c" ||
+        f == "liquid_fraction_x6c") return 12;
     return -1;
 }
 
@@ -144,7 +148,7 @@ double default_clip_0337(int code) {
     if (code == 0 || code == 1 || code == 2) return 0.2;
     if (code == 3) return 10.0;
     if (code == 5) return 1.0;
-    if (code == 6 || code == 7) return 1.0;
+    if (code == 6 || code == 7 || code == 12) return 1.0;
     if (code == 9 || code == 10 || code == 11) return 10.0;
     return 40.0;
 }
@@ -156,6 +160,52 @@ int colormap_code_0342() {
     if (cm == "gray" || cm == "grey" || cm == "grayscale" || cm == "greyscale") return 1;
     if (cm == "thermal" || cm == "heat" || cm == "hot") return 2;
     return 0;
+}
+
+// 0493x14ax: conservative area restriction/prolongation of the x6c phase
+// fraction from the solver grid to an arbitrary LiveVis grid.  x6c alpha is
+// treated as piecewise constant over each solver cell.  This preserves the
+// domain-integrated phase fraction up to floating-point roundoff and avoids any
+// additional display smoothing.
+__global__ void resample_phase_alpha_area_0493x14ax(
+    const double* src, int srcNx, int srcNy,
+    double* dst, int dstNx, int dstNy) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    const int n = dstNx * dstNy;
+    if (c >= n) return;
+    const int ix = c % dstNx;
+    const int iy = c / dstNx;
+
+    const double x0 = static_cast<double>(ix) * static_cast<double>(srcNx) /
+                      static_cast<double>(dstNx);
+    const double x1 = static_cast<double>(ix + 1) * static_cast<double>(srcNx) /
+                      static_cast<double>(dstNx);
+    const double y0 = static_cast<double>(iy) * static_cast<double>(srcNy) /
+                      static_cast<double>(dstNy);
+    const double y1 = static_cast<double>(iy + 1) * static_cast<double>(srcNy) /
+                      static_cast<double>(dstNy);
+
+    const int sx0 = max(0, min(srcNx - 1, static_cast<int>(floor(x0))));
+    const int sx1 = max(0, min(srcNx - 1, static_cast<int>(ceil(x1)) - 1));
+    const int sy0 = max(0, min(srcNy - 1, static_cast<int>(floor(y0))));
+    const int sy1 = max(0, min(srcNy - 1, static_cast<int>(ceil(y1)) - 1));
+
+    double sum = 0.0;
+    double weight = 0.0;
+    for (int sy = sy0; sy <= sy1; ++sy) {
+        const double wy = fmax(0.0, fmin(y1, static_cast<double>(sy + 1)) -
+                                     fmax(y0, static_cast<double>(sy)));
+        if (!(wy > 0.0)) continue;
+        for (int sx = sx0; sx <= sx1; ++sx) {
+            const double wx = fmax(0.0, fmin(x1, static_cast<double>(sx + 1)) -
+                                         fmax(x0, static_cast<double>(sx)));
+            if (!(wx > 0.0)) continue;
+            const double w = wx * wy;
+            sum += w * src[sy * srcNx + sx];
+            weight += w;
+        }
+    }
+    dst[c] = weight > 0.0 ? sum / weight : 0.0;
 }
 
 __global__ void resample_resident_curvature_nearest_0493x9b(
@@ -574,6 +624,43 @@ int chi_mode_code_live_0343(const std::string& mode) {
     return 0;
 }
 
+bool cuda_live_phase_alpha_x6c_0493x14ax(std::vector<float>& alpha,
+                                          int nx,
+                                          int ny,
+                                          int expectedStep) {
+    alpha.clear();
+    if (nx <= 0 || ny <= 0) return false;
+    const CudaQ6PhaseAlphaView0493x6c view = cuda_q6_phase_alpha_view_0493x6c();
+    if (!view.valid || view.deviceAlpha == nullptr || view.nx <= 0 || view.ny <= 0) {
+        return false;
+    }
+    if (expectedStep >= 0 && view.step != expectedStep) return false;
+
+    auto& w = workspace_0337();
+    if (!ensure_workspace_0337(w, nx, ny)) return false;
+    const int ncell = nx * ny;
+    const int threads = 256;
+    const int blocks = (ncell + threads - 1) / threads;
+    // Use the generic double scratch, not w.d_alpha: w.d_alpha caches the Darcy
+    // topology alpha and must not be clobbered by this diagnostic path.
+    resample_phase_alpha_area_0493x14ax<<<blocks, threads>>>(
+        view.deviceAlpha, view.nx, view.ny, w.d_tmp, nx, ny);
+    if (cudaGetLastError() != cudaSuccess) return false;
+    if (cudaDeviceSynchronize() != cudaSuccess) return false;
+
+    std::vector<double> compact(static_cast<std::size_t>(ncell), 0.0);
+    if (cudaMemcpy(compact.data(), w.d_tmp,
+                   compact.size() * sizeof(double),
+                   cudaMemcpyDeviceToHost) != cudaSuccess) {
+        return false;
+    }
+    alpha.resize(compact.size());
+    for (std::size_t i = 0; i < compact.size(); ++i) {
+        alpha[i] = static_cast<float>(compact[i]);
+    }
+    return true;
+}
+
 bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
                                         int nx,
                                         int ny,
@@ -598,8 +685,14 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     const bool residentCurvatureP10493x9b = (fcode == 10);
     const bool residentCurvature0493x9d =
         residentCurvatureP30493x9d || residentCurvatureP10493x9b;
-    local.residentOnly = residentCurvature0493x9d ? 1 : 0;
-    if (particleTypeFilter >= 0 && !residentCurvature0493x9d) {
+    const bool residentPhaseAlphaX6c0493x14az = (fcode == 12);
+    const bool residentLiveField0493x14az =
+        residentCurvature0493x9d || residentPhaseAlphaX6c0493x14az;
+    local.residentOnly = residentLiveField0493x14az ? 1 : 0;
+    // particleTypeFilter is meaningful for particle-deposited fields only.
+    // alpha_x6c is already the liquid phase field and must remain viewable with
+    // the common particleTypeFilter=1 atomizer configuration.
+    if (particleTypeFilter >= 0 && !residentLiveField0493x14az) {
         if (diag) *diag = local;
         return false;
     }
@@ -614,7 +707,25 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
     auto ta = std::chrono::steady_clock::now();
     auto finalizeStart0337 = ta;
 
-    if (residentCurvature0493x9d) {
+    if (residentPhaseAlphaX6c0493x14az) {
+        const CudaQ6PhaseAlphaView0493x6c view = cuda_q6_phase_alpha_view_0493x6c();
+        if (!view.valid || view.deviceAlpha == nullptr || view.nx <= 0 || view.ny <= 0) {
+            if (diag) *diag = local;
+            return false;
+        }
+        local.supported = 1;
+        // Direct device-to-device conservative remap.  Do not route through
+        // cuda_live_phase_alpha_x6c_0493x14ax(), which intentionally downloads
+        // a host float field for the recorder.  Live rendering stays compact on
+        // device until the final RGBA frame is downloaded.
+        resample_phase_alpha_area_0493x14ax<<<cellBlocks, threads>>>(
+            view.deviceAlpha, view.nx, view.ny, w.d_scalar, nx, ny);
+        if (cudaGetLastError() != cudaSuccess) { if (diag) *diag = local; return false; }
+        if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
+        local.resetSeconds = 0.0;
+        local.depositSeconds = 0.0;
+        if (quiver) quiver->rendered = 0;
+    } else if (residentCurvature0493x9d) {
         const double* deviceCurvature = nullptr;
         const double* deviceAlpha0493x9e = nullptr;
         int srcNx = 0;
@@ -722,7 +833,13 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
         }
     }
 
-    for (int pass = 0; pass < std::max(0, smoothPasses); ++pass) {
+    // 0493x14az: alpha_x6c is a diagnostic view of the actual physical x6c
+    // phase field.  Never apply the additional LiveVis smoothPasses filter to
+    // it; the intrinsic x6c filtering that produced phaseAlphaFiltered0493x6c
+    // is already part of the solver field definition.
+    const int effectiveSmoothPasses0493x14az =
+        residentPhaseAlphaX6c0493x14az ? 0 : std::max(0, smoothPasses);
+    for (int pass = 0; pass < effectiveSmoothPasses0493x14az; ++pass) {
         smooth_scalar_kernel_0337<<<cellBlocks, threads>>>(w.d_scalar, w.d_tmp, nx, ny);
         if (cudaDeviceSynchronize() != cudaSuccess) { if (diag) *diag = local; return false; }
         std::swap(w.d_scalar, w.d_tmp);
@@ -768,6 +885,11 @@ bool cuda_live_field_render_shared_0337(std::vector<unsigned char>& rgba,
 }
 
 #else
+
+bool cuda_live_phase_alpha_x6c_0493x14ax(std::vector<float>& alpha, int, int, int) {
+    alpha.clear();
+    return false;
+}
 
 bool cuda_live_field_render_shared_0337(std::vector<unsigned char>&, int, int, const SimulationParams&, const std::string&, double, double, int, int, CudaLiveField0337Diagnostics* diag, CudaLiveQuiver0337*) {
     if (diag) diag->attempted = 1;

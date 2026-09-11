@@ -1,5 +1,6 @@
 #include "filtered_field_recorder_0432.h"
 
+#include "cuda_live_field_0337.h"
 #include "live_visualization_0335.h"
 #include "particle_state.h"
 #include "simulation_params.h"
@@ -117,6 +118,10 @@ std::string normalize_field_0432(const std::string& raw) {
     if (f == "rho2" || f == "mass2" || f == "density2") return "rho2";
     if (f == "y1" || f == "fraction1" || f == "massfraction1") return "y1";
     if (f == "y2" || f == "fraction2" || f == "massfraction2") return "y2";
+    // Do not alias bare "alpha": LiveVis already uses field=alpha for Darcy
+    // penalization.  The explicit x6c names are unambiguous.
+    if (f == "alpha_x6c" || f == "phase_alpha" || f == "phase_alpha_x6c" ||
+        f == "liquid_fraction_x6c") return "alpha_x6c";
     if (f == "ux" || f == "vx") return "ux";
     if (f == "uy" || f == "vy") return "uy";
     if (f == "speed" || f == "normu" || f == "velocity") return "speed";
@@ -129,7 +134,8 @@ std::string normalize_field_0432(const std::string& raw) {
 
 bool supported_field_0432(const std::string& f) {
     static const std::unordered_set<std::string> supported = {
-        "rho", "rho1", "rho2", "y1", "y2", "ux", "uy", "speed", "n", "n1", "n2"
+        "rho", "rho1", "rho2", "y1", "y2", "alpha_x6c",
+        "ux", "uy", "speed", "n", "n1", "n2"
     };
     return supported.find(f) != supported.end();
 }
@@ -482,6 +488,12 @@ struct FilteredFieldRecorder0432::Impl {
                 ? ((locked.filterMode == "ema" && locked.filterTau > 0.0) ? "liveEvery" : "recordEvery")
                 : "explicit") << "\n";
         out << "smoothPasses = " << locked.smoothPasses << "\n";
+        if (std::find(lockedFields.begin(), lockedFields.end(), "alpha_x6c") != lockedFields.end()) {
+            out << "alphaX6cSource = phaseAlphaFiltered0493x6c\n";
+            out << "alphaX6cRemap = conservative_area_average\n";
+            out << "alphaX6cTemporalFilter = none\n";
+            out << "alphaX6cAdditionalSmoothPasses = 0\n";
+        }
         // Kept for provenance/backward readers: this is now a viewer-only value.
         out << "particleTypeFilter = " << locked.particleTypeFilter << "\n";
         out << "particleTypeFilterAffectsRecording = false\n";
@@ -597,7 +609,22 @@ struct FilteredFieldRecorder0432::Impl {
 
     void write_frame(std::uint64_t step, double time) {
         for (const std::string& field : lockedFields) {
-            std::vector<float> data = build_field(field);
+            std::vector<float> data;
+            if (field == "alpha_x6c") {
+                // 0493x14ax contract: record the instantaneous physical x6c
+                // geometry, conservatively remapped to the locked LiveVis
+                // grid.  Do not apply recorder EMA or smoothPasses here.
+                if (!cuda_live_phase_alpha_x6c_0493x14ax(
+                        data, locked.liveGridNx, locked.liveGridNy,
+                        static_cast<int>(step))) {
+                    throw std::runtime_error(
+                        "filtered recorder 0432 alpha_x6c unavailable/stale at step " +
+                        std::to_string(step) +
+                        "; requires current resident x6c phase geometry");
+                }
+            } else {
+                data = build_field(field);
+            }
             const std::string filename = "step_" + step_string_0432(step) + "_field_" + field + ".f32";
             const std::filesystem::path path = sessionDir / filename;
             std::ofstream out(path, std::ios::binary);

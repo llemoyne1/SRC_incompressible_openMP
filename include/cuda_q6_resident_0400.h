@@ -24,6 +24,17 @@ struct CudaQ6ResidentThermostat0400Diagnostics {
     const char* reason = "";
 };
 
+// 0493x14ax: read-only view of the physical x6c phase field for
+// observation-only diagnostics/recording.  The pointer stays owned by the
+// resident Q6 workspace and consumers must never write or free it.
+struct CudaQ6PhaseAlphaView0493x6c {
+    const double* deviceAlpha = nullptr;
+    int nx = 0;
+    int ny = 0;
+    int step = -1;
+    bool valid = false;
+};
+
 // 0493x9b: read-only resident view for diagnostics/LiveVis.  The pointer
 // remains owned by the Q6 workspace and must never be freed or written by the
 // consumer.  valid is true only after the passive x9b curvature stage ran.
@@ -111,6 +122,7 @@ struct CudaQ6Resident0400Diagnostics {
 };
 
 #if defined(MPCD_ENABLE_CUDA_Q6_RESIDENT_0400)
+CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c();
 CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b();
 CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d();
 
@@ -134,6 +146,9 @@ CudaQ6ResidentThermostat0400Diagnostics try_apply_cuda_q6_resident_thermostat_04
     const std::vector<int>& collisionCellId,
     std::uint64_t step);
 #else
+inline CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c() {
+    return {};
+}
 inline CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
     return {};
 }

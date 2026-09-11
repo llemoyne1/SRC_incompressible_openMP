@@ -166,6 +166,23 @@ double inlet_velocity_ramp_factor(const SimulationParams& params, double time) {
            a * params.inletVelocityRampFinalFactor;
 }
 
+// 0493x14ba: one global periodic multiplier shared by all inlet faces/segments.
+double inlet_velocity_oscillation_factor_0493x14ba(const SimulationParams& params, double time) {
+    if (!params.inletVelocityOscillationEnable) return 1.0;
+    const double effectiveTime = time + params.inletVelocityOscillationTimeOffset;
+    if (effectiveTime < params.inletVelocityOscillationStartTime) return 1.0;
+    constexpr double twoPi = 6.283185307179586476925286766559;
+    const double theta = twoPi *
+        (effectiveTime - params.inletVelocityOscillationStartTime) /
+        params.inletVelocityOscillationPeriod + params.inletVelocityOscillationPhase;
+    return 1.0 + params.inletVelocityOscillationAmplitude * std::sin(theta);
+}
+
+double inlet_velocity_time_factor_0493x14ba(const SimulationParams& params, double time) {
+    return inlet_velocity_ramp_factor(params, time) *
+           inlet_velocity_oscillation_factor_0493x14ba(params, time);
+}
+
 void inlet_velocity_for_face(const SimulationParams& params,
                              const char* face,
                              double time,
@@ -188,7 +205,7 @@ void inlet_velocity_for_face(const SimulationParams& params,
         ux = 0.0;
         uy = 0.0;
     }
-    const double fRamp = inlet_velocity_ramp_factor(params, time);
+    const double fRamp = inlet_velocity_time_factor_0493x14ba(params, time);
     ux *= fRamp;
     uy *= fRamp;
 }
@@ -961,7 +978,7 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
     std::normal_distribution<double> normal(0.0, 1.0);
 
     if (closed_capacity_additive_inlet_enabled(params)) {
-        const double ramp = inlet_velocity_ramp_factor(params, static_cast<double>(step) * params.dt);
+        const double ramp = inlet_velocity_time_factor_0493x14ba(params, static_cast<double>(step) * params.dt);
         double un = 0.0;
         double h = 1.0;
         if (cell.inletFace == "left" || cell.inletFace == "right") {
@@ -997,7 +1014,7 @@ void sample_hard_inlet_cell_particles(ParticleState& state,
 
     double meanFlucX = 0.0;
     double meanFlucY = 0.0;
-    const double ramp = inlet_velocity_ramp_factor(params, static_cast<double>(step) * params.dt);
+    const double ramp = inlet_velocity_time_factor_0493x14ba(params, static_cast<double>(step) * params.dt);
     for (int n = 0; n < targetN; ++n) {
         const double rx = uni(rng);
         const double ry = uni(rng);

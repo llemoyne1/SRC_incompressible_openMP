@@ -279,6 +279,21 @@ struct SimulationParams {
     double inletVelocityRampFinalFactor = 1.0;
     std::string inletVelocityRampProfile = "linear";
 
+    // 0493x14ba: optional global periodic modulation of every inlet velocity
+    // and of the matching Q6 open-boundary flux target.  This is deliberately
+    // independent of the startup ramp, so the effective multiplier is
+    // ramp(t) * [1 + A sin(2*pi*(t + offset - start)/period + phase)].
+    // Before start time the oscillation multiplier is exactly one.  The time
+    // offset is intended for phase-continuous hydrodynamic restarts whose local
+    // solver clock restarts from zero.  A is constrained to [0,1], preventing
+    // an inlet segment from silently reversing direction.
+    bool inletVelocityOscillationEnable = false;
+    double inletVelocityOscillationAmplitude = 0.0;
+    double inletVelocityOscillationPeriod = 1.0;
+    double inletVelocityOscillationPhase = 0.0;
+    double inletVelocityOscillationStartTime = 0.0;
+    double inletVelocityOscillationTimeOffset = 0.0;
+
     // Optional spatial profile for the imposed inlet velocity and matching
     // Q6 open-boundary fluxes.  Supported values:
     //   uniform          : historical constant U on the open face;

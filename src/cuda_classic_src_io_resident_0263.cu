@@ -147,6 +147,12 @@ struct CudaClassicSrcIoFullfaceConfig0263 {
     double rampInitial = 1.0;
     double rampFinal = 1.0;
     int rampSmoothstep = 0;
+    int oscillationEnable = 0;
+    double oscillationAmplitude = 0.0;
+    double oscillationPeriod = 1.0;
+    double oscillationPhase = 0.0;
+    double oscillationStartTime = 0.0;
+    double oscillationTimeOffset = 0.0;
     int profileCode = 0; // 0 uniform, 1 poiseuille_y_max, 2 poiseuille_y_mean, 3 flat_taper_y_mean
     double wallTaperCells = 0.0;
     double refMass = 1.0;
@@ -750,6 +756,23 @@ __device__ double ramp_factor_device_0263(const CudaClassicSrcIoFullfaceConfig02
     return (1.0 - a) * cfg.rampInitial + a * cfg.rampFinal;
 }
 
+__device__ double oscillation_factor_device_0493x14ba(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg, double time) {
+    if (!cfg.oscillationEnable) return 1.0;
+    const double effectiveTime = time + cfg.oscillationTimeOffset;
+    if (effectiveTime < cfg.oscillationStartTime) return 1.0;
+    const double twoPi = 6.283185307179586476925286766559;
+    const double theta = twoPi * (effectiveTime - cfg.oscillationStartTime) /
+                         cfg.oscillationPeriod + cfg.oscillationPhase;
+    return 1.0 + cfg.oscillationAmplitude * sin(theta);
+}
+
+__device__ double inlet_time_factor_device_0493x14ba(
+    const CudaClassicSrcIoFullfaceConfig0263& cfg, double time) {
+    return ramp_factor_device_0263(cfg, time) *
+           oscillation_factor_device_0493x14ba(cfg, time);
+}
+
 __device__ double flat_taper_y_base_device_0263(const CudaClassicSrcIoFullfaceConfig0263& cfg, double y) {
     if (!(cfg.wallTaperCells > 0.0)) return 1.0;
     const double h = cfg.yMax - cfg.yMin;
@@ -822,7 +845,7 @@ __device__ void segmented_inlet_velocity_device_0493x8k(
     double time,
     double& ux,
     double& uy) {
-    const double fRamp = ramp_factor_device_0263(cfg, time);
+    const double fRamp = inlet_time_factor_device_0493x14ba(cfg, time);
     ux = fRamp * cfg.segmentUx[segmentIndex];
     uy = fRamp * cfg.segmentUy[segmentIndex];
 
@@ -849,7 +872,7 @@ __device__ void inlet_velocity_device_0263(const CudaClassicSrcIoFullfaceConfig0
     else if (face == 2) { ux = cfg.inletUxBottom; uy = cfg.inletUyBottom; }
     else if (face == 3) { ux = cfg.inletUxTop; uy = cfg.inletUyTop; }
     else { ux = 0.0; uy = 0.0; }
-    const double fRamp = ramp_factor_device_0263(cfg, time);
+    const double fRamp = inlet_time_factor_device_0493x14ba(cfg, time);
     ux *= fRamp;
     uy *= fRamp;
     if (face == 0 || face == 1) {
@@ -5261,6 +5284,12 @@ CudaClassicSrcIoFullfaceConfig0263 make_config_0263(const ParticleState& state,
     cfg.rampInitial = params.inletVelocityRampInitialFactor;
     cfg.rampFinal = params.inletVelocityRampFinalFactor;
     cfg.rampSmoothstep = params.inletVelocityRampProfile == "smoothstep" ? 1 : 0;
+    cfg.oscillationEnable = params.inletVelocityOscillationEnable ? 1 : 0;
+    cfg.oscillationAmplitude = params.inletVelocityOscillationAmplitude;
+    cfg.oscillationPeriod = params.inletVelocityOscillationPeriod;
+    cfg.oscillationPhase = params.inletVelocityOscillationPhase;
+    cfg.oscillationStartTime = params.inletVelocityOscillationStartTime;
+    cfg.oscillationTimeOffset = params.inletVelocityOscillationTimeOffset;
     cfg.profileCode = profile_code_0263(params);
     cfg.wallTaperCells = params.inletVelocityWallTaperCells;
     cfg.rngSeed = params.rngSeed;

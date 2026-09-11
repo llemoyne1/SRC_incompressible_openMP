@@ -412,7 +412,7 @@ chmod +x "$GENERATOR" "$ANALYZER"
 # One runner, one Neumann selector.  x9e is the current optimized candidate;
 # x9c and x9d-fix1 remain selectable controls with identical boundary physics.
 NEUMANN_PROFILE="${NEUMANN_PROFILE:-x9e}"
-CASE_LABEL="${CASE_LABEL:-0493x14av_0414_air_assisted_atomizer_${NEUMANN_PROFILE}}"
+CASE_LABEL="${CASE_LABEL:-air_assisted_atomizer_testHRe_ncalib}"
 RUN_MODE="src-q6-g-f"
 TOPOLOGY="segmented"
 
