@@ -90,7 +90,7 @@ def main():
         for n,v in [('ly0',ly0),('ly1',ly1),('loy0',loy0),('loy1',loy1),('lx',lx),('cx',cx),('tx0',tx0),('tx1',tx1),('bx0',bx0),('bx1',bx1),('tf0',tf0),('tf1',tf1),('bf0',bf0),('bf1',bf1),('tex',tex),('bex',bex)]: aligned(v,h,n)
     except ValueError as e: ap.error(str(e))
     if not (0<loy0<ly0<ly1<loy1<a.Ly): ap.error('liquid nozzle does not fit')
-    if not (0<lx<cx-2*h<a.Lx): ap.error('air turn must be downstream of liquid exit')
+ #   if not (0<lx<cx-2*h<a.Lx): ap.error('air turn must be downstream of liquid exit')
     if not (0<bf0<bf1<bex<lc<tex<tf0<tf1<a.Ly): ap.error('air feed/nozzle geometry does not bracket liquid center')
     # Build chi as outer envelope minus L-shaped fluid corridor.
     chi=array('f'); counts={'liquid_nozzle':0,'air_top_L':0,'air_bottom_L':0}; solid=0

@@ -24,7 +24,7 @@ SEED="${SEED:-493215}"
 source "$ROOT/scripts/src_mpcd_run_ok_common.sh"
 suite_root_cd_0434
 
-CASE_LABEL="${CASE_LABEL:-0493x14aw_basilisk2d_Re500_WeG200_D96_lowkbt}"
+CASE_LABEL="${CASE_LABEL:-0493x14aw_inj2d_Re2500_WeG2200_D96_lowkbt}"
 RUN_MODE="src-q6-g-f"
 TOPOLOGY="segmented"
 NEUMANN_PROFILE="${NEUMANN_PROFILE:-x9e}"
@@ -32,8 +32,8 @@ NEUMANN_PROFILE="${NEUMANN_PROFILE:-x9e}"
 # -----------------------------------------------------------------------------
 # Target similarity and resolved local fluid
 # -----------------------------------------------------------------------------
-TARGET_RE_L="${TARGET_RE_L:-500}"
-TARGET_WE_G="${TARGET_WE_G:-200}"
+TARGET_RE_L="${TARGET_RE_L:-2500}"
+TARGET_WE_G="${TARGET_WE_G:-2200}"
 TARGET_DENSITY_RATIO="${TARGET_DENSITY_RATIO:-27.84}"
 TARGET_ST="${TARGET_ST:-1.6666666666666667}"
 BASILISK_PULSE_REL_AMPLITUDE="${BASILISK_PULSE_REL_AMPLITUDE:-0.05}"
@@ -42,7 +42,7 @@ BASILISK_PULSE_RUNTIME_ENABLE="${BASILISK_PULSE_RUNTIME_ENABLE:-0}"
 # Keep h and the validated alpha=90 local liquid used in the current atomizer.
 H_TARGET="${H_TARGET:-0.00390625}"              # 1/256
 GAMMA="${GAMMA:-8}"
-DT="${DT:-0.00635}"
+DT="${DT:-0.002}" #0.00635}"
 ROTATION_ANGLE="${ROTATION_ANGLE:-1.5707963267948966}"
 RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
 GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
@@ -75,8 +75,8 @@ GAS_NU_REFERENCE_STATUS="TG64_REVIEW_CV13.22"
 # No solid nozzle body: the liquid is injected directly through a centered
 # segment of the left boundary, as in Basilisk's f0 inlet mask.
 # -----------------------------------------------------------------------------
-JET_DIAMETER_CELLS="${JET_DIAMETER_CELLS:-96}"
-DOMAIN_DIAMETERS_X="${DOMAIN_DIAMETERS_X:-18}"
+JET_DIAMETER_CELLS="${JET_DIAMETER_CELLS:-288}" #96}"
+DOMAIN_DIAMETERS_X="${DOMAIN_DIAMETERS_X:-5}" #18}"
 DOMAIN_DIAMETERS_Y="${DOMAIN_DIAMETERS_Y:-10}"
 INITIAL_JET_LENGTH_OVER_D="${INITIAL_JET_LENGTH_OVER_D:-0.15}"
 
@@ -210,7 +210,7 @@ RECORD_EVERY="${RECORD_EVERY:-25}"
 RECORD_FIELDS="${RECORD_FIELDS:-mass,ux,uy}"
 FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-25}"
 
-BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493x14aw_basilisk_atomisation_Re500_seed${SEED}}"
+BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/0493x14aw_basilisk_atomisation_Re25500_We2200_seed${SEED}}"
 RUN_ROOT="$BASE_RUN_ROOT"
 
 # Common helper assumptions.

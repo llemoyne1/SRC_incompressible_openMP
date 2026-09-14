@@ -65,6 +65,9 @@ set -x
   src/elliptic_projection.cpp \
   src/q6_projection_adapter.cpp \
   src/closed_capacity_response.cpp \
+  src/solid_model_0493x16a.cpp \
+  src/solid_model_rigid_slab_0493x16a.cpp \
+  src/chi_solid_dynamics_0493x16a.cpp \
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \

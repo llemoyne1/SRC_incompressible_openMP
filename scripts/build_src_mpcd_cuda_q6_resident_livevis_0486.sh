@@ -75,6 +75,7 @@ set -x
   -DMPCD_ENABLE_CUDA_INLET_OUTLET_SEGMENTED_0249B \
   -DMPCD_ENABLE_CUDA_CLASSIC_SRC_IO_RESIDENT_0263 \
   -DMPCD_ENABLE_CUDA_DARCY_BRINKMAN_0343 \
+  -DMPCD_ENABLE_CUDA_CHI_SOLID_0493X16E \
   -DMPCD_ENABLE_CUDA_Q6_RESIDENT_0400 \
   -Iinclude \
   "${LIVEVIS_CFLAGS[@]}" \
@@ -90,6 +91,9 @@ set -x
   src/elliptic_projection.cpp \
   src/q6_projection_adapter.cpp \
   src/closed_capacity_response.cpp \
+  src/solid_model_0493x16a.cpp \
+  src/solid_model_rigid_slab_0493x16a.cpp \
+  src/chi_solid_dynamics_0493x16a.cpp \
   src/src_mpcd_base.cpp \
   src/runtime_summary.cpp \
   src/particle_state.cpp \
@@ -131,6 +135,7 @@ set -x
   src/cuda_inlet_outlet_segmented_0249b.cu \
   src/cuda_classic_src_io_resident_0263.cu \
   src/cuda_darcy_brinkman_0343.cu \
+  src/cuda_chi_solid_0493x16e.cu \
   src/cuda_live_field_0337.cu \
   "${LIVEVIS_LIBS[@]}" \
   -o "$OUT"

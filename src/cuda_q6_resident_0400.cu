@@ -2202,6 +2202,21 @@ struct KineticInterfaceAccumulator0493x9u {
 };
 
 
+// 0493x16l: scalar-only post-stream penetration audit.  This deliberately
+// does not reuse x16c's cell-occupancy weighting: a particle is counted only
+// from the Q2 value of the kinetic wall field at its own position.
+struct ChiPenetrationAccumulator0493x16l {
+    unsigned long long sampledParticles = 0ull;
+    unsigned long long rawInsideParticles = 0ull;
+    unsigned long long strictInsideParticles = 0ull;
+    unsigned long long q2InvalidParticles = 0ull;
+    unsigned long long flatGradientInsideParticles = 0ull;
+    double rawInsideMass = 0.0;
+    double strictInsideMass = 0.0;
+    double maxSolidLevelExcess = 0.0;
+    double maxPenetrationCells = 0.0;
+};
+
 // 0493x9x: crossing-time kinetic reflection audit.
 // No O(Nparticle) state is stored. The production path reuses x9t/x9u
 // total/ref/receiver/normal cell buffers and keeps the three-particle-pass
@@ -2615,6 +2630,8 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<double> kineticRefNy0493x9u;
     DeviceBuffer0400<KineticInterfaceAccumulator0493x9u> kineticAccum0493x9u;
     DeviceBuffer0400<KineticCrossingAccumulator0493x9x> kineticAccum0493x9x;
+    // 0493x16l: one scalar reduction record only; no O(Nparticle/cell) storage.
+    DeviceBuffer0400<ChiPenetrationAccumulator0493x16l> chiPenetrationAccum0493x16l;
     DeviceBuffer0400<KineticGlobalReaction0493x10f> kineticGlobalReaction0493x10f;
     // 0493x10g performance-only: one atomics-free reduction record per cell block.
     DeviceBuffer0400<KineticGlobalReactionPartial0493x10g> kineticGlobalReactionPartials0493x10g;
@@ -2707,6 +2724,24 @@ struct ResidentWorkspace0400 {
     int phaseGeometryResidentNy0493x6c = 0;
     bool phaseWallGeometryValid0493x9h = false;
     int phaseWallGeometryStep0493x9h = -1;
+    // 0493x16j: chi kinetic wall state. 0493x17a changes the material-wall
+    // backend from a per-step Q2 reconstruction to a persistent Lagrangian
+    // edge mesh extracted ONCE from the initial chi=0.5 contour.  The old x10
+    // segment buffers below are deliberately reused as resident edge storage.
+    bool chiKineticSegmentsValid0493x16j = false;
+    std::uint64_t chiKineticGeometryVersion0493x16j = 0u;
+    bool chiKineticImpulseValid0493x16j = false;
+    int chiKineticNx0493x16j = 0;
+    int chiKineticNy0493x16j = 0;
+    int chiLagrangianEdgeCount0493x17a = 0;
+    std::uint64_t chiLagrangianMeshVersion0493x17a = 0u;
+    unsigned long long chiLagrangianAmbiguousSquares0493x17a = 0ull;
+    double chiLagrangianMinEdgeLength0493x17a = 0.0;
+    double chiLagrangianMaxEdgeLength0493x17a = 0.0;
+    DeviceBuffer0400<signed char> chiLagrangianNormalSign0493x17a;
+    DeviceBuffer0400<int> chiLagrangianCellEdgeCount0493x17a;
+    DeviceBuffer0400<int> chiLagrangianCellEdgeIds0493x17a;
+    DeviceBuffer0400<unsigned long long> chiLagrangianBinOverflow0493x17a;
     double phaseGeometryReferenceCellMass0493x6c = 0.0;
     int phaseGeometryLiquidSpeciesCount0493x6c = 0;
     DeviceBuffer0400<double> partial0;
@@ -2739,6 +2774,7 @@ struct ResidentWorkspace0400 {
         int numCells, int reactionBlocks = 1, int reactionReservoirs = 1) {
         ensure_kinetic_interface_0493x9u(numCells);
         kineticAccum0493x9x.ensure(1u);
+        chiPenetrationAccum0493x16l.ensure(1u);
         kineticGlobalReaction0493x10f.ensure(
             static_cast<std::size_t>(std::max(1, reactionReservoirs)));
         kineticGlobalReactionPartials0493x10g.ensure(
@@ -2762,6 +2798,15 @@ struct ResidentWorkspace0400 {
         kineticContinuousSegUay0493x10n.ensure(s2);
         kineticContinuousSegUbx0493x10n.ensure(s2);
         kineticContinuousSegUby0493x10n.ensure(s2);
+        // 0493x17a: explicit Lagrangian material-wall edge metadata + a small
+        // fixed-capacity Eulerian broad-phase index. The edge coordinates and
+        // velocities themselves reuse the x10n arrays above; no second set of
+        // O(Nedge) doubles is allocated.
+        chiLagrangianNormalSign0493x17a.ensure(s2);
+        chiLagrangianCellEdgeCount0493x17a.ensure(c);
+        constexpr std::size_t kX17aCellEdgeCapacity = 64u;
+        chiLagrangianCellEdgeIds0493x17a.ensure(kX17aCellEdgeCapacity * c);
+        chiLagrangianBinOverflow0493x17a.ensure(1u);
     }
 
     void ensure(std::uint64_t particles, int numCells, int blocks, int speciesCount = 1) {
@@ -6089,6 +6134,417 @@ __device__ __forceinline__ bool q6_x10n_edge_crossing(
     return out->valid;
 }
 
+// 0493x16o: Q2-consistent edge root for the chi material wall.
+//
+// x10n marching-squares topology is still selected from the four corner
+// signs, but the finite branch endpoints used by the chi/Q2 collision path
+// must lie on that same Q2 contour.  For each dual edge, the tensor-product
+// Q2 patch reduces exactly to one 1-D quadratic through three cell-centre
+// samples.  The two edge corners straddle alpha=.5 by construction, so one
+// root is guaranteed in [0,1].  Bisection is deterministic and, because
+// adjacent owners use the same canonical three samples on their shared edge,
+// produces an identical shared endpoint without polynomial extrapolation.
+__device__ __forceinline__ double q6_x16o_alpha_or_owner_center(
+    const double* alpha,
+    int i, int j,
+    int nx, int ny,
+    int periodicX, int periodicY,
+    double ownerCenter) {
+    const int c = q6_x10n_cell_index(i, j, nx, ny, periodicX, periodicY);
+    return (c >= 0 && isfinite(alpha[c])) ? alpha[c] : ownerCenter;
+}
+
+__device__ __forceinline__ bool q6_x16o_q2_unit_edge_root(
+    double fm, double f0, double fp,
+    double* root) {
+    if (!root || !isfinite(fm) || !isfinite(f0) || !isfinite(fp))
+        return false;
+    double flo = f0 - 0.5;
+    double fhi = fp - 0.5;
+    if (flo == 0.0) { *root = 0.0; return true; }
+    if (fhi == 0.0) { *root = 1.0; return true; }
+    if ((flo > 0.0) == (fhi > 0.0)) return false;
+
+    const double d1 = 0.5 * (fp - fm);
+    const double d2 = 0.5 * (fp - 2.0 * f0 + fm);
+    double lo = 0.0;
+    double hi = 1.0;
+    for (int it = 0; it < 40; ++it) {
+        const double mid = 0.5 * (lo + hi);
+        const double fmid = (f0 + d1 * mid + d2 * mid * mid) - 0.5;
+        if (!isfinite(fmid)) return false;
+        if (fmid == 0.0) { lo = hi = mid; break; }
+        if ((fmid > 0.0) == (flo > 0.0)) {
+            lo = mid;
+            flo = fmid;
+        } else {
+            hi = mid;
+            fhi = fmid;
+        }
+    }
+    *root = 0.5 * (lo + hi);
+    return isfinite(*root) && *root >= 0.0 && *root <= 1.0;
+}
+
+__device__ __forceinline__ bool q6_x16o_q2_edge_theta(
+    const double* alpha,
+    int owner,
+    int edge,
+    int nx, int ny,
+    int periodicX, int periodicY,
+    double* theta) {
+    if (!alpha || !theta || owner < 0 || owner >= nx * ny ||
+        edge < 0 || edge > 3) return false;
+    const int i = owner % nx;
+    const int j = owner / nx;
+    const double c = alpha[owner];
+    if (!isfinite(c)) return false;
+
+    double fm = 0.0, f0 = 0.0, fp = 0.0;
+    bool reverse = false;
+    if (edge == 0) { // canonical xi: c00 -> c10
+        fm = q6_x16o_alpha_or_owner_center(alpha, i-1, j, nx, ny, periodicX, periodicY, c);
+        f0 = c;
+        fp = q6_x16o_alpha_or_owner_center(alpha, i+1, j, nx, ny, periodicX, periodicY, c);
+    } else if (edge == 1) { // canonical eta: c10 -> c11
+        fm = q6_x16o_alpha_or_owner_center(alpha, i+1, j-1, nx, ny, periodicX, periodicY, c);
+        f0 = q6_x16o_alpha_or_owner_center(alpha, i+1, j, nx, ny, periodicX, periodicY, c);
+        fp = q6_x16o_alpha_or_owner_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+    } else if (edge == 2) { // builder direction is c11 -> c01; canonical xi is c01 -> c11
+        fm = q6_x16o_alpha_or_owner_center(alpha, i-1, j+1, nx, ny, periodicX, periodicY, c);
+        f0 = q6_x16o_alpha_or_owner_center(alpha, i,   j+1, nx, ny, periodicX, periodicY, c);
+        fp = q6_x16o_alpha_or_owner_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+        reverse = true;
+    } else { // edge 3: builder direction c01 -> c00; canonical eta is c00 -> c01
+        fm = q6_x16o_alpha_or_owner_center(alpha, i, j-1, nx, ny, periodicX, periodicY, c);
+        f0 = c;
+        fp = q6_x16o_alpha_or_owner_center(alpha, i, j+1, nx, ny, periodicX, periodicY, c);
+        reverse = true;
+    }
+
+    double canonical = 0.0;
+    if (!q6_x16o_q2_unit_edge_root(fm, f0, fp, &canonical)) return false;
+    *theta = reverse ? (1.0 - canonical) : canonical;
+    return isfinite(*theta) && *theta >= 0.0 && *theta <= 1.0;
+}
+
+// 0493x16p: full Q2 boundary-root topology for the chi material wall.
+//
+// x16o placed marching-squares endpoints on the Q2 contour but still selected
+// topology from the four corner signs.  A quadratic edge can cross alpha=.5
+// twice while both edge corners have the same sign, so that topology can miss
+// a real branch.  x16p enumerates all Q2 roots on the four dual-square edges
+// (0, 1 or 2 roots per edge), deduplicates corner roots, and supports up to
+// four unique boundary roots / two branches, exactly the capacity qualified by
+// the x16p offline topology preflight.  Only the chi path uses this machinery.
+struct Q2BoundaryRoot0493x16p {
+    IsoPoint0493x10n p{};
+    double xi = 0.0;
+    double eta = 0.0;
+    double perimeter = 0.0;
+    int edge = -1;
+};
+
+struct Q2TopologyPatch0493x16p {
+    double fmm = 0.0, f0m = 0.0, fpm = 0.0;
+    double fm0 = 0.0, f00 = 0.0, fp0 = 0.0;
+    double fmp = 0.0, f0p = 0.0, fpp = 0.0;
+    bool valid = false;
+};
+
+__device__ __forceinline__ void q6_x16p_append_scalar_root(
+    double r, double roots[2], int* n, double rootTol) {
+    if (!roots || !n || *n < 0 || *n >= 2 || !isfinite(r) ||
+        r < -rootTol || r > 1.0 + rootTol) return;
+    r = fmin(1.0, fmax(0.0, r));
+    if (*n > 0 && fabs(r - roots[*n - 1]) <= 1.0e-9) return;
+    roots[(*n)++] = r;
+}
+
+__device__ __forceinline__ int q6_x16p_q2_unit_edge_roots(
+    double fm, double f0, double fp,
+    double roots[2]) {
+    if (!roots || !isfinite(fm) || !isfinite(f0) || !isfinite(fp)) return -1;
+    const double a = 0.5 * (fp - 2.0 * f0 + fm);
+    const double b = 0.5 * (fp - fm);
+    const double c = f0 - 0.5;
+    const double coefTol = 1.0e-13;
+    const double rootTol = 2.0e-10;
+    const double discTol = 1.0e-12;
+    int n = 0;
+    if (fabs(a) <= coefTol) {
+        if (fabs(b) <= coefTol) return fabs(c) <= coefTol ? -1 : 0;
+        q6_x16p_append_scalar_root(-c / b, roots, &n, rootTol);
+        return n;
+    }
+    double disc = b * b - 4.0 * a * c;
+    if (!isfinite(disc)) return -1;
+    if (disc < -discTol) return 0;
+    if (fabs(disc) <= discTol) {
+        q6_x16p_append_scalar_root(-b / (2.0 * a), roots, &n, rootTol);
+        return n;
+    }
+    disc = fmax(0.0, disc);
+    const double sd = sqrt(disc);
+    double r0 = (-b - sd) / (2.0 * a);
+    double r1 = (-b + sd) / (2.0 * a);
+    if (r1 < r0) { const double t = r0; r0 = r1; r1 = t; }
+    q6_x16p_append_scalar_root(r0, roots, &n, rootTol);
+    q6_x16p_append_scalar_root(r1, roots, &n, rootTol);
+    return n;
+}
+
+__device__ __forceinline__ bool q6_x16p_build_topology_patch(
+    const double* alpha, int owner,
+    int nx, int ny, int periodicX, int periodicY,
+    Q2TopologyPatch0493x16p* out) {
+    if (!alpha || !out || owner < 0 || owner >= nx * ny) return false;
+    const int i = owner % nx;
+    const int j = owner / nx;
+    const double c = alpha[owner];
+    if (!isfinite(c)) return false;
+    out->fmm = q6_x16o_alpha_or_owner_center(alpha, i-1, j-1, nx, ny, periodicX, periodicY, c);
+    out->f0m = q6_x16o_alpha_or_owner_center(alpha, i,   j-1, nx, ny, periodicX, periodicY, c);
+    out->fpm = q6_x16o_alpha_or_owner_center(alpha, i+1, j-1, nx, ny, periodicX, periodicY, c);
+    out->fm0 = q6_x16o_alpha_or_owner_center(alpha, i-1, j,   nx, ny, periodicX, periodicY, c);
+    out->f00 = c;
+    out->fp0 = q6_x16o_alpha_or_owner_center(alpha, i+1, j,   nx, ny, periodicX, periodicY, c);
+    out->fmp = q6_x16o_alpha_or_owner_center(alpha, i-1, j+1, nx, ny, periodicX, periodicY, c);
+    out->f0p = q6_x16o_alpha_or_owner_center(alpha, i,   j+1, nx, ny, periodicX, periodicY, c);
+    out->fpp = q6_x16o_alpha_or_owner_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+    out->valid = isfinite(out->fmm) && isfinite(out->f0m) && isfinite(out->fpm) &&
+                 isfinite(out->fm0) && isfinite(out->f00) && isfinite(out->fp0) &&
+                 isfinite(out->fmp) && isfinite(out->f0p) && isfinite(out->fpp);
+    return out->valid;
+}
+
+__device__ __forceinline__ void q6_x16p_quad1d(
+    double fm, double f0, double fp, double t,
+    double* value, double* deriv) {
+    const double d1 = 0.5 * (fp - fm);
+    const double d2 = 0.5 * (fp - 2.0 * f0 + fm);
+    if (value) *value = f0 + d1 * t + d2 * t * t;
+    if (deriv) *deriv = d1 + 2.0 * d2 * t;
+}
+
+__device__ __forceinline__ bool q6_x16p_eval_topology_patch(
+    const Q2TopologyPatch0493x16p& q,
+    double xi, double eta,
+    double* level, double* gx, double* gy) {
+    if (!q.valid || !level || !isfinite(xi) || !isfinite(eta)) return false;
+    double rm = 0.0, r0 = 0.0, rp = 0.0;
+    double rxm = 0.0, rx0 = 0.0, rxp = 0.0;
+    q6_x16p_quad1d(q.fmm, q.f0m, q.fpm, xi, &rm, &rxm);
+    q6_x16p_quad1d(q.fm0, q.f00, q.fp0, xi, &r0, &rx0);
+    q6_x16p_quad1d(q.fmp, q.f0p, q.fpp, xi, &rp, &rxp);
+    double val = 0.0, deta = 0.0, dxi = 0.0;
+    q6_x16p_quad1d(rm, r0, rp, eta, &val, &deta);
+    q6_x16p_quad1d(rxm, rx0, rxp, eta, &dxi, nullptr);
+    *level = val - 0.5;
+    if (gx) *gx = dxi;
+    if (gy) *gy = deta;
+    return isfinite(*level) && (!gx || isfinite(*gx)) && (!gy || isfinite(*gy));
+}
+
+__device__ __forceinline__ bool q6_x16p_append_boundary_root(
+    Q2BoundaryRoot0493x16p roots[8], int* count,
+    int edge, double canonical,
+    double x0, double y0, double dx, double dy,
+    int c00, int c10, int c11, int c01,
+    const float* uSolidX, const float* uSolidY) {
+    if (!roots || !count || *count < 0 || *count >= 8 || edge < 0 || edge > 3 ||
+        !isfinite(canonical)) return false;
+    canonical = fmin(1.0, fmax(0.0, canonical));
+    Q2BoundaryRoot0493x16p r{};
+    int ca = -1, cb = -1;
+    double w = canonical;
+    if (edge == 0) {
+        r.xi = canonical; r.eta = 0.0; ca = c00; cb = c10;
+        r.perimeter = canonical;
+    } else if (edge == 1) {
+        r.xi = 1.0; r.eta = canonical; ca = c10; cb = c11;
+        r.perimeter = 1.0 + canonical;
+    } else if (edge == 2) {
+        r.xi = canonical; r.eta = 1.0; ca = c01; cb = c11;
+        r.perimeter = 2.0 + (1.0 - canonical);
+    } else {
+        r.xi = 0.0; r.eta = canonical; ca = c00; cb = c01;
+        r.perimeter = 3.0 + (1.0 - canonical);
+    }
+    for (int k = 0; k < *count; ++k) {
+        const double ddx = r.xi - roots[k].xi;
+        const double ddy = r.eta - roots[k].eta;
+        if (ddx * ddx + ddy * ddy <= 1.0e-16) return true;
+    }
+    r.edge = edge;
+    r.p.x = x0 + r.xi * dx;
+    r.p.y = y0 + r.eta * dy;
+    const double ux0 = uSolidX ? static_cast<double>(uSolidX[ca]) : 0.0;
+    const double ux1 = uSolidX ? static_cast<double>(uSolidX[cb]) : 0.0;
+    const double uy0 = uSolidY ? static_cast<double>(uSolidY[ca]) : 0.0;
+    const double uy1 = uSolidY ? static_cast<double>(uSolidY[cb]) : 0.0;
+    r.p.ux = (1.0 - w) * ux0 + w * ux1;
+    r.p.uy = (1.0 - w) * uy0 + w * uy1;
+    r.p.valid = isfinite(r.p.x) && isfinite(r.p.y) &&
+                isfinite(r.p.ux) && isfinite(r.p.uy);
+    if (!r.p.valid) return false;
+    roots[(*count)++] = r;
+    return true;
+}
+
+__device__ __forceinline__ int q6_x16p_collect_boundary_roots(
+    const double* alpha, int owner,
+    int nx, int ny, int periodicX, int periodicY,
+    double x0, double y0, double dx, double dy,
+    int c00, int c10, int c11, int c01,
+    const float* uSolidX, const float* uSolidY,
+    Q2BoundaryRoot0493x16p roots[8]) {
+    if (!alpha || !roots || owner < 0 || owner >= nx * ny) return -1;
+    const int i = owner % nx;
+    const int j = owner / nx;
+    const double c = alpha[owner];
+    if (!isfinite(c)) return -1;
+    double triples[4][3];
+    triples[0][0] = q6_x16o_alpha_or_owner_center(alpha, i-1, j,   nx, ny, periodicX, periodicY, c);
+    triples[0][1] = c;
+    triples[0][2] = q6_x16o_alpha_or_owner_center(alpha, i+1, j,   nx, ny, periodicX, periodicY, c);
+    triples[1][0] = q6_x16o_alpha_or_owner_center(alpha, i+1, j-1, nx, ny, periodicX, periodicY, c);
+    triples[1][1] = q6_x16o_alpha_or_owner_center(alpha, i+1, j,   nx, ny, periodicX, periodicY, c);
+    triples[1][2] = q6_x16o_alpha_or_owner_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+    triples[2][0] = q6_x16o_alpha_or_owner_center(alpha, i-1, j+1, nx, ny, periodicX, periodicY, c);
+    triples[2][1] = q6_x16o_alpha_or_owner_center(alpha, i,   j+1, nx, ny, periodicX, periodicY, c);
+    triples[2][2] = q6_x16o_alpha_or_owner_center(alpha, i+1, j+1, nx, ny, periodicX, periodicY, c);
+    triples[3][0] = q6_x16o_alpha_or_owner_center(alpha, i,   j-1, nx, ny, periodicX, periodicY, c);
+    triples[3][1] = c;
+    triples[3][2] = q6_x16o_alpha_or_owner_center(alpha, i,   j+1, nx, ny, periodicX, periodicY, c);
+
+    int count = 0;
+    for (int edge = 0; edge < 4; ++edge) {
+        double eroots[2] = {0.0, 0.0};
+        const int nr = q6_x16p_q2_unit_edge_roots(
+            triples[edge][0], triples[edge][1], triples[edge][2], eroots);
+        if (nr < 0) return -1;
+        for (int k = 0; k < nr; ++k) {
+            if (!q6_x16p_append_boundary_root(
+                    roots, &count, edge, eroots[k], x0, y0, dx, dy,
+                    c00, c10, c11, c01, uSolidX, uSolidY)) return -1;
+        }
+    }
+    for (int a = 1; a < count; ++a) {
+        const Q2BoundaryRoot0493x16p key = roots[a];
+        int b = a - 1;
+        while (b >= 0 && roots[b].perimeter > key.perimeter) {
+            roots[b + 1] = roots[b];
+            --b;
+        }
+        roots[b + 1] = key;
+    }
+    return count;
+}
+
+__device__ __forceinline__ double q6_x16p_inside_margin(double xi, double eta) {
+    return fmin(fmin(xi, 1.0 - xi), fmin(eta, 1.0 - eta));
+}
+
+__device__ __forceinline__ int q6_x16p_trace_partner(
+    const Q2TopologyPatch0493x16p& q,
+    const Q2BoundaryRoot0493x16p roots[4], int start) {
+    if (!q.valid || !roots || start < 0 || start >= 4) return -1;
+    double x = roots[start].xi;
+    double y = roots[start].eta;
+    double f = 0.0, gx = 0.0, gy = 0.0;
+    if (!q6_x16p_eval_topology_patch(q, x, y, &f, &gx, &gy)) return -1;
+    double gn = hypot(gx, gy);
+    if (!(gn > 1.0e-13) || !isfinite(gn)) return -1;
+    double tx = -gy / gn;
+    double ty =  gx / gn;
+    const double probe = 2.0e-4;
+    const double mp = q6_x16p_inside_margin(x + probe * tx, y + probe * ty);
+    const double mm = q6_x16p_inside_margin(x - probe * tx, y - probe * ty);
+    if (mm > mp) { tx = -tx; ty = -ty; }
+    if (fmax(mp, mm) < -1.0e-8) return -1;
+    x += probe * tx;
+    y += probe * ty;
+    double oldTx = tx, oldTy = ty;
+    const double step = 1.0 / 64.0;
+    for (int it = 0; it < 256; ++it) {
+        for (int nit = 0; nit < 3; ++nit) {
+            if (!q6_x16p_eval_topology_patch(q, x, y, &f, &gx, &gy)) return -1;
+            const double g2 = gx * gx + gy * gy;
+            if (!(g2 > 1.0e-24) || !isfinite(g2)) return -1;
+            x -= f * gx / g2;
+            y -= f * gy / g2;
+        }
+        if (it > 1 && q6_x16p_inside_margin(x, y) < 0.04) {
+            int best = -1;
+            double best2 = 1.0e300;
+            for (int k = 0; k < 4; ++k) {
+                if (k == start) continue;
+                const double ddx = x - roots[k].xi;
+                const double ddy = y - roots[k].eta;
+                const double d2 = ddx * ddx + ddy * ddy;
+                if (d2 < best2) { best2 = d2; best = k; }
+            }
+            if (best >= 0 && best2 <= 0.05 * 0.05) return best;
+        }
+        if (!q6_x16p_eval_topology_patch(q, x, y, &f, &gx, &gy)) return -1;
+        gn = hypot(gx, gy);
+        if (!(gn > 1.0e-13) || !isfinite(gn)) return -1;
+        double ntx = -gy / gn;
+        double nty =  gx / gn;
+        if (ntx * oldTx + nty * oldTy < 0.0) { ntx = -ntx; nty = -nty; }
+        oldTx = ntx; oldTy = nty;
+        x += step * ntx;
+        y += step * nty;
+        if (x < -0.06 || x > 1.06 || y < -0.06 || y > 1.06) {
+            int best = -1;
+            double best2 = 1.0e300;
+            for (int k = 0; k < 4; ++k) {
+                if (k == start) continue;
+                const double ddx = x - roots[k].xi;
+                const double ddy = y - roots[k].eta;
+                const double d2 = ddx * ddx + ddy * ddy;
+                if (d2 < best2) { best2 = d2; best = k; }
+            }
+            return (best >= 0 && best2 <= 0.08 * 0.08) ? best : -1;
+        }
+    }
+    return -1;
+}
+
+// 0493x16j/x16o: chi material-wall endpoint velocity still comes from the
+// resident solid-velocity field.  x16o changes only endpoint geometry: theta
+// is the exact Q2 alpha=.5 root on this owner's dual edge.
+__device__ __forceinline__ bool q6_x16j_edge_crossing_chi_solid(
+    double a0, double a1,
+    double x0, double y0, double x1, double y1,
+    int c0, int c1,
+    int owner, int edge,
+    const double* alpha,
+    int nx, int ny, int periodicX, int periodicY,
+    const float* uSolidX, const float* uSolidY,
+    IsoPoint0493x10n* out) {
+    if (!out) return false;
+    const bool in0 = a0 >= 0.5;
+    const bool in1 = a1 >= 0.5;
+    if (in0 == in1) return false;
+    double theta = 0.0;
+    if (!q6_x16o_q2_edge_theta(
+            alpha, owner, edge, nx, ny, periodicX, periodicY, &theta))
+        return false;
+    out->x = x0 + theta * (x1 - x0);
+    out->y = y0 + theta * (y1 - y0);
+    const double ux0 = uSolidX ? static_cast<double>(uSolidX[c0]) : 0.0;
+    const double ux1 = uSolidX ? static_cast<double>(uSolidX[c1]) : 0.0;
+    const double uy0 = uSolidY ? static_cast<double>(uSolidY[c0]) : 0.0;
+    const double uy1 = uSolidY ? static_cast<double>(uSolidY[c1]) : 0.0;
+    out->ux = (1.0 - theta) * ux0 + theta * ux1;
+    out->uy = (1.0 - theta) * uy0 + theta * uy1;
+    out->valid = isfinite(out->x) && isfinite(out->y) &&
+                 isfinite(out->ux) && isfinite(out->uy);
+    return out->valid;
+}
+
 __device__ __forceinline__ void q6_x10n_orient_segment_outward(
     IsoPoint0493x10n* a,
     IsoPoint0493x10n* b,
@@ -6302,6 +6758,9 @@ __global__ void q6_x10n_build_continuous_interface(
     const double* totalM,
     const double* totalPx,
     const double* totalPy,
+    const float* solidUx0493x16j,
+    const float* solidUy0493x16j,
+    int useSolidVelocity0493x16j,
     const unsigned char* q6HydroValid0493x10o,
     const double* q6HydroCellUx0493x10o,
     const double* q6HydroCellUy0493x10o,
@@ -6424,14 +6883,85 @@ __global__ void q6_x10n_build_continuous_interface(
         const int b2 = a11 >= 0.5 ? 1 : 0;
         const int b3 = a01 >= 0.5 ? 1 : 0;
         const int code = b0 | (b1 << 1) | (b2 << 2) | (b3 << 3);
-        if (code == 0 || code == 15) continue;
-        if (audit) atomicAdd(&audit->continuousWallInterfaceDualCells, 1ull);
+        if (!useSolidVelocity0493x16j && (code == 0 || code == 15)) continue;
+        if (!useSolidVelocity0493x16j && audit)
+            atomicAdd(&audit->continuousWallInterfaceDualCells, 1ull);
 
         const double x0 = (static_cast<double>(i) + 0.5) * dx;
         const double y0 = (static_cast<double>(j) + 0.5) * dy;
         const double x1 = x0 + dx;
         const double y1 = y0 + dy;
-        IsoPoint0493x10n e[4];
+        int built = 0;
+        if (useSolidVelocity0493x16j) {
+            Q2BoundaryRoot0493x16p roots[8];
+            const int nr = q6_x16p_collect_boundary_roots(
+                alpha, owner, nx, ny, periodicX, periodicY,
+                x0, y0, dx, dy, c00, c10, c11, c01,
+                solidUx0493x16j, solidUy0493x16j, roots);
+            if (nr < 0 || nr > 4 || (nr != 0 && nr != 2 && nr != 4)) {
+                if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                continue;
+            }
+            if (nr == 0) continue;
+            if (audit) atomicAdd(&audit->continuousWallInterfaceDualCells, 1ull);
+
+            int pairA0 = -1, pairA1 = -1, pairB0 = -1, pairB1 = -1;
+            if (nr == 2) {
+                pairA0 = 0; pairA1 = 1;
+            } else {
+                if (audit) atomicAdd(&audit->continuousWallAmbiguousDualCells, 1ull);
+                Q2TopologyPatch0493x16p qtop{};
+                if (!q6_x16p_build_topology_patch(
+                        alpha, owner, nx, ny, periodicX, periodicY, &qtop)) {
+                    if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                    continue;
+                }
+                const int partner = q6_x16p_trace_partner(qtop, roots, 0);
+                if (partner <= 0 || partner >= 4) {
+                    if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                    continue;
+                }
+                pairA0 = 0; pairA1 = partner;
+                int rem[2] = {-1, -1}; int nrem = 0;
+                for (int k = 1; k < 4; ++k) {
+                    if (k == partner) continue;
+                    if (nrem < 2) rem[nrem++] = k;
+                }
+                if (nrem != 2) {
+                    if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                    continue;
+                }
+                pairB0 = rem[0]; pairB1 = rem[1];
+            }
+
+            if (q6_x10n_store_segment(owner, built, roots[pairA0].p, roots[pairA1].p,
+                    a00, a10, a11, a01, x0, y0, dx, dy,
+                    segAx, segAy, segBx, segBy,
+                    segUax, segUay, segUbx, segUby,
+                    dt0493x14z, referencePressureClosureScratch0493x14z)) {
+                q6_x14ad_record_segment_edges(
+                    segmentEdgePairs0493x14ad, owner, built,
+                    roots[pairA0].edge, roots[pairA1].edge);
+                ++built;
+            }
+            if (nr == 4 && built < 2 &&
+                q6_x10n_store_segment(owner, built, roots[pairB0].p, roots[pairB1].p,
+                    a00, a10, a11, a01, x0, y0, dx, dy,
+                    segAx, segAy, segBx, segBy,
+                    segUax, segUay, segUbx, segUby,
+                    dt0493x14z, referencePressureClosureScratch0493x14z)) {
+                q6_x14ad_record_segment_edges(
+                    segmentEdgePairs0493x14ad, owner, built,
+                    roots[pairB0].edge, roots[pairB1].edge);
+                ++built;
+            }
+            if ((nr == 2 && built != 1) || (nr == 4 && built != 2)) {
+                if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
+                segCount[owner] = 0;
+                continue;
+            }
+        } else {
+            IsoPoint0493x10n e[4];
         bool h[4] = {false, false, false, false};
         if (useQ6ThermalWall0493x10o) {
             // edge 0: c00--c10, Q6 x-face owned by c00
@@ -6462,6 +6992,19 @@ __global__ void q6_x10n_build_continuous_interface(
                 q6HydroValid0493x10o, q6HydroCellUx0493x10o, q6HydroCellUy0493x10o,
                 q6HydroFaceUxEast0493x10o, q6HydroFaceUyNorth0493x10o,
                 thermalThickness0493x10o, fullVectorEndpointVelocity0493x10r, &e[3], audit);
+        } else if (useSolidVelocity0493x16j) {
+            h[0] = q6_x16j_edge_crossing_chi_solid(a00, a10, x0, y0, x1, y0,
+                                          c00, c10, owner, 0, alpha, nx, ny, periodicX, periodicY,
+                                          solidUx0493x16j, solidUy0493x16j, &e[0]);
+            h[1] = q6_x16j_edge_crossing_chi_solid(a10, a11, x1, y0, x1, y1,
+                                          c10, c11, owner, 1, alpha, nx, ny, periodicX, periodicY,
+                                          solidUx0493x16j, solidUy0493x16j, &e[1]);
+            h[2] = q6_x16j_edge_crossing_chi_solid(a11, a01, x1, y1, x0, y1,
+                                          c11, c01, owner, 2, alpha, nx, ny, periodicX, periodicY,
+                                          solidUx0493x16j, solidUy0493x16j, &e[2]);
+            h[3] = q6_x16j_edge_crossing_chi_solid(a01, a00, x0, y1, x0, y0,
+                                          c01, c00, owner, 3, alpha, nx, ny, periodicX, periodicY,
+                                          solidUx0493x16j, solidUy0493x16j, &e[3]);
         } else {
             h[0] = q6_x10n_edge_crossing(a00, a10, x0, y0, x1, y0,
                                           c00, c10, totalM, totalPx, totalPy, &e[0]);
@@ -6475,7 +7018,6 @@ __global__ void q6_x10n_build_continuous_interface(
         int edges[4]; int ne = 0;
         for (int k = 0; k < 4; ++k) if (h[k]) edges[ne++] = k;
 
-        int built = 0;
         if (ne == 2) {
             if (q6_x10n_store_segment(owner, 0, e[edges[0]], e[edges[1]],
                     a00, a10, a11, a01, x0, y0, dx, dy,
@@ -6531,6 +7073,7 @@ __global__ void q6_x10n_build_continuous_interface(
         } else {
             if (audit) atomicAdd(&audit->continuousWallInvalidDualCells, 1ull);
             continue;
+        }
         }
         segCount[owner] = static_cast<unsigned char>(built);
 
@@ -6994,6 +7537,90 @@ __device__ __forceinline__ void q6_x10biq_local_coordinates(
     *eta = ry / dy;
 }
 
+
+// 0493x16n — make the domain of each local Q2 patch explicit.
+//
+// q6_x10n_build_continuous_interface() assigns owner=(i,j) to the dual square
+// whose corners are the four cell centres (i,j), (i+1,j), (i+1,j+1),
+// (i,j+1).  In q6_x10biq_local_coordinates() that square is exactly
+//
+//     0 <= xi <= 1,   0 <= eta <= 1.
+//
+// Neighboring tensor-product Q2 patches are C0 on a shared dual edge: at
+// xi=1 the left patch reduces to the same 1-D quadratic through column i+1 as
+// the right patch at xi=0 (and analogously in y).  Therefore these owner
+// squares define one continuous piecewise-Q2 wall without extrapolating any
+// patch outside the branch it owns.
+__device__ __forceinline__ int q6_x16n_dual_owner_for_position(
+    double x, double y,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY) {
+    if (!(nx > 1 && ny > 1 && lx > 0.0 && ly > 0.0) ||
+        !isfinite(x) || !isfinite(y)) return -1;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    if (periodicX) {
+        x -= floor(x / lx) * lx;
+        if (x >= lx) x = 0.0;
+    }
+    if (periodicY) {
+        y -= floor(y / ly) * ly;
+        if (y >= ly) y = 0.0;
+    }
+    if (x < 0.0 || x >= lx || y < 0.0 || y >= ly) return -1;
+
+    int i = static_cast<int>(floor(x / dx - 0.5));
+    int j = static_cast<int>(floor(y / dy - 0.5));
+    if (periodicX) i = wrap_cell_index_0400(i, nx);
+    else if (i < 0 || i + 1 >= nx) return -1;
+    if (periodicY) j = wrap_cell_index_0400(j, ny);
+    else if (j < 0 || j + 1 >= ny) return -1;
+    return j * nx + i;
+}
+
+__device__ __forceinline__ bool q6_x16n_clip_axis_to_unit_interval(
+    double q0, double uq, double qTol,
+    double* tauLo, double* tauHi) {
+    if (!tauLo || !tauHi) return false;
+    const double qMin = -qTol;
+    const double qMax = 1.0 + qTol;
+    if (fabs(uq) <= 1.0e-300) return q0 >= qMin && q0 <= qMax;
+    double a = (qMin - q0) / uq;
+    double b = (qMax - q0) / uq;
+    if (a > b) { const double t = a; a = b; b = t; }
+    *tauLo = fmax(*tauLo, a);
+    *tauHi = fmin(*tauHi, b);
+    return *tauHi >= *tauLo;
+}
+
+__device__ __forceinline__ bool q6_x16n_clip_to_dual_owner_window(
+    double xi0, double eta0,
+    double ux, double uy,
+    double window,
+    double* tauLo,
+    double* tauHi) {
+    if (!tauLo || !tauHi || !(window > 0.0) ||
+        !isfinite(xi0) || !isfinite(eta0) ||
+        !isfinite(ux) || !isfinite(uy)) return false;
+
+    // Give adjacent owner squares an O(roundoff) overlap so a root lying on a
+    // shared edge can be seen by either patch; the existing finite-segment
+    // lambda guard remains the final branch-consistency check.
+    const double qTol = 1.0e-10;
+    double lo = 0.0;
+    double hi = window;
+    if (!q6_x16n_clip_axis_to_unit_interval(xi0, ux, qTol, &lo, &hi) ||
+        !q6_x16n_clip_axis_to_unit_interval(eta0, uy, qTol, &lo, &hi))
+        return false;
+    lo = fmax(0.0, lo);
+    hi = fmin(window, hi);
+    if (!(hi >= lo) || !isfinite(lo) || !isfinite(hi)) return false;
+    *tauLo = lo;
+    *tauHi = hi;
+    return hi - lo > 1.0e-14;
+}
+
 // Evaluate the geometrically offset thermal envelope.  For a query point q on
 // the kinetic wall there exists a base point b on P=.5 such that
 // q = b + delta*n_out(b).  One fixed-point normal update is sufficient for the
@@ -7098,6 +7725,7 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     int periodicX, int periodicY,
     int phaseSense0493x14k,
     double phaseNormalScale0493x10w,
+    int strictRootBisection0493x16m,
     const BiquadraticAlphaPatch0493x10biq& q,
     const MovingSegment0493x10n& seg,
     MovingSegmentCollision0493x10n* out) {
@@ -7157,9 +7785,23 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     const double ux = (phaseVx0493x10w - wallVx) / dx;
     const double uy = (phaseVy0493x10w - wallVy) / dy;
 
+    // 0493x16n: the chi material-wall Q2 is a continuous *piecewise* field.
+    // Patch owner=(i,j) owns the dual square xi,eta in [0,1]^2; evaluating it
+    // elsewhere is polynomial extrapolation and can disagree with the adjacent
+    // owner patch even though both patches match exactly on their common edge.
+    // Restrict only the x16j/chi path here.  Historical liquid/gas Q2 keeps its
+    // qualified full-window behavior byte-for-byte below.
+    double searchLo0493x16n = 0.0;
+    double searchHi0493x16n = window;
+    if (strictRootBisection0493x16m &&
+        !q6_x16n_clip_to_dual_owner_window(
+            xi0, eta0, ux, uy, window,
+            &searchLo0493x16n, &searchHi0493x16n))
+        return false;
+
     double f0Raw0493x14k = 0.0, f1Raw0493x14k = 0.0;
     if (!q6_x10biq_level_at_tau(
-            q, xi0, eta0, ux, uy, 0.0,
+            q, xi0, eta0, ux, uy, searchLo0493x16n,
             thermalThickness, dx, dy, &f0Raw0493x14k)) return false;
     const double sideTol = 1.0e-10;
     // The Q2 field is positive on liquid A.  Multiplying by phaseSign makes
@@ -7168,15 +7810,15 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     const double f0 = phaseSign0493x14k * f0Raw0493x14k;
     if (f0 < -sideTol) return false;
     if (!q6_x10biq_level_at_tau(
-            q, xi0, eta0, ux, uy, window,
+            q, xi0, eta0, ux, uy, searchHi0493x16n,
             thermalThickness, dx, dy, &f1Raw0493x14k)) return false;
     const double f1 = phaseSign0493x14k * f1Raw0493x14k;
 
-    double lo = 0.0, hi = window;
+    double lo = searchLo0493x16n, hi = searchHi0493x16n;
     double flo = f0, fhi = f1;
     if (fhi > 0.0) {
         // Rare cross-and-return safeguard without a global subdivision pass.
-        const double mid = 0.5 * window;
+        const double mid = 0.5 * (lo + hi);
         double fmRaw0493x14k = 0.0;
         if (!q6_x10biq_level_at_tau(
                 q, xi0, eta0, ux, uy, mid,
@@ -7187,40 +7829,74 @@ __device__ __forceinline__ bool q6_x10biq_collide_moving_patch(
     }
     if (!(flo >= -sideTol && fhi <= 0.0)) return false;
 
-    // Safeguarded false-position.  Biquadratic P along a line is quartic, but
-    // an outward crossing from inside to outside is bracketed by sign, so no
-    // general quartic solver is needed.  Eight local iterations give sub-1e-2h
-    // worst-case spatial precision even under pure bisection at |v|~h/dt;
-    // ordinary false-position convergence is substantially faster.
     double tau = hi;
-    for (int it = 0; it < 8; ++it) {
-        const double width = hi - lo;
-        if (!(width > 1.0e-14)) break;
+    if (strictRootBisection0493x16m) {
+        // 0493x16m: chi material walls require a guaranteed root bracket.
+        // The historical safeguarded false-position can contract by only 0.85
+        // in one accepted secant step, so eight iterations do not provide the
+        // previously claimed 2^-8 worst-case bound.  Use pure bisection until
+        // the residual relative-trajectory uncertainty is <= 1e-8 cell.
+        // Select the own-support endpoint (lo), not the midpoint, so roundoff
+        // cannot place the nominal impact on the material side.
+        const double pathRateCells0493x16m = hypot(ux, uy);
+        const double targetPathCells0493x16m = 1.0e-8;
+        for (int it0493x16m = 0; it0493x16m < 40; ++it0493x16m) {
+            const double width0493x16m = hi - lo;
+            if (!(width0493x16m > 1.0e-14)) break;
+            if (isfinite(pathRateCells0493x16m) &&
+                pathRateCells0493x16m * width0493x16m <=
+                    targetPathCells0493x16m)
+                break;
+            const double trial0493x16m = 0.5 * (lo + hi);
+            double ftRaw0493x16m = 0.0;
+            if (!q6_x10biq_level_at_tau(
+                    q, xi0, eta0, ux, uy, trial0493x16m,
+                    thermalThickness, dx, dy, &ftRaw0493x16m)) return false;
+            const double ft0493x16m =
+                phaseSign0493x14k * ftRaw0493x16m;
+            if (ft0493x16m >= 0.0) {
+                lo = trial0493x16m;
+                flo = ft0493x16m;
+            } else {
+                hi = trial0493x16m;
+                fhi = ft0493x16m;
+            }
+        }
+        tau = lo;
+    } else {
+        // Historical x10biq path retained for liquid/gas qualification.
+        // Safeguarded false-position.  Biquadratic P along a line is quartic,
+        // but an outward crossing from inside to outside is bracketed by sign,
+        // so no general quartic solver is needed.
+        for (int it = 0; it < 8; ++it) {
+            const double width = hi - lo;
+            if (!(width > 1.0e-14)) break;
+            const double den = fhi - flo;
+            double trial = 0.5 * (lo + hi);
+            if (fabs(den) > 1.0e-16 && isfinite(den)) {
+                const double sec = (lo * fhi - hi * flo) / den;
+                const double guard = 0.15 * width;
+                if (isfinite(sec) && sec > lo + guard && sec < hi - guard)
+                    trial = sec;
+            }
+            double ftRaw0493x14k = 0.0;
+            if (!q6_x10biq_level_at_tau(
+                    q, xi0, eta0, ux, uy, trial,
+                    thermalThickness, dx, dy, &ftRaw0493x14k)) return false;
+            const double ft = phaseSign0493x14k * ftRaw0493x14k;
+            tau = trial;
+            if (ft >= 0.0) { lo = trial; flo = ft; }
+            else { hi = trial; fhi = ft; }
+        }
+        // One final bracket interpolation improves time accuracy almost for free.
         const double den = fhi - flo;
-        double trial = 0.5 * (lo + hi);
         if (fabs(den) > 1.0e-16 && isfinite(den)) {
             const double sec = (lo * fhi - hi * flo) / den;
-            const double guard = 0.15 * width;
-            if (isfinite(sec) && sec > lo + guard && sec < hi - guard)
-                trial = sec;
+            if (isfinite(sec) && sec >= lo && sec <= hi) tau = sec;
+            else tau = 0.5 * (lo + hi);
+        } else {
+            tau = 0.5 * (lo + hi);
         }
-        double ftRaw0493x14k = 0.0;
-        if (!q6_x10biq_level_at_tau(
-                q, xi0, eta0, ux, uy, trial,
-                thermalThickness, dx, dy, &ftRaw0493x14k)) return false;
-        const double ft = phaseSign0493x14k * ftRaw0493x14k;
-        tau = trial;
-        if (ft >= 0.0) { lo = trial; flo = ft; }
-        else { hi = trial; fhi = ft; }
-    }
-    // One final bracket interpolation improves time accuracy almost for free.
-    const double den = fhi - flo;
-    if (fabs(den) > 1.0e-16 && isfinite(den)) {
-        const double sec = (lo * fhi - hi * flo) / den;
-        if (isfinite(sec) && sec >= lo && sec <= hi) tau = sec;
-        else tau = 0.5 * (lo + hi);
-    } else {
-        tau = 0.5 * (lo + hi);
     }
     if (!isfinite(tau) || tau < 0.0 || tau > window) return false;
 
@@ -7825,7 +8501,7 @@ __global__ void q6_x10w_mark_pairwise_thermal_candidates(
                         0.0, dt, thermalThickness,
                         dx, dy, lx, ly, nx,
                         periodicX, periodicY,
-                        +1, 1.0, patch, seg, &raw);
+                        +1, 1.0, 0, patch, seg, &raw);
                     if (!rawOk || !(raw.tau < earliestRawTau)) continue;
 
                     earliestRawTau = raw.tau;
@@ -7837,7 +8513,7 @@ __global__ void q6_x10w_mark_pairwise_thermal_candidates(
                             0.0, dt, thermalThickness,
                             dx, dy, lx, ly, nx,
                             periodicX, periodicY,
-                            +1, a, patch, seg, &filtered);
+                            +1, a, 0, patch, seg, &filtered);
                     }
                 }
             }
@@ -7933,7 +8609,7 @@ __global__ void q6_x10w_apply_pairwise_thermal_velocity_redistribution(
                         0.0, dt, thermalThickness,
                         dx, dy, lx, ly, nx,
                         periodicX, periodicY,
-                        +1, 1.0, patch, seg, &raw);
+                        +1, 1.0, 0, patch, seg, &raw);
                     if (!rawOk || !(raw.tau < earliestRawTau)) continue;
                     earliestRawTau=raw.tau;
                     earliestRawSuppressed=false;
@@ -7946,7 +8622,7 @@ __global__ void q6_x10w_apply_pairwise_thermal_velocity_redistribution(
                             0.0, dt, thermalThickness,
                             dx, dy, lx, ly, nx,
                             periodicX, periodicY,
-                            +1, a, patch, seg, &filtered);
+                            +1, a, 0, patch, seg, &filtered);
                     }
                 }
             }
@@ -8114,6 +8790,7 @@ __device__ __forceinline__ bool q6_x10biq_closest_current_wall(
     double lx, double ly,
     int nx,
     int periodicX, int periodicY,
+    int restrictOwnerDomain0493x16n,
     const BiquadraticAlphaPatch0493x10biq& q,
     const MovingSegment0493x10n& seg,
     InitialOverlapNearest0493x10p* out) {
@@ -8141,6 +8818,19 @@ __device__ __forceinline__ bool q6_x10biq_closest_current_wall(
 
     double qx = qxGeom + seed.wallVx * tStart;
     double qy = qyGeom + seed.wallVy * tStart;
+
+    if (restrictOwnerDomain0493x16n) {
+        double xi0493x16n = 0.0, eta0493x16n = 0.0;
+        q6_x10biq_local_coordinates(
+            qxGeom, qyGeom, q.owner, nx, dx, dy, lx, ly,
+            periodicX, periodicY, &xi0493x16n, &eta0493x16n);
+        const double qTol0493x16n = 1.0e-10;
+        if (xi0493x16n < -qTol0493x16n ||
+            xi0493x16n > 1.0 + qTol0493x16n ||
+            eta0493x16n < -qTol0493x16n ||
+            eta0493x16n > 1.0 + qTol0493x16n)
+            return false;
+    }
 
     // Re-interpolate x10o wall velocity at the actual Q2 wall point and retain
     // marching-squares solely as branch support/topology.
@@ -8196,6 +8886,93 @@ __device__ __forceinline__ int q6_x10n_position_cell(
     return j * nx + i;
 }
 
+// 0493x16l: positive-double atomic max for the scalar diagnostic record.
+__device__ __forceinline__ void q6_x16l_atomic_max_positive(
+    double* address, double value) {
+    if (!address || !(value >= 0.0) || !isfinite(value)) return;
+    auto* u = reinterpret_cast<unsigned long long*>(address);
+    unsigned long long old = *u;
+    while (__longlong_as_double(old) < value) {
+        const unsigned long long assumed = old;
+        old = atomicCAS(u, assumed, __double_as_longlong(value));
+        if (old == assumed) break;
+    }
+}
+
+__global__ void q6_x16l_measure_chi_penetration(
+    CudaParticleDeviceView particles,
+    std::uint64_t nParticles,
+    const double* wallFraction,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    unsigned char fluidRole,
+    double strictLevelEpsilon,
+    ChiPenetrationAccumulator0493x16l* out) {
+    const std::uint64_t p =
+        static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (p >= nParticles || !out) return;
+    if (particles.role && particles.role[p] != fluidRole) return;
+
+    const double x = particles.x[p];
+    const double y = particles.y[p];
+    if (!isfinite(x) || !isfinite(y)) return;
+    // 0493x16n: measure penetration against the same continuous piecewise-Q2
+    // surface used by the material-wall crossing engine.  A Q2 owner is the
+    // lower-left cell centre of a dual square, NOT the finite-volume cell that
+    // contains the particle.  The old x16l choice evaluated overlapping Q2
+    // patches on [-1/2,1/2]^2 and could label a particle solid even though the
+    // production owner patch on [0,1]^2 still placed it on the fluid side.
+    const int owner = q6_x16n_dual_owner_for_position(
+        x, y, nx, ny, lx, ly, periodicX, periodicY);
+    if (owner < 0) return;
+
+    BiquadraticAlphaPatch0493x10biq patch{};
+    if (!q6_x10biq_build_patch(
+            wallFraction, owner, nx, ny, periodicX, periodicY, &patch)) {
+        atomicAdd(&out->q2InvalidParticles, 1ull);
+        return;
+    }
+
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    double xi = 0.0, eta = 0.0;
+    q6_x10biq_local_coordinates(
+        x, y, owner, nx, dx, dy, lx, ly, periodicX, periodicY, &xi, &eta);
+    double solidLevel = 0.0, gx = 0.0, gy = 0.0;
+    q6_x10biq_eval(patch, xi, eta, dx, dy, &solidLevel, &gx, &gy);
+    if (!isfinite(solidLevel) || !isfinite(gx) || !isfinite(gy)) {
+        atomicAdd(&out->q2InvalidParticles, 1ull);
+        return;
+    }
+
+    atomicAdd(&out->sampledParticles, 1ull);
+    const double levelExcess = solidLevel - 0.5;
+    if (!(levelExcess > 0.0)) return;
+
+    const double mass =
+        (particles.mass && particles.mass[p] > 0.0) ? particles.mass[p] : 1.0;
+    atomicAdd(&out->rawInsideParticles, 1ull);
+    atomic_add_double_0400(&out->rawInsideMass, mass);
+    q6_x16l_atomic_max_positive(&out->maxSolidLevelExcess, levelExcess);
+
+    const double grad = sqrt(gx * gx + gy * gy);
+    const double h = fmin(dx, dy);
+    if (grad > 1.0e-14 / fmax(h, 1.0e-300)) {
+        const double depthCells = (levelExcess / grad) / h;
+        q6_x16l_atomic_max_positive(&out->maxPenetrationCells, depthCells);
+    } else {
+        // A particle in the S>0.5 plateau has penetrated beyond the resolved
+        // level-field ramp; count it explicitly instead of inventing a depth.
+        atomicAdd(&out->flatGradientInsideParticles, 1ull);
+    }
+
+    if (levelExcess > strictLevelEpsilon) {
+        atomicAdd(&out->strictInsideParticles, 1ull);
+        atomic_add_double_0400(&out->strictInsideMass, mass);
+    }
+}
+
 // 0493x14v forward declaration.  The implementation is placed beside the
 // existing x10cic helpers so both paths use exactly the same CIC convention.
 __device__ __forceinline__ void q6_x14v_deposit_signed_phase_mass_cic(
@@ -8230,6 +9007,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
     std::uint32_t phaseBType0493x14k,
     int bilateralRelocation0493x14k,
     int gasSpecularReflection0493x14l,
+    int chiKineticBoundary0493x16j,
     int gasKineticExcessKick0493x14v,
     double* gasRawImpulseOwnerX0493x14v,
     double* gasRawImpulseOwnerY0493x14v,
@@ -8260,7 +9038,11 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
         if (!particles.type) continue;
         const std::uint32_t particleType0493x14k = particles.type[p];
         int phaseSense0493x14k = 0;
-        if (particleType0493x14k == phaseAType) {
+        if (chiKineticBoundary0493x16j) {
+            // S=1-chi is high in solid; every active fluid particle occupies
+            // the low-S side and therefore uses the existing phase-B sense.
+            phaseSense0493x14k = -1;
+        } else if (particleType0493x14k == phaseAType) {
             phaseSense0493x14k = +1;
         } else if (bilateralRelocation0493x14k &&
                    particleType0493x14k == phaseBType0493x14k) {
@@ -8274,19 +9056,26 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
         // response in the local moving-interface frame; x14l simply preserves
         // that response instead of overwriting it with position-only x10u.
         const bool gasSpecularThisParticle0493x14l =
-            gasSpecularReflection0493x14l != 0 &&
-            phaseSense0493x14k < 0;
+            chiKineticBoundary0493x16j != 0 ||
+            (gasSpecularReflection0493x14l != 0 && phaseSense0493x14k < 0);
         const bool positionOnlyThisParticle0493x14l =
             oneForOneRelocation0493x10u &&
             !gasSpecularThisParticle0493x14l;
-        const int initialCell = cells.cellId[p];
-        if (initialCell < 0 || initialCell >= cells.numCells) continue;
-
         const double x0 = particles.x[p];
         const double y0 = particles.y[p];
         const double vx0 = particles.vx[p];
         const double vy0 = particles.vy[p];
         const double mass = particles.mass ? particles.mass[p] : 1.0;
+
+        // 0493x16j-fix1: the chi wall pass now runs before ordinary streaming,
+        // outside the Q6 deposit.  Its cell id must therefore come directly
+        // from the current particle position rather than from cells.cellId,
+        // whose contents are not authoritative at this time level.  All legacy
+        // phase-interface paths keep their historical cells.cellId lookup.
+        const int initialCell = chiKineticBoundary0493x16j
+            ? q6_x10n_position_cell(x0, y0, nx, ny, lx, ly, periodicX, periodicY)
+            : cells.cellId[p];
+        if (initialCell < 0 || initialCell >= cells.numCells) continue;
 
         bool oldStationaryOuter = false;
         if (audit) {
@@ -8390,6 +9179,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                         thermalThicknessLocal0493x12a,
                                         dx, dy, lx, ly, nx,
                                         periodicX, periodicY,
+                                        chiKineticBoundary0493x16j,
                                         patch0493x10poly, seg, &q);
                             } else {
                                 // Numerical/stencil fallback only.  A valid
@@ -8438,6 +9228,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                 dx, dy, lx, ly, nx,
                                 periodicX, periodicY,
                                 phaseSense0493x14k, phaseScale0493x10w,
+                                chiKineticBoundary0493x16j,
                                 patch0493x10poly, seg, &hit);
                             // A raw Q2 crossing that disappears under the
                             // phase-transport scale is NOT a relocation/swap.
@@ -8456,6 +9247,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                         dx, dy, lx, ly, nx,
                                         periodicX, periodicY,
                                         phaseSense0493x14k, 1.0,
+                                        chiKineticBoundary0493x16j,
                                         patch0493x10poly, seg,
                                         &raw0493x10w);
                                 if (rawOk0493x10w &&
@@ -8564,6 +9356,7 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
                                         thermalThicknessWide0493x12a,
                                         dx, dy, lx, ly, nx,
                                         periodicX, periodicY,
+                                        chiKineticBoundary0493x16j,
                                         patchWide0493x10biq,
                                         seg0493x10q, &q0493x10q);
                             } else {
@@ -8604,8 +9397,15 @@ __global__ void q6_x10n_apply_continuous_moving_interface(
 
             if (resolveInitialOverlap0493x10p && event == 0 && nearest.valid) {
                 const double h0493x10p = fmin(dx, dy);
-                const double sideTol0493x10p =
-                    1.0e-8 * fmax(1.0, h0493x10p);
+                // 0493x16q: the chi/Q2 swept path rejects an event that starts
+                // on the wrong side by more than 1e-10 in Q2 level.  Its
+                // initial-overlap path must therefore not retain the much
+                // larger historical x10p physical-distance dead band.  Keep
+                // liquid/gas byte-for-byte on the qualified tolerance and use
+                // a cell-scaled near-machine wall tolerance only for chi.
+                const double sideTol0493x10p = chiKineticBoundary0493x16j
+                    ? 1.0e-10 * h0493x10p
+                    : 1.0e-8 * fmax(1.0, h0493x10p);
                 const double signedOutsideOwn0493x14k =
                     static_cast<double>(phaseSense0493x14k) *
                     nearest.signedDistance;
@@ -19486,6 +20286,16 @@ void append_kinetic_crossing_audit_0493x9x(
            "same-three-x9-particle-passes-plus-one-cell-kernel;deterministic-hash" << '\n';
 }
 
+bool apply_chi_kinetic_boundary_0493x16j(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    ResidentWorkspace0400& ws,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step, double time, std::uint64_t nParticles,
+    int threads, int cellBlocks, int particleBlocks,
+    int periodicX, int periodicY);
+
 bool apply_kinetic_interface_reflection_0493x9x(
     CudaParticleDeviceView particles,
     CudaCellWorkspaceDeviceView cells,
@@ -20254,6 +21064,7 @@ bool apply_kinetic_interface_reflection_0493x9x(
             ws.kineticTotalM0493x9t.data(),
             ws.kineticTotalPx0493x9t.data(),
             ws.kineticTotalPy0493x9t.data(),
+            nullptr, nullptr, 0,
             q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroValid0493x10o.data() : nullptr,
             q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroCellUx0493x10o.data() : nullptr,
             q6ThermalInterfaceWall0493x10o ? ws.kineticQ6HydroCellUy0493x10o.data() : nullptr,
@@ -20616,6 +21427,7 @@ bool apply_kinetic_interface_reflection_0493x9x(
             phaseAType, phaseBType0493x14k,
             bilateralRelocation0493x14k ? 1 : 0,
             gasSpecularReflection0493x14l ? 1 : 0,
+            0, // 0493x16j chi kinetic boundary disabled on historical phase path
             gasKineticExcessKick0493x14v ? 1 : 0,
             gasKineticExcessKick0493x14v
                 ? ws.kineticRefPx0493x9t.data() : nullptr,
@@ -24657,6 +25469,927 @@ bool apply_independent_masked_species_q6_0493w5(
     return true;
 }
 
+// =============================================================================
+// 0493x17a — PERSISTENT LAGRANGIAN MATERIAL BOUNDARY EXTRACTED FROM chi=0.5
+// =============================================================================
+// User-facing geometry remains chi.  The material-solid path extracts the
+// initial chi=0.5 contour once, stores it as explicit Lagrangian edges, and
+// thereafter advances those edges from the resident solid-velocity field.
+// No per-step chi/Q2 topology reconstruction participates in collision.
+// Darcy/Brinkman remains untouched when chiKineticBoundaryMode=off.
+
+constexpr int kChiLagrangianCellEdgeCapacity0493x17a = 64;
+
+struct ChiLagrangianHostEdge0493x17a {
+    double ax = 0.0;
+    double ay = 0.0;
+    double bx = 0.0;
+    double by = 0.0;
+    signed char normalSign = 1; // +1: left normal is fluidward, -1: right normal
+    int owner = -1;
+};
+
+struct ChiLagrangianExtractionStats0493x17a {
+    unsigned long long dualSquares = 0ull;
+    unsigned long long interfaceSquares = 0ull;
+    unsigned long long ambiguousSquares = 0ull;
+    unsigned long long degenerateEdges = 0ull;
+    double minEdgeLength = std::numeric_limits<double>::infinity();
+    double maxEdgeLength = 0.0;
+};
+
+int q6_x17a_host_wrap_index(int i, int n) {
+    i %= n;
+    if (i < 0) i += n;
+    return i;
+}
+
+std::vector<ChiLagrangianHostEdge0493x17a>
+q6_x17a_extract_initial_chi_contour(
+    const float* deviceChi,
+    int nx, int ny,
+    double lx, double ly,
+    int periodicX, int periodicY,
+    ChiLagrangianExtractionStats0493x17a* stats) {
+    if (!deviceChi || nx < 2 || ny < 2 || !(lx > 0.0) || !(ly > 0.0)) {
+        throw std::runtime_error("0493x17a invalid chi contour extraction input");
+    }
+    std::vector<float> chi(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny));
+    check_cuda_0400(cudaMemcpy(
+        chi.data(), deviceChi, chi.size() * sizeof(float), cudaMemcpyDeviceToHost),
+        "0493x17a initial chi download");
+
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    const int ownerNx = periodicX ? nx : nx - 1;
+    const int ownerNy = periodicY ? ny : ny - 1;
+    constexpr double iso = 0.5;
+    constexpr double tie = 1.0e-12;
+    std::vector<ChiLagrangianHostEdge0493x17a> edges;
+    edges.reserve(static_cast<std::size_t>(2 * nx * ny));
+    ChiLagrangianExtractionStats0493x17a local{};
+
+    auto sample = [&](int i, int j) -> double {
+        if (periodicX) i = q6_x17a_host_wrap_index(i, nx);
+        if (periodicY) j = q6_x17a_host_wrap_index(j, ny);
+        if (i < 0 || i >= nx || j < 0 || j >= ny) return 1.0;
+        return static_cast<double>(chi[static_cast<std::size_t>(j) * nx + i]);
+    };
+    auto shifted = [&](double v) -> double {
+        double f = v - iso;
+        // Deterministic tie break: an exactly half-valued cell centre is
+        // considered infinitesimally fluid.  This avoids a non-manifold node
+        // at a grid centre while shifting the represented contour only at
+        // machine-scale relative to one cell.
+        if (std::abs(f) < tie) f = tie;
+        return f;
+    };
+
+    for (int j = 0; j < ownerNy; ++j) {
+        for (int i = 0; i < ownerNx; ++i) {
+            ++local.dualSquares;
+            const double v00 = sample(i, j);
+            const double v10 = sample(i + 1, j);
+            const double v11 = sample(i + 1, j + 1);
+            const double v01 = sample(i, j + 1);
+            const double f00 = shifted(v00);
+            const double f10 = shifted(v10);
+            const double f11 = shifted(v11);
+            const double f01 = shifted(v01);
+            const int code = (f00 > 0.0 ? 1 : 0) |
+                             (f10 > 0.0 ? 2 : 0) |
+                             (f11 > 0.0 ? 4 : 0) |
+                             (f01 > 0.0 ? 8 : 0);
+            if (code == 0 || code == 15) continue;
+            ++local.interfaceSquares;
+
+            const double x0 = (static_cast<double>(i) + 0.5) * dx;
+            const double y0 = (static_cast<double>(j) + 0.5) * dy;
+            const double x1 = x0 + dx;
+            const double y1 = y0 + dy;
+
+            auto edge_point = [&](int e, double* x, double* y) {
+                double fa = 0.0, fb = 0.0;
+                double xa = 0.0, ya = 0.0, xb = 0.0, yb = 0.0;
+                switch (e) {
+                    case 0: fa=f00; fb=f10; xa=x0; ya=y0; xb=x1; yb=y0; break;
+                    case 1: fa=f10; fb=f11; xa=x1; ya=y0; xb=x1; yb=y1; break;
+                    case 2: fa=f11; fb=f01; xa=x1; ya=y1; xb=x0; yb=y1; break;
+                    default: fa=f01; fb=f00; xa=x0; ya=y1; xb=x0; yb=y0; break;
+                }
+                const double den = fa - fb;
+                double t = std::abs(den) > 1.0e-300 ? fa / den : 0.5;
+                t = std::max(0.0, std::min(1.0, t));
+                *x = xa + t * (xb - xa);
+                *y = ya + t * (yb - ya);
+            };
+
+            int pairA[2]{-1,-1};
+            int pairB[2]{-1,-1};
+            int nseg = 0;
+            auto one = [&](int a, int b) {
+                pairA[nseg] = a; pairB[nseg] = b; ++nseg;
+            };
+            switch (code) {
+                case 1:  one(3,0); break;
+                case 2:  one(0,1); break;
+                case 3:  one(3,1); break;
+                case 4:  one(1,2); break;
+                case 5: {
+                    ++local.ambiguousSquares;
+                    const double q = f00 * f11 - f10 * f01;
+                    if (q > 0.0) { one(0,1); one(2,3); }
+                    else         { one(3,0); one(1,2); }
+                    break;
+                }
+                case 6:  one(0,2); break;
+                case 7:  one(3,2); break;
+                case 8:  one(2,3); break;
+                case 9:  one(0,2); break;
+                case 10: {
+                    ++local.ambiguousSquares;
+                    const double q = f00 * f11 - f10 * f01;
+                    if (q < 0.0) { one(3,0); one(1,2); }
+                    else         { one(0,1); one(2,3); }
+                    break;
+                }
+                case 11: one(1,2); break;
+                case 12: one(1,3); break;
+                case 13: one(0,1); break;
+                case 14: one(3,0); break;
+                default: break;
+            }
+
+            for (int k = 0; k < nseg; ++k) {
+                ChiLagrangianHostEdge0493x17a e{};
+                edge_point(pairA[k], &e.ax, &e.ay);
+                edge_point(pairB[k], &e.bx, &e.by);
+                e.owner = j * nx + i;
+                const double tx = e.bx - e.ax;
+                const double ty = e.by - e.ay;
+                const double len = std::hypot(tx, ty);
+                if (!(len > 1.0e-12 * std::min(dx,dy)) || !std::isfinite(len)) {
+                    ++local.degenerateEdges;
+                    continue;
+                }
+
+                const double mx = 0.5 * (e.ax + e.bx);
+                const double my = 0.5 * (e.ay + e.by);
+                const double xi = std::max(0.0, std::min(1.0, (mx - x0) / dx));
+                const double eta = std::max(0.0, std::min(1.0, (my - y0) / dy));
+                const double gx = ((v10-v00)*(1.0-eta) + (v11-v01)*eta) / dx;
+                const double gy = ((v01-v00)*(1.0-xi) + (v11-v10)*xi) / dy;
+                const double leftDotGrad = (-ty) * gx + tx * gy;
+                if (!(std::hypot(gx,gy) > 1.0e-14 / std::max(std::min(dx,dy),1.0e-300))) {
+                    throw std::runtime_error(
+                        "0493x17a initial chi contour has a flat-gradient interface segment");
+                }
+                e.normalSign = leftDotGrad >= 0.0 ? 1 : -1;
+                local.minEdgeLength = std::min(local.minEdgeLength, len);
+                local.maxEdgeLength = std::max(local.maxEdgeLength, len);
+                edges.push_back(e);
+            }
+        }
+    }
+
+    if (edges.empty()) {
+        throw std::runtime_error("0493x17a chi=0.5 extraction produced no material-wall edges");
+    }
+    if (edges.size() > static_cast<std::size_t>(2 * nx * ny)) {
+        throw std::runtime_error("0493x17a chi contour exceeded two edges per dual square");
+    }
+    if (local.degenerateEdges != 0ull) {
+        throw std::runtime_error("0493x17a initial chi contour contains degenerate edges");
+    }
+    if (stats) *stats = local;
+    return edges;
+}
+
+void q6_x17a_write_initial_mesh(
+    const SimulationParams& params,
+    const std::vector<ChiLagrangianHostEdge0493x17a>& edges,
+    const ChiLagrangianExtractionStats0493x17a& stats,
+    double h) {
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) / "chi_lagrangian_mesh_0493x17a.csv";
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) throw std::runtime_error("0493x17a failed to open initial mesh CSV");
+    out << "edge,owner,ax,ay,bx,by,normalSign,lengthCells\n";
+    for (std::size_t k = 0; k < edges.size(); ++k) {
+        const auto& e = edges[k];
+        out << k << ',' << e.owner << ',' << std::setprecision(17)
+            << e.ax << ',' << e.ay << ',' << e.bx << ',' << e.by << ','
+            << static_cast<int>(e.normalSign) << ','
+            << (std::hypot(e.bx-e.ax,e.by-e.ay) / h) << '\n';
+    }
+    const std::filesystem::path summary =
+        std::filesystem::path(params.outputDir) / "chi_lagrangian_mesh_0493x17a.txt";
+    std::ofstream s(summary, std::ios::trunc);
+    if (!s) throw std::runtime_error("0493x17a failed to open mesh summary");
+    s << "backend=lagrangian_edge_mesh\n"
+      << "source=initial_chi_iso_0.5\n"
+      << "chiReextract=never\n"
+      << "edges=" << edges.size() << "\n"
+      << "dualSquares=" << stats.dualSquares << "\n"
+      << "interfaceSquares=" << stats.interfaceSquares << "\n"
+      << "ambiguousSquares=" << stats.ambiguousSquares << "\n"
+      << "degenerateEdges=" << stats.degenerateEdges << "\n"
+      << "minEdgeLengthCells=" << (stats.minEdgeLength/h) << "\n"
+      << "maxEdgeLengthCells=" << (stats.maxEdgeLength/h) << "\n";
+}
+
+__device__ __forceinline__ int q6_x17a_wrap_index(int i, int n, int periodic) {
+    if (periodic) {
+        i %= n;
+        if (i < 0) i += n;
+        return i;
+    }
+    if (i < 0 || i >= n) return -1;
+    return i;
+}
+
+__device__ __forceinline__ double q6_x17a_sample_cellcenter_field(
+    const float* field, double x, double y,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    if (!field || nx <= 0 || ny <= 0 || !(lx > 0.0) || !(ly > 0.0)) return 0.0;
+    const double dx = lx / static_cast<double>(nx);
+    const double dy = ly / static_cast<double>(ny);
+    const double gx = x / dx - 0.5;
+    const double gy = y / dy - 0.5;
+    int i0 = static_cast<int>(floor(gx));
+    int j0 = static_cast<int>(floor(gy));
+    double tx = gx - static_cast<double>(i0);
+    double ty = gy - static_cast<double>(j0);
+    int i1 = i0 + 1;
+    int j1 = j0 + 1;
+    if (!periodicX) {
+        if (i0 < 0) { i0 = 0; i1 = 0; tx = 0.0; }
+        else if (i1 >= nx) { i0 = nx-1; i1 = nx-1; tx = 0.0; }
+    }
+    if (!periodicY) {
+        if (j0 < 0) { j0 = 0; j1 = 0; ty = 0.0; }
+        else if (j1 >= ny) { j0 = ny-1; j1 = ny-1; ty = 0.0; }
+    }
+    i0 = q6_x17a_wrap_index(i0,nx,periodicX);
+    i1 = q6_x17a_wrap_index(i1,nx,periodicX);
+    j0 = q6_x17a_wrap_index(j0,ny,periodicY);
+    j1 = q6_x17a_wrap_index(j1,ny,periodicY);
+    if (i0 < 0 || i1 < 0 || j0 < 0 || j1 < 0) return 0.0;
+    const double f00 = field[j0*nx+i0];
+    const double f10 = field[j0*nx+i1];
+    const double f01 = field[j1*nx+i0];
+    const double f11 = field[j1*nx+i1];
+    return (1.0-ty)*((1.0-tx)*f00 + tx*f10) +
+           ty*((1.0-tx)*f01 + tx*f11);
+}
+
+__global__ void q6_x17a_update_edge_velocities(
+    int edgeCount,
+    const double* ax, const double* ay,
+    const double* bx, const double* by,
+    double* uax, double* uay, double* ubx, double* uby,
+    const float* uSolidX, const float* uSolidY,
+    int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY,
+    int movingSolid) {
+    const int e = blockIdx.x * blockDim.x + threadIdx.x;
+    if (e >= edgeCount) return;
+    if (!movingSolid || !uSolidX || !uSolidY) {
+        uax[e]=uay[e]=ubx[e]=uby[e]=0.0;
+        return;
+    }
+    uax[e] = q6_x17a_sample_cellcenter_field(
+        uSolidX, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
+    uay[e] = q6_x17a_sample_cellcenter_field(
+        uSolidY, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
+    ubx[e] = q6_x17a_sample_cellcenter_field(
+        uSolidX, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+    uby[e] = q6_x17a_sample_cellcenter_field(
+        uSolidY, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+}
+
+__device__ __forceinline__ int q6_x17a_cell_index_raw(
+    int i, int j, int nx, int ny, int periodicX, int periodicY) {
+    i = q6_x17a_wrap_index(i,nx,periodicX);
+    j = q6_x17a_wrap_index(j,ny,periodicY);
+    if (i < 0 || j < 0) return -1;
+    return j*nx+i;
+}
+
+__global__ void q6_x17a_bin_swept_edges(
+    int edgeCount,
+    const double* ax, const double* ay,
+    const double* bx, const double* by,
+    const double* uax, const double* uay,
+    const double* ubx, const double* uby,
+    int* cellCount, int* cellEdgeIds,
+    unsigned long long* overflow,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY) {
+    const int e = blockIdx.x * blockDim.x + threadIdx.x;
+    if (e >= edgeCount) return;
+    const double dx = lx/static_cast<double>(nx);
+    const double dy = ly/static_cast<double>(ny);
+    const double ax1=ax[e]+dt*uax[e], ay1=ay[e]+dt*uay[e];
+    const double bx1=bx[e]+dt*ubx[e], by1=by[e]+dt*uby[e];
+    const double eps = 1.0e-12 * fmin(dx,dy);
+    const double xmin=fmin(fmin(ax[e],bx[e]),fmin(ax1,bx1))-eps;
+    const double xmax=fmax(fmax(ax[e],bx[e]),fmax(ax1,bx1))+eps;
+    const double ymin=fmin(fmin(ay[e],by[e]),fmin(ay1,by1))-eps;
+    const double ymax=fmax(fmax(ay[e],by[e]),fmax(ay1,by1))+eps;
+    int i0=static_cast<int>(floor(xmin/dx));
+    int i1=static_cast<int>(floor(xmax/dx));
+    int j0=static_cast<int>(floor(ymin/dy));
+    int j1=static_cast<int>(floor(ymax/dy));
+    if (periodicX && i1-i0+1 >= nx) { i0=0; i1=nx-1; }
+    if (periodicY && j1-j0+1 >= ny) { j0=0; j1=ny-1; }
+    for (int j=j0;j<=j1;++j) {
+        for (int i=i0;i<=i1;++i) {
+            const int c=q6_x17a_cell_index_raw(i,j,nx,ny,periodicX,periodicY);
+            if (c<0) continue;
+            const int slot=atomicAdd(&cellCount[c],1);
+            if (slot < kChiLagrangianCellEdgeCapacity0493x17a) {
+                cellEdgeIds[c*kChiLagrangianCellEdgeCapacity0493x17a+slot]=e;
+            } else if (overflow) {
+                atomicAdd(overflow,1ull);
+            }
+        }
+    }
+}
+
+__device__ __forceinline__ double q6_x17a_cross(
+    double ax, double ay, double bx, double by) {
+    return ax*by-ay*bx;
+}
+
+struct ChiLagrangianEdgeHit0493x17a {
+    bool hit=false;
+    double tau=0.0;
+    double lambda=0.0;
+    double nx=0.0, ny=0.0;
+    double wallVx=0.0, wallVy=0.0;
+    double newVx=0.0, newVy=0.0;
+    double impulseWallX=0.0, impulseWallY=0.0;
+    double reln=0.0;
+    int edge=-1;
+};
+
+__device__ __forceinline__ bool q6_x17a_try_edge_hit(
+    int edge,
+    double px, double py, double vx, double vy, double mass,
+    double elapsed, double remaining,
+    const double* ax0, const double* ay0,
+    const double* bx0, const double* by0,
+    const double* uax, const double* uay,
+    const double* ubx, const double* uby,
+    const signed char* normalSign,
+    double lx, double ly, int periodicX, int periodicY,
+    ChiLagrangianEdgeHit0493x17a* out) {
+    if (!out || edge < 0 || !(remaining > 0.0)) return false;
+    double ax=ax0[edge]+elapsed*uax[edge];
+    double ay=ay0[edge]+elapsed*uay[edge];
+    double bx=bx0[edge]+elapsed*ubx[edge];
+    double by=by0[edge]+elapsed*uby[edge];
+    const double mx=0.5*(ax+bx), my=0.5*(ay+by);
+    if (periodicX && lx>0.0) {
+        const double shift=nearbyint((px-mx)/lx)*lx;
+        ax+=shift; bx+=shift;
+    }
+    if (periodicY && ly>0.0) {
+        const double shift=nearbyint((py-my)/ly)*ly;
+        ay+=shift; by+=shift;
+    }
+    const double ex0=bx-ax, ey0=by-ay;
+    const double ex1=ubx[edge]-uax[edge];
+    const double ey1=uby[edge]-uay[edge];
+    const double qx0=px-ax, qy0=py-ay;
+    const double qx1=vx-uax[edge], qy1=vy-uay[edge];
+    const double c0=q6_x17a_cross(qx0,qy0,ex0,ey0);
+    const double c1=q6_x17a_cross(qx1,qy1,ex0,ey0)+
+                    q6_x17a_cross(qx0,qy0,ex1,ey1);
+    const double c2=q6_x17a_cross(qx1,qy1,ex1,ey1);
+    double roots[2]{0.0,0.0};
+    int nr=0;
+    const double scale=fmax(1.0, fabs(c0)+fabs(c1)*remaining+fabs(c2)*remaining*remaining);
+    const double eps=1.0e-13*scale;
+    if (fabs(c2) <= eps/fmax(remaining*remaining,1.0e-300)) {
+        if (fabs(c1) <= eps/fmax(remaining,1.0e-300)) return false;
+        roots[nr++]=-c0/c1;
+    } else {
+        double disc=c1*c1-4.0*c2*c0;
+        const double discTol=1.0e-13*fmax(1.0,c1*c1+fabs(4.0*c2*c0));
+        if (disc < -discTol) return false;
+        if (disc < 0.0) disc=0.0;
+        const double sd=sqrt(disc);
+        const double r0=(-c1-sd)/(2.0*c2);
+        const double r1=(-c1+sd)/(2.0*c2);
+        roots[nr++]=fmin(r0,r1);
+        roots[nr++]=fmax(r0,r1);
+    }
+    bool found=false;
+    ChiLagrangianEdgeHit0493x17a best{};
+    best.tau=remaining+1.0;
+    for (int k=0;k<nr;++k) {
+        double tau=roots[k];
+        const double tTol=1.0e-12*fmax(1.0,remaining);
+        if (tau < -tTol || tau > remaining+tTol || !isfinite(tau)) continue;
+        tau=fmin(remaining,fmax(0.0,tau));
+        const double ahx=ax+tau*uax[edge], ahy=ay+tau*uay[edge];
+        const double bhx=bx+tau*ubx[edge], bhy=by+tau*uby[edge];
+        const double phx=px+tau*vx, phy=py+tau*vy;
+        const double ex=bhx-ahx, ey=bhy-ahy;
+        const double e2=ex*ex+ey*ey;
+        if (!(e2>1.0e-28) || !isfinite(e2)) continue;
+        double lam=((phx-ahx)*ex+(phy-ahy)*ey)/e2;
+        if (lam < -1.0e-10 || lam > 1.0+1.0e-10) continue;
+        lam=fmin(1.0,fmax(0.0,lam));
+        const double inv=1.0/sqrt(e2);
+        double nx=-ey*inv, ny=ex*inv;
+        if (normalSign[edge] < 0) { nx=-nx; ny=-ny; }
+        const double wallVx=(1.0-lam)*uax[edge]+lam*ubx[edge];
+        const double wallVy=(1.0-lam)*uay[edge]+lam*uby[edge];
+        const double reln=(vx-wallVx)*nx+(vy-wallVy)*ny;
+        // n points from solid to fluid; an entering particle has negative
+        // relative normal speed.  This criterion also catches a moving wall
+        // overtaking a particle, i.e. the temporal-capture case missed by the
+        // frozen-Q2 backend.
+        if (!(reln < -1.0e-13) || !isfinite(reln)) continue;
+        if (tau >= best.tau) continue;
+        best.hit=true; best.tau=tau; best.lambda=lam;
+        best.nx=nx; best.ny=ny; best.wallVx=wallVx; best.wallVy=wallVy;
+        best.reln=reln; best.edge=edge;
+        best.newVx=vx-2.0*reln*nx;
+        best.newVy=vy-2.0*reln*ny;
+        const double impulse=2.0*mass*reln;
+        best.impulseWallX=impulse*nx;
+        best.impulseWallY=impulse*ny;
+        found=true;
+    }
+    if (found) *out=best;
+    return found;
+}
+
+__device__ __forceinline__ int q6_x17a_position_cell(
+    double x, double y, int nx, int ny, double lx, double ly,
+    int periodicX, int periodicY) {
+    const double dx=lx/static_cast<double>(nx);
+    const double dy=ly/static_cast<double>(ny);
+    int i=static_cast<int>(floor(x/dx));
+    int j=static_cast<int>(floor(y/dy));
+    return q6_x17a_cell_index_raw(i,j,nx,ny,periodicX,periodicY);
+}
+
+__global__ void q6_x17a_apply_lagrangian_boundary(
+    CudaParticleDeviceView particles,
+    std::uint64_t nParticles,
+    int edgeCount,
+    const double* ax, const double* ay,
+    const double* bx, const double* by,
+    const double* uax, const double* uay,
+    const double* ubx, const double* uby,
+    const signed char* normalSign,
+    const int* cellCount, const int* cellEdgeIds,
+    double* wallImpulseX, double* wallImpulseY,
+    int nx, int ny, double lx, double ly, double dt,
+    int periodicX, int periodicY,
+    KineticCrossingAccumulator0493x9x* audit) {
+    const std::uint64_t p=static_cast<std::uint64_t>(blockIdx.x)*blockDim.x+threadIdx.x;
+    if (p>=nParticles) return;
+    if (particles.role && particles.role[p] != kParticleRoleFluid) return;
+    double cx=particles.x[p], cy=particles.y[p];
+    const double x0=cx, y0=cy;
+    double cvx=particles.vx[p], cvy=particles.vy[p];
+    const double vx0=cvx, vy0=cvy;
+    const double mass=(particles.mass && particles.mass[p]>0.0)?particles.mass[p]:1.0;
+    const double dx=lx/static_cast<double>(nx), dy=ly/static_cast<double>(ny);
+    const double h=fmin(dx,dy);
+    double elapsed=0.0;
+    int hits=0;
+    bool sawCandidate=false;
+
+    for (int event=0; event<3; ++event) {
+        const double remaining=dt-elapsed;
+        if (!(remaining>1.0e-15*dt)) break;
+        const double x1=cx+remaining*cvx;
+        const double y1=cy+remaining*cvy;
+        int i0=static_cast<int>(floor(fmin(cx,x1)/dx));
+        int i1=static_cast<int>(floor(fmax(cx,x1)/dx));
+        int j0=static_cast<int>(floor(fmin(cy,y1)/dy));
+        int j1=static_cast<int>(floor(fmax(cy,y1)/dy));
+        const bool fullX=periodicX && i1-i0+1>=nx;
+        const bool fullY=periodicY && j1-j0+1>=ny;
+        if (fullX) { i0=0; i1=nx-1; }
+        if (fullY) { j0=0; j1=ny-1; }
+        ChiLagrangianEdgeHit0493x17a best{};
+        best.tau=remaining+1.0;
+        int validHits=0;
+        for (int jr=j0;jr<=j1;++jr) {
+            for (int ir=i0;ir<=i1;++ir) {
+                const int c=q6_x17a_cell_index_raw(ir,jr,nx,ny,periodicX,periodicY);
+                if (c<0) continue;
+                int n=cellCount[c];
+                if(n>kChiLagrangianCellEdgeCapacity0493x17a) n=kChiLagrangianCellEdgeCapacity0493x17a;
+                if (n>0) sawCandidate=true;
+                for (int k=0;k<n;++k) {
+                    const int e=cellEdgeIds[c*kChiLagrangianCellEdgeCapacity0493x17a+k];
+                    if (e<0 || e>=edgeCount) continue;
+                    ChiLagrangianEdgeHit0493x17a hit{};
+                    if (!q6_x17a_try_edge_hit(
+                            e,cx,cy,cvx,cvy,mass,elapsed,remaining,
+                            ax,ay,bx,by,uax,uay,ubx,uby,normalSign,
+                            lx,ly,periodicX,periodicY,&hit)) continue;
+                    ++validHits;
+                    if (hit.tau<best.tau) best=hit;
+                }
+            }
+        }
+        if (!best.hit) break;
+        if (audit && validHits>1)
+            atomicAdd(&audit->continuousWallMultipleCollisionCandidates,1ull);
+
+        cx += cvx*best.tau;
+        cy += cvy*best.tau;
+        elapsed += best.tau;
+        cvx=best.newVx; cvy=best.newVy;
+        ++hits;
+        // Move a few ulps toward the fluid side after the event.  This is not
+        // an overlap-remapping model; it only prevents the same algebraic root
+        // from being rediscovered at tau=0 after reflection.
+        const double epsPos=2.0e-12*h;
+        cx += epsPos*best.nx;
+        cy += epsPos*best.ny;
+
+        const int reactionCell=q6_x17a_position_cell(
+            cx,cy,nx,ny,lx,ly,periodicX,periodicY);
+        if (reactionCell>=0) {
+            atomic_add_double_0400(&wallImpulseX[reactionCell],best.impulseWallX);
+            atomic_add_double_0400(&wallImpulseY[reactionCell],best.impulseWallY);
+        }
+        if (audit) {
+            atomicAdd(&audit->continuousWallCollisions,1ull);
+            if (hits==2) atomicAdd(&audit->continuousWallSecondCollisions,1ull);
+            else if (hits==3) atomicAdd(&audit->continuousWallThirdCollisions,1ull);
+            atomic_add_double_0400(&audit->continuousWallCollisionTimeFractionSum,elapsed/dt);
+            const double wallVn=best.wallVx*best.nx+best.wallVy*best.ny;
+            atomic_add_double_0400(&audit->continuousWallWallVnSum,wallVn);
+            atomic_add_double_0400(&audit->continuousWallWallVnSqSum,wallVn*wallVn);
+            atomic_add_double_0400(&audit->continuousWallWallVnAbsSum,fabs(wallVn));
+            const double beforeX=(cvx+2.0*best.reln*best.nx)-best.wallVx;
+            const double beforeY=(cvy+2.0*best.reln*best.ny)-best.wallVy;
+            const double afterX=cvx-best.wallVx, afterY=cvy-best.wallVy;
+            const double eb=beforeX*beforeX+beforeY*beforeY;
+            const double ea=afterX*afterX+afterY*afterY;
+            atomic_add_double_0400(&audit->continuousWallRelativeSpeedSqAbsErrorSum,fabs(ea-eb));
+            atomic_add_double_0400(&audit->continuousWallRelativeSpeedSqReferenceSum,fabs(eb));
+            atomic_add_double_0400(&audit->continuousWallImpulseX,best.impulseWallX);
+            atomic_add_double_0400(&audit->continuousWallImpulseY,best.impulseWallY);
+            atomic_add_double_0400(&audit->continuousWallImpulseAbsSum,
+                sqrt(best.impulseWallX*best.impulseWallX+best.impulseWallY*best.impulseWallY));
+        }
+    }
+    if (audit && sawCandidate) atomicAdd(&audit->continuousWallParticlesWithCandidate,1ull);
+    if (audit && hits>=3) atomicAdd(&audit->continuousWallCollisionLimitReached,1ull);
+
+    const double remaining=fmax(0.0,dt-elapsed);
+    const double xf=cx+cvx*remaining;
+    const double yf=cy+cvy*remaining;
+    const double newPreX=xf-cvx*dt;
+    const double newPreY=yf-cvy*dt;
+    particles.x[p]=newPreX;
+    particles.y[p]=newPreY;
+    particles.vx[p]=cvx;
+    particles.vy[p]=cvy;
+    if (audit && hits>0) {
+        atomic_add_double_0400(&audit->continuousWallPositionShiftAbsSum,
+            sqrt((newPreX-x0)*(newPreX-x0)+(newPreY-y0)*(newPreY-y0)));
+    }
+    (void)vx0; (void)vy0;
+}
+
+__global__ void q6_x17a_advance_lagrangian_edges(
+    int edgeCount,
+    double* ax, double* ay, double* bx, double* by,
+    const double* uax, const double* uay,
+    const double* ubx, const double* uby,
+    double dt) {
+    const int e=blockIdx.x*blockDim.x+threadIdx.x;
+    if (e>=edgeCount) return;
+    ax[e]+=dt*uax[e]; ay[e]+=dt*uay[e];
+    bx[e]+=dt*ubx[e]; by[e]+=dt*uby[e];
+}
+
+__device__ __forceinline__ double q6_x17a_point_segment_signed_distance(
+    double px,double py,
+    double ax,double ay,double bx,double by,
+    signed char normalSign,
+    double lx,double ly,int periodicX,int periodicY,
+    double* absDistance) {
+    const double mx=0.5*(ax+bx), my=0.5*(ay+by);
+    if (periodicX && lx>0.0) {
+        const double shift=nearbyint((px-mx)/lx)*lx; ax+=shift; bx+=shift;
+    }
+    if (periodicY && ly>0.0) {
+        const double shift=nearbyint((py-my)/ly)*ly; ay+=shift; by+=shift;
+    }
+    const double ex=bx-ax, ey=by-ay, e2=ex*ex+ey*ey;
+    if (!(e2>1.0e-28)) { if(absDistance)*absDistance=1.0e300; return 1.0e300; }
+    double lam=((px-ax)*ex+(py-ay)*ey)/e2;
+    lam=fmin(1.0,fmax(0.0,lam));
+    const double qx=ax+lam*ex,qy=ay+lam*ey;
+    const double dxp=px-qx,dyp=py-qy;
+    const double d=sqrt(dxp*dxp+dyp*dyp);
+    const double inv=1.0/sqrt(e2);
+    double nx=-ey*inv,ny=ex*inv;
+    if(normalSign<0){nx=-nx;ny=-ny;}
+    if(absDistance)*absDistance=d;
+    return dxp*nx+dyp*ny;
+}
+
+__global__ void q6_x17a_measure_lagrangian_penetration(
+    CudaParticleDeviceView particles,std::uint64_t nParticles,
+    int edgeCount,
+    const double* ax,const double* ay,const double* bx,const double* by,
+    const signed char* normalSign,
+    double lx,double ly,int periodicX,int periodicY,
+    double h,double strictDistance,
+    ChiPenetrationAccumulator0493x16l* out) {
+    const std::uint64_t p=static_cast<std::uint64_t>(blockIdx.x)*blockDim.x+threadIdx.x;
+    if(p>=nParticles || !out) return;
+    if(particles.role && particles.role[p]!=kParticleRoleFluid) return;
+    const double x=particles.x[p],y=particles.y[p];
+    if(!isfinite(x)||!isfinite(y)) return;
+    double bestAbs=1.0e300,bestSigned=1.0e300;
+    for(int e=0;e<edgeCount;++e){
+        double ad=0.0;
+        const double sd=q6_x17a_point_segment_signed_distance(
+            x,y,ax[e],ay[e],bx[e],by[e],normalSign[e],lx,ly,periodicX,periodicY,&ad);
+        if(ad<bestAbs){bestAbs=ad;bestSigned=sd;}
+    }
+    atomicAdd(&out->sampledParticles,1ull);
+    if(!(bestSigned<0.0)) return;
+    const double mass=(particles.mass&&particles.mass[p]>0.0)?particles.mass[p]:1.0;
+    atomicAdd(&out->rawInsideParticles,1ull);
+    atomic_add_double_0400(&out->rawInsideMass,mass);
+    const double penetration=-bestSigned;
+    q6_x16l_atomic_max_positive(&out->maxSolidLevelExcess,penetration);
+    if(h>0.0) q6_x16l_atomic_max_positive(&out->maxPenetrationCells,penetration/h);
+    if(penetration>strictDistance){
+        atomicAdd(&out->strictInsideParticles,1ull);
+        atomic_add_double_0400(&out->strictInsideMass,mass);
+    }
+}
+
+// =============================================================================
+// 0493x16j — CHI KINETIC SPECULAR BOUNDARY
+// =============================================================================
+// 0493x17a keeps the x16j public switch and reaction plumbing but replaces the
+// solid-side x10/Q2 reconstruction with the persistent Lagrangian edge mesh
+// above. Historical chi/Darcy paths remain untouched unless
+// chiKineticBoundaryMode=specular.
+bool apply_chi_kinetic_boundary_0493x16j(
+    CudaParticleDeviceView particles,
+    CudaCellWorkspaceDeviceView cells,
+    ResidentWorkspace0400& ws,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    std::uint64_t nParticles,
+    int threads,
+    int cellBlocks,
+    int particleBlocks,
+    int periodicX,
+    int periodicY) {
+    (void)cells;
+    if (params.chiKineticBoundaryMode != "specular") return false;
+
+    const float* chi = nullptr;
+    int chiNx = 0, chiNy = 0;
+    if (!cuda_darcy_brinkman_0343_device_chi_field(params, &chi, &chiNx, &chiNy) ||
+        !chi || chiNx != grid.Nx || chiNy != grid.Ny) {
+        throw std::runtime_error("0493x17a resident chi geometry unavailable or grid-mismatched");
+    }
+    const float* uSolidX = nullptr;
+    const float* uSolidY = nullptr;
+    int usNx = 0, usNy = 0;
+    const bool movingSolid = cuda_darcy_brinkman_0343_device_solid_velocity_fields(
+        params, &uSolidX, &uSolidY, &usNx, &usNy) &&
+        uSolidX && uSolidY && usNx == grid.Nx && usNy == grid.Ny;
+
+    ws.ensure_kinetic_interface_0493x9x(grid.numCells, 1, 1);
+    const std::uint64_t sourceGeometryVersion =
+        cuda_darcy_brinkman_0343_chi_geometry_version();
+    const double dx = params.Lx / static_cast<double>(grid.Nx);
+    const double dy = params.Ly / static_cast<double>(grid.Ny);
+    const double h = std::min(dx, dy);
+    bool initializedThisStep = false;
+
+    if (!ws.chiKineticSegmentsValid0493x16j) {
+        ChiLagrangianExtractionStats0493x17a stats{};
+        const auto edges = q6_x17a_extract_initial_chi_contour(
+            chi, grid.Nx, grid.Ny, params.Lx, params.Ly,
+            periodicX, periodicY, &stats);
+        const std::size_t n = edges.size();
+        std::vector<double> ax(n), ay(n), bx(n), by(n);
+        std::vector<signed char> normalSign(n);
+        for (std::size_t e=0;e<n;++e) {
+            ax[e]=edges[e].ax; ay[e]=edges[e].ay;
+            bx[e]=edges[e].bx; by[e]=edges[e].by;
+            normalSign[e]=edges[e].normalSign;
+        }
+        check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegAx0493x10n.data(),
+                                  ax.data(),n*sizeof(double),cudaMemcpyHostToDevice),
+                       "0493x17a edge ax upload");
+        check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegAy0493x10n.data(),
+                                  ay.data(),n*sizeof(double),cudaMemcpyHostToDevice),
+                       "0493x17a edge ay upload");
+        check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegBx0493x10n.data(),
+                                  bx.data(),n*sizeof(double),cudaMemcpyHostToDevice),
+                       "0493x17a edge bx upload");
+        check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegBy0493x10n.data(),
+                                  by.data(),n*sizeof(double),cudaMemcpyHostToDevice),
+                       "0493x17a edge by upload");
+        check_cuda_0400(cudaMemcpy(ws.chiLagrangianNormalSign0493x17a.data(),
+                                  normalSign.data(),n*sizeof(signed char),cudaMemcpyHostToDevice),
+                       "0493x17a normal sign upload");
+        ws.chiLagrangianEdgeCount0493x17a=static_cast<int>(n);
+        ws.chiLagrangianMeshVersion0493x17a=0u;
+        ws.chiLagrangianAmbiguousSquares0493x17a=stats.ambiguousSquares;
+        ws.chiLagrangianMinEdgeLength0493x17a=stats.minEdgeLength;
+        ws.chiLagrangianMaxEdgeLength0493x17a=stats.maxEdgeLength;
+        ws.chiKineticSegmentsValid0493x16j=true;
+        ws.chiKineticGeometryVersion0493x16j=sourceGeometryVersion;
+        q6_x17a_write_initial_mesh(params,edges,stats,h);
+        initializedThisStep=true;
+    }
+
+    const int edgeCount=ws.chiLagrangianEdgeCount0493x17a;
+    if (edgeCount<=0) {
+        throw std::runtime_error("0493x17a Lagrangian mesh has no resident edges");
+    }
+    const int edgeBlocks=std::max(1,(edgeCount+threads-1)/threads);
+    q6_x17a_update_edge_velocities<<<edgeBlocks,threads>>>(
+        edgeCount,
+        ws.kineticContinuousSegAx0493x10n.data(),
+        ws.kineticContinuousSegAy0493x10n.data(),
+        ws.kineticContinuousSegBx0493x10n.data(),
+        ws.kineticContinuousSegBy0493x10n.data(),
+        ws.kineticContinuousSegUax0493x10n.data(),
+        ws.kineticContinuousSegUay0493x10n.data(),
+        ws.kineticContinuousSegUbx0493x10n.data(),
+        ws.kineticContinuousSegUby0493x10n.data(),
+        movingSolid?uSolidX:nullptr,movingSolid?uSolidY:nullptr,
+        grid.Nx,grid.Ny,params.Lx,params.Ly,periodicX,periodicY,
+        movingSolid?1:0);
+    check_cuda_0400(cudaGetLastError(),"0493x17a edge velocity update launch");
+
+    const std::size_t cellCount=static_cast<std::size_t>(std::max(1,grid.numCells));
+    check_cuda_0400(cudaMemset(ws.chiLagrangianCellEdgeCount0493x17a.data(),0,
+                              cellCount*sizeof(int)),
+                   "0493x17a cell-edge counts zero");
+    check_cuda_0400(cudaMemset(ws.chiLagrangianBinOverflow0493x17a.data(),0,
+                              sizeof(unsigned long long)),
+                   "0493x17a bin overflow zero");
+    q6_x17a_bin_swept_edges<<<edgeBlocks,threads>>>(
+        edgeCount,
+        ws.kineticContinuousSegAx0493x10n.data(),
+        ws.kineticContinuousSegAy0493x10n.data(),
+        ws.kineticContinuousSegBx0493x10n.data(),
+        ws.kineticContinuousSegBy0493x10n.data(),
+        ws.kineticContinuousSegUax0493x10n.data(),
+        ws.kineticContinuousSegUay0493x10n.data(),
+        ws.kineticContinuousSegUbx0493x10n.data(),
+        ws.kineticContinuousSegUby0493x10n.data(),
+        ws.chiLagrangianCellEdgeCount0493x17a.data(),
+        ws.chiLagrangianCellEdgeIds0493x17a.data(),
+        ws.chiLagrangianBinOverflow0493x17a.data(),
+        grid.Nx,grid.Ny,params.Lx,params.Ly,params.dt,periodicX,periodicY);
+    check_cuda_0400(cudaGetLastError(),"0493x17a swept-edge binning launch");
+
+    const bool auditThisStep=params.summaryEvery>0 &&
+        (step==0 || ((step+1)%params.summaryEvery)==0);
+    KineticCrossingAccumulator0493x9x* auditDev=nullptr;
+    if (auditThisStep) {
+        KineticCrossingAccumulator0493x9x init{};
+        if (initializedThisStep) {
+            init.continuousWallDualCellsVisited=
+                static_cast<unsigned long long>(grid.numCells);
+            init.continuousWallInterfaceDualCells=
+                static_cast<unsigned long long>(edgeCount);
+            init.continuousWallSegmentsBuilt=
+                static_cast<unsigned long long>(edgeCount);
+            init.continuousWallAmbiguousDualCells=
+                ws.chiLagrangianAmbiguousSquares0493x17a;
+        }
+        check_cuda_0400(cudaMemcpy(ws.kineticAccum0493x9x.data(),&init,sizeof(init),
+                                  cudaMemcpyHostToDevice),
+                       "0493x17a kinetic audit init");
+        auditDev=ws.kineticAccum0493x9x.data();
+        unsigned long long overflow=0ull;
+        check_cuda_0400(cudaMemcpy(&overflow,ws.chiLagrangianBinOverflow0493x17a.data(),
+                                  sizeof(overflow),cudaMemcpyDeviceToHost),
+                       "0493x17a bin overflow download");
+        if (overflow!=0ull) {
+            throw std::runtime_error(
+                "0493x17a broad-phase cell-edge capacity exceeded; geometry/time step is outside first-jalon qualification");
+        }
+    }
+
+    check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseX0493x10m.data(),0,
+                              cellCount*sizeof(double)),
+                   "0493x17a wall impulseX zero");
+    check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseY0493x10m.data(),0,
+                              cellCount*sizeof(double)),
+                   "0493x17a wall impulseY zero");
+
+    q6_x17a_apply_lagrangian_boundary<<<particleBlocks,threads>>>(
+        particles,nParticles,edgeCount,
+        ws.kineticContinuousSegAx0493x10n.data(),
+        ws.kineticContinuousSegAy0493x10n.data(),
+        ws.kineticContinuousSegBx0493x10n.data(),
+        ws.kineticContinuousSegBy0493x10n.data(),
+        ws.kineticContinuousSegUax0493x10n.data(),
+        ws.kineticContinuousSegUay0493x10n.data(),
+        ws.kineticContinuousSegUbx0493x10n.data(),
+        ws.kineticContinuousSegUby0493x10n.data(),
+        ws.chiLagrangianNormalSign0493x17a.data(),
+        ws.chiLagrangianCellEdgeCount0493x17a.data(),
+        ws.chiLagrangianCellEdgeIds0493x17a.data(),
+        ws.kineticMovingWallImpulseX0493x10m.data(),
+        ws.kineticMovingWallImpulseY0493x10m.data(),
+        grid.Nx,grid.Ny,params.Lx,params.Ly,params.dt,periodicX,periodicY,
+        auditDev);
+    check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian material-wall launch");
+
+    // The edge mesh, not chi, is the material geometry authority after the
+    // initial extraction. Advance it with the same endpoint velocities used by
+    // the space-time collision solve.  No chi re-extraction occurs here or on
+    // later steps.
+    q6_x17a_advance_lagrangian_edges<<<edgeBlocks,threads>>>(
+        edgeCount,
+        ws.kineticContinuousSegAx0493x10n.data(),
+        ws.kineticContinuousSegAy0493x10n.data(),
+        ws.kineticContinuousSegBx0493x10n.data(),
+        ws.kineticContinuousSegBy0493x10n.data(),
+        ws.kineticContinuousSegUax0493x10n.data(),
+        ws.kineticContinuousSegUay0493x10n.data(),
+        ws.kineticContinuousSegUbx0493x10n.data(),
+        ws.kineticContinuousSegUby0493x10n.data(),params.dt);
+    check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian edge advance launch");
+    ++ws.chiLagrangianMeshVersion0493x17a;
+
+    ws.chiKineticImpulseValid0493x16j=true;
+    ws.chiKineticNx0493x16j=grid.Nx;
+    ws.chiKineticNy0493x16j=grid.Ny;
+
+    static bool reported=false;
+    if (!reported) {
+        std::cout << "[0493x16j-chi-kinetic] mode=specular timing=prestream"
+                  << " backend=x17a-lagrangian-edge-mesh"
+                  << " source=initial-chi-0.5 chiReextract=never"
+                  << " collision=space-time-moving-segment-quadratic"
+                  << " response=x14l-local-frame-specular"
+                  << " edgeCount=" << edgeCount
+                  << " binCapacity=" << kChiLagrangianCellEdgeCapacity0493x17a
+                  << " movingSolid=" << (movingSolid?1:0)
+                  << " darcyAlphaMax=" << params.darcyAlphaMax
+                  << " chiVP=" << (params.darcyChiCollisionVpEnable?1:0)
+                  << std::endl;
+        reported=true;
+    }
+
+    if (auditThisStep) {
+        KineticCrossingAccumulator0493x9x a{};
+        check_cuda_0400(cudaMemcpy(&a,ws.kineticAccum0493x9x.data(),sizeof(a),
+                                  cudaMemcpyDeviceToHost),
+                       "0493x17a kinetic audit download");
+        const std::filesystem::path path=
+            std::filesystem::path(params.outputDir)/"chi_kinetic_boundary_0493x16j.csv";
+        const bool writeHeader=!std::filesystem::exists(path);
+        std::ofstream out(path,std::ios::app);
+        if(!out) throw std::runtime_error("0493x17a failed to open kinetic boundary CSV");
+        if(writeHeader){
+            out << "step,time,geometryVersion,movingSolid,rebuildSegments,"
+                   "segmentsBuilt,particlesWithCandidate,collisions,secondCollisions,thirdCollisions,"
+                   "initialOverlapResolved,wideSearchTriggered,wideSearchFoundSegment,orphanNoSegment,"
+                   "wallImpulseX,wallImpulseY,wallImpulseAbsSum,positionShiftAbsSum\n";
+        }
+        out << step << ',' << std::setprecision(17) << time << ','
+            << ws.chiLagrangianMeshVersion0493x17a << ',' << (movingSolid?1:0) << ','
+            << (initializedThisStep?1:0) << ',' << a.continuousWallSegmentsBuilt << ','
+            << a.continuousWallParticlesWithCandidate << ','
+            << a.continuousWallCollisions << ','
+            << a.continuousWallSecondCollisions << ','
+            << a.continuousWallThirdCollisions << ','
+            << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ','
+            << a.continuousWallImpulseX << ',' << a.continuousWallImpulseY << ','
+            << a.continuousWallImpulseAbsSum << ','
+            << a.continuousWallPositionShiftAbsSum << '\n';
+    }
+    return true;
+}
+
 bool supported_subset_0400(const SimulationParams& params,
                            const CellGrid& grid,
                            const FluidDomainBounds& domain,
@@ -24711,6 +26444,192 @@ bool supported_subset_0400(const SimulationParams& params,
 }
 
 } // namespace
+
+bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time) {
+    if (params.chiKineticBoundaryMode != "specular") return false;
+
+    const std::uint64_t active = active_fluid_count(state);
+    if (active == 0u) {
+        throw std::runtime_error(
+            "0493x16j prestream chi kinetic boundary requires at least one active fluid particle");
+    }
+
+    CudaParticleState& gpuState = cuda_shared_particle_state_0251();
+    if (!cuda_shared_particle_state_0251_is_fresh()) {
+        gpuState.upload_all(state);
+        gpuState.set_active_fluid_size(active);
+        cuda_shared_particle_state_0251_mark_fresh(
+            "0493x16j_prestream_upload");
+    }
+    CudaParticleDeviceView particles = gpuState.device_view();
+    const std::uint64_t nParticles =
+        particles.nActiveFluid > 0u ? particles.nActiveFluid : active;
+    if (nParticles == 0u || nParticles > particles.n) {
+        throw std::runtime_error(
+            "0493x16j prestream chi kinetic boundary found an invalid resident active prefix");
+    }
+
+    const int threads = 256;
+    const int cellBlocks = std::max(
+        1, std::min(1024, (grid.numCells + threads - 1) / threads));
+    const int particleBlocks = std::max(
+        1, std::min(4096,
+            static_cast<int>((nParticles + threads - 1u) / threads)));
+    const int blocks = std::max(cellBlocks, particleBlocks);
+
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    ws.ensure(nParticles, grid.numCells, blocks,
+              params.speciesQ6Enable
+                  ? static_cast<int>(params.speciesDefinitions.size())
+                  : 1);
+    ws.chiKineticImpulseValid0493x16j = false;
+    ws.chiKineticNx0493x16j = 0;
+    ws.chiKineticNy0493x16j = 0;
+
+    const int periodicX = is_x_periodic(params) ? 1 : 0;
+    const int periodicY = is_y_periodic(params) ? 1 : 0;
+    const bool applied = apply_chi_kinetic_boundary_0493x16j(
+        particles, ws.cells.device_view(), ws, params, grid, step, time,
+        nParticles, threads, cellBlocks, particleBlocks, periodicX, periodicY);
+    if (!applied) return false;
+
+    state.NactiveFluid = nParticles;
+    cuda_shared_particle_state_0251_mark_fresh(
+        "0493x16j_prestream_chi_kinetic_boundary");
+    return true;
+}
+
+bool cuda_q6_record_chi_penetration_poststream_0493x16l(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double timePoststream) {
+    if (params.chiKineticBoundaryMode != "specular") return false;
+
+    const bool auditThisStep = params.summaryEvery > 0 &&
+        (step == 0 || ((step + 1) % params.summaryEvery) == 0);
+    if (!auditThisStep) return true;
+
+    const std::uint64_t active = active_fluid_count(state);
+    if (active == 0u) {
+        throw std::runtime_error(
+            "0493x17a penetration diagnostic requires active fluid particles");
+    }
+    const bool residentFreshBefore = cuda_shared_particle_state_0251_is_fresh();
+    bool hostUploadPerformed = false;
+    CudaParticleState& gpuState = cuda_shared_particle_state_0251();
+    if (!residentFreshBefore) {
+        gpuState.upload_all(state);
+        gpuState.set_active_fluid_size(active);
+        cuda_shared_particle_state_0251_mark_fresh(
+            "0493x17a_poststream_penetration_upload");
+        hostUploadPerformed = true;
+    }
+    CudaParticleDeviceView particles = gpuState.device_view();
+    const std::uint64_t nParticles =
+        particles.nActiveFluid > 0u ? particles.nActiveFluid : active;
+    if (nParticles == 0u || nParticles > particles.n) {
+        throw std::runtime_error(
+            "0493x17a penetration diagnostic found invalid resident active prefix");
+    }
+
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.chiKineticSegmentsValid0493x16j ||
+        ws.chiLagrangianEdgeCount0493x17a <= 0) {
+        throw std::runtime_error(
+            "0493x17a penetration diagnostic has no resident Lagrangian mesh");
+    }
+    const int threads = 256;
+    const int particleBlocks = std::max(
+        1, std::min(4096,
+            static_cast<int>((nParticles + threads - 1u) / threads)));
+    ws.chiPenetrationAccum0493x16l.ensure(1u);
+    check_cuda_0400(cudaMemset(
+        ws.chiPenetrationAccum0493x16l.data(), 0,
+        sizeof(ChiPenetrationAccumulator0493x16l)),
+        "0493x17a penetration accumulator zero");
+
+    const double h = std::min(
+        params.Lx/static_cast<double>(grid.Nx),
+        params.Ly/static_cast<double>(grid.Ny));
+    constexpr double strictDistanceCells0493x17a = 1.0e-6;
+    const double strictDistance = strictDistanceCells0493x17a * h;
+    q6_x17a_measure_lagrangian_penetration<<<particleBlocks,threads>>>(
+        particles,nParticles,ws.chiLagrangianEdgeCount0493x17a,
+        ws.kineticContinuousSegAx0493x10n.data(),
+        ws.kineticContinuousSegAy0493x10n.data(),
+        ws.kineticContinuousSegBx0493x10n.data(),
+        ws.kineticContinuousSegBy0493x10n.data(),
+        ws.chiLagrangianNormalSign0493x17a.data(),
+        params.Lx,params.Ly,
+        is_x_periodic(params)?1:0,is_y_periodic(params)?1:0,
+        h,strictDistance,ws.chiPenetrationAccum0493x16l.data());
+    check_cuda_0400(cudaGetLastError(),
+                    "0493x17a Lagrangian penetration diagnostic launch");
+    check_cuda_0400(cudaDeviceSynchronize(),
+                    "0493x17a Lagrangian penetration diagnostic synchronize");
+
+    ChiPenetrationAccumulator0493x16l a{};
+    check_cuda_0400(cudaMemcpy(
+        &a,ws.chiPenetrationAccum0493x16l.data(),sizeof(a),
+        cudaMemcpyDeviceToHost),
+        "0493x17a Lagrangian penetration diagnostic download");
+
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) / "chi_penetration_0493x16l.csv";
+    const bool writeHeader = !std::filesystem::exists(path);
+    std::ofstream out(path,std::ios::app);
+    if (!out) throw std::runtime_error(
+        "0493x17a failed to open penetration diagnostic CSV");
+    if (writeHeader) {
+        out << "step,time,geometryVersion,strictLevelEpsilon,"
+               "sampledParticles,rawInsideParticles,strictInsideParticles,"
+               "rawInsideMass,strictInsideMass,maxSolidLevelExcess,"
+               "maxPenetrationCells,flatGradientInsideParticles,"
+               "q2InvalidParticles,residentFreshBefore,hostUploadPerformed\n";
+    }
+    out << step << ',' << std::setprecision(17) << timePoststream << ','
+        << ws.chiLagrangianMeshVersion0493x17a << ','
+        << strictDistanceCells0493x17a << ','
+        << a.sampledParticles << ',' << a.rawInsideParticles << ','
+        << a.strictInsideParticles << ',' << a.rawInsideMass << ','
+        << a.strictInsideMass << ',' << a.maxSolidLevelExcess << ','
+        << a.maxPenetrationCells << ',' << 0 << ',' << 0 << ','
+        << (residentFreshBefore?1:0) << ',' << (hostUploadPerformed?1:0) << '\n';
+
+    static bool reported0493x17a=false;
+    if(!reported0493x17a){
+        std::cout << "[0493x16l-penetration] backend=x17a-lagrangian-edge-mesh"
+                  << " measure=nearest-oriented-material-edge"
+                  << " strictDistanceCells=" << strictDistanceCells0493x17a
+                  << " physics=read_only" << std::endl;
+        reported0493x17a=true;
+    }
+    return true;
+}
+
+bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
+    const double** deviceReactionX, const double** deviceReactionY,
+    int* nx, int* ny) {
+    if (deviceReactionX) *deviceReactionX = nullptr;
+    if (deviceReactionY) *deviceReactionY = nullptr;
+    if (nx) *nx = 0;
+    if (ny) *ny = 0;
+    auto& ws = resident_workspace_0400();
+    if (!ws.chiKineticImpulseValid0493x16j ||
+        ws.chiKineticNx0493x16j <= 0 || ws.chiKineticNy0493x16j <= 0) return false;
+    if (deviceReactionX) *deviceReactionX = ws.kineticMovingWallImpulseX0493x10m.data();
+    if (deviceReactionY) *deviceReactionY = ws.kineticMovingWallImpulseY0493x10m.data();
+    if (nx) *nx = ws.chiKineticNx0493x16j;
+    if (ny) *ny = ws.chiKineticNy0493x16j;
+    return true;
+}
 
 CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c() {
     CudaQ6PhaseAlphaView0493x6c view{};
