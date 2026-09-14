@@ -25,8 +25,8 @@ Les documents de ce répertoire sont des **vues de publication** de la base rela
 | Jalons canoniques | 298 |
 | Paramètres canoniques | 320 |
 | Flags / variables runner | 679 |
-| Artefacts indexés | 1682 |
-| Candidats Git | 1188 |
+| Artefacts indexés | 1683 |
+| Candidats Git | 1193 |
 
 ## Règle de publication
 

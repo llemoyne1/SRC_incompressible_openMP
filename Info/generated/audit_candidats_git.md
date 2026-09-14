@@ -7,12 +7,12 @@
 | Statut | Confiance | Nombre |
 |---|---|---:|
 | CANDIDATE | A | 467 |
-| CANDIDATE | B | 476 |
+| CANDIDATE | B | 477 |
 | CANDIDATE | C | 3 |
 | CURATED | A | 45 |
 | CURATED | B | 8 |
 | LINKED | A | 16 |
-| LINKED | B | 173 |
+| LINKED | B | 177 |
 
 ## Candidats déjà reliés à un jalon canonique
 
@@ -177,7 +177,11 @@
 | `x14at` | `candidate:x:x14at` | 7 |
 | `x14au` | `candidate:x:x14au` | 5 |
 | `x14av` | `candidate:x:x14av` | 3 |
+| `x14aw` | `candidate:x:x14aw` | 1 |
+| `x14ay` | `candidate:x:x14ay` | 1 |
 | `x14b` | `candidate:x:x14b` | 2 |
+| `x14ba` | `candidate:x:x14ba` | 2 |
+| `x14bc` | `candidate:x:x14bc` | 3 |
 | `x14c` | `candidate:x:x14c` | 2 |
 | `x14e` | `candidate:x:x14e` | 1 |
 | `x14f` | `candidate:x:x14f` | 3 |
@@ -1109,4 +1113,4 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
 | `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1188 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1193 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

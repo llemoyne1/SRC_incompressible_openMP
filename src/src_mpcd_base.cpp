@@ -1206,6 +1206,14 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const std::size_t n = active_fluid_count_size(state);
     const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const double time = static_cast<double>(step) * params.dt;
+
+    // 0493x16a: the solid module owns q,qdot and publishes only coupling fields
+    // chi(x,t), u_s(x,t). This happens before any Darcy/chiVP consumer.
+    if (params.chiSolidDynamicsEnable) {
+        result.chiSolidDynamics = prepare_chi_solid_dynamics_0493x16a(
+            workspace.chiSolidDynamics, params, grid, step, time);
+    }
+
     const bool forceFieldActive0493x3 =
         params.bodyAccelerationX != 0.0 || params.bodyAccelerationY != 0.0 ||
         (params.taylorGreenForcingEnable && params.taylorGreenForcingAmplitude > 0.0);
@@ -1302,6 +1310,20 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
     const SimulationParams& forceStreamParams0493x3 =
         *forceStreamParamsPtr0493x3;
+
+    // 0493x16j-fix1: x10n interprets particle x/y as PRE-STREAM coordinates
+    // and writes a position/velocity correction for the ordinary streaming
+    // stage that follows.  Run the chi material-wall event here, after every
+    // optional pre-stream force/Q6 operation and immediately before streaming.
+    // This is independent of speciesQ6Mode; mode=off executes no additional
+    // code and leaves every historical Darcy/STEP/VK path untouched.
+    if (params.chiKineticBoundaryMode == "specular") {
+        if (!cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
+                state, params, grid, static_cast<int>(step), time)) {
+            throw std::runtime_error(
+                "0493x16j prestream chi kinetic boundary was requested but not handled");
+        }
+    }
 
     // 0270: wall-simple resident CUDA performs y-wall reflection directly in
     // the force/stream kernel.  The generic CPU boundary pass is therefore a
@@ -1434,6 +1456,17 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             periodicResidentStreamHandled0334 = residentClassicPeriodic0260 && cudaStreaming0245.handled;
         }
         if (!handledByCudaStreaming) {
+            // x16j normally stays fully CUDA-resident.  If an unqualified
+            // topology falls back to CPU streaming, synchronize the corrected
+            // pre-stream state once and invalidate the device copy after the
+            // CPU transport so host/device authority remains explicit.
+            const bool chiKineticCpuFallback0493x16j =
+                params.chiKineticBoundaryMode == "specular";
+            if (chiKineticCpuFallback0493x16j &&
+                !cuda_shared_particle_state_0251_download_if_fresh(state)) {
+                throw std::runtime_error(
+                    "0493x16j failed to synchronize resident state before CPU streaming fallback");
+            }
 #pragma omp parallel for if(n > 10000)
             for (std::int64_t ii = 0; ii < static_cast<std::int64_t>(n); ++ii) {
                 const std::size_t i = static_cast<std::size_t>(ii);
@@ -1447,6 +1480,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 state.vy[i] += (forceStreamParams0493x3.bodyAccelerationY + tgAy) * forceStreamParams0493x3.dt;
                 state.x[i] += state.vx[i] * forceStreamParams0493x3.dt;
                 state.y[i] += state.vy[i] * forceStreamParams0493x3.dt;
+            }
+            if (chiKineticCpuFallback0493x16j) {
+                cuda_shared_particle_state_0251_invalidate(
+                    "0493x16j_cpu_streaming_fallback");
             }
         }
     }
@@ -1596,6 +1633,28 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    // 0493x16f: particle positions are now at the post-stream time level.
+    // Drift the dynamic solid geometry with its pre-kick velocity and republish
+    // the SAME historical binary chi/u_s fields before chiVP collision and the
+    // later Darcy/bath stage. This is a timing correction only: static solids
+    // (U_s=0) are unchanged, and no Darcy/bath/chiVP closure is modified.
+    if (params.chiSolidDynamicsEnable) {
+        (void)synchronize_chi_solid_dynamics_poststream_0493x16f(
+            workspace.chiSolidDynamics, params, grid, step, time + params.dt);
+    }
+
+    // 0493x16l: observation only.  Measure particles against the POST-stream
+    // solid geometry at t+dt, before any collision/chiVP operation can obscure
+    // the impermeability test.  The routine is read-only and runs only on the
+    // existing summary cadence.  mode=off executes no additional code.
+    if (params.chiKineticBoundaryMode == "specular") {
+        if (!cuda_q6_record_chi_penetration_poststream_0493x16l(
+                state, params, grid, static_cast<int>(step), time + params.dt)) {
+            throw std::runtime_error(
+                "0493x16l poststream penetration diagnostic was requested but not handled");
+        }
+    }
+
     {
         MPCD_PROFILE_PHASE(result.profile, Collision);
         if (cuda_collision_wrapper_still_needs_host_particles_0315f(params, grid, result.domain, step)) {
@@ -1709,6 +1768,35 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     if (params.darcyBrinkmanEnable && !q6GfDarcyPrestream0493x7g) {
         result.darcy = try_apply_cuda_darcy_brinkman_0343(
             state, params, grid, result.domain, step, time);
+    }
+
+    // 0493x16a action-reaction closure. x15 measured both fluid impulses
+    // exactly; give their opposite sum to the solid model once per step.
+    if (params.chiSolidDynamicsEnable) {
+        if (!result.darcy.chiSolidImpulseDiagnostic) {
+            throw std::runtime_error("0493x16a dynamic solid requires exact Darcy/bath impulse accounting");
+        }
+        result.chiSolidDynamics = advance_chi_solid_dynamics_0493x16a(
+            workspace.chiSolidDynamics, params, grid, step, time,
+            result.darcy.chiSolidDeterministicFluidImpulseX,
+            result.darcy.chiSolidDeterministicFluidImpulseY,
+            result.darcy.chiSolidStochasticFluidImpulseX,
+            result.darcy.chiSolidStochasticFluidImpulseY,
+            result.collision.chiVpFluidImpulseX,
+            result.collision.chiVpFluidImpulseY,
+            result.darcy.chiSolidCellFluidImpulseX0493x16b,
+            result.darcy.chiSolidCellFluidImpulseY0493x16b,
+            result.collision.chiVpCellFluidImpulseX0493x16b,
+            result.collision.chiVpCellFluidImpulseY0493x16b,
+            result.darcy.fictitiousFluidDiagnostic0493x16c,
+            result.darcy.fictitiousFluidMass0493x16c,
+            result.darcy.fictitiousFluidMomentumX0493x16c,
+            result.darcy.fictitiousFluidMomentumY0493x16c,
+            result.darcy.fictitiousLockedMomentumX0493x16c,
+            result.darcy.fictitiousLockedMomentumY0493x16c,
+            result.darcy.fictitiousRelativeMomentumX0493x16c,
+            result.darcy.fictitiousRelativeMomentumY0493x16c,
+            result.darcy.fictitiousRelativeVelocityRms0493x16c);
     }
 
     // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally

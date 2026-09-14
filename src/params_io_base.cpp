@@ -727,6 +727,10 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             std::replace(p.darcyBrinkmanForcingMode.begin(), p.darcyBrinkmanForcingMode.end(), '-', '_');
         }
         else if (key == "darcyChiCollisionVpEnable" || key == "darcyCollisionVpEnable" || key == "topoChiCollisionVpEnable") p.darcyChiCollisionVpEnable = parse_bool(value, key);
+        else if (key == "chiKineticBoundaryMode") {
+            p.chiKineticBoundaryMode = lower(trim(value));
+            std::replace(p.chiKineticBoundaryMode.begin(), p.chiKineticBoundaryMode.end(), '-', '_');
+        }
         else if (key == "darcyChiCollisionVpMode" || key == "darcyCollisionVpMode" || key == "topoChiCollisionVpMode") {
             p.darcyChiCollisionVpMode = lower(trim(value));
             std::replace(p.darcyChiCollisionVpMode.begin(), p.darcyChiCollisionVpMode.end(), '-', '_');
@@ -736,6 +740,12 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         else if (key == "darcyChiCollisionVpLayers" || key == "darcyCollisionVpLayers" || key == "topoChiCollisionVpLayers") p.darcyChiCollisionVpLayers = parse_int(value, key);
         else if (key == "darcyChiCollisionVpThreshold" || key == "darcyCollisionVpThreshold" || key == "topoChiCollisionVpThreshold") p.darcyChiCollisionVpThreshold = parse_double(value, key);
         else if (key == "darcyChiCollisionVpStrength" || key == "darcyCollisionVpStrength" || key == "topoChiCollisionVpStrength") p.darcyChiCollisionVpStrength = parse_double(value, key);
+        else if (key == "chiSolidDynamicsEnable") p.chiSolidDynamicsEnable = parse_bool(value, key);
+        else if (key == "chiSolidModel") {
+            p.chiSolidModel = lower(trim(value));
+            std::replace(p.chiSolidModel.begin(), p.chiSolidModel.end(), '-', '_');
+        }
+        else if (key == "chiSolidMass") p.chiSolidMass = parse_double(value, key);
         else if (key == "topoBenchmarkEnable") p.topoBenchmarkEnable = parse_bool(value, key);
         else if (key == "topoBenchmarkEvery") p.topoBenchmarkEvery = parse_int(value, key);
         else if (key == "topoBenchmarkFilename") p.topoBenchmarkFilename = value;
@@ -2287,6 +2297,38 @@ void validate_simulation_params(const SimulationParams& p) {
                 }
             }
         }
+        {
+            std::string kb = p.chiKineticBoundaryMode;
+            std::replace(kb.begin(), kb.end(), '-', '_');
+            if (!(kb == "off" || kb == "none" || kb == "specular")) {
+                throw std::runtime_error("0493x16j chiKineticBoundaryMode supports off or specular");
+            }
+            if (kb == "specular") {
+                if (!p.darcyBrinkmanEnable) {
+                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular requires darcyBrinkmanEnable=true so the resident chi provider exists");
+                }
+                // First qualification deliberately separates impermeability from
+                // Darcy/bath/chiVP forcing. This avoids changing any historical
+                // porous-solid closure while the kinetic boundary is validated.
+                if (std::abs(p.darcyAlphaMax) > 1.0e-15) {
+                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular qualification requires darcyAlphaMax=0; do not superpose unqualified Darcy forcing yet");
+                }
+                if (p.darcyChiCollisionVpEnable) {
+                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular qualification requires darcyChiCollisionVpEnable=false; tangential/SRC coupling will be qualified separately");
+                }
+                // 0493x17b: with a persistent Lagrangian material boundary,
+                // initialDeactivateBelowChi is once again meaningful as a one-time
+                // initial-state consistency operation. It is NOT a wall model and
+                // is never reapplied during the run. Keep the historical negative
+                // value valid, but allow [0,1] for chiKineticBoundaryMode=specular.
+                // Range/finite validation remains centralized in the historical
+                // darcyInitialDeactivateBelowChi validation above.
+                if (p.phaseInterfaceKineticReflectionFraction > 0.0) {
+                    throw std::runtime_error(
+                        "0493x16j first qualification forbids simultaneous liquid/gas and chi kinetic crossings; earliest-event arbitration is not yet enabled");
+                }
+            }
+        }
         if (p.darcyChiCollisionVpEnable) {
             if (!p.darcyBrinkmanEnable) {
                 throw std::runtime_error("darcyChiCollisionVpEnable=true requires darcyBrinkmanEnable=true so that the chi field is available");
@@ -2311,6 +2353,28 @@ void validate_simulation_params(const SimulationParams& p) {
             }
             if (!(p.darcyChiCollisionVpStrength >= 0.0) || !std::isfinite(p.darcyChiCollisionVpStrength)) {
                 throw std::runtime_error("darcyChiCollisionVpStrength must be non-negative and finite");
+            }
+        }
+        if (p.chiSolidDynamicsEnable) {
+            if (p.chiSolidModel != "rigid_slab_1d") {
+                throw std::runtime_error("0493x16a chiSolidDynamicsEnable supports chiSolidModel=rigid_slab_1d only");
+            }
+            if (!(p.chiSolidMass > 0.0) || !std::isfinite(p.chiSolidMass)) {
+                throw std::runtime_error("0493x16a chiSolidMass must be positive and finite");
+            }
+            if (!(p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
+                throw std::runtime_error("0493x16a rigid_slab_1d requires darcyChiMode=box/rectangle for its initial geometry");
+            }
+            if (!(p.darcyBoxXMax > p.darcyBoxXMin)) {
+                throw std::runtime_error("0493x16a rigid_slab_1d requires positive slab thickness");
+            }
+            if (p.darcyInitialDeactivateBelowChi >= 0.0) {
+                std::string kbDyn0493x17b = p.chiKineticBoundaryMode;
+                std::replace(kbDyn0493x17b.begin(), kbDyn0493x17b.end(), '-', '_');
+                if (kbDyn0493x17b != "specular") {
+                    throw std::runtime_error(
+                        "0493x16a dynamic chi-solid permits initial chi deactivation only with the x17 Lagrangian kinetic boundary");
+                }
             }
         }
         if (p.topoBenchmarkEvery < 0) {

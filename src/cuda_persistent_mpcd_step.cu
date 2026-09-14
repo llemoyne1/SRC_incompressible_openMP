@@ -73,6 +73,82 @@ __device__ inline std::uint64_t splitmix64_device_0272(std::uint64_t x) {
     return x ^ (x >> 31U);
 }
 
+// 0493x15b: exact chiVP action/reaction audit.  This device accumulator is
+// reset/read only when the already-existing x15a chi-solid diagnostic is
+// requested.  No new runtime parameter is introduced.
+__device__ double g_chiVpFluidImpulse0493x15b[2];
+
+void reset_chi_vp_impulse_0493x15b(bool enabled) {
+    if (!enabled) return;
+    const double zero[2] = {0.0, 0.0};
+    MPCD_CUDA_CHECK(cudaMemcpyToSymbol(g_chiVpFluidImpulse0493x15b, zero,
+                                       2 * sizeof(double), 0, cudaMemcpyHostToDevice));
+}
+
+void read_chi_vp_impulse_0493x15b(bool enabled,
+                                  CudaPersistentMpcdStepDiagnostics& diag) {
+    if (!enabled) return;
+    double h[2] = {0.0, 0.0};
+    MPCD_CUDA_CHECK(cudaMemcpyFromSymbol(h, g_chiVpFluidImpulse0493x15b,
+                                         2 * sizeof(double), 0, cudaMemcpyDeviceToHost));
+    diag.chiVpFluidImpulseX = h[0];
+    diag.chiVpFluidImpulseY = h[1];
+}
+
+// 0493x16b: cached device field for exact cell-resolved chiVP exchange.
+// The load is accumulated on the unshifted physical grid so SolidGeometry can
+// project it onto arbitrary rigid/deformable DOFs independently of the random
+// SRC collision-grid shift.
+struct ChiVpCellImpulseWorkspace0493x16b {
+    int numCells = 0;
+    double* d_x = nullptr;
+    double* d_y = nullptr;
+};
+
+ChiVpCellImpulseWorkspace0493x16b& chi_vp_cell_workspace_0493x16b() {
+    static ChiVpCellImpulseWorkspace0493x16b w;
+    return w;
+}
+
+void prepare_chi_vp_cell_impulse_0493x16b(bool enabled, int numCells,
+                                           double*& d_x, double*& d_y) {
+    d_x = nullptr;
+    d_y = nullptr;
+    if (!enabled || numCells <= 0) return;
+    auto& w = chi_vp_cell_workspace_0493x16b();
+    if (w.numCells != numCells || w.d_x == nullptr || w.d_y == nullptr) {
+        cuda_free(w.d_x);
+        cuda_free(w.d_y);
+        w.numCells = 0;
+        MPCD_CUDA_CHECK(cudaMalloc(&w.d_x, static_cast<std::size_t>(numCells) * sizeof(double)));
+        MPCD_CUDA_CHECK(cudaMalloc(&w.d_y, static_cast<std::size_t>(numCells) * sizeof(double)));
+        w.numCells = numCells;
+    }
+    MPCD_CUDA_CHECK(cudaMemset(w.d_x, 0, static_cast<std::size_t>(numCells) * sizeof(double)));
+    MPCD_CUDA_CHECK(cudaMemset(w.d_y, 0, static_cast<std::size_t>(numCells) * sizeof(double)));
+    d_x = w.d_x;
+    d_y = w.d_y;
+}
+
+void read_chi_vp_cell_impulse_0493x16b(bool enabled, int numCells,
+                                        CudaPersistentMpcdStepDiagnostics& diag) {
+    diag.chiVpCellFluidImpulseX0493x16b.clear();
+    diag.chiVpCellFluidImpulseY0493x16b.clear();
+    if (!enabled || numCells <= 0) return;
+    auto& w = chi_vp_cell_workspace_0493x16b();
+    if (w.numCells != numCells || w.d_x == nullptr || w.d_y == nullptr) {
+        throw std::runtime_error("0493x16b chiVP cell impulse workspace is not prepared");
+    }
+    diag.chiVpCellFluidImpulseX0493x16b.resize(static_cast<std::size_t>(numCells));
+    diag.chiVpCellFluidImpulseY0493x16b.resize(static_cast<std::size_t>(numCells));
+    MPCD_CUDA_CHECK(cudaMemcpy(diag.chiVpCellFluidImpulseX0493x16b.data(), w.d_x,
+                               static_cast<std::size_t>(numCells) * sizeof(double),
+                               cudaMemcpyDeviceToHost));
+    MPCD_CUDA_CHECK(cudaMemcpy(diag.chiVpCellFluidImpulseY0493x16b.data(), w.d_y,
+                               static_cast<std::size_t>(numCells) * sizeof(double),
+                               cudaMemcpyDeviceToHost));
+}
+
 __global__ void fill_rotation_tables_persistent_0272_kernel(int nc,
                                                             double cosAngle,
                                                             double sinAngle,
@@ -143,6 +219,12 @@ struct DeviceConfig {
     int chiCollisionVpLayers;
     double chiCollisionVpThreshold, chiCollisionVpStrength;
     double chiCollisionVpWallUx, chiCollisionVpWallUy;
+    const float* chiCollisionVpWallUxField;
+    const float* chiCollisionVpWallUyField;
+    int chiVpImpulseDiagnostic;
+    int chiVpCellImpulseDiagnostic0493x16b;
+    double* chiVpCellFluidImpulseX0493x16b;
+    double* chiVpCellFluidImpulseY0493x16b;
     int fusedStreamDeposit0274;
     int fusedStreamMode0274;
     double streamDt0274;
@@ -411,9 +493,16 @@ __device__ void add_chi_collision_vp_moments_0422(int ix, int iy,
     const double gamma = cfg.chiCollisionVpGamma;
     const double mvp = gamma * cfg.chiCollisionVpMass * w;
     if (!(mvp > 0.0)) return;
+    const int c = iy * cfg.chiCollisionVpNx + ix;
+    const double usx = cfg.chiCollisionVpWallUxField
+        ? static_cast<double>(cfg.chiCollisionVpWallUxField[c])
+        : cfg.chiCollisionVpWallUx;
+    const double usy = cfg.chiCollisionVpWallUyField
+        ? static_cast<double>(cfg.chiCollisionVpWallUyField[c])
+        : cfg.chiCollisionVpWallUy;
     mass += mvp;
-    px += mvp * cfg.chiCollisionVpWallUx;
-    py += mvp * cfg.chiCollisionVpWallUy;
+    px += mvp * usx;
+    py += mvp * usy;
 }
 
 __global__ void add_wall_virtual_faces_persistent_kernel(int nc,
@@ -566,6 +655,9 @@ __global__ void finalize_velocity_persistent_kernel(int nc,
 __global__ void src_rotate_persistent_kernel(int n,
                                              const int* cellId,
                                              const unsigned char* role,
+                                             const double* mass,
+                                             const double* x,
+                                             const double* y,
                                              const double* cellUx,
                                              const double* cellUy,
                                              const double* cosA,
@@ -585,12 +677,44 @@ __global__ void src_rotate_persistent_kernel(int n,
     }
     const double ux = cellUx[c];
     const double uy = cellUy[c];
-    const double dvx = vx[i] - ux;
-    const double dvy = vy[i] - uy;
+    const double vx0 = vx[i];
+    const double vy0 = vy[i];
+    const double dvx = vx0 - ux;
+    const double dvy = vy0 - uy;
     const double ca = cosA[c];
     const double sa = sinA[c];
-    vx[i] = ux + ca * dvx - sa * dvy;
-    vy[i] = uy + sa * dvx + ca * dvy;
+    const double vx1 = ux + ca * dvx - sa * dvy;
+    const double vy1 = uy + sa * dvx + ca * dvy;
+    vx[i] = vx1;
+    vy[i] = vy1;
+    if (cfg.chiVpImpulseDiagnostic && cfg.chiCollisionVpEnabled) {
+        const int ix = c % cfg.Nx;
+        const int iy = c / cfg.Nx;
+        if (chi_collision_vp_weight_0422(ix, iy, cfg) > 0.0) {
+            const double m = mass[i];
+            const double dpx = m * (vx1 - vx0);
+            const double dpy = m * (vy1 - vy0);
+            atomicAdd(&g_chiVpFluidImpulse0493x15b[0], dpx);
+            atomicAdd(&g_chiVpFluidImpulse0493x15b[1], dpy);
+            if (cfg.chiVpCellImpulseDiagnostic0493x16b &&
+                cfg.chiVpCellFluidImpulseX0493x16b &&
+                cfg.chiVpCellFluidImpulseY0493x16b && x && y) {
+                // Project the particle exchange to the unshifted physical grid,
+                // not the randomly shifted SRC collision grid. This field is a
+                // solver/solid coupling observable; it must stay attached to
+                // physical space for a deformable geometry.
+                const int pix = cfg.periodicX
+                    ? periodic_cell_index_device(x[i], cfg.Lx, cfg.dx, cfg.Nx)
+                    : bounded_cell_index_device(x[i], cfg.Lx, cfg.dx, cfg.Nx);
+                const int piy = cfg.periodicY
+                    ? periodic_cell_index_device(y[i], cfg.Ly, cfg.dy, cfg.Ny)
+                    : bounded_cell_index_device(y[i], cfg.Ly, cfg.dy, cfg.Ny);
+                const int pc = pix + cfg.Nx * piy;
+                atomicAdd(&cfg.chiVpCellFluidImpulseX0493x16b[pc], dpx);
+                atomicAdd(&cfg.chiVpCellFluidImpulseY0493x16b[pc], dpy);
+            }
+        }
+    }
     atomicAdd(rotatedCounter, 1ull);
 }
 
@@ -768,6 +892,23 @@ __global__ void apply_species_thermostat_0493x14d_kernel(
 }
 
 } // namespace
+
+bool cuda_persistent_mpcd_step_chi_vp_cell_impulse_device_0493x16e(
+    const double** deviceImpulseX, const double** deviceImpulseY, int* numCells) {
+    if (deviceImpulseX) *deviceImpulseX = nullptr;
+    if (deviceImpulseY) *deviceImpulseY = nullptr;
+    if (numCells) *numCells = 0;
+#if !defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP)
+    return false;
+#else
+    auto& w = chi_vp_cell_workspace_0493x16b();
+    if (w.numCells <= 0 || !w.d_x || !w.d_y) return false;
+    if (deviceImpulseX) *deviceImpulseX = w.d_x;
+    if (deviceImpulseY) *deviceImpulseY = w.d_y;
+    if (numCells) *numCells = w.numCells;
+    return true;
+#endif
+}
 
 bool cuda_persistent_mpcd_step_available() {
 #ifdef MPCD_ENABLE_CUDA_PERSISTENT_STEP
@@ -1082,7 +1223,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
     cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
     cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
+    cfg.chiCollisionVpWallUxField = config.chiCollisionVpWallUxField;
+    cfg.chiCollisionVpWallUyField = config.chiCollisionVpWallUyField;
+    cfg.chiVpImpulseDiagnostic = config.chiVpImpulseDiagnostic;
+    cfg.chiVpCellImpulseDiagnostic0493x16b = config.chiVpCellImpulseDiagnostic0493x16b;
+    cfg.chiVpCellFluidImpulseX0493x16b = nullptr;
+    cfg.chiVpCellFluidImpulseY0493x16b = nullptr;
+    prepare_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0, nc,
+        cfg.chiVpCellFluidImpulseX0493x16b, cfg.chiVpCellFluidImpulseY0493x16b);
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+    reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
@@ -1101,7 +1252,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
                                                                      b.cellUx, b.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.cellUx, b.cellUy,
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, b.role, b.mass, b.x, b.y, b.cellUx, b.cellUy,
                                                                   b.cosA, b.sinA, cfg, b.vx, b.vy,
                                                                   b.rotatedCounter, b.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -1128,6 +1279,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
         }
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
+    read_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
+        config.chiVpCellImpulseHostReadback0493x16e != 0, nc, diag);
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
@@ -1420,7 +1575,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
     cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
     cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
+    cfg.chiCollisionVpWallUxField = config.chiCollisionVpWallUxField;
+    cfg.chiCollisionVpWallUyField = config.chiCollisionVpWallUyField;
+    cfg.chiVpImpulseDiagnostic = config.chiVpImpulseDiagnostic;
+    cfg.chiVpCellImpulseDiagnostic0493x16b = config.chiVpCellImpulseDiagnostic0493x16b;
+    cfg.chiVpCellFluidImpulseX0493x16b = nullptr;
+    cfg.chiVpCellFluidImpulseY0493x16b = nullptr;
+    prepare_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0, nc,
+        cfg.chiVpCellFluidImpulseX0493x16b, cfg.chiVpCellFluidImpulseY0493x16b);
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+    reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
@@ -1439,7 +1604,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, b.cellMass, b.cellPx, b.cellPy,
                                                                      b.cellUx, b.cellUy);
         MPCD_CUDA_CHECK(cudaGetLastError());
-        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, b.cellUx, b.cellUy,
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, b.cellId, pv.role, pv.mass, pv.x, pv.y, b.cellUx, b.cellUy,
                                                                   b.cosA, b.sinA, cfg, pv.vx, pv.vy,
                                                                   b.rotatedCounter, b.invalidCounter);
         MPCD_CUDA_CHECK(cudaGetLastError());
@@ -1464,6 +1629,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         MPCD_CUDA_CHECK(cudaGetLastError());
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
+    read_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
+        config.chiVpCellImpulseHostReadback0493x16e != 0, nc, diag);
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();
@@ -1822,7 +1991,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
     cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
     cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
+    cfg.chiCollisionVpWallUxField = config.chiCollisionVpWallUxField;
+    cfg.chiCollisionVpWallUyField = config.chiCollisionVpWallUyField;
+    cfg.chiVpImpulseDiagnostic = config.chiVpImpulseDiagnostic;
+    cfg.chiVpCellImpulseDiagnostic0493x16b = config.chiVpCellImpulseDiagnostic0493x16b;
+    cfg.chiVpCellFluidImpulseX0493x16b = nullptr;
+    cfg.chiVpCellFluidImpulseY0493x16b = nullptr;
+    prepare_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0, nc,
+        cfg.chiVpCellFluidImpulseX0493x16b, cfg.chiVpCellFluidImpulseY0493x16b);
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+    reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
@@ -1846,7 +2025,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                      cv.cellUx, cv.cellUy);
         MPCD_PROFILE_END_0324("finalize_velocity_persistent");
         MPCD_PROFILE_BEGIN_0324();
-        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx, cv.cellUy,
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, pv.mass, pv.x, pv.y, cv.cellUx, cv.cellUy,
                                                                   cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
                                                                   cv.rotatedCounter, cv.invalidCounter);
         MPCD_PROFILE_END_0324("src_rotate_persistent");
@@ -1877,6 +2056,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         MPCD_PROFILE_END_0324("apply_thermostat_persistent");
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
+    read_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
+        config.chiVpCellImpulseHostReadback0493x16e != 0, nc, diag);
     diag.kernelSeconds = seconds_since(t0);
 
     if (kernelBreakdown0324) {
@@ -2253,7 +2436,17 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.chiCollisionVpStrength = config.chiCollisionVpStrength;
     cfg.chiCollisionVpWallUx = config.chiCollisionVpWallUx;
     cfg.chiCollisionVpWallUy = config.chiCollisionVpWallUy;
+    cfg.chiCollisionVpWallUxField = config.chiCollisionVpWallUxField;
+    cfg.chiCollisionVpWallUyField = config.chiCollisionVpWallUyField;
+    cfg.chiVpImpulseDiagnostic = config.chiVpImpulseDiagnostic;
+    cfg.chiVpCellImpulseDiagnostic0493x16b = config.chiVpCellImpulseDiagnostic0493x16b;
+    cfg.chiVpCellFluidImpulseX0493x16b = nullptr;
+    cfg.chiVpCellFluidImpulseY0493x16b = nullptr;
+    prepare_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0, nc,
+        cfg.chiVpCellFluidImpulseX0493x16b, cfg.chiVpCellFluidImpulseY0493x16b);
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
+    reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
@@ -2272,7 +2465,7 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         finalize_velocity_persistent_kernel<<<cellBlocks, threads>>>(nc, cv.cellMass, cv.cellPx, cv.cellPy,
                                                                      cv.cellUx, cv.cellUy);
         checkKernelLaunch0273();
-        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, cv.cellUx, cv.cellUy,
+        src_rotate_persistent_kernel<<<particleBlocks, threads>>>(nInt, cv.cellId, pv.role, pv.mass, pv.x, pv.y, cv.cellUx, cv.cellUy,
                                                                   cv.cosA, cv.sinA, cfg, pv.vx, pv.vy,
                                                                   cv.rotatedCounter, cv.invalidCounter);
         checkKernelLaunch0273();
@@ -2281,6 +2474,10 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
         MPCD_CUDA_CHECK(cudaGetLastError());
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
+    read_chi_vp_cell_impulse_0493x16b(
+        cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
+        config.chiVpCellImpulseHostReadback0493x16e != 0, nc, diag);
     diag.kernelSeconds = seconds_since(t0);
 
     t0 = Clock::now();

@@ -6,6 +6,7 @@
 #include "boundary_base.h"
 #include "cell_grid.h"
 #include "closed_capacity_response.h"
+#include "chi_solid_dynamics_0493x16a.h"
 #include "cuda_darcy_brinkman_0343.h"
 #include "fluid_domain.h"
 #include "immersed_solid.h"
@@ -43,6 +44,7 @@ struct StepResult {
     ThermostatDiagnostics thermostat;
     ClosedCapacityResponseDiagnostics capacity;
     CudaDarcyBrinkman0343Diagnostics darcy;
+    ChiSolidDynamicsDiagnostics0493x16a chiSolidDynamics;
     WeightedResamplingDiagnostics resampling;
     ResamplingParticlePoolDiagnostics resamplingPool;
     StepProfile profile;
@@ -55,6 +57,7 @@ struct SrcMpcdBaseWorkspace {
     ClosedCapacityResponseWorkspace capacity;
     WeightedRealFluidDepositWorkspace resampling;
     ResamplingParticlePoolWorkspace resamplingPool;
+    ChiSolidDynamicsWorkspace0493x16a chiSolidDynamics;
 #if defined(MPCD_ENABLE_CUDA_PARTICLE_STATE) && defined(MPCD_ENABLE_CUDA_CELL_WORKSPACE)
     CudaSpeciesCellWorkspace0490h speciesCellCuda0490h;
     CudaSpeciesMassClosureWorkspace0490i speciesMassClosureCuda0490i;

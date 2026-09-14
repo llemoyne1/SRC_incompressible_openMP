@@ -77,6 +77,22 @@ struct CudaPersistentMpcdStepConfig {
     double chiCollisionVpStrength = 1.0;
     double chiCollisionVpWallUx = 0.0;
     double chiCollisionVpWallUy = 0.0;
+    // 0493x16a: optional cell-local solid velocity supplied by SolidGeometry.
+    // When null, the historical scalar wall velocity above remains authoritative.
+    const float* chiCollisionVpWallUxField = nullptr;
+    const float* chiCollisionVpWallUyField = nullptr;
+    // 0493x15b: internal diagnostic switch. Reuses the existing x15a
+    // chi-solid audit request; this is not a new user-facing control.
+    int chiVpImpulseDiagnostic = 0;
+    // 0493x16b: internal spatial-load audit. When dynamic chi-solid coupling is
+    // active, accumulate the exact chiVP real-fluid impulse into the physical
+    // (unshifted) Eulerian cell containing each particle. This is not a new
+    // user-facing switch; src_collision enables it with chiSolidDynamicsEnable.
+    int chiVpCellImpulseDiagnostic0493x16b = 0;
+    // 0493x16e internal transport policy: dynamic solid load projection is
+    // device-resident, so the full chiVP cell field must not be copied to host.
+    // This is an implementation bit, not a user-facing control.
+    int chiVpCellImpulseHostReadback0493x16e = 1;
 
     // Absolute SRC/MPCD step used for random rotation signs.
     std::uint64_t step = 0u;
@@ -125,6 +141,19 @@ struct CudaPersistentMpcdStepDiagnostics {
     double kernelSeconds = 0.0;
     double downloadSeconds = 0.0;
     double totalSeconds = 0.0;
+
+    // 0493x15b: exact real-fluid momentum increment produced by SRC
+    // rotation in cells carrying chi-derived virtual-particle moments.
+    // Ordinary SRC pair/cell exchange sums to zero; the nonzero global sum
+    // is therefore the reaction partner of the chiVP population.
+    double chiVpFluidImpulseX = 0.0;
+    double chiVpFluidImpulseY = 0.0;
+
+    // 0493x16b: optional host mirror of the exact cell-resolved chiVP fluid
+    // impulse. x16e keeps the authoritative field device-resident, so these
+    // vectors intentionally remain empty in the resident dynamic-solid path.
+    std::vector<double> chiVpCellFluidImpulseX0493x16b;
+    std::vector<double> chiVpCellFluidImpulseY0493x16b;
 
     // 0215: optional persistent collision+thermostat substep diagnostics.
     // These are populated only when the persistent path applies the
@@ -237,6 +266,19 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     std::vector<double>& cellUyOut,
     const CudaPersistentMpcdStepConfig& config,
     ThermostatDiagnostics* thermostatDiagOut = nullptr);
+
+// 0493x16e: expose the resident exact chiVP cell-impulse field to the generic
+// CUDA solid-load projector. No ownership is transferred and no host copy is
+// performed. The pointers remain valid until the next persistent collision.
+#if defined(MPCD_ENABLE_CUDA_PERSISTENT_STEP)
+bool cuda_persistent_mpcd_step_chi_vp_cell_impulse_device_0493x16e(
+    const double** deviceImpulseX, const double** deviceImpulseY, int* numCells);
+#else
+inline bool cuda_persistent_mpcd_step_chi_vp_cell_impulse_device_0493x16e(
+    const double** x, const double** y, int* n) {
+    if (x) *x = nullptr; if (y) *y = nullptr; if (n) *n = 0; return false;
+}
+#endif
 
 // When the 0215 persistent collision+thermostat path has already applied the
 // thermostat inside src_collision_step(), the later thermostat phase consumes

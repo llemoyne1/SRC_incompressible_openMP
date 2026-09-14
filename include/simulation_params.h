@@ -736,11 +736,26 @@ struct SimulationParams {
     // persistent virtual particles are created, streamed, compacted or dumped.
     bool darcyChiCollisionVpEnable = false;
     std::string darcyChiCollisionVpMode = "interface_band"; // interface_band only in 0422
+
+    // 0493x16j: optional kinetic interpretation of the same resident chi field.
+    // off preserves every historical Darcy/chi script. specular treats chi=0.5
+    // as an impermeable moving material interface using the qualified x10n/Q2
+    // crossing engine and local-moving-frame specular response.
+    std::string chiKineticBoundaryMode = "off"; // off, specular
     double darcyChiCollisionVpGamma = -1.0; // <=0: wallVpGamma, then inferred active-fluid gamma
     double darcyChiCollisionVpMass = 1.0;
     int darcyChiCollisionVpLayers = 1;
     double darcyChiCollisionVpThreshold = 0.5;
     double darcyChiCollisionVpStrength = 1.0;
+
+    // 0493x16a: dynamic chi-solid architecture. The solid mechanics module
+    // owns its degrees of freedom; Darcy/SRC only consume chi(x,t), u_s(x,t)
+    // and return exact exchanged impulse. The first model is a rigid slab
+    // translating in x; its initial geometry comes from the existing Darcy box
+    // and its initial velocity from darcyUSolidX.
+    bool chiSolidDynamicsEnable = false;
+    std::string chiSolidModel = "none"; // none, rigid_slab_1d (0493x16a)
+    double chiSolidMass = 1.0;
 
     // 0348/topo: optional benchmark observables.  These are disabled by
     // default to preserve the CUDA resident path.  The 0348a implementation is

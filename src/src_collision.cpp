@@ -37,6 +37,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef _OPENMP
@@ -1165,6 +1166,17 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
                 throw std::runtime_error("darcyChiCollisionVpEnable=true requires an already supported Darcy chi field with dimensions matching the collision grid");
             }
         } else {
+            const float* dUSolidX0493x16a = nullptr;
+            const float* dUSolidY0493x16a = nullptr;
+            int uSolidNx0493x16a = 0;
+            int uSolidNy0493x16a = 0;
+            const bool localUSolid0493x16a = cuda_darcy_brinkman_0343_device_solid_velocity_fields(
+                params, &dUSolidX0493x16a, &dUSolidY0493x16a,
+                &uSolidNx0493x16a, &uSolidNy0493x16a);
+            if (localUSolid0493x16a &&
+                (uSolidNx0493x16a != grid.Nx || uSolidNy0493x16a != grid.Ny)) {
+                throw std::runtime_error("0493x16a local chi-solid velocity field dimensions do not match collision grid");
+            }
             cfg.chiCollisionVpEnabled = 1;
             cfg.chiCollisionVpField = dChiCollisionVp0422;
             cfg.chiCollisionVpNx = chiNx0422;
@@ -1179,6 +1191,19 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
             cfg.chiCollisionVpStrength = params.darcyChiCollisionVpStrength;
             cfg.chiCollisionVpWallUx = params.darcyUSolidX;
             cfg.chiCollisionVpWallUy = params.darcyUSolidY;
+            cfg.chiCollisionVpWallUxField = localUSolid0493x16a ? dUSolidX0493x16a : nullptr;
+            cfg.chiCollisionVpWallUyField = localUSolid0493x16a ? dUSolidY0493x16a : nullptr;
+            cfg.chiVpImpulseDiagnostic =
+                (params.chiSolidDynamicsEnable ||
+                 persistent_env_flag_enabled("MPCD_CHI_SOLID_IMPULSE_DIAG_0493X15A", false)) ? 1 : 0;
+            // 0493x16b: dynamic solids require the spatial reaction field in
+            // addition to the global x15 action/reaction audit. Internal only.
+            cfg.chiVpCellImpulseDiagnostic0493x16b = params.chiSolidDynamicsEnable ? 1 : 0;
+#if defined(MPCD_ENABLE_CUDA_CHI_SOLID_0493X16E)
+            // x16e consumes the exact cell field directly on device. Keep only
+            // scalar diagnostics on host; no Nx*Ny chiVP load download.
+            cfg.chiVpCellImpulseHostReadback0493x16e = params.chiSolidDynamicsEnable ? 0 : 1;
+#endif
         }
     }
     cfg.targetKBT = params.thermostatTargetKBT > 0.0 ? params.thermostatTargetKBT : params.kBT;
@@ -1425,6 +1450,34 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         g_persistentSrcCellIdsParticles0493x14g = raw.particlesVisited;
     }
 #endif
+
+    diagOut.chiVpFluidImpulseX = raw.chiVpFluidImpulseX;
+    diagOut.chiVpFluidImpulseY = raw.chiVpFluidImpulseY;
+    diagOut.chiVpCellFluidImpulseX0493x16b = std::move(raw.chiVpCellFluidImpulseX0493x16b);
+    diagOut.chiVpCellFluidImpulseY0493x16b = std::move(raw.chiVpCellFluidImpulseY0493x16b);
+
+    // 0493x15b qualification output: separate collision exchange from Darcy
+    // exchange so the eventual unified chi-solid model can retain one public
+    // physics path while still exposing its internal action/reaction terms.
+    if (cfg.chiCollisionVpEnabled && cfg.chiVpImpulseDiagnostic) {
+        const std::filesystem::path chiVpPath =
+            std::filesystem::path(params.outputDir) / "chi_vp_impulse_0493x15b.csv";
+        const bool writeHeader = !std::filesystem::exists(chiVpPath) ||
+                                 std::filesystem::file_size(chiVpPath) == 0u;
+        std::ofstream chiVpOut(chiVpPath, std::ios::app);
+        if (chiVpOut) {
+            chiVpOut << std::setprecision(17);
+            if (writeHeader) {
+                chiVpOut << "step,time,fluidImpulseX,fluidImpulseY,solidReactionImpulseX,solidReactionImpulseY,solidReactionForceX,solidReactionForceY\n";
+            }
+            const double invDt = params.dt > 0.0 ? 1.0 / params.dt : 0.0;
+            chiVpOut << step << ',' << static_cast<double>(step) * params.dt << ','
+                     << raw.chiVpFluidImpulseX << ',' << raw.chiVpFluidImpulseY << ','
+                     << -raw.chiVpFluidImpulseX << ',' << -raw.chiVpFluidImpulseY << ','
+                     << -raw.chiVpFluidImpulseX * invDt << ','
+                     << -raw.chiVpFluidImpulseY * invDt << '\n';
+        }
+    }
 
     CudaPersistentCollisionActiveRow row{};
     row.step = step;

@@ -126,6 +126,33 @@ CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c();
 CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b();
 CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d();
 
+// 0493x16j-fix1: run the chi material-wall crossing at the actual pre-stream
+// time level, independently of the selected species-Q6 branch.  The routine
+// reuses the resident x10n/Q2/x10p/q engine and leaves the shared particle
+// state resident for the CUDA streaming stage that follows.
+bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time);
+
+// Exact cell-resolved reaction impulse exerted on the chi material wall by
+// the latest x16j pre-stream crossing pass.
+bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
+    const double** deviceReactionX, const double** deviceReactionY, int* nx, int* ny);
+
+// 0493x16l: observation-only post-stream penetration diagnostic.  It samples
+// the same resident chi geometry with the x10 Q2 convention after the solid
+// has been synchronized to t+dt.  No particle state, force, or geometry is
+// modified.  Rows are written only on normal summary/audit steps.
+bool cuda_q6_record_chi_penetration_poststream_0493x16l(
+    ParticleState& state,
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double timePoststream);
+
 CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
     ParticleState& state,
     const SimulationParams& params);
@@ -154,6 +181,19 @@ inline CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
 }
 inline CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d() {
     return {};
+}
+inline bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
+    ParticleState&, const SimulationParams&, const CellGrid&, int, double) {
+    return false;
+}
+inline bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
+    const double** x, const double** y, int* nx, int* ny) {
+    if (x) *x = nullptr; if (y) *y = nullptr; if (nx) *nx = 0; if (ny) *ny = 0;
+    return false;
+}
+inline bool cuda_q6_record_chi_penetration_poststream_0493x16l(
+    ParticleState&, const SimulationParams&, const CellGrid&, int, double) {
+    return false;
 }
 inline CudaQ6ForceKick0493x3Diagnostics try_apply_cuda_q6_force_kick_0493x3(
     ParticleState&, const SimulationParams&) {

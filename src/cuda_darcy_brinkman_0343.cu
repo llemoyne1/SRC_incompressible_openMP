@@ -1,6 +1,7 @@
 #include "cuda_darcy_brinkman_0343.h"
 
 #include "cuda_shared_particle_state_0251.h"
+#include "cuda_chi_solid_0493x16e.h"
 
 #include <cuda_runtime.h>
 
@@ -34,7 +35,17 @@ struct DarcyWorkspace0343 {
     double* d_my = nullptr;
     // 0493x8a: 0..7 legacy, 8..9 continuous Darcy reaction proxy,
     // 10..11 exact deterministic mean-kick momentum increment.
+    // 0493x15a: 12..13 exact stochastic/bath momentum increment.
+    // 0493x16c: 14 fictitious mass, 15..16 fictitious momentum,
+    // 17..18 locked-to-solid reference momentum, 19 relative KE-like sum.
     double* d_sums = nullptr;
+    // 0493x16b: exact cell-resolved deterministic+bath fluid impulse.
+    double* d_cellFluidImpulseX0493x16b = nullptr;
+    double* d_cellFluidImpulseY0493x16b = nullptr;
+    // 0493x16g/x16h scratch. x16g: [capturedMass, rawBathIx, rawBathIy,
+    // correctionIx, correctionIy]. x16h: [capturedCellParticles,
+    // reinjectedParticles, reinjectedMass, sumAbsDx, reserved].
+    double* d_captureBathSums0493x16g = nullptr;
     double cumulativeMeanKickImpulseX0493x8a = 0.0;
     double cumulativeMeanKickImpulseY0493x8a = 0.0;
     std::uint64_t cumulativeMeanKickCalls0493x8a = 0u;
@@ -45,7 +56,19 @@ struct DarcyWorkspace0343 {
     float* d_lambda = nullptr;
     float* d_normalX = nullptr;
     float* d_normalY = nullptr;
+    // 0493x16a dynamic solid velocity fields. Static legacy paths keep using
+    // scalar darcyUSolidX/Y; these arrays are authoritative only when
+    // externalSolidFields0493x16a is true.
+    float* d_uSolidX = nullptr;
+    float* d_uSolidY = nullptr;
+    bool externalSolidFields0493x16a = false;
+    std::uint64_t externalGeometryVersion0493x16a = 0u;
     std::string fieldSignature;
+    // Geometry-state generation.  fieldSignature still guards parameter changes;
+    // geometryVersion additionally permits explicit invalidation when a future
+    // membrane/topology controller changes chi without changing its file name.
+    std::uint64_t geometryVersion0493x15a = 1u;
+    std::uint64_t builtGeometryVersion0493x15a = 0u;
 };
 
 DarcyWorkspace0343& workspace_0343() {
@@ -54,16 +77,23 @@ DarcyWorkspace0343& workspace_0343() {
 }
 
 void free_workspace_0343(DarcyWorkspace0343& w) {
+    const std::uint64_t geometryVersion0493x15a = w.geometryVersion0493x15a;
     cudaFree(w.d_mass);
     cudaFree(w.d_mx);
     cudaFree(w.d_my);
     cudaFree(w.d_sums);
+    cudaFree(w.d_cellFluidImpulseX0493x16b);
+    cudaFree(w.d_cellFluidImpulseY0493x16b);
+    cudaFree(w.d_captureBathSums0493x16g);
     cudaFree(w.d_chi);
     cudaFree(w.d_alpha);
     cudaFree(w.d_lambda);
     cudaFree(w.d_normalX);
     cudaFree(w.d_normalY);
+    cudaFree(w.d_uSolidX);
+    cudaFree(w.d_uSolidY);
     w = DarcyWorkspace0343{};
+    w.geometryVersion0493x15a = geometryVersion0493x15a > 0u ? geometryVersion0493x15a : 1u;
 }
 
 void check_cuda_0343(cudaError_t err, const char* what) {
@@ -75,7 +105,9 @@ void check_cuda_0343(cudaError_t err, const char* what) {
 bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     if (nx <= 0 || ny <= 0) return false;
     if (w.nx == nx && w.ny == ny && w.d_mass && w.d_mx && w.d_my && w.d_sums &&
-        w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY) return true;
+        w.d_cellFluidImpulseX0493x16b && w.d_cellFluidImpulseY0493x16b &&
+        w.d_captureBathSums0493x16g && w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY &&
+        w.d_uSolidX && w.d_uSolidY) return true;
     free_workspace_0343(w);
     w.nx = nx;
     w.ny = ny;
@@ -84,12 +116,17 @@ bool ensure_workspace_0343(DarcyWorkspace0343& w, int nx, int ny) {
     ok = ok && cudaMalloc(&w.d_mass, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_mx, ncell * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_my, ncell * sizeof(double)) == cudaSuccess;
-    ok = ok && cudaMalloc(&w.d_sums, 12u * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_sums, 20u * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_cellFluidImpulseX0493x16b, ncell * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_cellFluidImpulseY0493x16b, ncell * sizeof(double)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_captureBathSums0493x16g, 5u * sizeof(double)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_chi, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_alpha, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_lambda, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_normalX, ncell * sizeof(float)) == cudaSuccess;
     ok = ok && cudaMalloc(&w.d_normalY, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_uSolidX, ncell * sizeof(float)) == cudaSuccess;
+    ok = ok && cudaMalloc(&w.d_uSolidY, ncell * sizeof(float)) == cudaSuccess;
     if (!ok) {
         free_workspace_0343(w);
         return false;
@@ -102,6 +139,11 @@ bool env_truthy_0343(const char* name) {
     if (v == nullptr || *v == '\0') return false;
     const std::string s(v);
     return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF" || s == "no" || s == "NO");
+}
+
+std::string env_string_0493x16i(const char* name) {
+    const char* v = std::getenv(name);
+    return (v && *v) ? std::string(v) : std::string();
 }
 
 double seconds_since_0343(Clock0343::time_point t0) {
@@ -304,29 +346,48 @@ bool ensure_darcy_fields_0345(DarcyWorkspace0343& w, const SimulationParams& p, 
     const int ny = p.Ny;
     const int ncell = nx * ny;
     if (nx <= 0 || ny <= 0 || ncell <= 0) return false;
-    const std::string sig = darcy_field_signature_0345(p);
-    if (w.fieldSignature == sig && w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY) return true;
+    std::string sig;
+    if (w.externalSolidFields0493x16a) {
+        std::ostringstream ss;
+        ss << std::setprecision(17) << "external0493x16a|" << nx << '|' << ny << '|'
+           << w.externalGeometryVersion0493x16a << '|'
+           << p.darcyAlphaMin << '|' << p.darcyAlphaMax << '|' << p.darcyQ << '|' << p.dt;
+        sig = ss.str();
+    } else {
+        sig = darcy_field_signature_0345(p);
+    }
+    if (w.fieldSignature == sig &&
+        w.builtGeometryVersion0493x15a == w.geometryVersion0493x15a &&
+        w.d_chi && w.d_alpha && w.d_lambda && w.d_normalX && w.d_normalY) return true;
     const int blocks = (ncell + threads - 1) / threads;
-    const int chiMode = chi_mode_code_0343(p.darcyChiMode);
-    if (chiMode == 3) {
-        const auto chi = load_chi_file_host_0345(p, static_cast<std::size_t>(ncell));
-        check_cuda_0343(cudaMemcpy(w.d_chi, chi.data(), chi.size() * sizeof(float), cudaMemcpyHostToDevice), "upload chi file");
+    if (w.externalSolidFields0493x16a) {
+        // chi and u_s were already uploaded by the solid geometry provider.
+        // Rebuild only the fluid-side derived fields.
         precompute_alpha_lambda_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda, ncell,
                                                                          p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt);
     } else {
-        precompute_darcy_fields_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda,
-                                                                 nx, ny, p.Lx, p.Ly,
-                                                                 chiMode, p.darcyUniformChi,
-                                                                 p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt,
-                                                                 p.darcyCircleCx, p.darcyCircleCy, p.darcyCircleR,
-                                                                 p.darcyBoxXMin, p.darcyBoxXMax,
-                                                                 p.darcyBoxYMin, p.darcyBoxYMax,
-                                                                 p.darcyInterfaceWidth);
+        const int chiMode = chi_mode_code_0343(p.darcyChiMode);
+        if (chiMode == 3) {
+            const auto chi = load_chi_file_host_0345(p, static_cast<std::size_t>(ncell));
+            check_cuda_0343(cudaMemcpy(w.d_chi, chi.data(), chi.size() * sizeof(float), cudaMemcpyHostToDevice), "upload chi file");
+            precompute_alpha_lambda_from_chi_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda, ncell,
+                                                                             p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt);
+        } else {
+            precompute_darcy_fields_kernel_0345<<<blocks, threads>>>(w.d_chi, w.d_alpha, w.d_lambda,
+                                                                     nx, ny, p.Lx, p.Ly,
+                                                                     chiMode, p.darcyUniformChi,
+                                                                     p.darcyAlphaMin, p.darcyAlphaMax, p.darcyQ, p.dt,
+                                                                     p.darcyCircleCx, p.darcyCircleCy, p.darcyCircleR,
+                                                                     p.darcyBoxXMin, p.darcyBoxXMax,
+                                                                     p.darcyBoxYMin, p.darcyBoxYMax,
+                                                                     p.darcyInterfaceWidth);
+        }
     }
     precompute_darcy_normals_kernel_0419<<<blocks, threads>>>(w.d_chi, w.d_normalX, w.d_normalY,
                                                               nx, ny, p.Lx, p.Ly);
     check_cuda_0343(cudaDeviceSynchronize(), "precompute darcy chi/alpha/lambda/normals");
     w.fieldSignature = sig;
+    w.builtGeometryVersion0493x15a = w.geometryVersion0493x15a;
     return true;
 }
 
@@ -337,7 +398,7 @@ __global__ void reset_darcy_cells_kernel_0343(double* mass, double* mx, double* 
         mx[i] = 0.0;
         my[i] = 0.0;
     }
-    if (i < 12) sums[i] = 0.0;
+    if (i < 20) sums[i] = 0.0;
 }
 
 __global__ void deposit_darcy_moments_kernel_0343(CudaParticleDeviceView pv,
@@ -368,6 +429,10 @@ __global__ void deposit_darcy_moments_kernel_0343(CudaParticleDeviceView pv,
     atomicAdd(&myGrid[c], m * pv.vy[i]);
 }
 
+__device__ double solid_velocity_component_0493x16a(const float* field, int c, double fallback) {
+    return field ? static_cast<double>(field[c]) : fallback;
+}
+
 __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
                                                     const double* mxGrid,
                                                     const double* myGrid,
@@ -376,10 +441,16 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
                                                     const float* chiField,
                                                     const float* alphaField,
                                                     const float* lambdaField,
+                                                    const float* uSolidXField,
+                                                    const float* uSolidYField,
                                                     double uSolidX,
                                                     double uSolidY,
                                                     int forceEnable,
-                                                    int exactMomentumEnable0493x8a) {
+                                                    int exactMomentumEnable0493x8a,
+                                                    double* cellFluidImpulseX0493x16b,
+                                                    double* cellFluidImpulseY0493x16b,
+                                                    int collectCellImpulse0493x16b,
+                                                    int includeMeanKick0493x16b) {
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
     const int ncell = nx * ny;
     if (c >= ncell) return;
@@ -387,11 +458,15 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
     const double alpha = alphaField ? static_cast<double>(alphaField[c]) : 0.0;
     const double m = massGrid[c];
     double rel2 = 0.0;
+    double detIx0493x16b = 0.0;
+    double detIy0493x16b = 0.0;
     if (m > 0.0) {
         const double ux = mxGrid[c] / m;
         const double uy = myGrid[c] / m;
-        const double rx = ux - uSolidX;
-        const double ry = uy - uSolidY;
+        const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+        const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+        const double rx = ux - usx;
+        const double ry = uy - usy;
         rel2 = rx * rx + ry * ry;
         atomicAdd(&sums[0], m);
         atomicAdd(&sums[1], m * chi);
@@ -413,12 +488,70 @@ __global__ void diagnostics_darcy_cells_kernel_0343(const double* massGrid,
             // -M_cell*lambda_c*(u_cell-u_s), up to reduction roundoff.
             const double lambda =
                 lambdaField ? static_cast<double>(lambdaField[c]) : 0.0;
-            atomicAdd(&sums[10], -m * lambda * rx);
-            atomicAdd(&sums[11], -m * lambda * ry);
+            detIx0493x16b = -m * lambda * rx;
+            detIy0493x16b = -m * lambda * ry;
+            atomicAdd(&sums[10], detIx0493x16b);
+            atomicAdd(&sums[11], detIy0493x16b);
         }
+    }
+    if (collectCellImpulse0493x16b && cellFluidImpulseX0493x16b && cellFluidImpulseY0493x16b) {
+        cellFluidImpulseX0493x16b[c] = includeMeanKick0493x16b ? detIx0493x16b : 0.0;
+        cellFluidImpulseY0493x16b[c] = includeMeanKick0493x16b ? detIy0493x16b : 0.0;
     }
     atomicAdd(&sums[6], chi);
     atomicAdd(&sums[7], alpha);
+}
+
+__global__ void diagnostics_fictitious_fluid_particles_0493x16c(
+    CudaParticleDeviceView pv,
+    int nx, int ny,
+    double Lx, double Ly,
+    const float* chiField,
+    const float* exactSolidFraction0493x16k,
+    const float* uSolidXField,
+    const float* uSolidYField,
+    double uSolidX,
+    double uSolidY,
+    unsigned char fluidRole,
+    double* sums) {
+    const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= pv.n) return;
+    if (pv.role && pv.role[i] != fluidRole) return;
+    double x = pv.x[i];
+    double y = pv.y[i];
+    if (!isfinite(x) || !isfinite(y)) return;
+    const double invLx = Lx > 0.0 ? 1.0 / Lx : 1.0;
+    const double invLy = Ly > 0.0 ? 1.0 / Ly : 1.0;
+    x -= floor(x * invLx) * Lx;
+    y -= floor(y * invLy) * Ly;
+    int ix = static_cast<int>(floor(x * invLx * nx));
+    int iy = static_cast<int>(floor(y * invLy * ny));
+    ix = max(0, min(nx - 1, ix));
+    iy = max(0, min(ny - 1, iy));
+    const int c = iy * nx + ix;
+    const double chi = chiField ? static_cast<double>(chiField[c]) : 1.0;
+    // 0493x16k: when chi is a kinetic level field, preserve the x16c
+    // diagnostic as an actual occupied-volume measure by using the existing
+    // resident solidFraction buffer. Historical/non-kinetic paths still use
+    // 1-chi exactly as before.
+    const double ws = exactSolidFraction0493x16k
+        ? fmin(1.0, fmax(0.0, static_cast<double>(exactSolidFraction0493x16k[c])))
+        : fmin(1.0, fmax(0.0, 1.0 - chi));
+    if (!(ws > 0.0)) return;
+    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+    const double vx = pv.vx[i];
+    const double vy = pv.vy[i];
+    const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+    const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+    const double mw = m * ws;
+    const double rx = vx - usx;
+    const double ry = vy - usy;
+    atomicAdd(&sums[14], mw);
+    atomicAdd(&sums[15], mw * vx);
+    atomicAdd(&sums[16], mw * vy);
+    atomicAdd(&sums[17], mw * usx);
+    atomicAdd(&sums[18], mw * usy);
+    atomicAdd(&sums[19], mw * (rx * rx + ry * ry));
 }
 
 __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
@@ -428,6 +561,8 @@ __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
                                              int nx, int ny,
                                              double Lx, double Ly,
                                              const float* lambdaField,
+                                             const float* uSolidXField,
+                                             const float* uSolidYField,
                                              double uSolidX,
                                              double uSolidY,
                                              unsigned char fluidRole) {
@@ -451,8 +586,10 @@ __global__ void apply_darcy_kick_kernel_0343(CudaParticleDeviceView pv,
     const double ux = mxGrid[c] / m;
     const double uy = myGrid[c] / m;
     const double lambda = lambdaField ? static_cast<double>(lambdaField[c]) : 0.0;
-    const double dvx = -lambda * (ux - uSolidX);
-    const double dvy = -lambda * (uy - uSolidY);
+    const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+    const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+    const double dvx = -lambda * (ux - usx);
+    const double dvy = -lambda * (uy - usy);
     pv.vx[i] += dvx;
     pv.vy[i] += dvy;
 }
@@ -480,12 +617,19 @@ __global__ void apply_darcy_thermal_bath_kernel_0418(CudaParticleDeviceView pv,
                                                      int nx, int ny,
                                                      double Lx, double Ly,
                                                      const float* lambdaField,
+                                                     const float* uSolidXField,
+                                                     const float* uSolidYField,
                                                      double uSolidX,
                                                      double uSolidY,
                                                      double wallKBT,
                                                      unsigned long long step,
                                                      unsigned long long rngSeed,
-                                                     unsigned char fluidRole) {
+                                                     unsigned char fluidRole,
+                                                     double* impulseSums0493x15a,
+                                                     int collectImpulse0493x15a,
+                                                     double* cellFluidImpulseX0493x16b,
+                                                     double* cellFluidImpulseY0493x16b,
+                                                     int collectCellImpulse0493x16b) {
     const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= pv.n) return;
     if (pv.role && pv.role[i] != fluidRole) return;
@@ -505,6 +649,7 @@ __global__ void apply_darcy_thermal_bath_kernel_0418(CudaParticleDeviceView pv,
     if (!(strength > 0.0)) return;
     const double a = 1.0 - strength; // exp(-alpha dt), because lambdaField stores 1-exp(-alpha dt).
     const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+
     const double thermalVariance = fmax(0.0, 1.0 - a * a) * fmax(0.0, wallKBT) / m;
     const double sigma = sqrt(thermalVariance);
     const unsigned long long base = (step + 1ull) * 0xD1B54A32D192ED03ull ^
@@ -512,8 +657,61 @@ __global__ void apply_darcy_thermal_bath_kernel_0418(CudaParticleDeviceView pv,
                                     (rngSeed + 1ull) * 0xBF58476D1CE4E5B9ull;
     const double nx0 = sigma > 0.0 ? normal01_0418(base ^ 0xA24BAED4963EE407ull, base ^ 0x9FB21C651E98DF25ull) : 0.0;
     const double ny0 = sigma > 0.0 ? normal01_0418(base ^ 0xC2B2AE3D27D4EB4Full, base ^ 0x165667B19E3779F9ull) : 0.0;
-    pv.vx[i] = uSolidX + a * (pv.vx[i] - uSolidX) + sigma * nx0;
-    pv.vy[i] = uSolidY + a * (pv.vy[i] - uSolidY) + sigma * ny0;
+    const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+    const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+    const double vx0 = pv.vx[i];
+    const double vy0 = pv.vy[i];
+    const double vx1 = usx + a * (vx0 - usx) + sigma * nx0;
+    const double vy1 = usy + a * (vy0 - usy) + sigma * ny0;
+    pv.vx[i] = vx1;
+    pv.vy[i] = vy1;
+    const double dpx0493x16b = m * (vx1 - vx0);
+    const double dpy0493x16b = m * (vy1 - vy0);
+    if (collectImpulse0493x15a && impulseSums0493x15a) {
+        atomicAdd(&impulseSums0493x15a[12], dpx0493x16b);
+        atomicAdd(&impulseSums0493x15a[13], dpy0493x16b);
+    }
+    if (collectCellImpulse0493x16b && cellFluidImpulseX0493x16b && cellFluidImpulseY0493x16b) {
+        atomicAdd(&cellFluidImpulseX0493x16b[c], dpx0493x16b);
+        atomicAdd(&cellFluidImpulseY0493x16b[c], dpy0493x16b);
+    }
+}
+
+__device__ double periodic_delta_0493x16i(double x, double c, double L) {
+    double d = x - c;
+    if (L > 0.0) d -= nearbyint(d / L) * L;
+    return d;
+}
+
+__device__ double centerline_0493x16i(
+    double globalCenter, double y, double Ly,
+    double amplitude, double omega, double time) {
+    if (!(Ly > 0.0) || amplitude == 0.0 || omega == 0.0) return globalCenter;
+    const double pi = 3.141592653589793238462643383279502884;
+    const double ky = 2.0 * pi / Ly;
+    return globalCenter + amplitude * sin(ky * y) * sin(omega * time);
+}
+
+__device__ double signed_inside_0493x16i(
+    double x, double y, double globalCenter, double half,
+    double Lx, double Ly, double amplitude, double omega, double time) {
+    const double c = centerline_0493x16i(globalCenter, y, Ly, amplitude, omega, time);
+    return fabs(periodic_delta_0493x16i(x, c, Lx)) - half;
+}
+
+__device__ double reflect_x_outside_deformable_0493x16i(
+    double x, double y, double globalCenter, double half,
+    double Lx, double Ly, double amplitude, double omega, double time) {
+    const double c = centerline_0493x16i(globalCenter, y, Ly, amplitude, omega, time);
+    double d = periodic_delta_0493x16i(x, c, Lx);
+    const double side = d >= 0.0 ? 1.0 : -1.0;
+    const double depth = fmax(0.0, half - fabs(d));
+    double xNew = x + 2.0 * side * depth;
+    if (depth <= 0.0) return x;
+    xNew -= floor(xNew / Lx) * Lx;
+    if (xNew >= Lx) xNew -= Lx;
+    if (xNew < 0.0) xNew += Lx;
+    return xNew;
 }
 
 __global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
@@ -522,12 +720,28 @@ __global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
                                                      const float* lambdaField,
                                                      const float* normalXField,
                                                      const float* normalYField,
+                                                     const float* uSolidXField,
+                                                     const float* uSolidYField,
                                                      double uSolidX,
                                                      double uSolidY,
                                                      double wallKBT,
                                                      unsigned long long step,
                                                      unsigned long long rngSeed,
-                                                     unsigned char fluidRole) {
+                                                     unsigned char fluidRole,
+                                                     double* impulseSums0493x15a,
+                                                     int collectImpulse0493x15a,
+                                                     double* cellFluidImpulseX0493x16b,
+                                                     double* cellFluidImpulseY0493x16b,
+                                                     int collectCellImpulse0493x16b,
+                                                     const unsigned char* newlySolidMask0493x16g,
+                                                     double* captureBathSums0493x16g,
+                                                     int collectCaptureBath0493x16g,
+                                                     int spatialReinject0493x16h,
+                                                     int exclusionMode0493x16i,
+                                                     const double* deformableState0493x16i,
+                                                     double deformAmplitude0493x16i,
+                                                     double deformOmega0493x16i,
+                                                     double dt0493x16i) {
     const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i >= pv.n) return;
     if (pv.role && pv.role[i] != fluidRole) return;
@@ -543,10 +757,95 @@ __global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
     ix = max(0, min(nx - 1, ix));
     iy = max(0, min(ny - 1, iy));
     const int c = iy * nx + ix;
+    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
     const double strength = lambdaField ? fmin(1.0, fmax(0.0, static_cast<double>(lambdaField[c]))) : 0.0;
+
+    // 0493x16i prescribed-deformable strict-exclusion comparison.  The remap
+    // is evaluated BEFORE the binary Darcy strength check so swept-geometry
+    // mode can act continuously in a cut cell whose center is still fluid.
+    if (exclusionMode0493x16i > 0 && deformableState0493x16i && captureBathSums0493x16g) {
+        const double globalCenterNew = deformableState0493x16i[0];
+        const double globalVelocity = deformableState0493x16i[1];
+        const double half = 0.5 * deformableState0493x16i[3];
+        const double tNew = (static_cast<double>(step) + 1.0) * dt0493x16i;
+        const double tOld = static_cast<double>(step) * dt0493x16i;
+        double globalCenterOld = globalCenterNew - dt0493x16i * globalVelocity;
+        globalCenterOld -= floor(globalCenterOld / Lx) * Lx;
+        if (globalCenterOld >= Lx) globalCenterOld -= Lx;
+        if (globalCenterOld < 0.0) globalCenterOld += Lx;
+        const double sdNew = signed_inside_0493x16i(
+            x, y, globalCenterNew, half, Lx, Ly,
+            deformAmplitude0493x16i, deformOmega0493x16i, tNew);
+        bool candidate = false;
+        if (exclusionMode0493x16i == 1) {
+            candidate = newlySolidMask0493x16g && newlySolidMask0493x16g[c] && sdNew <= 0.0;
+        } else if (exclusionMode0493x16i == 2) {
+            const double sdOld = signed_inside_0493x16i(
+                x, y, globalCenterOld, half, Lx, Ly,
+                deformAmplitude0493x16i, deformOmega0493x16i, tOld);
+            // Continuous-occupancy exclusion: in a cut cell whose center is
+            // still fluid, exclude every particle geometrically inside the
+            // solid; once the center is solid, only the newly swept subset is
+            // remapped and the historical bath handles the established interior.
+            candidate = (sdNew <= 0.0) && ((strength <= 0.0) || (sdOld > 0.0));
+        }
+        if (candidate) {
+            atomicAdd(&captureBathSums0493x16g[0], 1.0);
+            const double xNew = reflect_x_outside_deformable_0493x16i(
+                x, y, globalCenterNew, half, Lx, Ly,
+                deformAmplitude0493x16i, deformOmega0493x16i, tNew);
+            double dd = xNew - x;
+            dd -= nearbyint(dd * invLx) * Lx;
+            if (fabs(dd) > 0.0) {
+                pv.x[i] = xNew;
+                atomicAdd(&captureBathSums0493x16g[1], 1.0);
+                atomicAdd(&captureBathSums0493x16g[2], m);
+                atomicAdd(&captureBathSums0493x16g[3], fabs(dd));
+            }
+            return;
+        }
+    }
+
     if (!(strength > 0.0)) return;
     const double a = 1.0 - strength; // exp(-alpha dt), because lambdaField stores 1-exp(-alpha dt).
-    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+
+    // 0493x16h common-translation ablation. If this particle lies in a cell
+    // that has just changed from fluid to solid because the historical binary
+    // mask moved, remap it immediately across the OUTWARD binary cell face.
+    // This is a local position-only operation: no collective reduction, no
+    // velocity change and therefore no momentum impulse. The particle bypasses
+    // the outward bath on this capture step. The historical path is bitwise
+    // unchanged when the gate is off or the mask did not move.
+    if (spatialReinject0493x16h && newlySolidMask0493x16g &&
+        captureBathSums0493x16g && newlySolidMask0493x16g[c]) {
+        atomicAdd(&captureBathSums0493x16g[0], 1.0);
+        const double rawNx = normalXField ? static_cast<double>(normalXField[c]) : 0.0;
+        if (fabs(rawNx) > 1.0e-12) {
+            const double dx = Lx / static_cast<double>(max(1, nx));
+            const double cellLo = static_cast<double>(ix) * dx;
+            const double cellHi = cellLo + dx;
+            const double eps = fmax(1.0e-14 * fmax(1.0, Lx), 1.0e-12 * dx);
+            double xNew = x;
+            if (rawNx > 0.0) {
+                const double depth = fmax(0.0, cellHi - x);
+                xNew = cellHi + fmax(depth, eps);
+            } else {
+                const double depth = fmax(0.0, x - cellLo);
+                xNew = cellLo - fmax(depth, eps);
+            }
+            xNew -= floor(xNew * invLx) * Lx;
+            if (xNew >= Lx) xNew -= Lx;
+            if (xNew < 0.0) xNew += Lx;
+            double dd = xNew - x;
+            dd -= nearbyint(dd * invLx) * Lx;
+            pv.x[i] = xNew;
+            atomicAdd(&captureBathSums0493x16g[1], 1.0);
+            atomicAdd(&captureBathSums0493x16g[2], m);
+            atomicAdd(&captureBathSums0493x16g[3], fabs(dd));
+        }
+        return;
+    }
+
     const double thermalVariance = fmax(0.0, 1.0 - a * a) * fmax(0.0, wallKBT) / m;
     const double sigma = sqrt(thermalVariance);
     const unsigned long long base = (step + 1ull) * 0xA0761D6478BD642Full ^
@@ -559,16 +858,40 @@ __global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
     if (!(nn > 1.0e-12)) {
         const double gx = sigma > 0.0 ? normal01_0418(base ^ 0xA24BAED4963EE407ull, base ^ 0x9FB21C651E98DF25ull) : 0.0;
         const double gy = sigma > 0.0 ? normal01_0418(base ^ 0xC2B2AE3D27D4EB4Full, base ^ 0x165667B19E3779F9ull) : 0.0;
-        pv.vx[i] = uSolidX + a * (pv.vx[i] - uSolidX) + sigma * gx;
-        pv.vy[i] = uSolidY + a * (pv.vy[i] - uSolidY) + sigma * gy;
+        const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+        const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+        const double vx0 = pv.vx[i];
+        const double vy0 = pv.vy[i];
+        const double vx1 = usx + a * (vx0 - usx) + sigma * gx;
+        const double vy1 = usy + a * (vy0 - usy) + sigma * gy;
+        pv.vx[i] = vx1;
+        pv.vy[i] = vy1;
+        const double dpx0493x16b = m * (vx1 - vx0);
+        const double dpy0493x16b = m * (vy1 - vy0);
+        if (collectImpulse0493x15a && impulseSums0493x15a) {
+            atomicAdd(&impulseSums0493x15a[12], dpx0493x16b);
+            atomicAdd(&impulseSums0493x15a[13], dpy0493x16b);
+        }
+        if (collectCellImpulse0493x16b && cellFluidImpulseX0493x16b && cellFluidImpulseY0493x16b) {
+            atomicAdd(&cellFluidImpulseX0493x16b[c], dpx0493x16b);
+            atomicAdd(&cellFluidImpulseY0493x16b[c], dpy0493x16b);
+        }
+        if (collectCaptureBath0493x16g && newlySolidMask0493x16g && captureBathSums0493x16g &&
+            newlySolidMask0493x16g[c]) {
+            atomicAdd(&captureBathSums0493x16g[0], m);
+            atomicAdd(&captureBathSums0493x16g[1], dpx0493x16b);
+            atomicAdd(&captureBathSums0493x16g[2], dpy0493x16b);
+        }
         return;
     }
     nxn /= nn;
     nyn /= nn;
     const double tx = -nyn;
     const double ty = nxn;
-    const double relx = pv.vx[i] - uSolidX;
-    const double rely = pv.vy[i] - uSolidY;
+    const double usx = solid_velocity_component_0493x16a(uSolidXField, c, uSolidX);
+    const double usy = solid_velocity_component_0493x16a(uSolidYField, c, uSolidY);
+    const double relx = pv.vx[i] - usx;
+    const double rely = pv.vy[i] - usy;
     const double vn = relx * nxn + rely * nyn;
     const double vt = relx * tx + rely * ty;
     const double gn = sigma > 0.0 ? normal01_0418(base ^ 0xD6E8FEB86659FD93ull, base ^ 0xCA5A826395121157ull) : 0.0;
@@ -579,8 +902,86 @@ __global__ void apply_darcy_outward_bath_kernel_0419(CudaParticleDeviceView pv,
     const double vnTrial = a * vn + sigma * gn;
     const double vnOut = fabs(vnTrial);
     const double vtOut = a * vt + sigma * gt;
-    pv.vx[i] = uSolidX + vnOut * nxn + vtOut * tx;
-    pv.vy[i] = uSolidY + vnOut * nyn + vtOut * ty;
+    const double vx0 = pv.vx[i];
+    const double vy0 = pv.vy[i];
+    const double vx1 = usx + vnOut * nxn + vtOut * tx;
+    const double vy1 = usy + vnOut * nyn + vtOut * ty;
+    pv.vx[i] = vx1;
+    pv.vy[i] = vy1;
+    const double dpx0493x16b = m * (vx1 - vx0);
+    const double dpy0493x16b = m * (vy1 - vy0);
+    if (collectImpulse0493x15a && impulseSums0493x15a) {
+        atomicAdd(&impulseSums0493x15a[12], dpx0493x16b);
+        atomicAdd(&impulseSums0493x15a[13], dpy0493x16b);
+    }
+    if (collectCellImpulse0493x16b && cellFluidImpulseX0493x16b && cellFluidImpulseY0493x16b) {
+        atomicAdd(&cellFluidImpulseX0493x16b[c], dpx0493x16b);
+        atomicAdd(&cellFluidImpulseY0493x16b[c], dpy0493x16b);
+    }
+    if (collectCaptureBath0493x16g && newlySolidMask0493x16g && captureBathSums0493x16g &&
+        newlySolidMask0493x16g[c]) {
+        atomicAdd(&captureBathSums0493x16g[0], m);
+        atomicAdd(&captureBathSums0493x16g[1], dpx0493x16b);
+        atomicAdd(&captureBathSums0493x16g[2], dpy0493x16b);
+    }
+}
+
+// 0493x16g diagnostic ablation.  The historical bath is applied first.  For
+// particles in cells newly swallowed by the moving binary mask, remove only
+// the collective x-velocity increment J_bath,x/M_capture associated with the
+// slab translation DOF. This preserves all particle-to-particle bath fluctuations
+// and leaves the transverse bath component untouched. The correction is included in the exact bath
+// and cell-resolved impulse accounting, so action/reaction remains exact.
+__global__ void neutralize_newly_captured_bath_mean_0493x16g(
+    CudaParticleDeviceView pv,
+    int nx, int ny, double Lx, double Ly,
+    const unsigned char* newlySolidMask0493x16g,
+    const double* captureBathSums0493x16g,
+    unsigned char fluidRole,
+    double* impulseSums0493x15a,
+    int collectImpulse0493x15a,
+    double* cellFluidImpulseX0493x16b,
+    double* cellFluidImpulseY0493x16b,
+    int collectCellImpulse0493x16b,
+    double* captureCorrectionSums0493x16g) {
+    const unsigned long long i = static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= pv.n) return;
+    if (pv.role && pv.role[i] != fluidRole) return;
+    if (!newlySolidMask0493x16g || !captureBathSums0493x16g) return;
+    const double M = captureBathSums0493x16g[0];
+    if (!(M > 0.0)) return;
+    const double invLx = Lx > 0.0 ? 1.0 / Lx : 1.0;
+    const double invLy = Ly > 0.0 ? 1.0 / Ly : 1.0;
+    double x = pv.x[i];
+    double y = pv.y[i];
+    if (!isfinite(x) || !isfinite(y)) return;
+    x -= floor(x * invLx) * Lx;
+    y -= floor(y * invLy) * Ly;
+    int ix = static_cast<int>(floor(x * invLx * nx));
+    int iy = static_cast<int>(floor(y * invLy * ny));
+    ix = max(0, min(nx - 1, ix));
+    iy = max(0, min(ny - 1, iy));
+    const int c = iy * nx + ix;
+    if (!newlySolidMask0493x16g[c]) return;
+    const double m = (pv.mass && pv.mass[i] > 0.0) ? pv.mass[i] : 1.0;
+    const double dvx = -captureBathSums0493x16g[1] / M;
+    const double dvy = 0.0;
+    pv.vx[i] += dvx;
+    pv.vy[i] += dvy;
+    const double dpx = m * dvx;
+    const double dpy = m * dvy;
+    if (collectImpulse0493x15a && impulseSums0493x15a) {
+        atomicAdd(&impulseSums0493x15a[12], dpx);
+        atomicAdd(&impulseSums0493x15a[13], dpy);
+    }
+    if (collectCellImpulse0493x16b && cellFluidImpulseX0493x16b && cellFluidImpulseY0493x16b) {
+        atomicAdd(&cellFluidImpulseX0493x16b[c], dpx);
+        atomicAdd(&cellFluidImpulseY0493x16b[c], dpy);
+    }
+    if (captureCorrectionSums0493x16g) {
+        atomicAdd(&captureCorrectionSums0493x16g[3], dpx);
+        atomicAdd(&captureCorrectionSums0493x16g[4], dpy);
+    }
 }
 
 std::string darcy_csv_path_0343(const SimulationParams& params) {
@@ -713,6 +1114,171 @@ void append_darcy_csv_0343(const SimulationParams& params,
 
 } // namespace
 
+std::string chi_solid_impulse_csv_path_0493x15a(const SimulationParams& params) {
+    return (std::filesystem::path(params.outputDir) /
+            "chi_solid_impulse_0493x15a.csv").string();
+}
+
+void append_chi_solid_impulse_csv_0493x15a(
+    const SimulationParams& params,
+    std::uint64_t step,
+    double time,
+    const CudaDarcyBrinkman0343Diagnostics& d) {
+    if (!d.chiSolidImpulseDiagnostic) return;
+    const std::string path = chi_solid_impulse_csv_path_0493x15a(params);
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    if (!out) return;
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,time,geometryVersion,forcingMode,chiVpEnabled,impulseComplete,mass,dt,"
+               "detFluidImpulseX,detFluidImpulseY,stochFluidImpulseX,stochFluidImpulseY,"
+               "fluidImpulseX,fluidImpulseY,solidReactionImpulseX,solidReactionImpulseY,"
+               "solidReactionForceX,solidReactionForceY,continuousReactionProxyX,continuousReactionProxyY,"
+               "captureBathMeanNeutralization0493x16g,captureBathMass0493x16g,"
+               "captureBathRawFluidImpulseX0493x16g,captureBathRawFluidImpulseY0493x16g,"
+               "captureBathCorrectionFluidImpulseX0493x16g,captureBathCorrectionFluidImpulseY0493x16g,"
+               "captureBathResidualFluidImpulseX0493x16g,captureBathResidualFluidImpulseY0493x16g,"
+               "captureSpatialReinjection0493x16h,captureCellParticles0493x16h,"
+               "captureReinjectedParticles0493x16h,captureReinjectedMass0493x16h,"
+               "captureReinjectedMeanAbsDx0493x16h,"
+               "deformableExclusion0493x16i,deformableExclusionMode0493x16i,"
+               "exclusionCandidateParticles0493x16i,exclusionReinjectedParticles0493x16i,"
+               "exclusionReinjectedMass0493x16i,exclusionReinjectedMeanAbsDx0493x16i,"
+               "darcyTotalSeconds0493x16i\n";
+    }
+    out << step << ',' << time << ',' << d.chiGeometryVersion << ','
+        << params.darcyBrinkmanForcingMode << ','
+        << (params.darcyChiCollisionVpEnable ? 1 : 0) << ','
+        << (d.chiSolidImpulseComplete ? 1 : 0) << ','
+        << d.mass << ',' << params.dt << ','
+        << d.chiSolidDeterministicFluidImpulseX << ','
+        << d.chiSolidDeterministicFluidImpulseY << ','
+        << d.chiSolidStochasticFluidImpulseX << ','
+        << d.chiSolidStochasticFluidImpulseY << ','
+        << d.chiSolidFluidImpulseX << ',' << d.chiSolidFluidImpulseY << ','
+        << d.chiSolidReactionImpulseX << ',' << d.chiSolidReactionImpulseY << ','
+        << d.chiSolidReactionForceX << ',' << d.chiSolidReactionForceY << ','
+        << d.darcyForceX << ',' << d.darcyForceY << ','
+        << (d.captureBathMeanNeutralization0493x16g ? 1 : 0) << ','
+        << d.captureBathMass0493x16g << ','
+        << d.captureBathRawFluidImpulseX0493x16g << ','
+        << d.captureBathRawFluidImpulseY0493x16g << ','
+        << d.captureBathCorrectionFluidImpulseX0493x16g << ','
+        << d.captureBathCorrectionFluidImpulseY0493x16g << ','
+        << d.captureBathResidualFluidImpulseX0493x16g << ','
+        << d.captureBathResidualFluidImpulseY0493x16g << ','
+        << (d.captureSpatialReinjection0493x16h ? 1 : 0) << ','
+        << d.captureCellParticles0493x16h << ','
+        << d.captureReinjectedParticles0493x16h << ','
+        << d.captureReinjectedMass0493x16h << ','
+        << (d.captureReinjectedParticles0493x16h > 0.0 ?
+            d.captureReinjectedAbsDxSum0493x16h / d.captureReinjectedParticles0493x16h : 0.0) << ','
+        << (d.deformableExclusion0493x16i ? 1 : 0) << ','
+        << d.deformableExclusionMode0493x16i << ','
+        << d.exclusionCandidateParticles0493x16i << ','
+        << d.exclusionReinjectedParticles0493x16i << ','
+        << d.exclusionReinjectedMass0493x16i << ','
+        << (d.exclusionReinjectedParticles0493x16i > 0.0 ?
+            d.exclusionReinjectedAbsDxSum0493x16i / d.exclusionReinjectedParticles0493x16i : 0.0) << ','
+        << d.totalSeconds << '\n';
+}
+
+void cuda_darcy_brinkman_0343_mark_chi_dirty() {
+    auto& w = workspace_0343();
+    ++w.geometryVersion0493x15a;
+    if (w.geometryVersion0493x15a == 0u) w.geometryVersion0493x15a = 1u;
+    w.fieldSignature.clear();
+}
+
+std::uint64_t cuda_darcy_brinkman_0343_chi_geometry_version() {
+    return workspace_0343().geometryVersion0493x15a;
+}
+
+bool cuda_darcy_brinkman_0343_upload_external_solid_fields(
+    const float* hostChi,
+    const float* hostUSolidX,
+    const float* hostUSolidY,
+    int nx,
+    int ny,
+    std::uint64_t geometryVersion) {
+    if (!hostChi || !hostUSolidX || !hostUSolidY || nx <= 0 || ny <= 0) return false;
+    auto& w = workspace_0343();
+    if (!ensure_workspace_0343(w, nx, ny)) return false;
+    const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+    check_cuda_0343(cudaMemcpy(w.d_chi, hostChi, n * sizeof(float), cudaMemcpyHostToDevice),
+                    "upload x16a external chi");
+    check_cuda_0343(cudaMemcpy(w.d_uSolidX, hostUSolidX, n * sizeof(float), cudaMemcpyHostToDevice),
+                    "upload x16a external usx");
+    check_cuda_0343(cudaMemcpy(w.d_uSolidY, hostUSolidY, n * sizeof(float), cudaMemcpyHostToDevice),
+                    "upload x16a external usy");
+    w.externalSolidFields0493x16a = true;
+    w.externalGeometryVersion0493x16a = geometryVersion > 0u ? geometryVersion : 1u;
+    w.geometryVersion0493x15a = w.externalGeometryVersion0493x16a;
+    w.fieldSignature.clear();
+    return true;
+}
+
+bool cuda_darcy_brinkman_0343_resident_solid_field_storage_0493x16e(
+    int nx, int ny, std::uint64_t geometryVersion,
+    float** deviceChi, float** deviceUSolidX, float** deviceUSolidY) {
+    if (deviceChi) *deviceChi = nullptr;
+    if (deviceUSolidX) *deviceUSolidX = nullptr;
+    if (deviceUSolidY) *deviceUSolidY = nullptr;
+    if (nx <= 0 || ny <= 0) return false;
+    auto& w = workspace_0343();
+    if (!ensure_workspace_0343(w, nx, ny)) return false;
+    w.externalSolidFields0493x16a = true;
+    w.externalGeometryVersion0493x16a = geometryVersion > 0u ? geometryVersion : 1u;
+    w.geometryVersion0493x15a = w.externalGeometryVersion0493x16a;
+    w.fieldSignature.clear();
+    if (deviceChi) *deviceChi = w.d_chi;
+    if (deviceUSolidX) *deviceUSolidX = w.d_uSolidX;
+    if (deviceUSolidY) *deviceUSolidY = w.d_uSolidY;
+    return w.d_chi && w.d_uSolidX && w.d_uSolidY;
+}
+
+bool cuda_darcy_brinkman_0343_device_cell_fluid_impulse_0493x16e(
+    const double** deviceImpulseX, const double** deviceImpulseY, int* nxOut, int* nyOut) {
+    if (deviceImpulseX) *deviceImpulseX = nullptr;
+    if (deviceImpulseY) *deviceImpulseY = nullptr;
+    if (nxOut) *nxOut = 0;
+    if (nyOut) *nyOut = 0;
+    auto& w = workspace_0343();
+    if (!w.d_cellFluidImpulseX0493x16b || !w.d_cellFluidImpulseY0493x16b ||
+        w.nx <= 0 || w.ny <= 0) return false;
+    if (deviceImpulseX) *deviceImpulseX = w.d_cellFluidImpulseX0493x16b;
+    if (deviceImpulseY) *deviceImpulseY = w.d_cellFluidImpulseY0493x16b;
+    if (nxOut) *nxOut = w.nx;
+    if (nyOut) *nyOut = w.ny;
+    return true;
+}
+
+bool cuda_darcy_brinkman_0343_device_solid_velocity_fields(
+    const SimulationParams& params,
+    const float** deviceUSolidX,
+    const float** deviceUSolidY,
+    int* nxOut,
+    int* nyOut) {
+    if (deviceUSolidX) *deviceUSolidX = nullptr;
+    if (deviceUSolidY) *deviceUSolidY = nullptr;
+    if (nxOut) *nxOut = 0;
+    if (nyOut) *nyOut = 0;
+    if (!params.darcyBrinkmanEnable) return false;
+    auto& w = workspace_0343();
+    const int nx = params.Nx;
+    const int ny = params.Ny;
+    const int threads = std::max(32, params.darcyThreadsPerBlock);
+    if (!ensure_workspace_0343(w, nx, ny)) return false;
+    if (!ensure_darcy_fields_0345(w, params, threads)) return false;
+    if (!w.externalSolidFields0493x16a || !w.d_uSolidX || !w.d_uSolidY) return false;
+    if (deviceUSolidX) *deviceUSolidX = w.d_uSolidX;
+    if (deviceUSolidY) *deviceUSolidY = w.d_uSolidY;
+    if (nxOut) *nxOut = nx;
+    if (nyOut) *nyOut = ny;
+    return true;
+}
+
 bool cuda_darcy_brinkman_0343_device_chi_field(
     const SimulationParams& params,
     const float** deviceChi,
@@ -752,8 +1318,11 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     if (!params.darcyBrinkmanEnable) return d;
     d.supported = true;
     d.speciesQ6Enable = params.speciesQ6Enable ? 1 : 0;
+    const bool chiSolidDiag0493x15a =
+        env_truthy_0343("MPCD_CHI_SOLID_IMPULSE_DIAG_0493X15A") || params.chiSolidDynamicsEnable;
     const bool exactMomentumDiag0493x8a =
-        env_truthy_0343("MPCD_DARCY_EXACT_MOMENTUM_DIAG_0493X8A");
+        env_truthy_0343("MPCD_DARCY_EXACT_MOMENTUM_DIAG_0493X8A") || chiSolidDiag0493x15a;
+    d.chiSolidImpulseDiagnostic = chiSolidDiag0493x15a;
     const int nx = params.Nx;
     const int ny = params.Ny;
     const int ncell = nx * ny;
@@ -791,6 +1360,9 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     if (!ensure_workspace_0343(w, nx, ny)) return d;
     const int threads = std::max(32, params.darcyThreadsPerBlock);
     if (!ensure_darcy_fields_0345(w, params, threads)) return d;
+    const float* uSolidXField0493x16a = w.externalSolidFields0493x16a ? w.d_uSolidX : nullptr;
+    const float* uSolidYField0493x16a = w.externalSolidFields0493x16a ? w.d_uSolidY : nullptr;
+    d.chiGeometryVersion = w.builtGeometryVersion0493x15a;
     const int cellBlocks = (ncell + threads - 1) / threads;
     const int particleBlocks = static_cast<int>((pv.n + static_cast<unsigned>(threads) - 1u) / static_cast<unsigned>(threads));
     const auto total0 = Clock0343::now();
@@ -809,15 +1381,30 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
 
     const bool topoBenchThisStep = topo_benchmark_write_step_0348(params, step);
     const bool topoBenchForceThisStep = topoBenchThisStep && params.topoBenchmarkForceEnable;
+    const bool collectCellImpulse0493x16b = params.chiSolidDynamicsEnable;
+    const bool pureThermalBath0493x16b = (params.darcyBrinkmanForcingMode == "thermal_bath" ||
+                                          params.darcyBrinkmanForcingMode == "thermalbath" ||
+                                          params.darcyBrinkmanForcingMode == "langevin" ||
+                                          params.darcyBrinkmanForcingMode == "ou");
+    const bool pureOutwardBath0493x16b = (params.darcyBrinkmanForcingMode == "outward_bath" ||
+                                          params.darcyBrinkmanForcingMode == "oriented_bath" ||
+                                          params.darcyBrinkmanForcingMode == "oriented_thermal_bath" ||
+                                          params.darcyBrinkmanForcingMode == "diffuse_reflection");
+    const bool includeMeanKick0493x16b = !pureThermalBath0493x16b && !pureOutwardBath0493x16b;
 
     t0 = Clock0343::now();
     diagnostics_darcy_cells_kernel_0343<<<cellBlocks, threads>>>(w.d_mass, w.d_mx, w.d_my, w.d_sums,
                                                                  nx, ny, w.d_chi, w.d_alpha, w.d_lambda,
+                                                                 uSolidXField0493x16a, uSolidYField0493x16a,
                                                                  params.darcyUSolidX, params.darcyUSolidY,
                                                                  topoBenchForceThisStep ? 1 : 0,
-                                                                 exactMomentumDiag0493x8a ? 1 : 0);
+                                                                 exactMomentumDiag0493x8a ? 1 : 0,
+                                                                 w.d_cellFluidImpulseX0493x16b,
+                                                                 w.d_cellFluidImpulseY0493x16b,
+                                                                 collectCellImpulse0493x16b ? 1 : 0,
+                                                                 includeMeanKick0493x16b ? 1 : 0);
     check_cuda_0343(cudaDeviceSynchronize(), "diagnostics cells");
-    double hSums[12]{};
+    double hSums[20]{};
     check_cuda_0343(cudaMemcpy(hSums, w.d_sums, sizeof(hSums), cudaMemcpyDeviceToHost), "copy diagnostics sums");
     d.diagnosticsSeconds = seconds_since_0343(t0);
 
@@ -837,6 +1424,57 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
         !thermalBath0418 && !outwardBath0419 && !meanOutwardBath0420;
     const bool meanKickApplied0493x8a = meanOnly0493x8a || meanOutwardBath0420;
     const bool wholeDarcyApply0493x8a = meanOnly0493x8a;
+
+    // x16g/x16h/x16i are mutually-exclusive experimental gates.  x16i
+    // compares two impermeable-exclusion remaps on a prescribed deformable
+    // geometry while leaving historical binary chi->alpha/Darcy untouched.
+    const bool captureBathMeanNeutralize0493x16g =
+        meanOutwardBath0420 && params.chiSolidDynamicsEnable &&
+        env_truthy_0343("SRC_X16G_CAPTURE_BATH_MEAN_NEUTRALIZE");
+    const bool captureSpatialReinject0493x16h =
+        meanOutwardBath0420 && params.chiSolidDynamicsEnable &&
+        env_truthy_0343("SRC_X16H_CAPTURE_SPATIAL_REINJECT");
+    int exclusionMode0493x16i = 0;
+    CudaPrescribedDeformableGeometry0493x16i deformGeom0493x16i{};
+    const std::string exclusionModeName0493x16i = env_string_0493x16i("SRC_X16I_IMPERMEABLE_EXCLUSION_MODE");
+    if (!exclusionModeName0493x16i.empty()) {
+        if (!meanOutwardBath0420 || !params.chiSolidDynamicsEnable) {
+            throw std::runtime_error("0493x16i exclusion comparison requires dynamic mean_outward_bath");
+        }
+        if (exclusionModeName0493x16i == "binary_event") exclusionMode0493x16i = 1;
+        else if (exclusionModeName0493x16i == "swept_geometry") exclusionMode0493x16i = 2;
+        else throw std::runtime_error("0493x16i unknown SRC_X16I_IMPERMEABLE_EXCLUSION_MODE");
+        if (!cuda_chi_solid_0493x16i_prescribed_geometry(&deformGeom0493x16i) ||
+            !deformGeom0493x16i.enabled || !deformGeom0493x16i.deviceState) {
+            throw std::runtime_error("0493x16i exclusion mode requires prescribed deformable resident geometry");
+        }
+        d.deformableExclusion0493x16i = true;
+        d.deformableExclusionMode0493x16i = exclusionMode0493x16i;
+    }
+    const int activeExperimentalGates0493x16i =
+        (captureBathMeanNeutralize0493x16g ? 1 : 0) +
+        (captureSpatialReinject0493x16h ? 1 : 0) +
+        (exclusionMode0493x16i > 0 ? 1 : 0);
+    if (activeExperimentalGates0493x16i > 1) {
+        throw std::runtime_error("0493x16g/x16h/x16i experimental gates are mutually exclusive");
+    }
+
+    const unsigned char* newlySolidMask0493x16g = nullptr;
+    if (captureBathMeanNeutralize0493x16g || captureSpatialReinject0493x16h || exclusionMode0493x16i == 1) {
+        int maskNx0493x16g = 0;
+        int maskNy0493x16g = 0;
+        if (!cuda_chi_solid_0493x16g_device_newly_solid_mask(
+                &newlySolidMask0493x16g, &maskNx0493x16g, &maskNy0493x16g) ||
+            !newlySolidMask0493x16g || maskNx0493x16g != nx || maskNy0493x16g != ny) {
+            throw std::runtime_error("0493x16i binary-event exclusion requires resident newly-solid mask");
+        }
+    }
+    if (activeExperimentalGates0493x16i > 0) {
+        check_cuda_0343(cudaMemset(w.d_captureBathSums0493x16g, 0, 5u * sizeof(double)),
+                        "reset x16g/x16h/x16i capture scratch");
+        d.captureBathMeanNeutralization0493x16g = captureBathMeanNeutralize0493x16g;
+        d.captureSpatialReinjection0493x16h = captureSpatialReinject0493x16h;
+    }
     if (exactMomentumDiag0493x8a && meanKickApplied0493x8a) {
         if (w.cumulativeMeanKickHasStep0493x8a &&
             step < w.cumulativeMeanKickLastStep0493x8a) {
@@ -857,29 +1495,91 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
         apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
                                                                   nx, ny, params.Lx, params.Ly,
                                                                   w.d_lambda,
+                                                                  uSolidXField0493x16a, uSolidYField0493x16a,
                                                                   params.darcyUSolidX, params.darcyUSolidY,
                                                                   static_cast<unsigned char>(kParticleRoleFluid));
         check_cuda_0343(cudaDeviceSynchronize(), "apply mean kick before outward bath");
         apply_darcy_outward_bath_kernel_0419<<<particleBlocks, threads>>>(pv,
                                                                           nx, ny, params.Lx, params.Ly,
                                                                           w.d_lambda, w.d_normalX, w.d_normalY,
+                                                                          uSolidXField0493x16a, uSolidYField0493x16a,
                                                                           params.darcyUSolidX, params.darcyUSolidY,
                                                                           wallKBT0418,
                                                                           static_cast<unsigned long long>(step),
                                                                           static_cast<unsigned long long>(params.rngSeed),
-                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+                                                                          static_cast<unsigned char>(kParticleRoleFluid),
+                                                                          w.d_sums, chiSolidDiag0493x15a ? 1 : 0,
+                                                                          w.d_cellFluidImpulseX0493x16b,
+                                                                          w.d_cellFluidImpulseY0493x16b,
+                                                                          collectCellImpulse0493x16b ? 1 : 0,
+                                                                          newlySolidMask0493x16g,
+                                                                          w.d_captureBathSums0493x16g,
+                                                                          captureBathMeanNeutralize0493x16g ? 1 : 0,
+                                                                          captureSpatialReinject0493x16h ? 1 : 0,
+                                                                          exclusionMode0493x16i,
+                                                                          deformGeom0493x16i.deviceState,
+                                                                          deformGeom0493x16i.amplitude,
+                                                                          deformGeom0493x16i.omega,
+                                                                          deformGeom0493x16i.dt);
         check_cuda_0343(cudaDeviceSynchronize(), "apply outward bath after mean kick");
+        if (captureBathMeanNeutralize0493x16g) {
+            neutralize_newly_captured_bath_mean_0493x16g<<<particleBlocks, threads>>>(
+                pv, nx, ny, params.Lx, params.Ly,
+                newlySolidMask0493x16g, w.d_captureBathSums0493x16g,
+                static_cast<unsigned char>(kParticleRoleFluid),
+                w.d_sums, chiSolidDiag0493x15a ? 1 : 0,
+                w.d_cellFluidImpulseX0493x16b, w.d_cellFluidImpulseY0493x16b,
+                collectCellImpulse0493x16b ? 1 : 0,
+                w.d_captureBathSums0493x16g);
+            check_cuda_0343(cudaDeviceSynchronize(), "x16g neutralize captured bath mean");
+            double capture0493x16g[5]{0.0, 0.0, 0.0, 0.0, 0.0};
+            check_cuda_0343(cudaMemcpy(capture0493x16g, w.d_captureBathSums0493x16g,
+                                       sizeof(capture0493x16g), cudaMemcpyDeviceToHost),
+                            "copy x16g capture-bath diagnostics");
+            d.captureBathMass0493x16g = capture0493x16g[0];
+            d.captureBathRawFluidImpulseX0493x16g = capture0493x16g[1];
+            d.captureBathRawFluidImpulseY0493x16g = capture0493x16g[2];
+            d.captureBathCorrectionFluidImpulseX0493x16g = capture0493x16g[3];
+            d.captureBathCorrectionFluidImpulseY0493x16g = capture0493x16g[4];
+            d.captureBathResidualFluidImpulseX0493x16g = capture0493x16g[1] + capture0493x16g[3];
+            d.captureBathResidualFluidImpulseY0493x16g = capture0493x16g[2] + capture0493x16g[4];
+        } else if (captureSpatialReinject0493x16h) {
+            double remap0493x16h[5]{0.0, 0.0, 0.0, 0.0, 0.0};
+            check_cuda_0343(cudaMemcpy(remap0493x16h, w.d_captureBathSums0493x16g,
+                                       sizeof(remap0493x16h), cudaMemcpyDeviceToHost),
+                            "copy x16h spatial-reinjection diagnostics");
+            d.captureCellParticles0493x16h = remap0493x16h[0];
+            d.captureReinjectedParticles0493x16h = remap0493x16h[1];
+            d.captureReinjectedMass0493x16h = remap0493x16h[2];
+            d.captureReinjectedAbsDxSum0493x16h = remap0493x16h[3];
+        } else if (exclusionMode0493x16i > 0) {
+            double remap0493x16i[5]{0.0, 0.0, 0.0, 0.0, 0.0};
+            check_cuda_0343(cudaMemcpy(remap0493x16i, w.d_captureBathSums0493x16g,
+                                       sizeof(remap0493x16i), cudaMemcpyDeviceToHost),
+                            "copy x16i deformable-exclusion diagnostics");
+            d.exclusionCandidateParticles0493x16i = remap0493x16i[0];
+            d.exclusionReinjectedParticles0493x16i = remap0493x16i[1];
+            d.exclusionReinjectedMass0493x16i = remap0493x16i[2];
+            d.exclusionReinjectedAbsDxSum0493x16i = remap0493x16i[3];
+        }
     } else if (outwardBath0419) {
         const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
                                    (params.wallVpKBT > 0.0 ? params.wallVpKBT : params.kBT);
         apply_darcy_outward_bath_kernel_0419<<<particleBlocks, threads>>>(pv,
                                                                           nx, ny, params.Lx, params.Ly,
                                                                           w.d_lambda, w.d_normalX, w.d_normalY,
+                                                                          uSolidXField0493x16a, uSolidYField0493x16a,
                                                                           params.darcyUSolidX, params.darcyUSolidY,
                                                                           wallKBT0418,
                                                                           static_cast<unsigned long long>(step),
                                                                           static_cast<unsigned long long>(params.rngSeed),
-                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+                                                                          static_cast<unsigned char>(kParticleRoleFluid),
+                                                                          w.d_sums, chiSolidDiag0493x15a ? 1 : 0,
+                                                                          w.d_cellFluidImpulseX0493x16b,
+                                                                          w.d_cellFluidImpulseY0493x16b,
+                                                                          collectCellImpulse0493x16b ? 1 : 0,
+                                                                          nullptr, nullptr, 0, 0,
+                                                                          0, nullptr, 0.0, 0.0, 0.0);
         check_cuda_0343(cudaDeviceSynchronize(), "apply outward bath");
     } else if (thermalBath0418) {
         const double wallKBT0418 = params.wallKBT > 0.0 ? params.wallKBT :
@@ -887,21 +1587,99 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
         apply_darcy_thermal_bath_kernel_0418<<<particleBlocks, threads>>>(pv,
                                                                           nx, ny, params.Lx, params.Ly,
                                                                           w.d_lambda,
+                                                                          uSolidXField0493x16a, uSolidYField0493x16a,
                                                                           params.darcyUSolidX, params.darcyUSolidY,
                                                                           wallKBT0418,
                                                                           static_cast<unsigned long long>(step),
                                                                           static_cast<unsigned long long>(params.rngSeed),
-                                                                          static_cast<unsigned char>(kParticleRoleFluid));
+                                                                          static_cast<unsigned char>(kParticleRoleFluid),
+                                                                          w.d_sums, chiSolidDiag0493x15a ? 1 : 0,
+                                                                          w.d_cellFluidImpulseX0493x16b,
+                                                                          w.d_cellFluidImpulseY0493x16b,
+                                                                          collectCellImpulse0493x16b ? 1 : 0);
         check_cuda_0343(cudaDeviceSynchronize(), "apply thermal bath");
     } else {
         apply_darcy_kick_kernel_0343<<<particleBlocks, threads>>>(pv, w.d_mass, w.d_mx, w.d_my,
                                                                   nx, ny, params.Lx, params.Ly,
                                                                   w.d_lambda,
+                                                                  uSolidXField0493x16a, uSolidYField0493x16a,
                                                                   params.darcyUSolidX, params.darcyUSolidY,
                                                                   static_cast<unsigned char>(kParticleRoleFluid));
         check_cuda_0343(cudaDeviceSynchronize(), "apply kick");
     }
     d.applySeconds = seconds_since_0343(t0);
+
+    if (params.chiSolidDynamicsEnable) {
+        const float* exactSolidFraction0493x16k = nullptr;
+        int solidFractionNx0493x16k = 0, solidFractionNy0493x16k = 0;
+        if (params.chiKineticBoundaryMode == "specular") {
+            if (!cuda_chi_solid_0493x16k_device_solid_fraction(
+                    &exactSolidFraction0493x16k,
+                    &solidFractionNx0493x16k, &solidFractionNy0493x16k) ||
+                solidFractionNx0493x16k != nx || solidFractionNy0493x16k != ny) {
+                throw std::runtime_error(
+                    "0493x16k missing resident exact solid-fraction diagnostic field");
+            }
+        }
+        diagnostics_fictitious_fluid_particles_0493x16c<<<particleBlocks, threads>>>(
+            pv, nx, ny, params.Lx, params.Ly, w.d_chi,
+            exactSolidFraction0493x16k,
+            uSolidXField0493x16a, uSolidYField0493x16a,
+            params.darcyUSolidX, params.darcyUSolidY,
+            static_cast<unsigned char>(kParticleRoleFluid), w.d_sums);
+        check_cuda_0343(cudaDeviceSynchronize(), "x16c fictitious-fluid diagnostic");
+        double fict0493x16c[6]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        check_cuda_0343(cudaMemcpy(fict0493x16c, w.d_sums + 14, 6u * sizeof(double),
+                                   cudaMemcpyDeviceToHost),
+                        "copy x16c fictitious-fluid diagnostic");
+        d.fictitiousFluidDiagnostic0493x16c = true;
+        d.fictitiousFluidMass0493x16c = fict0493x16c[0];
+        d.fictitiousFluidMomentumX0493x16c = fict0493x16c[1];
+        d.fictitiousFluidMomentumY0493x16c = fict0493x16c[2];
+        d.fictitiousLockedMomentumX0493x16c = fict0493x16c[3];
+        d.fictitiousLockedMomentumY0493x16c = fict0493x16c[4];
+        d.fictitiousRelativeMomentumX0493x16c = fict0493x16c[1] - fict0493x16c[3];
+        d.fictitiousRelativeMomentumY0493x16c = fict0493x16c[2] - fict0493x16c[4];
+        d.fictitiousRelativeVelocityRms0493x16c = fict0493x16c[0] > 0.0
+            ? sqrt(fmax(0.0, fict0493x16c[5] / fict0493x16c[0])) : 0.0;
+    }
+
+    if (chiSolidDiag0493x15a) {
+        double stochastic[2]{0.0, 0.0};
+        check_cuda_0343(cudaMemcpy(stochastic, w.d_sums + 12, 2u * sizeof(double),
+                                   cudaMemcpyDeviceToHost),
+                        "copy chi-solid stochastic impulse");
+        d.chiSolidDeterministicFluidImpulseX = meanKickApplied0493x8a ? hSums[10] : 0.0;
+        d.chiSolidDeterministicFluidImpulseY = meanKickApplied0493x8a ? hSums[11] : 0.0;
+        d.chiSolidStochasticFluidImpulseX = stochastic[0];
+        d.chiSolidStochasticFluidImpulseY = stochastic[1];
+        d.chiSolidFluidImpulseX = d.chiSolidDeterministicFluidImpulseX + d.chiSolidStochasticFluidImpulseX;
+        d.chiSolidFluidImpulseY = d.chiSolidDeterministicFluidImpulseY + d.chiSolidStochasticFluidImpulseY;
+        d.chiSolidReactionImpulseX = -d.chiSolidFluidImpulseX;
+        d.chiSolidReactionImpulseY = -d.chiSolidFluidImpulseY;
+        const double invDt0493x15a = params.dt > 0.0 ? 1.0 / params.dt : 0.0;
+        d.chiSolidReactionForceX = d.chiSolidReactionImpulseX * invDt0493x15a;
+        d.chiSolidReactionForceY = d.chiSolidReactionImpulseY * invDt0493x15a;
+        d.chiSolidImpulseComplete = !params.darcyChiCollisionVpEnable;
+    }
+
+    if (collectCellImpulse0493x16b) {
+#if !defined(MPCD_ENABLE_CUDA_CHI_SOLID_0493X16E)
+        // Pre-x16e compatibility path. x16e keeps this full field resident and
+        // transfers only scalar qualification diagnostics.
+        const std::size_t ncell0493x16b = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+        d.chiSolidCellFluidImpulseX0493x16b.resize(ncell0493x16b);
+        d.chiSolidCellFluidImpulseY0493x16b.resize(ncell0493x16b);
+        check_cuda_0343(cudaMemcpy(d.chiSolidCellFluidImpulseX0493x16b.data(),
+                                   w.d_cellFluidImpulseX0493x16b,
+                                   ncell0493x16b * sizeof(double), cudaMemcpyDeviceToHost),
+                        "copy x16b cell fluid impulse x");
+        check_cuda_0343(cudaMemcpy(d.chiSolidCellFluidImpulseY0493x16b.data(),
+                                   w.d_cellFluidImpulseY0493x16b,
+                                   ncell0493x16b * sizeof(double), cudaMemcpyDeviceToHost),
+                        "copy x16b cell fluid impulse y");
+#endif
+    }
 
     cuda_shared_particle_state_0251_mark_fresh("cuda_darcy_brinkman_0343");
     d.mass = hSums[0];
@@ -932,6 +1710,7 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.csvPath = darcy_csv_path_0343(params);
     append_darcy_csv_0343(params, step, time, d);
     append_topo_benchmark_csv_0348(params, step, time, d);
+    append_chi_solid_impulse_csv_0493x15a(params, step, time, d);
     if (exactMomentumDiag0493x8a) {
         append_exact_darcy_momentum_csv_0493x8a(
             params, step, time, d, meanKickApplied0493x8a, wholeDarcyApply0493x8a,

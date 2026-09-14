@@ -25,6 +25,16 @@ struct CollisionDiagnostics {
     double virtualMassImmersed = 0.0;
     double virtualMomentumX = 0.0;
     double virtualMomentumY = 0.0;
+
+    // 0493x15b: exact momentum increment of real particles caused by the
+    // chi-derived virtual population during SRC collision.
+    double chiVpFluidImpulseX = 0.0;
+    double chiVpFluidImpulseY = 0.0;
+
+    // 0493x16b: exact chiVP fluid impulse resolved on the unshifted physical
+    // cell grid. The dynamic solid receives the opposite field.
+    std::vector<double> chiVpCellFluidImpulseX0493x16b;
+    std::vector<double> chiVpCellFluidImpulseY0493x16b;
 };
 
 struct CollisionWorkspace {
