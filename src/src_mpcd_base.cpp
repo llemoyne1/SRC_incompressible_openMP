@@ -1206,6 +1206,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const std::size_t n = active_fluid_count_size(state);
     const std::uint64_t nActiveFluid = static_cast<std::uint64_t>(n);
     const double time = static_cast<double>(step) * params.dt;
+    const bool solidQualificationDiagnostics0493x18d =
+        params.chiSolidQualificationDiagnosticsEnable;
+    const bool lagrangianKineticSolid0493x18d =
+        params.chiSolidDynamicsEnable &&
+        (params.chiSolidModel == "membrane_2d" ||
+         params.chiSolidModel == "hinged_plate_2d") &&
+        params.chiKineticBoundaryMode == "specular";
 
     // 0493x16a: the solid module owns q,qdot and publishes only coupling fields
     // chi(x,t), u_s(x,t). This happens before any Darcy/chiVP consumer.
@@ -1647,7 +1654,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // solid geometry at t+dt, before any collision/chiVP operation can obscure
     // the impermeability test.  The routine is read-only and runs only on the
     // existing summary cadence.  mode=off executes no additional code.
-    if (params.chiKineticBoundaryMode == "specular") {
+    if (params.chiKineticBoundaryMode == "specular" &&
+        solidQualificationDiagnostics0493x18d) {
         if (!cuda_q6_record_chi_penetration_poststream_0493x16l(
                 state, params, grid, static_cast<int>(step), time + params.dt)) {
             throw std::runtime_error(
@@ -1765,7 +1773,13 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // stage for every path except Q6-g-f.  In 0493x7g Q6-g-f has already applied
     // Darcy before its pre-transport projection; applying it again
     // here would double the source and recreate divergence after projection.
-    if (params.darcyBrinkmanEnable && !q6GfDarcyPrestream0493x7g) {
+    // Lagrangian kinetic solids use the initial chi only to construct their
+    // persistent contour. With qualification diagnostics disabled, their
+    // per-step Darcy/Brinkman stage is a physical no-op (alpha=0, chiVP off)
+    // and is intentionally skipped. Legacy/Eulerian solids keep the historical
+    // Darcy load path because it is part of their mechanics.
+    if (params.darcyBrinkmanEnable && !q6GfDarcyPrestream0493x7g &&
+        !(lagrangianKineticSolid0493x18d && !solidQualificationDiagnostics0493x18d)) {
         result.darcy = try_apply_cuda_darcy_brinkman_0343(
             state, params, grid, result.domain, step, time);
     }
@@ -1773,7 +1787,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // 0493x16a action-reaction closure. x15 measured both fluid impulses
     // exactly; give their opposite sum to the solid model once per step.
     if (params.chiSolidDynamicsEnable) {
-        if (!result.darcy.chiSolidImpulseDiagnostic) {
+        if (!lagrangianKineticSolid0493x18d && !result.darcy.chiSolidImpulseDiagnostic) {
             throw std::runtime_error("0493x16a dynamic solid requires exact Darcy/bath impulse accounting");
         }
         result.chiSolidDynamics = advance_chi_solid_dynamics_0493x16a(

@@ -16,10 +16,12 @@
 | `BASILISK_PULSE_REL_AMPLITUDE` | double [0,1] | 0.05 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `BASILISK_PULSE_RUNTIME_ENABLE` | booléen 0\|1 | 1 dans x14bc; 0 dans x14ay par défaut |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `BIN` | chemin exécutable | build/src_mpcd_base_cuda_q6_resident_livevis_0486 dans les runners 0493w4–0493w8 |  | Alias script / binaire | mis à jour 0337 livevis |
+| `CASE_LABEL` | chaîne | dépend du runner |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `CASES` | liste/chaîne | tg poiseuille bend_pipe io_box |  | Runner qualification 0493x7i / sélection de cas | profil final x7q/x7i |
 | `CHI_FILE` | chemin fichier | DARCY_CHI_FILE ou chemin par défaut |  | Alias script Darcy | ajout/documenté 0426 |
 | `CHI_FILE_FORMAT` | chaîne | DARCY_CHI_FILE_FORMAT ou float32 |  | Alias script Darcy | ajout/documenté 0426 |
 | `CLEAN_RUN_ROOT` | booléen/int \| booléen | 1 |  | Alias runner / gestion des résultats \| Runner qualification 0493x7i / nettoyage campagne | ajout/normalisé 0493w4–0493w8 \| profil final x7q/x7i |
+| `COMMON_BOOST_UX` | double | 0.08 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
 | `DARCY_ALPHA_MAX` | double | selon script |  | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_ALPHA_MIN` | double | 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_BRINKMAN_FORCING_MODE` | chaîne | mean ou mean_outward_bath | darcyBrinkmanForcingMode | Alias script Darcy | ajout/documenté 0426 |
@@ -32,10 +34,10 @@
 | `DARCY_CHI_COLLISION_VP_THRESHOLD` | double | 0.5 | darcyChiCollisionVpThreshold | Alias script Darcy chiVP | ajout/documenté 0426 |
 | `DARCY_CHI_FILE` | chemin fichier | selon cas |  | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_CHI_FILE_FORMAT` | chaîne | float32 |  | Alias script Darcy | ajout/documenté 0426 |
-| `DARCY_COST_EVERY` | entier | SUMMARY_EVERY |  | Alias script Darcy diagnostics | ajout/documenté 0426 |
+| `DARCY_COST_EVERY` | entier \| entier >=0 | SUMMARY_EVERY \| 100 |  | Alias script Darcy diagnostics \| Runners solides mobiles x17--x18 | ajout/documenté 0426 \| actif dans les runners x17/x18 au 15/09/2026 |
 | `DARCY_INITIAL_DEACTIVATE_BELOW_CHI` | double | -1 ou 0.05 | darcyInitialDeactivateBelowChi | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_Q` | double | 0.1 |  | Alias script Darcy | ajout/documenté 0426 |
-| `DARCY_THREADS_PER_BLOCK` | entier | 256 |  | Alias script Darcy CUDA | ajout/documenté 0426 |
+| `DARCY_THREADS_PER_BLOCK` | entier \| entier >0 | 256 |  | Alias script Darcy CUDA \| Runners solides mobiles x17--x18 | ajout/documenté 0426 \| actif dans les runners x17/x18 au 15/09/2026 |
 | `DARCY_USOLID_X` | double | 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `DARCY_USOLID_Y` | double | 0.0 |  | Alias script Darcy | ajout/documenté 0426 |
 | `DENSITY_RELAXATION_TIME` | double >0 | 0.25 |  | Alias runner de qualification 0493x7d/x7e | historique x7d/x7e; valeur reprise dans profil x7q |
@@ -47,6 +49,7 @@
 | `DROP_RADIUS_CELLS` | double >0 | 40 |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_VX` | double | 0 |  | Alias runner — splash x9s | ajout 0493x9s |
 | `DROP_VY` | double | -0.35 |  | Alias runner — splash x9s | ajout 0493x9s |
+| `DT` | double >0 | dépend du runner | dt | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `DUMP_ROLE_FILTER` | all\|fluid \| alias script utilisateur | fluid dans scripts visual 0309+ \| fluid dans scripts visuels 0309+ | dumpRoleFilter | Alias script \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | ajout 0314 \| script 0314 |
 | `DUMP_STATE_EVERY` | entier >=0 | 1000 dans x14bc | dumpStateEvery | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `EMPTY_INITIAL_MASS` | double >0 | PARTICLE_MASS |  | Alias script état initial / injection empty refill 0434 | option locale/proposée 0434; documenté 0436 |
@@ -56,6 +59,9 @@
 | `FILTER_SAMPLE_EVERY` | entier >0 | 100 runner |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
 | `FILTERED_RECORDING_ENABLE` | booléen shell \| booléen/env truthy | 0 ou valeur script \| 0 sauf script/profil |  | Alias script filtered recording 0434/0436 | documenté 0436 |
 | `FLIGHT_WARN_CELLS` | double >0 | 0.80 |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
+| `FLOW_UX` | double | 0.352 x18a; 0 x18b |  | Runners solides mobiles x17--x18 | mis à jour x18f; actif 15/09/2026 |
+| `FLUID_DENSITY_FACTOR` | double >0 | 0.010 gas; 1.0 liquid |  | Runners solides mobiles x18 | mis à jour x18f; actif 15/09/2026 |
+| `FLUID_REGIME` | chaîne | gas |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `GAMMA` | entier >0 | 20 |  | Validateurs CUDA resampling — population | lecture C++ directe dans validateurs shadow; également variable shell courante des runners |
 | `GAMMA_SCALE` | double >0 | GAMMA/8 |  | Runner x14ay — raffinement particulaire | ajout 0493x14ay |
 | `GAS_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.08; x14bc: 0.00575 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
@@ -66,8 +72,18 @@
 | `GAS_PRESSURE_SCALE` | double >= 0 | 1.0 |  | Alias script 0493x6g | ajout runner 0493x6g |
 | `GRID_CASES` | liste/chaîne de cas | défini par le validateur |  | Validateurs CUDA resampling — entrée de test | présent code; ajouté consolidation 0493w8 |
 | `H_TARGET` | double >0 | 0.00390625 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `HINGED_ANGULAR_DAMPING` | double >=0 | 80 x18a; 0 x18b |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `HINGED_GRAVITY_Y` | double | -5 x18a; -10 x18b |  | Runners solides mobiles x18 | mis à jour x18f; actif 15/09/2026 |
+| `HINGED_INITIAL_ANGLE` | double radians | 0 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `HINGED_INITIAL_FLUID_GEOMETRY` | auto\|on\|off | auto |  | Runners solides mobiles x18 | mis à jour x18f; actif 15/09/2026 |
+| `HINGED_INITIAL_OMEGA` | double | 0 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `HINGED_OUTPUT_EVERY` | entier >=0 | 1 x18a; 5 x18b |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `HINGED_X_BOUNDARY_MODE` | inlet_neumann\|double_neumann\|periodic | inlet_neumann x18a; double_neumann x18b |  | Runners solides mobiles x18 | introduit x18f; actif 15/09/2026 |
 | `INACTIVE_SLOTS` | entier \| alias script utilisateur | 50k-120k selon cas; pas de défaut universel \| selon script; éviter les millions | dumpRoleFilter | Capacité particulaire \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | consolidé 0311-0312 \| script/demo/audit |
+| `INACTIVE_SLOTS_CELL_FRACTION` | double >=0 | 1.0 en segmented x18f; 0 en periodic |  | Runners ouverts / pool particulaire | documenté x18f; actif 15/09/2026 |
 | `INACTIVE_SLOTS_RESAMPLING` | entier | 750000 pour certains scripts |  | Alias script livevis/benchmark | confirmé 0337 |
+| `INITIAL_ANGLE_DEG` | double degrés | -45 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `INITIAL_DEACTIVATE_BELOW_CHI` | double | 0.5; -1 automatiquement si x18a-fix2 tourné |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `INITIAL_DOMAIN_MODE` | full \| empty \| empty\|full | full \| empty dans le runner partagé; full dans le wrapper biphasique |  | Alias script état initial / injection empty refill 0434 \| Alias runner / injection multi-espèces | option locale/proposée 0434; documenté 0436 \| ajout/normalisé 0493w4–0493w8 |
 | `INITIAL_JET_LENGTH_OVER_D` | double >=0 | 0.15 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
 | `INJECT_MASS_CLOSURE_STRENGTH` | double | 1.0 pour liquid; 0.0 pour gas |  | Alias runner / injection multi-espèces | ajout/normalisé 0493w4–0493w8 |
@@ -82,6 +98,7 @@
 | `INLET_SMIN` | double/chaîne selon variable | STEP_YMAX/Ly |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `INPUT_STATE` | chemin fichier | selon cas | inputState | Alias script état initial | ajout/documenté 0426 |
 | `JET_DIAMETER_CELLS` | entier >0 | 96 |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
+| `KBT` | double >0 | dépend du cas | kBT | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `KINETIC_REFLECTION_FRACTION` | double [0,1] | 1.0 dans runners x12 de production; défaut SimulationParams=0.0 | phaseInterfaceKineticReflectionFraction, q6ForceProjectionMode, speciesQ6Mode | Alias runner — interface cinétique / évaporation | runner alias courant; production x12 = 1.0 |
 | `LIQUID_KBT` | double >0 | dépend du benchmark; Couette x14w: 0.02; x14bc cold benchmark: 0.0078125 |  | Runner x14 — propriétés de phase | paramètre visible des runners x14 |
 | `LIQUID_NU_REFERENCE` | double >0 | 0.0002122268985 dans x14bc |  | Runner x14aw/x14bc — benchmark Basilisk | ajout 0493x14aw/x14bc |
@@ -117,6 +134,16 @@
 | `LIVE_VIS_SMOOTH_PASSES` | entier >=0 | 1 |  | Alias script livevis 0337 | ajout 0337 |
 | `LIVE_VIS_VSYNC` | booléen/int | 0 |  | Alias script livevis 0337 | ajout 0337 |
 | `LIVE_VIS_WINDOW_SCALE` | entier >=1 | 1 |  | Alias script livevis 0337 | ajout 0337 |
+| `MEMBRANE_ANCHOR_BAND_CELLS` | double >0 | 4.5 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_CX` | double | 0.375 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_DAMPING` | double >=0 | 1500 x17d |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_HALF_THICKNESS_CELLS` | double >0 | 6 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_K_AREA` | double >0 | 1e7 x17d |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_K_STRETCH` | double >0 | 750000 x17d |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_OUTPUT_EVERY` | entier >=0 | 1 x17d |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_YMAX` | double | 0.375 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MEMBRANE_YMIN` | double | 0.125 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `MODE` | chaîne | src-q6 |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `MPCD_BACKEND` | string | cuda dans scripts/run_src_mpcd_cuda_primary_0275.sh; openmp si demandé explicitement |  | Backend principal | principal utilisateur |
 | `MPCD_CUDA_ACTIVE_PREFIX_ASSUME_NO_HOST_CONSUMERS_0315D` | booléen/env truthy | false/off |  | CUDA état résident / active-prefix — audit et compatibilité | présent état 36abd23; inventorié 0490p (0315d) |
 | `MPCD_CUDA_ACTIVE_PREFIX_COMPACT_FULLSCAN_0315C` | booléen/env truthy | false/off |  | CUDA état résident / active-prefix — audit et compatibilité | présent état 36abd23; inventorié 0490p (0315c) |
@@ -534,8 +561,13 @@
 | `OUTLET_MODE` | double/chaîne selon variable \| string | hybrid/neumann selon script \| neumann dans scripts mis à jour | openBoundaryOutletMode | Alias script géométrie/segments Darcy \| Scripts démo 0283/0291 — inlet/outlet | ajout/documenté 0426 \| contrôle utilisateur script |
 | `OUTLET_SMAX` | double/chaîne selon variable | 1.0 ou 0.25 selon script |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `OUTLET_SMIN` | double/chaîne selon variable | 0.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
+| `PARTICLE_MASS` | double >0 | dépend du cas |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `PARTICLE_TYPE_FILTER` | entier | -1 |  | Alias script livevis / filtrage type 0436 \| Alias script livevis / particle type filter 0436 | ajout runner 0436 |
 | `PHASE_INTERFACE_KINETIC_BILATERAL_RELOCATION` | booléen | true dans les runners liquide/gaz x14k+ | phaseInterfaceKineticBilateralRelocation | Runner x14 — interface | alias conceptuel / écriture params x14k |
+| `PLATE_CX` | double | 0.375 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `PLATE_HALF_THICKNESS_CELLS` | double >0 | 3 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `PLATE_LENGTH` | double >0 | 0.40 |  | Runners solides mobiles x18 | mis à jour x18f; actif 15/09/2026 |
+| `PLATE_TOP_Y` | double | 0.45 |  | Runners solides mobiles x18 | mis à jour x18f; actif 15/09/2026 |
 | `POSTCHECK_SPECIES_ENABLE` | booléen | true | speciesDiagnosticsEnable | Alias runner / validation injection | ajout/normalisé 0493w4–0493w8 |
 | `PREFLIGHT_ONLY` | booléen/int \| booléen | 0 |  | Alias runner / validation \| Runner qualification 0493x7i / préflight | ajout/normalisé 0493w4–0493w8 \| profil final x7q/x7i |
 | `PROJECTION_MOMENTUM_CORRECTION_ENABLE` | booléen | false dans 0493w8 | projectionMomentumCorrectionEnable | Alias runner / projection Q6 | documenté 0493w8 |
@@ -561,11 +593,17 @@
 | `RECORD_ENABLE` | booléen | true dans x14bc |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
 | `RECORD_EVERY` | entier >0 | 100 runner; 25 recommandé pour run long pulsé |  | Runner x14 — LiveVis/recording | ajout 0493x14aw/x14bc |
 | `RECORD_FIELDS` | liste CSV de champs | rho,ux,uy dans les profils 0434 récents \| rho,ux,uy dans les profils récents |  | Alias script filtered recording 0434/0436 | documenté 0436 |
+| `REF_KBT` | double >0 | 0.05555555555555556 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `REF_PARTICLE_MASS` | double >0 | 0.4444444444444444 |  | Runners solides mobiles x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `REFINE` | entier >0 | 3 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
+| `RELATIVE_UX` | double | 0.08 |  | Runners membrane FSI x17 | actif dans les runners x17/x18 au 15/09/2026 |
 | `REQUIRE_MIXED_CELL_AT_END` | booléen | false | speciesCellDiagnosticsEnable | Alias runner / validation injection | ajout/normalisé 0493w4–0493w8 |
 | `REQUIRE_VALIDATED_SEGMENTED_RESIDENT` | booléen | 1 |  | Alias script sécurité CUDA | ajout/documenté 0426 |
 | `RESTART` | booléen 0\|1 | 0 |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `RESTART_STATE` | chemin .smpcd | vide |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
 | `RESTART_TAG` | chaîne | segment |  | Runner x14 — dumps/restart | ajout 0493x14aw/x14bc |
+| `ROOT` | chemin | repo auto |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `ROTATION_ANGLE` | double radians | pi/2 | rotationAngle | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `RUN_MODES` | liste de modes: src; src-q6; src-resampling; src-q6-resampling | dépend du runner; src src-q6 pour les comparaisons injection/TG |  | Alias script / cas de run | existant; utilisé scripts portables |
 | `RUN_OK_DARCY_COMMON_FILLED_STATE` | booléen | 0 |  | Alias run_ok Darcy / qualification | documenté helper commun 0493x7h; profil final x7q/x7i |
 | `RUN_ROOT` | chaîne chemin | runs/0493x7q_q6_g_f_physical_qualification |  | Runner qualification 0493x7i / racine de sortie | profil final x7q/x7i |
@@ -575,6 +613,8 @@
 | `SEED` | uint64 | 1628638 |  | Validateurs CUDA resampling — reproductibilité | lecture C++ directe dans validateurs shadow; également variable shell courante des runners |
 | `SEEDS` | liste d’entiers | 493801 |  | Alias runner / ensemble statistique | ajout/normalisé 0493w4–0493w8 |
 | `SIGMA_ACTIVE` | double >=0 | dépend du runner; x12b/x12c/x12d JFM: 392.149185; x12a splash: campagne-dépendant | surfaceTensionSigma | Alias runner — tension superficielle | runner alias courant; x12 splash/JFM |
+| `SOLID_MASS` | double >0 | dépend du cas |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
+| `SOLID_QUALIFICATION_DIAGNOSTICS` | booléen | false |  | Runners solides mobiles x18 | introduit x18f; actif 15/09/2026 |
 | `SPECIES_Q6_COMPARISON_TOLERANCE` | double >0 | 1.0e-11 | speciesQ6ComparisonTolerance | Alias runner / Q6 multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `SPECIES_Q6_ENABLE` | booléen | true dans le runner injection; selon scénario TG | projectionEnable, speciesQ6Enable | Alias runner / Q6 multi-espèces | ajout/normalisé 0493w4–0493w8 |
 | `SPECIES_Q6_FALLBACK_MODE` | common\|fatal | common | speciesQ6FallbackMode | Alias runner / Q6 multi-espèces | ajout/normalisé 0493w4–0493w8 |
@@ -625,7 +665,9 @@
 | `STEP_XMIN` | double/chaîne selon variable | 0.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `STEP_YMAX` | double/chaîne selon variable | 0.52 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
 | `STEP_YMIN` | double/chaîne selon variable | 0.0 |  | Alias script géométrie/segments Darcy | ajout/documenté 0426 |
+| `STEPS` | entier >0 | dépend du runner |  | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `STRICT_FLIGHT_GUARD` | booléen | 0 |  | Runner x14 — contrôle de campagne | ajout 0493x14aw/x14bc |
+| `SUMMARY_EVERY` | entier >0 | dépend du runner | summaryEvery | Runners solides mobiles x17--x18 | actif dans les runners x17/x18 au 15/09/2026 |
 | `SUMMARY_ROLE_FILTER` | all\|fluid \| alias script utilisateur | fluid dans scripts visual 0309+ \| fluid dans scripts visuels 0309+ | summaryRoleFilter | Alias script \| CUDA resampling post-SRC — diagnostics, split-safety et optimisation inactive | ajout 0314 \| script 0314 |
 | `SURFACE_TENSION_MIN_RADIUS_CELLS` | double >=0 | source Params=0.0; x12b/x12c/x12d JFM et x12yl: 4; x12cal dynamique et anciens splash x12a obstacle: 3 | surfaceTensionMinRadiusCells | Alias runner — tension superficielle | runner alias courant; valeur dépend de la campagne x12 |
 | `TARGET` | wall \| puddle | wall dans runner principal; wrappers dédiés disponibles |  | Alias runner — splash x9s | ajout 0493x9s |
@@ -881,6 +923,23 @@ Binaire exécuté par les scripts portables livevis.
 - `DEFINED_OR_USED_IN` — `scripts/run_0493w8_tg_mono_dual_equivalence.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_ok_injection_type1_into_type2_empty.sh`
 
+### `CASE_LABEL`
+
+- **Type :** chaîne
+- **Défaut :** `dépend du runner`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Étiquette de cas/répertoire de sortie.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
 ### `CASES`
 
 - **Type :** liste/chaîne
@@ -952,6 +1011,21 @@ Supprime le run root avant une nouvelle campagne. | Contrôle le runner de quali
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x7i` — Benchmark physique multi-cas SRC / Q6 / Q6-g-f
 - `ASSOCIATED_WITH` → `x7q` — Fermeture exacte du moment périodique au niveau particulaire B1/RT0
+
+### `COMMON_BOOST_UX`
+
+- **Type :** double
+- **Défaut :** `0.08`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Boost commun utilisé par les comparaisons galiléennes de qualification.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
 
 ### `DARCY_ALPHA_MAX`
 
@@ -1161,17 +1235,21 @@ Alias externe de CHI_FILE_FORMAT.
 
 ### `DARCY_COST_EVERY`
 
-- **Type :** entier
-- **Défaut :** `SUMMARY_EVERY`
-- **Catégorie :** Alias script Darcy diagnostics
-- **Statut :** ajout/documenté 0426
+- **Type :** entier | entier >=0
+- **Défaut :** `SUMMARY_EVERY | 100`
+- **Catégorie :** Alias script Darcy diagnostics | Runners solides mobiles x17--x18
+- **Statut :** ajout/documenté 0426 | actif dans les runners x17/x18 au 15/09/2026
 
-Alias script de darcyCostEvery.
+Alias script de darcyCostEvery. | Cadence du diagnostic de coût Darcy lorsque celui-ci est demandé.
 
-**Remarques.** Les alias script sont résolus avant écriture du .kv ou export de l’environnement.
+**Remarques.** Les alias script sont résolus avant écriture du .kv ou export de l’environnement. | Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
 
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `doc/README_0426_DARCY_FASTFLAGS.md`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_backward_step_0425.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
@@ -1213,17 +1291,21 @@ Alias script de darcyQ.
 
 ### `DARCY_THREADS_PER_BLOCK`
 
-- **Type :** entier
+- **Type :** entier | entier >0
 - **Défaut :** `256`
-- **Catégorie :** Alias script Darcy CUDA
-- **Statut :** ajout/documenté 0426
+- **Catégorie :** Alias script Darcy CUDA | Runners solides mobiles x17--x18
+- **Statut :** ajout/documenté 0426 | actif dans les runners x17/x18 au 15/09/2026
 
-Alias script de darcyThreadsPerBlock.
+Alias script de darcyThreadsPerBlock. | Taille de bloc CUDA du provider chi/Darcy utilisée par ces runners.
 
-**Remarques.** Les alias script sont résolus avant écriture du .kv ou export de l’environnement.
+**Remarques.** Les alias script sont résolus avant écriture du .kv ou export de l’environnement. | Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
 
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `doc/README_0426_DARCY_FASTFLAGS.md`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_backward_step_0425.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
@@ -1431,6 +1513,24 @@ Vitesse initiale verticale de la goutte.
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x9s` — Benchmark paramétrable d'impact et splash
 
+### `DT`
+
+- **Type :** double >0
+- **Défaut :** `dépend du runner`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+- **Écrit / contrôle :** `dt`
+
+Pas de temps de la campagne solide.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
 ### `DUMP_ROLE_FILTER`
 
 - **Type :** all|fluid | alias script utilisateur
@@ -1581,6 +1681,66 @@ Seuil d’avertissement sur déplacement thermique+advectif liquide par pas en c
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `FLOW_UX`
+
+- **Type :** double
+- **Défaut :** `0.352 x18a; 0 x18b`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Vitesse imposée par le runner; x18f l’applique à l’inlet gauche du mode inlet_neumann x18a.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `FLUID_DENSITY_FACTOR`
+
+- **Type :** double >0
+- **Défaut :** `0.010 gas; 1.0 liquid`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Facteur de densité x18b; multiplie masse particulaire et kBT simultanément.
+
+**Remarques.** Contrôle de runner; le cas qualitatif x18b retenu le 15/09/2026 utilise explicitement 0.10. Gas/liquid restent des labels de densité du même modèle MPCD.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18b` — Chute du volet dans un fluide au repos
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `FLUID_REGIME`
+
+- **Type :** chaîne
+- **Défaut :** `gas`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Label de régime x18b: gas/liquid/custom; ne change pas d’équation d’état.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18b` — Chute du volet dans un fluide au repos
 
 ### `GAMMA`
 
@@ -1754,6 +1914,130 @@ Fixe la taille de cellule h du benchmark.
 - `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 
+### `HINGED_ANGULAR_DAMPING`
+
+- **Type :** double >=0
+- **Défaut :** `80 x18a; 0 x18b`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Frottement mécanique visqueux de charnière transmis à chiSolidHingedAngularDamping.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `HINGED_GRAVITY_Y`
+
+- **Type :** double
+- **Défaut :** `-5 x18a; -10 x18b`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Accélération verticale du volet transmise au solveur.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `HINGED_INITIAL_ANGLE`
+
+- **Type :** double radians
+- **Défaut :** `0`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Angle initial direct du runner x18a.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `HINGED_INITIAL_FLUID_GEOMETRY`
+
+- **Type :** auto|on|off
+- **Défaut :** `auto`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Sélectionne l’exclusion initiale du fluide cohérente avec l’angle réel du volet.
+
+**Remarques.** auto active l’aide prepare_0493x18a_initial_fluid.py si l’angle initial est non nul; x18f intègre durablement x18a-fix2 au runner.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+- `ASSOCIATED_WITH` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `HINGED_INITIAL_OMEGA`
+
+- **Type :** double
+- **Défaut :** `0`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Vitesse angulaire initiale du volet.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `HINGED_OUTPUT_EVERY`
+
+- **Type :** entier >=0
+- **Défaut :** `1 x18a; 5 x18b`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Cadence de sortie physique du volet.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `HINGED_X_BOUNDARY_MODE`
+
+- **Type :** inlet_neumann|double_neumann|periodic
+- **Défaut :** `inlet_neumann x18a; double_neumann x18b`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** introduit x18f; actif 15/09/2026
+
+Choisit la famille de conditions x du volet: inlet gauche + outlet Neumann droit, double-Neumann outlet-only, ou périodique.
+
+**Remarques.** double_neumann n’est autorisé par x18f que sur le chemin Q6 résident; la configuration outlet-only Neumann est fonctionnelle mais non qualifiée quantitativement en masse.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+- `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
 ### `INACTIVE_SLOTS`
 
 - **Type :** entier | alias script utilisateur
@@ -1769,6 +2053,25 @@ Nombre de slots Inactive préalloués par les générateurs/scripts. | Nombre de
 **Défini/utilisé dans :**
 - `DEFINED_OR_USED_IN` — `src/cuda_classic_src_io_resident_0263.cu`
 
+### `INACTIVE_SLOTS_CELL_FRACTION`
+
+- **Type :** double >=0
+- **Défaut :** `1.0 en segmented x18f; 0 en periodic`
+- **Catégorie :** Runners ouverts / pool particulaire
+- **Statut :** documenté x18f; actif 15/09/2026
+
+Dimensionne le pool de slots inactifs en fraction du nombre de cellules lorsque INACTIVE_SLOTS n’est pas imposé explicitement.
+
+**Remarques.** Variable de suite/runner, distincte de INACTIVE_SLOTS_FRACTION. x18f l’utilise pour fournir le pool nécessaire aux bains cinétiques Neumann.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/src_mpcd_run_common_0434.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
 ### `INACTIVE_SLOTS_RESAMPLING`
 
 - **Type :** entier
@@ -1779,6 +2082,44 @@ Nombre de slots Inactive préalloués par les générateurs/scripts. | Nombre de
 Nombre de slots inactifs pour les cas resampling.
 
 **Remarques.** N’affecte pas le SRC classic si RUN_MODES=classic; utile pour réservoir resampling.
+
+### `INITIAL_ANGLE_DEG`
+
+- **Type :** double degrés
+- **Défaut :** `-45`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Angle initial convivial de la chute x18b, converti en radians.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18b` — Chute du volet dans un fluide au repos
+
+### `INITIAL_DEACTIVATE_BELOW_CHI`
+
+- **Type :** double
+- **Défaut :** `0.5; -1 automatiquement si x18a-fix2 tourné`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Contrôle la déactivation initiale historique; x18a-fix2 la neutralise pour la géométrie tournée.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
 
 ### `INITIAL_DOMAIN_MODE`
 
@@ -2012,6 +2353,24 @@ Fixe D/h du jet.
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `KBT`
+
+- **Type :** double >0
+- **Défaut :** `dépend du cas`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+- **Écrit / contrôle :** `kBT`
+
+Échelle thermique du runner.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
 
 ### `KINETIC_REFLECTION_FRACTION`
 
@@ -2526,6 +2885,170 @@ Vsync GLFW.
 Facteur d’échelle de la fenêtre.
 
 **Remarques.** N’affecte pas la simulation.
+
+### `MEMBRANE_ANCHOR_BAND_CELLS`
+
+- **Type :** double >0
+- **Défaut :** `4.5`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Largeur de bande d’ancrage x17d.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `MEMBRANE_CX`
+
+- **Type :** double
+- **Défaut :** `0.375`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Centre x de la plaque mince générée par le runner x17d.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `MEMBRANE_DAMPING`
+
+- **Type :** double >=0
+- **Défaut :** `1500 x17d`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Amortissement de membrane transmis au paramètre solveur.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+### `MEMBRANE_HALF_THICKNESS_CELLS`
+
+- **Type :** double >0
+- **Défaut :** `6`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Demi-épaisseur du chi initial de plaque en cellules.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+### `MEMBRANE_K_AREA`
+
+- **Type :** double >0
+- **Défaut :** `1e7 x17d`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Raideur de pénalité d’aire du runner.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+### `MEMBRANE_K_STRETCH`
+
+- **Type :** double >0
+- **Défaut :** `750000 x17d`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Raideur d’étirement du runner.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+### `MEMBRANE_OUTPUT_EVERY`
+
+- **Type :** entier >=0
+- **Défaut :** `1 x17d`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Cadence des snapshots nodaux.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+### `MEMBRANE_YMAX`
+
+- **Type :** double
+- **Défaut :** `0.375`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Borne supérieure initiale du strip x17d.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `MEMBRANE_YMIN`
+
+- **Type :** double
+- **Défaut :** `0.125`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Borne inférieure initiale du strip x17d.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `MODE`
+
+- **Type :** chaîne
+- **Défaut :** `src-q6`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Mode solveur choisi par les runners mobiles.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
 
 ### `MPCD_BACKEND`
 
@@ -9028,6 +9551,23 @@ Coordonnée relative minimale du segment outlet.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
 
+### `PARTICLE_MASS`
+
+- **Type :** double >0
+- **Défaut :** `dépend du cas`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Masse particulaire du runner.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
 ### `PARTICLE_TYPE_FILTER`
 
 - **Type :** entier
@@ -9056,6 +9596,74 @@ Override de script qui patche livevis_control.kv et exporte les variables runtim
 
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14k` — Géométrie cinétique bilatérale
+
+### `PLATE_CX`
+
+- **Type :** double
+- **Défaut :** `0.375`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Centre x de la plaque articulée initiale.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `PLATE_HALF_THICKNESS_CELLS`
+
+- **Type :** double >0
+- **Défaut :** `3`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Demi-épaisseur du volet en cellules.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `PLATE_LENGTH`
+
+- **Type :** double >0
+- **Défaut :** `0.40`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Longueur du volet rigide.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `PLATE_TOP_Y`
+
+- **Type :** double
+- **Défaut :** `0.45`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** mis à jour x18f; actif 15/09/2026
+
+Position y de l’extrémité supérieure/charnière du volet.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
 
 ### `POSTCHECK_SPECIES_ENABLE`
 
@@ -9561,6 +10169,78 @@ Sélectionne les champs enregistrés par les dumps filtrés .f32. | Alias de scr
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
 - `ASSOCIATED_WITH` → `x6c` — Infrastructure résidente du champ de phase alpha
 
+### `REF_KBT`
+
+- **Type :** double >0
+- **Défaut :** `0.05555555555555556`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Référence thermique x18b avant scaling de densité.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18b` — Chute du volet dans un fluide au repos
+
+### `REF_PARTICLE_MASS`
+
+- **Type :** double >0
+- **Défaut :** `0.4444444444444444`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Masse particulaire de référence x18b.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18b` — Chute du volet dans un fluide au repos
+
+### `REFINE`
+
+- **Type :** entier >0
+- **Défaut :** `3`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Facteur de raffinement du démonstrateur membrane x17d.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `RELATIVE_UX`
+
+- **Type :** double
+- **Défaut :** `0.08`
+- **Catégorie :** Runners membrane FSI x17
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Vitesse relative fluide/solide utilisée par x17c.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17c` — Première mécanique de membrane lagrangienne
+
 ### `REQUIRE_MIXED_CELL_AT_END`
 
 - **Type :** booléen
@@ -9646,6 +10326,41 @@ Désigne l’état de reprise lorsque RESTART=1.
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `ROOT`
+
+- **Type :** chemin
+- **Défaut :** `repo auto`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Racine du checkout utilisée par le runner.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `ROTATION_ANGLE`
+
+- **Type :** double radians
+- **Défaut :** `pi/2`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+- **Écrit / contrôle :** `rotationAngle`
+
+Angle SRC/MPCD de rotation stochastique fixé par les runners.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
 
 ### `RUN_MODES`
 
@@ -9791,6 +10506,43 @@ Surcharge surfaceTensionSigma dans les runners capillaires/splash/JFM.
 - `ASSOCIATED_WITH` → `x12cal` — Calibrateur dynamique de tension superficielle
 - `ASSOCIATED_WITH` → `x12d` — Cas de mesure JFM 524 à géométrie/We/Fr ciblés
 - `ASSOCIATED_WITH` → `x12yl` — Calibrateur mécanique/statique de tension superficielle
+
+### `SOLID_MASS`
+
+- **Type :** double >0
+- **Défaut :** `dépend du cas`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Masse totale du solide passée à chiSolidMass.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+### `SOLID_QUALIFICATION_DIAGNOSTICS`
+
+- **Type :** booléen
+- **Défaut :** `false`
+- **Catégorie :** Runners solides mobiles x18
+- **Statut :** introduit x18f; actif 15/09/2026
+
+Transmet chiSolidQualificationDiagnosticsEnable au .kv et adapte les sorties attendues du runner.
+
+**Remarques.** false conserve le chemin de production compact x18d; true réactive les diagnostics lourds de qualification.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18d` — Nettoyage global du chemin normal des solides mobiles
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
 
 ### `SPECIES_Q6_COMPARISON_TOLERANCE`
 
@@ -10598,6 +11350,23 @@ Borne y minimale du rectangle solide step généré en chi.
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_lr_segments_0411.sh`
 - `DEFINED_OR_USED_IN` — `scripts/run_src_classic_cuda_darcy_chi_naca_periodic_0414.sh`
 
+### `STEPS`
+
+- **Type :** entier >0
+- **Défaut :** `dépend du runner`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+
+Nombre de pas du run.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
 ### `STRICT_FLIGHT_GUARD`
 
 - **Type :** booléen
@@ -10616,6 +11385,27 @@ Transforme le dépassement FLIGHT_WARN_CELLS en erreur fatale.
 **Jalons associés :**
 - `ASSOCIATED_WITH` → `x14aw` — Analogue 2-D Basilisk atomisation ReL=500 / WeG=200
 - `ASSOCIATED_WITH` → `x14bc` — Benchmark Basilisk froid pulsé ReL=500
+
+### `SUMMARY_EVERY`
+
+- **Type :** entier >0
+- **Défaut :** `dépend du runner`
+- **Catégorie :** Runners solides mobiles x17--x18
+- **Statut :** actif dans les runners x17/x18 au 15/09/2026
+- **Écrit / contrôle :** `summaryEvery`
+
+Cadence des sorties de résumé; ne doit plus activer les diagnostics lourds x18d par défaut.
+
+**Remarques.** Contrôle de runner; ne crée pas une nouvelle physique indépendamment du .kv généré.
+
+**Défini/utilisé dans :**
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17c_membrane_fsi_case.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x17d_fixed_membrane_publishable.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18a_hinged_plate.sh`
+- `DEFINED_OR_USED_IN` — `scripts/run_0493x18b_hinged_fall_quiescent.sh`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18d` — Nettoyage global du chemin normal des solides mobiles
 
 ### `SUMMARY_ROLE_FILTER`
 

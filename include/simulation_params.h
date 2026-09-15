@@ -754,8 +754,55 @@ struct SimulationParams {
     // translating in x; its initial geometry comes from the existing Darcy box
     // and its initial velocity from darcyUSolidX.
     bool chiSolidDynamicsEnable = false;
-    std::string chiSolidModel = "none"; // none, rigid_slab_1d (0493x16a)
+    std::string chiSolidModel = "none"; // none, rigid_slab_1d (0493x16a), membrane_2d (0493x17c), hinged_plate_2d (0493x18a)
     double chiSolidMass = 1.0;
+    // 0493x18d: qualification/audit machinery is opt-in. The normal mobile-solid
+    // path computes only quantities required by the physics and requested
+    // scientific outputs. Set true only for dedicated validation campaigns.
+    bool chiSolidQualificationDiagnosticsEnable = false;
+
+    // 0493x17c: true Lagrangian elastic membrane mechanics on the persistent
+    // x17a chi=0.5 contour.  The geometry input remains chi; these parameters
+    // define only the constitutive law of the extracted closed material loop.
+    double chiSolidMembraneStretchStiffness = 0.0; // edge spring k_s >= 0
+    double chiSolidMembraneAreaStiffness = 0.0;    // global area penalty k_A >= 0
+    double chiSolidMembraneDamping = 0.0;          // momentum-conserving edge dashpot >= 0
+    // 0493x17d-fix3: rotationally invariant discrete bending rigidity B >= 0.
+    // Energy: 0.5*B*sum_i (dtheta_i)^2/l0_i, around the initial turning angle.
+    double chiSolidMembraneBendingStiffness = 0.0;
+    // 0493x17d-fix6: optional cross-thickness triangulation stiffness for
+    // thin closed strips. Zero preserves the historical contour-only model.
+    double chiSolidMembraneCrossBraceStiffness = 0.0;
+    // Maximum initial cross-brace search radius in local rest-edge lengths.
+    double chiSolidMembraneCrossBraceRangeEdges = 16.0;
+    // 0493x17d-fix7: fraction of cross-brace stiffness used by the two
+    // diagonals. 0 = transverse rungs only; 0.5 reproduces fix6.
+    double chiSolidMembraneCrossBraceDiagonalFraction = 0.5;
+    int chiSolidMembraneOutputEvery = 0;           // <=0: use summaryEvery for node snapshots
+    // 0493x17d: optional material supports for article demonstrators.  Extrema
+    // anchoring pins nodes selected from the INITIAL contour only; the collision
+    // geometry remains the persistent Lagrangian loop.
+    std::string chiSolidMembraneAnchorMode = "none"; // none, x_extrema, y_extrema
+    double chiSolidMembraneAnchorBandCells = 0.0;     // distance from each selected initial extremum, in h
+
+    // 0493x18a: rigid finite-thickness plate with one rotational DOF about a
+    // fixed z-axis hinge. The initial closed contour still comes from chi=0.5.
+    // The reference configuration is vertical with the hinge at the top-center;
+    // theta=0 therefore means hanging straight down.
+    double chiSolidHingedGravityY = -1.0;          // body acceleration acting on the solid only
+    double chiSolidHingedAngularDamping = 0.0;     // viscous hinge torque -C*omega
+    double chiSolidHingedInitialAngle = 0.0;       // rad, relative to the initial chi geometry
+    double chiSolidHingedInitialOmega = 0.0;       // rad / time
+    int chiSolidHingedOutputEvery = 0;             // <=0: use summaryEvery
+    // 0493x18e: local FSI subcycling of the material-wall/hinge coupling.
+    // This does NOT reduce the global MPCD/Q6 time step; only the pre-stream
+    // particle--hinge interaction is subdivided when the body becomes fast.
+    bool chiSolidHingedFsiSubcyclingEnable = true;
+    int chiSolidHingedFsiMinSubsteps = 4;
+    int chiSolidHingedFsiMaxSubsteps = 64;
+    double chiSolidHingedMaxAngularIncrement = 0.02;       // rad / local substep
+    double chiSolidHingedMaxTipDisplacementCells = 0.20;  // |omega| R dt_sub / h
+    int chiSolidHingedMaxParticleSpanCells = 64;          // hard no-hang guard per substep
 
     // 0348/topo: optional benchmark observables.  These are disabled by
     // default to preserve the CUDA resident path.  The 0348a implementation is

@@ -25,7 +25,9 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1882,7 +1884,13 @@ bool q6_open_segmented_0409_supported(const SimulationParams& params) {
         if (open_boundary_face_is_x(seg.face) && std::abs(seg.uy) > 1.0e-15) return false;
         if (open_boundary_face_is_y(seg.face) && std::abs(seg.ux) > 1.0e-15) return false;
     }
-    return hasInlet && hasOutlet;
+    // 0493x18f: a quiescent hinged-body domain may legitimately use passive
+    // Neumann continuation on both streamwise faces with no prescribed inlet.
+    // Restrict this extension to the Neumann pressure/kinetic continuation; all
+    // other segmented modes keep the historical inlet+outlet contract.
+    const bool outletOnlyPassiveNeumann0493x18f =
+        !hasInlet && hasOutlet && params.openBoundaryOutletMode == "neumann";
+    return hasOutlet && (hasInlet || outletOnlyPassiveNeumann0493x18f);
 }
 
 Q6SegmentedIo0409 q6_make_segmented_0409(const SimulationParams& params, double time) {
@@ -2009,6 +2017,31 @@ public:
 private:
     T* ptr_ = nullptr;
     std::size_t capacity_ = 0u;
+};
+
+// 0493x17c: compact scalar reductions for the true nodal membrane.  All
+// extensive quantities are accumulated on device; only this scalar record is
+// copied to the host during the solid kick / article diagnostics.
+struct ChiMembraneReduction0493x17c {
+    double area2 = 0.0;
+    double perimeter = 0.0;
+    double stretchEnergy = 0.0;
+    double bendingEnergy = 0.0;
+    double maxAbsAngleChange = 0.0;
+    double maxAbsEdgeStrain = 0.0;
+    double centerXSum = 0.0;
+    double centerYSum = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+    double kineticEnergy = 0.0;
+    double reactionImpulseX = 0.0;
+    double reactionImpulseY = 0.0;
+    double cellReactionImpulseX = 0.0;
+    double cellReactionImpulseY = 0.0;
+    double supportConstraintImpulseX = 0.0;
+    double supportConstraintImpulseY = 0.0;
+    double internalForceX = 0.0;
+    double internalForceY = 0.0;
 };
 
 struct PhaseGeometryAccumulator0493x6b {
@@ -2215,6 +2248,28 @@ struct ChiPenetrationAccumulator0493x16l {
     double strictInsideMass = 0.0;
     double maxSolidLevelExcess = 0.0;
     double maxPenetrationCells = 0.0;
+};
+
+// 0493x18d: minimal physical generalized load for the one-DOF hinged body.
+// These are required by the mechanics/results; qualification fields are not.
+struct ChiHingedPhysicalLoad0493x18d {
+    double impulseX = 0.0;
+    double impulseY = 0.0;
+    double torqueImpulse = 0.0;
+};
+
+// 0493x18e: always-on safety state for the hinged material-wall path.  These
+// counters are deliberately tiny and remain active even when the heavyweight
+// x18d qualification diagnostics are disabled.  Their purpose is to fail fast
+// instead of letting a pathological particle flight expand into an enormous
+// cell-search kernel that appears hung from the host.
+struct ChiHingedSafety0493x18e {
+    unsigned long long particleSpanExceeded = 0ull;
+    unsigned long long collisionLimitReached = 0ull;
+    unsigned long long nonFiniteState = 0ull;
+    unsigned long long maxSpanXCells = 0ull;
+    unsigned long long maxSpanYCells = 0ull;
+    unsigned long long maxSearchCells = 0ull;
 };
 
 // 0493x9x: crossing-time kinetic reflection audit.
@@ -2742,6 +2797,65 @@ struct ResidentWorkspace0400 {
     DeviceBuffer0400<int> chiLagrangianCellEdgeCount0493x17a;
     DeviceBuffer0400<int> chiLagrangianCellEdgeIds0493x17a;
     DeviceBuffer0400<unsigned long long> chiLagrangianBinOverflow0493x17a;
+
+    // 0493x17c: the x17a contour becomes a true closed nodal membrane when
+    // chiSolidModel=membrane_2d. Nodes are the geometry authority; the x17a
+    // edge arrays are a collision/broad-phase view synchronized from them.
+    bool chiMembraneInitialized0493x17c = false;
+    int chiMembraneNodeCount0493x17c = 0;
+    double chiMembraneSignedArea00493x17c = 0.0;
+    double chiMembranePerimeter00493x17c = 0.0;
+    DeviceBuffer0400<double> chiMembraneNodeX0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeY0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeVx0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeVy0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeX00493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeY00493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeImpulseX0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeImpulseY0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeForceX0493x17c;
+    DeviceBuffer0400<double> chiMembraneNodeForceY0493x17c;
+    DeviceBuffer0400<double> chiMembraneRestLength0493x17c;
+    DeviceBuffer0400<unsigned char> chiMembraneNodePinned0493x17d;
+    int chiMembranePinnedNodeCount0493x17d = 0;
+    DeviceBuffer0400<int> chiMembraneEdgeNodeA0493x17c;
+    DeviceBuffer0400<int> chiMembraneEdgeNodeB0493x17c;
+    DeviceBuffer0400<ChiMembraneReduction0493x17c> chiMembraneReductionBefore0493x17c;
+    DeviceBuffer0400<ChiMembraneReduction0493x17c> chiMembraneReductionAfter0493x17c;
+
+    // 0493x18a: rigid one-DOF hinged plate reuses the persistent closed-loop
+    // node/edge buffers, but owns only the scalar generalized coordinate theta.
+    bool chiHingedInitialized0493x18a = false;
+    double chiHingedPivotX0493x18a = 0.0;
+    double chiHingedPivotY0493x18a = 0.0;
+    double chiHingedCenterX00493x18a = 0.0;
+    double chiHingedCenterY00493x18a = 0.0;
+    double chiHingedInertia0493x18a = 0.0;
+    double chiHingedTheta0493x18a = 0.0;
+    double chiHingedOmega0493x18a = 0.0;
+    DeviceBuffer0400<double> chiHingedTorqueImpulse0493x18a;
+    DeviceBuffer0400<ChiHingedPhysicalLoad0493x18d> chiHingedPhysicalLoad0493x18d;
+    DeviceBuffer0400<ChiHingedSafety0493x18e> chiHingedSafety0493x18e;
+    DeviceBuffer0400<double> chiMembraneArea20493x18d;
+
+    // 0493x18e parent-step record.  Normal hinged runs apply the hydro/external
+    // kick inside local pre-stream substeps, so the later mechanics stage must
+    // report (not re-apply) the already-consumed generalized impulse.
+    bool chiHingedFsiSubcycledStepValid0493x18e = false;
+    int chiHingedFsiSubcycledStep0493x18e = -1;
+    int chiHingedFsiSubsteps0493x18e = 1;
+    double chiHingedThetaBeforeStep0493x18e = 0.0;
+    double chiHingedOmegaBeforeStep0493x18e = 0.0;
+    double chiHingedHydroImpulseXStep0493x18e = 0.0;
+    double chiHingedHydroImpulseYStep0493x18e = 0.0;
+    double chiHingedHydroTorqueImpulseStep0493x18e = 0.0;
+    double chiHingedGravityTorqueImpulseStep0493x18e = 0.0;
+    double chiHingedDampingTorqueImpulseStep0493x18e = 0.0;
+    double chiHingedMaxAbsOmegaSubstep0493x18e = 0.0;
+    double chiHingedMaxAngularIncrement0493x18e = 0.0;
+    double chiHingedMaxTipDisplacementCells0493x18e = 0.0;
+    double chiHingedMaxRadius0493x18e = 0.0;
+
     double phaseGeometryReferenceCellMass0493x6c = 0.0;
     int phaseGeometryLiquidSpeciesCount0493x6c = 0;
     DeviceBuffer0400<double> partial0;
@@ -2807,6 +2921,30 @@ struct ResidentWorkspace0400 {
         constexpr std::size_t kX17aCellEdgeCapacity = 64u;
         chiLagrangianCellEdgeIds0493x17a.ensure(kX17aCellEdgeCapacity * c);
         chiLagrangianBinOverflow0493x17a.ensure(1u);
+
+        // A marching-squares contour has no more than 2*numCells segments.
+        // x17c supports one simple closed loop, so nodeCount=edgeCount and the
+        // same s2 capacity is sufficient for all nodal arrays.
+        chiMembraneNodeX0493x17c.ensure(s2);
+        chiMembraneNodeY0493x17c.ensure(s2);
+        chiMembraneNodeVx0493x17c.ensure(s2);
+        chiMembraneNodeVy0493x17c.ensure(s2);
+        chiMembraneNodeX00493x17c.ensure(s2);
+        chiMembraneNodeY00493x17c.ensure(s2);
+        chiMembraneNodeImpulseX0493x17c.ensure(s2);
+        chiMembraneNodeImpulseY0493x17c.ensure(s2);
+        chiMembraneNodeForceX0493x17c.ensure(s2);
+        chiMembraneNodeForceY0493x17c.ensure(s2);
+        chiMembraneRestLength0493x17c.ensure(s2);
+        chiMembraneNodePinned0493x17d.ensure(s2);
+        chiMembraneEdgeNodeA0493x17c.ensure(s2);
+        chiMembraneEdgeNodeB0493x17c.ensure(s2);
+        chiMembraneReductionBefore0493x17c.ensure(1u);
+        chiMembraneReductionAfter0493x17c.ensure(1u);
+        chiHingedTorqueImpulse0493x18a.ensure(1u);
+        chiHingedPhysicalLoad0493x18d.ensure(1u);
+        chiHingedSafety0493x18e.ensure(1u);
+        chiMembraneArea20493x18d.ensure(1u);
     }
 
     void ensure(std::uint64_t particles, int numCells, int blocks, int speciesCount = 1) {
@@ -25665,6 +25803,170 @@ q6_x17a_extract_initial_chi_contour(
     return edges;
 }
 
+struct ChiMembraneHostLoop0493x17c {
+    std::vector<double> x;
+    std::vector<double> y;
+    std::vector<double> restLength;
+    std::vector<int> edgeA;
+    std::vector<int> edgeB;
+    std::vector<signed char> normalSign;
+    double signedArea0 = 0.0;
+    double perimeter0 = 0.0;
+};
+
+ChiMembraneHostLoop0493x17c q6_x17c_build_single_closed_loop(
+    const std::vector<ChiLagrangianHostEdge0493x17a>& edges,
+    double h) {
+    if (edges.size() < 3u || !(h > 0.0)) {
+        throw std::runtime_error("0493x17c membrane requires at least three contour edges");
+    }
+    const double tol = 1.0e-9 * h;
+    using Key = std::pair<long long,long long>;
+    std::map<Key,int> nodeByKey;
+    std::vector<double> rawX, rawY;
+    std::vector<int> rawA(edges.size(),-1), rawB(edges.size(),-1);
+    auto node_id = [&](double x, double y) -> int {
+        const Key key{static_cast<long long>(std::llround(x/tol)),
+                      static_cast<long long>(std::llround(y/tol))};
+        auto it=nodeByKey.find(key);
+        if(it!=nodeByKey.end()) return it->second;
+        const int id=static_cast<int>(rawX.size());
+        nodeByKey.emplace(key,id);
+        rawX.push_back(x); rawY.push_back(y);
+        return id;
+    };
+    for(std::size_t e=0;e<edges.size();++e){
+        rawA[e]=node_id(edges[e].ax,edges[e].ay);
+        rawB[e]=node_id(edges[e].bx,edges[e].by);
+        if(rawA[e]==rawB[e])
+            throw std::runtime_error("0493x17c membrane contour contains a collapsed edge");
+    }
+    if(rawX.size()!=edges.size()){
+        throw std::runtime_error(
+            "0493x17c membrane first implementation requires one simple closed contour (nodeCount=edgeCount)");
+    }
+    struct Adj { int edge=-1; int other=-1; };
+    std::vector<std::vector<Adj>> adj(rawX.size());
+    for(std::size_t e=0;e<edges.size();++e){
+        adj[static_cast<std::size_t>(rawA[e])].push_back({static_cast<int>(e),rawB[e]});
+        adj[static_cast<std::size_t>(rawB[e])].push_back({static_cast<int>(e),rawA[e]});
+    }
+    for(std::size_t i=0;i<adj.size();++i){
+        if(adj[i].size()!=2u){
+            throw std::runtime_error(
+                "0493x17c membrane chi=0.5 contour is not a closed degree-2 manifold; multiple/open components are not in the first article demonstrator");
+        }
+    }
+    int start=0;
+    for(int i=1;i<static_cast<int>(rawX.size());++i){
+        if(rawX[i]<rawX[start]-tol ||
+           (std::abs(rawX[i]-rawX[start])<=tol && rawY[i]<rawY[start])) start=i;
+    }
+    std::vector<unsigned char> used(edges.size(),0u);
+    std::vector<int> orderedNodes;
+    std::vector<int> orderedEdges;
+    std::vector<signed char> orderedNormal;
+    orderedNodes.reserve(edges.size());
+    orderedEdges.reserve(edges.size());
+    orderedNormal.reserve(edges.size());
+    int cur=start;
+    int previous=-1;
+    for(std::size_t k=0;k<edges.size();++k){
+        orderedNodes.push_back(cur);
+        Adj pick{};
+        bool have=false;
+        for(const Adj& a:adj[static_cast<std::size_t>(cur)]){
+            if(used[static_cast<std::size_t>(a.edge)]) continue;
+            if(!have || (a.other!=previous && pick.other==previous) || a.edge<pick.edge){
+                pick=a; have=true;
+            }
+        }
+        if(!have) throw std::runtime_error("0493x17c membrane loop traversal terminated early");
+        used[static_cast<std::size_t>(pick.edge)]=1u;
+        orderedEdges.push_back(pick.edge);
+        const bool forward=rawA[static_cast<std::size_t>(pick.edge)]==cur &&
+                           rawB[static_cast<std::size_t>(pick.edge)]==pick.other;
+        orderedNormal.push_back(forward ? edges[static_cast<std::size_t>(pick.edge)].normalSign
+                                       : static_cast<signed char>(-edges[static_cast<std::size_t>(pick.edge)].normalSign));
+        previous=cur;
+        cur=pick.other;
+    }
+    if(cur!=start) throw std::runtime_error("0493x17c membrane contour did not close after all edges");
+    for(unsigned char v:used) if(!v)
+        throw std::runtime_error("0493x17c membrane contour contains more than one connected component");
+
+    ChiMembraneHostLoop0493x17c out{};
+    const int n=static_cast<int>(orderedNodes.size());
+    out.x.resize(static_cast<std::size_t>(n));
+    out.y.resize(static_cast<std::size_t>(n));
+    out.restLength.resize(static_cast<std::size_t>(n));
+    out.edgeA.resize(static_cast<std::size_t>(n));
+    out.edgeB.resize(static_cast<std::size_t>(n));
+    out.normalSign=orderedNormal;
+    for(int i=0;i<n;++i){
+        out.x[static_cast<std::size_t>(i)]=rawX[static_cast<std::size_t>(orderedNodes[static_cast<std::size_t>(i)])];
+        out.y[static_cast<std::size_t>(i)]=rawY[static_cast<std::size_t>(orderedNodes[static_cast<std::size_t>(i)])];
+        out.edgeA[static_cast<std::size_t>(i)]=i;
+        out.edgeB[static_cast<std::size_t>(i)]=(i+1)%n;
+    }
+    for(int i=0;i<n;++i){
+        const int j=(i+1)%n;
+        const double dx=out.x[static_cast<std::size_t>(j)]-out.x[static_cast<std::size_t>(i)];
+        const double dy=out.y[static_cast<std::size_t>(j)]-out.y[static_cast<std::size_t>(i)];
+        const double l=std::hypot(dx,dy);
+        if(!(l>1.0e-10*h) || l>4.0*h || !std::isfinite(l)){
+            throw std::runtime_error(
+                "0493x17c membrane first implementation rejects degenerate or periodic-seam-spanning contour edges");
+        }
+        out.restLength[static_cast<std::size_t>(i)]=l;
+        out.perimeter0+=l;
+        out.signedArea0+=0.5*(out.x[static_cast<std::size_t>(i)]*out.y[static_cast<std::size_t>(j)]-
+                              out.x[static_cast<std::size_t>(j)]*out.y[static_cast<std::size_t>(i)]);
+    }
+    if(!(std::abs(out.signedArea0)>h*h) || !std::isfinite(out.signedArea0)){
+        throw std::runtime_error("0493x17c membrane contour has zero/invalid enclosed area");
+    }
+    return out;
+}
+
+void q6_x17c_write_initial_membrane(
+    const SimulationParams& params,
+    const ChiMembraneHostLoop0493x17c& loop) {
+    if(params.outputDir.empty()) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::filesystem::path p=
+        std::filesystem::path(params.outputDir)/"chi_membrane_initial_0493x17c.csv";
+    std::ofstream out(p,std::ios::trunc);
+    if(!out) throw std::runtime_error("0493x17c failed to open initial membrane CSV");
+    out << "node,x0,y0,edgeToNextRestLength,normalSign\n" << std::setprecision(17);
+    for(std::size_t i=0;i<loop.x.size();++i){
+        out << i << ',' << loop.x[i] << ',' << loop.y[i] << ','
+            << loop.restLength[i] << ',' << static_cast<int>(loop.normalSign[i]) << '\n';
+    }
+    const std::filesystem::path q=
+        std::filesystem::path(params.outputDir)/"chi_membrane_initial_0493x17c.txt";
+    std::ofstream summary(q,std::ios::trunc);
+    if(!summary) throw std::runtime_error("0493x17c failed to open initial membrane summary");
+    summary << std::setprecision(17)
+            << "model=membrane_2d\n"
+            << "source=initial_chi_0.5_contour\n"
+            << "topology=single_closed_loop\n"
+            << "nodeCount=" << loop.x.size() << "\n"
+            << "edgeCount=" << loop.edgeA.size() << "\n"
+            << "signedArea0=" << loop.signedArea0 << "\n"
+            << "perimeter0=" << loop.perimeter0 << "\n"
+            << "mass=" << params.chiSolidMass << "\n"
+            << "stretchStiffness=" << params.chiSolidMembraneStretchStiffness << "\n"
+            << "areaStiffness=" << params.chiSolidMembraneAreaStiffness << "\n"
+            << "edgeDamping=" << params.chiSolidMembraneDamping << "\n"
+            << "bendingStiffness=" << params.chiSolidMembraneBendingStiffness << "\n"
+            << "crossBraceStiffness=" << params.chiSolidMembraneCrossBraceStiffness << "\n"
+            << "crossBraceRangeEdges=" << params.chiSolidMembraneCrossBraceRangeEdges << "\n"
+            << "crossBraceDiagonalFraction=" << params.chiSolidMembraneCrossBraceDiagonalFraction << "\n"
+            << "anchorMode=" << params.chiSolidMembraneAnchorMode << "\n"
+            << "anchorBandCells=" << params.chiSolidMembraneAnchorBandCells << "\n";
+}
+
 void q6_x17a_write_initial_mesh(
     const SimulationParams& params,
     const std::vector<ChiLagrangianHostEdge0493x17a>& edges,
@@ -25767,6 +26069,345 @@ __global__ void q6_x17a_update_edge_velocities(
         uSolidX, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
     uby[e] = q6_x17a_sample_cellcenter_field(
         uSolidY, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+}
+
+__global__ void q6_x17c_set_edges_from_nodes(
+    int edgeCount,
+    const int* edgeA, const int* edgeB,
+    const double* nodeX, const double* nodeY,
+    const double* nodeVx, const double* nodeVy,
+    double* ax, double* ay, double* bx, double* by,
+    double* uax, double* uay, double* ubx, double* uby) {
+    const int e=blockIdx.x*blockDim.x+threadIdx.x;
+    if(e>=edgeCount) return;
+    const int a=edgeA[e], b=edgeB[e];
+    ax[e]=nodeX[a]; ay[e]=nodeY[a];
+    bx[e]=nodeX[b]; by[e]=nodeY[b];
+    uax[e]=nodeVx[a]; uay[e]=nodeVy[a];
+    ubx[e]=nodeVx[b]; uby[e]=nodeVy[b];
+}
+
+__global__ void q6_x17c_drift_nodes(
+    int nodeCount, double* x, double* y,
+    const double* vx, const double* vy,
+    const unsigned char* pinned, double dt) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount) return;
+    if(pinned && pinned[i]) return;
+    x[i]+=dt*vx[i];
+    y[i]+=dt*vy[i];
+}
+
+__global__ void q6_x18a_set_hinged_nodes(
+    int nodeCount,
+    double* x, double* y, double* vx, double* vy,
+    const double* x0, const double* y0,
+    double pivotX, double pivotY, double theta, double omega) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount) return;
+    const double c=cos(theta), sn=sin(theta);
+    const double rx0=x0[i]-pivotX;
+    const double ry0=y0[i]-pivotY;
+    const double rx=c*rx0-sn*ry0;
+    const double ry=sn*rx0+c*ry0;
+    x[i]=pivotX+rx;
+    y[i]=pivotY+ry;
+    vx[i]=-omega*ry;
+    vy[i]= omega*rx;
+}
+
+__global__ void q6_x17c_reduce_before(
+    int nodeCount, int edgeCount,
+    const double* x, const double* y,
+    const double* vx, const double* vy,
+    const double* impulseX, const double* impulseY,
+    const int* edgeA, const int* edgeB,
+    const double* restLength,
+    double nodeMass, double kStretch,
+    ChiMembraneReduction0493x17c* out) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(!out) return;
+    if(i<nodeCount){
+        const double vxi=vx[i], vyi=vy[i];
+        atomic_add_double_0400(&out->centerXSum,x[i]);
+        atomic_add_double_0400(&out->centerYSum,y[i]);
+        atomic_add_double_0400(&out->momentumX,nodeMass*vxi);
+        atomic_add_double_0400(&out->momentumY,nodeMass*vyi);
+        atomic_add_double_0400(&out->kineticEnergy,0.5*nodeMass*(vxi*vxi+vyi*vyi));
+        atomic_add_double_0400(&out->reactionImpulseX,impulseX[i]);
+        atomic_add_double_0400(&out->reactionImpulseY,impulseY[i]);
+    }
+    if(i<edgeCount){
+        const int a=edgeA[i], b=edgeB[i];
+        const double dx=x[b]-x[a], dy=y[b]-y[a];
+        const double l=sqrt(dx*dx+dy*dy);
+        const double l0=restLength[i];
+        atomic_add_double_0400(&out->area2,x[a]*y[b]-x[b]*y[a]);
+        atomic_add_double_0400(&out->perimeter,l);
+        if(l0>0.0 && isfinite(l)){
+            const double strain=(l-l0)/l0;
+            atomic_add_double_0400(&out->stretchEnergy,0.5*kStretch*(l-l0)*(l-l0));
+            q6_x16l_atomic_max_positive(&out->maxAbsEdgeStrain,fabs(strain));
+        }
+    }
+}
+
+__global__ void q6_x18d_reduce_membrane_area2(
+    int edgeCount, const int* edgeA, const int* edgeB,
+    const double* x, const double* y, double* area2) {
+    const int e=blockIdx.x*blockDim.x+threadIdx.x;
+    if(e>=edgeCount || !area2) return;
+    const int a=edgeA[e], b=edgeB[e];
+    atomic_add_double_0400(area2,x[a]*y[b]-x[b]*y[a]);
+}
+
+__global__ void q6_x18d_area_internal_force_device(
+    int nodeCount,
+    const double* x, const double* y,
+    double signedArea0, const double* area2,
+    double kArea,
+    double* forceX, double* forceY) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount || !area2 || !(fabs(signedArea0)>1.0e-300)) return;
+    const int im=(i+nodeCount-1)%nodeCount;
+    const int ip=(i+1)%nodeCount;
+    const double signedArea=0.5*(*area2);
+    const double gradX=0.5*(y[ip]-y[im]);
+    const double gradY=0.5*(x[im]-x[ip]);
+    const double coeff=-kArea*(signedArea-signedArea0)/fabs(signedArea0);
+    forceX[i]+=coeff*gradX;
+    forceY[i]+=coeff*gradY;
+}
+
+__global__ void q6_x17c_edge_internal_forces(
+    int edgeCount,
+    const int* edgeA, const int* edgeB,
+    const double* x, const double* y,
+    const double* vx, const double* vy,
+    const double* restLength,
+    double kStretch, double damping,
+    double* forceX, double* forceY) {
+    const int e=blockIdx.x*blockDim.x+threadIdx.x;
+    if(e>=edgeCount) return;
+    const int a=edgeA[e], b=edgeB[e];
+    const double dx=x[b]-x[a], dy=y[b]-y[a];
+    const double l2=dx*dx+dy*dy;
+    if(!(l2>1.0e-28) || !isfinite(l2)) return;
+    const double l=sqrt(l2), tx=dx/l, ty=dy/l;
+    const double dvx=vx[b]-vx[a], dvy=vy[b]-vy[a];
+    const double extensionRate=dvx*tx+dvy*ty;
+    const double mag=kStretch*(l-restLength[e])+damping*extensionRate;
+    const double fx=mag*tx, fy=mag*ty;
+    atomic_add_double_0400(&forceX[a], fx);
+    atomic_add_double_0400(&forceY[a], fy);
+    atomic_add_double_0400(&forceX[b],-fx);
+    atomic_add_double_0400(&forceY[b],-fy);
+}
+
+__device__ __forceinline__ double q6_x17d_wrap_angle(double a) {
+    return atan2(sin(a), cos(a));
+}
+
+// 0493x17d-fix3: rotationally invariant angular bending energy on the
+// persistent closed material loop.  The rest turning angle is taken from the
+// initial Lagrangian contour, so rigid translation/rotation costs no energy.
+// The 1/l0 factor is the standard discrete approximation of
+//   (B/2) int kappa^2 ds.
+__global__ void q6_x17d_bending_internal_forces(
+    int nodeCount,
+    const double* x, const double* y,
+    const double* x0, const double* y0,
+    double bendingStiffness,
+    double* forceX, double* forceY,
+    ChiMembraneReduction0493x17c* out) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount || !(bendingStiffness>0.0)) return;
+    const int im=(i+nodeCount-1)%nodeCount;
+    const int ip=(i+1)%nodeCount;
+
+    const double ax=x[im]-x[i], ay=y[im]-y[i];
+    const double bx=x[ip]-x[i], by=y[ip]-y[i];
+    const double a0x=x0[im]-x0[i], a0y=y0[im]-y0[i];
+    const double b0x=x0[ip]-x0[i], b0y=y0[ip]-y0[i];
+    const double a2=ax*ax+ay*ay, b2=bx*bx+by*by;
+    const double a02=a0x*a0x+a0y*a0y, b02=b0x*b0x+b0y*b0y;
+    if(!(a2>1.0e-28) || !(b2>1.0e-28) || !(a02>1.0e-28) || !(b02>1.0e-28)) return;
+
+    const double theta=atan2(ax*by-ay*bx, ax*bx+ay*by);
+    const double theta0=atan2(a0x*b0y-a0y*b0x, a0x*b0x+a0y*b0y);
+    const double dtheta=q6_x17d_wrap_angle(theta-theta0);
+    const double l0=0.5*(sqrt(a02)+sqrt(b02));
+    if(!(l0>1.0e-14) || !isfinite(l0) || !isfinite(dtheta)) return;
+    const double kAngle=bendingStiffness/l0;
+
+    // theta = angle(b)-angle(a).
+    const double gax= ay/a2, gay=-ax/a2;
+    const double gbx=-by/b2, gby= bx/b2;
+    const double scale=-kAngle*dtheta;
+    const double fimx=scale*gax, fimy=scale*gay;
+    const double fipx=scale*gbx, fipy=scale*gby;
+    const double fix=-(fimx+fipx), fiy=-(fimy+fipy);
+
+    atomic_add_double_0400(&forceX[im],fimx);
+    atomic_add_double_0400(&forceY[im],fimy);
+    atomic_add_double_0400(&forceX[i],fix);
+    atomic_add_double_0400(&forceY[i],fiy);
+    atomic_add_double_0400(&forceX[ip],fipx);
+    atomic_add_double_0400(&forceY[ip],fipy);
+    if(out) {
+        atomic_add_double_0400(&out->bendingEnergy,0.5*kAngle*dtheta*dtheta);
+        q6_x16l_atomic_max_positive(&out->maxAbsAngleChange,fabs(dtheta));
+    }
+}
+
+
+__device__ __forceinline__ void q6_x17d_crossbrace_pair_force(
+    int a, int b,
+    const double* x, const double* y,
+    const double* vx, const double* vy,
+    const double* x0, const double* y0,
+    double stiffness, double damping,
+    double* forceX, double* forceY) {
+    if(a==b || !(stiffness>0.0)) return;
+    const double dx=x[b]-x[a], dy=y[b]-y[a];
+    const double d0x=x0[b]-x0[a], d0y=y0[b]-y0[a];
+    const double l2=dx*dx+dy*dy, l02=d0x*d0x+d0y*d0y;
+    if(!(l2>1.0e-28) || !(l02>1.0e-28) || !isfinite(l2) || !isfinite(l02)) return;
+    const double l=sqrt(l2), l0=sqrt(l02), tx=dx/l, ty=dy/l;
+    const double dvx=vx[b]-vx[a], dvy=vy[b]-vy[a];
+    const double extensionRate=dvx*tx+dvy*ty;
+    const double mag=stiffness*(l-l0)+damping*extensionRate;
+    const double fx=mag*tx, fy=mag*ty;
+    atomic_add_double_0400(&forceX[a], fx);
+    atomic_add_double_0400(&forceY[a], fy);
+    atomic_add_double_0400(&forceX[b],-fx);
+    atomic_add_double_0400(&forceY[b],-fy);
+}
+
+// 0493x17d-fix6: triangulate a thin CLOSED material strip across its
+// thickness.  Each node searches the INITIAL contour for the nearest node
+// lying approximately on its local normal, with opposite contour tangent and
+// within a local-radius cutoff.  Long faces of a thin box therefore acquire a
+// rung plus two diagonals; end caps do not bridge the full span.  Forces are
+// pairwise and therefore preserve the internal-force closure exactly.
+// This path is optional and disabled when crossBraceStiffness==0.
+__global__ void q6_x17d_crossbrace_internal_forces(
+    int nodeCount,
+    const double* x, const double* y,
+    const double* vx, const double* vy,
+    const double* x0, const double* y0,
+    double crossBraceStiffness,
+    double rangeEdges,
+    double diagonalFraction,
+    double edgeDamping,
+    double* forceX, double* forceY) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount || !(crossBraceStiffness>0.0) || !(rangeEdges>0.0)) return;
+    const int im=(i+nodeCount-1)%nodeCount;
+    const int ip=(i+1)%nodeCount;
+    const double tix=x0[ip]-x0[im], tiy=y0[ip]-y0[im];
+    const double ti2=tix*tix+tiy*tiy;
+    const double e0ax=x0[i]-x0[im], e0ay=y0[i]-y0[im];
+    const double e0bx=x0[ip]-x0[i], e0by=y0[ip]-y0[i];
+    const double localEdge=0.5*(sqrt(e0ax*e0ax+e0ay*e0ay)+sqrt(e0bx*e0bx+e0by*e0by));
+    if(!(ti2>1.0e-28) || !(localEdge>1.0e-14)) return;
+    const double ti=sqrt(ti2);
+    const double maxR=rangeEdges*localEdge;
+
+    int best=-1;
+    double bestR2=maxR*maxR;
+    for(int j=0;j<nodeCount;++j){
+        if(j==i || j==im || j==ip) continue;
+        const int jm=(j+nodeCount-1)%nodeCount;
+        const int jp=(j+1)%nodeCount;
+        const double tjx=x0[jp]-x0[jm], tjy=y0[jp]-y0[jm];
+        const double tj2=tjx*tjx+tjy*tjy;
+        if(!(tj2>1.0e-28)) continue;
+        // Opposite traversal direction identifies the opposite material face.
+        const double tangentCos=(tix*tjx+tiy*tjy)/(ti*sqrt(tj2));
+        if(!(tangentCos < -0.70)) continue;
+        const double dx=x0[j]-x0[i], dy=y0[j]-y0[i];
+        const double r2=dx*dx+dy*dy;
+        if(!(r2>1.0e-28) || !(r2<bestR2)) continue;
+        // Cross-thickness candidate must lie close to the local normal.
+        const double tangential=fabs(dx*tix+dy*tiy)/(sqrt(r2)*ti);
+        if(tangential > 0.35) continue;
+        best=j; bestR2=r2;
+    }
+    if(best<0 || i>=best) return; // one owner per opposite-face pair
+
+    const int bm=(best+nodeCount-1)%nodeCount;
+    const int bp=(best+1)%nodeCount;
+    const double kd=diagonalFraction*crossBraceStiffness;
+    const double cd=0.25*edgeDamping;
+    const double cdiag=diagonalFraction*cd;
+    q6_x17d_crossbrace_pair_force(i,best,x,y,vx,vy,x0,y0,
+                                   crossBraceStiffness,cd,forceX,forceY);
+    // Optional diagonals add shear rigidity.  For a bendable strip they may be
+    // reduced or disabled while the transverse rung still preserves thickness.
+    if(kd>0.0 && bm!=i && bm!=im && bm!=ip)
+        q6_x17d_crossbrace_pair_force(i,bm,x,y,vx,vy,x0,y0,kd,cdiag,forceX,forceY);
+    if(kd>0.0 && bp!=i && bp!=im && bp!=ip)
+        q6_x17d_crossbrace_pair_force(i,bp,x,y,vx,vy,x0,y0,kd,cdiag,forceX,forceY);
+}
+
+__global__ void q6_x17c_area_internal_force(
+    int nodeCount,
+    const double* x, const double* y,
+    double signedArea0, double signedArea,
+    double kArea,
+    double* forceX, double* forceY) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount || !(fabs(signedArea0)>1.0e-300)) return;
+    const int im=(i+nodeCount-1)%nodeCount;
+    const int ip=(i+1)%nodeCount;
+    const double gradX=0.5*(y[ip]-y[im]);
+    const double gradY=0.5*(x[im]-x[ip]);
+    const double coeff=-kArea*(signedArea-signedArea0)/fabs(signedArea0);
+    forceX[i]+=coeff*gradX;
+    forceY[i]+=coeff*gradY;
+}
+
+__global__ void q6_x17c_kick_nodes(
+    int nodeCount,
+    double* vx, double* vy,
+    const double* impulseX, const double* impulseY,
+    const double* forceX, const double* forceY,
+    const unsigned char* pinned,
+    double nodeMass, double dt,
+    ChiMembraneReduction0493x17c* out) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=nodeCount || !(nodeMass>0.0)) return;
+    const double fx=forceX[i], fy=forceY[i];
+    if(out) {
+        atomic_add_double_0400(&out->internalForceX,fx);
+        atomic_add_double_0400(&out->internalForceY,fy);
+    }
+    if(pinned && pinned[i]) {
+        if(out) {
+            atomic_add_double_0400(&out->supportConstraintImpulseX,-(impulseX[i]+dt*fx));
+            atomic_add_double_0400(&out->supportConstraintImpulseY,-(impulseY[i]+dt*fy));
+        }
+        vx[i]=0.0; vy[i]=0.0;
+        return;
+    }
+    const double vxn=vx[i]+impulseX[i]/nodeMass+dt*fx/nodeMass;
+    const double vyn=vy[i]+impulseY[i]/nodeMass+dt*fy/nodeMass;
+    vx[i]=vxn; vy[i]=vyn;
+    if(out) {
+        atomic_add_double_0400(&out->momentumX,nodeMass*vxn);
+        atomic_add_double_0400(&out->momentumY,nodeMass*vyn);
+        atomic_add_double_0400(&out->kineticEnergy,0.5*nodeMass*(vxn*vxn+vyn*vyn));
+    }
+}
+
+__global__ void q6_x17c_reduce_cell_reaction(
+    int ncell, const double* rx, const double* ry,
+    ChiMembraneReduction0493x17c* out) {
+    const int c=blockIdx.x*blockDim.x+threadIdx.x;
+    if(c>=ncell || !out) return;
+    atomic_add_double_0400(&out->cellReactionImpulseX,rx[c]);
+    atomic_add_double_0400(&out->cellReactionImpulseY,ry[c]);
 }
 
 __device__ __forceinline__ int q6_x17a_cell_index_raw(
@@ -25951,6 +26592,15 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
     const signed char* normalSign,
     const int* cellCount, const int* cellEdgeIds,
     double* wallImpulseX, double* wallImpulseY,
+    const int* membraneEdgeNodeA, const int* membraneEdgeNodeB,
+    double* membraneNodeImpulseX, double* membraneNodeImpulseY,
+    int nodalReactionActive,
+    int hingedActive, double hingedPivotX, double hingedPivotY,
+    double* hingedTorqueImpulse,
+    ChiHingedPhysicalLoad0493x18d* hingedPhysicalLoad,
+    ChiHingedSafety0493x18e* hingedSafety,
+    int commitPoststreamPosition0493x18e,
+    int maxParticleSpanCells0493x18e,
     int nx, int ny, double lx, double ly, double dt,
     int periodicX, int periodicY,
     KineticCrossingAccumulator0493x9x* audit) {
@@ -25964,6 +26614,12 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
     const double mass=(particles.mass && particles.mass[p]>0.0)?particles.mass[p]:1.0;
     const double dx=lx/static_cast<double>(nx), dy=ly/static_cast<double>(ny);
     const double h=fmin(dx,dy);
+    if (hingedSafety &&
+        (!isfinite(cx) || !isfinite(cy) || !isfinite(cvx) || !isfinite(cvy) ||
+         !isfinite(mass) || !(mass>0.0) || !isfinite(dt) || !(dt>0.0))) {
+        atomicAdd(&hingedSafety->nonFiniteState,1ull);
+        return;
+    }
     double elapsed=0.0;
     int hits=0;
     bool sawCandidate=false;
@@ -25973,6 +26629,33 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
         if (!(remaining>1.0e-15*dt)) break;
         const double x1=cx+remaining*cvx;
         const double y1=cy+remaining*cvy;
+        if (hingedSafety) {
+            if (!isfinite(x1) || !isfinite(y1)) {
+                atomicAdd(&hingedSafety->nonFiniteState,1ull);
+                return;
+            }
+            const double spanXd=fabs(x1-cx)/dx+2.0;
+            const double spanYd=fabs(y1-cy)/dy+2.0;
+            if (!isfinite(spanXd) || !isfinite(spanYd)) {
+                atomicAdd(&hingedSafety->nonFiniteState,1ull);
+                return;
+            }
+            const unsigned long long spanX=static_cast<unsigned long long>(ceil(spanXd));
+            const unsigned long long spanY=static_cast<unsigned long long>(ceil(spanYd));
+            const unsigned long long searchCells=spanX*spanY;
+            atomicMax(&hingedSafety->maxSpanXCells,spanX);
+            atomicMax(&hingedSafety->maxSpanYCells,spanY);
+            atomicMax(&hingedSafety->maxSearchCells,searchCells);
+            if (maxParticleSpanCells0493x18e>0) {
+                const unsigned long long maxSpan=
+                    static_cast<unsigned long long>(maxParticleSpanCells0493x18e);
+                const unsigned long long maxSearch=4ull*maxSpan;
+                if (spanX>maxSpan || spanY>maxSpan || searchCells>maxSearch) {
+                    atomicAdd(&hingedSafety->particleSpanExceeded,1ull);
+                    return;
+                }
+            }
+        }
         int i0=static_cast<int>(floor(fmin(cx,x1)/dx));
         int i1=static_cast<int>(floor(fmax(cx,x1)/dx));
         int j0=static_cast<int>(floor(fmin(cy,y1)/dy));
@@ -26020,11 +26703,36 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
         cx += epsPos*best.nx;
         cy += epsPos*best.ny;
 
-        const int reactionCell=q6_x17a_position_cell(
-            cx,cy,nx,ny,lx,ly,periodicX,periodicY);
-        if (reactionCell>=0) {
-            atomic_add_double_0400(&wallImpulseX[reactionCell],best.impulseWallX);
-            atomic_add_double_0400(&wallImpulseY[reactionCell],best.impulseWallY);
+        if (wallImpulseX && wallImpulseY) {
+            const int reactionCell=q6_x17a_position_cell(
+                cx,cy,nx,ny,lx,ly,periodicX,periodicY);
+            if (reactionCell>=0) {
+                atomic_add_double_0400(&wallImpulseX[reactionCell],best.impulseWallX);
+                atomic_add_double_0400(&wallImpulseY[reactionCell],best.impulseWallY);
+            }
+        }
+        if (nodalReactionActive && membraneEdgeNodeA && membraneEdgeNodeB &&
+            membraneNodeImpulseX && membraneNodeImpulseY && best.edge>=0) {
+            const int na=membraneEdgeNodeA[best.edge];
+            const int nb=membraneEdgeNodeB[best.edge];
+            const double wa=1.0-best.lambda;
+            const double wb=best.lambda;
+            atomic_add_double_0400(&membraneNodeImpulseX[na],wa*best.impulseWallX);
+            atomic_add_double_0400(&membraneNodeImpulseY[na],wa*best.impulseWallY);
+            atomic_add_double_0400(&membraneNodeImpulseX[nb],wb*best.impulseWallX);
+            atomic_add_double_0400(&membraneNodeImpulseY[nb],wb*best.impulseWallY);
+        }
+        if (hingedActive && (hingedTorqueImpulse || hingedPhysicalLoad)) {
+            const double rx=cx-hingedPivotX;
+            const double ry=cy-hingedPivotY;
+            const double tauImpulse=rx*best.impulseWallY-ry*best.impulseWallX;
+            if (hingedPhysicalLoad) {
+                atomic_add_double_0400(&hingedPhysicalLoad->impulseX,best.impulseWallX);
+                atomic_add_double_0400(&hingedPhysicalLoad->impulseY,best.impulseWallY);
+                atomic_add_double_0400(&hingedPhysicalLoad->torqueImpulse,tauImpulse);
+            } else {
+                atomic_add_double_0400(hingedTorqueImpulse,tauImpulse);
+            }
         }
         if (audit) {
             atomicAdd(&audit->continuousWallCollisions,1ull);
@@ -26050,21 +26758,42 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
     }
     if (audit && sawCandidate) atomicAdd(&audit->continuousWallParticlesWithCandidate,1ull);
     if (audit && hits>=3) atomicAdd(&audit->continuousWallCollisionLimitReached,1ull);
+    if (hingedSafety && hits>=3)
+        atomicAdd(&hingedSafety->collisionLimitReached,1ull);
 
     const double remaining=fmax(0.0,dt-elapsed);
     const double xf=cx+cvx*remaining;
     const double yf=cy+cvy*remaining;
+    if (hingedSafety && (!isfinite(xf) || !isfinite(yf) || !isfinite(cvx) || !isfinite(cvy))) {
+        atomicAdd(&hingedSafety->nonFiniteState,1ull);
+        return;
+    }
     const double newPreX=xf-cvx*dt;
     const double newPreY=yf-cvy*dt;
-    particles.x[p]=newPreX;
-    particles.y[p]=newPreY;
+    particles.x[p]=commitPoststreamPosition0493x18e?xf:newPreX;
+    particles.y[p]=commitPoststreamPosition0493x18e?yf:newPreY;
     particles.vx[p]=cvx;
     particles.vy[p]=cvy;
     if (audit && hits>0) {
+        const double storedX=commitPoststreamPosition0493x18e?xf:newPreX;
+        const double storedY=commitPoststreamPosition0493x18e?yf:newPreY;
         atomic_add_double_0400(&audit->continuousWallPositionShiftAbsSum,
-            sqrt((newPreX-x0)*(newPreX-x0)+(newPreY-y0)*(newPreY-y0)));
+            sqrt((storedX-x0)*(storedX-x0)+(storedY-y0)*(storedY-y0)));
     }
     (void)vx0; (void)vy0;
+}
+
+// 0493x18e: during hinged FSI subcycling the particle state is advanced through
+// the full parent interval locally.  The ordinary SRC/MPCD streaming stage must
+// still run once afterwards, so convert the final physical position back into
+// the equivalent pre-stream representation x_pre = x_final - v_final*dt.
+__global__ void q6_x18e_rewind_particles_for_parent_stream(
+    CudaParticleDeviceView particles, std::uint64_t nParticles, double dt) {
+    const std::uint64_t p=static_cast<std::uint64_t>(blockIdx.x)*blockDim.x+threadIdx.x;
+    if(p>=nParticles) return;
+    if(particles.role && particles.role[p]!=kParticleRoleFluid) return;
+    particles.x[p]-=particles.vx[p]*dt;
+    particles.y[p]-=particles.vy[p]*dt;
 }
 
 __global__ void q6_x17a_advance_lagrangian_edges(
@@ -26112,6 +26841,7 @@ __global__ void q6_x17a_measure_lagrangian_penetration(
     const double* ax,const double* ay,const double* bx,const double* by,
     const signed char* normalSign,
     double lx,double ly,int periodicX,int periodicY,
+    int closedLoopParity0493x17d,
     double h,double strictDistance,
     ChiPenetrationAccumulator0493x16l* out) {
     const std::uint64_t p=static_cast<std::uint64_t>(blockIdx.x)*blockDim.x+threadIdx.x;
@@ -26120,18 +26850,31 @@ __global__ void q6_x17a_measure_lagrangian_penetration(
     const double x=particles.x[p],y=particles.y[p];
     if(!isfinite(x)||!isfinite(y)) return;
     double bestAbs=1.0e300,bestSigned=1.0e300;
+    int crossings=0;
     for(int e=0;e<edgeCount;++e){
         double ad=0.0;
         const double sd=q6_x17a_point_segment_signed_distance(
             x,y,ax[e],ay[e],bx[e],by[e],normalSign[e],lx,ly,periodicX,periodicY,&ad);
         if(ad<bestAbs){bestAbs=ad;bestSigned=sd;}
+        if(closedLoopParity0493x17d){
+            // x17c/x17d membranes are required to be internal, simple closed
+            // loops away from periodic seams.  For such loops, nearest-edge
+            // orientation is NOT a valid global inside/outside test once the
+            // contour becomes non-convex.  Use even/odd ray parity instead.
+            const double y0=ay[e], y1=by[e];
+            if((y0>y)!=(y1>y)){
+                const double xhit=ax[e]+(y-y0)*(bx[e]-ax[e])/(y1-y0);
+                if(xhit>x) crossings^=1;
+            }
+        }
     }
     atomicAdd(&out->sampledParticles,1ull);
-    if(!(bestSigned<0.0)) return;
+    const bool inside = closedLoopParity0493x17d ? (crossings!=0) : (bestSigned<0.0);
+    if(!inside) return;
     const double mass=(particles.mass&&particles.mass[p]>0.0)?particles.mass[p]:1.0;
     atomicAdd(&out->rawInsideParticles,1ull);
     atomic_add_double_0400(&out->rawInsideMass,mass);
-    const double penetration=-bestSigned;
+    const double penetration=closedLoopParity0493x17d ? bestAbs : -bestSigned;
     q6_x16l_atomic_max_positive(&out->maxSolidLevelExcess,penetration);
     if(h>0.0) q6_x16l_atomic_max_positive(&out->maxPenetrationCells,penetration/h);
     if(penetration>strictDistance){
@@ -26164,22 +26907,43 @@ bool apply_chi_kinetic_boundary_0493x16j(
     (void)cells;
     if (params.chiKineticBoundaryMode != "specular") return false;
 
+    const bool membraneActive0493x17c =
+        params.chiSolidDynamicsEnable && params.chiSolidModel == "membrane_2d";
+    const bool hingedActive0493x18a =
+        params.chiSolidDynamicsEnable && params.chiSolidModel == "hinged_plate_2d";
+    const bool nodalLagrangianActive0493x18a =
+        membraneActive0493x17c || hingedActive0493x18a;
+    const bool qualification0493x18d=params.chiSolidQualificationDiagnosticsEnable;
+    const bool needCellWallReaction0493x18d=!nodalLagrangianActive0493x18a || qualification0493x18d;
+    const bool needNodalReaction0493x18d=membraneActive0493x17c ||
+        (hingedActive0493x18a && qualification0493x18d);
+
+    // The Eulerian chi is needed only for the initial Lagrangian extraction.
+    // Afterwards the resident edge/node mesh is the geometry authority.
     const float* chi = nullptr;
     int chiNx = 0, chiNy = 0;
-    if (!cuda_darcy_brinkman_0343_device_chi_field(params, &chi, &chiNx, &chiNy) ||
-        !chi || chiNx != grid.Nx || chiNy != grid.Ny) {
-        throw std::runtime_error("0493x17a resident chi geometry unavailable or grid-mismatched");
+    if (!nodalLagrangianActive0493x18a || !ws.chiKineticSegmentsValid0493x16j) {
+        if (!cuda_darcy_brinkman_0343_device_chi_field(params, &chi, &chiNx, &chiNy) ||
+            !chi || chiNx != grid.Nx || chiNy != grid.Ny) {
+            throw std::runtime_error("0493x17a resident chi geometry unavailable or grid-mismatched");
+        }
     }
     const float* uSolidX = nullptr;
     const float* uSolidY = nullptr;
     int usNx = 0, usNy = 0;
-    const bool movingSolid = cuda_darcy_brinkman_0343_device_solid_velocity_fields(
-        params, &uSolidX, &uSolidY, &usNx, &usNy) &&
-        uSolidX && uSolidY && usNx == grid.Nx && usNy == grid.Ny;
+    bool movingSolidEulerian=false;
+    if (!nodalLagrangianActive0493x18a) {
+        movingSolidEulerian = cuda_darcy_brinkman_0343_device_solid_velocity_fields(
+            params, &uSolidX, &uSolidY, &usNx, &usNy) &&
+            uSolidX && uSolidY && usNx == grid.Nx && usNy == grid.Ny;
+    }
+    const bool movingSolid = nodalLagrangianActive0493x18a || movingSolidEulerian;
 
     ws.ensure_kinetic_interface_0493x9x(grid.numCells, 1, 1);
     const std::uint64_t sourceGeometryVersion =
-        cuda_darcy_brinkman_0343_chi_geometry_version();
+        (nodalLagrangianActive0493x18a && ws.chiKineticSegmentsValid0493x16j)
+            ? ws.chiKineticGeometryVersion0493x16j
+            : cuda_darcy_brinkman_0343_chi_geometry_version();
     const double dx = params.Lx / static_cast<double>(grid.Nx);
     const double dy = params.Ly / static_cast<double>(grid.Ny);
     const double h = std::min(dx, dy);
@@ -26190,14 +26954,162 @@ bool apply_chi_kinetic_boundary_0493x16j(
         const auto edges = q6_x17a_extract_initial_chi_contour(
             chi, grid.Nx, grid.Ny, params.Lx, params.Ly,
             periodicX, periodicY, &stats);
-        const std::size_t n = edges.size();
-        std::vector<double> ax(n), ay(n), bx(n), by(n);
-        std::vector<signed char> normalSign(n);
-        for (std::size_t e=0;e<n;++e) {
-            ax[e]=edges[e].ax; ay[e]=edges[e].ay;
-            bx[e]=edges[e].bx; by[e]=edges[e].by;
-            normalSign[e]=edges[e].normalSign;
+        std::vector<double> ax, ay, bx, by;
+        std::vector<signed char> normalSign;
+        if (nodalLagrangianActive0493x18a) {
+            const auto loop=q6_x17c_build_single_closed_loop(edges,h);
+            const std::size_t n=loop.x.size();
+            ax.resize(n); ay.resize(n); bx.resize(n); by.resize(n);
+            normalSign=loop.normalSign;
+            std::vector<double> currentX=loop.x, currentY=loop.y;
+            std::vector<double> vx(n,0.0), vy(n,0.0);
+            std::vector<unsigned char> pinned(n,0u);
+
+            if (membraneActive0493x17c) {
+                std::fill(vx.begin(),vx.end(),params.darcyUSolidX);
+                std::fill(vy.begin(),vy.end(),params.darcyUSolidY);
+                std::string anchor0493x17d=params.chiSolidMembraneAnchorMode;
+                std::replace(anchor0493x17d.begin(),anchor0493x17d.end(),'-','_');
+                if(anchor0493x17d!="none") {
+                    const auto [xminIt,xmaxIt]=std::minmax_element(loop.x.begin(),loop.x.end());
+                    const auto [yminIt,ymaxIt]=std::minmax_element(loop.y.begin(),loop.y.end());
+                    const double xmin=*xminIt,xmax=*xmaxIt,ymin=*yminIt,ymax=*ymaxIt;
+                    const double band=params.chiSolidMembraneAnchorBandCells*h;
+                    int npin=0;
+                    for(std::size_t i=0;i<n;++i){
+                        bool pin=false;
+                        if(anchor0493x17d=="x_extrema")
+                            pin=(loop.x[i]<=xmin+band || loop.x[i]>=xmax-band);
+                        else if(anchor0493x17d=="y_extrema")
+                            pin=(loop.y[i]<=ymin+band || loop.y[i]>=ymax-band);
+                        pinned[i]=pin?1u:0u; npin+=pin?1:0;
+                        if(pin){vx[i]=0.0;vy[i]=0.0;}
+                    }
+                    if(npin<2 || npin>=static_cast<int>(n))
+                        throw std::runtime_error("0493x17d anchored membrane selected an invalid number of pinned nodes");
+                    ws.chiMembranePinnedNodeCount0493x17d=npin;
+                } else {
+                    ws.chiMembranePinnedNodeCount0493x17d=0;
+                }
+            } else {
+                // 0493x18a: fixed hinge at the top-center of the initial
+                // finite-thickness plate. theta=0 is exactly the chi geometry.
+                const auto [xminIt,xmaxIt]=std::minmax_element(loop.x.begin(),loop.x.end());
+                const auto [yminIt,ymaxIt]=std::minmax_element(loop.y.begin(),loop.y.end());
+                const double xmin=*xminIt,xmax=*xmaxIt,ymin=*yminIt,ymax=*ymaxIt;
+                if (!((ymax-ymin) > (xmax-xmin)))
+                    throw std::runtime_error("0493x18a first hinged_plate_2d demonstrator requires a vertically elongated initial rectangle");
+                const double pivotX=0.5*(xmin+xmax);
+                const double pivotY=ymax;
+                double area2=0.0, cxNum=0.0, cyNum=0.0, polarArea=0.0;
+                for(std::size_t i=0;i<n;++i){
+                    const std::size_t j=(i+1u)%n;
+                    const double xi=loop.x[i]-pivotX, yi=loop.y[i]-pivotY;
+                    const double xj=loop.x[j]-pivotX, yj=loop.y[j]-pivotY;
+                    const double cross=xi*yj-xj*yi;
+                    area2+=cross;
+                    cxNum+=(xi+xj)*cross;
+                    cyNum+=(yi+yj)*cross;
+                    polarArea+=cross*(xi*xi+xi*xj+xj*xj+yi*yi+yi*yj+yj*yj)/12.0;
+                }
+                if (!(std::abs(area2)>2.0*h*h) || !std::isfinite(area2))
+                    throw std::runtime_error("0493x18a invalid hinged plate polygon area");
+                const double centerRelX=cxNum/(3.0*area2);
+                const double centerRelY=cyNum/(3.0*area2);
+                const double meanR2=2.0*polarArea/area2;
+                const double inertia=params.chiSolidMass*meanR2;
+                double maxRadius0493x18e=0.0;
+                for(std::size_t i=0;i<n;++i){
+                    const double rx=loop.x[i]-pivotX;
+                    const double ry=loop.y[i]-pivotY;
+                    maxRadius0493x18e=std::max(maxRadius0493x18e,std::hypot(rx,ry));
+                }
+                if (!(inertia>0.0) || !std::isfinite(inertia) ||
+                    !(maxRadius0493x18e>0.0) || !std::isfinite(maxRadius0493x18e))
+                    throw std::runtime_error("0493x18e invalid hinged plate inertia/radius");
+                ws.chiHingedPivotX0493x18a=pivotX;
+                ws.chiHingedPivotY0493x18a=pivotY;
+                ws.chiHingedCenterX00493x18a=pivotX+centerRelX;
+                ws.chiHingedCenterY00493x18a=pivotY+centerRelY;
+                ws.chiHingedInertia0493x18a=inertia;
+                ws.chiHingedMaxRadius0493x18e=maxRadius0493x18e;
+                ws.chiHingedTheta0493x18a=params.chiSolidHingedInitialAngle;
+                ws.chiHingedOmega0493x18a=params.chiSolidHingedInitialOmega;
+                ws.chiHingedInitialized0493x18a=true;
+                ws.chiMembranePinnedNodeCount0493x17d=0;
+                const double c=std::cos(ws.chiHingedTheta0493x18a);
+                const double sn=std::sin(ws.chiHingedTheta0493x18a);
+                for(std::size_t i=0;i<n;++i){
+                    const double rx0=loop.x[i]-pivotX, ry0=loop.y[i]-pivotY;
+                    const double rx=c*rx0-sn*ry0;
+                    const double ry=sn*rx0+c*ry0;
+                    currentX[i]=pivotX+rx; currentY[i]=pivotY+ry;
+                    vx[i]=-ws.chiHingedOmega0493x18a*ry;
+                    vy[i]= ws.chiHingedOmega0493x18a*rx;
+                }
+                if(!params.outputDir.empty()) {
+                    std::filesystem::create_directories(params.outputDir);
+                    std::ofstream q(std::filesystem::path(params.outputDir)/"chi_hinged_plate_initial_0493x18a.txt",std::ios::trunc);
+                    if(!q) throw std::runtime_error("0493x18a failed to open initial hinged-plate summary");
+                    q << std::setprecision(17)
+                      << "model=hinged_plate_2d\n"
+                      << "pivotX=" << pivotX << "\n"
+                      << "pivotY=" << pivotY << "\n"
+                      << "centerX0=" << ws.chiHingedCenterX00493x18a << "\n"
+                      << "centerY0=" << ws.chiHingedCenterY00493x18a << "\n"
+                      << "mass=" << params.chiSolidMass << "\n"
+                      << "inertia=" << inertia << "\n"
+                      << "maxRadius=" << maxRadius0493x18e << "\n"
+                      << "length=" << (ymax-ymin) << "\n"
+                      << "thickness=" << (xmax-xmin) << "\n"
+                      << "gravityY=" << params.chiSolidHingedGravityY << "\n"
+                      << "angularDamping=" << params.chiSolidHingedAngularDamping << "\n";
+                }
+            }
+
+            for(std::size_t e=0;e<n;++e){
+                const int a=loop.edgeA[e], b=loop.edgeB[e];
+                ax[e]=currentX[static_cast<std::size_t>(a)];
+                ay[e]=currentY[static_cast<std::size_t>(a)];
+                bx[e]=currentX[static_cast<std::size_t>(b)];
+                by[e]=currentY[static_cast<std::size_t>(b)];
+            }
+            auto copyD=[&](double* dst,const double* src,std::size_t count,const char* what){
+                check_cuda_0400(cudaMemcpy(dst,src,count*sizeof(double),cudaMemcpyHostToDevice),what);
+            };
+            copyD(ws.chiMembraneNodeX0493x17c.data(),currentX.data(),n,"0493x18a nodal x upload");
+            copyD(ws.chiMembraneNodeY0493x17c.data(),currentY.data(),n,"0493x18a nodal y upload");
+            copyD(ws.chiMembraneNodeX00493x17c.data(),loop.x.data(),n,"0493x18a nodal x0 upload");
+            copyD(ws.chiMembraneNodeY00493x17c.data(),loop.y.data(),n,"0493x18a nodal y0 upload");
+            copyD(ws.chiMembraneNodeVx0493x17c.data(),vx.data(),n,"0493x18a nodal vx upload");
+            copyD(ws.chiMembraneNodeVy0493x17c.data(),vy.data(),n,"0493x18a nodal vy upload");
+            copyD(ws.chiMembraneRestLength0493x17c.data(),loop.restLength.data(),n,"0493x18a rest length upload");
+            check_cuda_0400(cudaMemcpy(ws.chiMembraneNodePinned0493x17d.data(),pinned.data(),n*sizeof(unsigned char),cudaMemcpyHostToDevice),
+                           "0493x18a pinned-node upload");
+            check_cuda_0400(cudaMemcpy(ws.chiMembraneEdgeNodeA0493x17c.data(),loop.edgeA.data(),n*sizeof(int),cudaMemcpyHostToDevice),
+                           "0493x18a edge-node A upload");
+            check_cuda_0400(cudaMemcpy(ws.chiMembraneEdgeNodeB0493x17c.data(),loop.edgeB.data(),n*sizeof(int),cudaMemcpyHostToDevice),
+                           "0493x18a edge-node B upload");
+            check_cuda_0400(cudaMemset(ws.chiMembraneNodeImpulseX0493x17c.data(),0,n*sizeof(double)),
+                           "0493x18a initial node impulseX zero");
+            check_cuda_0400(cudaMemset(ws.chiMembraneNodeImpulseY0493x17c.data(),0,n*sizeof(double)),
+                           "0493x18a initial node impulseY zero");
+            ws.chiMembraneNodeCount0493x17c=static_cast<int>(n);
+            ws.chiMembraneSignedArea00493x17c=loop.signedArea0;
+            ws.chiMembranePerimeter00493x17c=loop.perimeter0;
+            ws.chiMembraneInitialized0493x17c=true;
+            if(membraneActive0493x17c) q6_x17c_write_initial_membrane(params,loop);
+        } else {
+            const std::size_t n=edges.size();
+            ax.resize(n); ay.resize(n); bx.resize(n); by.resize(n);
+            normalSign.resize(n);
+            for(std::size_t e=0;e<n;++e){
+                ax[e]=edges[e].ax; ay[e]=edges[e].ay;
+                bx[e]=edges[e].bx; by[e]=edges[e].by;
+                normalSign[e]=edges[e].normalSign;
+            }
         }
+        const std::size_t n=ax.size();
         check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegAx0493x10n.data(),
                                   ax.data(),n*sizeof(double),cudaMemcpyHostToDevice),
                        "0493x17a edge ax upload");
@@ -26229,28 +27141,328 @@ bool apply_chi_kinetic_boundary_0493x16j(
         throw std::runtime_error("0493x17a Lagrangian mesh has no resident edges");
     }
     const int edgeBlocks=std::max(1,(edgeCount+threads-1)/threads);
-    q6_x17a_update_edge_velocities<<<edgeBlocks,threads>>>(
-        edgeCount,
-        ws.kineticContinuousSegAx0493x10n.data(),
-        ws.kineticContinuousSegAy0493x10n.data(),
-        ws.kineticContinuousSegBx0493x10n.data(),
-        ws.kineticContinuousSegBy0493x10n.data(),
-        ws.kineticContinuousSegUax0493x10n.data(),
-        ws.kineticContinuousSegUay0493x10n.data(),
-        ws.kineticContinuousSegUbx0493x10n.data(),
-        ws.kineticContinuousSegUby0493x10n.data(),
-        movingSolid?uSolidX:nullptr,movingSolid?uSolidY:nullptr,
-        grid.Nx,grid.Ny,params.Lx,params.Ly,periodicX,periodicY,
-        movingSolid?1:0);
-    check_cuda_0400(cudaGetLastError(),"0493x17a edge velocity update launch");
+    if (nodalLagrangianActive0493x18a) {
+        if (!ws.chiMembraneInitialized0493x17c ||
+            ws.chiMembraneNodeCount0493x17c != edgeCount) {
+            throw std::runtime_error("0493x18a nodal Lagrangian mesh was not initialized as one closed loop");
+        }
+        q6_x17c_set_edges_from_nodes<<<edgeBlocks,threads>>>(
+            edgeCount,
+            ws.chiMembraneEdgeNodeA0493x17c.data(),
+            ws.chiMembraneEdgeNodeB0493x17c.data(),
+            ws.chiMembraneNodeX0493x17c.data(),
+            ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),
+            ws.chiMembraneNodeVy0493x17c.data(),
+            ws.kineticContinuousSegAx0493x10n.data(),
+            ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),
+            ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),
+            ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),
+            ws.kineticContinuousSegUby0493x10n.data());
+        check_cuda_0400(cudaGetLastError(),"0493x17c node-to-edge kinematics launch");
+        if (needNodalReaction0493x18d) {
+            const std::size_t nodeBytes=static_cast<std::size_t>(edgeCount)*sizeof(double);
+            check_cuda_0400(cudaMemset(ws.chiMembraneNodeImpulseX0493x17c.data(),0,nodeBytes),
+                           "0493x17c node impulseX zero");
+            check_cuda_0400(cudaMemset(ws.chiMembraneNodeImpulseY0493x17c.data(),0,nodeBytes),
+                           "0493x17c node impulseY zero");
+        }
+        if (hingedActive0493x18a) {
+            if (qualification0493x18d) {
+                check_cuda_0400(cudaMemset(ws.chiHingedTorqueImpulse0493x18a.data(),0,sizeof(double)),
+                               "0493x18a hinge torque impulse zero");
+            } else {
+                check_cuda_0400(cudaMemset(ws.chiHingedPhysicalLoad0493x18d.data(),0,
+                                          sizeof(ChiHingedPhysicalLoad0493x18d)),
+                               "0493x18d hinged physical load zero");
+            }
+        }
+    } else {
+        q6_x17a_update_edge_velocities<<<edgeBlocks,threads>>>(
+            edgeCount,
+            ws.kineticContinuousSegAx0493x10n.data(),
+            ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),
+            ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),
+            ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),
+            ws.kineticContinuousSegUby0493x10n.data(),
+            movingSolid?uSolidX:nullptr,movingSolid?uSolidY:nullptr,
+            grid.Nx,grid.Ny,params.Lx,params.Ly,periodicX,periodicY,
+            movingSolid?1:0);
+        check_cuda_0400(cudaGetLastError(),"0493x17a edge velocity update launch");
+    }
+
+    // 0493x18e: the normal hinged path is locally subcycled here, at the
+    // material-wall coupling itself.  Only this pre-stream FSI work is
+    // subdivided; the expensive SRC/Q6/collision chain still executes once per
+    // parent dt.  This removes the one-parent-step delay between hydrodynamic
+    // impulse and wall velocity that destabilizes very light hinged bodies.
+    ws.chiHingedFsiSubcycledStepValid0493x18e=false;
+    if (hingedActive0493x18a && !qualification0493x18d &&
+        params.chiSolidHingedFsiSubcyclingEnable) {
+        const int nodeCount=ws.chiMembraneNodeCount0493x17c;
+        const int nodeBlocks=std::max(1,(nodeCount+threads-1)/threads);
+        const std::size_t cellCount0493x18e=
+            static_cast<std::size_t>(std::max(1,grid.numCells));
+        const double inertia=ws.chiHingedInertia0493x18a;
+        const double radius=ws.chiHingedMaxRadius0493x18e;
+        if (!(params.dt>0.0) || !std::isfinite(params.dt) ||
+            !(inertia>0.0) || !std::isfinite(inertia) ||
+            !(radius>0.0) || !std::isfinite(radius) || !(h>0.0)) {
+            throw std::runtime_error("0493x18e invalid hinged FSI dt/inertia/radius/grid scale");
+        }
+
+        const double thetaStepStart=ws.chiHingedTheta0493x18a;
+        const double omegaStepStart=ws.chiHingedOmega0493x18a;
+        if (!std::isfinite(thetaStepStart) || !std::isfinite(omegaStepStart)) {
+            throw std::runtime_error("0493x18e non-finite hinged state before local FSI subcycling");
+        }
+        const double rcx0=ws.chiHingedCenterX00493x18a-ws.chiHingedPivotX0493x18a;
+        const double rcy0=ws.chiHingedCenterY00493x18a-ws.chiHingedPivotY0493x18a;
+        const double baseSubDt=params.dt/static_cast<double>(params.chiSolidHingedFsiMinSubsteps);
+        double remainingParent=params.dt;
+        double hydroImpulseXTotal=0.0, hydroImpulseYTotal=0.0;
+        double hydroTorqueImpulseTotal=0.0;
+        double gravityTorqueImpulseTotal=0.0, dampingTorqueImpulseTotal=0.0;
+        double maxAbsOmega=std::abs(omegaStepStart);
+        double maxAngularIncrement=0.0, maxTipCells=0.0;
+        int substeps=0;
+        const double parentTol=1.0e-14*params.dt;
+
+        while (remainingParent>parentTol) {
+            if (substeps>=params.chiSolidHingedFsiMaxSubsteps) {
+                std::ostringstream oss;
+                oss << "0493x18e hinged FSI needs more than "
+                    << params.chiSolidHingedFsiMaxSubsteps
+                    << " local substeps; remaining=" << remainingParent
+                    << " omega=" << ws.chiHingedOmega0493x18a
+                    << " tipCellsPerParent="
+                    << std::abs(ws.chiHingedOmega0493x18a)*radius*params.dt/h
+                    << ". Increase chiSolidHingedFsiMaxSubsteps or reduce the physical forcing.";
+                throw std::runtime_error(oss.str());
+            }
+            const double thetaBefore=ws.chiHingedTheta0493x18a;
+            const double omegaBefore=ws.chiHingedOmega0493x18a;
+            if (!std::isfinite(thetaBefore) || !std::isfinite(omegaBefore)) {
+                throw std::runtime_error("0493x18e non-finite hinged state during local FSI subcycling");
+            }
+
+            double subDt=std::min(remainingParent,baseSubDt);
+            const double absOmega=std::abs(omegaBefore);
+            if (absOmega>0.0) {
+                subDt=std::min(subDt,params.chiSolidHingedMaxAngularIncrement/absOmega);
+                subDt=std::min(subDt,
+                    params.chiSolidHingedMaxTipDisplacementCells*h/(absOmega*radius));
+            }
+            if (!(subDt>0.0) || !std::isfinite(subDt) || subDt<1.0e-15*params.dt) {
+                throw std::runtime_error(
+                    "0493x18e hinged FSI local dt collapsed; angular velocity is outside the safe integration range");
+            }
+
+            // Current node positions/velocities are the exact rigid state at
+            // the start of this substep.  Build their locally swept broad phase.
+            check_cuda_0400(cudaMemset(ws.chiLagrangianCellEdgeCount0493x17a.data(),0,
+                                      cellCount0493x18e*sizeof(int)),
+                           "0493x18e cell-edge counts zero");
+            check_cuda_0400(cudaMemset(ws.chiLagrangianBinOverflow0493x17a.data(),0,
+                                      sizeof(unsigned long long)),
+                           "0493x18e bin overflow zero");
+            check_cuda_0400(cudaMemset(ws.chiHingedPhysicalLoad0493x18d.data(),0,
+                                      sizeof(ChiHingedPhysicalLoad0493x18d)),
+                           "0493x18e substep physical load zero");
+            check_cuda_0400(cudaMemset(ws.chiHingedSafety0493x18e.data(),0,
+                                      sizeof(ChiHingedSafety0493x18e)),
+                           "0493x18e safety zero");
+
+            q6_x17a_bin_swept_edges<<<edgeBlocks,threads>>>(
+                edgeCount,
+                ws.kineticContinuousSegAx0493x10n.data(),
+                ws.kineticContinuousSegAy0493x10n.data(),
+                ws.kineticContinuousSegBx0493x10n.data(),
+                ws.kineticContinuousSegBy0493x10n.data(),
+                ws.kineticContinuousSegUax0493x10n.data(),
+                ws.kineticContinuousSegUay0493x10n.data(),
+                ws.kineticContinuousSegUbx0493x10n.data(),
+                ws.kineticContinuousSegUby0493x10n.data(),
+                ws.chiLagrangianCellEdgeCount0493x17a.data(),
+                ws.chiLagrangianCellEdgeIds0493x17a.data(),
+                ws.chiLagrangianBinOverflow0493x17a.data(),
+                grid.Nx,grid.Ny,params.Lx,params.Ly,subDt,periodicX,periodicY);
+            check_cuda_0400(cudaGetLastError(),"0493x18e swept-edge binning launch");
+
+            q6_x17a_apply_lagrangian_boundary<<<particleBlocks,threads>>>(
+                particles,nParticles,edgeCount,
+                ws.kineticContinuousSegAx0493x10n.data(),
+                ws.kineticContinuousSegAy0493x10n.data(),
+                ws.kineticContinuousSegBx0493x10n.data(),
+                ws.kineticContinuousSegBy0493x10n.data(),
+                ws.kineticContinuousSegUax0493x10n.data(),
+                ws.kineticContinuousSegUay0493x10n.data(),
+                ws.kineticContinuousSegUbx0493x10n.data(),
+                ws.kineticContinuousSegUby0493x10n.data(),
+                ws.chiLagrangianNormalSign0493x17a.data(),
+                ws.chiLagrangianCellEdgeCount0493x17a.data(),
+                ws.chiLagrangianCellEdgeIds0493x17a.data(),
+                nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,0,
+                1,ws.chiHingedPivotX0493x18a,ws.chiHingedPivotY0493x18a,
+                nullptr,ws.chiHingedPhysicalLoad0493x18d.data(),
+                ws.chiHingedSafety0493x18e.data(),1,
+                params.chiSolidHingedMaxParticleSpanCells,
+                grid.Nx,grid.Ny,params.Lx,params.Ly,subDt,periodicX,periodicY,nullptr);
+            check_cuda_0400(cudaGetLastError(),"0493x18e subcycled material-wall launch");
+
+            ChiHingedPhysicalLoad0493x18d load{};
+            ChiHingedSafety0493x18e safety{};
+            unsigned long long overflow=0ull;
+            check_cuda_0400(cudaMemcpy(&load,ws.chiHingedPhysicalLoad0493x18d.data(),
+                                      sizeof(load),cudaMemcpyDeviceToHost),
+                           "0493x18e substep physical load download");
+            check_cuda_0400(cudaMemcpy(&safety,ws.chiHingedSafety0493x18e.data(),
+                                      sizeof(safety),cudaMemcpyDeviceToHost),
+                           "0493x18e safety download");
+            check_cuda_0400(cudaMemcpy(&overflow,ws.chiLagrangianBinOverflow0493x17a.data(),
+                                      sizeof(overflow),cudaMemcpyDeviceToHost),
+                           "0493x18e bin overflow download");
+            if (overflow!=0ull || safety.particleSpanExceeded!=0ull ||
+                safety.collisionLimitReached!=0ull || safety.nonFiniteState!=0ull) {
+                std::ostringstream oss;
+                oss << "0493x18e material-wall safety stop: binOverflow=" << overflow
+                    << " particleSpanExceeded=" << safety.particleSpanExceeded
+                    << " collisionLimitReached=" << safety.collisionLimitReached
+                    << " nonFiniteState=" << safety.nonFiniteState
+                    << " maxSpanXCells=" << safety.maxSpanXCells
+                    << " maxSpanYCells=" << safety.maxSpanYCells
+                    << " maxSearchCells=" << safety.maxSearchCells
+                    << " maxAllowedSpanCells=" << params.chiSolidHingedMaxParticleSpanCells
+                    << ". The run is stopped deliberately before a pathological CUDA search can hang.";
+                throw std::runtime_error(oss.str());
+            }
+            if (!std::isfinite(load.impulseX) || !std::isfinite(load.impulseY) ||
+                !std::isfinite(load.torqueImpulse)) {
+                throw std::runtime_error("0493x18e non-finite hydrodynamic substep load");
+            }
+
+            // Keep the original x18a drift--kick ordering, but execute it on
+            // the local FSI dt so the next substep immediately sees the updated
+            // wall velocity.  This is the key stability change for light bodies.
+            const double thetaAfter=thetaBefore+subDt*omegaBefore;
+            const double c=std::cos(thetaAfter),sn=std::sin(thetaAfter);
+            const double rcx=c*rcx0-sn*rcy0;
+            const double gravityTorque=rcx*params.chiSolidMass*params.chiSolidHingedGravityY;
+            const double dampingTorque=-params.chiSolidHingedAngularDamping*omegaBefore;
+            const double gravityImpulse=gravityTorque*subDt;
+            const double dampingImpulse=dampingTorque*subDt;
+            const double omegaAfter=omegaBefore+
+                (load.torqueImpulse+gravityImpulse+dampingImpulse)/inertia;
+            if (!std::isfinite(thetaAfter) || !std::isfinite(omegaAfter)) {
+                throw std::runtime_error("0493x18e hinged state became non-finite after local FSI kick");
+            }
+
+            hydroImpulseXTotal+=load.impulseX;
+            hydroImpulseYTotal+=load.impulseY;
+            hydroTorqueImpulseTotal+=load.torqueImpulse;
+            gravityTorqueImpulseTotal+=gravityImpulse;
+            dampingTorqueImpulseTotal+=dampingImpulse;
+            maxAbsOmega=std::max(maxAbsOmega,std::max(std::abs(omegaBefore),std::abs(omegaAfter)));
+            maxAngularIncrement=std::max(maxAngularIncrement,std::abs(omegaBefore*subDt));
+            maxTipCells=std::max(maxTipCells,std::abs(omegaBefore)*radius*subDt/h);
+
+            ws.chiHingedTheta0493x18a=thetaAfter;
+            ws.chiHingedOmega0493x18a=omegaAfter;
+            q6_x18a_set_hinged_nodes<<<nodeBlocks,threads>>>(
+                nodeCount,
+                ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+                ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+                ws.chiMembraneNodeX00493x17c.data(),ws.chiMembraneNodeY00493x17c.data(),
+                ws.chiHingedPivotX0493x18a,ws.chiHingedPivotY0493x18a,
+                thetaAfter,omegaAfter);
+            check_cuda_0400(cudaGetLastError(),"0493x18e rigid substep state launch");
+            q6_x17c_set_edges_from_nodes<<<edgeBlocks,threads>>>(
+                edgeCount,
+                ws.chiMembraneEdgeNodeA0493x17c.data(),ws.chiMembraneEdgeNodeB0493x17c.data(),
+                ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+                ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+                ws.kineticContinuousSegAx0493x10n.data(),ws.kineticContinuousSegAy0493x10n.data(),
+                ws.kineticContinuousSegBx0493x10n.data(),ws.kineticContinuousSegBy0493x10n.data(),
+                ws.kineticContinuousSegUax0493x10n.data(),ws.kineticContinuousSegUay0493x10n.data(),
+                ws.kineticContinuousSegUbx0493x10n.data(),ws.kineticContinuousSegUby0493x10n.data());
+            check_cuda_0400(cudaGetLastError(),"0493x18e substep node-to-edge sync launch");
+
+            remainingParent-=subDt;
+            if (remainingParent<parentTol) remainingParent=0.0;
+            ++substeps;
+        }
+
+        // Restore the representation expected by the one ordinary parent
+        // streaming pass: that pass will now land particles exactly at the
+        // physical positions reached by the local collision substeps.
+        q6_x18e_rewind_particles_for_parent_stream<<<particleBlocks,threads>>>(
+            particles,nParticles,params.dt);
+        check_cuda_0400(cudaGetLastError(),"0493x18e parent-stream rewind launch");
+
+        ws.chiHingedFsiSubcycledStepValid0493x18e=true;
+        ws.chiHingedFsiSubcycledStep0493x18e=step;
+        ws.chiHingedFsiSubsteps0493x18e=substeps;
+        ws.chiHingedThetaBeforeStep0493x18e=thetaStepStart;
+        ws.chiHingedOmegaBeforeStep0493x18e=omegaStepStart;
+        ws.chiHingedHydroImpulseXStep0493x18e=hydroImpulseXTotal;
+        ws.chiHingedHydroImpulseYStep0493x18e=hydroImpulseYTotal;
+        ws.chiHingedHydroTorqueImpulseStep0493x18e=hydroTorqueImpulseTotal;
+        ws.chiHingedGravityTorqueImpulseStep0493x18e=gravityTorqueImpulseTotal;
+        ws.chiHingedDampingTorqueImpulseStep0493x18e=dampingTorqueImpulseTotal;
+        ws.chiHingedMaxAbsOmegaSubstep0493x18e=maxAbsOmega;
+        ws.chiHingedMaxAngularIncrement0493x18e=maxAngularIncrement;
+        ws.chiHingedMaxTipDisplacementCells0493x18e=maxTipCells;
+        ++ws.chiLagrangianMeshVersion0493x17a;
+        ws.chiKineticImpulseValid0493x16j=false;
+        ws.chiKineticNx0493x16j=grid.Nx;
+        ws.chiKineticNy0493x16j=grid.Ny;
+
+        static bool reported0493x18e=false;
+        if(!reported0493x18e){
+            std::cout << "[0493x18e-hinged-fsi] localSubcycling=1"
+                      << " minSubsteps=" << params.chiSolidHingedFsiMinSubsteps
+                      << " maxSubsteps=" << params.chiSolidHingedFsiMaxSubsteps
+                      << " maxAngularIncrement=" << params.chiSolidHingedMaxAngularIncrement
+                      << " maxTipDisplacementCells=" << params.chiSolidHingedMaxTipDisplacementCells
+                      << " maxParticleSpanCells=" << params.chiSolidHingedMaxParticleSpanCells
+                      << " globalDtUnchanged=" << params.dt
+                      << std::endl;
+            reported0493x18e=true;
+        }
+        return true;
+    }
 
     const std::size_t cellCount=static_cast<std::size_t>(std::max(1,grid.numCells));
     check_cuda_0400(cudaMemset(ws.chiLagrangianCellEdgeCount0493x17a.data(),0,
                               cellCount*sizeof(int)),
                    "0493x17a cell-edge counts zero");
-    check_cuda_0400(cudaMemset(ws.chiLagrangianBinOverflow0493x17a.data(),0,
-                              sizeof(unsigned long long)),
-                   "0493x17a bin overflow zero");
+    if (hingedActive0493x18a) {
+        const double tipCells=std::abs(ws.chiHingedOmega0493x18a)*
+            ws.chiHingedMaxRadius0493x18e*params.dt/h;
+        const double angleIncrement=std::abs(ws.chiHingedOmega0493x18a)*params.dt;
+        if (!std::isfinite(tipCells) || !std::isfinite(angleIncrement) ||
+            tipCells>params.chiSolidHingedMaxTipDisplacementCells*
+                     static_cast<double>(params.chiSolidHingedFsiMaxSubsteps) ||
+            angleIncrement>params.chiSolidHingedMaxAngularIncrement*
+                           static_cast<double>(params.chiSolidHingedFsiMaxSubsteps)) {
+            throw std::runtime_error(
+                "0493x18e hinged safety stop before broad-phase: wall sweep exceeds the configured hard local-substep envelope");
+        }
+        check_cuda_0400(cudaMemset(ws.chiHingedSafety0493x18e.data(),0,
+                                  sizeof(ChiHingedSafety0493x18e)),
+                       "0493x18e hinged safety zero");
+    }
+    if (qualification0493x18d || hingedActive0493x18a) {
+        check_cuda_0400(cudaMemset(ws.chiLagrangianBinOverflow0493x17a.data(),0,
+                                  sizeof(unsigned long long)),
+                       "0493x17a bin overflow zero");
+    }
     q6_x17a_bin_swept_edges<<<edgeBlocks,threads>>>(
         edgeCount,
         ws.kineticContinuousSegAx0493x10n.data(),
@@ -26263,11 +27475,12 @@ bool apply_chi_kinetic_boundary_0493x16j(
         ws.kineticContinuousSegUby0493x10n.data(),
         ws.chiLagrangianCellEdgeCount0493x17a.data(),
         ws.chiLagrangianCellEdgeIds0493x17a.data(),
-        ws.chiLagrangianBinOverflow0493x17a.data(),
+        (qualification0493x18d||hingedActive0493x18a)?
+            ws.chiLagrangianBinOverflow0493x17a.data():nullptr,
         grid.Nx,grid.Ny,params.Lx,params.Ly,params.dt,periodicX,periodicY);
     check_cuda_0400(cudaGetLastError(),"0493x17a swept-edge binning launch");
 
-    const bool auditThisStep=params.summaryEvery>0 &&
+    const bool auditThisStep=qualification0493x18d && params.summaryEvery>0 &&
         (step==0 || ((step+1)%params.summaryEvery)==0);
     KineticCrossingAccumulator0493x9x* auditDev=nullptr;
     if (auditThisStep) {
@@ -26296,12 +27509,14 @@ bool apply_chi_kinetic_boundary_0493x16j(
         }
     }
 
-    check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseX0493x10m.data(),0,
-                              cellCount*sizeof(double)),
-                   "0493x17a wall impulseX zero");
-    check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseY0493x10m.data(),0,
-                              cellCount*sizeof(double)),
-                   "0493x17a wall impulseY zero");
+    if (needCellWallReaction0493x18d) {
+        check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseX0493x10m.data(),0,
+                                  cellCount*sizeof(double)),
+                       "0493x17a wall impulseX zero");
+        check_cuda_0400(cudaMemset(ws.kineticMovingWallImpulseY0493x10m.data(),0,
+                                  cellCount*sizeof(double)),
+                       "0493x17a wall impulseY zero");
+    }
 
     q6_x17a_apply_lagrangian_boundary<<<particleBlocks,threads>>>(
         particles,nParticles,edgeCount,
@@ -26316,30 +27531,105 @@ bool apply_chi_kinetic_boundary_0493x16j(
         ws.chiLagrangianNormalSign0493x17a.data(),
         ws.chiLagrangianCellEdgeCount0493x17a.data(),
         ws.chiLagrangianCellEdgeIds0493x17a.data(),
-        ws.kineticMovingWallImpulseX0493x10m.data(),
-        ws.kineticMovingWallImpulseY0493x10m.data(),
+        needCellWallReaction0493x18d?ws.kineticMovingWallImpulseX0493x10m.data():nullptr,
+        needCellWallReaction0493x18d?ws.kineticMovingWallImpulseY0493x10m.data():nullptr,
+        needNodalReaction0493x18d?ws.chiMembraneEdgeNodeA0493x17c.data():nullptr,
+        needNodalReaction0493x18d?ws.chiMembraneEdgeNodeB0493x17c.data():nullptr,
+        needNodalReaction0493x18d?ws.chiMembraneNodeImpulseX0493x17c.data():nullptr,
+        needNodalReaction0493x18d?ws.chiMembraneNodeImpulseY0493x17c.data():nullptr,
+        needNodalReaction0493x18d?1:0,
+        hingedActive0493x18a?1:0,
+        ws.chiHingedPivotX0493x18a,ws.chiHingedPivotY0493x18a,
+        (hingedActive0493x18a&&qualification0493x18d)?ws.chiHingedTorqueImpulse0493x18a.data():nullptr,
+        (hingedActive0493x18a&&!qualification0493x18d)?ws.chiHingedPhysicalLoad0493x18d.data():nullptr,
+        hingedActive0493x18a?ws.chiHingedSafety0493x18e.data():nullptr,0,
+        hingedActive0493x18a?params.chiSolidHingedMaxParticleSpanCells:0,
         grid.Nx,grid.Ny,params.Lx,params.Ly,params.dt,periodicX,periodicY,
         auditDev);
     check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian material-wall launch");
+    if (hingedActive0493x18a) {
+        ChiHingedSafety0493x18e safety{};
+        unsigned long long overflow=0ull;
+        check_cuda_0400(cudaMemcpy(&safety,ws.chiHingedSafety0493x18e.data(),
+                                  sizeof(safety),cudaMemcpyDeviceToHost),
+                       "0493x18e hinged safety download");
+        check_cuda_0400(cudaMemcpy(&overflow,ws.chiLagrangianBinOverflow0493x17a.data(),
+                                  sizeof(overflow),cudaMemcpyDeviceToHost),
+                       "0493x18e hinged bin overflow download");
+        if (overflow!=0ull || safety.particleSpanExceeded!=0ull ||
+            safety.collisionLimitReached!=0ull || safety.nonFiniteState!=0ull) {
+            std::ostringstream oss;
+            oss << "0493x18e hinged material-wall safety stop: binOverflow=" << overflow
+                << " particleSpanExceeded=" << safety.particleSpanExceeded
+                << " collisionLimitReached=" << safety.collisionLimitReached
+                << " nonFiniteState=" << safety.nonFiniteState
+                << " maxSpanXCells=" << safety.maxSpanXCells
+                << " maxSpanYCells=" << safety.maxSpanYCells
+                << " maxSearchCells=" << safety.maxSearchCells;
+            throw std::runtime_error(oss.str());
+        }
+    }
 
     // The edge mesh, not chi, is the material geometry authority after the
     // initial extraction. Advance it with the same endpoint velocities used by
     // the space-time collision solve.  No chi re-extraction occurs here or on
     // later steps.
-    q6_x17a_advance_lagrangian_edges<<<edgeBlocks,threads>>>(
-        edgeCount,
-        ws.kineticContinuousSegAx0493x10n.data(),
-        ws.kineticContinuousSegAy0493x10n.data(),
-        ws.kineticContinuousSegBx0493x10n.data(),
-        ws.kineticContinuousSegBy0493x10n.data(),
-        ws.kineticContinuousSegUax0493x10n.data(),
-        ws.kineticContinuousSegUay0493x10n.data(),
-        ws.kineticContinuousSegUbx0493x10n.data(),
-        ws.kineticContinuousSegUby0493x10n.data(),params.dt);
-    check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian edge advance launch");
+    if (membraneActive0493x17c) {
+        const int nodeCount=ws.chiMembraneNodeCount0493x17c;
+        const int nodeBlocks=std::max(1,(nodeCount+threads-1)/threads);
+        q6_x17c_drift_nodes<<<nodeBlocks,threads>>>(
+            nodeCount,ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+            ws.chiMembraneNodePinned0493x17d.data(),params.dt);
+        check_cuda_0400(cudaGetLastError(),"0493x17c membrane nodal drift launch");
+        q6_x17c_set_edges_from_nodes<<<edgeBlocks,threads>>>(
+            edgeCount,
+            ws.chiMembraneEdgeNodeA0493x17c.data(),ws.chiMembraneEdgeNodeB0493x17c.data(),
+            ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+            ws.kineticContinuousSegAx0493x10n.data(),ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),ws.kineticContinuousSegUby0493x10n.data());
+        check_cuda_0400(cudaGetLastError(),"0493x17c post-drift node-to-edge sync launch");
+    } else if (hingedActive0493x18a) {
+        const int nodeCount=ws.chiMembraneNodeCount0493x17c;
+        const int nodeBlocks=std::max(1,(nodeCount+threads-1)/threads);
+        ws.chiHingedTheta0493x18a += params.dt*ws.chiHingedOmega0493x18a;
+        q6_x18a_set_hinged_nodes<<<nodeBlocks,threads>>>(
+            nodeCount,
+            ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+            ws.chiMembraneNodeX00493x17c.data(),ws.chiMembraneNodeY00493x17c.data(),
+            ws.chiHingedPivotX0493x18a,ws.chiHingedPivotY0493x18a,
+            ws.chiHingedTheta0493x18a,ws.chiHingedOmega0493x18a);
+        check_cuda_0400(cudaGetLastError(),"0493x18a hinged rigid drift launch");
+        q6_x17c_set_edges_from_nodes<<<edgeBlocks,threads>>>(
+            edgeCount,
+            ws.chiMembraneEdgeNodeA0493x17c.data(),ws.chiMembraneEdgeNodeB0493x17c.data(),
+            ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+            ws.kineticContinuousSegAx0493x10n.data(),ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),ws.kineticContinuousSegUby0493x10n.data());
+        check_cuda_0400(cudaGetLastError(),"0493x18a post-drift node-to-edge sync launch");
+    } else {
+        q6_x17a_advance_lagrangian_edges<<<edgeBlocks,threads>>>(
+            edgeCount,
+            ws.kineticContinuousSegAx0493x10n.data(),
+            ws.kineticContinuousSegAy0493x10n.data(),
+            ws.kineticContinuousSegBx0493x10n.data(),
+            ws.kineticContinuousSegBy0493x10n.data(),
+            ws.kineticContinuousSegUax0493x10n.data(),
+            ws.kineticContinuousSegUay0493x10n.data(),
+            ws.kineticContinuousSegUbx0493x10n.data(),
+            ws.kineticContinuousSegUby0493x10n.data(),params.dt);
+        check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian edge advance launch");
+    }
     ++ws.chiLagrangianMeshVersion0493x17a;
 
-    ws.chiKineticImpulseValid0493x16j=true;
+    ws.chiKineticImpulseValid0493x16j=needCellWallReaction0493x18d;
     ws.chiKineticNx0493x16j=grid.Nx;
     ws.chiKineticNy0493x16j=grid.Ny;
 
@@ -26353,6 +27643,7 @@ bool apply_chi_kinetic_boundary_0493x16j(
                   << " edgeCount=" << edgeCount
                   << " binCapacity=" << kChiLagrangianCellEdgeCapacity0493x17a
                   << " movingSolid=" << (movingSolid?1:0)
+                  << " solidModel=" << params.chiSolidModel
                   << " darcyAlphaMax=" << params.darcyAlphaMax
                   << " chiVP=" << (params.darcyChiCollisionVpEnable?1:0)
                   << std::endl;
@@ -26477,9 +27768,12 @@ bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
     const int threads = 256;
     const int cellBlocks = std::max(
         1, std::min(1024, (grid.numCells + threads - 1) / threads));
+    // 0493x17d-fix2: x17a/x16l kernels use one particle per CUDA thread
+    // (no grid-stride loop).  Capping the launch at 4096 blocks silently
+    // truncated coverage to 4096*256 = 1,048,576 particles on large runs.
+    // Launch one thread for every resident active-prefix slot instead.
     const int particleBlocks = std::max(
-        1, std::min(4096,
-            static_cast<int>((nParticles + threads - 1u) / threads)));
+        1, static_cast<int>((nParticles + threads - 1u) / threads));
     const int blocks = std::max(cellBlocks, particleBlocks);
 
     ResidentWorkspace0400& ws = resident_workspace_0400();
@@ -26546,9 +27840,12 @@ bool cuda_q6_record_chi_penetration_poststream_0493x16l(
             "0493x17a penetration diagnostic has no resident Lagrangian mesh");
     }
     const int threads = 256;
+    // 0493x17d-fix2: x17a/x16l kernels use one particle per CUDA thread
+    // (no grid-stride loop).  Capping the launch at 4096 blocks silently
+    // truncated coverage to 4096*256 = 1,048,576 particles on large runs.
+    // Launch one thread for every resident active-prefix slot instead.
     const int particleBlocks = std::max(
-        1, std::min(4096,
-            static_cast<int>((nParticles + threads - 1u) / threads)));
+        1, static_cast<int>((nParticles + threads - 1u) / threads));
     ws.chiPenetrationAccum0493x16l.ensure(1u);
     check_cuda_0400(cudaMemset(
         ws.chiPenetrationAccum0493x16l.data(), 0,
@@ -26569,6 +27866,8 @@ bool cuda_q6_record_chi_penetration_poststream_0493x16l(
         ws.chiLagrangianNormalSign0493x17a.data(),
         params.Lx,params.Ly,
         is_x_periodic(params)?1:0,is_y_periodic(params)?1:0,
+        (params.chiSolidDynamicsEnable &&
+         (params.chiSolidModel=="membrane_2d" || params.chiSolidModel=="hinged_plate_2d"))?1:0,
         h,strictDistance,ws.chiPenetrationAccum0493x16l.data());
     check_cuda_0400(cudaGetLastError(),
                     "0493x17a Lagrangian penetration diagnostic launch");
@@ -26606,7 +27905,11 @@ bool cuda_q6_record_chi_penetration_poststream_0493x16l(
     static bool reported0493x17a=false;
     if(!reported0493x17a){
         std::cout << "[0493x16l-penetration] backend=x17a-lagrangian-edge-mesh"
-                  << " measure=nearest-oriented-material-edge"
+                  << " measure="
+                  << ((params.chiSolidDynamicsEnable &&
+                       (params.chiSolidModel=="membrane_2d" || params.chiSolidModel=="hinged_plate_2d"))
+                        ? "closed-loop-parity+nearest-edge-depth"
+                        : "nearest-oriented-material-edge")
                   << " strictDistanceCells=" << strictDistanceCells0493x17a
                   << " physics=read_only" << std::endl;
         reported0493x17a=true;
@@ -26628,6 +27931,608 @@ bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
     if (deviceReactionY) *deviceReactionY = ws.kineticMovingWallImpulseY0493x10m.data();
     if (nx) *nx = ws.chiKineticNx0493x16j;
     if (ny) *ny = ws.chiKineticNy0493x16j;
+    return true;
+}
+
+bool cuda_q6_advance_chi_membrane_0493x17c(
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    CudaChiMembraneDiagnostics0493x17c* diagnostics) {
+    if (diagnostics) *diagnostics = CudaChiMembraneDiagnostics0493x17c{};
+    if (!params.chiSolidDynamicsEnable || params.chiSolidModel != "membrane_2d") {
+        return false;
+    }
+
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.chiMembraneInitialized0493x17c ||
+        ws.chiMembraneNodeCount0493x17c <= 2 ||
+        ws.chiLagrangianEdgeCount0493x17a != ws.chiMembraneNodeCount0493x17c) {
+        throw std::runtime_error(
+            "0493x17c membrane mechanics requested before a valid closed Lagrangian loop was initialized");
+    }
+    const bool qualification0493x18d=params.chiSolidQualificationDiagnosticsEnable;
+    if (qualification0493x18d &&
+        (!ws.chiKineticImpulseValid0493x16j ||
+         ws.chiKineticNx0493x16j != grid.Nx || ws.chiKineticNy0493x16j != grid.Ny)) {
+        throw std::runtime_error(
+            "0493x17c membrane qualification requires the current x17a cell reaction field");
+    }
+
+    const int n = ws.chiMembraneNodeCount0493x17c;
+    const int e = ws.chiLagrangianEdgeCount0493x17a;
+    const double nodeMass = params.chiSolidMass / static_cast<double>(n);
+    if (!(nodeMass > 0.0) || !std::isfinite(nodeMass)) {
+        throw std::runtime_error("0493x17c membrane has invalid nodal mass");
+    }
+    const int threads = 256;
+    const int nodeBlocks = std::max(1, (n + threads - 1) / threads);
+    const int edgeBlocks = std::max(1, (e + threads - 1) / threads);
+    const int cellBlocks = std::max(1, (grid.numCells + threads - 1) / threads);
+    const std::size_t nodeBytes = static_cast<std::size_t>(n) * sizeof(double);
+
+    if (qualification0493x18d) {
+        check_cuda_0400(cudaMemset(ws.chiMembraneReductionBefore0493x17c.data(), 0,
+                                   sizeof(ChiMembraneReduction0493x17c)),
+                        "0493x17c before reduction zero");
+        check_cuda_0400(cudaMemset(ws.chiMembraneReductionAfter0493x17c.data(), 0,
+                                   sizeof(ChiMembraneReduction0493x17c)),
+                        "0493x17c after reduction zero");
+    }
+    check_cuda_0400(cudaMemset(ws.chiMembraneNodeForceX0493x17c.data(), 0, nodeBytes),
+                    "0493x17c membrane forceX zero");
+    check_cuda_0400(cudaMemset(ws.chiMembraneNodeForceY0493x17c.data(), 0, nodeBytes),
+                    "0493x17c membrane forceY zero");
+
+    if (qualification0493x18d) {
+        q6_x17c_reduce_before<<<std::max(nodeBlocks, edgeBlocks), threads>>>(
+            n, e,
+            ws.chiMembraneNodeX0493x17c.data(), ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(), ws.chiMembraneNodeVy0493x17c.data(),
+            ws.chiMembraneNodeImpulseX0493x17c.data(), ws.chiMembraneNodeImpulseY0493x17c.data(),
+            ws.chiMembraneEdgeNodeA0493x17c.data(), ws.chiMembraneEdgeNodeB0493x17c.data(),
+            ws.chiMembraneRestLength0493x17c.data(), nodeMass,
+            params.chiSolidMembraneStretchStiffness,
+            ws.chiMembraneReductionBefore0493x17c.data());
+        check_cuda_0400(cudaGetLastError(), "0493x17c membrane before reduction launch");
+    }
+
+    q6_x17c_edge_internal_forces<<<edgeBlocks, threads>>>(
+        e,
+        ws.chiMembraneEdgeNodeA0493x17c.data(), ws.chiMembraneEdgeNodeB0493x17c.data(),
+        ws.chiMembraneNodeX0493x17c.data(), ws.chiMembraneNodeY0493x17c.data(),
+        ws.chiMembraneNodeVx0493x17c.data(), ws.chiMembraneNodeVy0493x17c.data(),
+        ws.chiMembraneRestLength0493x17c.data(),
+        params.chiSolidMembraneStretchStiffness,
+        params.chiSolidMembraneDamping,
+        ws.chiMembraneNodeForceX0493x17c.data(), ws.chiMembraneNodeForceY0493x17c.data());
+    check_cuda_0400(cudaGetLastError(), "0493x17c membrane edge-force launch");
+
+    if (params.chiSolidMembraneBendingStiffness > 0.0) {
+        q6_x17d_bending_internal_forces<<<nodeBlocks, threads>>>(
+            n,
+            ws.chiMembraneNodeX0493x17c.data(), ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeX00493x17c.data(), ws.chiMembraneNodeY00493x17c.data(),
+            params.chiSolidMembraneBendingStiffness,
+            ws.chiMembraneNodeForceX0493x17c.data(), ws.chiMembraneNodeForceY0493x17c.data(),
+            qualification0493x18d?ws.chiMembraneReductionBefore0493x17c.data():nullptr);
+        check_cuda_0400(cudaGetLastError(), "0493x17d-fix3 membrane bending-force launch");
+    }
+
+    if (params.chiSolidMembraneCrossBraceStiffness > 0.0) {
+        q6_x17d_crossbrace_internal_forces<<<nodeBlocks, threads>>>(
+            n,
+            ws.chiMembraneNodeX0493x17c.data(), ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(), ws.chiMembraneNodeVy0493x17c.data(),
+            ws.chiMembraneNodeX00493x17c.data(), ws.chiMembraneNodeY00493x17c.data(),
+            params.chiSolidMembraneCrossBraceStiffness,
+            params.chiSolidMembraneCrossBraceRangeEdges,
+            params.chiSolidMembraneCrossBraceDiagonalFraction,
+            params.chiSolidMembraneDamping,
+            ws.chiMembraneNodeForceX0493x17c.data(), ws.chiMembraneNodeForceY0493x17c.data());
+        check_cuda_0400(cudaGetLastError(), "0493x17d-fix6 membrane cross-brace force launch");
+    }
+
+    ChiMembraneReduction0493x17c before{};
+    double signedArea=ws.chiMembraneSignedArea00493x17c;
+    if (qualification0493x18d) {
+        check_cuda_0400(cudaMemcpy(&before, ws.chiMembraneReductionBefore0493x17c.data(),
+                                   sizeof(before), cudaMemcpyDeviceToHost),
+                        "0493x17c membrane before reduction download");
+        signedArea=0.5*before.area2;
+    }
+
+    if (params.chiSolidMembraneAreaStiffness > 0.0) {
+        if (qualification0493x18d) {
+            q6_x17c_area_internal_force<<<nodeBlocks, threads>>>(
+                n,
+                ws.chiMembraneNodeX0493x17c.data(), ws.chiMembraneNodeY0493x17c.data(),
+                ws.chiMembraneSignedArea00493x17c, signedArea,
+                params.chiSolidMembraneAreaStiffness,
+                ws.chiMembraneNodeForceX0493x17c.data(), ws.chiMembraneNodeForceY0493x17c.data());
+        } else {
+            check_cuda_0400(cudaMemset(ws.chiMembraneArea20493x18d.data(),0,sizeof(double)),
+                            "0493x18d membrane area2 zero");
+            q6_x18d_reduce_membrane_area2<<<edgeBlocks,threads>>>(
+                e,ws.chiMembraneEdgeNodeA0493x17c.data(),ws.chiMembraneEdgeNodeB0493x17c.data(),
+                ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+                ws.chiMembraneArea20493x18d.data());
+            check_cuda_0400(cudaGetLastError(),"0493x18d membrane area reduction launch");
+            q6_x18d_area_internal_force_device<<<nodeBlocks,threads>>>(
+                n,ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+                ws.chiMembraneSignedArea00493x17c,ws.chiMembraneArea20493x18d.data(),
+                params.chiSolidMembraneAreaStiffness,
+                ws.chiMembraneNodeForceX0493x17c.data(),ws.chiMembraneNodeForceY0493x17c.data());
+        }
+        check_cuda_0400(cudaGetLastError(), "0493x17c membrane area-force launch");
+    }
+
+    q6_x17c_kick_nodes<<<nodeBlocks, threads>>>(
+        n,
+        ws.chiMembraneNodeVx0493x17c.data(), ws.chiMembraneNodeVy0493x17c.data(),
+        ws.chiMembraneNodeImpulseX0493x17c.data(), ws.chiMembraneNodeImpulseY0493x17c.data(),
+        ws.chiMembraneNodeForceX0493x17c.data(), ws.chiMembraneNodeForceY0493x17c.data(),
+        ws.chiMembraneNodePinned0493x17d.data(),
+        nodeMass, params.dt, qualification0493x18d?ws.chiMembraneReductionAfter0493x17c.data():nullptr);
+    check_cuda_0400(cudaGetLastError(), "0493x17c membrane kick launch");
+
+    ChiMembraneReduction0493x17c after{};
+    if (qualification0493x18d) {
+        q6_x17c_reduce_cell_reaction<<<cellBlocks, threads>>>(
+            grid.numCells,
+            ws.kineticMovingWallImpulseX0493x10m.data(),
+            ws.kineticMovingWallImpulseY0493x10m.data(),
+            ws.chiMembraneReductionAfter0493x17c.data());
+        check_cuda_0400(cudaGetLastError(), "0493x17c membrane cell-reaction reduction launch");
+        check_cuda_0400(cudaMemcpy(&after, ws.chiMembraneReductionAfter0493x17c.data(),
+                                   sizeof(after), cudaMemcpyDeviceToHost),
+                        "0493x17c membrane after reduction download");
+    }
+
+    CudaChiMembraneDiagnostics0493x17c d{};
+    d.available = true;
+    d.initialized = true;
+    d.advanced = true;
+    d.nodeCount = n;
+    d.edgeCount = e;
+    d.mass = params.chiSolidMass;
+    d.nodeMass = nodeMass;
+    if (qualification0493x18d) {
+    d.centerX = before.centerXSum / static_cast<double>(n);
+    d.centerY = before.centerYSum / static_cast<double>(n);
+    d.momentumBeforeX = before.momentumX;
+    d.momentumBeforeY = before.momentumY;
+    d.momentumAfterX = after.momentumX;
+    d.momentumAfterY = after.momentumY;
+    d.meanVelocityXBefore = before.momentumX / params.chiSolidMass;
+    d.meanVelocityYBefore = before.momentumY / params.chiSolidMass;
+    d.meanVelocityXAfter = after.momentumX / params.chiSolidMass;
+    d.meanVelocityYAfter = after.momentumY / params.chiSolidMass;
+    d.nodeReactionImpulseX = before.reactionImpulseX;
+    d.nodeReactionImpulseY = before.reactionImpulseY;
+    d.cellReactionImpulseX = after.cellReactionImpulseX;
+    d.cellReactionImpulseY = after.cellReactionImpulseY;
+    d.loadProjectionResidualX = d.nodeReactionImpulseX - d.cellReactionImpulseX;
+    d.loadProjectionResidualY = d.nodeReactionImpulseY - d.cellReactionImpulseY;
+    d.pinnedNodeCount = ws.chiMembranePinnedNodeCount0493x17d;
+    d.supportConstraintImpulseX = after.supportConstraintImpulseX;
+    d.supportConstraintImpulseY = after.supportConstraintImpulseY;
+    d.internalForceSumX = after.internalForceX;
+    d.internalForceSumY = after.internalForceY;
+    d.signedArea0 = ws.chiMembraneSignedArea00493x17c;
+    d.signedArea = signedArea;
+    d.areaRelativeChange =
+        (std::abs(d.signedArea0) > 1.0e-300)
+            ? (d.signedArea - d.signedArea0) / std::abs(d.signedArea0) : 0.0;
+    d.perimeter0 = ws.chiMembranePerimeter00493x17c;
+    d.perimeter = before.perimeter;
+    d.perimeterRelativeChange =
+        (d.perimeter0 > 1.0e-300) ? (d.perimeter - d.perimeter0) / d.perimeter0 : 0.0;
+    d.maxAbsEdgeStrain = before.maxAbsEdgeStrain;
+    d.stretchEnergy = before.stretchEnergy;
+    d.bendingEnergy = before.bendingEnergy;
+    d.maxAbsAngleChange = before.maxAbsAngleChange;
+    d.areaEnergy =
+        (std::abs(d.signedArea0) > 1.0e-300)
+            ? 0.5 * params.chiSolidMembraneAreaStiffness *
+              (d.signedArea - d.signedArea0) * (d.signedArea - d.signedArea0) /
+              std::abs(d.signedArea0)
+            : 0.0;
+    d.kineticEnergyBefore = before.kineticEnergy;
+    d.kineticEnergyAfter = after.kineticEnergy;
+    const double effectiveLocalSpringStiffness =
+        params.chiSolidMembraneStretchStiffness +
+        params.chiSolidMembraneCrossBraceStiffness *
+            (1.0 + 2.0 * params.chiSolidMembraneCrossBraceDiagonalFraction);
+    const double stretchStability = params.dt * std::sqrt(
+        std::max(0.0, effectiveLocalSpringStiffness / nodeMass));
+    const double meanRestLength = d.edgeCount > 0
+        ? d.perimeter0 / static_cast<double>(d.edgeCount) : 0.0;
+    const double bendingStability =
+        (params.chiSolidMembraneBendingStiffness > 0.0 && meanRestLength > 1.0e-14)
+            ? 4.0 * params.dt * std::sqrt(
+                params.chiSolidMembraneBendingStiffness /
+                (nodeMass * meanRestLength * meanRestLength * meanRestLength))
+            : 0.0;
+    d.stabilityNumber = std::max(stretchStability, bendingStability);
+
+    const std::filesystem::path diagPath =
+        std::filesystem::path(params.outputDir) / "chi_membrane_0493x17c.csv";
+    if (!params.outputDir.empty()) {
+        std::filesystem::create_directories(params.outputDir);
+        const bool header = !std::filesystem::exists(diagPath);
+        std::ofstream out(diagPath, std::ios::app);
+        if (!out) throw std::runtime_error("0493x17c cannot open membrane diagnostics CSV");
+        if (header) {
+            out << "step,time,nodeCount,edgeCount,mass,nodeMass,centerX,centerY,"
+                   "meanVelocityXBefore,meanVelocityYBefore,meanVelocityXAfter,meanVelocityYAfter,"
+                   "momentumBeforeX,momentumBeforeY,momentumAfterX,momentumAfterY,"
+                   "nodeReactionImpulseX,nodeReactionImpulseY,cellReactionImpulseX,cellReactionImpulseY,"
+                   "loadProjectionResidualX,loadProjectionResidualY,pinnedNodeCount,supportConstraintImpulseX,supportConstraintImpulseY,internalForceSumX,internalForceSumY,"
+                   "signedArea0,signedArea,areaRelativeChange,perimeter0,perimeter,perimeterRelativeChange,"
+                   "maxAbsEdgeStrain,stretchEnergy,bendingEnergy,maxAbsAngleChange,areaEnergy,kineticEnergyBefore,kineticEnergyAfter,"
+                   "stabilityNumber\n";
+        }
+        out << step << ',' << std::setprecision(17) << time << ','
+            << d.nodeCount << ',' << d.edgeCount << ',' << d.mass << ',' << d.nodeMass << ','
+            << d.centerX << ',' << d.centerY << ','
+            << d.meanVelocityXBefore << ',' << d.meanVelocityYBefore << ','
+            << d.meanVelocityXAfter << ',' << d.meanVelocityYAfter << ','
+            << d.momentumBeforeX << ',' << d.momentumBeforeY << ','
+            << d.momentumAfterX << ',' << d.momentumAfterY << ','
+            << d.nodeReactionImpulseX << ',' << d.nodeReactionImpulseY << ','
+            << d.cellReactionImpulseX << ',' << d.cellReactionImpulseY << ','
+            << d.loadProjectionResidualX << ',' << d.loadProjectionResidualY << ','
+            << d.pinnedNodeCount << ',' << d.supportConstraintImpulseX << ',' << d.supportConstraintImpulseY << ','
+            << d.internalForceSumX << ',' << d.internalForceSumY << ','
+            << d.signedArea0 << ',' << d.signedArea << ',' << d.areaRelativeChange << ','
+            << d.perimeter0 << ',' << d.perimeter << ',' << d.perimeterRelativeChange << ','
+            << d.maxAbsEdgeStrain << ',' << d.stretchEnergy << ','
+            << d.bendingEnergy << ',' << d.maxAbsAngleChange << ',' << d.areaEnergy << ','
+            << d.kineticEnergyBefore << ',' << d.kineticEnergyAfter << ','
+            << d.stabilityNumber << '\n';
+    }
+    } // qualification0493x18d
+
+    const int snapshotEvery = params.chiSolidMembraneOutputEvery > 0
+        ? params.chiSolidMembraneOutputEvery : params.summaryEvery;
+    const bool snapshotThisStep = snapshotEvery > 0 &&
+        (step == 0 || ((step + 1) % snapshotEvery) == 0);
+    if (snapshotThisStep && !params.outputDir.empty()) {
+        std::vector<double> x(static_cast<std::size_t>(n)), y(static_cast<std::size_t>(n));
+        std::vector<double> vx(static_cast<std::size_t>(n)), vy(static_cast<std::size_t>(n));
+        std::vector<double> x0(static_cast<std::size_t>(n)), y0(static_cast<std::size_t>(n));
+        std::vector<unsigned char> pinned(static_cast<std::size_t>(n));
+        auto copyNode = [&](std::vector<double>& dst, const double* src, const char* what) {
+            check_cuda_0400(cudaMemcpy(dst.data(), src, nodeBytes, cudaMemcpyDeviceToHost), what);
+        };
+        copyNode(x, ws.chiMembraneNodeX0493x17c.data(), "0493x17c membrane node x snapshot");
+        copyNode(y, ws.chiMembraneNodeY0493x17c.data(), "0493x17c membrane node y snapshot");
+        copyNode(vx, ws.chiMembraneNodeVx0493x17c.data(), "0493x17c membrane node vx snapshot");
+        copyNode(vy, ws.chiMembraneNodeVy0493x17c.data(), "0493x17c membrane node vy snapshot");
+        copyNode(x0, ws.chiMembraneNodeX00493x17c.data(), "0493x17c membrane node x0 snapshot");
+        copyNode(y0, ws.chiMembraneNodeY00493x17c.data(), "0493x17c membrane node y0 snapshot");
+        check_cuda_0400(cudaMemcpy(pinned.data(), ws.chiMembraneNodePinned0493x17d.data(),
+                                  static_cast<std::size_t>(n)*sizeof(unsigned char), cudaMemcpyDeviceToHost),
+                        "0493x17d membrane pinned snapshot");
+        const std::filesystem::path nodePath =
+            std::filesystem::path(params.outputDir) / "chi_membrane_nodes_0493x17c.csv";
+        const bool header = !std::filesystem::exists(nodePath);
+        std::ofstream out(nodePath, std::ios::app);
+        if (!out) throw std::runtime_error("0493x17c cannot open membrane node-history CSV");
+        if (header) out << "step,time,node,x,y,vx,vy,x0,y0,pinned0493x17d\n";
+        out << std::setprecision(17);
+        for (int i = 0; i < n; ++i) {
+            out << step << ',' << time << ',' << i << ','
+                << x[static_cast<std::size_t>(i)] << ',' << y[static_cast<std::size_t>(i)] << ','
+                << vx[static_cast<std::size_t>(i)] << ',' << vy[static_cast<std::size_t>(i)] << ','
+                << x0[static_cast<std::size_t>(i)] << ',' << y0[static_cast<std::size_t>(i)] << ','
+                << static_cast<int>(pinned[static_cast<std::size_t>(i)]) << '\n';
+        }
+    }
+
+    static bool reported0493x17c = false;
+    if (!reported0493x17c) {
+        std::cout << "[0493x17c-membrane] model=membrane_2d"
+                  << " source=initial-chi-0.5"
+                  << " mechanics=edge-spring+area-penalty+edge-dashpot+angular-bending+cross-braces"
+                  << " coupling=direct-impact-shape-functions"
+                  << " geometryAuthority=Lagrangian-nodes"
+                  << " nodes=" << n
+                  << " mass=" << params.chiSolidMass
+                  << " kStretch=" << params.chiSolidMembraneStretchStiffness
+                  << " kArea=" << params.chiSolidMembraneAreaStiffness
+                  << " damping=" << params.chiSolidMembraneDamping
+                  << " bending=" << params.chiSolidMembraneBendingStiffness
+                  << " crossBrace=" << params.chiSolidMembraneCrossBraceStiffness
+                  << " crossBraceDiagFrac=" << params.chiSolidMembraneCrossBraceDiagonalFraction
+                  << " anchorMode=" << params.chiSolidMembraneAnchorMode
+                  << " pinnedNodes=" << ws.chiMembranePinnedNodeCount0493x17d
+                  << std::endl;
+        reported0493x17c = true;
+    }
+
+    if (diagnostics) *diagnostics = d;
+    return true;
+}
+
+bool cuda_q6_advance_chi_hinged_plate_0493x18a(
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    CudaChiHingedPlateDiagnostics0493x18a* diagnostics) {
+    if (diagnostics) *diagnostics = CudaChiHingedPlateDiagnostics0493x18a{};
+    if (!params.chiSolidDynamicsEnable || params.chiSolidModel != "hinged_plate_2d") {
+        return false;
+    }
+
+    ResidentWorkspace0400& ws = resident_workspace_0400();
+    if (!ws.chiHingedInitialized0493x18a || !ws.chiMembraneInitialized0493x17c ||
+        ws.chiMembraneNodeCount0493x17c <= 2 ||
+        ws.chiLagrangianEdgeCount0493x17a != ws.chiMembraneNodeCount0493x17c) {
+        throw std::runtime_error(
+            "0493x18a hinged plate mechanics requested before valid Lagrangian initialization");
+    }
+    const bool qualification0493x18d=params.chiSolidQualificationDiagnosticsEnable;
+    if (qualification0493x18d &&
+        (!ws.chiKineticImpulseValid0493x16j ||
+         ws.chiKineticNx0493x16j != grid.Nx || ws.chiKineticNy0493x16j != grid.Ny)) {
+        throw std::runtime_error(
+            "0493x18a qualification requires the current x17a kinetic wall reaction field");
+    }
+
+    const int n=ws.chiMembraneNodeCount0493x17c;
+    const int e=ws.chiLagrangianEdgeCount0493x17a;
+    const int threads=256;
+    const int nodeBlocks=std::max(1,(n+threads-1)/threads);
+    const int edgeBlocks=std::max(1,(e+threads-1)/threads);
+    const int cellBlocks=std::max(1,(grid.numCells+threads-1)/threads);
+
+    ChiMembraneReduction0493x17c nodeSum{},cellSum{};
+    double hydroTorqueImpulse=0.0;
+    const bool subcycled0493x18e = !qualification0493x18d &&
+        params.chiSolidHingedFsiSubcyclingEnable &&
+        ws.chiHingedFsiSubcycledStepValid0493x18e &&
+        ws.chiHingedFsiSubcycledStep0493x18e==step;
+    if (subcycled0493x18e) {
+        nodeSum.reactionImpulseX=ws.chiHingedHydroImpulseXStep0493x18e;
+        nodeSum.reactionImpulseY=ws.chiHingedHydroImpulseYStep0493x18e;
+        hydroTorqueImpulse=ws.chiHingedHydroTorqueImpulseStep0493x18e;
+    } else if (qualification0493x18d) {
+        check_cuda_0400(cudaMemset(ws.chiMembraneReductionBefore0493x17c.data(),0,
+                                   sizeof(ChiMembraneReduction0493x17c)),
+                        "0493x18a node reaction reduction zero");
+        check_cuda_0400(cudaMemset(ws.chiMembraneReductionAfter0493x17c.data(),0,
+                                   sizeof(ChiMembraneReduction0493x17c)),
+                        "0493x18a cell reaction reduction zero");
+        q6_x17c_reduce_before<<<std::max(nodeBlocks,edgeBlocks),threads>>>(
+            n,e,
+            ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+            ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+            ws.chiMembraneNodeImpulseX0493x17c.data(),ws.chiMembraneNodeImpulseY0493x17c.data(),
+            ws.chiMembraneEdgeNodeA0493x17c.data(),ws.chiMembraneEdgeNodeB0493x17c.data(),
+            ws.chiMembraneRestLength0493x17c.data(),0.0,0.0,
+            ws.chiMembraneReductionBefore0493x17c.data());
+        check_cuda_0400(cudaGetLastError(),"0493x18a nodal reaction reduction launch");
+        q6_x17c_reduce_cell_reaction<<<cellBlocks,threads>>>(
+            grid.numCells,
+            ws.kineticMovingWallImpulseX0493x10m.data(),
+            ws.kineticMovingWallImpulseY0493x10m.data(),
+            ws.chiMembraneReductionAfter0493x17c.data());
+        check_cuda_0400(cudaGetLastError(),"0493x18a cell reaction reduction launch");
+        check_cuda_0400(cudaMemcpy(&nodeSum,ws.chiMembraneReductionBefore0493x17c.data(),
+                                   sizeof(nodeSum),cudaMemcpyDeviceToHost),
+                        "0493x18a nodal reaction download");
+        check_cuda_0400(cudaMemcpy(&cellSum,ws.chiMembraneReductionAfter0493x17c.data(),
+                                   sizeof(cellSum),cudaMemcpyDeviceToHost),
+                        "0493x18a cell reaction download");
+        check_cuda_0400(cudaMemcpy(&hydroTorqueImpulse,ws.chiHingedTorqueImpulse0493x18a.data(),
+                                   sizeof(double),cudaMemcpyDeviceToHost),
+                        "0493x18a hydrodynamic torque impulse download");
+    } else {
+        ChiHingedPhysicalLoad0493x18d hydroLoad{};
+        check_cuda_0400(cudaMemcpy(&hydroLoad,ws.chiHingedPhysicalLoad0493x18d.data(),
+                                   sizeof(hydroLoad),cudaMemcpyDeviceToHost),
+                        "0493x18d hinged physical load download");
+        nodeSum.reactionImpulseX=hydroLoad.impulseX;
+        nodeSum.reactionImpulseY=hydroLoad.impulseY;
+        hydroTorqueImpulse=hydroLoad.torqueImpulse;
+    }
+
+    const double theta=ws.chiHingedTheta0493x18a;
+    const double rcx0=ws.chiHingedCenterX00493x18a-ws.chiHingedPivotX0493x18a;
+    const double rcy0=ws.chiHingedCenterY00493x18a-ws.chiHingedPivotY0493x18a;
+    const double c=std::cos(theta),sn=std::sin(theta);
+    const double rcx=c*rcx0-sn*rcy0;
+    const double rcy=sn*rcx0+c*rcy0;
+    const double centerX=ws.chiHingedPivotX0493x18a+rcx;
+    const double centerY=ws.chiHingedPivotY0493x18a+rcy;
+    const double mass=params.chiSolidMass;
+    const double inertia=ws.chiHingedInertia0493x18a;
+
+    double omegaBefore=ws.chiHingedOmega0493x18a;
+    double omegaAfter=ws.chiHingedOmega0493x18a;
+    double gravityTorque=0.0,dampingTorque=0.0;
+    double gravityTorqueImpulse=0.0,dampingTorqueImpulse=0.0;
+    double thetaBeforeForMomentum=theta;
+    if (subcycled0493x18e) {
+        omegaBefore=ws.chiHingedOmegaBeforeStep0493x18e;
+        omegaAfter=ws.chiHingedOmega0493x18a;
+        thetaBeforeForMomentum=ws.chiHingedThetaBeforeStep0493x18e;
+        gravityTorqueImpulse=ws.chiHingedGravityTorqueImpulseStep0493x18e;
+        dampingTorqueImpulse=ws.chiHingedDampingTorqueImpulseStep0493x18e;
+        const double invDt=params.dt>0.0?1.0/params.dt:0.0;
+        gravityTorque=gravityTorqueImpulse*invDt;
+        dampingTorque=dampingTorqueImpulse*invDt;
+    } else {
+        gravityTorque=rcx*mass*params.chiSolidHingedGravityY;
+        dampingTorque=-params.chiSolidHingedAngularDamping*omegaBefore;
+        gravityTorqueImpulse=gravityTorque*params.dt;
+        dampingTorqueImpulse=dampingTorque*params.dt;
+        const double totalAngularImpulseLocal=
+            hydroTorqueImpulse+gravityTorqueImpulse+dampingTorqueImpulse;
+        omegaAfter=omegaBefore+totalAngularImpulseLocal/inertia;
+        ws.chiHingedOmega0493x18a=omegaAfter;
+    }
+    const double totalAngularImpulse=
+        hydroTorqueImpulse+gravityTorqueImpulse+dampingTorqueImpulse;
+
+    const double cb=std::cos(thetaBeforeForMomentum),snb=std::sin(thetaBeforeForMomentum);
+    const double rcxBefore=cb*rcx0-snb*rcy0;
+    const double rcyBefore=snb*rcx0+cb*rcy0;
+    const double vcmBeforeX=-omegaBefore*rcyBefore;
+    const double vcmBeforeY= omegaBefore*rcxBefore;
+    const double vcmAfterX=-omegaAfter*rcy;
+    const double vcmAfterY= omegaAfter*rcx;
+    const double momentumBeforeX=mass*vcmBeforeX;
+    const double momentumBeforeY=mass*vcmBeforeY;
+    const double momentumAfterX=mass*vcmAfterX;
+    const double momentumAfterY=mass*vcmAfterY;
+    const double gravityImpulseY=mass*params.chiSolidHingedGravityY*params.dt;
+    const double hingeReactionImpulseX=(momentumAfterX-momentumBeforeX)-nodeSum.reactionImpulseX;
+    const double hingeReactionImpulseY=(momentumAfterY-momentumBeforeY)-nodeSum.reactionImpulseY-gravityImpulseY;
+    const double angularBalanceResidual=inertia*(omegaAfter-omegaBefore)-totalAngularImpulse;
+
+    q6_x18a_set_hinged_nodes<<<nodeBlocks,threads>>>(
+        n,
+        ws.chiMembraneNodeX0493x17c.data(),ws.chiMembraneNodeY0493x17c.data(),
+        ws.chiMembraneNodeVx0493x17c.data(),ws.chiMembraneNodeVy0493x17c.data(),
+        ws.chiMembraneNodeX00493x17c.data(),ws.chiMembraneNodeY00493x17c.data(),
+        ws.chiHingedPivotX0493x18a,ws.chiHingedPivotY0493x18a,
+        theta,omegaAfter);
+    check_cuda_0400(cudaGetLastError(),"0493x18a post-kick rigid velocity update launch");
+
+    CudaChiHingedPlateDiagnostics0493x18a d{};
+    d.available=true; d.initialized=true; d.advanced=true;
+    d.nodeCount=n; d.edgeCount=e; d.mass=mass; d.inertia=inertia;
+    d.pivotX=ws.chiHingedPivotX0493x18a; d.pivotY=ws.chiHingedPivotY0493x18a;
+    d.centerX=centerX; d.centerY=centerY; d.theta=theta;
+    d.omegaBefore=omegaBefore; d.omegaAfter=omegaAfter;
+    d.momentumBeforeX=momentumBeforeX; d.momentumBeforeY=momentumBeforeY;
+    d.momentumAfterX=momentumAfterX; d.momentumAfterY=momentumAfterY;
+    d.nodeReactionImpulseX=nodeSum.reactionImpulseX;
+    d.nodeReactionImpulseY=nodeSum.reactionImpulseY;
+    d.hydroTorqueImpulse=hydroTorqueImpulse;
+    d.gravityTorque=gravityTorque; d.dampingTorque=dampingTorque;
+    d.gravityImpulseY=gravityImpulseY;
+    d.hingeReactionImpulseX=hingeReactionImpulseX;
+    d.hingeReactionImpulseY=hingeReactionImpulseY;
+    d.fsiSubcycled=subcycled0493x18e;
+    d.fsiSubsteps=subcycled0493x18e?ws.chiHingedFsiSubsteps0493x18e:1;
+    d.maxAbsOmegaSubstep=subcycled0493x18e?ws.chiHingedMaxAbsOmegaSubstep0493x18e:
+        std::max(std::abs(omegaBefore),std::abs(omegaAfter));
+    d.maxAngularIncrement=subcycled0493x18e?ws.chiHingedMaxAngularIncrement0493x18e:
+        std::abs(omegaBefore*params.dt);
+    d.maxTipDisplacementCells=subcycled0493x18e?ws.chiHingedMaxTipDisplacementCells0493x18e:
+        (grid.dx>0.0?std::abs(omegaBefore)*ws.chiHingedMaxRadius0493x18e*params.dt/grid.dx:0.0);
+    if (qualification0493x18d) {
+        d.cellReactionImpulseX=cellSum.cellReactionImpulseX;
+        d.cellReactionImpulseY=cellSum.cellReactionImpulseY;
+        d.loadProjectionResidualX=d.nodeReactionImpulseX-d.cellReactionImpulseX;
+        d.loadProjectionResidualY=d.nodeReactionImpulseY-d.cellReactionImpulseY;
+        d.angularBalanceResidual=angularBalanceResidual;
+    }
+
+    const int outputEvery=params.chiSolidHingedOutputEvery>0
+        ? params.chiSolidHingedOutputEvery : params.summaryEvery;
+    const bool outputThisStep=outputEvery>0 && (step==0 || ((step+1)%outputEvery)==0);
+    if(outputThisStep && !params.outputDir.empty()) {
+        std::filesystem::create_directories(params.outputDir);
+        const std::filesystem::path path=
+            std::filesystem::path(params.outputDir)/"chi_hinged_plate_0493x18a.csv";
+        const bool header=!std::filesystem::exists(path);
+        std::ofstream out(path,std::ios::app);
+        if(!out) throw std::runtime_error("0493x18a cannot open hinged plate result CSV");
+        if (!qualification0493x18d) {
+            if(header) {
+                out << "step,time,pivotX,pivotY,centerX,centerY,theta,thetaDeg,"
+                       "omegaBefore,omegaAfter,mass,inertia,"
+                       "hydroImpulseX,hydroImpulseY,hydroForceX,hydroForceY,"
+                       "hydroTorqueImpulse,hydroTorque,gravityY,gravityTorque,dampingTorque,"
+                       "totalTorque,angularAcceleration,gravityImpulseY,"
+                       "hingeReactionImpulseX,hingeReactionImpulseY,"
+                       "fsiSubcycled,fsiSubsteps,maxAbsOmegaSubstep,maxAngularIncrement,maxTipDisplacementCells\n";
+            }
+            const double invDt=params.dt>0.0?1.0/params.dt:0.0;
+            const double hydroTorque=hydroTorqueImpulse*invDt;
+            const double totalTorque=hydroTorque+gravityTorque+dampingTorque;
+            const double angularAcceleration=(omegaAfter-omegaBefore)*invDt;
+            out << step << ',' << std::setprecision(17) << time << ','
+                << d.pivotX << ',' << d.pivotY << ',' << d.centerX << ',' << d.centerY << ','
+                << d.theta << ',' << d.theta*(180.0/3.14159265358979323846) << ','
+                << d.omegaBefore << ',' << d.omegaAfter << ',' << d.mass << ',' << d.inertia << ','
+                << d.nodeReactionImpulseX << ',' << d.nodeReactionImpulseY << ','
+                << d.nodeReactionImpulseX*invDt << ',' << d.nodeReactionImpulseY*invDt << ','
+                << hydroTorqueImpulse << ',' << hydroTorque << ','
+                << params.chiSolidHingedGravityY << ',' << gravityTorque << ',' << dampingTorque << ','
+                << totalTorque << ',' << angularAcceleration << ',' << gravityImpulseY << ','
+                << hingeReactionImpulseX << ',' << hingeReactionImpulseY << ','
+                << (d.fsiSubcycled?1:0) << ',' << d.fsiSubsteps << ','
+                << d.maxAbsOmegaSubstep << ',' << d.maxAngularIncrement << ','
+                << d.maxTipDisplacementCells << '\n';
+        } else {
+            if(header) {
+                out << "step,time,geometryVersion,nodeCount,edgeCount,pivotX,pivotY,centerX,centerY,"
+                       "theta,thetaDeg,omegaBefore,omegaAfter,mass,inertia,"
+                       "hydroImpulseX,hydroImpulseY,hydroTorqueImpulse,gravityY,gravityTorque,dampingTorque,"
+                       "gravityImpulseY,hingeReactionImpulseX,hingeReactionImpulseY,"
+                       "cellReactionImpulseX,cellReactionImpulseY,loadProjectionResidualX,loadProjectionResidualY,"
+                       "angularBalanceResidual\n";
+            }
+            out << step << ',' << std::setprecision(17) << time << ','
+                << ws.chiLagrangianMeshVersion0493x17a << ',' << n << ',' << e << ','
+                << d.pivotX << ',' << d.pivotY << ',' << d.centerX << ',' << d.centerY << ','
+                << d.theta << ',' << d.theta*(180.0/3.14159265358979323846) << ','
+                << d.omegaBefore << ',' << d.omegaAfter << ',' << d.mass << ',' << d.inertia << ','
+                << d.nodeReactionImpulseX << ',' << d.nodeReactionImpulseY << ','
+                << d.hydroTorqueImpulse << ',' << params.chiSolidHingedGravityY << ','
+                << d.gravityTorque << ',' << d.dampingTorque << ',' << d.gravityImpulseY << ','
+                << d.hingeReactionImpulseX << ',' << d.hingeReactionImpulseY << ','
+                << d.cellReactionImpulseX << ',' << d.cellReactionImpulseY << ','
+                << d.loadProjectionResidualX << ',' << d.loadProjectionResidualY << ','
+                << d.angularBalanceResidual << '\n';
+            const std::size_t nodeBytes=static_cast<std::size_t>(n)*sizeof(double);
+            std::vector<double> x(static_cast<std::size_t>(n)),y(static_cast<std::size_t>(n));
+            check_cuda_0400(cudaMemcpy(x.data(),ws.chiMembraneNodeX0493x17c.data(),nodeBytes,cudaMemcpyDeviceToHost),
+                            "0493x18a node x snapshot");
+            check_cuda_0400(cudaMemcpy(y.data(),ws.chiMembraneNodeY0493x17c.data(),nodeBytes,cudaMemcpyDeviceToHost),
+                            "0493x18a node y snapshot");
+            const std::filesystem::path nodePath=
+                std::filesystem::path(params.outputDir)/"chi_hinged_plate_nodes_0493x18a.csv";
+            const bool nodeHeader=!std::filesystem::exists(nodePath);
+            std::ofstream nodes(nodePath,std::ios::app);
+            if(!nodes) throw std::runtime_error("0493x18a cannot open hinged plate node-history CSV");
+            if(nodeHeader) nodes << "step,time,node,x,y\n";
+            nodes << std::setprecision(17);
+            for(int i=0;i<n;++i)
+                nodes << step << ',' << time << ',' << i << ','
+                      << x[static_cast<std::size_t>(i)] << ',' << y[static_cast<std::size_t>(i)] << '\n';
+        }
+    }
+
+    static bool reported0493x18a=false;
+    if(!reported0493x18a) {
+        std::cout << "[0493x18a-hinged] model=hinged_plate_2d"
+                  << " dof=theta_z"
+                  << " hinge=top-center-fixed"
+                  << " nodes=" << n
+                  << " mass=" << mass
+                  << " inertia=" << inertia
+                  << " gravityY=" << params.chiSolidHingedGravityY
+                  << " angularDamping=" << params.chiSolidHingedAngularDamping
+                  << " theta0=" << params.chiSolidHingedInitialAngle
+                  << " omega0=" << params.chiSolidHingedInitialOmega
+                  << " qualificationDiagnostics=" << (qualification0493x18d?1:0)
+                  << " fsiSubcycling=" << (params.chiSolidHingedFsiSubcyclingEnable?1:0)
+                  << " fsiMinSubsteps=" << params.chiSolidHingedFsiMinSubsteps
+                  << " fsiMaxSubsteps=" << params.chiSolidHingedFsiMaxSubsteps
+                  << std::endl;
+        reported0493x18a=true;
+    }
+
+    if(diagnostics) *diagnostics=d;
     return true;
 }
 

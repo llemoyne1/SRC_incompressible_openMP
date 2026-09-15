@@ -26,7 +26,7 @@
 #   n, N, count, population, particle_count, cell_count
 #   vorticity, omega, curl
 #   chi, topo_chi, alpha, darcy_alpha, darcy_power, darcy, brinkman_power, kappa
-field = rho
+field = alpha_x6c
 
 # colormap:
 #   blue_red, gray, thermal
@@ -49,7 +49,7 @@ gain = 1
 #   0 = raw field; 1-3 = typical; large values cost more and smear details.
 smoothPasses = 0
 
-particleTypeFilter = 2
+particleTypeFilter = 1
 
 # =============================================================================
 # 2. Live grid and cadence
@@ -59,8 +59,8 @@ particleTypeFilter = 2
 #   live scalar grid resolution. Also used by filtered field dumps.
 #   If a recording session is already open, recorder dimensions are locked until
 #   that session is stopped and restarted.
- liveGridNx = 1000    # unset by default: inherit solver Nx/Ny
- liveGridNy = 500    # unset by default: inherit solver Nx/Ny
+ liveGridNx = 500    # unset by default: inherit solver Nx/Ny
+ liveGridNy = 250    # unset by default: inherit solver Nx/Ny
 
 # liveEvery:
 #   live frame cadence in solver steps.
@@ -76,7 +76,7 @@ liveEvery = 1
 # quiverScale:
 #   <0 disables quiver overlay.
 #   >=0 enables it. Try 0.2, 0.5, 1.0 depending on velocity scale.
-quiverScale = 75.0
+quiverScale = -75.0
 
 # quiverNx/quiverNy:
 #   number of quiver vectors in x/y. Independent from liveGridNx/liveGridNy.

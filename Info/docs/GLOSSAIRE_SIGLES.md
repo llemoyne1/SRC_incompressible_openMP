@@ -47,6 +47,11 @@ est indiqué explicitement.
 | `TG` | Taylor–Green | Vortex / champ périodique analytique utilisé pour calibrer et qualifier le transport. | Sert notamment à mesurer la viscosité effective. |
 | `VK` | von Kármán | Rue de tourbillons derrière obstacle utilisée pour tester dynamique, fréquence et rupture de symétrie. | Les campagnes x7/x8 l'utilisent comme cas applicatif sensible. |
 
+| `DOF` | Degree of Freedom / degré de liberté | Coordonnée mécanique indépendante d’un solide (par exemple translation du slab ou angle du volet). | `hinged_plate_2d` possède un seul DOF de rotation `theta`. |
+| `FSI` | Fluid–Structure Interaction / interaction fluide–structure | Couplage bidirectionnel entre impacts/charges du fluide et mouvement ou déformation d’un solide. | Le chantier x17–x18 réutilise la frontière matérielle lagrangienne x17a. |
+| `frontière lagrangienne persistante` | Contour matériel porté par des noeuds/segments mobiles | Représentation autoritaire des solides matériels après extraction initiale de `chi=0.5`. | Évite le cycle `Gamma -> chi -> Gamma` et le remapping des particules lors des changements de masque. |
+| `broad phase` | Recherche grossière de candidats de collision | Restreint les segments à tester avant l’intersection particule/segment exacte. | La détection fine reste locale et CUDA-résidente dans x17a. |
+
 ## Règle de maintenance
 
 Ce fichier est **curé manuellement**. Il ne doit contenir que des termes réellement utilisés dans le projet

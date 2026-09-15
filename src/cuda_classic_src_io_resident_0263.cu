@@ -5513,7 +5513,13 @@ bool supported_segmented_0264(const SimulationParams& params) {
         if (mode == 1) hasInlet = true;
         if (mode == 2) hasOutlet = true;
     }
-    return hasInlet && hasOutlet;
+    // 0493x18f: Q6 resident Neumann supports an outlet-only segmented family
+    // (e.g. left+right passive boundaries around a freely falling hinged body).
+    // Do not broaden the legacy SRC-classic segmented contract.
+    const bool outletOnlyQ6Neumann0493x18f =
+        q6ResidentIo0409 && !hasInlet && hasOutlet &&
+        params.openBoundaryOutletMode == "neumann";
+    return hasOutlet && (hasInlet || outletOnlyQ6Neumann0493x18f);
 }
 
 void maybe_apply_forced_outlet_extraction_0291(

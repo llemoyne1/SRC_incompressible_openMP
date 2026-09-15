@@ -1318,6 +1318,8 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     if (!params.darcyBrinkmanEnable) return d;
     d.supported = true;
     d.speciesQ6Enable = params.speciesQ6Enable ? 1 : 0;
+    // Exact exchanged impulse remains enabled whenever solid dynamics needs it.
+    // Only the qualification-only inventories/CSVs are disabled by default.
     const bool chiSolidDiag0493x15a =
         env_truthy_0343("MPCD_CHI_SOLID_IMPULSE_DIAG_0493X15A") || params.chiSolidDynamicsEnable;
     const bool exactMomentumDiag0493x8a =
@@ -1609,7 +1611,18 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     }
     d.applySeconds = seconds_since_0343(t0);
 
-    if (params.chiSolidDynamicsEnable) {
+    // 0493x17c-fix1: x16c is a fictitious-domain inventory diagnostic.
+    // It is not defined once a persistent Lagrangian contour becomes the
+    // geometry authority: x17c/x18a deliberately do not rasterize the moving
+    // membrane/hinged plate through the legacy x16e solidFraction field. Keep
+    // the diagnostic unchanged for rigid/legacy dynamic-chi models, but leave
+    // it unavailable for the Lagrangian models. Impermeability remains covered
+    // independently by x16l/x17; load closure is checked by the Lagrangian
+    // mechanics diagnostics.
+    if (params.chiSolidQualificationDiagnosticsEnable &&
+        params.chiSolidDynamicsEnable &&
+        params.chiSolidModel != "membrane_2d" &&
+        params.chiSolidModel != "hinged_plate_2d") {
         const float* exactSolidFraction0493x16k = nullptr;
         int solidFractionNx0493x16k = 0, solidFractionNy0493x16k = 0;
         if (params.chiKineticBoundaryMode == "specular") {
@@ -1710,7 +1723,9 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
     d.csvPath = darcy_csv_path_0343(params);
     append_darcy_csv_0343(params, step, time, d);
     append_topo_benchmark_csv_0348(params, step, time, d);
-    append_chi_solid_impulse_csv_0493x15a(params, step, time, d);
+    if (params.chiSolidQualificationDiagnosticsEnable) {
+        append_chi_solid_impulse_csv_0493x15a(params, step, time, d);
+    }
     if (exactMomentumDiag0493x8a) {
         append_exact_darcy_momentum_csv_0493x8a(
             params, step, time, d, meanKickApplied0493x8a, wholeDarcyApply0493x8a,

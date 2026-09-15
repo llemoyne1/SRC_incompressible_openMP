@@ -59,6 +59,91 @@ struct CudaQ6PhaseCurvatureView0493x9d {
     bool valid = false;
 };
 
+struct CudaChiMembraneDiagnostics0493x17c {
+    bool available = false;
+    bool initialized = false;
+    bool advanced = false;
+    int nodeCount = 0;
+    int edgeCount = 0;
+    double mass = 0.0;
+    double nodeMass = 0.0;
+    double centerX = 0.0;
+    double centerY = 0.0;
+    double meanVelocityXBefore = 0.0;
+    double meanVelocityYBefore = 0.0;
+    double meanVelocityXAfter = 0.0;
+    double meanVelocityYAfter = 0.0;
+    double momentumBeforeX = 0.0;
+    double momentumBeforeY = 0.0;
+    double momentumAfterX = 0.0;
+    double momentumAfterY = 0.0;
+    double nodeReactionImpulseX = 0.0;
+    double nodeReactionImpulseY = 0.0;
+    double cellReactionImpulseX = 0.0;
+    double cellReactionImpulseY = 0.0;
+    double loadProjectionResidualX = 0.0;
+    double loadProjectionResidualY = 0.0;
+    int pinnedNodeCount = 0;
+    double supportConstraintImpulseX = 0.0;
+    double supportConstraintImpulseY = 0.0;
+    double internalForceSumX = 0.0;
+    double internalForceSumY = 0.0;
+    double signedArea0 = 0.0;
+    double signedArea = 0.0;
+    double areaRelativeChange = 0.0;
+    double perimeter0 = 0.0;
+    double perimeter = 0.0;
+    double perimeterRelativeChange = 0.0;
+    double maxAbsEdgeStrain = 0.0;
+    double stretchEnergy = 0.0;
+    double bendingEnergy = 0.0;
+    double maxAbsAngleChange = 0.0;
+    double areaEnergy = 0.0;
+    double kineticEnergyBefore = 0.0;
+    double kineticEnergyAfter = 0.0;
+    double stabilityNumber = 0.0;
+};
+
+struct CudaChiHingedPlateDiagnostics0493x18a {
+    bool available = false;
+    bool initialized = false;
+    bool advanced = false;
+    int nodeCount = 0;
+    int edgeCount = 0;
+    double mass = 0.0;
+    double inertia = 0.0;
+    double pivotX = 0.0;
+    double pivotY = 0.0;
+    double centerX = 0.0;
+    double centerY = 0.0;
+    double theta = 0.0;
+    double omegaBefore = 0.0;
+    double omegaAfter = 0.0;
+    double momentumBeforeX = 0.0;
+    double momentumBeforeY = 0.0;
+    double momentumAfterX = 0.0;
+    double momentumAfterY = 0.0;
+    double nodeReactionImpulseX = 0.0;
+    double nodeReactionImpulseY = 0.0;
+    double cellReactionImpulseX = 0.0;
+    double cellReactionImpulseY = 0.0;
+    double loadProjectionResidualX = 0.0;
+    double loadProjectionResidualY = 0.0;
+    double hydroTorqueImpulse = 0.0;
+    double gravityTorque = 0.0;
+    double dampingTorque = 0.0;
+    double gravityImpulseY = 0.0;
+    double hingeReactionImpulseX = 0.0;
+    double hingeReactionImpulseY = 0.0;
+    double angularBalanceResidual = 0.0;
+    // 0493x18e: normal-path local FSI subcycling diagnostics.
+    bool fsiSubcycled = false;
+    int fsiSubsteps = 1;
+    double maxAbsOmegaSubstep = 0.0;
+    double maxAngularIncrement = 0.0;
+    double maxTipDisplacementCells = 0.0;
+};
+
 struct CudaQ6ForceKick0493x3Diagnostics {
     bool requested = false;
     bool handled = false;
@@ -142,6 +227,29 @@ bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
 bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
     const double** deviceReactionX, const double** deviceReactionY, int* nx, int* ny);
 
+// 0493x17c: kick the true nodal membrane after the x17a space-time
+// collision/drift step.  The persistent Lagrangian loop remains authoritative;
+// chi is not re-extracted.  Internal spring/area/dashpot forces are exactly
+// momentum-conserving up to roundoff and the kinetic wall impulse is already
+// distributed to impact-edge nodes by the collision kernel.
+bool cuda_q6_advance_chi_membrane_0493x17c(
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    CudaChiMembraneDiagnostics0493x17c* diagnostics);
+
+// 0493x18a: one-DOF rigid finite-thickness plate hinged about a fixed z axis.
+// The current material contour is a rigid transform of the initial chi loop;
+// fluid impacts supply the exact generalized angular impulse, while gravity
+// and viscous hinge damping provide the external restoring/loading torques.
+bool cuda_q6_advance_chi_hinged_plate_0493x18a(
+    const SimulationParams& params,
+    const CellGrid& grid,
+    int step,
+    double time,
+    CudaChiHingedPlateDiagnostics0493x18a* diagnostics);
+
 // 0493x16l: observation-only post-stream penetration diagnostic.  It samples
 // the same resident chi geometry with the x10 Q2 convention after the solid
 // has been synchronized to t+dt.  No particle state, force, or geometry is
@@ -189,6 +297,16 @@ inline bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
 inline bool cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
     const double** x, const double** y, int* nx, int* ny) {
     if (x) *x = nullptr; if (y) *y = nullptr; if (nx) *nx = 0; if (ny) *ny = 0;
+    return false;
+}
+inline bool cuda_q6_advance_chi_membrane_0493x17c(
+    const SimulationParams&, const CellGrid&, int, double,
+    CudaChiMembraneDiagnostics0493x17c*) {
+    return false;
+}
+inline bool cuda_q6_advance_chi_hinged_plate_0493x18a(
+    const SimulationParams&, const CellGrid&, int, double,
+    CudaChiHingedPlateDiagnostics0493x18a*) {
     return false;
 }
 inline bool cuda_q6_record_chi_penetration_poststream_0493x16l(

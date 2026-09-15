@@ -142,3 +142,44 @@ aux gros dumps/restarts et au recording de campagne.
 
 Les publications `Info/generated/*` et le dump SQL ne font pas partie du patch source-only; ils
 doivent être régénérés par `build_src_reference.py` sur le checkout réel après application.
+
+
+## V4.31 — solides matériels mobiles et FSI
+
+V4.31 ajoute 31 jalons x15--x18d et rafraîchit les inventaires actifs avec les paramètres
+`chiKineticBoundaryMode`, `chiSolid*` et les contrôles de runners x17/x18. La publication doit
+rendre visible la distinction structurante entre milieu poreux Darcy et solide matériel lagrangien.
+`x17b` est la qualification d'imperméabilité de référence. Avec V4.31-fix1, `x18d` est marqué
+`VALIDATED/FUNCTIONAL` après application réelle, compilation CUDA locale réussie et runs du volet
+fonctionnels; la performance chiffrée reste à benchmarker.
+
+Comme pour les versions précédentes, `Info/generated/*` et le dump SQL sont des produits de
+reconstruction et ne doivent pas être transportés dans le patch source-only.
+
+
+## V4.31-fix1 — provenance et validation locale x18d
+
+Aucun jalon n’est ajouté. Les métadonnées des 20 paramètres solides mobiles sont resserrées pour
+que `ASSOCIATED_WITH` exprime leur jalon d’introduction réel plutôt qu’une plage x16--x18. La
+validation opérateur du 15/09/2026 fait passer x18d à `VALIDATED/FUNCTIONAL` sans revendiquer de
+facteur d’accélération non mesuré.
+
+
+## V4.32 — x18e/x18f : volet sous-cyclé et CL ouvertes
+
+V4.32 ajoute deux jalons (`x18e`, `x18f`), six paramètres solveur du sous-cyclage FSI et trois
+contrôles ENV/runner explicités par x18f. Les inventaires actifs attendus deviennent 886 lignes
+paramètres et 624 lignes ENV brutes.
+
+Le statut publié doit distinguer strictement les deux chemins de frontière : `x18a/inlet_neumann`
+est validé fonctionnellement sur le worktree réel; `x18b/double_neumann` est un démonstrateur
+qualitatif seulement, car le bilan particulaire outlet-only présente un drift dépendant du régime.
+Le package `x18f-fix1` de verrouillage global de population est `NOT_APPLIED/NOT_CANONICAL`.
+
+Sous les règles de publication V4.31-fix1 inchangées, les compteurs structurels attendus sont :
+331 jalons, 32 curations, 346 paramètres publiés et 721 flags publiés. Les compteurs de relations,
+preuves et artefacts doivent être relus sur le checkout réel car ils dépendent aussi du graphe Git
+et des fichiers présents.
+
+`Info/generated/*` et le dump SQL restent des produits de reconstruction et ne sont pas transportés
+dans le patch source-only.

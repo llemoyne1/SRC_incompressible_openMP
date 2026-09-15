@@ -1,6 +1,6 @@
 # Info — base de référence SRC_GPU-SURF
 
-> **V4.27** — réintégration canonique de la lignée Neumann multiphasique après cherry-pick dans `surf`, restauration V4.22/V4.23 et documentation x9e→x9e-fix3.
+> **V4.32** — volet articulé : sous-cyclage FSI x18e, frontières ouvertes x18f et qualification explicite du double-Neumann.
 
 
 `Info/` est le sous-système documentaire versionné du projet SRC_GPU-SURF. Il est volontairement séparé du code de calcul (`src/`, `include/`), des runners/analyseurs (`scripts/`, `matlab/`) et des outils temporaires (`tools/`).
@@ -597,3 +597,54 @@ Le snapshot ENV est rafraîchi avec les contrôles explicites du benchmark/resta
 Les sources primaires exactes, le log TG et les captures qualitatives sélectionnées sont archivés sous
 `inputs/historical/0493x14aw_x14bc_20260911_original_sources.zip`. Voir
 `docs/CURATION_0493X14AW_X14BC_BASILISK_COLD_V4_30.md`.
+
+
+### V4.31 — x15→x18d : solides matériels mobiles et FSI
+
+V4.31 intègre dans la base de référence l'historique du chantier solides mobiles documenté dans le
+rapport projet : diagnostic du `chi-solid` volumique (x15), échec des stratégies de remapping
+(x16a--x16i), première frontière cinétique `chi=0.5` (x16j--x16q), frontière lagrangienne
+persistante qualifiée x17a/x17b, mécanique de membrane x17c/x17d puis volet rigide articulé
+x18a/x18b. La frontière x17b devient la référence d'imperméabilité des solides matériels; le
+chemin Darcy reste la représentation des milieux poreux/optimisation.
+
+Le nettoyage x18d introduit `chiSolidQualificationDiagnosticsEnable=false` par défaut afin que les
+runs normaux ne paient plus les diagnostics de qualification. La validation locale du 15 septembre
+2026 confirme désormais **application du patch, compilation CUDA réussie et runs du volet
+fonctionnels**. x18d est donc `VALIDATED/FUNCTIONAL`; aucun gain de performance chiffré n’est
+revendiqué tant qu’un benchmark avant/après n’a pas été réalisé. Le fast-path spécialisé x18c reste
+explicitement non canonique.
+
+Les inventaires actifs sont rafraîchis au 15 septembre : 880 lignes paramètres et
+621 lignes ENV brutes. Les sources primaires et le rapport consolidé sont archivés sous
+`inputs/historical/0493x15_x18_mobile_solids_20260912_15_original_sources.zip`. Voir
+`docs/CURATION_0493X15_X18_MOBILE_SOLIDS_V4_31.md`.
+
+
+### V4.31-fix1 — provenance paramétrique et validation fonctionnelle x18d
+
+Ce correctif ne crée aucun jalon. Il précise la provenance des 20 paramètres mobiles afin que les
+relations automatiques pointent vers leur jalon d’introduction réel (x16a, x16j, x17c, x17d, x18a
+ou x18d), et enregistre la validation locale réussie de x18d. Voir
+`docs/CURATION_0493X15_X18_MOBILE_SOLIDS_V4_31_FIX1.md`.
+
+
+### V4.32 — x18e/x18f : sous-cyclage et frontières ouvertes du volet
+
+V4.32 ajoute les jalons `x18e` et `x18f`. x18e sous-cycle localement le couplage FSI du volet sans
+modifier le pas global SRC/Q6 et ajoute six paramètres de contrôle/garde. La validation locale confirme
+la compilation CUDA et des runs fonctionnels; un `dt` global jusqu’à 20 fois la limite pratique
+précédente a été testé sans reproduire le hang, sans revendiquer une stabilité inconditionnelle.
+
+x18f finalise les runners : `x18a` utilise `inlet_neumann` (inlet uniforme gauche, outlet Neumann
+droit, parois haut/bas) et ce chemin est `VALIDATED/FUNCTIONAL`; `x18b` utilise `double_neumann`.
+Cette dernière configuration outlet-only est fonctionnelle comme démonstrateur FSI mais reste non
+qualifiée quantitativement en masse : le biais du bain x8q change de signe et d’amplitude selon le
+régime. Le cas `FLUID_DENSITY_FACTOR=0.10` termine 2000 pas mais dérive de -3.0825% en population.
+
+Le correctif proposé `x18f-fix1` de verrouillage global de population n’a pas été appliqué et n’est
+pas canonique : les CL ouvertes doivent pouvoir représenter des bilans non nuls (remplissage,
+vidange, gonflement/dégonflement). `INACTIVE_SLOTS_CELL_FRACTION` est documenté comme variable de
+pool x18f; elle est distincte de `INACTIVE_SLOTS_FRACTION`.
+
+Voir `docs/CURATION_0493X18E_X18F_HINGED_FSI_V4_32.md`.

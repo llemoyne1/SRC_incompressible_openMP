@@ -28,6 +28,8 @@
 | `x14o` | Ablation pression gaz constante | LIQUID_GAS | Ablation |
 | `x14y` | Ablation sans soustraction p_g | LIQUID_GAS | Rejeté: double comptage pression équilibre |
 | `x14z` | Fermeture géométrique p_ref | LIQUID_GAS | Rejeté comme cause du défaut n=1 |
+| `x15f` | Ablation sans outward_bath | MOBILE_SOLID | PASS comme ablation discriminante; direction rejetée pour un solide matériel mobile. |
+| `x16i` | Comparaison binary_event / swept_geometry | MOBILE_SOLID | REJECTED_DIRECTION pour le mécanisme final de solide matériel. |
 
 ## ANALYZER
 
@@ -184,6 +186,15 @@
 | `x14m` | Assemblage bilatéral + compatibilité x12a | LIQUID_GAS | Architecture intégrée |
 | `x14s` | EOS gaz volume accessible | LIQUID_GAS | Actif dans x14 récent |
 | `x14v` | Kick cinétique excédentaire | LIQUID_GAS | Actif dans chaîne x14 candidate |
+| `x16a` | Architecture SolidDynamics / SolidGeometry | MOBILE_SOLID | PASS sur le test rigid_slab_1d 2000 pas; fermeture proche du roundoff. |
+| `x16b` | Charge solide spatiale exacte | MOBILE_SOLID | Infrastructure de charge retenue; base du couplage mécanique ultérieur. |
+| `x16e` | Rasterisation subcellulaire CUDA résidente | MOBILE_SOLID | REVIEW; améliore la représentation mais ne résout pas le principe de capture/remapping. |
+| `x16j` | Première frontière chi cinétique spéculaire | MOBILE_SOLID | REVIEW: principe cinétique retenu; backend Eulerien encore en qualification. |
+| `x16p` | Topologie complète de frontière Q2 | MOBILE_SOLID | REVIEW: rigide PASS/zero penetration, déformable REVIEW; zeroPenetrationAllCases=FAIL. |
+| `x17a` | Frontière chi lagrangienne persistante | MOBILE_SOLID | Backend matériel de référence; remplace la reconstruction chi->segments à chaque pas. |
+| `x17c` | Première mécanique de membrane lagrangienne | FSI | Couplage FSI fonctionnel; mécanique structurelle minimale non revendiquée comme modèle de solide détaillé. |
+| `x18a` | Volet rigide articulé 1-DOF | FSI | VALIDATED/FUNCTIONAL: volet 1-DOF avec sous-cyclage x18e et runner x18f inlet_neumann validé localement sur 200 pas à dt=0.006, FLOW_UX=0.352; terminaison COMPLETE. |
+| `x18f` | Frontières ouvertes et initialisation finale du volet | FSI | MIXED: x18a inlet_neumann VALIDATED/FUNCTIONAL; x18b double_neumann fonctionnel qualitativement mais non qualifié quantitativement en bilan de masse. |
 
 ## DEMONSTRATION
 
@@ -227,6 +238,11 @@
 | `x14ax` | Recorder alpha_x6c du champ liquide physique résident | LIQUID_GAS | Diagnostic intégré et utilisé dans les campagnes d’interface; ne modifie pas la fermeture physique lorsque le champ n’est pas demandé. |
 | `x14p` | Audit offline alpha/volume gazeux accessible | LIQUID_GAS | Diagnostic offline; aucune loi CUDA proposée à ce stade |
 | `x14q` | Fit offline de fraction de volume accessible | LIQUID_GAS | Diagnostic offline; explicitement pas une proposition CUDA |
+| `x15a` | Audit du bilan de force du chi-solid fixe | MOBILE_SOLID | REVIEW: bilan mécanique exploitable; imperméabilité non encore établie. |
+| `x15b` | Décomposition exacte chiVP/Brinkman | MOBILE_SOLID | Résultat mécanique validé; ne constitue pas une fermeture matérielle imperméable. |
+| `x15c` | Mesure directe de perméabilité du chi-solid | MOBILE_SOLID | PASS comme diagnostic de perméabilité; résultat physique: paroi volumique poreuse. |
+| `x16c` | Inventaire du fluide fictif dans le solide | MOBILE_SOLID | INFORMATIONAL; diagnostic de qualification, non physique nécessaire au chemin normal. |
+| `x16l` | Diagnostic direct post-stream de pénétration | MOBILE_SOLID | Qualification-only; read-only; non conservé dans le chemin normal x18d. |
 
 ## EXPERIMENT
 
@@ -238,6 +254,10 @@
 | `x8x` | Réservoir virtuel Neumann coarse-grained | OPEN_BOUNDARY_MULTIPHASE | Améliore le défaut x8w et passe les checks analytiques de demi-flux, mais la densité de réservoir suit encore le déficit de densité intérieur; supersédé par x8y. |
 | `x8y` | Réservoir de pression Neumann à densité de référence | OPEN_BOUNDARY_MULTIPHASE | Échec post-contact documenté: un ux liquide intérieur négatif est recopié dans le Maxwellien extérieur et transforme le réservoir en injecteur macroscopique; supersédé par x8z. |
 | `x14ay` | Raffinement particulaire gamma 12/16 à similitude thermique | LIQUID_GAS | Smoke gamma=12 exploitable mais amélioration interfaciale jugée trop faible face au surcoût; gamma=12/16 non retenu pour le benchmark courant. |
+| `x16f` | Synchronisation temporelle post-stream | MOBILE_SOLID | Résultat négatif: effet faible; le défaut principal n’est pas la synchronisation temporelle. |
+| `x16g` | Neutralisation du bath lors de la capture | MOBILE_SOLID | Résultat négatif: le pic est déplacé au pas suivant; corriger la vitesse seule est insuffisant. |
+| `x16h` | Réinjection spatiale des particules capturées | MOBILE_SOLID | REVIEW/REJECTED_DIRECTION: gain local mais remapping trop brutal. |
+| `x17d` | Membrane ancrée / plaque flexible de démonstration | FSI | HISTORICAL/REVIEW: transfert FSI démontré, mais tuning structural abandonné après rigidités excessives ou repliements. |
 
 ## FIX
 
@@ -273,6 +293,14 @@
 | `x13w-fix3` | Reseed sur moyenne pré-échappement | TRANSPORT_SURFACE | Correctif utilisé dans x13zd; mécanisme x13w reste invalidé physiquement |
 | `x13zn` | Nettoyage runner injection | RUN_OK | Correctif runner-only attesté; aucune modification solveur |
 | `x14g` | Cellules exactes post-stream/grid-shift | LIQUID_GAS | Correctif d'intégration actif |
+| `x16k` | Géométrie chi de niveau pour le test galiléen | MOBILE_SOLID | REVIEW; étape intermédiaire vers la reconstruction Q2 cohérente. |
+| `x16m` | Raffinement de racine Q2 | MOBILE_SOLID | REVIEW: cas rigides propres; résidu de fuite sur géométries déformables/courbes. |
+| `x16n` | Cohérence dual-square Q2 | MOBILE_SOLID | REVIEW: rigidQualification=PASS, deformableQualification=REVIEW. |
+| `x16o` | Cohérence des extrémités d’arêtes Q2 | MOBILE_SOLID | REVIEW: rigidQualification=PASS; fuite spatiale subsiste sur cas courbe/déformable. |
+| `x16q` | Correction overlap/dead-zone de la frontière Q2 | MOBILE_SOLID | REVIEW; dernier raffinement de la lignée x16j--x16q, supplantée par x17a. |
+| `x17d-fix2` | Couverture complète des particules par le collisionneur x17a | MOBILE_SOLID | Correctif de couverture nécessaire; conservé comme jalon de correction de calcul. |
+| `x18a-fix2` | Initialisation du fluide cohérente avec l’angle du volet | FSI | INTEGRATED: correctif d’initialisation conservé et câblé durablement dans x18f. |
+| `x18e` | Sous-cyclage FSI local du volet articulé | FSI | VALIDATED/FUNCTIONAL: compilation CUDA locale et runs réussis; pas global testé jusqu’à 20x la limite pratique précédente sans reproduire le hang. Pas de revendication de stabilité inconditionnelle ni de speedup wall-time 20x. |
 
 ## INFRA
 
@@ -288,6 +316,12 @@
 | `x8h` | Restart hydrodynamique pour les longs runs VK | OPEN_BOUNDARY | Infrastructure de continuation hydrodynamique; RNG non bitwise continu |
 | `x8u` | Réalignement du runner Zovatto sur la fermeture x8t | OPEN_BOUNDARY | Réintégration production de la fermeture x8t dans la lignée x8m; clôture documentaire du cycle x8 |
 | `x10n` | Interface continue marching-squares mobile | FREE_SURFACE_KINETICS | Architecture continue OFF comme mode autonome; primitives réutilisées par x10o, Q2, x12a et suites |
+
+## OPTIMIZATION
+
+| ID | Nom | Domaine | Statut |
+|---|---|---|---|
+| `x18d` | Nettoyage global du chemin normal des solides mobiles | MOBILE_SOLID | VALIDATED/FUNCTIONAL: x18d appliqué sur le worktree réel, compilation CUDA locale réussie et runs hinged_plate_2d fonctionnels; gain de performance non encore quantifié par benchmark. |
 
 ## PERF
 
@@ -356,6 +390,9 @@
 | `x14e` | Qualification thermostat sur chemin SRC de production | LIQUID_GAS | PASS chemin SRC production résident |
 | `x14f` | Qualification exacte thermostat sur src-q6-g-f | LIQUID_GAS | PASS x14f-fix1 exact src-q6-g-f |
 | `x14i` | Qualification finale thermostat src-q6-g-f avec grid shift | LIQUID_GAS | PASS production shifted-grid resident species thermostat |
+| `x15e` | Qualification de la chaîne historique forte | MOBILE_SOLID | PASS pour la chaîne historique statique; mécanisme non retenu comme fermeture mobile finale. |
+| `x16d` | Test galiléen du masque chi mobile | MOBILE_SOLID | REVIEW/FAIL comme invariance galiléenne du remapping binaire; résultat causal retenu. |
+| `x17b` | Initialisation et qualification des solides lagrangiens | MOBILE_SOLID | PASS: 6/6 cas, zéro pénétration stricte, persistance mesh, fermeture action-réaction/charge, contrôle galiléen. |
 
 ## RUNNER
 
@@ -363,6 +400,7 @@
 |---|---|---|---|
 | `0493W4` | Runner d'injection multi-espèces normalisé par famille de phase | MULTISPECIES_RUNNER | Jalon de runner attesté par le code et les inventaires |
 | `x14bc` | Benchmark Basilisk froid pulsé ReL=500 | LIQUID_GAS | Calibration liquide TG128 8 graines PASS, CV=2.2%; smoke pulsé 300 pas PASS intégration/visualisation. Production longue 4758 pas planifiée, non encore qualifiée statistiquement. |
+| `x18b` | Chute du volet dans un fluide au repos | FSI | FUNCTIONAL/QUALITATIVE: chute double-Neumann 2000 pas COMPLETE à FLUID_DENSITY_FACTOR=0.10, sans damping mécanique; non qualifié pour mesure quantitative longue du damping ou bilan stationnaire de masse. |
 
 ## TOOLING
 

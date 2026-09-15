@@ -6,13 +6,13 @@
 
 | Statut | Confiance | Nombre |
 |---|---|---:|
-| CANDIDATE | A | 467 |
-| CANDIDATE | B | 477 |
+| CANDIDATE | A | 468 |
+| CANDIDATE | B | 478 |
 | CANDIDATE | C | 3 |
 | CURATED | A | 45 |
 | CURATED | B | 8 |
-| LINKED | A | 16 |
-| LINKED | B | 177 |
+| LINKED | A | 17 |
+| LINKED | B | 200 |
 
 ## Candidats déjà reliés à un jalon canonique
 
@@ -69,6 +69,7 @@
 | `x10v` | `candidate:x:x10v` | 2 |
 | `x12a` | `candidate:x:x12a` | 22 |
 | `x14v` | `candidate:x:x14v` | 7 |
+| `x17b` | `candidate:x:x17b` | 9 |
 | `x6f2` | `candidate:x:x6f2` | 4 |
 | `x7j` | `candidate:x:x7j` | 3 |
 | `x8c` | `candidate:x:x8c` | 5 |
@@ -176,8 +177,8 @@
 | `x14as` | `candidate:x:x14as` | 2 |
 | `x14at` | `candidate:x:x14at` | 7 |
 | `x14au` | `candidate:x:x14au` | 5 |
-| `x14av` | `candidate:x:x14av` | 3 |
-| `x14aw` | `candidate:x:x14aw` | 1 |
+| `x14av` | `candidate:x:x14av` | 4 |
+| `x14aw` | `candidate:x:x14aw` | 2 |
 | `x14ay` | `candidate:x:x14ay` | 1 |
 | `x14b` | `candidate:x:x14b` | 2 |
 | `x14ba` | `candidate:x:x14ba` | 2 |
@@ -202,6 +203,29 @@
 | `x14x` | `candidate:x:x14x` | 6 |
 | `x14y` | `candidate:x:x14y` | 1 |
 | `x14z` | `candidate:x:x14z` | 1 |
+| `x15a` | `candidate:x:x15a` | 2 |
+| `x15b` | `candidate:x:x15b` | 2 |
+| `x15c` | `candidate:x:x15c` | 2 |
+| `x15e` | `candidate:x:x15e` | 2 |
+| `x15f` | `candidate:x:x15f` | 2 |
+| `x16a` | `candidate:x:x16a` | 8 |
+| `x16b` | `candidate:x:x16b` | 3 |
+| `x16c` | `candidate:x:x16c` | 3 |
+| `x16d` | `candidate:x:x16d` | 4 |
+| `x16e` | `candidate:x:x16e` | 5 |
+| `x16f` | `candidate:x:x16f` | 3 |
+| `x16g` | `candidate:x:x16g` | 2 |
+| `x16h` | `candidate:x:x16h` | 2 |
+| `x16i` | `candidate:x:x16i` | 3 |
+| `x16j` | `candidate:x:x16j` | 6 |
+| `x16k` | `candidate:x:x16k` | 5 |
+| `x16l` | `candidate:x:x16l` | 4 |
+| `x16m` | `candidate:x:x16m` | 11 |
+| `x16n` | `candidate:x:x16n` | 5 |
+| `x16o` | `candidate:x:x16o` | 5 |
+| `x16p` | `candidate:x:x16p` | 7 |
+| `x16q` | `candidate:x:x16q` | 7 |
+| `x17a` | `candidate:x:x17a` | 7 |
 | `x2` | `candidate:x:x2` | 2 |
 | `x3` | `candidate:x:x3` | 5 |
 | `x4a` | `candidate:x:x4a` | 5 |
@@ -733,6 +757,7 @@
 | `0493n` | 2026-07-27T19:51:46+02:00 | `eac470a5cc` etat avant refonte du resampling | 3 | IN_MAINLINE |
 | `0493o5` | 2026-07-28T23:25:09+02:00 | `d57a68bb6f` 0493o1-o3: checkpoint target-driven species Neff split guard | 1 | IN_MAINLINE |
 | `x13h-20260831` | 2026-08-29T21:42:43+02:00 | `7655b81b1b` one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 1 | IN_MAINLINE |
+| `x17b-20260914` | 2026-09-14T09:21:16+02:00 | `5f8d8bd466` 0493x17b qualify persistent Lagrangian chi solid boundary | 1 | IN_MAINLINE |
 | `x6h` | 2026-08-09T11:07:33+02:00 | `e2a947f7f6` 0493x6h: fix low-wall Q6 reconstruction and add RT0 face-to-particle mapping | 2 | IN_MAINLINE |
 | `x7k-x7l` | 2026-08-10T17:30:40+02:00 | `f12cfe7c65` 0493x7k-x7l: strip Q6-g-f production diagnostics telemetry | 1 | IN_MAINLINE |
 | `x8q-x8t` | 2026-08-16T18:16:37+02:00 | `a34dfdc862` 0493x8q-x8t: complete passive Neumann outlet for Q6GF | 2 | IN_MAINLINE |
@@ -1113,4 +1138,4 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
 | `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1193 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1219 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

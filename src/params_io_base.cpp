@@ -746,6 +746,28 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
             std::replace(p.chiSolidModel.begin(), p.chiSolidModel.end(), '-', '_');
         }
         else if (key == "chiSolidMass") p.chiSolidMass = parse_double(value, key);
+        else if (key == "chiSolidQualificationDiagnosticsEnable") p.chiSolidQualificationDiagnosticsEnable = parse_bool(value, key);
+        else if (key == "chiSolidMembraneStretchStiffness") p.chiSolidMembraneStretchStiffness = parse_double(value, key);
+        else if (key == "chiSolidMembraneAreaStiffness") p.chiSolidMembraneAreaStiffness = parse_double(value, key);
+        else if (key == "chiSolidMembraneDamping") p.chiSolidMembraneDamping = parse_double(value, key);
+        else if (key == "chiSolidMembraneBendingStiffness") p.chiSolidMembraneBendingStiffness = parse_double(value, key);
+        else if (key == "chiSolidMembraneCrossBraceStiffness") p.chiSolidMembraneCrossBraceStiffness = parse_double(value, key);
+        else if (key == "chiSolidMembraneCrossBraceRangeEdges") p.chiSolidMembraneCrossBraceRangeEdges = parse_double(value, key);
+        else if (key == "chiSolidMembraneCrossBraceDiagonalFraction") p.chiSolidMembraneCrossBraceDiagonalFraction = parse_double(value, key);
+        else if (key == "chiSolidMembraneOutputEvery") p.chiSolidMembraneOutputEvery = parse_int(value, key);
+        else if (key == "chiSolidMembraneAnchorMode") p.chiSolidMembraneAnchorMode = value;
+        else if (key == "chiSolidMembraneAnchorBandCells") p.chiSolidMembraneAnchorBandCells = parse_double(value, key);
+        else if (key == "chiSolidHingedGravityY") p.chiSolidHingedGravityY = parse_double(value, key);
+        else if (key == "chiSolidHingedAngularDamping") p.chiSolidHingedAngularDamping = parse_double(value, key);
+        else if (key == "chiSolidHingedInitialAngle") p.chiSolidHingedInitialAngle = parse_double(value, key);
+        else if (key == "chiSolidHingedInitialOmega") p.chiSolidHingedInitialOmega = parse_double(value, key);
+        else if (key == "chiSolidHingedOutputEvery") p.chiSolidHingedOutputEvery = parse_int(value, key);
+        else if (key == "chiSolidHingedFsiSubcyclingEnable") p.chiSolidHingedFsiSubcyclingEnable = parse_bool(value, key);
+        else if (key == "chiSolidHingedFsiMinSubsteps") p.chiSolidHingedFsiMinSubsteps = parse_int(value, key);
+        else if (key == "chiSolidHingedFsiMaxSubsteps") p.chiSolidHingedFsiMaxSubsteps = parse_int(value, key);
+        else if (key == "chiSolidHingedMaxAngularIncrement") p.chiSolidHingedMaxAngularIncrement = parse_double(value, key);
+        else if (key == "chiSolidHingedMaxTipDisplacementCells") p.chiSolidHingedMaxTipDisplacementCells = parse_double(value, key);
+        else if (key == "chiSolidHingedMaxParticleSpanCells") p.chiSolidHingedMaxParticleSpanCells = parse_int(value, key);
         else if (key == "topoBenchmarkEnable") p.topoBenchmarkEnable = parse_bool(value, key);
         else if (key == "topoBenchmarkEvery") p.topoBenchmarkEvery = parse_int(value, key);
         else if (key == "topoBenchmarkFilename") p.topoBenchmarkFilename = value;
@@ -2356,17 +2378,120 @@ void validate_simulation_params(const SimulationParams& p) {
             }
         }
         if (p.chiSolidDynamicsEnable) {
-            if (p.chiSolidModel != "rigid_slab_1d") {
-                throw std::runtime_error("0493x16a chiSolidDynamicsEnable supports chiSolidModel=rigid_slab_1d only");
+            if (!(p.chiSolidModel == "rigid_slab_1d" || p.chiSolidModel == "membrane_2d" ||
+                  p.chiSolidModel == "hinged_plate_2d")) {
+                throw std::runtime_error(
+                    "0493x18a chiSolidDynamicsEnable supports chiSolidModel=rigid_slab_1d, membrane_2d or hinged_plate_2d");
             }
             if (!(p.chiSolidMass > 0.0) || !std::isfinite(p.chiSolidMass)) {
                 throw std::runtime_error("0493x16a chiSolidMass must be positive and finite");
             }
-            if (!(p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
-                throw std::runtime_error("0493x16a rigid_slab_1d requires darcyChiMode=box/rectangle for its initial geometry");
-            }
-            if (!(p.darcyBoxXMax > p.darcyBoxXMin)) {
-                throw std::runtime_error("0493x16a rigid_slab_1d requires positive slab thickness");
+            if (p.chiSolidModel == "rigid_slab_1d") {
+                if (!(p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
+                    throw std::runtime_error("0493x16a rigid_slab_1d requires darcyChiMode=box/rectangle for its initial geometry");
+                }
+                if (!(p.darcyBoxXMax > p.darcyBoxXMin)) {
+                    throw std::runtime_error("0493x16a rigid_slab_1d requires positive slab thickness");
+                }
+            } else if (p.chiSolidModel == "membrane_2d") {
+                if (p.chiKineticBoundaryMode != "specular") {
+                    throw std::runtime_error(
+                        "0493x17c membrane_2d requires chiKineticBoundaryMode=specular");
+                }
+                if (p.darcyChiMode == "uniform") {
+                    throw std::runtime_error(
+                        "0493x17c membrane_2d requires a non-uniform chi field with a closed chi=0.5 contour");
+                }
+                if (p.darcyChiCollisionVpEnable || std::abs(p.darcyAlphaMax) > 1.0e-15 ||
+                    std::abs(p.darcyAlphaMin) > 1.0e-15) {
+                    throw std::runtime_error(
+                        "0493x17c membrane_2d first qualification requires kinetic-only coupling: darcyAlphaMin=darcyAlphaMax=0 and chiVP=false");
+                }
+                if (!(p.chiSolidMembraneStretchStiffness > 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneStretchStiffness) ||
+                    !(p.chiSolidMembraneAreaStiffness > 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneAreaStiffness) ||
+                    !(p.chiSolidMembraneDamping >= 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneDamping) ||
+                    !(p.chiSolidMembraneBendingStiffness >= 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneBendingStiffness) ||
+                    !(p.chiSolidMembraneCrossBraceStiffness >= 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneCrossBraceStiffness) ||
+                    !(p.chiSolidMembraneCrossBraceRangeEdges > 0.0) ||
+                    !std::isfinite(p.chiSolidMembraneCrossBraceRangeEdges) ||
+                    !(p.chiSolidMembraneCrossBraceDiagonalFraction >= 0.0) ||
+                    !(p.chiSolidMembraneCrossBraceDiagonalFraction <= 1.0) ||
+                    !std::isfinite(p.chiSolidMembraneCrossBraceDiagonalFraction)) {
+                    throw std::runtime_error(
+                        "0493x17d-fix7 membrane_2d requires positive finite stretch/area stiffness, finite non-negative damping/bending/cross-brace stiffness, positive cross-brace range, and diagonal fraction in [0,1]");
+                }
+                if (p.chiSolidMembraneOutputEvery < 0) {
+                    throw std::runtime_error(
+                        "0493x17c chiSolidMembraneOutputEvery must be non-negative");
+                }
+                {
+                    std::string anchor0493x17d = p.chiSolidMembraneAnchorMode;
+                    std::replace(anchor0493x17d.begin(), anchor0493x17d.end(), '-', '_');
+                    if (!(anchor0493x17d == "none" || anchor0493x17d == "x_extrema" ||
+                          anchor0493x17d == "y_extrema")) {
+                        throw std::runtime_error(
+                            "0493x17d chiSolidMembraneAnchorMode supports none, x_extrema or y_extrema");
+                    }
+                    if (!(p.chiSolidMembraneAnchorBandCells >= 0.0) ||
+                        !std::isfinite(p.chiSolidMembraneAnchorBandCells)) {
+                        throw std::runtime_error(
+                            "0493x17d chiSolidMembraneAnchorBandCells must be finite and non-negative");
+                    }
+                    if (anchor0493x17d != "none" && !(p.chiSolidMembraneAnchorBandCells > 0.0)) {
+                        throw std::runtime_error(
+                            "0493x17d anchored membrane requires chiSolidMembraneAnchorBandCells>0");
+                    }
+                    if (anchor0493x17d != "none" &&
+                        (std::abs(p.darcyUSolidX) > 1.0e-15 || std::abs(p.darcyUSolidY) > 1.0e-15)) {
+                        throw std::runtime_error(
+                            "0493x17d first anchored-membrane demonstrator requires zero prescribed solid velocity");
+                    }
+                }
+            } else {
+                // 0493x18a: one-DOF rigid hinged plate.  The geometry is a
+                // finite-thickness closed chi contour; only theta(t) evolves.
+                if (p.chiKineticBoundaryMode != "specular") {
+                    throw std::runtime_error(
+                        "0493x18a hinged_plate_2d requires chiKineticBoundaryMode=specular");
+                }
+                if (!(p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
+                    throw std::runtime_error(
+                        "0493x18a hinged_plate_2d requires darcyChiMode=box/rectangle");
+                }
+                if (!(p.darcyBoxXMax > p.darcyBoxXMin) || !(p.darcyBoxYMax > p.darcyBoxYMin)) {
+                    throw std::runtime_error(
+                        "0493x18a hinged_plate_2d requires a positive finite-thickness rectangle");
+                }
+                if (p.darcyChiCollisionVpEnable || std::abs(p.darcyAlphaMax) > 1.0e-15 ||
+                    std::abs(p.darcyAlphaMin) > 1.0e-15) {
+                    throw std::runtime_error(
+                        "0493x18a hinged_plate_2d requires kinetic-only chi coupling: darcyAlphaMin=darcyAlphaMax=0 and chiVP=false");
+                }
+                if (!std::isfinite(p.chiSolidHingedGravityY) ||
+                    !(p.chiSolidHingedAngularDamping >= 0.0) ||
+                    !std::isfinite(p.chiSolidHingedAngularDamping) ||
+                    !std::isfinite(p.chiSolidHingedInitialAngle) ||
+                    !std::isfinite(p.chiSolidHingedInitialOmega) ||
+                    p.chiSolidHingedOutputEvery < 0 ||
+                    p.chiSolidHingedFsiMinSubsteps < 1 ||
+                    p.chiSolidHingedFsiMaxSubsteps < p.chiSolidHingedFsiMinSubsteps ||
+                    !(p.chiSolidHingedMaxAngularIncrement > 0.0) ||
+                    !std::isfinite(p.chiSolidHingedMaxAngularIncrement) ||
+                    !(p.chiSolidHingedMaxTipDisplacementCells > 0.0) ||
+                    !std::isfinite(p.chiSolidHingedMaxTipDisplacementCells) ||
+                    p.chiSolidHingedMaxParticleSpanCells < 2) {
+                    throw std::runtime_error(
+                        "0493x18e hinged plate requires finite mechanics, minSubsteps>=1, maxSubsteps>=minSubsteps, positive finite local angular/tip limits and maxParticleSpanCells>=2");
+                }
+                if (std::abs(p.darcyUSolidX) > 1.0e-15 || std::abs(p.darcyUSolidY) > 1.0e-15) {
+                    throw std::runtime_error(
+                        "0493x18a hinged_plate_2d owns its rigid-body velocity; darcyUSolidX/Y must be zero");
+                }
             }
             if (p.darcyInitialDeactivateBelowChi >= 0.0) {
                 std::string kbDyn0493x17b = p.chiKineticBoundaryMode;

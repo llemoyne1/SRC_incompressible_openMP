@@ -232,6 +232,32 @@
 | `rightOpenYMin` | clé supprimée | (non applicable) | Clés supprimées — migration vers segments 0143 | supprimé 0143; rejet explicite; recensé 0490p |
 | `rngSeed` | uint64 | 12345 | Temps et collision SRC | existant catalogue 0292 \| canonique |
 | `rotationAngle` | double | 2.0943951023931953 rad | Temps et collision SRC | existant catalogue 0292 \| alias accepté \| canonique |
+| `SimulationParams::chiKineticBoundaryMode` | string | off | Solides matériels mobiles / FSI | introduit x16j; état courant 15/09/2026 |
+| `SimulationParams::chiSolidDynamicsEnable` | booléen | false | Solides matériels mobiles / FSI | introduit x16a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidHingedAngularDamping` | double | 0.0 | Solides matériels mobiles / FSI | introduit x18a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidHingedFsiMaxSubsteps` | entier | 64 | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedFsiMinSubsteps` | entier | 4 | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedFsiSubcyclingEnable` | booléen | true | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedGravityY` | double | -1.0 | Solides matériels mobiles / FSI | introduit x18a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidHingedInitialAngle` | double | 0.0 | Solides matériels mobiles / FSI | introduit x18a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidHingedInitialOmega` | double | 0.0 | Solides matériels mobiles / FSI | introduit x18a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidHingedMaxAngularIncrement` | double | 0.02 | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedMaxParticleSpanCells` | entier | 64 | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedMaxTipDisplacementCells` | double | 0.20 | Solides matériels mobiles / FSI | introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026 |
+| `SimulationParams::chiSolidHingedOutputEvery` | entier | 0 | Solides matériels mobiles / FSI | introduit x18a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMass` | double | 1.0 | Solides matériels mobiles / FSI | introduit x16a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneAnchorBandCells` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneAnchorMode` | string | none | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneAreaStiffness` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17c; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneBendingStiffness` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneCrossBraceDiagonalFraction` | double | 0.5 | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneCrossBraceRangeEdges` | double | 16.0 | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneCrossBraceStiffness` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17d; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneDamping` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17c; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneOutputEvery` | entier | 0 | Solides matériels mobiles / FSI | introduit x17c; état courant 15/09/2026 |
+| `SimulationParams::chiSolidMembraneStretchStiffness` | double | 0.0 | Solides matériels mobiles / FSI | introduit x17c; état courant 15/09/2026 |
+| `SimulationParams::chiSolidModel` | string | none | Solides matériels mobiles / FSI | introduit x16a; état courant 15/09/2026 |
+| `SimulationParams::chiSolidQualificationDiagnosticsEnable` | booléen | false | Solides matériels mobiles / FSI | introduit x18d; état courant validé au 15/09/2026 |
 | `SimulationParams::inletVelocityOscillationAmplitude` | double | 0.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
 | `SimulationParams::inletVelocityOscillationEnable` | booléen | false | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
 | `SimulationParams::inletVelocityOscillationPeriod` | double | 1.0 | Entrée globale oscillante 0493x14ba | ajout 0493x14ba |
@@ -1785,6 +1811,7 @@ Valeur uniforme de chi lorsque darcyChiMode=uniform.
 - **Statut :** existant catalogue 0292 | canonique
 - **Clé(s) `.kv` :** `dt`
 - **Champ(s) C++ :** `dt`
+- **Variables runner qui écrivent ce paramètre :** `DT`
 
 Pas de temps MPCD/SRD.
 
@@ -2891,6 +2918,7 @@ Clé params.kv lue par le parseur courant.
 - **Statut :** existant catalogue 0292 | canonique
 - **Clé(s) `.kv` :** `kBT`
 - **Champ(s) C++ :** `kBT`
+- **Variables runner qui écrivent ce paramètre :** `KBT`
 
 Température cinétique globale de référence.
 
@@ -4613,12 +4641,559 @@ Graine de génération pseudo-aléatoire.
 - **Clé(s) `.kv` :** `rotationAngle`, `alphaDeg`
 - **Champ(s) C++ :** `rotationAngle`
 - **Autres alias :** `alphaDeg`
+- **Variables runner qui écrivent ce paramètre :** `ROTATION_ANGLE`
 
 Angle de rotation SRD/MPCD.
 
 **Sources / usages :**
 - `DEFINED_OR_USED_IN` — `include/simulation_params.h`
 - `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+### `SimulationParams::chiKineticBoundaryMode`
+
+- **Type :** string
+- **Défaut :** `off`
+- **Contraintes / valeurs :** off|specular
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x16j; état courant 15/09/2026
+- **Autres alias :** `chiKineticBoundaryMode`
+
+Active l’interprétation cinétique imperméable de chi=0.5.
+
+**Remarques.** off préserve le chemin Darcy historique; specular active la frontière matérielle cinétique.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x16j` — Première frontière chi cinétique spéculaire
+
+### `SimulationParams::chiSolidDynamicsEnable`
+
+- **Type :** booléen
+- **Défaut :** `false`
+- **Contraintes / valeurs :** true|false
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x16a; état courant 15/09/2026
+- **Autres alias :** `chiSolidDynamicsEnable`
+
+Active l’évolution mécanique du solide chi.
+
+**Remarques.** Active la mécanique SolidDynamics; le modèle est choisi par chiSolidModel.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/src_mpcd_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `SimulationParams::chiSolidHingedAngularDamping`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini >=0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18a; état courant 15/09/2026
+- **Autres alias :** `chiSolidHingedAngularDamping`
+
+Coefficient du couple visqueux de charnière -C*omega.
+
+**Remarques.** Paramètre mécanique du volet articulé; distinct de l’amortissement hydrodynamique.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `SimulationParams::chiSolidHingedFsiMaxSubsteps`
+
+- **Type :** entier
+- **Défaut :** `64`
+- **Contraintes / valeurs :** >= chiSolidHingedFsiMinSubsteps
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedFsiMaxSubsteps`
+
+Nombre maximal de sous-pas FSI locaux du volet.
+
+**Remarques.** Borne haute de sécurité/coût du découpage local adaptatif x18e.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedFsiMinSubsteps`
+
+- **Type :** entier
+- **Défaut :** `4`
+- **Contraintes / valeurs :** >=1
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedFsiMinSubsteps`
+
+Nombre minimal de sous-pas FSI locaux du volet.
+
+**Remarques.** Borne basse du découpage local adaptatif x18e.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedFsiSubcyclingEnable`
+
+- **Type :** booléen
+- **Défaut :** `true`
+- **Contraintes / valeurs :** true|false
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedFsiSubcyclingEnable`
+
+Active le sous-cyclage FSI local particule--volet sans modifier le pas global SRC/Q6.
+
+**Remarques.** x18e: le pas global dt reste inchangé; sous-pas locaux uniquement pour collisions et dynamique du volet.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedGravityY`
+
+- **Type :** double
+- **Défaut :** `-1.0`
+- **Contraintes / valeurs :** fini
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18a; état courant 15/09/2026
+- **Autres alias :** `chiSolidHingedGravityY`
+
+Accélération verticale appliquée au solide articulé seulement.
+
+**Remarques.** Paramètre mécanique du volet articulé; contribue au couple gravitaire autour de la charnière.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `SimulationParams::chiSolidHingedInitialAngle`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini; radians
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18a; état courant 15/09/2026
+- **Autres alias :** `chiSolidHingedInitialAngle`
+
+Angle initial du volet relatif à la géométrie chi verticale de référence.
+
+**Remarques.** Condition initiale du volet articulé; theta=0 correspond à la géométrie verticale de référence.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `SimulationParams::chiSolidHingedInitialOmega`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18a; état courant 15/09/2026
+- **Autres alias :** `chiSolidHingedInitialOmega`
+
+Vitesse angulaire initiale du volet.
+
+**Remarques.** Condition initiale de vitesse angulaire du volet articulé.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `SimulationParams::chiSolidHingedMaxAngularIncrement`
+
+- **Type :** double
+- **Défaut :** `0.02`
+- **Contraintes / valeurs :** >0; radians
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedMaxAngularIncrement`
+
+Limite l’incrément angulaire local du volet par sous-pas FSI.
+
+**Remarques.** Critère adaptatif x18e; ne constitue pas un amortissement mécanique.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedMaxParticleSpanCells`
+
+- **Type :** entier
+- **Défaut :** `64`
+- **Contraintes / valeurs :** >=1; cellules
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedMaxParticleSpanCells`
+
+Garde-fou sur l’étendue cellulaire maximale parcourue par une trajectoire particulaire lors du broad-phase.
+
+**Remarques.** Garde anti-hang x18e; une trajectoire non finie ou démesurée est rejetée avant explosion du coût du broad-phase.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedMaxTipDisplacementCells`
+
+- **Type :** double
+- **Défaut :** `0.20`
+- **Contraintes / valeurs :** >0; cellules
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18e; VALIDATED/FUNCTIONAL 15/09/2026
+- **Autres alias :** `chiSolidHingedMaxTipDisplacementCells`
+
+Limite le déplacement local de l’extrémité du volet en unités de cellule par sous-pas.
+
+**Remarques.** Critère géométrique adaptatif x18e pour le sous-cyclage FSI.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `ASSOCIATED_WITH` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `SimulationParams::chiSolidHingedOutputEvery`
+
+- **Type :** entier
+- **Défaut :** `0`
+- **Contraintes / valeurs :** >=0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18a; état courant 15/09/2026
+- **Autres alias :** `chiSolidHingedOutputEvery`
+
+Cadence de la sortie physique du volet.
+
+**Remarques.** Cadence de la sortie physique du volet articulé; 0 utilise summaryEvery.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18a` — Volet rigide articulé 1-DOF
+
+### `SimulationParams::chiSolidMass`
+
+- **Type :** double
+- **Défaut :** `1.0`
+- **Contraintes / valeurs :** fini > 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x16a; état courant 15/09/2026
+- **Autres alias :** `chiSolidMass`
+
+Masse totale du solide dynamique.
+
+**Remarques.** Masse totale du solide dynamique distribuée aux DOF selon le modèle.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `SimulationParams::chiSolidMembraneAnchorBandCells`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini >=0; >0 si ancrage actif
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneAnchorBandCells`
+
+Largeur de bande d’ancrage en cellules autour des extrema initiaux.
+
+**Remarques.** Largeur de la bande d’ancrage de la campagne membrane ancrée.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneAnchorMode`
+
+- **Type :** string
+- **Défaut :** `none`
+- **Contraintes / valeurs :** none|x_extrema|y_extrema
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneAnchorMode`
+
+Sélectionne les zones d’ancrage depuis le contour initial.
+
+**Remarques.** Sélection géométrique des nœuds ancrés de la campagne membrane ancrée.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneAreaStiffness`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** membrane_2d: fini > 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17c; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneAreaStiffness`
+
+Raideur de pénalité d’aire globale.
+
+**Remarques.** Paramètre constitutif de la première mécanique de membrane lagrangienne.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17c` — Première mécanique de membrane lagrangienne
+
+### `SimulationParams::chiSolidMembraneBendingStiffness`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini >= 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneBendingStiffness`
+
+Raideur de flexion discrète autour des angles de repos.
+
+**Remarques.** Ajout expérimental de la campagne membrane ancrée; 0 conserve le modèle sans flexion.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneCrossBraceDiagonalFraction`
+
+- **Type :** double
+- **Défaut :** `0.5`
+- **Contraintes / valeurs :** [0,1]
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneCrossBraceDiagonalFraction`
+
+Fraction de raideur affectée aux diagonales des renforts.
+
+**Remarques.** Paramètre expérimental de la campagne membrane ancrée; 0=rungs seuls.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneCrossBraceRangeEdges`
+
+- **Type :** double
+- **Défaut :** `16.0`
+- **Contraintes / valeurs :** fini > 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneCrossBraceRangeEdges`
+
+Rayon de recherche initial des renforts en longueurs d’arête de repos.
+
+**Remarques.** Paramètre expérimental de la campagne membrane ancrée; n’agit que si la raideur cross-brace est non nulle.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneCrossBraceStiffness`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini >= 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17d; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneCrossBraceStiffness`
+
+Raideur optionnelle de renforts transverses/croisés du ruban mince.
+
+**Remarques.** Renfort expérimental de la campagne membrane ancrée; 0 désactive.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `SimulationParams::chiSolidMembraneDamping`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** fini >= 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17c; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneDamping`
+
+Amortissement interne relatif de la membrane.
+
+**Remarques.** Dissipation structurelle de la première mécanique de membrane, distincte de l’action du fluide.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17c` — Première mécanique de membrane lagrangienne
+
+### `SimulationParams::chiSolidMembraneOutputEvery`
+
+- **Type :** entier
+- **Défaut :** `0`
+- **Contraintes / valeurs :** >=0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17c; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneOutputEvery`
+
+Cadence des snapshots nodaux de membrane.
+
+**Remarques.** Cadence de sortie introduite avec la mécanique de membrane lagrangienne; 0 utilise summaryEvery.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17c` — Première mécanique de membrane lagrangienne
+
+### `SimulationParams::chiSolidMembraneStretchStiffness`
+
+- **Type :** double
+- **Défaut :** `0.0`
+- **Contraintes / valeurs :** membrane_2d: fini > 0
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x17c; état courant 15/09/2026
+- **Autres alias :** `chiSolidMembraneStretchStiffness`
+
+Raideur des ressorts d’arêtes de la membrane lagrangienne.
+
+**Remarques.** Paramètre constitutif de la première mécanique de membrane lagrangienne.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x17c` — Première mécanique de membrane lagrangienne
+
+### `SimulationParams::chiSolidModel`
+
+- **Type :** string
+- **Défaut :** `none`
+- **Contraintes / valeurs :** none|rigid_slab_1d|membrane_2d|hinged_plate_2d
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x16a; état courant 15/09/2026
+- **Autres alias :** `chiSolidModel`
+
+Sélectionne le modèle mécanique du solide dynamique.
+
+**Remarques.** Abstraction mécanique introduite avec SolidDynamics/SolidGeometry; les modèles membrane_2d et hinged_plate_2d utilisent ensuite la frontière cinétique.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `SimulationParams::chiSolidQualificationDiagnosticsEnable`
+
+- **Type :** booléen
+- **Défaut :** `false`
+- **Contraintes / valeurs :** true|false
+- **Catégorie :** Solides matériels mobiles / FSI
+- **Statut :** introduit x18d; état courant validé au 15/09/2026
+- **Autres alias :** `chiSolidQualificationDiagnosticsEnable`
+
+Réactive les diagnostics lourds de qualification des solides mobiles.
+
+**Remarques.** false est le chemin normal performant; true est réservé aux campagnes de qualification.
+
+**Sources / usages :**
+- `DEFINED_OR_USED_IN` — `include/simulation_params.h`
+- `DEFINED_OR_USED_IN` — `src/cuda_q6_resident_0400.cu`
+- `DEFINED_OR_USED_IN` — `src/params_io_base.cpp`
+- `DEFINED_OR_USED_IN` — `src/src_mpcd_base.cpp`
+
+**Jalons associés :**
+- `ASSOCIATED_WITH` → `x18d` — Nettoyage global du chemin normal des solides mobiles
 
 ### `SimulationParams::inletVelocityOscillationAmplitude`
 
@@ -5636,7 +6211,7 @@ Réserve des slots inactifs dans l’état initial pour injection/remplissage.
 - **Statut :** existant catalogue 0292 | canonique
 - **Clé(s) `.kv` :** `summaryEvery`
 - **Champ(s) C++ :** `summaryEvery`
-- **Variables runner qui écrivent ce paramètre :** `MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS`
+- **Variables runner qui écrivent ce paramètre :** `MPCD_X10L_PREWALL_INTERFACE_DIAGNOSTICS`, `SUMMARY_EVERY`
 
 Cadence d’écriture de summary_runtime.csv et d’affichage de progression.
 

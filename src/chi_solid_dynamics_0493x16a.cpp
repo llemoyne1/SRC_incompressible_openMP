@@ -7,6 +7,8 @@
 #include "simulation_params.h"
 #include "solid_model_0493x16a.h"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -90,6 +92,31 @@ void append_diagnostic_0493x16a(const SimulationParams& params,
         << d.maxAbsSolidFractionChange0493x16i << '\n';
 }
 
+void append_state_result_0493x18d(const SimulationParams& params,
+                                  std::uint64_t step,
+                                  double time,
+                                  const char* model,
+                                  const ChiSolidDynamicsDiagnostics0493x16a& d) {
+    if (params.outputDir.empty()) return;
+    const int every = std::max(1, params.summaryEvery);
+    if (!(step == 0u || ((step + 1u) % static_cast<std::uint64_t>(every)) == 0u)) return;
+    std::filesystem::create_directories(params.outputDir);
+    const std::filesystem::path path =
+        std::filesystem::path(params.outputDir) / "chi_solid_state_0493x18d.csv";
+    const bool exists = std::filesystem::exists(path);
+    std::ofstream out(path, std::ios::app);
+    if (!out) throw std::runtime_error("0493x18d cannot open solid state result CSV");
+    out << std::setprecision(17);
+    if (!exists) {
+        out << "step,time,model,geometryVersion,centerX,velocityX,mass,"
+               "solidMomentumX,reactionImpulseX,reactionImpulseY\n";
+    }
+    out << step << ',' << time << ',' << model << ',' << d.geometryVersion << ','
+        << d.centerXAfter << ',' << d.velocityXAfter << ',' << d.mass << ','
+        << d.solidMomentumAfterX << ',' << d.solidReactionImpulseX << ','
+        << d.solidReactionImpulseY << '\n';
+}
+
 void copy_common_fluid_diagnostics_0493x16e(
     ChiSolidDynamicsDiagnostics0493x16a& d,
     double brinkmanFluidImpulseX,
@@ -159,23 +186,48 @@ ChiSolidDynamicsDiagnostics0493x16a prepare_chi_solid_dynamics_0493x16a(
     auto& w = *workspace.impl;
 
     if (!w.initialized) {
-        w.model = make_solid_model_0493x16a(params);
-        const bool hostComplete = w.model.dynamics && w.model.geometry;
-        const bool residentComplete =
-            w.model.resident0493x16e && w.model.resident0493x16e->available();
-        if (!hostComplete && !residentComplete) {
-            throw std::runtime_error("0493x16a solid model factory returned no usable host or resident backend");
+        if (params.chiSolidModel == "membrane_2d" ||
+            params.chiSolidModel == "hinged_plate_2d") {
+            // x17c/x18a: the persistent x17 Lagrangian contour is the geometry
+            // authority. Do not instantiate/rasterize the legacy Eulerian solid
+            // provider: q6 initializes the closed nodal loop from initial chi.
+            w.modelName = params.chiSolidModel;
+            w.cudaResident0493x16e = false;
+            w.initialized = true;
+        } else {
+            w.model = make_solid_model_0493x16a(params);
+            const bool hostComplete = w.model.dynamics && w.model.geometry;
+            const bool residentComplete =
+                w.model.resident0493x16e && w.model.resident0493x16e->available();
+            if (!hostComplete && !residentComplete) {
+                throw std::runtime_error("0493x16a solid model factory returned no usable host or resident backend");
+            }
+            w.cudaResident0493x16e = residentComplete;
+            w.modelName = residentComplete
+                ? w.model.resident0493x16e->model_name()
+                : w.model.dynamics->model_name();
+            w.initialized = true;
         }
-        w.cudaResident0493x16e = residentComplete;
-        w.modelName = residentComplete
-            ? w.model.resident0493x16e->model_name()
-            : w.model.dynamics->model_name();
-        w.initialized = true;
     }
 
     ++w.geometryVersion;
     if (w.geometryVersion == 0u) w.geometryVersion = 1u;
     w.residentPoststreamDiag0493x16f = SolidCudaDiagnostics0493x16e{};
+
+    if (params.chiSolidModel == "membrane_2d" ||
+        params.chiSolidModel == "hinged_plate_2d") {
+        d.prepared = true;
+        d.geometryVersion = w.geometryVersion;
+        d.velocityXBefore = params.darcyUSolidX;
+        d.velocityXAfter = params.darcyUSolidX;
+        d.mass = params.chiSolidMass;
+        d.solidMomentumBeforeX = d.mass * d.velocityXBefore;
+        d.solidMomentumAfterX = d.solidMomentumBeforeX;
+        // Geometry is intentionally not republished through x16e. The initial
+        // Darcy chi remains available for one-time contour extraction, after
+        // which x17c Lagrangian nodes are authoritative.
+        return d;
+    }
 
     if (w.cudaResident0493x16e) {
         float* dChi = nullptr;
@@ -267,6 +319,16 @@ ChiSolidDynamicsDiagnostics0493x16a synchronize_chi_solid_dynamics_poststream_04
     if (!w.initialized) {
         throw std::runtime_error("0493x16f poststream solid synchronization before prepare");
     }
+    if (params.chiSolidModel == "membrane_2d" ||
+        params.chiSolidModel == "hinged_plate_2d") {
+        // x17c/x18a drift is performed directly on the persistent nodal geometry in
+        // the pre-stream kinetic pass. No Eulerian chi/u_s synchronization is
+        // required (or allowed) after streaming.
+        d.prepared = true;
+        d.geometryVersion = w.geometryVersion;
+        d.mass = params.chiSolidMass;
+        return d;
+    }
     if (!w.cudaResident0493x16e || !w.model.resident0493x16e) {
         // x16f is deliberately a CUDA-resident timing experiment. Keep the
         // pre-x16e host fallback untouched rather than silently changing its
@@ -357,6 +419,7 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
     }
     d.prepared = true;
     d.geometryVersion = w.geometryVersion;
+    const bool qualification0493x18d = params.chiSolidQualificationDiagnosticsEnable;
     copy_common_fluid_diagnostics_0493x16e(
         d,
         brinkmanFluidImpulseX, brinkmanFluidImpulseY,
@@ -371,6 +434,142 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
         fictitiousRelativeMomentumX0493x16c,
         fictitiousRelativeMomentumY0493x16c,
         fictitiousRelativeVelocityRms0493x16c);
+
+    if (params.chiSolidModel == "hinged_plate_2d") {
+        CudaChiHingedPlateDiagnostics0493x18a hd{};
+        if (!cuda_q6_advance_chi_hinged_plate_0493x18a(
+                params, grid, static_cast<int>(step), time, &hd) ||
+            !hd.available || !hd.advanced) {
+            throw std::runtime_error("0493x18a failed to advance hinged plate mechanics");
+        }
+
+        if (!qualification0493x18d) {
+            d.centerXBefore = hd.centerX;
+            d.centerXAfter = hd.centerX;
+            d.velocityXBefore = hd.mass > 0.0 ? hd.momentumBeforeX / hd.mass : 0.0;
+            d.velocityXAfter = hd.mass > 0.0 ? hd.momentumAfterX / hd.mass : 0.0;
+            d.mass = hd.mass;
+            d.solidMomentumBeforeX = hd.momentumBeforeX;
+            d.solidMomentumAfterX = hd.momentumAfterX;
+            d.solidReactionImpulseX = hd.nodeReactionImpulseX;
+            d.solidReactionImpulseY = hd.nodeReactionImpulseY;
+            d.advanced = true;
+            return d;
+        }
+
+        const double legacyAbs =
+            std::abs(d.totalFluidImpulseX) + std::abs(d.totalFluidImpulseY);
+        const double reactionScale = 1.0 +
+            std::abs(hd.nodeReactionImpulseX) + std::abs(hd.nodeReactionImpulseY);
+        if (legacyAbs > 1.0e-11 * reactionScale) {
+            throw std::runtime_error(
+                "0493x18a hinged_plate_2d received non-kinetic Darcy/bath/chiVP impulse; kinetic-only coupling is required");
+        }
+
+        d.centerXBefore = hd.centerX;
+        d.centerXAfter = hd.centerX;
+        d.velocityXBefore = hd.momentumBeforeX / hd.mass;
+        d.velocityXAfter = hd.momentumAfterX / hd.mass;
+        d.mass = hd.mass;
+        d.solidMomentumBeforeX = hd.momentumBeforeX;
+        d.solidMomentumAfterX = hd.momentumAfterX;
+        d.chiKineticFluidImpulseX0493x16j = -hd.nodeReactionImpulseX;
+        d.chiKineticFluidImpulseY0493x16j = -hd.nodeReactionImpulseY;
+        d.totalFluidImpulseX += d.chiKineticFluidImpulseX0493x16j;
+        d.totalFluidImpulseY += d.chiKineticFluidImpulseY0493x16j;
+        d.solidReactionImpulseX = hd.nodeReactionImpulseX;
+        d.solidReactionImpulseY = hd.nodeReactionImpulseY;
+        d.spatialLoadAvailable0493x16b = true;
+        d.cellReactionSumX0493x16b = hd.cellReactionImpulseX;
+        d.cellReactionSumY0493x16b = hd.cellReactionImpulseY;
+        d.cellLoadClosureResidualX0493x16b =
+            d.cellReactionSumX0493x16b + d.totalFluidImpulseX;
+        d.cellLoadClosureResidualY0493x16b =
+            d.cellReactionSumY0493x16b + d.totalFluidImpulseY;
+        d.primaryProjectionResidual0493x16b = std::max(
+            std::abs(hd.loadProjectionResidualX), std::abs(hd.loadProjectionResidualY));
+        d.actionReactionResidualX =
+            (hd.momentumAfterX-hd.momentumBeforeX) + d.totalFluidImpulseX
+            - hd.hingeReactionImpulseX;
+        d.actionReactionResidualY =
+            (hd.momentumAfterY-hd.momentumBeforeY) + d.totalFluidImpulseY
+            - hd.hingeReactionImpulseY - hd.gravityImpulseY;
+        d.cudaResidentSolid0493x16e = false;
+        d.subcellRaster0493x16e = false;
+        d.poststreamTemporalSync0493x16f = false;
+        d.poststreamDriftX0493x16f = 0.0;
+        d.advanced = true;
+        append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+        return d;
+    }
+
+    if (params.chiSolidModel == "membrane_2d") {
+        CudaChiMembraneDiagnostics0493x17c md{};
+        if (!cuda_q6_advance_chi_membrane_0493x17c(
+                params, grid, static_cast<int>(step), time, &md) ||
+            !md.available || !md.advanced) {
+            throw std::runtime_error("0493x17c failed to advance resident Lagrangian membrane mechanics");
+        }
+
+        if (!qualification0493x18d) {
+            d.mass = md.mass;
+            d.advanced = true;
+            return d;
+        }
+
+        // The first membrane qualification is deliberately kinetic-only.  Keep
+        // the old Darcy/bath/chiVP channels visible as diagnostics and fail if
+        // they unexpectedly contribute instead of silently double-coupling.
+        const double legacyAbs =
+            std::abs(d.totalFluidImpulseX) + std::abs(d.totalFluidImpulseY);
+        const double reactionScale = 1.0 +
+            std::abs(md.nodeReactionImpulseX) + std::abs(md.nodeReactionImpulseY);
+        if (legacyAbs > 1.0e-11 * reactionScale) {
+            throw std::runtime_error(
+                "0493x17c membrane_2d received non-kinetic Darcy/bath/chiVP impulse; first qualification requires kinetic-only coupling");
+        }
+
+        d.centerXBefore = md.centerX - params.dt * md.meanVelocityXBefore;
+        d.centerXAfter = md.centerX;
+        d.velocityXBefore = md.meanVelocityXBefore;
+        d.velocityXAfter = md.meanVelocityXAfter;
+        d.mass = md.mass;
+        d.solidMomentumBeforeX = md.momentumBeforeX;
+        d.solidMomentumAfterX = md.momentumAfterX;
+        d.chiKineticFluidImpulseX0493x16j = -md.nodeReactionImpulseX;
+        d.chiKineticFluidImpulseY0493x16j = -md.nodeReactionImpulseY;
+        d.totalFluidImpulseX += d.chiKineticFluidImpulseX0493x16j;
+        d.totalFluidImpulseY += d.chiKineticFluidImpulseY0493x16j;
+        d.solidReactionImpulseX = md.nodeReactionImpulseX;
+        d.solidReactionImpulseY = md.nodeReactionImpulseY;
+        d.spatialLoadAvailable0493x16b = true;
+        d.cellReactionSumX0493x16b = md.cellReactionImpulseX;
+        d.cellReactionSumY0493x16b = md.cellReactionImpulseY;
+        d.cellLoadClosureResidualX0493x16b =
+            d.cellReactionSumX0493x16b + d.totalFluidImpulseX;
+        d.cellLoadClosureResidualY0493x16b =
+            d.cellReactionSumY0493x16b + d.totalFluidImpulseY;
+        d.primaryProjectionResidual0493x16b = std::max(
+            std::abs(md.loadProjectionResidualX), std::abs(md.loadProjectionResidualY));
+        // x17d: for pinned membrane nodes the external support carries an
+        // explicit constraint impulse.  Closed fluid+free-solid momentum is
+        // recovered when that external impulse is removed from the balance.
+        d.actionReactionResidualX =
+            (md.momentumAfterX - md.momentumBeforeX) + d.totalFluidImpulseX
+            - md.supportConstraintImpulseX;
+        d.actionReactionResidualY =
+            (md.momentumAfterY - md.momentumBeforeY) + d.totalFluidImpulseY
+            - md.supportConstraintImpulseY;
+        // x17c is CUDA-resident, but it deliberately bypasses the x16e
+        // Eulerian solid rasterizer; keep the legacy x16e/x16f flags truthful.
+        d.cudaResidentSolid0493x16e = false;
+        d.subcellRaster0493x16e = false;
+        d.poststreamTemporalSync0493x16f = false;
+        d.poststreamDriftX0493x16f = 0.0;
+        d.advanced = true;
+        append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+        return d;
+    }
 
     if (w.cudaResident0493x16e) {
         const double* dDarcyX = nullptr;
@@ -474,7 +673,11 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
         d.hostGeometryFieldUploadBytes0493x16e = rd.hostGeometryFieldUploadBytes;
         d.hostLoadFieldDownloadBytes0493x16e = rd.hostLoadFieldDownloadBytes;
         d.advanced = true;
-        append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+        if (qualification0493x18d) {
+            append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+        } else {
+            append_state_result_0493x18d(params, step, time, w.modelName.c_str(), d);
+        }
         return d;
     }
 
@@ -556,7 +759,11 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
     d.actionReactionResidualX = (d.solidMomentumAfterX - d.solidMomentumBeforeX) + d.totalFluidImpulseX;
     d.actionReactionResidualY = d.solidReactionImpulseY + d.totalFluidImpulseY;
     d.advanced = true;
-    append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+    if (qualification0493x18d) {
+        append_diagnostic_0493x16a(params, step, time, w.modelName.c_str(), d);
+    } else {
+        append_state_result_0493x18d(params, step, time, w.modelName.c_str(), d);
+    }
     return d;
 }
 

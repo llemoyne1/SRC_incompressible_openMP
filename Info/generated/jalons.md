@@ -198,6 +198,44 @@
 | `x14ba` | CODE | OPEN_BOUNDARY_MULTIPHASE | Oscillation globale sinusoïdale de vitesse d’entrée | Chemin désactivé strictement neutre; checker statique/maths PASS et chemin pulsé exercé ensuite par le smoke x14bc. Qualification longue du breakup non encore revendiquée. |
 | `x14bc` | RUNNER | LIQUID_GAS | Benchmark Basilisk froid pulsé ReL=500 | Calibration liquide TG128 8 graines PASS, CV=2.2%; smoke pulsé 300 pas PASS intégration/visualisation. Production longue 4758 pas planifiée, non encore qualifiée statistiquement. |
 
+## solides mobiles / FSI
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x15a` | DIAGNOSTIC | MOBILE_SOLID | Audit du bilan de force du chi-solid fixe | REVIEW: bilan mécanique exploitable; imperméabilité non encore établie. |
+| `x15b` | DIAGNOSTIC | MOBILE_SOLID | Décomposition exacte chiVP/Brinkman | Résultat mécanique validé; ne constitue pas une fermeture matérielle imperméable. |
+| `x15c` | DIAGNOSTIC | MOBILE_SOLID | Mesure directe de perméabilité du chi-solid | PASS comme diagnostic de perméabilité; résultat physique: paroi volumique poreuse. |
+| `x15e` | QUALIFICATION | MOBILE_SOLID | Qualification de la chaîne historique forte | PASS pour la chaîne historique statique; mécanisme non retenu comme fermeture mobile finale. |
+| `x15f` | ABLATION | MOBILE_SOLID | Ablation sans outward_bath | PASS comme ablation discriminante; direction rejetée pour un solide matériel mobile. |
+| `x16a` | CODE | MOBILE_SOLID | Architecture SolidDynamics / SolidGeometry | PASS sur le test rigid_slab_1d 2000 pas; fermeture proche du roundoff. |
+| `x16b` | CODE | MOBILE_SOLID | Charge solide spatiale exacte | Infrastructure de charge retenue; base du couplage mécanique ultérieur. |
+| `x16c` | DIAGNOSTIC | MOBILE_SOLID | Inventaire du fluide fictif dans le solide | INFORMATIONAL; diagnostic de qualification, non physique nécessaire au chemin normal. |
+| `x16d` | QUALIFICATION | MOBILE_SOLID | Test galiléen du masque chi mobile | REVIEW/FAIL comme invariance galiléenne du remapping binaire; résultat causal retenu. |
+| `x16e` | CODE | MOBILE_SOLID | Rasterisation subcellulaire CUDA résidente | REVIEW; améliore la représentation mais ne résout pas le principe de capture/remapping. |
+| `x16f` | EXPERIMENT | MOBILE_SOLID | Synchronisation temporelle post-stream | Résultat négatif: effet faible; le défaut principal n’est pas la synchronisation temporelle. |
+| `x16g` | EXPERIMENT | MOBILE_SOLID | Neutralisation du bath lors de la capture | Résultat négatif: le pic est déplacé au pas suivant; corriger la vitesse seule est insuffisant. |
+| `x16h` | EXPERIMENT | MOBILE_SOLID | Réinjection spatiale des particules capturées | REVIEW/REJECTED_DIRECTION: gain local mais remapping trop brutal. |
+| `x16i` | ABLATION | MOBILE_SOLID | Comparaison binary_event / swept_geometry | REJECTED_DIRECTION pour le mécanisme final de solide matériel. |
+| `x16j` | CODE | MOBILE_SOLID | Première frontière chi cinétique spéculaire | REVIEW: principe cinétique retenu; backend Eulerien encore en qualification. |
+| `x16k` | FIX | MOBILE_SOLID | Géométrie chi de niveau pour le test galiléen | REVIEW; étape intermédiaire vers la reconstruction Q2 cohérente. |
+| `x16l` | DIAGNOSTIC | MOBILE_SOLID | Diagnostic direct post-stream de pénétration | Qualification-only; read-only; non conservé dans le chemin normal x18d. |
+| `x16m` | FIX | MOBILE_SOLID | Raffinement de racine Q2 | REVIEW: cas rigides propres; résidu de fuite sur géométries déformables/courbes. |
+| `x16n` | FIX | MOBILE_SOLID | Cohérence dual-square Q2 | REVIEW: rigidQualification=PASS, deformableQualification=REVIEW. |
+| `x16o` | FIX | MOBILE_SOLID | Cohérence des extrémités d’arêtes Q2 | REVIEW: rigidQualification=PASS; fuite spatiale subsiste sur cas courbe/déformable. |
+| `x16p` | CODE | MOBILE_SOLID | Topologie complète de frontière Q2 | REVIEW: rigide PASS/zero penetration, déformable REVIEW; zeroPenetrationAllCases=FAIL. |
+| `x16q` | FIX | MOBILE_SOLID | Correction overlap/dead-zone de la frontière Q2 | REVIEW; dernier raffinement de la lignée x16j--x16q, supplantée par x17a. |
+| `x17a` | CODE | MOBILE_SOLID | Frontière chi lagrangienne persistante | Backend matériel de référence; remplace la reconstruction chi->segments à chaque pas. |
+| `x17b` | QUALIFICATION | MOBILE_SOLID | Initialisation et qualification des solides lagrangiens | PASS: 6/6 cas, zéro pénétration stricte, persistance mesh, fermeture action-réaction/charge, contrôle galiléen. |
+| `x17c` | CODE | FSI | Première mécanique de membrane lagrangienne | Couplage FSI fonctionnel; mécanique structurelle minimale non revendiquée comme modèle de solide détaillé. |
+| `x17d` | EXPERIMENT | FSI | Membrane ancrée / plaque flexible de démonstration | HISTORICAL/REVIEW: transfert FSI démontré, mais tuning structural abandonné après rigidités excessives ou repliements. |
+| `x17d-fix2` | FIX | MOBILE_SOLID | Couverture complète des particules par le collisionneur x17a | Correctif de couverture nécessaire; conservé comme jalon de correction de calcul. |
+| `x18a` | CODE | FSI | Volet rigide articulé 1-DOF | VALIDATED/FUNCTIONAL: volet 1-DOF avec sous-cyclage x18e et runner x18f inlet_neumann validé localement sur 200 pas à dt=0.006, FLOW_UX=0.352; terminaison COMPLETE. |
+| `x18a-fix2` | FIX | FSI | Initialisation du fluide cohérente avec l’angle du volet | INTEGRATED: correctif d’initialisation conservé et câblé durablement dans x18f. |
+| `x18b` | RUNNER | FSI | Chute du volet dans un fluide au repos | FUNCTIONAL/QUALITATIVE: chute double-Neumann 2000 pas COMPLETE à FLUID_DENSITY_FACTOR=0.10, sans damping mécanique; non qualifié pour mesure quantitative longue du damping ou bilan stationnaire de masse. |
+| `x18d` | OPTIMIZATION | MOBILE_SOLID | Nettoyage global du chemin normal des solides mobiles | VALIDATED/FUNCTIONAL: x18d appliqué sur le worktree réel, compilation CUDA locale réussie et runs hinged_plate_2d fonctionnels; gain de performance non encore quantifié par benchmark. |
+| `x18e` | FIX | FSI | Sous-cyclage FSI local du volet articulé | VALIDATED/FUNCTIONAL: compilation CUDA locale et runs réussis; pas global testé jusqu’à 20x la limite pratique précédente sans reproduire le hang. Pas de revendication de stabilité inconditionnelle ni de speedup wall-time 20x. |
+| `x18f` | CODE | FSI | Frontières ouvertes et initialisation finale du volet | MIXED: x18a inlet_neumann VALIDATED/FUNCTIONAL; x18b double_neumann fonctionnel qualitativement mais non qualifié quantitativement en bilan de masse. |
+
 ## x2-x4b : diagnostic gravitaire et séquençage Q6-g force-aware
 
 | ID | Nature | Domaine | Nom | Statut / portée |
@@ -682,7 +720,6 @@ Corrige la pression gazeuse par la fraction de volume accessible dérivée de al
 - `IMPLEMENTS_RESULT_OF` → `x14r` — Analyse volume accessible
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14s_drop_shape_fourier.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14s_drop_shape_fourier.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14s_multiseed6_shape_step1000.sh`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14s_multiseed6_sigma256.sh`
@@ -705,8 +742,6 @@ Benchmark plan qui qualifie la transmission moyenne de p_g par x6g/x14s sans ter
 - `REFERENCES` → `x6g` — Condition de pression gazeuse sur l'interface physique
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14t_normal_pressure_piston.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14t_normal_pressure_piston.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14t_normal_pressure_piston.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14t_normal_pressure_piston.py`
 - `ASSOCIATED_WITH` — `scripts/run_ok_0493x14t_normal_pressure_piston.sh`
@@ -729,8 +764,6 @@ Benchmark de flux de moment dirigé; montre que x14l seul rend imperméable mais
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14U_NORMAL_KINETIC_IMPACT.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14u_normal_kinetic_impact.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14u_normal_kinetic_impact.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14u_normal_kinetic_impact.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14u_normal_kinetic_impact.py`
 - `ASSOCIATED_WITH` — `scripts/run_ok_0493x14u_normal_kinetic_impact.sh`
@@ -772,7 +805,6 @@ Benchmark de transfert tangentiel; teste continuité de contrainte via collision
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14W_TWO_PHASE_COUETTE.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14w_two_phase_couette.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14w_two_phase_couette.py`
 - `ASSOCIATED_WITH` — `scripts/run_ok_0493x14w_two_phase_couette.sh`
 
@@ -796,8 +828,6 @@ Runner intégré x6g+x9+x14l+x14v+chaîne liquide; banc pour forme, moment et fr
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14X_TWO_PHASE_OSCILLATING_DROP_N2.md`
 - `ASSOCIATED_WITH` — `doc/README_0493X14X_X14V_ABLATION_OVERRIDE_FIX.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14x_oscillating_drop_n2.cpython-313.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14x_oscillating_drop_two_phase.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14x_oscillating_drop_n2.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14x_oscillating_drop_two_phase.py`
 - `ASSOCIATED_WITH` — `scripts/run_ok_0493x14x_oscillating_drop_liquid_gas.sh`
@@ -972,10 +1002,6 @@ Canal périodique avec goutte entraînée par un profil gazeux; vérifie que la 
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14AH_CORRECTED_DYNAMIC_DRAG.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14ah_drop_gas_transient_poiseuille.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14ah_drop_gas_transient_poiseuille.cpython-313.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14ah_drop_gas_transient_poiseuille.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14ah_drop_gas_transient_poiseuille.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14ah_drop_gas_transient_poiseuille.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14ah_drop_gas_transient_poiseuille.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14ah_drop_gas_transient_poiseuille_drag.sh`
@@ -1038,8 +1064,6 @@ Qualification du mode n=3 de la chaîne x14ai-fix1.
 - `REFERENCES` → `x14ai-fix1` — Fermeture B1 exacte post-correction périodique
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14aj_oscillating_drop_n3_two_phase.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14aj_oscillating_drop_n3_two_phase.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14aj_oscillating_drop_n3_two_phase.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14aj_oscillating_drop_n3_device_closure.sh`
 
@@ -1056,8 +1080,6 @@ Qualification du mode n=3 de la chaîne x14ai-fix1.
 TC avec paramètres liquide x14 (gamma=20, dt=0.002, etc.); comparaison historique confondait changement de fluide et effet gaz.
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14ak_taylor_culick_two_phase.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14ak_taylor_culick_two_phase.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14ak_taylor_culick_two_phase.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14ak_taylor_culick_two_phase.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14ak_taylor_culick_two_phase_device_closure.sh`
@@ -1076,9 +1098,6 @@ Deux runs avec liquide initial identique: liquide seul vs même liquide + gaz, p
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14AL_TC_HISTORICAL_AB.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14al_taylor_culick_recording.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/compare_0493x14al_taylor_culick_ab.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x14al_taylor_culick_historical_ab.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14al_taylor_culick_recording.py`
 - `ASSOCIATED_WITH` — `scripts/compare_0493x14al_taylor_culick_ab.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x14al_taylor_culick_historical_ab.py`
@@ -1101,8 +1120,6 @@ Screening multi-rayons avec x9e sans baseline sigma=0 longue.
 
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/README_0493X14AM_YOUNG_LAPLACE_TWO_PHASE.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14am_young_laplace_two_phase.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x14am_young_laplace_two_phase.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x14am_young_laplace_two_phase.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14am_young_laplace_two_phase_multiradius.sh`
 - `ASSOCIATED_WITH` — `scripts/run_0493x14am_young_laplace_two_phase_multiradius.sh.before_resolved_gas`
@@ -1927,7 +1944,6 @@ Mesure la viscosité transverse pure, la réponse longitudinale c_s/nu_L et l’
 - `ASSOCIATED_WITH` — `doc/0493x13b_fluid_design.csv`
 - `ASSOCIATED_WITH` — `doc/README_0493X13B_CONSTITUTIVE_TRANSPORT.md`
 - `ASSOCIATED_WITH` — `doc/README_0493X13B_C_FRACTIONAL_SOUND_FIX1.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13b_constitutive_transport.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13b_constitutive_transport.py`
 - `ASSOCIATED_WITH` — `scripts/check_0493x13b_constitutive_transport.sh`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x13b_shear_state.py`
@@ -2079,8 +2095,6 @@ Consolide gamma=8, angle 120°, lambda/h=0.72 comme fluide économique de réfé
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `doc/0493x13h_cost_plan.csv`
 - `ASSOCIATED_WITH` — `doc/README_0493X13H_L072_QUALIFICATION.md`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13h_A_Cdamp_L072.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13h_B_density_transport_L072.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13h_A_Cdamp_L072.py`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13h_B_density_transport_L072.py`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13h_C_Mach_L072.py`
@@ -2201,8 +2215,6 @@ Qualifie dynamiquement la chaîne surface libre sur le mode azimutal n=2 du flui
 - `REFERENCES` → `x13h` — Point liquide de référence G08-120-L072
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13k_oscillating_drop_2d.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x13k_oscillating_drop_2d.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13k_oscillating_drop_2d.py`
 - `ASSOCIATED_WITH` — `scripts/generate_0493x13k_oscillating_drop_2d.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x13k_oscillating_drop_2d_x13h.sh`
@@ -2223,8 +2235,6 @@ Qualifie dynamiquement la chaîne surface libre sur le mode azimutal n=2 du flui
 - `BUILDS_ON` → `x13k` — Qualification goutte oscillante n=2
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13l_oscillating_drop_n3_state.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13l_oscillating_drop_n3_state.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13l_oscillating_drop_n3_state.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x13l_n3_multiseed10.sh`
 - `ASSOCIATED_WITH` — `scripts/run_0493x13l_oscillating_drop_n3_x13h.sh`
@@ -2245,8 +2255,6 @@ Qualifie dynamiquement la chaîne surface libre sur le mode azimutal n=2 du flui
 - `BUILDS_ON` → `x13l` — Qualification goutte oscillante n=3
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13m_oscillating_drop_n4_state.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13m_oscillating_drop_n4_state.cpython-313.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13m_oscillating_drop_n4_state.py`
 - `ASSOCIATED_WITH` — `scripts/run_0493x13m_n4_multiseed10.sh`
 - `ASSOCIATED_WITH` — `scripts/run_0493x13m_oscillating_drop_n4_x13h.sh`
@@ -2270,11 +2278,6 @@ Mesure la rétraction symétrique d’une nappe résolue; met en évidence G_TC 
 - `REFERENCES` → `x13m` — Qualification goutte oscillante n=4
 
 **Artefacts associés :**
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13n_rim_momentum.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13n_rim_traction.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13n_rim_traction_v2.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/analyze_0493x13n_taylor_culick_sheet_2d.cpython-312.pyc`
-- `ASSOCIATED_WITH` — `scripts/__pycache__/generate_0493x13n_taylor_culick_sheet_2d.cpython-312.pyc`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13n_rim_momentum.py`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13n_rim_traction.py`
 - `ASSOCIATED_WITH` — `scripts/analyze_0493x13n_rim_traction_v2.py`
@@ -3029,6 +3032,548 @@ Compare une petite famille de lois identité/shift/scale/affine/power sur les é
 **Relations :**
 - `BUILDS_ON` → `x14p` — Audit offline alpha/volume gazeux accessible
 - `REFERENCES` → `x14p` — Audit offline alpha/volume gazeux accessible
+
+### `x15a` — Audit du bilan de force du chi-solid fixe
+
+- **Clé unique :** `0493x15a`
+- **ID canonique :** `0493x15a`
+- **Nature / domaine :** `DIAGNOSTIC` / `MOBILE_SOLID`
+- **Statut :** REVIEW: bilan mécanique exploitable; imperméabilité non encore établie.
+- **Confiance :** `B`
+- **Date :** `2026-09-12`
+
+Instrumente le budget de force/réaction du piston chi fixe et établit la fermeture mécanique avant l’étude de perméabilité.
+
+**Notes.** Précurseur direct des mesures x15b/x15c.
+
+### `x15b` — Décomposition exacte chiVP/Brinkman
+
+- **Clé unique :** `0493x15b`
+- **ID canonique :** `0493x15b`
+- **Nature / domaine :** `DIAGNOSTIC` / `MOBILE_SOLID`
+- **Statut :** Résultat mécanique validé; ne constitue pas une fermeture matérielle imperméable.
+- **Confiance :** `B`
+- **Date :** `2026-09-12`
+
+Sépare exactement les contributions Brinkman et chiVP; montre qu’une fermeture du budget mécanique peut coexister avec un solide poreux.
+
+**Notes.** À faible alpha, la réaction est dominée par chiVP (~94%).
+
+**Relations :**
+- `BUILDS_ON` → `x15a` — Audit du bilan de force du chi-solid fixe
+
+### `x15c` — Mesure directe de perméabilité du chi-solid
+
+- **Clé unique :** `0493x15c`
+- **ID canonique :** `0493x15c`
+- **Nature / domaine :** `DIAGNOSTIC` / `MOBILE_SOLID`
+- **Statut :** PASS comme diagnostic de perméabilité; résultat physique: paroi volumique poreuse.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Mesure les crossings à travers un slab et démontre que mean+chiVP reste poreux malgré une bonne fermeture de force.
+
+**Notes.** Summary exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x15b` — Décomposition exacte chiVP/Brinkman
+
+### `x15e` — Qualification de la chaîne historique forte
+
+- **Clé unique :** `0493x15e`
+- **ID canonique :** `0493x15e`
+- **Nature / domaine :** `QUALIFICATION` / `MOBILE_SOLID`
+- **Statut :** PASS pour la chaîne historique statique; mécanisme non retenu comme fermeture mobile finale.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Avec mean_outward_bath, alpha=800000, chiVP=0.25 et exclusion initiale, obtient zéro crossing mesuré sur le slab.
+
+**Notes.** Summary exact archivé; l’imperméabilité dépend fortement du bath orienté.
+
+**Relations :**
+- `BUILDS_ON` → `x15c` — Mesure directe de perméabilité du chi-solid
+
+### `x15f` — Ablation sans outward_bath
+
+- **Clé unique :** `0493x15f`
+- **ID canonique :** `0493x15f`
+- **Nature / domaine :** `ABLATION` / `MOBILE_SOLID`
+- **Statut :** PASS comme ablation discriminante; direction rejetée pour un solide matériel mobile.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Retire outward_bath à forte pénalisation et fait réapparaître un flux de crossings très important.
+
+**Notes.** Summary exact archivé; établit le rôle dominant du bath post-pénétration.
+
+**Relations :**
+- `ABLATES` → `x15e` — Qualification de la chaîne historique forte
+
+### `x16a` — Architecture SolidDynamics / SolidGeometry
+
+- **Clé unique :** `0493x16a`
+- **ID canonique :** `0493x16a`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** PASS sur le test rigid_slab_1d 2000 pas; fermeture proche du roundoff.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Introduit une dynamique solide modulaire, le DOF rigid_slab_1d et les champs locaux chi/uSolidX/uSolidY avec bilan de quantité de mouvement.
+
+**Notes.** Package et summary exacts archivés.
+
+**Relations :**
+- `BUILDS_ON` → `x15f` — Ablation sans outward_bath
+
+### `x16b` — Charge solide spatiale exacte
+
+- **Clé unique :** `0493x16b`
+- **ID canonique :** `0493x16b`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** Infrastructure de charge retenue; base du couplage mécanique ultérieur.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Ajoute Delta p_s(c)=-Delta p_f(c) par cellule et la projection générique de cette charge vers les degrés de liberté du solide.
+
+**Notes.** Package exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `x16c` — Inventaire du fluide fictif dans le solide
+
+- **Clé unique :** `0493x16c`
+- **ID canonique :** `0493x16c`
+- **Nature / domaine :** `DIAGNOSTIC` / `MOBILE_SOLID`
+- **Statut :** INFORMATIONAL; diagnostic de qualification, non physique nécessaire au chemin normal.
+- **Confiance :** `B`
+- **Date :** `2026-09-12`
+
+Ajoute un diagnostic de masse/moment/vitesse relative du fluide fictif afin d’attribuer les défauts du chi-solid mobile.
+
+**Notes.** Devient opt-in/obsolète pour les géométries lagrangiennes avec x18d.
+
+**Relations :**
+- `DIAGNOSES` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `x16d` — Test galiléen du masque chi mobile
+
+- **Clé unique :** `0493x16d`
+- **ID canonique :** `0493x16d`
+- **Nature / domaine :** `QUALIFICATION` / `MOBILE_SOLID`
+- **Statut :** REVIEW/FAIL comme invariance galiléenne du remapping binaire; résultat causal retenu.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Montre que les sauts du masque binaire capturent brutalement des particules et corrèlent fortement masse fictive et pics d’impulsion.
+
+**Notes.** Delta M_fict ~+639 aux shifts; RMS impulsion ~430.5 aux shifts contre ~35.7 hors shifts.
+
+**Relations :**
+- `DIAGNOSES` → `x16a` — Architecture SolidDynamics / SolidGeometry
+
+### `x16e` — Rasterisation subcellulaire CUDA résidente
+
+- **Clé unique :** `0493x16e`
+- **ID canonique :** `0493x16e`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** REVIEW; améliore la représentation mais ne résout pas le principe de capture/remapping.
+- **Confiance :** `B`
+- **Date :** `2026-09-12`
+
+Teste une représentation subcellulaire résidente pour adoucir les changements de support de la géométrie mobile.
+
+**Notes.** Étape de la branche x16d--x16i finalement abandonnée comme mécanisme final.
+
+**Relations :**
+- `BUILDS_ON` → `x16d` — Test galiléen du masque chi mobile
+
+### `x16f` — Synchronisation temporelle post-stream
+
+- **Clé unique :** `0493x16f`
+- **ID canonique :** `0493x16f`
+- **Nature / domaine :** `EXPERIMENT` / `MOBILE_SOLID`
+- **Statut :** Résultat négatif: effet faible; le défaut principal n’est pas la synchronisation temporelle.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Replace la mise à jour géométrique au niveau temporel post-stream correct pour tester l’hypothèse d’un décalage n/n+1.
+
+**Notes.** Tentative infructueuse conservée comme enseignement.
+
+**Relations :**
+- `BUILDS_ON` → `x16e` — Rasterisation subcellulaire CUDA résidente
+
+### `x16g` — Neutralisation du bath lors de la capture
+
+- **Clé unique :** `0493x16g`
+- **ID canonique :** `0493x16g`
+- **Nature / domaine :** `EXPERIMENT` / `MOBILE_SOLID`
+- **Statut :** Résultat négatif: le pic est déplacé au pas suivant; corriger la vitesse seule est insuffisant.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Neutralise l’impulsion collective de bath sur les particules nouvellement capturées par le masque.
+
+**Notes.** Tentative infructueuse conservée.
+
+**Relations :**
+- `BUILDS_ON` → `x16f` — Synchronisation temporelle post-stream
+
+### `x16h` — Réinjection spatiale des particules capturées
+
+- **Clé unique :** `0493x16h`
+- **ID canonique :** `0493x16h`
+- **Nature / domaine :** `EXPERIMENT` / `MOBILE_SOLID`
+- **Statut :** REVIEW/REJECTED_DIRECTION: gain local mais remapping trop brutal.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Replace les particules capturées du côté fluide; réduit les pics mais provoque une déplétion artificielle du nouveau support solide.
+
+**Notes.** Réduction ~70% du pic d’impulsion et ~95% du bath, au prix d’une forte déplétion.
+
+**Relations :**
+- `BUILDS_ON` → `x16g` — Neutralisation du bath lors de la capture
+
+### `x16i` — Comparaison binary_event / swept_geometry
+
+- **Clé unique :** `0493x16i`
+- **ID canonique :** `0493x16i`
+- **Nature / domaine :** `ABLATION` / `MOBILE_SOLID`
+- **Statut :** REJECTED_DIRECTION pour le mécanisme final de solide matériel.
+- **Confiance :** `A`
+- **Date :** `2026-09-12`
+
+Compare remapping binaire et volume balayé sur une géométrie déformable prescrite; aucun ne restaure une invariance galiléenne satisfaisante.
+
+**Notes.** Erreur galiléenne ~0.2695 vs ~0.2859; swept_geometry plus coûteux (~+19%).
+
+**Relations :**
+- `BUILDS_ON` → `x16h` — Réinjection spatiale des particules capturées
+
+### `x16j` — Première frontière chi cinétique spéculaire
+
+- **Clé unique :** `0493x16j`
+- **ID canonique :** `0493x16j`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** REVIEW: principe cinétique retenu; backend Eulerien encore en qualification.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Interprète chi=0.5 comme frontière matérielle et réutilise crossing x10/Q2 et réflexion spéculaire x14l au lieu de réparer les particules après pénétration.
+
+**Notes.** Package exact archivé.
+
+**Relations :**
+- `REFERENCES` → `x14l` — Réflexion spéculaire du gaz
+- `SUPERSEDES` → `x16i` — Comparaison binary_event / swept_geometry
+
+### `x16k` — Géométrie chi de niveau pour le test galiléen
+
+- **Clé unique :** `0493x16k`
+- **ID canonique :** `0493x16k`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** REVIEW; étape intermédiaire vers la reconstruction Q2 cohérente.
+- **Confiance :** `B`
+- **Date :** `2026-09-13`
+
+Corrige/aligne l’évaluation géométrique de la frontière cinétique chi pour réduire les incohérences sous boost commun.
+
+**Notes.** Jalon intermédiaire attesté par le chantier x16j--x16q.
+
+**Relations :**
+- `BUILDS_ON` → `x16j` — Première frontière chi cinétique spéculaire
+
+### `x16l` — Diagnostic direct post-stream de pénétration
+
+- **Clé unique :** `0493x16l`
+- **ID canonique :** `0493x16l`
+- **Nature / domaine :** `DIAGNOSTIC` / `MOBILE_SOLID`
+- **Statut :** Qualification-only; read-only; non conservé dans le chemin normal x18d.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Mesure la présence de particules du côté solide après streaming afin de distinguer fuite réelle et simple métrique cellulaire.
+
+**Notes.** Diagnostic réutilisé plus tard pour auditer x18.
+
+**Relations :**
+- `DIAGNOSES` → `x16j` — Première frontière chi cinétique spéculaire
+- `REFERENCES` → `x18d` — Nettoyage global du chemin normal des solides mobiles
+
+### `x16m` — Raffinement de racine Q2
+
+- **Clé unique :** `0493x16m`
+- **ID canonique :** `0493x16m`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** REVIEW: cas rigides propres; résidu de fuite sur géométries déformables/courbes.
+- **Confiance :** `B`
+- **Date :** `2026-09-13`
+
+Raffine la localisation de racine/intersection Q2 à l’échelle subcellulaire pour la frontière cinétique chi.
+
+**Notes.** Étape intermédiaire de la reconstruction Eulerienne.
+
+**Relations :**
+- `BUILDS_ON` → `x16l` — Diagnostic direct post-stream de pénétration
+
+### `x16n` — Cohérence dual-square Q2
+
+- **Clé unique :** `0493x16n`
+- **ID canonique :** `0493x16n`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** REVIEW: rigidQualification=PASS, deformableQualification=REVIEW.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Impose une convention piecewise-Q2 cohérente sur les carrés duaux pour la topologie de frontière.
+
+**Notes.** Summary exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x16m` — Raffinement de racine Q2
+
+### `x16o` — Cohérence des extrémités d’arêtes Q2
+
+- **Clé unique :** `0493x16o`
+- **ID canonique :** `0493x16o`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** REVIEW: rigidQualification=PASS; fuite spatiale subsiste sur cas courbe/déformable.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Construit les extrémités de segments à partir des racines Q2 cohérentes avec le propriétaire local.
+
+**Notes.** Summary exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x16n` — Cohérence dual-square Q2
+
+### `x16p` — Topologie complète de frontière Q2
+
+- **Clé unique :** `0493x16p`
+- **ID canonique :** `0493x16p`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** REVIEW: rigide PASS/zero penetration, déformable REVIEW; zeroPenetrationAllCases=FAIL.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Reconstruit la topologie locale depuis racines de bord Q2 et contour tracing, jusqu’à deux segments par propriétaire.
+
+**Notes.** Summary exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x16o` — Cohérence des extrémités d’arêtes Q2
+
+### `x16q` — Correction overlap/dead-zone de la frontière Q2
+
+- **Clé unique :** `0493x16q`
+- **ID canonique :** `0493x16q`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** REVIEW; dernier raffinement de la lignée x16j--x16q, supplantée par x17a.
+- **Confiance :** `B`
+- **Date :** `2026-09-13`
+
+Traite la zone morte/overlap restante du chemin Q2 avant l’abandon de la reconstruction Eulerienne comme autorité mobile.
+
+**Notes.** Conservé pour l’historique et les briques Q2 réutilisables.
+
+**Relations :**
+- `BUILDS_ON` → `x16p` — Topologie complète de frontière Q2
+- `REFERENCES` → `x16j` — Première frontière chi cinétique spéculaire
+- `SUPERSEDED_BY` → `x17a` — Frontière chi lagrangienne persistante
+
+### `x17a` — Frontière chi lagrangienne persistante
+
+- **Clé unique :** `0493x17a`
+- **ID canonique :** `0493x17a`
+- **Nature / domaine :** `CODE` / `MOBILE_SOLID`
+- **Statut :** Backend matériel de référence; remplace la reconstruction chi->segments à chaque pas.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Extrait une fois Gamma0={chi=0.5}, maintient un mesh lagrangien persistant et résout directement les collisions particule/segment mobile dans l’espace-temps.
+
+**Notes.** Package exact archivé; crossing quadratique exact en paramètre temporel.
+
+**Relations :**
+- `SUPERSEDES` → `x16q` — Correction overlap/dead-zone de la frontière Q2
+
+### `x17b` — Initialisation et qualification des solides lagrangiens
+
+- **Clé unique :** `0493x17b`
+- **ID canonique :** `0493x17b`
+- **Nature / domaine :** `QUALIFICATION` / `MOBILE_SOLID`
+- **Statut :** PASS: 6/6 cas, zéro pénétration stricte, persistance mesh, fermeture action-réaction/charge, contrôle galiléen.
+- **Confiance :** `A`
+- **Date :** `2026-09-13`
+
+Ajoute l’exclusion initiale unique du côté solide et qualifie la frontière persistante sans remapping en cours de run.
+
+**Notes.** État de référence d’imperméabilité à préserver.
+
+**Relations :**
+- `QUALIFIES` → `x17a` — Frontière chi lagrangienne persistante
+
+### `x17c` — Première mécanique de membrane lagrangienne
+
+- **Clé unique :** `0493x17c`
+- **ID canonique :** `0493x17c`
+- **Nature / domaine :** `CODE` / `FSI`
+- **Statut :** Couplage FSI fonctionnel; mécanique structurelle minimale non revendiquée comme modèle de solide détaillé.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Fait des noeuds x17a des DOF matériels avec ressorts d’arêtes, pénalité d’aire, amortissement interne et distribution nodale des impulsions.
+
+**Notes.** Package exact archivé.
+
+**Relations :**
+- `BUILDS_ON` → `x17b` — Initialisation et qualification des solides lagrangiens
+- `REFERENCES` → `x17a` — Frontière chi lagrangienne persistante
+
+### `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+- **Clé unique :** `0493x17d`
+- **ID canonique :** `0493x17d`
+- **Nature / domaine :** `EXPERIMENT` / `FSI`
+- **Statut :** HISTORICAL/REVIEW: transfert FSI démontré, mais tuning structural abandonné après rigidités excessives ou repliements.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Ajoute ancrages géométriques puis explore flexion et cohérence transverse pour obtenir une déformation visible sous charge fluide.
+
+**Notes.** Les fix mécaniques ultérieurs restent preuves sous x17d, sauf fix2 promu séparément.
+
+**Relations :**
+- `BUILDS_ON` → `x17c` — Première mécanique de membrane lagrangienne
+
+### `x17d-fix2` — Couverture complète des particules par le collisionneur x17a
+
+- **Clé unique :** `0493x17d-fix2`
+- **ID canonique :** `0493x17d-fix2`
+- **Nature / domaine :** `FIX` / `MOBILE_SOLID`
+- **Statut :** Correctif de couverture nécessaire; conservé comme jalon de correction de calcul.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Supprime un plafond historique de lancement de 4096 blocs qui limitait le traitement à 1048576 particules sur les grands cas.
+
+**Notes.** Package exact archivé.
+
+**Relations :**
+- `FIXES` → `x17d` — Membrane ancrée / plaque flexible de démonstration
+
+### `x18a` — Volet rigide articulé 1-DOF
+
+- **Clé unique :** `0493x18a`
+- **ID canonique :** `0493x18a`
+- **Nature / domaine :** `CODE` / `FSI`
+- **Statut :** VALIDATED/FUNCTIONAL: volet 1-DOF avec sous-cyclage x18e et runner x18f inlet_neumann validé localement sur 200 pas à dt=0.006, FLOW_UX=0.352; terminaison COMPLETE.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Ajoute hinged_plate_2d: contour rigide de faible épaisseur, charnière z fixe, dynamique I*theta_ddot=tau_hydro+tau_g-C*omega et couple issu des impacts x17a.
+
+**Notes.** Configuration de référence pour le futur sweep U->theta: inlet uniforme gauche, outlet Neumann droit, haut/bas solides. Le correctif d’initialisation x18a-fix2 est intégré directement au runner x18f.
+
+**Relations :**
+- `BUILDS_ON` → `x17b` — Initialisation et qualification des solides lagrangiens
+- `REFERENCES` → `x17a` — Frontière chi lagrangienne persistante
+- `REFERENCES` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `REFERENCES` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
+
+- **Clé unique :** `0493x18a-fix2`
+- **ID canonique :** `0493x18a-fix2`
+- **Nature / domaine :** `FIX` / `FSI`
+- **Statut :** INTEGRATED: correctif d’initialisation conservé et câblé durablement dans x18f.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Corrige le trou de fluide vertical laissé par la déactivation chi initiale lorsque le contour lagrangien est initialement tourné.
+
+**Notes.** HINGED_INITIAL_FLUID_GEOMETRY=auto appelle prepare_0493x18a_initial_fluid.py pour tout angle initial non nul; plus besoin de réappliquer le script x18a-fix2 après un build.
+
+**Relations :**
+- `FIXES` → `x18a` — Volet rigide articulé 1-DOF
+- `REFERENCES` → `x18f` — Frontières ouvertes et initialisation finale du volet
+
+### `x18b` — Chute du volet dans un fluide au repos
+
+- **Clé unique :** `0493x18b`
+- **ID canonique :** `0493x18b`
+- **Nature / domaine :** `RUNNER` / `FSI`
+- **Statut :** FUNCTIONAL/QUALITATIVE: chute double-Neumann 2000 pas COMPLETE à FLUID_DENSITY_FACTOR=0.10, sans damping mécanique; non qualifié pour mesure quantitative longue du damping ou bilan stationnaire de masse.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Variante x18a: volet initialement relevé, gravité, Ux=0 et sweep de densité fluide en scalant masse particulaire et kBT au même facteur.
+
+**Notes.** Double-Neumann outlet-only: à rho factor 0.01, dérive positive forte (+71338 particules cumulées à ~110 pas) et épuisement du pool; à 0.10, Nfluid 1087414 -> 1053894 (-3.0825%), Nmin=1037481, Nmax=1087891 et dérive tardive ~-25 à -29 particules/pas après ~800 pas. Démonstrateur qualitatif seulement.
+
+**Relations :**
+- `BUILDS_ON` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
+- `REFERENCES` → `x18a` — Volet rigide articulé 1-DOF
+
+### `x18d` — Nettoyage global du chemin normal des solides mobiles
+
+- **Clé unique :** `0493x18d`
+- **ID canonique :** `0493x18d`
+- **Nature / domaine :** `OPTIMIZATION` / `MOBILE_SOLID`
+- **Statut :** VALIDATED/FUNCTIONAL: x18d appliqué sur le worktree réel, compilation CUDA locale réussie et runs hinged_plate_2d fonctionnels; gain de performance non encore quantifié par benchmark.
+- **Confiance :** `A`
+- **Date :** `2026-09-14`
+
+Rend les diagnostics de qualification lourds opt-in via chiSolidQualificationDiagnosticsEnable=false par défaut et conserve seulement physique + résultats scientifiques dans le chemin normal.
+
+**Notes.** x18c spécialisé reste non canonique. x18d est le chemin normal global pour les solides mobiles; diagnostics lourds opt-in. Validation fonctionnelle locale rapportée le 15/09/2026; aucun facteur d’accélération n’est revendiqué sans benchmark.
+
+**Relations :**
+- `OPTIMIZES` → `x17b` — Initialisation et qualification des solides lagrangiens
+- `OPTIMIZES` → `x17c` — Première mécanique de membrane lagrangienne
+- `OPTIMIZES` → `x18a` — Volet rigide articulé 1-DOF
+
+### `x18e` — Sous-cyclage FSI local du volet articulé
+
+- **Clé unique :** `0493x18e`
+- **ID canonique :** `0493x18e`
+- **Nature / domaine :** `FIX` / `FSI`
+- **Statut :** VALIDATED/FUNCTIONAL: compilation CUDA locale et runs réussis; pas global testé jusqu’à 20x la limite pratique précédente sans reproduire le hang. Pas de revendication de stabilité inconditionnelle ni de speedup wall-time 20x.
+- **Confiance :** `A`
+- **Date :** `2026-09-15`
+
+Sous-cycle localement collisions particule--volet et ODE rigide tout en conservant le pas global SRC/Q6; ajoute des critères angulaires/géométriques et des gardes anti-hang sur le broad-phase.
+
+**Notes.** Le chemin normal reste le sous-cyclage local; le mode qualification conserve la trajectoire historique mono-pas avec gardes. Six paramètres chiSolidHingedFsi*/Max* sont introduits.
+
+**Relations :**
+- `BUILDS_ON` → `x18d` — Nettoyage global du chemin normal des solides mobiles
+- `FIXES` → `x18a` — Volet rigide articulé 1-DOF
+
+### `x18f` — Frontières ouvertes et initialisation finale du volet
+
+- **Clé unique :** `0493x18f`
+- **ID canonique :** `0493x18f`
+- **Nature / domaine :** `CODE` / `FSI`
+- **Statut :** MIXED: x18a inlet_neumann VALIDATED/FUNCTIONAL; x18b double_neumann fonctionnel qualitativement mais non qualifié quantitativement en bilan de masse.
+- **Confiance :** `A`
+- **Date :** `2026-09-15`
+
+Finalise les runners: x18a inlet uniforme gauche + outlet Neumann droit, x18b double-Neumann outlet-only, top/bottom solides, intégration permanente de x18a-fix2 et pool inactif pour la fermeture cinétique Neumann.
+
+**Notes.** L’extension outlet-only est limitée au chemin Q6 résident + Neumann; le legacy SRC-classic n’est pas élargi. x18f-fix1 de verrouillage global de population n’a pas été appliqué et n’est pas canonique.
+
+**Relations :**
+- `BUILDS_ON` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
+- `BUILDS_ON` → `x18e` — Sous-cyclage FSI local du volet articulé
+- `REFERENCES` → `x18a` — Volet rigide articulé 1-DOF
+- `REFERENCES` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
+- `REFERENCES` → `x18b` — Chute du volet dans un fluide au repos
 
 ### `x2` — Diagnostic liquide plein : force appliquée avant une projection Q6 trop tardive
 

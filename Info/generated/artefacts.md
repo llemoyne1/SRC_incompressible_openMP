@@ -8,6 +8,23 @@
 |---|---|---|
 | `matlab/analyze_0493x14at_sato_stageA_campaign.m` |  | present |
 | `matlab/analyze_0493x14au_sato_viscosity_qualification.m` |  | present |
+| `matlab/analyze_0493x15a_fixed_chi_piston_force_budget.m` |  | present |
+| `matlab/analyze_0493x15b_fixed_chi_vp_force_budget.m` |  | present |
+| `matlab/analyze_0493x15c_chi_vp_permeability.m` |  | present |
+| `matlab/analyze_0493x15e_historical_chi_solid_force_permeability.m` |  | present |
+| `matlab/analyze_0493x15f_mean_chivp_force_permeability.m` |  | present |
+| `matlab/analyze_0493x16a_rigid_slab_dynamic_coupling.m` |  | present |
+| `matlab/analyze_0493x16b_spatial_solid_load.m` |  | present |
+| `matlab/analyze_0493x16c_fictitious_fluid_inventory.m` |  | present |
+| `matlab/analyze_0493x16d_capture_channels.m` |  | present |
+| `matlab/analyze_0493x16d_galilean_invariance.m` |  | present |
+| `matlab/analyze_0493x16e_resident_raster_galilean.m` |  | present |
+| `matlab/analyze_0493x16f_temporal_sync_galilean.m` |  | present |
+| `matlab/analyze_0493x16g_capture_bath_neutralized.m` |  | present |
+| `matlab/analyze_0493x16h_capture_spatial_reinjection.m` |  | present |
+| `matlab/analyze_0493x16i_deformable_impermeable_compare.m` |  | present |
+| `matlab/analyze_0493x16j_chi_kinetic_specular_compare.m` |  | present |
+| `matlab/analyze_0493x16k_mobile_solid_qualification.m` |  | present |
 | `matlab/analyze_0493x7i_q6_g_f_qualification.m` | x7i | present |
 | `matlab/analyze_0493x8d_q6gf_poiseuille_qualification.m` |  | present |
 | `matlab/analyze_0493x8e_q6gf_darcy_alpha_sweep.m` |  | present |
@@ -48,40 +65,18 @@
 | `matlab/analyze_vk_nondim_0493x8j.m` | x8j | present |
 | `matlab/analyze_vk_symmetry_breaking_0493x7v.m` |  | present |
 | `matlab/analyze_vk_vorticity_transport_0493x7u.m` |  | present |
-| `scripts/__pycache__/analyze_0493w1_src_fluid_calibrator.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x13b_constitutive_transport.cpython-312.pyc` | x13b | present |
-| `scripts/__pycache__/analyze_0493x13h_A_Cdamp_L072.cpython-312.pyc` | x13h | present |
-| `scripts/__pycache__/analyze_0493x13h_B_density_transport_L072.cpython-312.pyc` | x13h | present |
-| `scripts/__pycache__/analyze_0493x13i_kbt_scaling.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x13k_oscillating_drop_2d.cpython-312.pyc` | x13k | present |
-| `scripts/__pycache__/analyze_0493x13l_oscillating_drop_n3_state.cpython-312.pyc` | x13l | present |
-| `scripts/__pycache__/analyze_0493x13l_oscillating_drop_n3_state.cpython-313.pyc` | x13l | present |
-| `scripts/__pycache__/analyze_0493x13m_oscillating_drop_n4_state.cpython-312.pyc` | x13m | present |
-| `scripts/__pycache__/analyze_0493x13m_oscillating_drop_n4_state.cpython-313.pyc` | x13m | present |
-| `scripts/__pycache__/analyze_0493x13n_rim_momentum.cpython-312.pyc` | x13n | present |
-| `scripts/__pycache__/analyze_0493x13n_rim_traction.cpython-312.pyc` | x13n | present |
-| `scripts/__pycache__/analyze_0493x13n_rim_traction_v2.cpython-312.pyc` | x13n | present |
-| `scripts/__pycache__/analyze_0493x13n_taylor_culick_sheet_2d.cpython-312.pyc` | x13n | present |
-| `scripts/__pycache__/analyze_0493x14ah_drop_gas_transient_poiseuille.cpython-312.pyc` | x14ah | present |
-| `scripts/__pycache__/analyze_0493x14ah_drop_gas_transient_poiseuille.cpython-313.pyc` | x14ah | present |
-| `scripts/__pycache__/analyze_0493x14aj_oscillating_drop_n3_two_phase.cpython-312.pyc` | x14aj | present |
-| `scripts/__pycache__/analyze_0493x14aj_oscillating_drop_n3_two_phase.cpython-313.pyc` | x14aj | present |
-| `scripts/__pycache__/analyze_0493x14ak_taylor_culick_two_phase.cpython-312.pyc` | x14ak | present |
-| `scripts/__pycache__/analyze_0493x14al_taylor_culick_recording.cpython-312.pyc` | x14al | present |
-| `scripts/__pycache__/analyze_0493x14am_young_laplace_two_phase.cpython-312.pyc` | x14am | present |
-| `scripts/__pycache__/analyze_0493x14am_young_laplace_two_phase.cpython-313.pyc` | x14am | present |
-| `scripts/__pycache__/analyze_0493x14at_sato_stageA_campaign.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14at_sato_stageA_campaign.cpython-313.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14at_sato_stageA_recording.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14at_sato_stageA_recording.cpython-313.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14au_sato_viscosity_qualification.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14av_air_assisted_atomizer.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/analyze_0493x14s_drop_shape_fourier.cpython-312.pyc` | x14s | present |
-| `scripts/__pycache__/analyze_0493x14t_normal_pressure_piston.cpython-312.pyc` | x14t | present |
-| `scripts/__pycache__/analyze_0493x14u_normal_kinetic_impact.cpython-312.pyc` | x14u | present |
-| `scripts/__pycache__/analyze_0493x14w_two_phase_couette.cpython-312.pyc` | x14w | present |
-| `scripts/__pycache__/analyze_0493x14x_oscillating_drop_n2.cpython-313.pyc` | x14x | present |
-| `scripts/__pycache__/analyze_gas_jet_liquid_bath_2d.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16m_q2_root_refinement.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16m_static_curved_characterization.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16m_wall_motion_rate_characterization.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16n_q2_dual_square_qualification.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16o_q2_edge_endpoint_qualification.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16p_q2_topology_qualification.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16q_overlap_deadzone_qualification.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x16q_overlap_deadzone_smoke.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x17b_mobile_solids_final_qualification.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x17c_membrane_fsi.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x17d_article_solids.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x17d_fixed_membrane_publishable.cpython-312.pyc` |  | present |
 | `scripts/analyze_0438b_periodic_equiv_sweep.py` |  | present |
 | `scripts/analyze_0493c_resident_qualification.py` |  | present |
 | `scripts/analyze_0493e_monospecies_resampling_physics.py` |  | present |
@@ -173,6 +168,27 @@
 | `scripts/analyze_0493x14u_normal_kinetic_impact.py` | x14u | present |
 | `scripts/analyze_0493x14w_two_phase_couette.py` | x14w | present |
 | `scripts/analyze_0493x14x_oscillating_drop_n2.py` | x14x | present |
+| `scripts/analyze_0493x16k_galilean_geometry_smoke.py` |  | present |
+| `scripts/analyze_0493x16l_chi_penetration.py` |  | present |
+| `scripts/analyze_0493x16m_q2_root_refinement.py` |  | present |
+| `scripts/analyze_0493x16m_static_curved_characterization.py` |  | present |
+| `scripts/analyze_0493x16m_wall_motion_rate_characterization.py` |  | present |
+| `scripts/analyze_0493x16n_q2_dual_square_qualification.py` |  | present |
+| `scripts/analyze_0493x16o_q2_edge_endpoint_qualification.py` |  | present |
+| `scripts/analyze_0493x16p_q2_topology_preflight.py` |  | present |
+| `scripts/analyze_0493x16p_q2_topology_qualification.py` |  | present |
+| `scripts/analyze_0493x16q_overlap_deadzone_qualification.py` |  | present |
+| `scripts/analyze_0493x16q_overlap_deadzone_smoke.py` |  | present |
+| `scripts/analyze_0493x17a_lagrangian_boundary_qualification.py` |  | present |
+| `scripts/analyze_0493x17b_mobile_solids_final_qualification.py` |  | present |
+| `scripts/analyze_0493x17c_membrane_fsi.py` |  | present |
+| `scripts/analyze_0493x17d_article_solids.py` |  | present |
+| `scripts/analyze_0493x17d_fixed_membrane_publishable.py` |  | present |
+| `scripts/analyze_0493x17d_membrane_strain_localization.py` |  | present |
+| `scripts/analyze_0493x18_penetration.py` |  | present |
+| `scripts/analyze_0493x18_penetration_sweep.py` |  | present |
+| `scripts/analyze_0493x18a_hinged_plate.py` |  | present |
+| `scripts/analyze_0493x18a_hinged_plate_speed_sweep.py` |  | present |
 | `scripts/analyze_0493x3_q6_force_projection_tg.py` | x3 | present |
 | `scripts/analyze_0493x4a_q6_force_single_tg.py` | x4a | present |
 | `scripts/analyze_0493x4b_q6_force_fusion_tg.py` | x4b | present |
@@ -286,8 +302,10 @@
 | `matlab/validate_taylor_green_q6_periodic.m` |  | present |
 | `matlab/validate_taylor_green_q9_filtered_short.m` |  | present |
 | `matlab/validate_von_karman_long_comparison.m` |  | present |
-| `scripts/__pycache__/check_0493x14ba_inlet_oscillation.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/check_injection_species_0492b.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/check_0493x16n_q2_dual_square_math.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/check_0493x17c_membrane_math.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/check_0493x17d_article_solids.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/check_0493x17d_fix2_full_particle_coverage.cpython-312.pyc` |  | present |
 | `scripts/check_0493a_universal_species_resident.sh` |  | present |
 | `scripts/check_0493b_universal_species_resampling.sh` |  | present |
 | `scripts/check_0493c_resident_qualification.sh` |  | present |
@@ -331,6 +349,32 @@
 | `scripts/check_0493x13i_kbt_scaling.sh` |  | present |
 | `scripts/check_0493x13j_src_transport.sh` | x13j | present |
 | `scripts/check_0493x14ba_inlet_oscillation.py` |  | present |
+| `scripts/check_0493x16j_fix1_prestream_dispatch.sh` |  | present |
+| `scripts/check_0493x16k_galilean_chi_level_geometry.sh` |  | present |
+| `scripts/check_0493x16l_direct_chi_penetration.sh` |  | present |
+| `scripts/check_0493x16m_q2_root_refinement.sh` |  | present |
+| `scripts/check_0493x16m_static_curved_characterization.sh` |  | present |
+| `scripts/check_0493x16m_wall_motion_rate_characterization.sh` |  | present |
+| `scripts/check_0493x16n_q2_dual_square_consistency.sh` |  | present |
+| `scripts/check_0493x16n_q2_dual_square_math.py` |  | present |
+| `scripts/check_0493x16o_q2_edge_endpoint_consistency.sh` |  | present |
+| `scripts/check_0493x16o_q2_edge_endpoint_math.py` |  | present |
+| `scripts/check_0493x16p_q2_topology_branch_reconstruction.sh` |  | present |
+| `scripts/check_0493x16p_q2_topology_math.py` |  | present |
+| `scripts/check_0493x16q_chi_overlap_deadzone_fix.sh` |  | present |
+| `scripts/check_0493x16q_overlap_deadzone_math.py` |  | present |
+| `scripts/check_0493x17a_lagrangian_boundary.sh` |  | present |
+| `scripts/check_0493x17a_lagrangian_boundary_math.py` |  | present |
+| `scripts/check_0493x17b_mobile_solids_initialization.sh` |  | present |
+| `scripts/check_0493x17c_elastic_membrane_fsi.sh` |  | present |
+| `scripts/check_0493x17c_fix1_membrane_fictitious_diag.sh` |  | present |
+| `scripts/check_0493x17c_membrane_math.py` |  | present |
+| `scripts/check_0493x17d_article_solids.py` |  | present |
+| `scripts/check_0493x17d_article_solids.sh` |  | present |
+| `scripts/check_0493x17d_fix2_full_particle_coverage.py` |  | present |
+| `scripts/check_0493x17d_fix2_full_particle_coverage.sh` |  | present |
+| `scripts/check_0493x17d_fix3_visible_membrane.py` |  | present |
+| `scripts/check_0493x17d_fix3_visible_membrane.sh` |  | present |
 | `scripts/check_0493x5a2_generator_profiles.py` | x5a2 | present |
 | `scripts/check_0493x7b_virial_grid_scaling.py` |  | present |
 | `scripts/check_0493x7f_q6_g_f_multibc.py` | x7f | present |
@@ -955,17 +999,9 @@
 | `matlab/prepare_poiseuille_wallvp_resampling_0131.m` |  | present |
 | `matlab/prepare_taylor_green_random_population_resampling_0128.m` |  | present |
 | `matlab/prepare_taylor_green_void_rich_resampling_0127.m` |  | present |
-| `scripts/__pycache__/generate_0493x13k_oscillating_drop_2d.cpython-312.pyc` | x13k | present |
-| `scripts/__pycache__/generate_0493x13n_taylor_culick_sheet_2d.cpython-312.pyc` | x13n | present |
-| `scripts/__pycache__/generate_0493x14ah_drop_gas_transient_poiseuille.cpython-312.pyc` | x14ah | present |
-| `scripts/__pycache__/generate_0493x14ah_drop_gas_transient_poiseuille.cpython-313.pyc` | x14ah | present |
-| `scripts/__pycache__/generate_0493x14ak_taylor_culick_two_phase.cpython-312.pyc` | x14ak | present |
-| `scripts/__pycache__/generate_0493x14al_taylor_culick_historical_ab.cpython-312.pyc` | x14al | present |
-| `scripts/__pycache__/generate_0493x14av_air_assisted_atomizer_state.cpython-312.pyc` |  | present |
-| `scripts/__pycache__/generate_0493x14t_normal_pressure_piston.cpython-312.pyc` | x14t | present |
-| `scripts/__pycache__/generate_0493x14u_normal_kinetic_impact.cpython-312.pyc` | x14u | present |
-| `scripts/__pycache__/generate_0493x14x_oscillating_drop_two_phase.cpython-313.pyc` | x14x | present |
-| `scripts/__pycache__/generate_gas_jet_liquid_bath_2d.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/generate_0493x17d_piston_state.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/prepare_0493x17b_initial_state_curved_slab.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/prepare_0493x18a_initial_fluid.cpython-312.pyc` |  | present |
 | `scripts/generate_0491h_fix1_state.py` |  | present |
 | `scripts/generate_0493k_tg_state.py` |  | present |
 | `scripts/generate_0493m_equal_mass_count_tg_state.py` |  | present |
@@ -991,6 +1027,7 @@
 | `scripts/generate_0493x14t_normal_pressure_piston.py` | x14t | present |
 | `scripts/generate_0493x14u_normal_kinetic_impact.py` | x14u | present |
 | `scripts/generate_0493x14x_oscillating_drop_two_phase.py` | x14x | present |
+| `scripts/generate_0493x17d_piston_state.py` |  | present |
 | `scripts/generate_0493x7s_transverse_shear_state.py` |  | present |
 | `scripts/generate_0493x9a_ellipse_state.py` |  | present |
 | `scripts/generate_0493x9b_ellipse_state.py` |  | present |
@@ -999,14 +1036,29 @@
 | `scripts/generate_0493x9q_gas_box_state.py` |  | present |
 | `scripts/generate_0493x9s_splash_state.py` | x9s | present |
 | `scripts/generate_gas_jet_liquid_bath_2d.py` |  | present |
+| `scripts/prepare_0493x17b_initial_state_curved_slab.py` |  | present |
+| `scripts/prepare_0493x18a_initial_fluid.py` |  | present |
 
 ## MATLAB_TOOL
 
 | Fichier | Jalons liés | Statut |
 |---|---|---|
 | `matlab/bin_smpcd_state.m` |  | present |
+| `matlab/collect_0493x15d_permeability_sweep.m` |  | present |
 | `matlab/compare_poiseuille_runs.m` |  | present |
 | `matlab/demo_immersed_circle_combined_motion.m` |  | present |
+| `matlab/hinge1.avi` |  | present |
+| `matlab/hinge1_2.avi` |  | present |
+| `matlab/hinge1_2_ux.avi` |  | present |
+| `matlab/hinge1_o_U00352.avi` |  | present |
+| `matlab/hinge1_o_U0352.avi` |  | present |
+| `matlab/hinge1_ux.avi` |  | present |
+| `matlab/hinge1_ux_U00352.avi` |  | present |
+| `matlab/hinge1_ux_U352.avi` |  | present |
+| `matlab/hinge2_liqu.avi` |  | present |
+| `matlab/hinge2_rho01.avi` |  | present |
+| `matlab/hinge2_ux.avi` |  | present |
+| `matlab/hinge2_ux_rho01.avi` |  | present |
 | `matlab/inspect_smpcd_particle_thresholds.m` |  | present |
 | `matlab/inspect_smpcd_state.m` |  | present |
 | `matlab/list_smpcd_dumps.m` |  | present |
@@ -1015,6 +1067,8 @@
 | `matlab/make_open_channel_hard_inlet_visual_report_0071.m` |  | present |
 | `matlab/make_periodic_cylinder_dynamic_visual_report_0105.m` |  | present |
 | `matlab/make_periodic_cylinder_startup_visual_report_0104.m` |  | present |
+| `matlab/membrane_boost.avi` |  | present |
+| `matlab/membrane_rest.avi` |  | present |
 | `matlab/parse_smpcd_kv.m` |  | present |
 | `matlab/plot_q6_projection_summary.m` |  | present |
 | `matlab/plot_smpcd_frame.m` |  | present |
@@ -1259,11 +1313,66 @@
 | `scripts/run_0493x14av_air_assisted_atomizer_demo.sh` |  | present |
 | `scripts/run_0493x14aw_basilisk_atomisation_re500.sh` |  | present |
 | `scripts/run_0493x14ay_basilisk_atomisation_gamma_refinement.sh` |  | present |
+| `scripts/run_0493x14bc_Rayleigh.sh` |  | present |
 | `scripts/run_0493x14bc_basilisk_atomisation_cold_re500.sh` |  | present |
 | `scripts/run_0493x14bc_basilisk_atomisation_cold_re500_pulsed.sh` |  | present |
 | `scripts/run_0493x14bc_basilisk_atomisation_cold_re500_steady.sh` |  | present |
 | `scripts/run_0493x14s_multiseed6_shape_step1000.sh` | x14s | present |
 | `scripts/run_0493x14s_multiseed6_sigma256.sh` | x14s | present |
+| `scripts/run_0493x15a_fixed_chi_piston_force_budget.sh` |  | present |
+| `scripts/run_0493x15b_fixed_chi_vp_force_budget.sh` |  | present |
+| `scripts/run_0493x15c_chi_vp_permeability.sh` |  | present |
+| `scripts/run_0493x15e_historical_chi_solid_force_permeability.sh` |  | present |
+| `scripts/run_0493x15f_mean_chivp_force_permeability.sh` |  | present |
+| `scripts/run_0493x16a_rigid_slab_dynamic_coupling.sh` |  | present |
+| `scripts/run_0493x16b_rigid_slab_dynamic_demo.sh` |  | present |
+| `scripts/run_0493x16b_spatial_solid_load.sh` |  | present |
+| `scripts/run_0493x16c_fictitious_fluid_demo.sh` |  | present |
+| `scripts/run_0493x16c_fictitious_fluid_inventory.sh` |  | present |
+| `scripts/run_0493x16d_galilean_case.sh` |  | present |
+| `scripts/run_0493x16d_galilean_pair.sh` |  | present |
+| `scripts/run_0493x16e_resident_raster_galilean_case.sh` |  | present |
+| `scripts/run_0493x16e_resident_raster_galilean_pair.sh` |  | present |
+| `scripts/run_0493x16f_temporal_sync_galilean_case.sh` |  | present |
+| `scripts/run_0493x16f_temporal_sync_galilean_pair.sh` |  | present |
+| `scripts/run_0493x16g_capture_bath_neutralized_galilean_case.sh` |  | present |
+| `scripts/run_0493x16h_capture_spatial_reinjection_galilean_case.sh` |  | present |
+| `scripts/run_0493x16i_deformable_impermeable_case.sh` |  | present |
+| `scripts/run_0493x16i_deformable_impermeable_compare.sh` |  | present |
+| `scripts/run_0493x16j_chi_kinetic_specular_case.sh` |  | present |
+| `scripts/run_0493x16j_chi_kinetic_specular_compare.sh` |  | present |
+| `scripts/run_0493x16j_fix1_prestream_smoke.sh` |  | present |
+| `scripts/run_0493x16k_galilean_geometry_smoke.sh` |  | present |
+| `scripts/run_0493x16l_chi_penetration_qualification.sh` |  | present |
+| `scripts/run_0493x16m_q2_root_refinement_qualification.sh` |  | present |
+| `scripts/run_0493x16m_static_curved_characterization.sh` |  | present |
+| `scripts/run_0493x16m_wall_motion_rate_characterization.sh` |  | present |
+| `scripts/run_0493x16n_q2_dual_square_qualification.sh` |  | present |
+| `scripts/run_0493x16o_q2_edge_endpoint_qualification.sh` |  | present |
+| `scripts/run_0493x16p_q2_topology_preflight.sh` |  | present |
+| `scripts/run_0493x16p_q2_topology_qualification.sh` |  | present |
+| `scripts/run_0493x16q_overlap_deadzone_qualification.sh` |  | present |
+| `scripts/run_0493x16q_overlap_deadzone_smoke.sh` |  | present |
+| `scripts/run_0493x17a_lagrangian_boundary_case.sh` |  | present |
+| `scripts/run_0493x17a_lagrangian_boundary_qualification.sh` |  | present |
+| `scripts/run_0493x17a_lagrangian_boundary_smoke.sh` |  | present |
+| `scripts/run_0493x17b_initialization_smoke.sh` |  | present |
+| `scripts/run_0493x17b_mobile_solids_final_qualification.sh` |  | present |
+| `scripts/run_0493x17c_membrane_fsi_case.sh` |  | present |
+| `scripts/run_0493x17c_membrane_fsi_qualification.sh` |  | present |
+| `scripts/run_0493x17c_membrane_smoke.sh` |  | present |
+| `scripts/run_0493x17d_article_solids.sh` |  | present |
+| `scripts/run_0493x17d_article_solids_smoke.sh` |  | present |
+| `scripts/run_0493x17d_fixed_membrane_case.sh` |  | present |
+| `scripts/run_0493x17d_fixed_membrane_publishable.sh` |  | present |
+| `scripts/run_0493x17d_pressure_piston_case.sh` |  | present |
+| `scripts/run_0493x17d_visible_membrane.sh` |  | present |
+| `scripts/run_0493x17d_visible_membrane_fix4.sh` |  | present |
+| `scripts/run_0493x17d_visible_membrane_fix6.sh` |  | present |
+| `scripts/run_0493x17d_visible_membrane_fix7.sh` |  | present |
+| `scripts/run_0493x18a_hinged_plate.sh` |  | present |
+| `scripts/run_0493x18a_hinged_plate_speed_sweep.sh` |  | present |
+| `scripts/run_0493x18b_hinged_fall_quiescent.sh` |  | present |
 | `scripts/run_0493x1_closed_box_smoke.sh` | x1 | present |
 | `scripts/run_0493x2_liquid_only_q6.sh` | x2 | present |
 | `scripts/run_0493x2_liquid_only_q6_common.sh` | x2 | present |
@@ -1383,6 +1492,7 @@
 | `scripts/run_ok_air_assisted_atomizer.sh` |  | present |
 | `scripts/run_ok_air_assisted_atomizer_noair.sh` |  | present |
 | `scripts/run_ok_air_assisted_atomizer_old.sh` |  | present |
+| `scripts/run_ok_air_assisted_atomizer_test.sh` |  | present |
 | `scripts/run_ok_bend_pipe.sh` |  | present |
 | `scripts/run_ok_coalescence.sh` |  | present |
 | `scripts/run_ok_dambreak.sh` |  | present |
