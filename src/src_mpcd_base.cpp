@@ -54,6 +54,123 @@ namespace {
 
 using ProfileClock = std::chrono::steady_clock;
 
+// 0493x19b-fix3: complete, read-only operator-by-operator global-moment audit.
+// It is gated entirely by MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT and therefore
+// changes no historical production path.  Resident CUDA states are reduced on
+// device; host-authoritative states use the identical formulas directly.
+struct FluidMomentStage0493x19bFix3 {
+    std::string stage;
+    std::string source;
+    CudaFluidMomentSnapshot0493x19bFix3 m;
+};
+
+CudaFluidMomentSnapshot0493x19bFix3 measure_host_fluid_moments_0493x19b_fix3(
+    const ParticleState& state, double centerX, double centerY) {
+    CudaFluidMomentSnapshot0493x19bFix3 out{};
+    out.handled = true;
+    const std::size_t n = active_fluid_count_size(state);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!is_fluid_particle(state, i)) continue;
+        const double m = state.mass[i];
+        const double x = state.x[i];
+        const double y = state.y[i];
+        const double vx = state.vx[i];
+        const double vy = state.vy[i];
+        if (!(m > 0.0) || !std::isfinite(m) || !std::isfinite(x) ||
+            !std::isfinite(y) || !std::isfinite(vx) || !std::isfinite(vy)) continue;
+        const double rx = x - centerX;
+        const double ry = y - centerY;
+        const double r2 = rx * rx + ry * ry;
+        const double r = std::sqrt(r2);
+        ++out.particles;
+        out.mass += m;
+        out.momentumX += m * vx;
+        out.momentumY += m * vy;
+        out.angularMomentumZ += m * (rx * vy - ry * vx);
+        out.kineticEnergy += 0.5 * m * (vx * vx + vy * vy);
+        out.polarMassMoment += m * r2;
+        if (r > 0.0) {
+            out.radialMomentum += m * (rx * vx + ry * vy) / r;
+            out.tangentialMomentum += m * (-ry * vx + rx * vy) / r;
+        }
+    }
+    return out;
+}
+
+class FullAngularAudit0493x19bFix3 {
+public:
+    FullAngularAudit0493x19bFix3(const SimulationParams& params,
+                                 std::uint64_t step,
+                                 double time)
+        : enabled_(env_truthy_src_base_0475a("MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT") &&
+                   !params.outputDir.empty() &&
+                   std::abs(params.chiSolidPrescribedInnerOmegaZ) > 0.0),
+          centerX_(params.chiSolidPrescribedRotationCenterX),
+          centerY_(params.chiSolidPrescribedRotationCenterY),
+          outputDir_(params.outputDir), step_(step), time_(time) {
+        if (enabled_ && (!std::isfinite(centerX_) || !std::isfinite(centerY_))) {
+            throw std::runtime_error("0493x19b-fix3 invalid angular-audit center");
+        }
+        stages_.reserve(20);
+    }
+
+    bool enabled() const { return enabled_; }
+
+    void capture(const char* stage, const ParticleState& state) {
+        if (!enabled_) return;
+        FluidMomentStage0493x19bFix3 row{};
+        row.stage = stage;
+        row.m = cuda_q6_measure_resident_fluid_moments_0493x19b_fix3(centerX_, centerY_);
+        if (row.m.handled) {
+            row.source = "cuda_resident";
+        } else {
+            row.m = measure_host_fluid_moments_0493x19b_fix3(state, centerX_, centerY_);
+            row.source = "host_authoritative";
+        }
+        stages_.push_back(std::move(row));
+    }
+
+    void flush(const char* exitStage) {
+        if (!enabled_ || flushed_) return;
+        flushed_ = true;
+        const std::filesystem::path path =
+            std::filesystem::path(outputDir_) / "angular_balance_stages_0493x19b_fix3.csv";
+        std::filesystem::create_directories(path.parent_path());
+        const bool header = !std::filesystem::exists(path) ||
+                            std::filesystem::file_size(path) == 0u;
+        std::ofstream out(path, std::ios::app);
+        if (!out) throw std::runtime_error(
+            "0493x19b-fix3 failed to open stage angular-balance CSV");
+        if (header) {
+            out << "step,time,stageIndex,stage,source,exitStage,particles,mass,"
+                   "momentumX,momentumY,angularMomentumZ,kineticEnergy,"
+                   "polarMassMoment,radialMomentum,tangentialMomentum\n";
+        }
+        out << std::setprecision(17);
+        for (std::size_t k = 0; k < stages_.size(); ++k) {
+            const auto& r = stages_[k];
+            out << step_ << ',' << time_ << ',' << k << ','
+                << '"' << r.stage << '"' << ',' << '"' << r.source << '"' << ','
+                << '"' << exitStage << '"' << ','
+                << r.m.particles << ',' << r.m.mass << ','
+                << r.m.momentumX << ',' << r.m.momentumY << ','
+                << r.m.angularMomentumZ << ',' << r.m.kineticEnergy << ','
+                << r.m.polarMassMoment << ',' << r.m.radialMomentum << ','
+                << r.m.tangentialMomentum << '\n';
+        }
+    }
+
+private:
+    bool enabled_ = false;
+    bool flushed_ = false;
+    double centerX_ = 0.0;
+    double centerY_ = 0.0;
+    std::string outputDir_;
+    std::uint64_t step_ = 0u;
+    double time_ = 0.0;
+    std::vector<FluidMomentStage0493x19bFix3> stages_;
+};
+
 struct StepProfilePhaseIndex {
     enum : std::size_t {
         ForceStream = 0,
@@ -1212,7 +1329,10 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         params.chiSolidDynamicsEnable &&
         (params.chiSolidModel == "membrane_2d" ||
          params.chiSolidModel == "hinged_plate_2d") &&
-        params.chiKineticBoundaryMode == "specular";
+        (params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback");
+
+    FullAngularAudit0493x19bFix3 angularAudit0493x19bFix3(params, step, time);
+    angularAudit0493x19bFix3.capture("step_start", state);
 
     // 0493x16a: the solid module owns q,qdot and publishes only coupling fields
     // chi(x,t), u_s(x,t). This happens before any Darcy/chiVP consumer.
@@ -1318,19 +1438,23 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     const SimulationParams& forceStreamParams0493x3 =
         *forceStreamParamsPtr0493x3;
 
+    angularAudit0493x19bFix3.capture("post_prestream_sources", state);
+
     // 0493x16j-fix1: x10n interprets particle x/y as PRE-STREAM coordinates
     // and writes a position/velocity correction for the ordinary streaming
     // stage that follows.  Run the chi material-wall event here, after every
     // optional pre-stream force/Q6 operation and immediately before streaming.
     // This is independent of speciesQ6Mode; mode=off executes no additional
     // code and leaves every historical Darcy/STEP/VK path untouched.
-    if (params.chiKineticBoundaryMode == "specular") {
+    if ((params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) {
         if (!cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
                 state, params, grid, static_cast<int>(step), time)) {
             throw std::runtime_error(
                 "0493x16j prestream chi kinetic boundary was requested but not handled");
         }
     }
+
+    angularAudit0493x19bFix3.capture("post_chi_wall", state);
 
     // 0270: wall-simple resident CUDA performs y-wall reflection directly in
     // the force/stream kernel.  The generic CPU boundary pass is therefore a
@@ -1468,7 +1592,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             // pre-stream state once and invalidate the device copy after the
             // CPU transport so host/device authority remains explicit.
             const bool chiKineticCpuFallback0493x16j =
-                params.chiKineticBoundaryMode == "specular";
+                (params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback");
             if (chiKineticCpuFallback0493x16j &&
                 !cuda_shared_particle_state_0251_download_if_fresh(state)) {
                 throw std::runtime_error(
@@ -1494,6 +1618,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+
+    angularAudit0493x19bFix3.capture("post_stream", state);
 
     {
         MPCD_PROFILE_PHASE(result.profile, Domain);
@@ -1581,6 +1707,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    angularAudit0493x19bFix3.capture("post_boundary", state);
+
     // 0315e: synchronize the active host prefix only when an immediate
     // downstream CPU/host particle consumer is actually present.  In the
     // validated resident IO classic path, collision and the due thermostat can
@@ -1640,6 +1768,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    angularAudit0493x19bFix3.capture("post_immersed", state);
+
     // 0493x16f: particle positions are now at the post-stream time level.
     // Drift the dynamic solid geometry with its pre-kick velocity and republish
     // the SAME historical binary chi/u_s fields before chiVP collision and the
@@ -1654,7 +1784,7 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     // solid geometry at t+dt, before any collision/chiVP operation can obscure
     // the impermeability test.  The routine is read-only and runs only on the
     // existing summary cadence.  mode=off executes no additional code.
-    if (params.chiKineticBoundaryMode == "specular" &&
+    if ((params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback") &&
         solidQualificationDiagnostics0493x18d) {
         if (!cuda_q6_record_chi_penetration_poststream_0493x16l(
                 state, params, grid, static_cast<int>(step), time + params.dt)) {
@@ -1662,6 +1792,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
                 "0493x16l poststream penetration diagnostic was requested but not handled");
         }
     }
+
+    angularAudit0493x19bFix3.capture("post_penetration_diagnostic", state);
 
     {
         MPCD_PROFILE_PHASE(result.profile, Collision);
@@ -1671,6 +1803,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
         result.collision = src_collision_step(state, params, grid, result.domain, step, workspace.collision);
     }
+    angularAudit0493x19bFix3.capture("post_src_collision", state);
+
     bool q6ResidentHandled0400 = false;
     bool thermostatHandledByQ6Resident0400 = false;
     {
@@ -1712,6 +1846,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    angularAudit0493x19bFix3.capture("post_q6_projection", state);
+
     {
         MPCD_PROFILE_PHASE(result.profile, ClosedCapacity);
         if (!params.srcClassicCudaModeEnable) {
@@ -1728,6 +1864,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    angularAudit0493x19bFix3.capture("post_closed_capacity", state);
+
     {
         MPCD_PROFILE_PHASE(result.profile, Thermostat);
         if (q6ResidentHandled0400) {
@@ -1755,6 +1893,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             }
         }
     }
+    angularAudit0493x19bFix3.capture("post_thermostat", state);
+
     {
         MPCD_PROFILE_PHASE(result.profile, KeepMeanFlow);
         if (q6ResidentHandled0400 && params.keepMeanFlowEnable) {
@@ -1768,6 +1908,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             cuda_shared_particle_state_0251_invalidate("cpu_keep_mean_flow_after_collision");
         }
     }
+
+    angularAudit0493x19bFix3.capture("post_keep_mean_flow", state);
 
     // 0343/topo legacy ordering: retain the historical post-collision Darcy
     // stage for every path except Q6-g-f.  In 0493x7g Q6-g-f has already applied
@@ -1783,6 +1925,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         result.darcy = try_apply_cuda_darcy_brinkman_0343(
             state, params, grid, result.domain, step, time);
     }
+
+    angularAudit0493x19bFix3.capture("post_darcy", state);
 
     // 0493x16a action-reaction closure. x15 measured both fluid impulses
     // exactly; give their opposite sum to the solid model once per step.
@@ -1812,6 +1956,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             result.darcy.fictitiousRelativeMomentumY0493x16c,
             result.darcy.fictitiousRelativeVelocityRms0493x16c);
     }
+
+    angularAudit0493x19bFix3.capture("post_solid_dynamics", state);
 
     // 0304: passive adaptive-trigger flag diagnostic.  This is intentionally
     // placed at the same post-SRC/post-thermostat physical-grid point as the
@@ -1862,6 +2008,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             "post_src_classic_post_thermostat_pre_cpu_resampling");
     }
 
+    angularAudit0493x19bFix3.capture("post_mass_recondition", state);
+
     CudaResamplingPopulationGuard0297Diagnostics cudaPopulationGuard0490j{};
     bool callerTimingActive0493o3 = false;
     ProfileClock::time_point callerStart0493o3{};
@@ -1901,6 +2049,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
         }
     }
 
+    angularAudit0493x19bFix3.capture("post_population_guard", state);
+
     // 0158: when resampling is disabled, the pool/deposit diagnostics are only
     // needed on steps for which the caller will write a runtime summary.  The
     // default public API keeps the previous conservative behavior; the main
@@ -1911,6 +2061,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             !env_truthy_0270("MPCD_CUDA_Q6_RESIDENT_SKIP_STEP_BOUNDARY_SYNC_0400")) {
             (void)cuda_shared_particle_state_0251_download_if_fresh(state);
         }
+        angularAudit0493x19bFix3.capture("step_end", state);
+        angularAudit0493x19bFix3.flush("disabled_resampling_fast_return");
         return result;
     }
 
@@ -2002,6 +2154,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
     }
 
     if (!params.resamplingEnable) {
+        angularAudit0493x19bFix3.capture("step_end", state);
+        angularAudit0493x19bFix3.flush("disabled_resampling_diagnostics_return");
         return result;
     }
 
@@ -2553,6 +2707,8 @@ StepResult run_src_mpcd_base_step(ParticleState& state,
             callerRemainingPipelineSeconds0493o3,
             callerTotalSeconds0493o3);
     }
+    angularAudit0493x19bFix3.capture("step_end", state);
+    angularAudit0493x19bFix3.flush("normal_step_return");
     return result;
 }
 

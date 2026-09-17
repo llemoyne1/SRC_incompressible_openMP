@@ -1625,7 +1625,7 @@ CudaDarcyBrinkman0343Diagnostics try_apply_cuda_darcy_brinkman_0343(
         params.chiSolidModel != "hinged_plate_2d") {
         const float* exactSolidFraction0493x16k = nullptr;
         int solidFractionNx0493x16k = 0, solidFractionNy0493x16k = 0;
-        if (params.chiKineticBoundaryMode == "specular") {
+        if ((params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) {
             if (!cuda_chi_solid_0493x16k_device_solid_fraction(
                     &exactSolidFraction0493x16k,
                     &solidFractionNx0493x16k, &solidFractionNy0493x16k) ||

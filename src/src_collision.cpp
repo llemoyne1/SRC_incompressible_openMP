@@ -1100,6 +1100,13 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
     cfg.rotationAngle = params.rotationAngle;
     cfg.randomRotationSign = params.randomRotationSign ? 1 : 0;
     cfg.rngSeed = params.rngSeed;
+    const bool x19bAngularAuditFix2 =
+        params.chiSolidPrescribedInnerOmegaZ != 0.0 &&
+        params.chiKineticBoundaryMode == "bounceback" &&
+        persistent_env_flag_enabled("MPCD_X19B_FIX2_SRC_ANGULAR_AUDIT", false);
+    cfg.x19bSrcAngularMomentumDiagnostic = x19bAngularAuditFix2 ? 1 : 0;
+    cfg.x19bAngularMomentumCenterX = params.chiSolidPrescribedRotationCenterX;
+    cfg.x19bAngularMomentumCenterY = params.chiSolidPrescribedRotationCenterY;
     cfg.periodicX = is_x_periodic(params) ? 1 : 0;
     cfg.periodicY = is_y_periodic(params) ? 1 : 0;
     cfg.domainXMin = domain.xMin;
@@ -1450,6 +1457,30 @@ bool try_cuda_persistent_src_collision_active(ParticleState& state,
         g_persistentSrcCellIdsParticles0493x14g = raw.particlesVisited;
     }
 #endif
+
+    if (x19bAngularAuditFix2) {
+        if (!raw.x19bSrcAngularMomentumDiagnosticValid) {
+            throw std::runtime_error(
+                "0493x19b-fix2 requested SRC angular-momentum audit but the active persistent collision backend did not provide it");
+        }
+        const std::filesystem::path x19bAngularPath =
+            std::filesystem::path(params.outputDir) / "src_angular_momentum_0493x19b_fix2.csv";
+        const bool writeHeader = !std::filesystem::exists(x19bAngularPath) ||
+                                 std::filesystem::file_size(x19bAngularPath) == 0u;
+        std::ofstream out(x19bAngularPath, std::ios::app);
+        if (!out) {
+            throw std::runtime_error(
+                "0493x19b-fix2 failed to open SRC angular-momentum diagnostic CSV");
+        }
+        out << std::setprecision(17);
+        if (writeHeader) {
+            out << "step,time,LbeforeSrc,LafterSrc,deltaLSrc\n";
+        }
+        out << step << ',' << static_cast<double>(step) * params.dt << ','
+            << raw.x19bSrcAngularMomentumBefore << ','
+            << raw.x19bSrcAngularMomentumAfter << ','
+            << raw.x19bSrcAngularMomentumDelta << '\n';
+    }
 
     diagOut.chiVpFluidImpulseX = raw.chiVpFluidImpulseX;
     diagOut.chiVpFluidImpulseY = raw.chiVpFluidImpulseY;

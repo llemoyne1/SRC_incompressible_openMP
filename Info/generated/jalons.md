@@ -235,6 +235,13 @@
 | `x18d` | OPTIMIZATION | MOBILE_SOLID | Nettoyage global du chemin normal des solides mobiles | VALIDATED/FUNCTIONAL: x18d appliqué sur le worktree réel, compilation CUDA locale réussie et runs hinged_plate_2d fonctionnels; gain de performance non encore quantifié par benchmark. |
 | `x18e` | FIX | FSI | Sous-cyclage FSI local du volet articulé | VALIDATED/FUNCTIONAL: compilation CUDA locale et runs réussis; pas global testé jusqu’à 20x la limite pratique précédente sans reproduire le hang. Pas de revendication de stabilité inconditionnelle ni de speedup wall-time 20x. |
 | `x18f` | CODE | FSI | Frontières ouvertes et initialisation finale du volet | MIXED: x18a inlet_neumann VALIDATED/FUNCTIONAL; x18b double_neumann fonctionnel qualitativement mais non qualifié quantitativement en bilan de masse. |
+| `x19a` | CODE | FSI | Première accommodation tangentielle de la frontière lagrangienne | QUALIFIED |
+| `x19b` | QUALIFICATION | FSI | Couette cylindrique avec cylindre intérieur tournant prescrit | QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS |
+| `x19b-fix1` | QUALIFICATION | FSI | Décomposition couple normal/tangentiel du Couette cylindrique x19b | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix2` | QUALIFICATION | FSI | Bilan angulaire paroi/SRC du Couette cylindrique x19b | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix3` | QUALIFICATION | FSI | Audit angulaire complet par opérateur du Couette cylindrique x19b | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix4` | QUALIFICATION | FSI | Couette cylindrique x19b haute SNR à Omega=0.20 | QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS |
+| `x19c` | QUALIFICATION | FSI | Cylindre intérieur libre sous couple constant dans un anneau Couette | QUALIFIED |
 
 ## x2-x4b : diagnostic gravitaire et séquençage Q6-g force-aware
 
@@ -3574,6 +3581,127 @@ Finalise les runners: x18a inlet uniforme gauche + outlet Neumann droit, x18b do
 - `REFERENCES` → `x18a` — Volet rigide articulé 1-DOF
 - `REFERENCES` → `x18a-fix2` — Initialisation du fluide cohérente avec l’angle du volet
 - `REFERENCES` → `x18b` — Chute du volet dans un fluide au repos
+
+### `x19a` — Première accommodation tangentielle de la frontière lagrangienne
+
+- **Clé unique :** `0493x19a`
+- **ID canonique :** `0493x19a`
+- **Nature / domaine :** `CODE` / `FSI`
+- **Statut :** QUALIFIED
+- **Confiance :** `A`
+- **Date :** `2026-09-16`
+
+Étend chiKineticBoundaryMode avec bounceback dans le repère local de la paroi x17. Le mode specular historique reste inchangé. Le nouveau mode inverse les composantes normale et tangentielle de la vitesse relative et restitue exactement la réaction au point d’impact.
+
+**Notes.** Premier jalon volontairement sans VP lagrangiennes: il isole la transmission tangentielle d’impact. Qualification prévue par Couette plan avec plaque lagrangienne prescrite; le chantier suivant devra décider si des agrégats VP de cellules coupées sont nécessaires pour fermer le no-slip MPCD quantitatif. Late-window x19a result reported on 2026-09-16 over 11 dumps, steps 5000..15000: bounceback relative RMSE=0.0379074 and shape R2=0.984009; specular relative RMSE=0.598073. This is accepted as the planar tangential-transfer gate for opening the curved-wall x19b qualification, not as a general curved-wall/torque qualification. FINAL QUALIFICATION 2026-09-17: planar prescribed Lagrangian Couette, late window steps 5000..15000 over 11 dumps. Bounceback relative RMSE=0.0379074 and shape R2=0.984009; specular relative RMSE=0.598073. This closes x19a as the planar tangential momentum-transfer gate. It does not by itself claim curved-wall torque accuracy.
+
+**Relations :**
+- `BUILDS_ON` → `x17b` — Initialisation et qualification des solides lagrangiens
+- `EXTENDS` → `x18a` — Volet rigide articulé 1-DOF
+
+### `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+
+- **Clé unique :** `0493x19b`
+- **ID canonique :** `0493x19b`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Ajoute à la frontière lagrangienne x17 une cinématique matérielle tangentielle prescrite pour la branche intérieure d’un anneau concentrique. La géométrie reste stationnaire; le cylindre intérieur porte u_w=Omega ez x r projeté tangentiellement sur la facette locale, tandis que la branche extérieure reste fixe. Mesure séparément profil azimutal et couples d’impact intérieur/extérieur.
+
+**Notes.** Premier cas courbe après x19a. Le garde runtime exige deux branches bien séparées et approximativement concentriques. Le profil u_theta(r) est comparé à la solution exacte de Couette cylindrique. Le couple est enregistré directement par action-réaction x17. La fermeture Tin+Tout et la viscosité déduite du couple sont explicitement traitées comme audit du comportement de moment angulaire du SRC courant; aucune conservation du moment angulaire bulk n’est supposée a priori. Aucun DOF solide dynamique n’est encore activé. First x19b late-window run: bounceback profile relative RMSE=0.0890368, profile R2=0.889773, shape R2=0.901643, mean |ur|/Ui=0.0600813. Total wall-reaction torques were Tin=-2.09049837 and Tout=-31.8989012; paired subtraction from specular still gave same-sign differential torques (dTin=-3.37097707, dTout=-34.6532198, closure=1.09727746). Therefore x19b-fix1 adds diagnostic decomposition of each impact reaction into local facet-normal and local tangential torque before any interpretation as bulk angular-momentum failure. x19b-fix1 short restart separated normal/tangential wall torque. On additional steps 209..2999: total Tin=-25.2921586, Tout=14.8634893; normal Tin=4.12830613, Tout=0.446839249; tangential Tin=-29.4204648, Tout=14.4166501, tangential closure=0.509979. The normal contamination is secondary (|normal/tangential|=0.140321 inner and 0.0309947 outer), while block SEM remains very large (13.8189 inner, 30.5184 outer). x19b-fix2 therefore samples wall torque every solver step and measures the exact real-fluid angular-momentum increment caused by the bulk SRC rotation kernel. x19b-fix2 short restart (steps 100..1500, 1401 rows) measured wall reaction total=-9.3164897, tangential=-11.6141197 (inner=-10.99058 outer=-0.623539747), normal=2.29763003, while bulk SRC delta-L/dt=0.950671599. The partial fluid-wall+SRC residual is 10.2671613 (normalized 1.10204), so SRC alone does not account for the angular-momentum budget. x19b-fix3 replaces sequential hypothesis testing by a complete read-only stage audit of mass, linear momentum, angular momentum, kinetic energy, polar mass moment, radial momentum and tangential momentum across every top-level mutating operator, plus an independent x17 wall-reaction cross-check. x19b-fix3 closed the complete operator angular-momentum audit at telescoping relRMS=1.804e-16 and independently reproduced the x17 wall torque at relRMS=4.022e-14. On steps 20..400 the antisymmetric tangential torque estimator was T_C=8.97153647 with sample SEM 21.553472, while the common half-sum was 1.57951063 with sample SEM 20.9297974; the remaining limitation is therefore torque SNR rather than a hidden angular-momentum channel. A matched four-seed src-q6 TG calibration (gamma=12, dt=0.006, kBT=0.05, alpha=pi/2, h=1/256, mode 2,2, lambda=0.25) gives nu=2.3313138152e-4, std=1.0569841665e-5, SEM=5.2849208326e-6, CV=0.045339; all four fits PASS with R2 about 0.9981. x19b-fix4 therefore raises prescribed Omega from 0.05 to 0.20 (Ui=0.04) and measures T_C=(T_outer,t-T_inner,t)/2 against the matched TG torque reference. FINAL QUALIFICATION 2026-09-17: the x19b-fix3 17-stage angular-momentum audit closes telescopically at relRMS=1.804e-16 and reproduces the independent x17 wall accounting at relRMS=4.022e-14, excluding an uninstrumented angular-momentum channel in the measured timestep. Matched four-seed src-q6 Taylor-Green calibration gives nu=2.3313138152e-4, std=1.0569841665e-5, SEM=5.2849208326e-6, CV=0.045339; all fits PASS with R2 about 0.9981. High-SNR x19b-fix4 at Omega=0.20 gives effective Ri=0.199976991, Ro=0.349989344, rho2D=786521.317, tangential Couette half-difference T_C=29.9952367 +/-0.752329 block SEM versus matched-TG theory 27.3626194, relative difference +9.62122%. Common tangential half-sum=-3.20952218 +/-1.82092. Velocity profile relRMSE=0.0325029, R2=0.985311, gain=0.976747, radial/Ui=0.0180787. Curved prescribed-wall hydrodynamics are therefore qualified with an explicit approximately 10% torque bias.
+
+**Relations :**
+- `BUILDS_ON` → `x17b` — Initialisation et qualification des solides lagrangiens
+- `BUILDS_ON` → `x19a` — Première accommodation tangentielle de la frontière lagrangienne
+
+### `x19b-fix1` — Décomposition couple normal/tangentiel du Couette cylindrique x19b
+
+- **Clé unique :** `0493x19b-fix1`
+- **ID canonique :** `0493x19b-fix1`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Ajoute quatre accumulateurs diagnostiques séparant, pour chaque impact x17 de l anneau prescrit, le couple de la réaction parallèle à la normale de facette et celui de la réaction tangentielle complémentaire. Aucun changement de trajectoire, bounceback, Q6, thermostat ou géométrie.
+
+**Notes.** Qualification courte prévue uniquement sur bounceback: restart du dernier dump x19b établi et 3000 pas supplémentaires. Le but est de déterminer si le mauvais bilan de couple total provient d une contamination normale liée à la facettisation ou persiste dans le couple tangentiel lui-même.
+
+**Relations :**
+- `BUILDS_ON` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+- `FIXES` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+
+### `x19b-fix2` — Bilan angulaire paroi/SRC du Couette cylindrique x19b
+
+- **Clé unique :** `0493x19b-fix2`
+- **ID canonique :** `0493x19b-fix2`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Diagnostic court sans modification physique: force SUMMARY_EVERY=1 pour conserver tous les impacts x17 et ajoute une réduction CUDA du moment angulaire réel du fluide juste avant/après la rotation SRC. Le bilan compare la réaction de paroi au delta-L SRC et laisse explicitement Q6/thermostat comme opérateurs aval non instrumentés.
+
+**Notes.** Runner prévu sur bounceback seulement, restart d un état Couette déjà établi, 1500 pas supplémentaires par défaut. LiveVis est conservé mais décimé à every=10 car il s agit d un diagnostic court visant à limiter le coût. Aucun specular n est relancé.
+
+**Relations :**
+- `BUILDS_ON` → `x19b-fix1` — Décomposition couple normal/tangentiel du Couette cylindrique x19b
+- `FIXES` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+
+### `x19b-fix3` — Audit angulaire complet par opérateur du Couette cylindrique x19b
+
+- **Clé unique :** `0493x19b-fix3`
+- **ID canonique :** `0493x19b-fix3`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Instrumentation diagnostique complète et opt-in. Mesure le même état fluide global avant/après prestream, frontière x17, streaming, frontières externes, immersed, diagnostic de pénétration, SRC, Q6, capacité fermée, thermostat, keep-mean-flow, Darcy, dynamique solide et gardes de resampling. Chaque snapshot contient masse, Px, Py, Lz, énergie cinétique, moment polaire, moment radial et tangentiel. Le runner court écrit aussi rho/ux/uy sur une grille 48x48 à chaque pas pour une inspection indépendante de dumps réduits consécutifs.
+
+**Notes.** Aucune physique modifiée. Runner bounceback seul, restart d un état Couette établi, 400 pas supplémentaires par défaut. L audit est activé seulement par MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT=1.
+
+**Relations :**
+- `BUILDS_ON` → `x19b-fix2` — Bilan angulaire paroi/SRC du Couette cylindrique x19b
+- `FIXES` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+
+### `x19b-fix4` — Couette cylindrique x19b haute SNR à Omega=0.20
+
+- **Clé unique :** `0493x19b-fix4`
+- **ID canonique :** `0493x19b-fix4`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Qualification de couple à haute SNR sans modification de la physique. Le runner repart d un état bounceback établi à Omega=0.05, ajoute uniquement l incrément de vitesse moyenne Couette exact jusqu à Omega=0.20 en conservant les vitesses thermiques particulières, puis exécute 5000 pas avec diagnostics de couple à chaque pas. L analyseur utilise le couple tangentiel antisymétrique T_C=(T_outer-T_inner)/2, le demi-somme comme contrôle de stationnarité, les rayons x17 effectifs et la viscosité TG appariée.
+
+**Notes.** Reference TG: nu=2.3313138152e-4, SEM=5.2849208326e-6, n=4. Target Omega=0.20, nominal Ui=0.04. Nominal expected torque magnitude about 27.37 before replacing nominal radii/density by measured values. Local x19b-fix4 high-SNR result: effective Ri=0.199976991, Ro=0.349989344, rho2D=786521.317; tangential Couette half-difference T_C=29.9952367 +/-0.752329 block SEM versus matched-TG theory 27.3626194, relative difference +9.62122%. Common tangential half-sum=-3.20952218 +/-1.82092. Velocity profile relRMSE=0.0325029, R2=0.985311, gain=0.976747, radial/Ui=0.0180787. x19b is therefore closed as a curved moving-material-wall qualification with an explicitly documented ~10% torque bias. FINAL LOCAL RESULT 2026-09-17: T_C=29.9952367 +/-0.752329 block SEM against matched-TG 27.3626194 (+9.62122%); common half-sum=-3.20952218 +/-1.82092; profile relRMSE=0.0325029, R2=0.985311, gain=0.976747, radial/Ui=0.0180787. This is the quantitative prescribed curved-wall reference used by x19c.
+
+**Relations :**
+- `BUILDS_ON` → `x19b-fix3` — Audit angulaire complet par opérateur du Couette cylindrique x19b
+- `FIXES` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+- `QUALIFIES` → `x19b` — Couette cylindrique avec cylindre intérieur tournant prescrit
+
+### `x19c` — Cylindre intérieur libre sous couple constant dans un anneau Couette
+
+- **Clé unique :** `0493x19c`
+- **ID canonique :** `0493x19c`
+- **Nature / domaine :** `QUALIFICATION` / `FSI`
+- **Statut :** QUALIFIED
+- **Confiance :** `A`
+- **Date :** `2026-09-17`
+
+Validation end-to-end du traitement solide: la géométrie circulaire x17 reste stationnaire comme ensemble, mais la vitesse matérielle de la branche intérieure devient une DOF libre Omega. A chaque pas, le collisionneur fournit exactement l impulsion de couple de réaction intérieure; le solide applique I DeltaOmega = J_hydro + T_ext dt - C Omega dt. T_ext est fixé AVANT x19c à partir de la moyenne tardive du couple intérieur total du run prescrit indépendant x19b-fix4 à Omega=0.20. Le run x19c repart du champ fluide établi de fix4 avec Omega0=0.20 et vérifie fermeture mécanique, action-reaction, stationnarité de Omega, reproduction du couple hydrodynamique de référence et maintien du profil Couette.
+
+**Notes.** Primary gate is discrete solid-mechanics closure plus agreement with the independent prescribed-run total inner torque reference. The matched TG continuum result remains a secondary hydrodynamic reference because x19b already documents the residual force/torque discretization bias. FINAL END-TO-END QUALIFICATION 2026-09-17 over free-rotor steps 500..5000 (4501 rows): I=1976.51919; discrete mechanics closure relRMS=8.007e-15, maxAbs=2.753e-14; independent wall cross-check relRMS=0. Hydro torque=-23.5995409 +/-0.528601 block SEM versus prescribed x19b reference -23.3998141 +/-1.92345, relative difference -0.85354%, z=-0.100125. External torque=23.3998141 and net torque=-0.199726735 +/-0.528601, compatible with zero. Mean Omega=0.192093421 +/-0.000948921 versus target 0.2 +/-0.0164399 reference SEM, relative error -3.95329%, z=-0.48014; first/last Omega=0.193184329/0.191002027 and omegaSlope/step=-8.889e-07. Late fluid profile relRMSE=0.036046, R2=0.981934, gain=0.956627, radial/Ui=0.0182496. All mechanics, omega, hydro, stationary and profile gates PASS. This qualifies the bidirectional rigid-solid rotational FSI loop from kinetic wall impulse through generalized torque and rigid-body integration back to wall velocity. Scope does not extend this analytic qualification to free translation, contact/collision mechanics or multi-solid interactions.
+
+**Relations :**
+- `BUILDS_ON` → `x19b-fix4` — Couette cylindrique x19b haute SNR à Omega=0.20
+- `QUALIFIES` → `x19b-fix4` — Couette cylindrique x19b haute SNR à Omega=0.20
+- `REFERENCES` → `x19b-fix4` — Couette cylindrique x19b haute SNR à Omega=0.20
 
 ### `x2` — Diagnostic liquide plein : force appliquée avant une projection Q6 trop tardive
 

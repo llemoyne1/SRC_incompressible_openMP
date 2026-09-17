@@ -164,7 +164,7 @@ public:
                 fields.chi, fields.uSolidX, fields.uSolidY,
                 grid.Nx, grid.Ny, params.Lx, params.Ly,
                 initialCenterX_, initialVelocityX_, mass_, thickness_, params.dt,
-                geometryVersion, params.chiKineticBoundaryMode == "specular" ? 1 : 0, &d)) {
+                geometryVersion, (params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback") ? 1 : 0, &d)) {
             throw std::runtime_error("0493x16f RigidSlab1D historical-binary prepare failed");
         }
         diagnostics = SolidCudaDiagnostics0493x16e{};
@@ -209,7 +209,7 @@ public:
         if (!cuda_chi_solid_0493x16f_poststream_sync_rigid_slab(
                 fields.chi, fields.uSolidX, fields.uSolidY,
                 grid.Nx, grid.Ny, params.Lx, params.Ly, params.dt,
-                geometryVersion, params.chiKineticBoundaryMode == "specular" ? 1 : 0, &d)) {
+                geometryVersion, (params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback") ? 1 : 0, &d)) {
             throw std::runtime_error("0493x16f RigidSlab1D poststream geometry synchronization failed");
         }
         diagnostics = SolidCudaDiagnostics0493x16e{};

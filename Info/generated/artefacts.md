@@ -25,6 +25,13 @@
 | `matlab/analyze_0493x16i_deformable_impermeable_compare.m` |  | present |
 | `matlab/analyze_0493x16j_chi_kinetic_specular_compare.m` |  | present |
 | `matlab/analyze_0493x16k_mobile_solid_qualification.m` |  | present |
+| `matlab/analyze_0493x19a_lagrangian_planar_couette.m` |  | present |
+| `matlab/analyze_0493x19b_fix1_torque_split.m` |  | present |
+| `matlab/analyze_0493x19b_fix2_angular_balance.m` |  | present |
+| `matlab/analyze_0493x19b_fix3_full_angular_audit.m` |  | present |
+| `matlab/analyze_0493x19b_fix4_highsnr_omega020.m` |  | present |
+| `matlab/analyze_0493x19b_prescribed_rotating_annulus.m` |  | present |
+| `matlab/analyze_0493x19c_free_rotor_annulus.m` |  | present |
 | `matlab/analyze_0493x7i_q6_g_f_qualification.m` | x7i | present |
 | `matlab/analyze_0493x8d_q6gf_poiseuille_qualification.m` |  | present |
 | `matlab/analyze_0493x8e_q6gf_darcy_alpha_sweep.m` |  | present |
@@ -65,6 +72,7 @@
 | `matlab/analyze_vk_nondim_0493x8j.m` | x8j | present |
 | `matlab/analyze_vk_symmetry_breaking_0493x7v.m` |  | present |
 | `matlab/analyze_vk_vorticity_transport_0493x7u.m` |  | present |
+| `scripts/__pycache__/analyze_0493w1_src_fluid_calibrator.cpython-312.pyc` |  | present |
 | `scripts/__pycache__/analyze_0493x16m_q2_root_refinement.cpython-312.pyc` |  | present |
 | `scripts/__pycache__/analyze_0493x16m_static_curved_characterization.cpython-312.pyc` |  | present |
 | `scripts/__pycache__/analyze_0493x16m_wall_motion_rate_characterization.cpython-312.pyc` |  | present |
@@ -1047,18 +1055,6 @@
 | `matlab/collect_0493x15d_permeability_sweep.m` |  | present |
 | `matlab/compare_poiseuille_runs.m` |  | present |
 | `matlab/demo_immersed_circle_combined_motion.m` |  | present |
-| `matlab/hinge1.avi` |  | present |
-| `matlab/hinge1_2.avi` |  | present |
-| `matlab/hinge1_2_ux.avi` |  | present |
-| `matlab/hinge1_o_U00352.avi` |  | present |
-| `matlab/hinge1_o_U0352.avi` |  | present |
-| `matlab/hinge1_ux.avi` |  | present |
-| `matlab/hinge1_ux_U00352.avi` |  | present |
-| `matlab/hinge1_ux_U352.avi` |  | present |
-| `matlab/hinge2_liqu.avi` |  | present |
-| `matlab/hinge2_rho01.avi` |  | present |
-| `matlab/hinge2_ux.avi` |  | present |
-| `matlab/hinge2_ux_rho01.avi` |  | present |
 | `matlab/inspect_smpcd_particle_thresholds.m` |  | present |
 | `matlab/inspect_smpcd_state.m` |  | present |
 | `matlab/list_smpcd_dumps.m` |  | present |
@@ -1067,8 +1063,6 @@
 | `matlab/make_open_channel_hard_inlet_visual_report_0071.m` |  | present |
 | `matlab/make_periodic_cylinder_dynamic_visual_report_0105.m` |  | present |
 | `matlab/make_periodic_cylinder_startup_visual_report_0104.m` |  | present |
-| `matlab/membrane_boost.avi` |  | present |
-| `matlab/membrane_rest.avi` |  | present |
 | `matlab/parse_smpcd_kv.m` |  | present |
 | `matlab/plot_q6_projection_summary.m` |  | present |
 | `matlab/plot_smpcd_frame.m` |  | present |
@@ -1373,6 +1367,15 @@
 | `scripts/run_0493x18a_hinged_plate.sh` |  | present |
 | `scripts/run_0493x18a_hinged_plate_speed_sweep.sh` |  | present |
 | `scripts/run_0493x18b_hinged_fall_quiescent.sh` |  | present |
+| `scripts/run_0493x19a_lagrangian_planar_couette.sh` |  | present |
+| `scripts/run_0493x19a_lagrangian_planar_couette_pair.sh` |  | present |
+| `scripts/run_0493x19b_fix1_torque_split_restart.sh` |  | present |
+| `scripts/run_0493x19b_fix2_angular_balance_restart.sh` |  | present |
+| `scripts/run_0493x19b_fix3_full_angular_audit_restart.sh` |  | present |
+| `scripts/run_0493x19b_fix4_highsnr_omega020.sh` |  | present |
+| `scripts/run_0493x19b_prescribed_rotating_annulus.sh` |  | present |
+| `scripts/run_0493x19b_prescribed_rotating_annulus_pair.sh` |  | present |
+| `scripts/run_0493x19c_free_rotor_annulus.sh` |  | present |
 | `scripts/run_0493x1_closed_box_smoke.sh` | x1 | present |
 | `scripts/run_0493x2_liquid_only_q6.sh` | x2 | present |
 | `scripts/run_0493x2_liquid_only_q6_common.sh` | x2 | present |

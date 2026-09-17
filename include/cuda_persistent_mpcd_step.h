@@ -94,6 +94,14 @@ struct CudaPersistentMpcdStepConfig {
     // This is an implementation bit, not a user-facing control.
     int chiVpCellImpulseHostReadback0493x16e = 1;
 
+    // 0493x19b-fix2: opt-in diagnostic of the exact change of real-fluid
+    // angular momentum caused by the SRC rotation itself.  This is a
+    // diagnostic only; it does not alter the collision.  The reference
+    // center is the prescribed annulus center used by x19b.
+    int x19bSrcAngularMomentumDiagnostic = 0;
+    double x19bAngularMomentumCenterX = 0.0;
+    double x19bAngularMomentumCenterY = 0.0;
+
     // Absolute SRC/MPCD step used for random rotation signs.
     std::uint64_t step = 0u;
     double rotationAngle = 2.0943951023931954923; // 120 degrees
@@ -154,6 +162,14 @@ struct CudaPersistentMpcdStepDiagnostics {
     // vectors intentionally remain empty in the resident dynamic-solid path.
     std::vector<double> chiVpCellFluidImpulseX0493x16b;
     std::vector<double> chiVpCellFluidImpulseY0493x16b;
+
+    // 0493x19b-fix2: real-fluid angular momentum immediately before and
+    // after the SRC velocity-rotation kernel, measured about the prescribed
+    // annulus center.  delta = after-before.
+    bool x19bSrcAngularMomentumDiagnosticValid = false;
+    double x19bSrcAngularMomentumBefore = 0.0;
+    double x19bSrcAngularMomentumAfter = 0.0;
+    double x19bSrcAngularMomentumDelta = 0.0;
 
     // 0215: optional persistent collision+thermostat substep diagnostics.
     // These are populated only when the persistent path applies the

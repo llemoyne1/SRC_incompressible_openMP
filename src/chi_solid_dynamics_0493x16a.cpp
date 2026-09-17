@@ -598,7 +598,7 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
         const double* dChiKineticReactionX0493x16j = nullptr;
         const double* dChiKineticReactionY0493x16j = nullptr;
         int chiKineticNx0493x16j = 0, chiKineticNy0493x16j = 0;
-        if (params.chiKineticBoundaryMode == "specular") {
+        if ((params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) {
             if (!cuda_q6_chi_kinetic_wall_reaction_device_0493x16j(
                     &dChiKineticReactionX0493x16j, &dChiKineticReactionY0493x16j,
                     &chiKineticNx0493x16j, &chiKineticNy0493x16j) ||
@@ -629,7 +629,7 @@ ChiSolidDynamicsDiagnostics0493x16a advance_chi_solid_dynamics_0493x16a(
         d.spatialLoadAvailable0493x16b = true;
         d.cellReactionSumX0493x16b = rd.cellReactionSumX;
         d.cellReactionSumY0493x16b = rd.cellReactionSumY;
-        if (params.chiKineticBoundaryMode == "specular") {
+        if ((params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) {
             // rd.cellReactionSum is the exact total reaction on the solid.
             // Existing D+B+VP values are fluid impulses, so recover the kinetic
             // fluid impulse by exact action/reaction without another device reduction.

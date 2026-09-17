@@ -195,6 +195,7 @@
 | `x17c` | Première mécanique de membrane lagrangienne | FSI | Couplage FSI fonctionnel; mécanique structurelle minimale non revendiquée comme modèle de solide détaillé. |
 | `x18a` | Volet rigide articulé 1-DOF | FSI | VALIDATED/FUNCTIONAL: volet 1-DOF avec sous-cyclage x18e et runner x18f inlet_neumann validé localement sur 200 pas à dt=0.006, FLOW_UX=0.352; terminaison COMPLETE. |
 | `x18f` | Frontières ouvertes et initialisation finale du volet | FSI | MIXED: x18a inlet_neumann VALIDATED/FUNCTIONAL; x18b double_neumann fonctionnel qualitativement mais non qualifié quantitativement en bilan de masse. |
+| `x19a` | Première accommodation tangentielle de la frontière lagrangienne | FSI | QUALIFIED |
 
 ## DEMONSTRATION
 
@@ -393,6 +394,12 @@
 | `x15e` | Qualification de la chaîne historique forte | MOBILE_SOLID | PASS pour la chaîne historique statique; mécanisme non retenu comme fermeture mobile finale. |
 | `x16d` | Test galiléen du masque chi mobile | MOBILE_SOLID | REVIEW/FAIL comme invariance galiléenne du remapping binaire; résultat causal retenu. |
 | `x17b` | Initialisation et qualification des solides lagrangiens | MOBILE_SOLID | PASS: 6/6 cas, zéro pénétration stricte, persistance mesh, fermeture action-réaction/charge, contrôle galiléen. |
+| `x19b` | Couette cylindrique avec cylindre intérieur tournant prescrit | FSI | QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS |
+| `x19b-fix1` | Décomposition couple normal/tangentiel du Couette cylindrique x19b | FSI | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix2` | Bilan angulaire paroi/SRC du Couette cylindrique x19b | FSI | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix3` | Audit angulaire complet par opérateur du Couette cylindrique x19b | FSI | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
+| `x19b-fix4` | Couette cylindrique x19b haute SNR à Omega=0.20 | FSI | QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS |
+| `x19c` | Cylindre intérieur libre sous couple constant dans un anneau Couette | FSI | QUALIFIED |
 
 ## RUNNER
 

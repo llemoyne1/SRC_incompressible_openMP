@@ -747,6 +747,15 @@ SimulationParams read_simulation_params_kv(const std::string& filepath) {
         }
         else if (key == "chiSolidMass") p.chiSolidMass = parse_double(value, key);
         else if (key == "chiSolidQualificationDiagnosticsEnable") p.chiSolidQualificationDiagnosticsEnable = parse_bool(value, key);
+        else if (key == "chiSolidPrescribedInnerOmegaZ") p.chiSolidPrescribedInnerOmegaZ = parse_double(value, key);
+        else if (key == "chiSolidPrescribedRotationCenterX") p.chiSolidPrescribedRotationCenterX = parse_double(value, key);
+        else if (key == "chiSolidPrescribedRotationCenterY") p.chiSolidPrescribedRotationCenterY = parse_double(value, key);
+        else if (key == "chiSolidFreeRotorEnable") p.chiSolidFreeRotorEnable = parse_bool(value, key);
+        else if (key == "chiSolidFreeRotorInertia") p.chiSolidFreeRotorInertia = parse_double(value, key);
+        else if (key == "chiSolidFreeRotorInitialOmegaZ") p.chiSolidFreeRotorInitialOmegaZ = parse_double(value, key);
+        else if (key == "chiSolidFreeRotorExternalTorqueZ") p.chiSolidFreeRotorExternalTorqueZ = parse_double(value, key);
+        else if (key == "chiSolidFreeRotorAngularDamping") p.chiSolidFreeRotorAngularDamping = parse_double(value, key);
+        else if (key == "chiSolidFreeRotorOutputEvery") p.chiSolidFreeRotorOutputEvery = parse_int(value, key);
         else if (key == "chiSolidMembraneStretchStiffness") p.chiSolidMembraneStretchStiffness = parse_double(value, key);
         else if (key == "chiSolidMembraneAreaStiffness") p.chiSolidMembraneAreaStiffness = parse_double(value, key);
         else if (key == "chiSolidMembraneDamping") p.chiSolidMembraneDamping = parse_double(value, key);
@@ -2322,27 +2331,91 @@ void validate_simulation_params(const SimulationParams& p) {
         {
             std::string kb = p.chiKineticBoundaryMode;
             std::replace(kb.begin(), kb.end(), '-', '_');
-            if (!(kb == "off" || kb == "none" || kb == "specular")) {
-                throw std::runtime_error("0493x16j chiKineticBoundaryMode supports off or specular");
+            if (!(kb == "off" || kb == "none" || kb == "specular" || kb == "bounceback")) {
+                throw std::runtime_error("0493x19a chiKineticBoundaryMode supports off, specular or bounceback");
             }
-            if (kb == "specular") {
+            if (!std::isfinite(p.chiSolidPrescribedInnerOmegaZ) ||
+                !std::isfinite(p.chiSolidPrescribedRotationCenterX) ||
+                !std::isfinite(p.chiSolidPrescribedRotationCenterY) ||
+                !std::isfinite(p.chiSolidFreeRotorInertia) ||
+                !std::isfinite(p.chiSolidFreeRotorInitialOmegaZ) ||
+                !std::isfinite(p.chiSolidFreeRotorExternalTorqueZ) ||
+                !std::isfinite(p.chiSolidFreeRotorAngularDamping)) {
+                throw std::runtime_error(
+                    "0493x19c annular rotation/free-rotor parameters must be finite");
+            }
+            const bool prescribedInnerRotation0493x19b =
+                std::abs(p.chiSolidPrescribedInnerOmegaZ) > 0.0;
+            const bool freeRotor0493x19c = p.chiSolidFreeRotorEnable;
+            const bool annularRotation0493x19c =
+                prescribedInnerRotation0493x19b || freeRotor0493x19c;
+            if (annularRotation0493x19c &&
+                !(kb == "specular" || kb == "bounceback")) {
+                throw std::runtime_error(
+                    "0493x19c annular rotation/free rotor requires specular or bounceback chi kinetic boundary");
+            }
+            if (freeRotor0493x19c) {
+                if (!(p.chiSolidFreeRotorInertia > 0.0) ||
+                    !(p.chiSolidFreeRotorAngularDamping >= 0.0) ||
+                    p.chiSolidFreeRotorOutputEvery < 0) {
+                    throw std::runtime_error(
+                        "0493x19c free rotor requires positive inertia, non-negative damping, and outputEvery>=0");
+                }
+                if (prescribedInnerRotation0493x19b) {
+                    throw std::runtime_error(
+                        "0493x19c free rotor cannot be combined with prescribed inner omega");
+                }
+                if (p.chiSolidDynamicsEnable) {
+                    throw std::runtime_error(
+                        "0493x19c free rotor is an x17 material-boundary DOF and cannot be combined with legacy chiSolidDynamicsEnable");
+                }
+            }
+            if (kb == "specular" || kb == "bounceback") {
                 if (!p.darcyBrinkmanEnable) {
-                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular requires darcyBrinkmanEnable=true so the resident chi provider exists");
+                    throw std::runtime_error("0493x19a active chi kinetic boundary requires darcyBrinkmanEnable=true so the resident initial-chi provider exists");
                 }
                 // First qualification deliberately separates impermeability from
                 // Darcy/bath/chiVP forcing. This avoids changing any historical
                 // porous-solid closure while the kinetic boundary is validated.
                 if (std::abs(p.darcyAlphaMax) > 1.0e-15) {
-                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular qualification requires darcyAlphaMax=0; do not superpose unqualified Darcy forcing yet");
+                    throw std::runtime_error("0493x19a active chi kinetic boundary requires darcyAlphaMax=0; do not superpose Darcy forcing with the material wall");
                 }
+                // 0493x19b first prescribed-rotation qualification. The annulus is
+                // supplied as a chi file containing two concentric material contours.
+                // Rotation is a tangential material velocity only: the geometric
+                // contour remains stationary. Keep it isolated from structural DOFs
+                // and from the older uniform-translation prescription.
+                if (annularRotation0493x19c) {
+                    if (prescribedInnerRotation0493x19b && p.chiSolidDynamicsEnable) {
+                        throw std::runtime_error(
+                            "0493x19b prescribed inner rotation cannot be combined with chiSolidDynamicsEnable=true");
+                    }
+                    if (p.darcyChiMode != "file") {
+                        throw std::runtime_error(
+                            "0493x19c annular rotation/free-rotor qualification requires darcyChiMode=file");
+                    }
+                    if (std::abs(p.darcyUSolidX) > 1.0e-15 ||
+                        std::abs(p.darcyUSolidY) > 1.0e-15) {
+                        throw std::runtime_error(
+                            "0493x19c annular rotation/free rotor requires darcyUSolidX=darcyUSolidY=0");
+                    }
+                    if (!(p.chiSolidPrescribedRotationCenterX >= 0.0 &&
+                          p.chiSolidPrescribedRotationCenterX <= p.Lx &&
+                          p.chiSolidPrescribedRotationCenterY >= 0.0 &&
+                          p.chiSolidPrescribedRotationCenterY <= p.Ly)) {
+                        throw std::runtime_error(
+                            "0493x19c annular rotation center must lie inside the domain");
+                    }
+                }
+
                 if (p.darcyChiCollisionVpEnable) {
-                    throw std::runtime_error("0493x16j chiKineticBoundaryMode=specular qualification requires darcyChiCollisionVpEnable=false; tangential/SRC coupling will be qualified separately");
+                    throw std::runtime_error("0493x19a active chi kinetic boundary requires darcyChiCollisionVpEnable=false; this first tangential qualification isolates direct kinetic accommodation");
                 }
                 // 0493x17b: with a persistent Lagrangian material boundary,
                 // initialDeactivateBelowChi is once again meaningful as a one-time
                 // initial-state consistency operation. It is NOT a wall model and
                 // is never reapplied during the run. Keep the historical negative
-                // value valid, but allow [0,1] for chiKineticBoundaryMode=specular.
+                // value valid, but allow [0,1] for an active chi kinetic boundary.
                 // Range/finite validation remains centralized in the historical
                 // darcyInitialDeactivateBelowChi validation above.
                 if (p.phaseInterfaceKineticReflectionFraction > 0.0) {
@@ -2394,9 +2467,9 @@ void validate_simulation_params(const SimulationParams& p) {
                     throw std::runtime_error("0493x16a rigid_slab_1d requires positive slab thickness");
                 }
             } else if (p.chiSolidModel == "membrane_2d") {
-                if (p.chiKineticBoundaryMode != "specular") {
+                if (!(p.chiKineticBoundaryMode == "specular" || p.chiKineticBoundaryMode == "bounceback")) {
                     throw std::runtime_error(
-                        "0493x17c membrane_2d requires chiKineticBoundaryMode=specular");
+                        "0493x19a membrane_2d requires an active chi kinetic boundary (specular or bounceback)");
                 }
                 if (p.darcyChiMode == "uniform") {
                     throw std::runtime_error(
@@ -2455,9 +2528,9 @@ void validate_simulation_params(const SimulationParams& p) {
             } else {
                 // 0493x18a: one-DOF rigid hinged plate.  The geometry is a
                 // finite-thickness closed chi contour; only theta(t) evolves.
-                if (p.chiKineticBoundaryMode != "specular") {
+                if (!(p.chiKineticBoundaryMode == "specular" || p.chiKineticBoundaryMode == "bounceback")) {
                     throw std::runtime_error(
-                        "0493x18a hinged_plate_2d requires chiKineticBoundaryMode=specular");
+                        "0493x19a hinged_plate_2d requires an active chi kinetic boundary (specular or bounceback)");
                 }
                 if (!(p.darcyChiMode == "box" || p.darcyChiMode == "rectangle")) {
                     throw std::runtime_error(

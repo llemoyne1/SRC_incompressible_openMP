@@ -2488,6 +2488,20 @@ struct KineticCrossingAccumulator0493x9x {
     double continuousWallImpulseY = 0.0;
     double continuousWallImpulseAbsSum = 0.0;
     double continuousWallPositionShiftAbsSum = 0.0;
+    // 0493x19b: prescribed concentric-annulus torque audit. Populated only
+    // when chiSolidPrescribedInnerOmegaZ is non-zero.
+    unsigned long long x19bInnerCollisions = 0ull;
+    unsigned long long x19bOuterCollisions = 0ull;
+    double x19bInnerTorqueImpulse = 0.0;
+    double x19bOuterTorqueImpulse = 0.0;
+    // 0493x19b-fix1: split the wall-reaction torque into the component
+    // carried by the local facet-normal impulse and the complementary
+    // local tangential impulse. This is diagnostic only: the particle
+    // response and the reaction applied to the solid are unchanged.
+    double x19bInnerTorqueNormalImpulse = 0.0;
+    double x19bInnerTorqueTangentialImpulse = 0.0;
+    double x19bOuterTorqueNormalImpulse = 0.0;
+    double x19bOuterTorqueTangentialImpulse = 0.0;
 
     // 0493x10o: Q6-hydrodynamic velocity + finite thermal interface layer.
     unsigned long long q6ThermalHydroCapturedCells = 0ull;
@@ -2856,6 +2870,13 @@ struct ResidentWorkspace0400 {
     double chiHingedMaxTipDisplacementCells0493x18e = 0.0;
     double chiHingedMaxRadius0493x18e = 0.0;
 
+    // 0493x19c: one-DOF free concentric inner rotor.  The circular geometry
+    // remains stationary; only the material angular velocity and diagnostic
+    // angle are stateful.
+    bool chiFreeRotorInitialized0493x19c = false;
+    double chiFreeRotorTheta0493x19c = 0.0;
+    double chiFreeRotorOmega0493x19c = 0.0;
+
     double phaseGeometryReferenceCellMass0493x6c = 0.0;
     int phaseGeometryLiquidSpeciesCount0493x6c = 0;
     DeviceBuffer0400<double> partial0;
@@ -2999,6 +3020,104 @@ __device__ double atomic_add_double_0400(double* address, double value) {
     } while (assumed != old);
     return __longlong_as_double(old);
 #endif
+}
+
+// 0493x19b-fix3: read-only compact global moments.  One global accumulator is
+// reused serially by the top-level audit checkpoints.  Each CUDA block first
+// reduces locally, so only O(blocks) global atomics are issued per checkpoint.
+struct FluidMomentAccumulator0493x19bFix3 {
+    unsigned long long particles;
+    double mass;
+    double momentumX;
+    double momentumY;
+    double angularMomentumZ;
+    double kineticEnergy;
+    double polarMassMoment;
+    double radialMomentum;
+    double tangentialMomentum;
+};
+
+__device__ FluidMomentAccumulator0493x19bFix3 g_fluidMoments0493x19bFix3;
+
+__global__ void reduce_fluid_moments_0493x19b_fix3_kernel(
+    CudaParticleDeviceView particles,
+    std::uint64_t nParticles,
+    double centerX,
+    double centerY) {
+    extern __shared__ double sm[];
+    const int t = static_cast<int>(threadIdx.x);
+    const int nt = static_cast<int>(blockDim.x);
+    double* sCount = sm + 0 * nt;
+    double* sMass = sm + 1 * nt;
+    double* sPx = sm + 2 * nt;
+    double* sPy = sm + 3 * nt;
+    double* sLz = sm + 4 * nt;
+    double* sK = sm + 5 * nt;
+    double* sI = sm + 6 * nt;
+    double* sPr = sm + 7 * nt;
+    double* sPt = sm + 8 * nt;
+
+    const std::uint64_t i = static_cast<std::uint64_t>(blockIdx.x) *
+                            static_cast<std::uint64_t>(blockDim.x) +
+                            static_cast<std::uint64_t>(threadIdx.x);
+    double count = 0.0, m = 0.0, px = 0.0, py = 0.0, lz = 0.0;
+    double ke = 0.0, polar = 0.0, pr = 0.0, pt = 0.0;
+    if (i < nParticles &&
+        (!particles.role || particles.role[i] == kParticleRoleFluid)) {
+        m = particles.mass ? particles.mass[i] : 1.0;
+        const double x = particles.x[i];
+        const double y = particles.y[i];
+        const double vx = particles.vx[i];
+        const double vy = particles.vy[i];
+        if (isfinite(m) && isfinite(x) && isfinite(y) &&
+            isfinite(vx) && isfinite(vy) && m > 0.0) {
+            const double rx = x - centerX;
+            const double ry = y - centerY;
+            const double r2 = rx * rx + ry * ry;
+            const double r = sqrt(r2);
+            count = 1.0;
+            px = m * vx;
+            py = m * vy;
+            lz = m * (rx * vy - ry * vx);
+            ke = 0.5 * m * (vx * vx + vy * vy);
+            polar = m * r2;
+            if (r > 0.0) {
+                pr = m * (rx * vx + ry * vy) / r;
+                pt = m * (-ry * vx + rx * vy) / r;
+            }
+        } else {
+            m = 0.0;
+        }
+    }
+    sCount[t] = count; sMass[t] = m; sPx[t] = px; sPy[t] = py;
+    sLz[t] = lz; sK[t] = ke; sI[t] = polar; sPr[t] = pr; sPt[t] = pt;
+    __syncthreads();
+    for (int stride = nt / 2; stride > 0; stride >>= 1) {
+        if (t < stride) {
+            sCount[t] += sCount[t + stride];
+            sMass[t] += sMass[t + stride];
+            sPx[t] += sPx[t + stride];
+            sPy[t] += sPy[t + stride];
+            sLz[t] += sLz[t + stride];
+            sK[t] += sK[t + stride];
+            sI[t] += sI[t + stride];
+            sPr[t] += sPr[t + stride];
+            sPt[t] += sPt[t + stride];
+        }
+        __syncthreads();
+    }
+    if (t == 0) {
+        atomicAdd(&g_fluidMoments0493x19bFix3.particles,
+                  static_cast<unsigned long long>(sCount[0]));
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.mass, sMass[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.momentumX, sPx[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.momentumY, sPy[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.angularMomentumZ, sLz[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.kineticEnergy, sK[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.polarMassMoment, sI[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.radialMomentum, sPr[0]);
+        atomic_add_double_0400(&g_fluidMoments0493x19bFix3.tangentialMomentum, sPt[0]);
+    }
 }
 
 __global__ void q6_zero_cells_0400(CudaCellWorkspaceDeviceView cells,
@@ -26052,23 +26171,35 @@ __global__ void q6_x17a_update_edge_velocities(
     const double* bx, const double* by,
     double* uax, double* uay, double* ubx, double* uby,
     const float* uSolidX, const float* uSolidY,
+    double uniformUSolidX, double uniformUSolidY,
     int nx, int ny, double lx, double ly,
     int periodicX, int periodicY,
     int movingSolid) {
     const int e = blockIdx.x * blockDim.x + threadIdx.x;
     if (e >= edgeCount) return;
-    if (!movingSolid || !uSolidX || !uSolidY) {
+    if (!movingSolid) {
         uax[e]=uay[e]=ubx[e]=uby[e]=0.0;
         return;
     }
-    uax[e] = q6_x17a_sample_cellcenter_field(
-        uSolidX, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
-    uay[e] = q6_x17a_sample_cellcenter_field(
-        uSolidY, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
-    ubx[e] = q6_x17a_sample_cellcenter_field(
-        uSolidX, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
-    uby[e] = q6_x17a_sample_cellcenter_field(
-        uSolidY, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+    // 0493x19a-fix2: x17 historically obtained material-wall velocity only
+    // from resident x16 solid fields. A prescribed static Lagrangian contour
+    // (chiSolidDynamicsEnable=false) therefore lost darcyUSolidX/Y and became
+    // silently stationary. Keep field interpolation when fields exist; otherwise
+    // use the uniform prescribed wall velocity. This is required for a moving
+    // belt whose geometry is stationary because its motion is purely tangential.
+    if (uSolidX && uSolidY) {
+        uax[e] = q6_x17a_sample_cellcenter_field(
+            uSolidX, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
+        uay[e] = q6_x17a_sample_cellcenter_field(
+            uSolidY, ax[e], ay[e], nx, ny, lx, ly, periodicX, periodicY);
+        ubx[e] = q6_x17a_sample_cellcenter_field(
+            uSolidX, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+        uby[e] = q6_x17a_sample_cellcenter_field(
+            uSolidY, bx[e], by[e], nx, ny, lx, ly, periodicX, periodicY);
+    } else {
+        uax[e]=ubx[e]=uniformUSolidX;
+        uay[e]=uby[e]=uniformUSolidY;
+    }
 }
 
 __global__ void q6_x17c_set_edges_from_nodes(
@@ -26473,6 +26604,9 @@ struct ChiLagrangianEdgeHit0493x17a {
     double newVx=0.0, newVy=0.0;
     double impulseWallX=0.0, impulseWallY=0.0;
     double reln=0.0;
+    // 0493x19b: 0=ordinary wall, 1=rotating inner annulus branch,
+    // 2=stationary outer annulus branch.
+    int prescribedBoundaryClass=0;
     int edge=-1;
 };
 
@@ -26486,6 +26620,11 @@ __device__ __forceinline__ bool q6_x17a_try_edge_hit(
     const double* ubx, const double* uby,
     const signed char* normalSign,
     double lx, double ly, int periodicX, int periodicY,
+    int kineticReflectionMode0493x19a,
+    int annularRotationActive0493x19c,
+    double prescribedInnerOmegaZ0493x19b,
+    double prescribedCenterX0493x19b,
+    double prescribedCenterY0493x19b,
     ChiLagrangianEdgeHit0493x17a* out) {
     if (!out || edge < 0 || !(remaining > 0.0)) return false;
     double ax=ax0[edge]+elapsed*uax[edge];
@@ -26548,8 +26687,33 @@ __device__ __forceinline__ bool q6_x17a_try_edge_hit(
         const double inv=1.0/sqrt(e2);
         double nx=-ey*inv, ny=ex*inv;
         if (normalSign[edge] < 0) { nx=-nx; ny=-ny; }
-        const double wallVx=(1.0-lam)*uax[edge]+lam*ubx[edge];
-        const double wallVy=(1.0-lam)*uay[edge]+lam*uby[edge];
+        double wallVx=(1.0-lam)*uax[edge]+lam*ubx[edge];
+        double wallVy=(1.0-lam)*uay[edge]+lam*uby[edge];
+        int prescribedBoundaryClass0493x19b=0;
+        if (annularRotationActive0493x19c) {
+            // x19b: the concentric annulus is geometrically stationary. Only
+            // the material velocity of the inner branch rotates. Inner-wall
+            // fluidward normals point away from the common center; outer-wall
+            // fluidward normals point toward it.
+            const double rx=phx-prescribedCenterX0493x19b;
+            const double ry=phy-prescribedCenterY0493x19b;
+            const double radialProjection=rx*nx+ry*ny;
+            if (radialProjection > 0.0) {
+                prescribedBoundaryClass0493x19b=1;
+                const double rawVx=-prescribedInnerOmegaZ0493x19b*ry;
+                const double rawVy= prescribedInnerOmegaZ0493x19b*rx;
+                // Marching-squares makes a faceted circle. Project the exact
+                // rigid-rotation velocity onto the local facet tangent so the
+                // prescribed wall has identically zero discrete normal speed.
+                const double vn=rawVx*nx+rawVy*ny;
+                wallVx=rawVx-vn*nx;
+                wallVy=rawVy-vn*ny;
+            } else {
+                prescribedBoundaryClass0493x19b=2;
+                wallVx=0.0;
+                wallVy=0.0;
+            }
+        }
         const double reln=(vx-wallVx)*nx+(vy-wallVy)*ny;
         // n points from solid to fluid; an entering particle has negative
         // relative normal speed.  This criterion also catches a moving wall
@@ -26559,12 +26723,26 @@ __device__ __forceinline__ bool q6_x17a_try_edge_hit(
         if (tau >= best.tau) continue;
         best.hit=true; best.tau=tau; best.lambda=lam;
         best.nx=nx; best.ny=ny; best.wallVx=wallVx; best.wallVy=wallVy;
-        best.reln=reln; best.edge=edge;
-        best.newVx=vx-2.0*reln*nx;
-        best.newVy=vy-2.0*reln*ny;
-        const double impulse=2.0*mass*reln;
-        best.impulseWallX=impulse*nx;
-        best.impulseWallY=impulse*ny;
+        best.reln=reln; best.prescribedBoundaryClass=prescribedBoundaryClass0493x19b; best.edge=edge;
+        if (kineticReflectionMode0493x19a == 2) {
+            // 0493x19a deterministic full accommodation / moving-wall
+            // bounce-back in the local wall frame: c'=-c.  This reverses
+            // both normal and tangential relative velocity and therefore
+            // transfers tangential momentum while preserving exact
+            // action-reaction at the impact point.
+            best.newVx=2.0*wallVx-vx;
+            best.newVy=2.0*wallVy-vy;
+            best.impulseWallX=2.0*mass*(vx-wallVx);
+            best.impulseWallY=2.0*mass*(vy-wallVy);
+        } else {
+            // Historical x17 specular response: only the relative normal
+            // component is reversed, so there is no tangential traction.
+            best.newVx=vx-2.0*reln*nx;
+            best.newVy=vy-2.0*reln*ny;
+            const double impulse=2.0*mass*reln;
+            best.impulseWallX=impulse*nx;
+            best.impulseWallY=impulse*ny;
+        }
         found=true;
     }
     if (found) *out=best;
@@ -26603,6 +26781,11 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
     int maxParticleSpanCells0493x18e,
     int nx, int ny, double lx, double ly, double dt,
     int periodicX, int periodicY,
+    int kineticReflectionMode0493x19a,
+    int annularRotationActive0493x19c,
+    double prescribedInnerOmegaZ0493x19b,
+    double prescribedCenterX0493x19b,
+    double prescribedCenterY0493x19b,
     KineticCrossingAccumulator0493x9x* audit) {
     const std::uint64_t p=static_cast<std::uint64_t>(blockIdx.x)*blockDim.x+threadIdx.x;
     if (p>=nParticles) return;
@@ -26681,7 +26864,9 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
                     if (!q6_x17a_try_edge_hit(
                             e,cx,cy,cvx,cvy,mass,elapsed,remaining,
                             ax,ay,bx,by,uax,uay,ubx,uby,normalSign,
-                            lx,ly,periodicX,periodicY,&hit)) continue;
+                            lx,ly,periodicX,periodicY,kineticReflectionMode0493x19a,
+                            annularRotationActive0493x19c,prescribedInnerOmegaZ0493x19b,
+                            prescribedCenterX0493x19b,prescribedCenterY0493x19b,&hit)) continue;
                     ++validHits;
                     if (hit.tau<best.tau) best=hit;
                 }
@@ -26696,6 +26881,8 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
         elapsed += best.tau;
         cvx=best.newVx; cvy=best.newVy;
         ++hits;
+        const double impactX0493x19b=cx;
+        const double impactY0493x19b=cy;
         // Move a few ulps toward the fluid side after the event.  This is not
         // an overlap-remapping model; it only prevents the same algebraic root
         // from being rediscovered at tau=0 after reflection.
@@ -26735,6 +26922,37 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
             }
         }
         if (audit) {
+            if (best.prescribedBoundaryClass!=0) {
+                const double rx=impactX0493x19b-prescribedCenterX0493x19b;
+                const double ry=impactY0493x19b-prescribedCenterY0493x19b;
+                const double tau=rx*best.impulseWallY-ry*best.impulseWallX;
+
+                // x19b-fix1 diagnostic decomposition in the LOCAL FACET
+                // frame. Jn is parallel to the fluidward facet normal; Jt is
+                // the complementary tangential wall reaction. On an exact
+                // circle r x Jn is zero. A non-zero normal torque therefore
+                // measures faceting/pressure contamination, while the
+                // tangential torque is the direct Couette shear diagnostic.
+                const double jnScalar=best.impulseWallX*best.nx+
+                                      best.impulseWallY*best.ny;
+                const double jnX=jnScalar*best.nx;
+                const double jnY=jnScalar*best.ny;
+                const double jtX=best.impulseWallX-jnX;
+                const double jtY=best.impulseWallY-jnY;
+                const double tauNormal=rx*jnY-ry*jnX;
+                const double tauTangential=rx*jtY-ry*jtX;
+                if (best.prescribedBoundaryClass==1) {
+                    atomicAdd(&audit->x19bInnerCollisions,1ull);
+                    atomic_add_double_0400(&audit->x19bInnerTorqueImpulse,tau);
+                    atomic_add_double_0400(&audit->x19bInnerTorqueNormalImpulse,tauNormal);
+                    atomic_add_double_0400(&audit->x19bInnerTorqueTangentialImpulse,tauTangential);
+                } else {
+                    atomicAdd(&audit->x19bOuterCollisions,1ull);
+                    atomic_add_double_0400(&audit->x19bOuterTorqueImpulse,tau);
+                    atomic_add_double_0400(&audit->x19bOuterTorqueNormalImpulse,tauNormal);
+                    atomic_add_double_0400(&audit->x19bOuterTorqueTangentialImpulse,tauTangential);
+                }
+            }
             atomicAdd(&audit->continuousWallCollisions,1ull);
             if (hits==2) atomicAdd(&audit->continuousWallSecondCollisions,1ull);
             else if (hits==3) atomicAdd(&audit->continuousWallThirdCollisions,1ull);
@@ -26743,9 +26961,11 @@ __global__ void q6_x17a_apply_lagrangian_boundary(
             atomic_add_double_0400(&audit->continuousWallWallVnSum,wallVn);
             atomic_add_double_0400(&audit->continuousWallWallVnSqSum,wallVn*wallVn);
             atomic_add_double_0400(&audit->continuousWallWallVnAbsSum,fabs(wallVn));
-            const double beforeX=(cvx+2.0*best.reln*best.nx)-best.wallVx;
-            const double beforeY=(cvy+2.0*best.reln*best.ny)-best.wallVy;
             const double afterX=cvx-best.wallVx, afterY=cvy-best.wallVy;
+            const double beforeX=(kineticReflectionMode0493x19a==2)
+                ? -afterX : (cvx+2.0*best.reln*best.nx)-best.wallVx;
+            const double beforeY=(kineticReflectionMode0493x19a==2)
+                ? -afterY : (cvy+2.0*best.reln*best.ny)-best.wallVy;
             const double eb=beforeX*beforeX+beforeY*beforeY;
             const double ea=afterX*afterX+afterY*afterY;
             atomic_add_double_0400(&audit->continuousWallRelativeSpeedSqAbsErrorSum,fabs(ea-eb));
@@ -26905,7 +27125,9 @@ bool apply_chi_kinetic_boundary_0493x16j(
     int periodicX,
     int periodicY) {
     (void)cells;
-    if (params.chiKineticBoundaryMode != "specular") return false;
+    if (!(params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) return false;
+    const int kineticReflectionMode0493x19a =
+        (params.chiKineticBoundaryMode == "bounceback") ? 2 : 1;
 
     const bool membraneActive0493x17c =
         params.chiSolidDynamicsEnable && params.chiSolidModel == "membrane_2d";
@@ -26937,7 +27159,34 @@ bool apply_chi_kinetic_boundary_0493x16j(
             params, &uSolidX, &uSolidY, &usNx, &usNy) &&
             uSolidX && uSolidY && usNx == grid.Nx && usNy == grid.Ny;
     }
-    const bool movingSolid = nodalLagrangianActive0493x18a || movingSolidEulerian;
+    // 0493x19a-fix2: a persistent contour may represent a prescribed moving
+    // material wall even when no structural dynamics model publishes x16 fields.
+    // Non-zero darcyUSolidX/Y is the existing uniform prescribed-wall velocity
+    // in that legacy/static configuration. For zero velocity the historical
+    // stationary path is unchanged.
+    const bool prescribedUniformWall0493x19a =
+        !nodalLagrangianActive0493x18a && !movingSolidEulerian &&
+        (std::abs(params.darcyUSolidX) > 0.0 || std::abs(params.darcyUSolidY) > 0.0);
+    const bool prescribedInnerRotation0493x19b =
+        !nodalLagrangianActive0493x18a &&
+        std::abs(params.chiSolidPrescribedInnerOmegaZ) > 0.0;
+    const bool freeRotor0493x19c =
+        !nodalLagrangianActive0493x18a && params.chiSolidFreeRotorEnable;
+    if (freeRotor0493x19c && !ws.chiFreeRotorInitialized0493x19c) {
+        ws.chiFreeRotorTheta0493x19c = 0.0;
+        ws.chiFreeRotorOmega0493x19c = params.chiSolidFreeRotorInitialOmegaZ;
+        ws.chiFreeRotorInitialized0493x19c = true;
+    }
+    const bool annularRotationActive0493x19c =
+        prescribedInnerRotation0493x19b || freeRotor0493x19c;
+    const double innerOmegaZ0493x19c = freeRotor0493x19c
+        ? ws.chiFreeRotorOmega0493x19c
+        : params.chiSolidPrescribedInnerOmegaZ;
+    // x19b/x19c separate material-wall motion from geometry motion: concentric
+    // circular walls remain fixed as sets while the inner material rotates.
+    const bool geometryMoving0493x19b = nodalLagrangianActive0493x18a ||
+        movingSolidEulerian || prescribedUniformWall0493x19a;
+    const bool movingSolid = geometryMoving0493x19b || annularRotationActive0493x19c;
 
     ws.ensure_kinetic_interface_0493x9x(grid.numCells, 1, 1);
     const std::uint64_t sourceGeometryVersion =
@@ -27108,6 +27357,67 @@ bool apply_chi_kinetic_boundary_0493x16j(
                 bx[e]=edges[e].bx; by[e]=edges[e].by;
                 normalSign[e]=edges[e].normalSign;
             }
+
+            // 0493x19b: fail closed if the prescribed-rotation option is used
+            // on anything other than two well separated, approximately
+            // concentric material branches. This keeps the first benchmark
+            // deliberately narrow instead of silently assigning rotation to an
+            // arbitrary multi-contour chi geometry.
+            if (annularRotationActive0493x19c) {
+                std::size_t innerCount=0, outerCount=0;
+                double innerWeightedRadius=0.0, outerWeightedRadius=0.0;
+                double innerLength=0.0, outerLength=0.0;
+                double innerMinRadius=std::numeric_limits<double>::infinity();
+                double innerMaxRadius=0.0;
+                double outerMinRadius=std::numeric_limits<double>::infinity();
+                double outerMaxRadius=0.0;
+                for (const auto& e : edges) {
+                    const double tx=e.bx-e.ax, ty=e.by-e.ay;
+                    const double len=std::hypot(tx,ty);
+                    const double mx=0.5*(e.ax+e.bx);
+                    const double my=0.5*(e.ay+e.by);
+                    const double rx=mx-params.chiSolidPrescribedRotationCenterX;
+                    const double ry=my-params.chiSolidPrescribedRotationCenterY;
+                    const double r=std::hypot(rx,ry);
+                    if (!(len>0.0) || !(r>2.0*h) || !std::isfinite(r))
+                        throw std::runtime_error("0493x19b invalid prescribed annulus edge radius");
+                    double nx=-ty/len, ny=tx/len;
+                    if (e.normalSign<0) { nx=-nx; ny=-ny; }
+                    const double radialCos=(rx*nx+ry*ny)/r;
+                    if (!std::isfinite(radialCos) || std::abs(radialCos)<0.5)
+                        throw std::runtime_error("0493x19b prescribed rotation requires approximately concentric circular branches");
+                    if (radialCos>0.0) {
+                        ++innerCount; innerWeightedRadius+=len*r; innerLength+=len;
+                        innerMinRadius=std::min(innerMinRadius,r);
+                        innerMaxRadius=std::max(innerMaxRadius,r);
+                    } else {
+                        ++outerCount; outerWeightedRadius+=len*r; outerLength+=len;
+                        outerMinRadius=std::min(outerMinRadius,r);
+                        outerMaxRadius=std::max(outerMaxRadius,r);
+                    }
+                }
+                if (innerCount<8 || outerCount<8 || !(innerLength>0.0) || !(outerLength>0.0) ||
+                    !(innerMaxRadius < outerMinRadius))
+                    throw std::runtime_error("0493x19b prescribed rotation requires two separated inner/outer contour branches");
+                if (!params.outputDir.empty()) {
+                    std::filesystem::create_directories(params.outputDir);
+                    std::ofstream q(std::filesystem::path(params.outputDir)/"chi_prescribed_rotation_0493x19b.txt",std::ios::trunc);
+                    if(!q) throw std::runtime_error("0493x19b failed to open prescribed-rotation geometry summary");
+                    q << std::setprecision(17)
+                      << "model=" << (freeRotor0493x19c ? "free_inner_rotor_annulus" : "prescribed_inner_rotation_annulus") << "\n"
+                      << "centerX=" << params.chiSolidPrescribedRotationCenterX << "\n"
+                      << "centerY=" << params.chiSolidPrescribedRotationCenterY << "\n"
+                      << "omegaZ=" << innerOmegaZ0493x19c << "\n"
+                      << "innerEdges=" << innerCount << "\n"
+                      << "outerEdges=" << outerCount << "\n"
+                      << "innerRadiusLengthWeighted=" << (innerWeightedRadius/innerLength) << "\n"
+                      << "outerRadiusLengthWeighted=" << (outerWeightedRadius/outerLength) << "\n"
+                      << "innerRadiusMin=" << innerMinRadius << "\n"
+                      << "innerRadiusMax=" << innerMaxRadius << "\n"
+                      << "outerRadiusMin=" << outerMinRadius << "\n"
+                      << "outerRadiusMax=" << outerMaxRadius << "\n";
+                }
+            }
         }
         const std::size_t n=ax.size();
         check_cuda_0400(cudaMemcpy(ws.kineticContinuousSegAx0493x10n.data(),
@@ -27191,9 +27501,10 @@ bool apply_chi_kinetic_boundary_0493x16j(
             ws.kineticContinuousSegUay0493x10n.data(),
             ws.kineticContinuousSegUbx0493x10n.data(),
             ws.kineticContinuousSegUby0493x10n.data(),
-            movingSolid?uSolidX:nullptr,movingSolid?uSolidY:nullptr,
+            movingSolidEulerian?uSolidX:nullptr,movingSolidEulerian?uSolidY:nullptr,
+            params.darcyUSolidX,params.darcyUSolidY,
             grid.Nx,grid.Ny,params.Lx,params.Ly,periodicX,periodicY,
-            movingSolid?1:0);
+            geometryMoving0493x19b?1:0);
         check_cuda_0400(cudaGetLastError(),"0493x17a edge velocity update launch");
     }
 
@@ -27313,7 +27624,8 @@ bool apply_chi_kinetic_boundary_0493x16j(
                 nullptr,ws.chiHingedPhysicalLoad0493x18d.data(),
                 ws.chiHingedSafety0493x18e.data(),1,
                 params.chiSolidHingedMaxParticleSpanCells,
-                grid.Nx,grid.Ny,params.Lx,params.Ly,subDt,periodicX,periodicY,nullptr);
+                grid.Nx,grid.Ny,params.Lx,params.Ly,subDt,periodicX,periodicY,
+                kineticReflectionMode0493x19a,0,0.0,0.0,0.0,nullptr);
             check_cuda_0400(cudaGetLastError(),"0493x18e subcycled material-wall launch");
 
             ChiHingedPhysicalLoad0493x18d load{};
@@ -27482,8 +27794,13 @@ bool apply_chi_kinetic_boundary_0493x16j(
 
     const bool auditThisStep=qualification0493x18d && params.summaryEvery>0 &&
         (step==0 || ((step+1)%params.summaryEvery)==0);
+    // x19c requires the exact inner-wall reaction impulse every physical step,
+    // independently of the diagnostic output cadence. Reuse the existing
+    // crossing accumulator rather than introducing a second collision-side
+    // reduction path.
+    const bool collectCrossingAccum0493x19c = auditThisStep || freeRotor0493x19c;
     KineticCrossingAccumulator0493x9x* auditDev=nullptr;
-    if (auditThisStep) {
+    if (collectCrossingAccum0493x19c) {
         KineticCrossingAccumulator0493x9x init{};
         if (initializedThisStep) {
             init.continuousWallDualCellsVisited=
@@ -27497,7 +27814,7 @@ bool apply_chi_kinetic_boundary_0493x16j(
         }
         check_cuda_0400(cudaMemcpy(ws.kineticAccum0493x9x.data(),&init,sizeof(init),
                                   cudaMemcpyHostToDevice),
-                       "0493x17a kinetic audit init");
+                       "0493x19c kinetic/rotor accumulator init");
         auditDev=ws.kineticAccum0493x9x.data();
         unsigned long long overflow=0ull;
         check_cuda_0400(cudaMemcpy(&overflow,ws.chiLagrangianBinOverflow0493x17a.data(),
@@ -27545,8 +27862,72 @@ bool apply_chi_kinetic_boundary_0493x16j(
         hingedActive0493x18a?ws.chiHingedSafety0493x18e.data():nullptr,0,
         hingedActive0493x18a?params.chiSolidHingedMaxParticleSpanCells:0,
         grid.Nx,grid.Ny,params.Lx,params.Ly,params.dt,periodicX,periodicY,
-        auditDev);
+        kineticReflectionMode0493x19a,
+        annularRotationActive0493x19c?1:0,
+        innerOmegaZ0493x19c,
+        params.chiSolidPrescribedRotationCenterX,
+        params.chiSolidPrescribedRotationCenterY,auditDev);
     check_cuda_0400(cudaGetLastError(),"0493x17a Lagrangian material-wall launch");
+
+    // 0493x19c: free one-DOF rotor kick from the exact reaction impulse of the
+    // inner material branch.  The wall used omegaBefore throughout this
+    // pre-stream collision pass; the updated omega is consumed on the next
+    // parent step.  Geometry does not rotate because a centered circular set is
+    // invariant under this DOF.
+    if (freeRotor0493x19c) {
+        KineticCrossingAccumulator0493x9x rotorAccum{};
+        check_cuda_0400(cudaMemcpy(&rotorAccum,ws.kineticAccum0493x9x.data(),
+                                  sizeof(rotorAccum),cudaMemcpyDeviceToHost),
+                       "0493x19c free-rotor wall impulse download");
+        const double inertia=params.chiSolidFreeRotorInertia;
+        const double omegaBefore=ws.chiFreeRotorOmega0493x19c;
+        const double thetaBefore=ws.chiFreeRotorTheta0493x19c;
+        const double hydroImpulse=rotorAccum.x19bInnerTorqueImpulse;
+        const double hydroNormalImpulse=rotorAccum.x19bInnerTorqueNormalImpulse;
+        const double hydroTangentialImpulse=rotorAccum.x19bInnerTorqueTangentialImpulse;
+        const double externalImpulse=params.chiSolidFreeRotorExternalTorqueZ*params.dt;
+        const double dampingImpulse=-params.chiSolidFreeRotorAngularDamping*omegaBefore*params.dt;
+        const double totalImpulse=hydroImpulse+externalImpulse+dampingImpulse;
+        const double omegaAfter=omegaBefore+totalImpulse/inertia;
+        const double thetaAfter=thetaBefore+0.5*params.dt*(omegaBefore+omegaAfter);
+        if (!std::isfinite(omegaAfter) || !std::isfinite(thetaAfter) ||
+            !std::isfinite(totalImpulse)) {
+            throw std::runtime_error("0493x19c free rotor state became non-finite");
+        }
+        const double mechanicsResidual=inertia*(omegaAfter-omegaBefore)-totalImpulse;
+        ws.chiFreeRotorOmega0493x19c=omegaAfter;
+        ws.chiFreeRotorTheta0493x19c=thetaAfter;
+
+        const int rotorEvery=params.chiSolidFreeRotorOutputEvery>0
+            ? params.chiSolidFreeRotorOutputEvery
+            : std::max(1,params.summaryEvery);
+        const bool rotorOutputThisStep=(step==0 || ((step+1)%rotorEvery)==0);
+        if (rotorOutputThisStep && !params.outputDir.empty()) {
+            std::filesystem::create_directories(params.outputDir);
+            const std::filesystem::path rotorPath=
+                std::filesystem::path(params.outputDir)/"chi_free_rotor_0493x19c.csv";
+            const bool writeHeader=!std::filesystem::exists(rotorPath);
+            std::ofstream out(rotorPath,std::ios::app);
+            if(!out) throw std::runtime_error("0493x19c cannot open free-rotor CSV");
+            out << std::setprecision(17);
+            if(writeHeader) {
+                out << "step,time,timeAfter,thetaBefore,thetaAfter,omegaBefore,omegaAfter,inertia,"
+                       "innerCollisions,hydroTorqueImpulse,hydroNormalTorqueImpulse,hydroTangentialTorqueImpulse,"
+                       "externalTorqueImpulse,dampingTorqueImpulse,totalTorqueImpulse,mechanicsResidual,"
+                       "hydroTorque,externalTorque,dampingTorque,totalTorque,kineticEnergyBefore,kineticEnergyAfter\n";
+            }
+            out << step << ',' << time << ',' << (time+params.dt) << ','
+                << thetaBefore << ',' << thetaAfter << ',' << omegaBefore << ',' << omegaAfter << ','
+                << inertia << ',' << rotorAccum.x19bInnerCollisions << ','
+                << hydroImpulse << ',' << hydroNormalImpulse << ',' << hydroTangentialImpulse << ','
+                << externalImpulse << ',' << dampingImpulse << ',' << totalImpulse << ',' << mechanicsResidual << ','
+                << hydroImpulse/params.dt << ',' << params.chiSolidFreeRotorExternalTorqueZ << ','
+                << (-params.chiSolidFreeRotorAngularDamping*omegaBefore) << ',' << totalImpulse/params.dt << ','
+                << (0.5*inertia*omegaBefore*omegaBefore) << ','
+                << (0.5*inertia*omegaAfter*omegaAfter) << '\n';
+        }
+    }
+
     if (hingedActive0493x18a) {
         ChiHingedSafety0493x18e safety{};
         unsigned long long overflow=0ull;
@@ -27635,14 +28016,19 @@ bool apply_chi_kinetic_boundary_0493x16j(
 
     static bool reported=false;
     if (!reported) {
-        std::cout << "[0493x16j-chi-kinetic] mode=specular timing=prestream"
+        std::cout << "[0493x16j-chi-kinetic] mode=" << params.chiKineticBoundaryMode << " timing=prestream"
                   << " backend=x17a-lagrangian-edge-mesh"
                   << " source=initial-chi-0.5 chiReextract=never"
                   << " collision=space-time-moving-segment-quadratic"
-                  << " response=x14l-local-frame-specular"
+                  << " response=" << (kineticReflectionMode0493x19a == 2
+                        ? "local-frame-bounceback" : "x14l-local-frame-specular")
                   << " edgeCount=" << edgeCount
                   << " binCapacity=" << kChiLagrangianCellEdgeCapacity0493x17a
                   << " movingSolid=" << (movingSolid?1:0)
+                  << " geometryMoving=" << (geometryMoving0493x19b?1:0)
+                  << " prescribedInnerOmegaZ=" << params.chiSolidPrescribedInnerOmegaZ
+                  << " freeRotor=" << (freeRotor0493x19c?1:0)
+                  << " activeInnerOmegaZ=" << innerOmegaZ0493x19c
                   << " solidModel=" << params.chiSolidModel
                   << " darcyAlphaMax=" << params.darcyAlphaMax
                   << " chiVP=" << (params.darcyChiCollisionVpEnable?1:0)
@@ -27664,7 +28050,10 @@ bool apply_chi_kinetic_boundary_0493x16j(
             out << "step,time,geometryVersion,movingSolid,rebuildSegments,"
                    "segmentsBuilt,particlesWithCandidate,collisions,secondCollisions,thirdCollisions,"
                    "initialOverlapResolved,wideSearchTriggered,wideSearchFoundSegment,orphanNoSegment,"
-                   "wallImpulseX,wallImpulseY,wallImpulseAbsSum,positionShiftAbsSum\n";
+                   "wallImpulseX,wallImpulseY,wallImpulseAbsSum,positionShiftAbsSum,"
+                   "x19bInnerCollisions,x19bOuterCollisions,x19bInnerTorqueImpulse,x19bOuterTorqueImpulse,"
+                   "x19bInnerTorqueNormalImpulse,x19bInnerTorqueTangentialImpulse,"
+                   "x19bOuterTorqueNormalImpulse,x19bOuterTorqueTangentialImpulse\n";
         }
         out << step << ',' << std::setprecision(17) << time << ','
             << ws.chiLagrangianMeshVersion0493x17a << ',' << (movingSolid?1:0) << ','
@@ -27676,7 +28065,13 @@ bool apply_chi_kinetic_boundary_0493x16j(
             << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ','
             << a.continuousWallImpulseX << ',' << a.continuousWallImpulseY << ','
             << a.continuousWallImpulseAbsSum << ','
-            << a.continuousWallPositionShiftAbsSum << '\n';
+            << a.continuousWallPositionShiftAbsSum << ','
+            << a.x19bInnerCollisions << ',' << a.x19bOuterCollisions << ','
+            << a.x19bInnerTorqueImpulse << ',' << a.x19bOuterTorqueImpulse << ','
+            << a.x19bInnerTorqueNormalImpulse << ','
+            << a.x19bInnerTorqueTangentialImpulse << ','
+            << a.x19bOuterTorqueNormalImpulse << ','
+            << a.x19bOuterTorqueTangentialImpulse << '\n';
     }
     return true;
 }
@@ -27736,13 +28131,54 @@ bool supported_subset_0400(const SimulationParams& params,
 
 } // namespace
 
+CudaFluidMomentSnapshot0493x19bFix3 cuda_q6_measure_resident_fluid_moments_0493x19b_fix3(
+    double centerX, double centerY) {
+    CudaFluidMomentSnapshot0493x19bFix3 out{};
+    if (!cuda_shared_particle_state_0251_is_fresh()) return out;
+    CudaParticleState& gpuState = cuda_shared_particle_state_0251();
+    CudaParticleDeviceView particles = gpuState.device_view();
+    const std::uint64_t nParticles =
+        particles.nActiveFluid > 0u ? particles.nActiveFluid : particles.n;
+    if (nParticles == 0u || nParticles > particles.n) return out;
+
+    FluidMomentAccumulator0493x19bFix3 zero{};
+    check_cuda_0400(cudaMemcpyToSymbol(
+        g_fluidMoments0493x19bFix3, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice),
+        "0493x19b-fix3 moment accumulator zero");
+    constexpr int threads = 256;
+    const int blocks = std::max(
+        1, static_cast<int>((nParticles + static_cast<std::uint64_t>(threads) - 1u) /
+                            static_cast<std::uint64_t>(threads)));
+    const std::size_t shared = 9u * static_cast<std::size_t>(threads) * sizeof(double);
+    reduce_fluid_moments_0493x19b_fix3_kernel<<<blocks, threads, shared>>>(
+        particles, nParticles, centerX, centerY);
+    check_cuda_0400(cudaGetLastError(), "0493x19b-fix3 moment reduction launch");
+    check_cuda_0400(cudaDeviceSynchronize(), "0493x19b-fix3 moment reduction sync");
+
+    FluidMomentAccumulator0493x19bFix3 h{};
+    check_cuda_0400(cudaMemcpyFromSymbol(
+        &h, g_fluidMoments0493x19bFix3, sizeof(h), 0, cudaMemcpyDeviceToHost),
+        "0493x19b-fix3 moment accumulator download");
+    out.handled = true;
+    out.particles = static_cast<std::uint64_t>(h.particles);
+    out.mass = h.mass;
+    out.momentumX = h.momentumX;
+    out.momentumY = h.momentumY;
+    out.angularMomentumZ = h.angularMomentumZ;
+    out.kineticEnergy = h.kineticEnergy;
+    out.polarMassMoment = h.polarMassMoment;
+    out.radialMomentum = h.radialMomentum;
+    out.tangentialMomentum = h.tangentialMomentum;
+    return out;
+}
+
 bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
     ParticleState& state,
     const SimulationParams& params,
     const CellGrid& grid,
     int step,
     double time) {
-    if (params.chiKineticBoundaryMode != "specular") return false;
+    if (!(params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) return false;
 
     const std::uint64_t active = active_fluid_count(state);
     if (active == 0u) {
@@ -27804,7 +28240,7 @@ bool cuda_q6_record_chi_penetration_poststream_0493x16l(
     const CellGrid& grid,
     int step,
     double timePoststream) {
-    if (params.chiKineticBoundaryMode != "specular") return false;
+    if (!(params.chiKineticBoundaryMode == "specular" || params.chiKineticBoundaryMode == "bounceback")) return false;
 
     const bool auditThisStep = params.summaryEvery > 0 &&
         (step == 0 || ((step + 1) % params.summaryEvery) == 0);

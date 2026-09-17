@@ -741,7 +741,7 @@ struct SimulationParams {
     // off preserves every historical Darcy/chi script. specular treats chi=0.5
     // as an impermeable moving material interface using the qualified x10n/Q2
     // crossing engine and local-moving-frame specular response.
-    std::string chiKineticBoundaryMode = "off"; // off, specular
+    std::string chiKineticBoundaryMode = "off"; // off, specular, bounceback (0493x19a)
     double darcyChiCollisionVpGamma = -1.0; // <=0: wallVpGamma, then inferred active-fluid gamma
     double darcyChiCollisionVpMass = 1.0;
     int darcyChiCollisionVpLayers = 1;
@@ -760,6 +760,28 @@ struct SimulationParams {
     // path computes only quantities required by the physics and requested
     // scientific outputs. Set true only for dedicated validation campaigns.
     bool chiSolidQualificationDiagnosticsEnable = false;
+
+    // 0493x19b: prescribed tangential rotation of the INNER branch of a
+    // concentric Lagrangian material boundary. The geometry itself remains
+    // fixed; only the local material-wall velocity used by the kinetic
+    // response is non-zero. A boundary branch is classified as inner when its
+    // fluidward normal has positive radial projection from the prescribed
+    // center. Zero omega preserves the x17/x19a path exactly.
+    double chiSolidPrescribedInnerOmegaZ = 0.0;
+    double chiSolidPrescribedRotationCenterX = 0.0;
+    double chiSolidPrescribedRotationCenterY = 0.0;
+
+    // 0493x19c: one-DOF free inner rotor on the same concentric annulus.
+    // Geometry remains stationary as a set; the scalar angular velocity is
+    // advanced from the exact inner-wall reaction impulse plus an optional
+    // constant external torque and viscous mechanical damping.  The rotation
+    // center reuses chiSolidPrescribedRotationCenterX/Y.
+    bool chiSolidFreeRotorEnable = false;
+    double chiSolidFreeRotorInertia = 1.0;
+    double chiSolidFreeRotorInitialOmegaZ = 0.0;
+    double chiSolidFreeRotorExternalTorqueZ = 0.0;
+    double chiSolidFreeRotorAngularDamping = 0.0;
+    int chiSolidFreeRotorOutputEvery = 0; // <=0: use summaryEvery
 
     // 0493x17c: true Lagrangian elastic membrane mechanics on the persistent
     // x17a chi=0.5 contour.  The geometry input remains chi; these parameters

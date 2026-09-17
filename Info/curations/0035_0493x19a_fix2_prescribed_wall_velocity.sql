@@ -1,0 +1,11 @@
+-- 0493x19a-fix2 — prescribed tangential velocity for persistent x17 wall
+-- Status: PENDING_LOCAL_CUDA_BUILD_AND_QUALIFICATION
+-- 2026-09-16
+-- Finding: the first planar Couette pair produced near-zero ux for both
+-- specular and bounceback because q6_x17a_update_edge_velocities zeroed edge
+-- velocities when chiSolidDynamicsEnable=false and no x16 resident uSolid field
+-- was published. darcyUSolidX=0.04 was therefore not reaching the x17 contour.
+-- Fix: retain interpolated x16 velocity fields when available; otherwise use
+-- darcyUSolidX/Y as uniform prescribed material-wall velocity for the persistent
+-- static contour. Historical zero-velocity static walls remain unchanged.
+-- Runner now requires movingSolid=1 in the x17 startup diagnostic.

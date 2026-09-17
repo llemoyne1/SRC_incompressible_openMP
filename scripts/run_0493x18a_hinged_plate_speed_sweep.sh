@@ -2,10 +2,10 @@
 set -u
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT" || exit $?
-SPEEDS="${SPEEDS:-0.08 0.12 0.16 0.2}"
-SWEEP_ROOT="${SWEEP_ROOT:-runs/0493x18a_hinged_plate_speed_sweep}"
-STEPS="${STEPS:-600}"
-RECORD_ENABLE="${RECORD_ENABLE:-false}"
+SPEEDS="${SPEEDS:-0.01 0.02}"
+SWEEP_ROOT="${SWEEP_ROOT:-runs/0493x18a_hinged_plate_speed_sweep_V3}"
+STEPS="${STEPS:-7500}"
+RECORD_ENABLE="${RECORD_ENABLE:-true}"
 for U in $SPEEDS; do
   TAG="$(python3 - "$U" <<'PY'
 import sys

@@ -154,6 +154,22 @@ struct CudaQ6ForceKick0493x3Diagnostics {
     const char* reason = "";
 };
 
+// 0493x19b-fix3: compact real-fluid global moments used by the full
+// operator-by-operator angular-momentum audit.  The CUDA implementation is
+// read-only and never changes host/device authority.
+struct CudaFluidMomentSnapshot0493x19bFix3 {
+    bool handled = false;
+    std::uint64_t particles = 0u;
+    double mass = 0.0;
+    double momentumX = 0.0;
+    double momentumY = 0.0;
+    double angularMomentumZ = 0.0;
+    double kineticEnergy = 0.0;
+    double polarMassMoment = 0.0;
+    double radialMomentum = 0.0;
+    double tangentialMomentum = 0.0;
+};
+
 struct CudaQ6Resident0400Diagnostics {
     bool requested = false;
     bool handled = false;
@@ -211,10 +227,16 @@ CudaQ6PhaseAlphaView0493x6c cuda_q6_phase_alpha_view_0493x6c();
 CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b();
 CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d();
 
-// 0493x16j-fix1: run the chi material-wall crossing at the actual pre-stream
+// 0493x19a/x16j: run the chi material-wall crossing at the actual pre-stream
 // time level, independently of the selected species-Q6 branch.  The routine
 // reuses the resident x10n/Q2/x10p/q engine and leaves the shared particle
 // state resident for the CUDA streaming stage that follows.
+// 0493x19b-fix3: read-only global moments of the resident real-fluid state.
+// Returns handled=false when the shared CUDA particle state is not currently
+// authoritative; callers may then evaluate the same moments from the host state.
+CudaFluidMomentSnapshot0493x19bFix3 cuda_q6_measure_resident_fluid_moments_0493x19b_fix3(
+    double centerX, double centerY);
+
 bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(
     ParticleState& state,
     const SimulationParams& params,
@@ -288,6 +310,10 @@ inline CudaQ6PhaseCurvatureView0493x9b cuda_q6_phase_curvature_view_0493x9b() {
     return {};
 }
 inline CudaQ6PhaseCurvatureView0493x9d cuda_q6_phase_curvature_view_0493x9d() {
+    return {};
+}
+inline CudaFluidMomentSnapshot0493x19bFix3 cuda_q6_measure_resident_fluid_moments_0493x19b_fix3(
+    double, double) {
     return {};
 }
 inline bool cuda_q6_apply_chi_kinetic_boundary_prestream_0493x16j(

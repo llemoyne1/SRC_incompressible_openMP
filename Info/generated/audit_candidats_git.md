@@ -7,12 +7,12 @@
 | Statut | Confiance | Nombre |
 |---|---|---:|
 | CANDIDATE | A | 468 |
-| CANDIDATE | B | 478 |
+| CANDIDATE | B | 480 |
 | CANDIDATE | C | 3 |
 | CURATED | A | 45 |
 | CURATED | B | 8 |
-| LINKED | A | 17 |
-| LINKED | B | 200 |
+| LINKED | A | 18 |
+| LINKED | B | 205 |
 
 ## Candidats déjà reliés à un jalon canonique
 
@@ -70,6 +70,7 @@
 | `x12a` | `candidate:x:x12a` | 22 |
 | `x14v` | `candidate:x:x14v` | 7 |
 | `x17b` | `candidate:x:x17b` | 9 |
+| `x18f` | `candidate:x:x18f` | 1 |
 | `x6f2` | `candidate:x:x6f2` | 4 |
 | `x7j` | `candidate:x:x7j` | 3 |
 | `x8c` | `candidate:x:x8c` | 5 |
@@ -182,7 +183,7 @@
 | `x14ay` | `candidate:x:x14ay` | 1 |
 | `x14b` | `candidate:x:x14b` | 2 |
 | `x14ba` | `candidate:x:x14ba` | 2 |
-| `x14bc` | `candidate:x:x14bc` | 3 |
+| `x14bc` | `candidate:x:x14bc` | 4 |
 | `x14c` | `candidate:x:x14c` | 2 |
 | `x14e` | `candidate:x:x14e` | 1 |
 | `x14f` | `candidate:x:x14f` | 3 |
@@ -208,7 +209,7 @@
 | `x15c` | `candidate:x:x15c` | 2 |
 | `x15e` | `candidate:x:x15e` | 2 |
 | `x15f` | `candidate:x:x15f` | 2 |
-| `x16a` | `candidate:x:x16a` | 8 |
+| `x16a` | `candidate:x:x16a` | 9 |
 | `x16b` | `candidate:x:x16b` | 3 |
 | `x16c` | `candidate:x:x16c` | 3 |
 | `x16d` | `candidate:x:x16d` | 4 |
@@ -226,6 +227,11 @@
 | `x16p` | `candidate:x:x16p` | 7 |
 | `x16q` | `candidate:x:x16q` | 7 |
 | `x17a` | `candidate:x:x17a` | 7 |
+| `x17c` | `candidate:x:x17c` | 10 |
+| `x17d` | `candidate:x:x17d` | 26 |
+| `x18a` | `candidate:x:x18a` | 8 |
+| `x18b` | `candidate:x:x18b` | 1 |
+| `x18d` | `candidate:x:x18d` | 1 |
 | `x2` | `candidate:x:x2` | 2 |
 | `x3` | `candidate:x:x3` | 5 |
 | `x4a` | `candidate:x:x4a` | 5 |
@@ -1130,6 +1136,7 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x11` | 2026-08-22T17:35:47+02:00 | `8f587696ba` surface tension quantif.validated particle evaporation trated | 4 | IN_MAINLINE |
 | `x12` | 2026-08-27T21:27:16+02:00 | `15aa7c3c41` calibrateur sigma et nu avancés, campagne de recherche Re élevé | 2 | IN_MAINLINE |
 | `x13tw` | 2026-08-31T22:22:09+02:00 | `3dafac4652` untracked files on surf: 7655b81 one-for_one swap normal only & validation scripts for surf. tension (osc. droplet and TC | 3 |  |
+| `x18` | 2026-09-15T22:02:00+02:00 | `a7bf54a33f` 0493x18f: finalize hinged FSI open boundaries and document validation | 2 | IN_MAINLINE |
 | `x7s` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 | `x7t` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 2 | IN_MAINLINE |
 | `x7u` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 7 | IN_MAINLINE |
@@ -1138,4 +1145,4 @@ Candidats B conservés ici uniquement s’ils disposent de plusieurs preuves ou 
 | `x7x` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 6 | IN_MAINLINE |
 | `x7y` | 2026-08-14T14:35:17+02:00 | `3bd07c8035` daignostics of momentum loss | 3 | IN_MAINLINE |
 
-Le CSV complet contient les **1219 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.
+Le CSV complet contient les **1227 candidats**, y compris les entrées B/C à faible signal qui ne sont pas développées dans cette vue Markdown.

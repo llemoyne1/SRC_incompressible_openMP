@@ -95,6 +95,87 @@ void read_chi_vp_impulse_0493x15b(bool enabled,
     diag.chiVpFluidImpulseY = h[1];
 }
 
+// 0493x19b-fix2: diagnostic-only global real-fluid angular momentum
+// immediately before/after the SRC rotation kernel.  The reduction uses one
+// double atomic per CUDA block rather than one per particle, so the short
+// qualification run can sample every solver step without turning the audit
+// itself into the dominant cost.
+__device__ double g_x19bSrcAngularMomentum0493x19bFix2[2];
+
+__global__ void x19b_reduce_real_fluid_angular_momentum_fix2_kernel(
+    int n,
+    const unsigned char* role,
+    const double* mass,
+    const double* x,
+    const double* y,
+    const double* vx,
+    const double* vy,
+    unsigned char fluidRole,
+    double centerX,
+    double centerY,
+    int slot)
+{
+    __shared__ double partial[256];
+    const int tid = threadIdx.x;
+    const int i = blockIdx.x * blockDim.x + tid;
+    double value = 0.0;
+    if (i < n && role[i] == fluidRole) {
+        const double rx = x[i] - centerX;
+        const double ry = y[i] - centerY;
+        value = mass[i] * (rx * vy[i] - ry * vx[i]);
+    }
+    partial[tid] = value;
+    __syncthreads();
+    for (int stride = 128; stride > 0; stride >>= 1) {
+        if (tid < stride) partial[tid] += partial[tid + stride];
+        __syncthreads();
+    }
+    if (tid == 0) atomicAdd(&g_x19bSrcAngularMomentum0493x19bFix2[slot], partial[0]);
+}
+
+void reset_x19b_src_angular_momentum_fix2(bool enabled) {
+    if (!enabled) return;
+    const double zero[2] = {0.0, 0.0};
+    MPCD_CUDA_CHECK(cudaMemcpyToSymbol(g_x19bSrcAngularMomentum0493x19bFix2, zero,
+                                       2 * sizeof(double), 0, cudaMemcpyHostToDevice));
+}
+
+void launch_x19b_src_angular_momentum_fix2(
+    bool enabled,
+    int slot,
+    int n,
+    const unsigned char* role,
+    const double* mass,
+    const double* x,
+    const double* y,
+    const double* vx,
+    const double* vy,
+    double centerX,
+    double centerY)
+{
+    if (!enabled) return;
+    constexpr int threads0493x19bFix2 = 256;
+    const int blocks = std::max(1, (n + threads0493x19bFix2 - 1) / threads0493x19bFix2);
+    x19b_reduce_real_fluid_angular_momentum_fix2_kernel<<<blocks, threads0493x19bFix2>>>(
+        n, role, mass, x, y, vx, vy, static_cast<unsigned char>(kParticleRoleFluid),
+        centerX, centerY, slot);
+    MPCD_CUDA_CHECK(cudaGetLastError());
+}
+
+void read_x19b_src_angular_momentum_fix2(
+    bool enabled,
+    CudaPersistentMpcdStepDiagnostics& diag)
+{
+    if (!enabled) return;
+    double h[2] = {0.0, 0.0};
+    MPCD_CUDA_CHECK(cudaMemcpyFromSymbol(h, g_x19bSrcAngularMomentum0493x19bFix2,
+                                         2 * sizeof(double), 0, cudaMemcpyDeviceToHost));
+    diag.x19bSrcAngularMomentumDiagnosticValid = true;
+    diag.x19bSrcAngularMomentumBefore = h[0];
+    diag.x19bSrcAngularMomentumAfter = h[1];
+    diag.x19bSrcAngularMomentumDelta = h[1] - h[0];
+}
+
 // 0493x16b: cached device field for exact cell-resolved chiVP exchange.
 // The load is accumulated on the unshifted physical grid so SolidGeometry can
 // project it onto arbitrary rigid/deformable DOFs independently of the random
@@ -1235,6 +1316,16 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
     reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
+    const bool x19bAngularAuditFix2 = config.x19bSrcAngularMomentumDiagnostic != 0;
+    if (x19bAngularAuditFix2 && (applyThermostat || cycles != 1)) {
+        throw std::runtime_error(
+            "0493x19b-fix2 SRC angular-momentum audit requires collision-only cycles=1");
+    }
+    reset_x19b_src_angular_momentum_fix2(x19bAngularAuditFix2);
+    launch_x19b_src_angular_momentum_fix2(
+        x19bAngularAuditFix2, 0, nInt, b.role, b.mass, b.x, b.y, b.vx, b.vy,
+        config.x19bAngularMomentumCenterX, config.x19bAngularMomentumCenterY);
+
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
         reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, b.cellId, b.count, b.cellMass,
@@ -1278,7 +1369,11 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_impl(
             MPCD_CUDA_CHECK(cudaGetLastError());
         }
     }
+    launch_x19b_src_angular_momentum_fix2(
+        x19bAngularAuditFix2, 1, nInt, b.role, b.mass, b.x, b.y, b.vx, b.vy,
+        config.x19bAngularMomentumCenterX, config.x19bAngularMomentumCenterY);
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_x19b_src_angular_momentum_fix2(x19bAngularAuditFix2, diag);
     read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
     read_chi_vp_cell_impulse_0493x16b(
         cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
@@ -2448,6 +2543,16 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
     cfg.fluidRole = static_cast<unsigned char>(kParticleRoleFluid);
     reset_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0);
 
+    const bool x19bAngularAuditFix2 = config.x19bSrcAngularMomentumDiagnostic != 0;
+    if (x19bAngularAuditFix2 && cycles != 1) {
+        throw std::runtime_error(
+            "0493x19b-fix2 SRC angular-momentum audit requires collision-only cycles=1");
+    }
+    reset_x19b_src_angular_momentum_fix2(x19bAngularAuditFix2);
+    launch_x19b_src_angular_momentum_fix2(
+        x19bAngularAuditFix2, 0, nInt, pv.role, pv.mass, pv.x, pv.y, pv.vx, pv.vy,
+        config.x19bAngularMomentumCenterX, config.x19bAngularMomentumCenterY);
+
     t0 = Clock::now();
     for (int cycle = 0; cycle < cycles; ++cycle) {
         reset_persistent_cells_kernel<<<resetBlocks, threads>>>(nInt, nc, cv.cellId, cv.count, cv.cellMass,
@@ -2470,10 +2575,14 @@ CudaPersistentMpcdStepDiagnostics cuda_apply_persistent_tg_deposit_src_collision
                                                                   cv.rotatedCounter, cv.invalidCounter);
         checkKernelLaunch0273();
     }
+    launch_x19b_src_angular_momentum_fix2(
+        x19bAngularAuditFix2, 1, nInt, pv.role, pv.mass, pv.x, pv.y, pv.vx, pv.vy,
+        config.x19bAngularMomentumCenterX, config.x19bAngularMomentumCenterY);
     if (lazyKernelLaunchCheck0273) {
         MPCD_CUDA_CHECK(cudaGetLastError());
     }
     MPCD_CUDA_CHECK(cudaDeviceSynchronize());
+    read_x19b_src_angular_momentum_fix2(x19bAngularAuditFix2, diag);
     read_chi_vp_impulse_0493x15b(cfg.chiVpImpulseDiagnostic != 0, diag);
     read_chi_vp_cell_impulse_0493x16b(
         cfg.chiVpCellImpulseDiagnostic0493x16b != 0 &&
