@@ -1,0 +1,22 @@
+0493x24bc Sato incident-jet profile comparison - V2 correction
+Date: 2026-09-25
+
+Reason for V2:
+- The authoritative recording manifests show recordFields=rho,ux,uy, not rho1,rho2,ux,uy.
+- The first MATLAB analyzer incorrectly required rho1/rho2 and therefore found zero usable frames.
+- The manifests also show an observation-only mismatch: x24b smoothPasses=3, x24c smoothPasses=0.
+
+V2 policy:
+- Use the fields actually recorded: rho and uy.
+- Use incidentGasMassDensity from the already existing sato_stageA_recording_history.csv to construct a conservative gas-region density mask.
+- Reject recording cells whose total mass exceeds 3 times the expected gas-cell mass.
+- Equalize observational smoothing by applying the exact recorder 3x3 arithmetic box smoother offline to the less-smoothed dataset until both have effective smoothPasses=3.
+- Do not modify any simulation or original recording.
+
+Quantity:
+Jdown_proxy = rho_total * max(-uy,0)^2 / recordCellArea in gas-masked cells.
+It is an advective gas-region proxy, not species-resolved rho_g and not a full stress tensor.
+
+Window: steps 3000:4000.
+Probe heights: z/D = 0.25, 0.50, 1.00 above etaFar(t).
+Outputs remain under ../runs/0493x24bc_sato_jet_profile_comparison and each run's analysis directory.

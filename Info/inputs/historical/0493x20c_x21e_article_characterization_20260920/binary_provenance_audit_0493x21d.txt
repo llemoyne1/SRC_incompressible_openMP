@@ -1,0 +1,225 @@
+===== 0493x21d CURRENT-BINARY PROVENANCE AUDIT =====
+policy=READ_ONLY_NO_BUILD_NO_CHECKOUT_NO_MODIFICATION
+root=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF
+referenceCommit=74297ce274fc0cd92a9f47a4de92b444ce671b5f
+
+===== BINARY =====
+binary=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/build/src_mpcd_base_cuda_q6_resident_livevis_0486
+binarySha256=422a199e0bdd2ae0525f41a332299cabec268fee7d04957d839e1e765a806ecc
+binaryMtime=2026-09-20 09:49:51.729693400 +0200
+binarySize=18288840
+
+===== GIT =====
+head=74297ce274fc0cd92a9f47a4de92b444ce671b5f
+branch=surf
+referenceSubject=74297ce274fc0cd92a9f47a4de92b444ce671b5f 2026-09-17 23:16:20 +0200 0493x19c: qualify rotational FSI end-to-end
+
+===== BUILD-RELEVANT WORKTREE STATUS =====
+ M src/src_mpcd_base.cpp
+
+===== BUILD-RELEVANT DIFFERENCES VS REFERENCE COMMIT =====
+M	src/src_mpcd_base.cpp
+
+===== CUDA CAPILLARY CORE CHECK =====
+src/cuda_q6_resident_0400.cu currentSha256=d3efa1618a4c5a8deb519a4fc3c9ac7a93e0569e9677e021fe64c9a2e2307aee
+src/cuda_q6_resident_0400.cu referenceSha256=d3efa1618a4c5a8deb519a4fc3c9ac7a93e0569e9677e021fe64c9a2e2307aee
+src/cuda_q6_resident_0400.cu status=IDENTICAL_TO_REFERENCE
+src/src_mpcd_base.cpp currentSha256=4e3b345f437d010f8296ccea569480bb84aefadb31e6fb28b0ef44941660f4d1
+src/src_mpcd_base.cpp referenceSha256=eb0b3fdc8653c70c3a789430115836800477fa66131fa23437ec708f17d8774e
+src/src_mpcd_base.cpp status=DIFFERS_FROM_REFERENCE
+src/params_io_base.cpp currentSha256=eaec5986b7de95928f2505b1bd31987d809372b46eded6cbabfb0b0d151785a0
+src/params_io_base.cpp referenceSha256=eaec5986b7de95928f2505b1bd31987d809372b46eded6cbabfb0b0d151785a0
+src/params_io_base.cpp status=IDENTICAL_TO_REFERENCE
+scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh currentSha256=66b31391c26f51a5f00d6e8335cb5d1c246cbe7bbfda1e2e6419f0e7f303b0f8
+scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh referenceSha256=66b31391c26f51a5f00d6e8335cb5d1c246cbe7bbfda1e2e6419f0e7f303b0f8
+scripts/build_src_mpcd_cuda_q6_resident_livevis_0486.sh status=IDENTICAL_TO_REFERENCE
+
+===== X21C FIX2 MARKER CHECK =====
+src/cuda_q6_resident_0400.cu:1280:        << "face-kappa=interp(p3/x9m);limit-only-in-sigma*kappa;"
+src/cuda_q6_resident_0400.cu.orig:1280:        << "face-kappa=interp(p3/x9m);limit-only-in-sigma*kappa;"
+x21cFix2Markers=PRESENT
+
+===== DIFF: src/src_mpcd_base.cpp VS REFERENCE =====
+diff --git a/src/src_mpcd_base.cpp b/src/src_mpcd_base.cpp
+index 51320b4..dc125ef 100755
+--- a/src/src_mpcd_base.cpp
++++ b/src/src_mpcd_base.cpp
+@@ -92,28 +92,43 @@ CudaFluidMomentSnapshot0493x19bFix3 measure_host_fluid_moments_0493x19b_fix3(
+         if (r > 0.0) {
+             out.radialMomentum += m * (rx * vx + ry * vy) / r;
+             out.tangentialMomentum += m * (-ry * vx + rx * vy) / r;
+         }
+     }
+     return out;
+ }
+ 
++bool full_angular_audit_0493x19b_fix3_requested() {
++    // Process-level diagnostic flag: runners set it before launch and the solver
++    // never mutates it. Cache it once so the production hot path does not call
++    // getenv() at every timestep.
++    static const bool enabled =
++        env_truthy_src_base_0475a("MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT");
++    return enabled;
++}
++
+ class FullAngularAudit0493x19bFix3 {
+ public:
+     FullAngularAudit0493x19bFix3(const SimulationParams& params,
+                                  std::uint64_t step,
+                                  double time)
+-        : enabled_(env_truthy_src_base_0475a("MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT") &&
++        : enabled_(full_angular_audit_0493x19b_fix3_requested() &&
+                    !params.outputDir.empty() &&
+                    std::abs(params.chiSolidPrescribedInnerOmegaZ) > 0.0),
+-          centerX_(params.chiSolidPrescribedRotationCenterX),
+-          centerY_(params.chiSolidPrescribedRotationCenterY),
+-          outputDir_(params.outputDir), step_(step), time_(time) {
+-        if (enabled_ && (!std::isfinite(centerX_) || !std::isfinite(centerY_))) {
++          step_(step), time_(time) {
++        // 0493x19d-perf: the complete x19b audit is diagnostic-only.  When it
++        // is disabled, keep construction allocation-free and avoid copying the
++        // output path on every production timestep.
++        if (!enabled_) return;
++
++        centerX_ = params.chiSolidPrescribedRotationCenterX;
++        centerY_ = params.chiSolidPrescribedRotationCenterY;
++        outputDir_ = params.outputDir;
++        if (!std::isfinite(centerX_) || !std::isfinite(centerY_)) {
+             throw std::runtime_error("0493x19b-fix3 invalid angular-audit center");
+         }
+         stages_.reserve(20);
+     }
+ 
+     bool enabled() const { return enabled_; }
+ 
+     void capture(const char* stage, const ParticleState& state) {
+@@ -818,16 +833,19 @@ CudaResidentProfileRow0266 make_cuda_resident_profile_row_0266(std::uint64_t ste
+     return row;
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaPeriodicStreaming0245Diagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+@@ -842,16 +860,19 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
+     acc.add(row);
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaWallSimpleStreaming0246Diagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+@@ -869,16 +890,19 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
+     acc.add(row);
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaPistonStreaming0247bDiagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+@@ -896,16 +920,19 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
+     acc.add(row);
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaImmersedRectangle0247Diagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+@@ -921,16 +948,19 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
+     acc.add(row);
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaImmersedCircle0284Diagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+@@ -946,16 +976,19 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
+     acc.add(row);
+ }
+ 
+ void record_cuda_resident_profile_0266(const std::string& outputDir,
+                                        std::uint64_t step,
+                                        const char* mode,
+                                        const char* phase,
+                                        const CudaClassicSrcIoResident0263Diagnostics& d) {
++    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
++    // output directory on every timestep when resident profiling is disabled.
++    if (!cuda_resident_profile_0266_enabled()) return;
+     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
+     row.requested = d.requested ? 1 : 0;
+     row.supported = d.supported ? 1 : 0;
+     row.handled = d.handled ? 1 : 0;
+     row.applied = d.applied ? 1 : 0;
+     row.particles = d.particles;
+     row.fluidParticles = d.fluidParticles;
+     row.allocationCalls = d.allocationCalls;
+
+===== DIFF: src/cuda_q6_resident_0400.cu VS REFERENCE =====
+
+===== DECISION =====
+sourceState=DIFFERS_FROM_REFERENCE
+trackedBuildInputDiff=1
+untrackedSourceOrHeaderFiles=0
+nextAction=REVIEW_LISTED_DIFFS_BEFORE_USING_CURRENT_BINARY
+
+report=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x21d_binary_provenance_audit.txt

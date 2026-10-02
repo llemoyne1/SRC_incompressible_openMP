@@ -1,0 +1,14 @@
+src/src_mpcd_base.cpp sha256=4e3b345f437d010f8296ccea569480bb84aefadb31e6fb28b0ef44941660f4d1
+Info/curations/0043_0493x19d_hotpath_diagnostic_cleanup.sql sha256=d5de7cb34afe1cd09faf143892a02057b668baed9f1a6dcce9213cd7b1605e95
+Info/docs/CURATION_0493X19D_HOTPATH_DIAGNOSTIC_CLEANUP_V4_43.md sha256=487bdea7b8d8f72a545f7ec0c0dc2d812656454ae18158e8b94c47e2c79a75f5
+Traceback (most recent call last):
+  File "/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/scripts/build_src_reference.py", line 1575, in <module>
+    main()
+  File "/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/scripts/build_src_reference.py", line 1567, in main
+    stats = build(args)
+            ^^^^^^^^^^^
+  File "/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/scripts/build_src_reference.py", line 1474, in build
+    atomic_replace_many(replacements)
+  File "/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/scripts/build_src_reference.py", line 1368, in atomic_replace_many
+    os.replace(dest, backup)
+PermissionError: [Errno 13] Permission denied: '/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/generated' -> '/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/Info/generated.__bak__'

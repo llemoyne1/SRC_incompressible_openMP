@@ -1,0 +1,33 @@
+===== 0493x20h X20F ROTATION-ANGLE PATH PROBE =====
+runRoot=runs/0493x20h_x20f_angle_probe
+binary=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/build/src_mpcd_base_cuda_q6_resident_livevis_0486
+binarySha256=ab718f8f61b67959c157b78c05a37a8c7efa3dec7740d862ed12eecacd27090f
+commonHelper=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/scripts/src_mpcd_run_common_0434.sh
+commonHelperSha256=c681d38847033ddd072ef36c7ec409cab56635fd5e4f1ea9e7b8215ca737dc1b
+generator=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/scripts/generate_0493x13e_longitudinal_velocity_state.py
+generatorSha256=eacf15fc1935176b533fa18dce47cb21d050a313ccf3dc946a4b0be5ecab88fc
+commonInitialSha256=2794d302ae9c9b5fd4a9805e2e7a48781b535051893eb5014e9a6d18d46f036d
+
+anglesDeg=30,175
+sameSeed=4938601
+profiles=ORIGINAL,SYNCED,SANITIZED
+
+ORIGINAL_firstDifferentStep=1
+ORIGINAL_step1Identical=NO
+ORIGINAL_finalComparedStep=3
+ORIGINAL_finalIdentical=NO
+
+SYNCED_firstDifferentStep=1
+SYNCED_step1Identical=NO
+SYNCED_finalComparedStep=3
+SYNCED_finalIdentical=NO
+
+SANITIZED_firstDifferentStep=1
+SANITIZED_step1Identical=NO
+SANITIZED_finalComparedStep=3
+SANITIZED_finalIdentical=NO
+
+VERDICT=FRESH_X20F_PATH_ANGLE_SENSITIVE
+IMPACT=The exact x20f helper path distinguishes 30 and 175 deg in a fresh isolated probe. The previous x20f campaign equality is therefore not reproduced; investigate stale/reused outputs or campaign-specific state/environment history.
+
+hashTable=runs/0493x20h_x20f_angle_probe/audit/x20h_hashes.csv

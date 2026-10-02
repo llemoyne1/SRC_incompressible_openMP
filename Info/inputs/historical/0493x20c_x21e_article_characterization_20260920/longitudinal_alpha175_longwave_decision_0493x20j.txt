@@ -1,0 +1,7 @@
+0493x20j alpha175 long-wave longitudinal qualification — factual analysis
+campaign=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20j_longitudinal_alpha175_longwave
+Primary criterion: >=2/3 seeds with >=4 valid signed zero crossings, crossing fit R2>=0.98, window frequency variation <=10% when measurable, and seed CV(c)<=10%.
+Secondary strongly-damped estimator: fit exp(-beta t)[A cos(omega t)+B sin(omega t)]+C over the first 1.5 reference cycles; per-seed R2>=0.98, beta/omega<=0.5, c within 30% of c_ref, >=2/3 candidates, and seed CV(c)<=10%.
+Q6 projected-face quantity is the residual to the active divergence constraint; post-applied-cell quantity is absolute reconstructed divergence.
+case=alpha175_longwave model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA dampedAcoustic=PROPAGATIVE_DAMPED_RESOLVED c_damped=0.3642489514666667 dampedR2mean=0.9916758578282888 dampingRatioMean=0.16275311634253303 AL_tail=0.08136061892803875 Sdiv_initial=NA constraintResidual/pre=NA
+case=alpha175_longwave model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA dampedAcoustic=DAMPED_FIT_NONRESOLVABLE c_damped=NA dampedR2mean=0.40557761345641036 dampingRatioMean=2.2958137609733558 AL_tail=0.04357934848375992 Sdiv_initial=0.0013945995606055056 constraintResidual/pre=0.00389475197430415

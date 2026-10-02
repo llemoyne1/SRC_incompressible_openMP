@@ -1,0 +1,87 @@
+0493x24d — Sato water/air density-ratio feasibility probe
+Date: 25/09/2026
+
+STATUS / PURPOSE
+----------------
+Classification: EXPERIMENTATION / FEASIBILITY PROBE.
+Not a historical reproduction and not yet an article validation point.
+No C++/CUDA modification.
+
+Article assertion tested by this run:
+  Can the current x14 gas/liquid chain carry the experimental water/air density
+  ratio while retaining a resolved gas flight, a stable explicit gas phase and
+  a measurable incident modified Froude number in the Sato near-field geometry?
+
+Decision rule:
+  - if the run remains numerically healthy and the incident forcing is measurable,
+    proceed to controlled Re/Oh similarity work;
+  - if it becomes unstable, under-resolved or loses the explicit gas support,
+    classify exact water/air density similarity as outside the current qualified
+    operating envelope and do not tune until a positive result is obtained.
+
+AUDIT BEFORE RUN
+----------------
+Validation / reference         Historical / publication configuration         x24d candidate
+----------------------------------------------------------------------------------------------------------
+Geometry H/D                  Sato water/air H/D=0.8                         IDENTICAL ratio: H/D=0.8
+Bath depth                    H_L/D=10                                       IDENTICAL ratio: H_L/D=10
+Vessel / lateral extent       D_vessel/D=20 (3-D cylinder)                   SAME ratio Lx/D=20, but 2-D slot
+Nozzle                        circular 3-D, d=10 mm                          DIFFERENT: planar 2-D slot, D=20 cells
+Low Sato forcing              U_j=9.46 m/s; Fr_m'=0.660364520158346         MATCHED by target Fr_m'
+Bond number                   water/air Bo_D ~= 13.58                        MATCHED: target Bo_D=13.584125
+rho_G/rho_L                   1.17/997 = 1.1735205616850552e-3               MATCHED by particle-mass ratio
+Re_L                          ~1.11e5                                        NOT matched / to be diagnosed later
+Re_G                          ~6.19e3                                        NOT matched / to be diagnosed later
+Oh_L                          ~1e-3                                          NOT matched / to be diagnosed later
+Wall model                    physical nozzle                                DIFFERENT: chi-Brinkman, alpha=8e5
+Current x24b baseline         rho_G/rho_L=0.1, dt=1e-3, kBT_G=0.08           CHANGED deliberately
+
+NUMERICAL ACCOMMODATION REQUIRED BY CURRENT CODE
+-------------------------------------------------
+A literal mass-only change at dt=1e-3 and kBT_G=0.08 violates the existing
+resolved-flight guard because both thermal and driven gas particle flights become
+too large when m_G is reduced by ~85x.
+
+Therefore x24d uses the minimal explicit numerical accommodation:
+  m_L      = 1
+  m_G      = 1.17/997 = 0.0011735205616850552
+  kBT_L    = 0.02
+  kBT_G    = 0.0009388164493480442
+  kBT_G/m_G = 0.8, identical to x24b (0.08/0.1)
+  dt       = 0.0004
+
+For target Fr_m'=0.660364520158346, this gives approximately:
+  U_jet                 = 5.9694820421 (simulation units)
+  C_thermal             = 0.09159 cell/step
+  C_jet                 = 0.61127 cell/step
+  C_thermal + C_jet     = 0.70286 < 0.80 current guard
+
+Gravity and surface tension remain at the x24b values so that the already matched
+Bond number is preserved.  This probe therefore changes density ratio plus only
+what is numerically required to resolve that change; it does not yet attempt to
+match Re_L, Re_G or Oh_L.
+
+RUN DEFAULTS
+------------
+runner      : scripts/run_0493x24d_sato_airwater_density_probe.sh
+binary      : build/src_mpcd_base_cuda_q6_resident_livevis_0486
+seed        : 493205
+mode        : src-q6-g-f
+H/D         : 0.8
+Fr_m' target: 0.660364520158346
+Bo_D target : 13.584125
+alphaMax    : 800000
+steps       : 1000
+dt          : 0.0004
+t_end       : 0.4
+analysis    : steps 500:1000 (feasibility diagnostics only)
+dumps       : every 500 steps
+LiveVis     : enabled; ./livevis_control.kv is authoritative and must not be modified by the runner
+restart     : supported by the inherited x24 runner machinery
+
+PROVENANCE CONTRACT
+-------------------
+The authoritative identity is the complete tuple:
+(source commit, binary, runner, runtime flags, generated params, seed, analyzer).
+Use generated params/*.kv, environment/runtime logs and binary markers as the
+proof of what actually ran. Preserve negative/REVIEW outcomes.

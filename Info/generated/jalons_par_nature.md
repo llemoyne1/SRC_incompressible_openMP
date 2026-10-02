@@ -84,6 +84,10 @@
 | `x13i` | Loi d’échelle en kBT du fluide x13h | TRANSPORT_SURFACE | Calibration de similitude thermique du fluide x13h; scripts-only |
 | `x13j` | Calibrateur transport autonome + qualification Young–Laplace x13h | TRANSPORT_SURFACE | Double rôle historique documenté; aucune nouvelle physique C++ |
 | `x14au` | Qualification viscosité associée au cas Sato | LIQUID_GAS | Liquide primaire INVALID; gaz REVIEW; cohérence d’échelle 2σ diagnostique seulement |
+| `x21a` | Pilote statique capillaire fort | SURFACE_TENSION | PILOT_NOT_RETAINED_FOR_FINAL_CALIBRATION |
+| `x21b` | Pilote faible sigma avec controle sigma0 long | SURFACE_TENSION | SUPERSEDED_PROTOCOL |
+| `x21c` | Protocole shadow Young-Laplace sans baseline libre longue | SURFACE_TENSION | PASS_SHADOW_PROTOCOL_PHYSICS_VERDICT_NOT_ASSIGNED |
+| `x21d` | Pilote article de goutte statique sigma=10000 | SURFACE_TENSION | PASS_PIPELINE_ARTICLE_STATIC_DROP |
 
 ## CAMPAIGN
 
@@ -244,6 +248,8 @@
 | `x15c` | Mesure directe de perméabilité du chi-solid | MOBILE_SOLID | PASS comme diagnostic de perméabilité; résultat physique: paroi volumique poreuse. |
 | `x16c` | Inventaire du fluide fictif dans le solide | MOBILE_SOLID | INFORMATIONAL; diagnostic de qualification, non physique nécessaire au chemin normal. |
 | `x16l` | Diagnostic direct post-stream de pénétration | MOBILE_SOLID | Qualification-only; read-only; non conservé dans le chemin normal x18d. |
+| `x20g` | Audit historique de sensibilite a l angle SRC | LONGITUDINAL | PASS_HISTORICAL_PATH_ANGLE_SENSITIVE |
+| `x20h` | Probe frais du chemin x20f sensible a l angle | LONGITUDINAL | PASS_FRESH_X20F_PATH_ANGLE_SENSITIVE |
 
 ## EXPERIMENT
 
@@ -400,6 +406,15 @@
 | `x19b-fix3` | Audit angulaire complet par opérateur du Couette cylindrique x19b | FSI | PENDING_LOCAL_CUDA_BUILD_AND_SHORT_RESTART_DIAGNOSTIC |
 | `x19b-fix4` | Couette cylindrique x19b haute SNR à Omega=0.20 | FSI | QUALIFIED_WITH_DOCUMENTED_TORQUE_BIAS |
 | `x19c` | Cylindre intérieur libre sous couple constant dans un anneau Couette | FSI | QUALIFIED |
+| `x20a` | Campagne JCP de caractérisation SRC / Q6-G-F | BULK_FLUID | COMPLETED_SUPERSEDED_TG_BY_X20B |
+| `x20b` | Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP | BULK_FLUID | COMPLETED_STATUS_AWARE_ARTICLE_DATASET |
+| `x20c` | Extension en angle SRC du jeu transport article | BULK_FLUID | COMPLETED_ALPHA_EXTENSION |
+| `x20d` | Confirmation Taylor-Green haute-angle a resolution accrue | BULK_FLUID | PASS_HIGH_ALPHA_TG_CONFIRMATION |
+| `x20e` | Pilote longitudinal nominal SRC / Q6-G-F | LONGITUDINAL | PASS_NOMINAL_LONGITUDINAL_DISCRIMINATION |
+| `x20f` | Carte longitudinale reduite | LONGITUDINAL | PARTIAL_VALID_NONANGLE_ALPHA_BRANCHES_INVALID |
+| `x20i` | Rerun longitudinal propre alpha30 / alpha175 | LONGITUDINAL | COMPLETED_CLEAN_ALPHA_RERUN |
+| `x20j` | Qualification longitudinale longue longueur d onde a alpha175 | LONGITUDINAL | PASS_LONGWAVE_DISCRIMINATION_DAMPED_FALLBACK |
+| `x21e` | Campagne multi-rayons pour figure/tableau capillaires article | SURFACE_TENSION | IN_PROGRESS_ARTICLE_RADIUS_CAMPAIGN |
 
 ## RUNNER
 

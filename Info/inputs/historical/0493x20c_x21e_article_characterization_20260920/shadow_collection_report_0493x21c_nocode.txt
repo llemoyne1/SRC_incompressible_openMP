@@ -1,0 +1,14 @@
+===== 0493x21c NO-CODE SHADOW COLLECTION =====
+integrityStatus=PASS
+physicsVerdict=NOT_ASSIGNED
+sigmaEffective=NOT_COMPUTED
+reason=collector intentionally avoids using raw curvatureMean as the qualification denominator
+campaignRoot=runs/0493x21c_fix1_capillary_shadow_R64_s945
+sigmaTarget=945
+checkpoints=3 expectedPairs=18 collectedPairs=18
+deltaPGlobalMean=-44303.7990259
+deltaPGlobalStd=2762.96998726
+deltaPGlobalCVAbs=0.0623642
+integrityFlags=NONE
+note=sigma0 branches are same-checkpoint probes only; no stationary sigma0 interpretation is made.
+note=curvatureMean/laplaceTargetCurrent are retained as raw diagnostics only, not used for a pass/fail or sigma_eff.

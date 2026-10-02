@@ -1,0 +1,102 @@
+0493x24c — Sato corrected H/D=1.7 discriminant run
+===================================================
+Date: 2026-09-25
+Classification: EXPERIMENTATION (not strict historical reproduction)
+
+Article assertion addressed
+---------------------------
+Determine whether the large deficit and lack of stationarity previously observed
+at H/D=1.7 were materially contaminated by the historical geometry change in
+which the nozzle was shortened when the stand-off was increased.
+
+The x24c case keeps exactly the x24b nozzle geometry (20-cell throat, 40-cell
+length, 4-cell walls) and changes only its vertical position relative to the bath,
+so that H/D changes from 0.8 to 1.7 by rigid translation.  Brinkman walls are
+retained, with alphaMax=8e5 as qualified by the x24b anchor.
+
+Historical validation targeted
+------------------------------
+0493x14at_H1p7_Fr0p90_seed493205, common analysis window 3000:4000.
+Authoritative archived report values:
+  target Fr_m' = 0.9
+  measured Fr_m' = 0.768893965093
+  h/D = 0.390437070471
+  stability = REVIEW
+  relative drift = -0.224634725549
+  late/early half delta = -0.0941706647109
+  dp* = -1.75251174283
+
+Current anchor controlling the Brinkman change
+----------------------------------------------
+0493x24b_sato_anchor_H0p8_Fr0p90_seed493205, window 3000:4000:
+  target Fr_m' = 0.9
+  measured Fr_m' = 0.61049825
+  h/D = 0.66512731
+  stability = PASS
+  relative drift = 0.04297
+  late/early half delta = 0.02307
+
+This establishes that alphaMax=8e5 does not catastrophically alter the H/D=0.8
+response.  x24c therefore probes the corrected H/D=1.7 geometry without changing
+the wall model again.
+
+Three-column audit
+------------------
+Validation historical | Historical actual configuration | x24c candidate
+H/D                    | 1.7                             | 1.7 IDENTICAL
+D                      | 20 cells                        | 20 cells IDENTICAL
+liquid depth / D       | 10                              | 10 IDENTICAL
+Lx / D                 | 20                              | 20 IDENTICAL
+nozzle throat          | 20 cells                        | 20 cells IDENTICAL
+nozzle wall thickness  | 4 cells                         | 4 cells IDENTICAL
+nozzle length          | about 22 cells at H/D=1.7      | 40 cells DIFFERENT intentionally
+geometry rule          | nozzle shortened as H/D grows  | same 40-cell nozzle rigidly translated
+seed                    | 493205                          | 493205 IDENTICAL
+analysis window         | 3000:4000                      | 3000:4000 IDENTICAL
+target Fr_m'            | 0.90                            | 0.90 IDENTICAL
+gas/liquid x14 family  | x14at runtime chain             | same intended chain; verify runtime artifacts
+Brinkman forcing        | mean, chiVP off                 | mean, chiVP off IDENTICAL in formulation
+alphaMax                | 2500                            | 800000 DIFFERENT intentionally; x24b anchor checked
+runner                  | run_0493x14at_sato_stageA_campaign.sh | run_0493x24c_sato_corrected_H1p7_Fr0p90.sh DIFFERENT
+
+Decision contract
+-----------------
+1. If h/D increases substantially and/or the 3000:4000 stability improves relative
+   to historical x14at H/D=1.7, the historical nozzle-length change is identified
+   as a material confounder.  Proceed to a small corrected H/D campaign.
+2. If x24c remains close to the historical H/D=1.7 response, do not attribute the
+   deficit primarily to geometry.  The next investigation must focus on physical
+   similarity (rhoG/rhoL, ReG, ReL, Oh, jet development and gas-pressure state).
+3. If the result is intermediate, retain it as such; no parameter tuning or
+   repeated reruns are used to manufacture agreement.
+4. Sato h/D=1.30 Fr_m' is an external 3-D experimental reference, not an automatic
+   2-D pass/fail criterion.
+
+Run contract
+------------
+steps = 4000
+analysis window = 3000:4000
+H/D = 1.7
+target Fr_m' = 0.90
+nozzle throat = 20 cells
+nozzle length = 40 cells = 2D
+nozzle wall thickness = 4 cells
+alphaMax = 800000
+seed = 493205
+livevis_enable = 1
+livevis_every = 1
+livevis control = ./livevis_control.kv (never modified by runner)
+filtered recording cadence is controlled by the livevis control file; runner fallback = 100 steps
+dump/restart state every = 1000 steps
+RESTART supported by runner
+No C++/CUDA source modification.
+
+Expected default grid
+---------------------
+Lx = 1.5625, NX = 400 -> h = 1/256.
+D = 20h.
+Bath level = 0.78125.
+For H/D=1.7: nozzle exit = bath + 34h = 0.9140625.
+With a fixed 40-cell nozzle: Ly = exit + 40h = 1.0703125,
+therefore NY = 274.
+Expected grid = 400 x 274.

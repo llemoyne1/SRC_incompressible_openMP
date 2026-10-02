@@ -85,6 +85,11 @@
 | `scripts/__pycache__/analyze_0493x17c_membrane_fsi.cpython-312.pyc` |  | present |
 | `scripts/__pycache__/analyze_0493x17d_article_solids.cpython-312.pyc` |  | present |
 | `scripts/__pycache__/analyze_0493x17d_fixed_membrane_publishable.cpython-312.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x20f_longitudinal_reduced_map.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x20i_longitudinal_alpha_clean.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x20j_longitudinal_alpha175_longwave.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x21c_capillary_shadow_young_laplace.cpython-313.pyc` |  | present |
+| `scripts/__pycache__/analyze_0493x21e_article_capillary_radius_campaign.cpython-313.pyc` |  | present |
 | `scripts/analyze_0438b_periodic_equiv_sweep.py` |  | present |
 | `scripts/analyze_0493c_resident_qualification.py` |  | present |
 | `scripts/analyze_0493e_monospecies_resampling_physics.py` |  | present |
@@ -197,6 +202,15 @@
 | `scripts/analyze_0493x18_penetration_sweep.py` |  | present |
 | `scripts/analyze_0493x18a_hinged_plate.py` |  | present |
 | `scripts/analyze_0493x18a_hinged_plate_speed_sweep.py` |  | present |
+| `scripts/analyze_0493x20e_longitudinal_nominal_pilot.py` |  | present |
+| `scripts/analyze_0493x20f_longitudinal_reduced_map.py` |  | present |
+| `scripts/analyze_0493x20i_longitudinal_alpha_clean.py` |  | present |
+| `scripts/analyze_0493x20j_longitudinal_alpha175_longwave.py` |  | present |
+| `scripts/analyze_0493x21a_capillary_static_pilot.py` |  | present |
+| `scripts/analyze_0493x21b_capillary_static_weak.py` |  | present |
+| `scripts/analyze_0493x21c_capillary_shadow_young_laplace.py` |  | present |
+| `scripts/analyze_0493x21d_article_capillary_pilot.py` |  | present |
+| `scripts/analyze_0493x21e_article_capillary_radius_campaign.py` |  | present |
 | `scripts/analyze_0493x3_q6_force_projection_tg.py` | x3 | present |
 | `scripts/analyze_0493x4a_q6_force_single_tg.py` | x4a | present |
 | `scripts/analyze_0493x4b_q6_force_fusion_tg.py` | x4b | present |
@@ -1377,6 +1391,21 @@
 | `scripts/run_0493x19b_prescribed_rotating_annulus_pair.sh` |  | present |
 | `scripts/run_0493x19c_free_rotor_annulus.sh` |  | present |
 | `scripts/run_0493x1_closed_box_smoke.sh` | x1 | present |
+| `scripts/run_0493x20a_article_fluid_campaign.sh` |  | present |
+| `scripts/run_0493x20b_article_tg_requalification.sh` |  | present |
+| `scripts/run_0493x20c_article_alpha_extension.sh` |  | present |
+| `scripts/run_0493x20d_high_alpha_tg_confirmation.sh` |  | present |
+| `scripts/run_0493x20e_longitudinal_nominal_pilot.sh` |  | present |
+| `scripts/run_0493x20f_longitudinal_reduced_map.sh` |  | present |
+| `scripts/run_0493x20i_longitudinal_alpha_clean_rerun.sh` |  | present |
+| `scripts/run_0493x20j_longitudinal_alpha175_longwave.sh` |  | present |
+| `scripts/run_0493x21a_capillary_static_pilot.sh` |  | present |
+| `scripts/run_0493x21b_capillary_static_weak.sh` |  | present |
+| `scripts/run_0493x21c_capillary_shadow_young_laplace.sh` |  | present |
+| `scripts/run_0493x21c_shadow_probes_nocode.sh` |  | present |
+| `scripts/run_0493x21d_article_capillary_pilot.sh` |  | present |
+| `scripts/run_0493x21d_article_capillary_pilot_find_qualified_binary.sh` |  | present |
+| `scripts/run_0493x21e_article_capillary_radius_campaign.sh` |  | present |
 | `scripts/run_0493x2_liquid_only_q6.sh` | x2 | present |
 | `scripts/run_0493x2_liquid_only_q6_common.sh` | x2 | present |
 | `scripts/run_0493x3_liquid_only_q6_force_prestream.sh` | x3 | present |

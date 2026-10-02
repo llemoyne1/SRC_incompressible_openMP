@@ -1,0 +1,8 @@
+0493x20i clean longitudinal alpha rerun — factual analysis
+campaign=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20i_longitudinal_alpha_clean
+Criteria for a resolved propagative mode: >=2/3 seeds with >=4 valid signed zero crossings, crossing fit R2>=0.98, window frequency variation <=10% when measurable, and seed CV(c)<=10%.
+Q6 projected-face quantity is the residual to the active divergence constraint; post-applied-cell quantity is absolute reconstructed divergence.
+case=alpha30 model=src Ma=0.1 seeds=3 acoustic=PROPAGATIVE_RESOLVED c=0.35854369818318244 AL_tail=0.20142718487073744 Sdiv_initial=NA constraintResidual/pre=NA
+case=alpha30 model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.046940369097752836 Sdiv_initial=0.0034799688310251813 constraintResidual/pre=0.004121516574054194
+case=alpha175 model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.07704325667542812 Sdiv_initial=NA constraintResidual/pre=NA
+case=alpha175 model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.043558812974749304 Sdiv_initial=0.003479968831025185 constraintResidual/pre=0.00392664061031142

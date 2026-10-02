@@ -1,0 +1,12 @@
+===== 0493x21d ARTICLE CAPILLARY PILOT =====
+plateauStatus=PASS fractionStart=0.50 steps=750..1500
+Reff=0.232883242 Reff/h=59.6181 drift=0.036% areaDrift=0.073%
+kappaThAbs=4.29399724 kappaNumMeanSigned=-1.05433619 kappaAbsRatio=0.245537 Ekappa=75.446%
+pL=-31551.6213 pG=0 deltaP=-31551.6213 deltaPTimeStd=67138.8216
+sigmaTarget=10000 sigmaEffLocalSigned=29925.5793 sigmaEff/sigma=2.99256
+UspRms=0.419964791 UspMax=2.55312307 Usigma=0.286184377 UspRms/Usigma=1.46746
+clipMean=1.998% clipMax=5.518%
+axisRatio=1.02283796 ellipticity=0.0112581624
+status=PASS_PIPELINE
+notes=curvature_error_above_15pct
+interpretation=pilot only; validates plateau/curvature/pressure/spurious-current extraction before multi-radius campaign

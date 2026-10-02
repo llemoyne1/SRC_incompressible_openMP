@@ -1,0 +1,20 @@
+0493x24bc Sato incident-jet profile comparison — V3 hotfix
+Date: 2026-09-25
+
+Purpose
+-------
+Offline-only comparison of x24b H/D=0.8 and x24c H/D=1.7 recorded fields.
+No solver/source/run data are modified.
+
+V3 correction
+-------------
+V2 correctly discovered rho,ux,uy recordings and homogenized recorder smoothing,
+but failed at the first metrics append on MATLAB versions that reject assignment
+from a populated struct into a fieldless struct([]).
+V3 predeclares the complete metrics struct schema before the frame loop.
+No diagnostic formula, window, masking criterion, smoothing rule, or output metric
+has been changed relative to V2.
+
+Window: steps 3000:4000
+Probe heights: z/D = 0.25, 0.50, 1.00
+Momentum-flux proxy: rho_total * max(-uy,0)^2 / cellArea in gas-masked cells.

@@ -1,0 +1,108 @@
+0493x24e — Sato water/air-density bath pre-stabilization
+Date: 2026-09-25
+
+OBJECTIVE
+---------
+Build an unforced statistically stationary gas/liquid bath, then use a late
+state dump as the common physical RESTART origin for subsequent forced Sato
+campaign runs.  This avoids interpreting cavity depth while the numerical
+free-surface reference level is still relaxing.
+
+ARTICLE ASSERTION SUPPORTED
+---------------------------
+Not a Sato validation point.  This run establishes the initial-condition
+protocol required before later quantitative comparison with Sato/Barron.
+
+HISTORICAL / CANDIDATE AUDIT
+----------------------------
+Validation/history aimed at:
+  x24b/x24c showed that the reconstructed far/mean free-surface level moves
+  substantially during early forced runs and that a scalar occupancy-area
+  correction is inadequate.
+
+Historical forced configuration:
+  current Q6-g-f/x14 gas-liquid chain; corrected Sato 2-D geometry;
+  Brinkman nozzle walls; water/air-density probe x24d for rhoG/rhoL;
+  directed top gas injection active.
+
+x24e candidate configuration:
+  IDENTICAL current solver family, source state generator, water/air density
+  ratio, kBT values, dt, gravity, sigma, nozzle geometry, Brinkman alpha,
+  top segmented atmospheric topology and seed;
+  DIFFERENT ONLY in directed forcing: central top segment has zero mean velocity.
+  It remains a hard-density gas reservoir so the gas/open-boundary topology is
+  the same as the future forced run.
+
+DEFAULT PHYSICAL/NUMERICAL CONTRACT
+-----------------------------------
+  H/D                         = 0.8
+  vessel width / nozzle width = 20
+  liquid depth / nozzle width = 10
+  nozzle inner width          = 20 cells
+  nozzle length               = 40 cells = 2D
+  grid                        = 400 x 256
+  gamma                       = 20
+  dt                          = 4e-4
+  steps                       = 15000 (t=6)
+  rhoG/rhoL                   = 1.1735205616850552e-3
+  liquid particle mass        = 1
+  gas particle mass           = 1.1735205616850552e-3
+  liquid kBT                  = 0.02
+  gas kBT                     = 9.388164493480442e-4
+  gravity y                   = -0.5
+  sigma                       = 294.461365748622
+  target directed Fr_m'       = 0
+  jet speed                   = 0
+  Brinkman alphaMax           = 800000
+  Brinkman forcing            = mean
+  chi collision VP            = off
+
+BOUNDARY INTERPRETATION
+-----------------------
+The central top throat is retained as an inlet-type hard-density reservoir with
+mean velocity exactly zero.  This is NOT a directed jet.  It allows the gas
+inventory/pressure to equilibrate with the same segmented top topology that
+will later be used for injection.  Left/right top outlet segments remain active.
+
+RUN/OBSERVATION CONTRACT
+------------------------
+  LIVE_VIS_ENABLE = 1
+  LIVE_VIS_EVERY  = 1
+  livevis control = ./livevis_control.kv (user-owned, never modified by runner)
+  restart dumps   = every 1000 steps
+  late analysis   = steps 10000:15000
+  runner does not modify C++/CUDA source
+
+OFFLINE STATIONARITY ANALYSIS
+-----------------------------
+MATLAB:
+  matlab/analyze_0493x24e_sato_airwater_bath_stabilization.m
+
+Outputs under run analysis/:
+  sato_bath_stabilization_history.csv
+  sato_bath_stabilization_summary.csv
+  sato_bath_stabilization_report.txt
+  sato_bath_level_stabilization.png
+  sato_bath_surface_range.png
+  sato_bath_area_vs_geometric_level.png
+
+The primary geometric observables are etaMean and etaFar reconstructed from the
+liquid rho recording.  Integrated alpha occupancy is reported independently and
+is never used to correct the level.
+
+Diagnostic plateau criterion (not a physical fit): over steps 10000:15000,
+absolute late-half shifts of etaMean/D and etaFar/D must each be <= 0.02 for
+status PASS.  REVIEW means continue the SAME unforced physics by RESTART; it is
+not a reason to tune model parameters.
+
+RESTART POLICY
+--------------
+Do not choose the campaign restart dump before reviewing the stationarity
+report.  Select a late dump only from a demonstrated plateau.  Preserve the
+full provenance tuple: source commit, binary, runner, runtime flags, params,
+seed, selected dump and analyzer.
+
+NO SOURCE CHANGE
+----------------
+This package adds only a runner, MATLAB analyzer and Info record.  It respects
+the article-production freeze on solver source modifications.

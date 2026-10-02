@@ -97,18 +97,33 @@ CudaFluidMomentSnapshot0493x19bFix3 measure_host_fluid_moments_0493x19b_fix3(
     return out;
 }
 
+bool full_angular_audit_0493x19b_fix3_requested() {
+    // Process-level diagnostic flag: runners set it before launch and the solver
+    // never mutates it. Cache it once so the production hot path does not call
+    // getenv() at every timestep.
+    static const bool enabled =
+        env_truthy_src_base_0475a("MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT");
+    return enabled;
+}
+
 class FullAngularAudit0493x19bFix3 {
 public:
     FullAngularAudit0493x19bFix3(const SimulationParams& params,
                                  std::uint64_t step,
                                  double time)
-        : enabled_(env_truthy_src_base_0475a("MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT") &&
+        : enabled_(full_angular_audit_0493x19b_fix3_requested() &&
                    !params.outputDir.empty() &&
                    std::abs(params.chiSolidPrescribedInnerOmegaZ) > 0.0),
-          centerX_(params.chiSolidPrescribedRotationCenterX),
-          centerY_(params.chiSolidPrescribedRotationCenterY),
-          outputDir_(params.outputDir), step_(step), time_(time) {
-        if (enabled_ && (!std::isfinite(centerX_) || !std::isfinite(centerY_))) {
+          step_(step), time_(time) {
+        // 0493x19d-perf: the complete x19b audit is diagnostic-only.  When it
+        // is disabled, keep construction allocation-free and avoid copying the
+        // output path on every production timestep.
+        if (!enabled_) return;
+
+        centerX_ = params.chiSolidPrescribedRotationCenterX;
+        centerY_ = params.chiSolidPrescribedRotationCenterY;
+        outputDir_ = params.outputDir;
+        if (!std::isfinite(centerX_) || !std::isfinite(centerY_)) {
             throw std::runtime_error("0493x19b-fix3 invalid angular-audit center");
         }
         stages_.reserve(20);
@@ -823,6 +838,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaPeriodicStreaming0245Diagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -847,6 +865,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaWallSimpleStreaming0246Diagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -874,6 +895,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaPistonStreaming0247bDiagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -901,6 +925,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaImmersedRectangle0247Diagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -926,6 +953,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaImmersedCircle0284Diagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;
@@ -951,6 +981,9 @@ void record_cuda_resident_profile_0266(const std::string& outputDir,
                                        const char* mode,
                                        const char* phase,
                                        const CudaClassicSrcIoResident0263Diagnostics& d) {
+    // 0493x19d-perf: avoid constructing/copying diagnostic strings and the
+    // output directory on every timestep when resident profiling is disabled.
+    if (!cuda_resident_profile_0266_enabled()) return;
     auto row = make_cuda_resident_profile_row_0266(step, mode, phase);
     row.requested = d.requested ? 1 : 0;
     row.supported = d.supported ? 1 : 0;

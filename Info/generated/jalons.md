@@ -252,6 +252,31 @@
 | `x4a` | CODE | Q6_GF | Q6-g prestream_single — un solve Q6 par pas forcé | Référence mono-solve; supplantée par la fusion x4b |
 | `x4b` | PERF | Q6_GF | Q6-g prestream_single_fused — fusion CUDA force + projection | Séquençage temporel Q6-g de référence pour la suite de 0493x |
 
+## bulk fluid characterization
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x20a` | QUALIFICATION | BULK_FLUID | Campagne JCP de caractérisation SRC / Q6-G-F | COMPLETED_SUPERSEDED_TG_BY_X20B |
+| `x20b` | QUALIFICATION | BULK_FLUID | Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP | COMPLETED_STATUS_AWARE_ARTICLE_DATASET |
+
+## JCP article characterization
+
+| ID | Nature | Domaine | Nom | Statut / portée |
+|---|---|---|---|---|
+| `x20c` | QUALIFICATION | BULK_FLUID | Extension en angle SRC du jeu transport article | COMPLETED_ALPHA_EXTENSION |
+| `x20d` | QUALIFICATION | BULK_FLUID | Confirmation Taylor-Green haute-angle a resolution accrue | PASS_HIGH_ALPHA_TG_CONFIRMATION |
+| `x20e` | QUALIFICATION | LONGITUDINAL | Pilote longitudinal nominal SRC / Q6-G-F | PASS_NOMINAL_LONGITUDINAL_DISCRIMINATION |
+| `x20f` | QUALIFICATION | LONGITUDINAL | Carte longitudinale reduite | PARTIAL_VALID_NONANGLE_ALPHA_BRANCHES_INVALID |
+| `x20g` | DIAGNOSTIC | LONGITUDINAL | Audit historique de sensibilite a l angle SRC | PASS_HISTORICAL_PATH_ANGLE_SENSITIVE |
+| `x20h` | DIAGNOSTIC | LONGITUDINAL | Probe frais du chemin x20f sensible a l angle | PASS_FRESH_X20F_PATH_ANGLE_SENSITIVE |
+| `x20i` | QUALIFICATION | LONGITUDINAL | Rerun longitudinal propre alpha30 / alpha175 | COMPLETED_CLEAN_ALPHA_RERUN |
+| `x20j` | QUALIFICATION | LONGITUDINAL | Qualification longitudinale longue longueur d onde a alpha175 | PASS_LONGWAVE_DISCRIMINATION_DAMPED_FALLBACK |
+| `x21a` | CALIBRATOR | SURFACE_TENSION | Pilote statique capillaire fort | PILOT_NOT_RETAINED_FOR_FINAL_CALIBRATION |
+| `x21b` | CALIBRATOR | SURFACE_TENSION | Pilote faible sigma avec controle sigma0 long | SUPERSEDED_PROTOCOL |
+| `x21c` | CALIBRATOR | SURFACE_TENSION | Protocole shadow Young-Laplace sans baseline libre longue | PASS_SHADOW_PROTOCOL_PHYSICS_VERDICT_NOT_ASSIGNED |
+| `x21d` | CALIBRATOR | SURFACE_TENSION | Pilote article de goutte statique sigma=10000 | PASS_PIPELINE_ARTICLE_STATIC_DROP |
+| `x21e` | QUALIFICATION | SURFACE_TENSION | Campagne multi-rayons pour figure/tableau capillaires article | IN_PROGRESS_ARTICLE_RADIUS_CAMPAIGN |
+
 ## x5a-x5b : surface libre masquée, dam-break vide et gaz explicite
 
 | ID | Nature | Domaine | Nom | Statut / portée |
@@ -3661,7 +3686,7 @@ Diagnostic court sans modification physique: force SUMMARY_EVERY=1 pour conserve
 
 Instrumentation diagnostique complète et opt-in. Mesure le même état fluide global avant/après prestream, frontière x17, streaming, frontières externes, immersed, diagnostic de pénétration, SRC, Q6, capacité fermée, thermostat, keep-mean-flow, Darcy, dynamique solide et gardes de resampling. Chaque snapshot contient masse, Px, Py, Lz, énergie cinétique, moment polaire, moment radial et tangentiel. Le runner court écrit aussi rho/ux/uy sur une grille 48x48 à chaque pas pour une inspection indépendante de dumps réduits consécutifs.
 
-**Notes.** Aucune physique modifiée. Runner bounceback seul, restart d un état Couette établi, 400 pas supplémentaires par défaut. L audit est activé seulement par MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT=1.
+**Notes.** Aucune physique modifiée. Runner bounceback seul, restart d un état Couette établi, 400 pas supplémentaires par défaut. L audit est activé seulement par MPCD_X19B_FIX3_FULL_ANGULAR_AUDIT=1. 0493x19d performance maintenance 2026-09-18: the x19b-fix3 complete angular audit now has an allocation-free disabled path (cached process-level flag, no outputDir copy and no stage-vector reserve when OFF). CUDA resident phase-profile recorders now return before constructing diagnostic strings or copying outputDir when profiling is OFF. Explicitly enabled diagnostic behavior is preserved; free-rotor/FSI mechanics are unchanged.
 
 **Relations :**
 - `BUILDS_ON` → `x19b-fix2` — Bilan angulaire paroi/SRC du Couette cylindrique x19b
@@ -3721,6 +3746,254 @@ Isole un liquide mono-espèce entièrement rempli dans la boîte fermée sous gr
 **Artefacts associés :**
 - `ASSOCIATED_WITH` — `scripts/run_0493x2_liquid_only_q6.sh`
 - `ASSOCIATED_WITH` — `scripts/run_0493x2_liquid_only_q6_common.sh`
+
+### `x20a` — Campagne JCP de caractérisation SRC / Q6-G-F
+
+- **Clé unique :** `0493x20a`
+- **ID canonique :** `0493x20a`
+- **Nature / domaine :** `QUALIFICATION` / `BULK_FLUID`
+- **Statut :** COMPLETED_SUPERSEDED_TG_BY_X20B
+- **Confiance :** `A`
+- **Date :** `2026-09-18`
+
+Runner maître unique réutilisant le calibrateur standalone 0493w1 pour une matrice appariée SRC/Q6-G-F. Douze configurations physiques uniques autour du point nominal gamma=8, alpha_SRC=120 deg, lambdaMean/h=0.72; trois réalisations Taylor-Green et MSD par modèle, trois répétitions acoustiques SRC, soit 180 appels solveur. Les points croisés/collapse sont volontairement différés après examen des tendances.
+
+**Notes.** No solver physics modification. Campaign-level restart uses existing .complete realization markers and SKIP_EXISTING=1. LiveVis defaults off because all calibrations are short and small-grid; it remains explicitly available without modifying ./livevis_control.kv. Campaign completed. Final article transport assembly retains x20a MSD and acoustic measurements, while Taylor-Green viscosity is replaced by the longer x20b requalification where available. Nominal x20a MSD Q6-G-F/SRC ratio is about 1.122; acoustic SRC propagation remains close to sqrt(kBT/m).
+
+**Relations :**
+- `BUILDS_ON` → `x13h` — Point liquide de référence G08-120-L072
+- `REFERENCES` → `x20b` — Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP
+
+### `x20b` — Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP
+
+- **Clé unique :** `0493x20b`
+- **ID canonique :** `0493x20b`
+- **Nature / domaine :** `QUALIFICATION` / `BULK_FLUID`
+- **Statut :** COMPLETED_STATUS_AWARE_ARTICLE_DATASET
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Reprise TG-only des douze points x20a sur domaine 128x128, durees physiques adaptees au temps de decroissance mesure lors du pilote, six seeds communes par modele et point. Les MSD et acoustiques x20a ne sont pas rejoues. Les ratios de viscosite produits par le runner sont status-aware et incluent des ratios apparies seed par seed.
+
+**Notes.** No solver/source modification. Uses canonical standalone 0493w1 calibrator with CALIBRATION_EXPERIMENTS=tg only. Campaign restart uses .complete markers/SKIP_EXISTING. Q6-G-F production closure contract unchanged from x20a. Campaign completed: 12 physical points x 2 models x 6 matched seeds = 144 TG runs on 128x128, with PASS/REVIEW/INVALID retained pointwise rather than hidden by a global verdict. Final transport tables combine x20b TG with x20a MSD.
+
+**Relations :**
+- `BUILDS_ON` → `x20a` — Campagne JCP de caractérisation SRC / Q6-G-F
+- `REFERENCES` → `x20a` — Campagne JCP de caractérisation SRC / Q6-G-F
+
+### `x20c` — Extension en angle SRC du jeu transport article
+
+- **Clé unique :** `0493x20c`
+- **ID canonique :** `0493x20c`
+- **Nature / domaine :** `QUALIFICATION` / `BULK_FLUID`
+- **Statut :** COMPLETED_ALPHA_EXTENSION
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Etend le balayage alpha_SRC avec TG et MSD apparies SRC/Q6-G-F. Les points 30 et 45 deg sont conserves comme mesures article; les viscosites haute-angle 165/175 deg sont traitees comme preliminaires et remplacees par x20d.
+
+**Notes.** Six seeds TG/MSD par modele sur les extensions; les statuts PASS/REVIEW/INVALID sont conserves. La table finale article preserve explicitement la provenance x20c.
+
+**Relations :**
+- `BUILDS_ON` → `x20b` — Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP
+- `REFERENCES` → `x20d` — Confirmation Taylor-Green haute-angle a resolution accrue
+
+### `x20d` — Confirmation Taylor-Green haute-angle a resolution accrue
+
+- **Clé unique :** `0493x20d`
+- **ID canonique :** `0493x20d`
+- **Nature / domaine :** `QUALIFICATION` / `BULK_FLUID`
+- **Statut :** PASS_HIGH_ALPHA_TG_CONFIRMATION
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Requalifie alpha_SRC=165 et 175 deg sur TG 256x256, mode (1,1), six seeds par modele. Les quatre ensembles SRC/Q6-G-F passent les criteres de viscosite et remplacent les estimations haute-angle x20c.
+
+**Notes.** alpha165: nu_SRC=0.004208334604, nu_Q6GF=0.003105024404, ratio apparie=0.740344. alpha175: nu_SRC=0.009431787002, nu_Q6GF=0.005861715686, ratio apparie=0.622753. Les MSD x20c restent utilises.
+
+**Relations :**
+- `BUILDS_ON` → `x20c` — Extension en angle SRC du jeu transport article
+- `REFERENCES` → `x20c` — Extension en angle SRC du jeu transport article
+
+### `x20e` — Pilote longitudinal nominal SRC / Q6-G-F
+
+- **Clé unique :** `0493x20e`
+- **ID canonique :** `0493x20e`
+- **Nature / domaine :** `QUALIFICATION` / `LONGITUDINAL`
+- **Statut :** PASS_NOMINAL_LONGITUDINAL_DISCRIMINATION
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Teste directement la propagation longitudinale au point nominal. SRC presente un mode propagatif resolu proche de l echelle thermique; la fermeture Q6-G-F supprime le mode longitudinal coherent sous le protocole.
+
+**Notes.** Ma=0.05: c_SRC=0.353910; Ma=0.10: c_SRC=0.350673. Q6-G-F: c non assignable; amplitude longitudinale fortement reduite. Le residu de divergence sur les faces projetees est interprete comme residu a la contrainte active, distinct de la divergence cellulaire reconstruite.
+
+**Relations :**
+- `BUILDS_ON` → `x20b` — Requalification longue Taylor-Green SRC / Q6-G-F pour article JCP
+
+### `x20f` — Carte longitudinale reduite
+
+- **Clé unique :** `0493x20f`
+- **ID canonique :** `0493x20f`
+- **Nature / domaine :** `QUALIFICATION` / `LONGITUDINAL`
+- **Statut :** PARTIAL_VALID_NONANGLE_ALPHA_BRANCHES_INVALID
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Etend le pilote longitudinal a ell bas/haut, gamma=6 et angles extremes. Les branches non-angle sont exploitables; les sorties alpha30/alpha175 de la campagne initiale sont invalidees par reutilisation/staleness et ne sont pas retenues scientifiquement.
+
+**Notes.** ell_low Q6-G-F AL_tail=0.03764 et residu projete/pre=0.002434; ell_high 0.03977 et 0.003710; gamma6 0.06256 et 0.002101. Les branches alpha de cette campagne ne doivent pas etre reutilisees.
+
+**Relations :**
+- `BUILDS_ON` → `x20e` — Pilote longitudinal nominal SRC / Q6-G-F
+
+### `x20g` — Audit historique de sensibilite a l angle SRC
+
+- **Clé unique :** `0493x20g`
+- **ID canonique :** `0493x20g`
+- **Nature / domaine :** `DIAGNOSTIC` / `LONGITUDINAL`
+- **Statut :** PASS_HISTORICAL_PATH_ANGLE_SENSITIVE
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Verifie sur le chemin historique de calibration que alpha=30 et 175 deg conduisent a des trajectoires differentes des le premier pas; ecarte une insensibilite intrinseque du solveur a rotationAngle.
+
+**Notes.** Audit sans modification de physique; binaire historique ab718f8f... et chemin standalone historique.
+
+**Relations :**
+- `REFERENCES` → `x20f` — Carte longitudinale reduite
+
+### `x20h` — Probe frais du chemin x20f sensible a l angle
+
+- **Clé unique :** `0493x20h`
+- **ID canonique :** `0493x20h`
+- **Nature / domaine :** `DIAGNOSTIC` / `LONGITUDINAL`
+- **Statut :** PASS_FRESH_X20F_PATH_ANGLE_SENSITIVE
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Rejoue le chemin helper x20f dans des environnements ORIGINAL/SYNCED/SANITIZED et montre dans les trois cas une divergence alpha30/175 des le step 1. La collision de sorties x20f est donc attribuee a la campagne reutilisee/stale, pas au chemin numerique.
+
+**Notes.** Aucune physique modifiee; diagnostic de provenance/campagne.
+
+**Relations :**
+- `REFERENCES` → `x20f` — Carte longitudinale reduite
+
+### `x20i` — Rerun longitudinal propre alpha30 / alpha175
+
+- **Clé unique :** `0493x20i`
+- **ID canonique :** `0493x20i`
+- **Nature / domaine :** `QUALIFICATION` / `LONGITUDINAL`
+- **Statut :** COMPLETED_CLEAN_ALPHA_RERUN
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Rejoue les angles extremes dans des repertoires propres. A alpha30 SRC redevient propagatif et Q6-G-F reste non resolvable; a alpha175 la longueur d onde standard reste trop amortie pour le critere zero-crossing.
+
+**Notes.** alpha30 SRC c=0.358544, Q6-G-F AL_tail=0.04694 avec residu projete/pre=0.004122. alpha175 standard: non resolvable pour SRC et Q6-G-F; ce point motive x20j.
+
+**Relations :**
+- `BUILDS_ON` → `x20h` — Probe frais du chemin x20f sensible a l angle
+
+### `x20j` — Qualification longitudinale longue longueur d onde a alpha175
+
+- **Clé unique :** `0493x20j`
+- **ID canonique :** `0493x20j`
+- **Nature / domaine :** `QUALIFICATION` / `LONGITUDINAL`
+- **Statut :** PASS_LONGWAVE_DISCRIMINATION_DAMPED_FALLBACK
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Allonge la longueur d onde a alpha_SRC=175 deg et ajoute un estimateur amorti. SRC presente un mode longitudinal amorti mais propagatif; la fermeture Q6-G-F reste non resolvable.
+
+**Notes.** SRC: c_damped=0.364249, R2 moyen=0.991676, beta/omega moyen=0.16275. Q6-G-F: damped fit non resolvable, R2 moyen=0.40558, beta/omega moyen=2.2958. Aucune vitesse acoustique n est assignee a la fermeture.
+
+**Relations :**
+- `BUILDS_ON` → `x20i` — Rerun longitudinal propre alpha30 / alpha175
+
+### `x21a` — Pilote statique capillaire fort
+
+- **Clé unique :** `0493x21a`
+- **ID canonique :** `0493x21a`
+- **Nature / domaine :** `CALIBRATOR` / `SURFACE_TENSION`
+- **Statut :** PILOT_NOT_RETAINED_FOR_FINAL_CALIBRATION
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Pilote de goutte R/h=64 a sigma=10000 avec la chaine surface libre qualifiee. Il confirme qu une goutte fortement capillaire peut rester macroscopiquement reguliere mais montre que la pression Q6 absolue et la courbure brute x9e ne constituent pas, seules, une calibration Young-Laplace propre.
+
+**Notes.** Le pilote sert a definir le protocole article; il ne remet pas en cause le mecanisme capillaire. La calibration finale doit isoler l increment capillaire et employer la courbure effectivement injectee.
+
+**Relations :**
+- `BUILDS_ON` → `x13h` — Point liquide de référence G08-120-L072
+- `REFERENCES` → `x9e` — Qualification diagnostique de goutte statique
+
+### `x21b` — Pilote faible sigma avec controle sigma0 long
+
+- **Clé unique :** `0493x21b`
+- **ID canonique :** `0493x21b`
+- **Nature / domaine :** `CALIBRATOR` / `SURFACE_TENSION`
+- **Statut :** SUPERSEDED_PROTOCOL
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Teste sigma=120 a R/h=64 avec une baseline sigma=0 longue. Le protocole est abandonne car la goutte libre sigma0 evolue/disperse et cesse d etre un controle geometriquement comparable.
+
+**Notes.** Resultat methodologique: ne pas utiliser de baseline sigma0 libre longue pour la calibration statique; utiliser des probes courts issus du meme checkpoint.
+
+**Relations :**
+- `BUILDS_ON` → `x21a` — Pilote statique capillaire fort
+
+### `x21c` — Protocole shadow Young-Laplace sans baseline libre longue
+
+- **Clé unique :** `0493x21c`
+- **ID canonique :** `0493x21c`
+- **Nature / domaine :** `CALIBRATOR` / `SURFACE_TENSION`
+- **Statut :** PASS_SHADOW_PROTOCOL_PHYSICS_VERDICT_NOT_ASSIGNED
+- **Confiance :** `A`
+- **Date :** `2026-09-19`
+
+Selectionne trois checkpoints d une goutte active sigma=945 sur plateau geometrique, puis lance depuis chaque etat des probes 2-step sigma=945/sigma=0 apparies, six repetitions. Le protocole isole un increment de pression a geometrie identique.
+
+**Notes.** 18/18 paires integres. deltaP global moyen=-44303.8, CV global inter-checkpoint=6.24%; CV intra-checkpoint ~1e-6 et mismatch rayon/aire nul au premier pas. Le collecteur no-code n estime volontairement pas sigma_eff avec curvatureMean brut. Le patch diagnostic face-kappa propose ensuite a ete retire/non retenu; aucun changement solveur canonique.
+
+**Relations :**
+- `BUILDS_ON` → `x21b` — Pilote faible sigma avec controle sigma0 long
+
+### `x21d` — Pilote article de goutte statique sigma=10000
+
+- **Clé unique :** `0493x21d`
+- **ID canonique :** `0493x21d`
+- **Nature / domaine :** `CALIBRATOR` / `SURFACE_TENSION`
+- **Statut :** PASS_PIPELINE_ARTICLE_STATIC_DROP
+- **Confiance :** `A`
+- **Date :** `2026-09-20`
+
+Valide sur un seul cas R/h=64 la chaine de production des donnees article: plateau, rayon effectif, pression, vitesse parasite et clipping, avant balayage multi-rayons. La courbure brute x9e est conservee comme diagnostic mais pas comme metrique article.
+
+**Notes.** Plateau 750..1500 PASS; Reff/h=59.6181; drift Reff=0.036%, aire=0.073%; axisRatio=1.02284; clipMean=1.998%, clipMax=5.518%. Le binaire courant 422a199e... differe du binaire historique seulement par x19d dans src_mpcd_base.cpp; le coeur capillaire cuda_q6_resident_0400.cu est bit-a-bit identique au commit 74297ce.
+
+**Relations :**
+- `BUILDS_ON` → `x21c` — Protocole shadow Young-Laplace sans baseline libre longue
+- `REFERENCES` → `x9e` — Qualification diagnostique de goutte statique
+
+### `x21e` — Campagne multi-rayons pour figure/tableau capillaires article
+
+- **Clé unique :** `0493x21e`
+- **ID canonique :** `0493x21e`
+- **Nature / domaine :** `QUALIFICATION` / `SURFACE_TENSION`
+- **Statut :** IN_PROGRESS_ARTICLE_RADIUS_CAMPAIGN
+- **Confiance :** `A`
+- **Date :** `2026-09-20`
+
+Campagne sigma=10000, R/h=40,48,56,64,72,80, trois seeds, 1500 steps actifs puis shadows 2-step sigma/sigma0. La courbure article est reconstruite offline suivant exactement x6c -> p3/Scharr -> interpolation face alpha=0.5 -> cutoff x9r et validee contre les compteurs runtime.
+
+**Notes.** Objectif unique: produire fig_07_capillary_calibration, table_03_capillary_calibration et table_S3_capillary_map. Premier run R40 seed4932401 termine avec plateau PASS 600..1500 et checkpoint 1500. Un bug de parsing CRLF du chemin checkpoint a ete corrige dans runner fix2; aucune physique n a change.
+
+**Relations :**
+- `BUILDS_ON` → `x21d` — Pilote article de goutte statique sigma=10000
+- `REFERENCES` → `x6c` — Infrastructure résidente du champ de phase alpha
+- `REFERENCES` → `x9r` — Cutoff de résolution du saut capillaire
 
 ### `x3` — Q6-g force-aware — preuve de concept prestream à deux solves
 

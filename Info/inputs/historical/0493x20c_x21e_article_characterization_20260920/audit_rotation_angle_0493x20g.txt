@@ -1,0 +1,51 @@
+===== 0493x20g SRC ROTATION-ANGLE AUDIT =====
+repoRoot=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF
+runRoot=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit
+seed=4938601
+
+calibrator=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/scripts/calibrate_fluid_0493w1_standalone.sh
+calibratorSha256=d76c33d8a6cdcd70df5dc0f71423ad10a2944c954987542ef7c43b2918406c49
+expectedHistoricalCalibratorSha256=d76c33d8a6cdcd70df5dc0f71423ad10a2944c954987542ef7c43b2918406c49
+historicalCalibratorShaMatch=YES
+
+binary=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/build/src_mpcd_base_cuda_q6_resident_livevis_0486
+binarySha256=ab718f8f61b67959c157b78c05a37a8c7efa3dec7740d862ed12eecacd27090f
+expectedHistoricalBinarySha256=ab718f8f61b67959c157b78c05a37a8c7efa3dec7740d862ed12eecacd27090f
+historicalBinaryShaMatch=YES
+confidence=EXACT_HISTORICAL_X20_PATH
+
+probePhysics=SRC periodic historical standalone calibrator path
+probeGrid=64x64
+gamma=8
+lambdaOverH=0.72
+kBT=0.125
+mass=1.0
+seed=4938601
+steps=8
+dumpEvery=1
+anglesDeg=30,175
+randomRotationSign=true
+gridShiftEnable=true
+thermostat=cell_relative_rescale every step
+
+paramsRotationAngle30Rad=0.52359877559829882
+paramsRotationAngle175Rad=3.0543261909900767
+initialStatesIdentical=YES
+
+DEVICE_ROTATION_0272_ON_firstDifferentStep=1
+DEVICE_ROTATION_0272_ON_step1Identical=NO
+DEVICE_ROTATION_0272_ON_step8Identical=NO
+
+DEVICE_ROTATION_0272_OFF_firstDifferentStep=1
+DEVICE_ROTATION_0272_OFF_step1Identical=NO
+DEVICE_ROTATION_0272_OFF_step8Identical=NO
+
+VERDICT=HISTORICAL_PATH_ANGLE_SENSITIVE
+IMPACT=The exact historical x20a-x20d runtime path distinguishes 30 and 175 deg. This strongly localizes the x20f anomaly outside the historical transport calibrator path.
+
+hashTable=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit/audit_rotation_angle_hashes.csv
+logs:
+  /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit/ON_alpha30.log
+  /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit/ON_alpha175.log
+  /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit/OFF_alpha30.log
+  /mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20g_rotation_angle_audit/OFF_alpha175.log

@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# 0493x23g — ARTICLE L/G INTERFACE-CENTERED QUASI-ISOVISCOUS COUETTE
+#
+# Geometry:
+#   y=0          : solid wall, ux=-Uw
+#   0<y<hL      : projected liquid (Q6-g-f)
+#   y=hL        : single planar liquid/gas interface
+#   hL<y<Ly     : compressible SRC gas
+#   y=Ly        : solid wall, ux=+Uw
+#   x            : periodic
+#
+# Purpose:
+#   Qualify the LIQUID/GAS tangential interaction locally at a single planar
+#   interface, while minimizing dependence on remote wall slip and on an
+#   uncertain large viscosity contrast.
+#
+#   The microscopic point is the low-ell article transport-map case L036_G08_A120:
+#     h=1/256, gamma=8, alphaSRC=120 deg,
+#     dt=0.0031735664074561293, kBT=0.125, m=1 on BOTH sides.
+#
+#   The closures remain physically different:
+#     liquid : SRC + particle/field Q6-g-f closure
+#     gas    : compressible SRC gas, q6Strength=0
+#
+#   Independent article TG references (6 seeds, both PASS/QUALIFIED):
+#     nu_L(Q6-g-f) = 7.18535122550e-4
+#     nu_G(SRC)    = 6.774787066662e-4
+#   With equal nominal densities, mu_G/mu_L = nu_G/nu_L ~= 0.942861.
+#   Thus the expected interfacial slope jump is only about 6%, rather than the
+#   O(8x) contrast of x23f.  The viscosity ratio is used only as a local
+#   constitutive reference and for the optional spin-up profile.
+#
+#   Default 128x128, L=0.5x0.5 -> 64h liquid + 64h gas.  The liquid thickness
+#   exceeds 2*Rc (Rc/h ~= 25.3), so x12a is not globally triggered by a thin
+#   liquid layer.  Equal m and kBT also make the single wall-VP parameter set
+#   consistent with BOTH physical walls.
+#
+#   Surface tension is zero: the interface is planar and this benchmark targets
+#   tangential transfer, not capillarity.  The production liquid/gas interface
+#   chain (x10/x12/x14) otherwise remains active.
+#
+#   Recording includes rho1/rho2 and y1/y2 so the later analysis can locate the
+#   interface from composition and fit one-sided velocity gradients as a
+#   function of distance from alpha~0.5, instead of inferring the interface law
+#   from remote no-slip conditions.
+# =============================================================================
+
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+source "$ROOT/scripts/src_mpcd_run_ok_common.sh"
+suite_root_cd_0434
+
+CASE_LABEL="${CASE_LABEL:-0493x23g_article_interface_quasi_isoviscous_L036_G08_A120}"
+RUN_MODE="src-q6-g-f"
+TOPOLOGY="wall"
+
+# -----------------------------------------------------------------------------
+# Geometry chosen to preserve h=1/256 while reducing cost.
+# -----------------------------------------------------------------------------
+Lx="${Lx:-0.5}"
+Ly="${Ly:-0.5}"
+NX="${NX:-128}"
+NY="${NY:-128}"
+LIQUID_CELLS="${LIQUID_CELLS:-64}"
+
+GAMMA="${GAMMA:-8}"
+DT="${DT:-0.0031735664074561293}"
+STEPS="${STEPS:-5000}"
+SEED="${SEED:-593172}"
+
+WALL_SPEED_MAG="${WALL_SPEED_MAG:-0.04}"
+WALL_UX_BOTTOM="$(awk -v u="$WALL_SPEED_MAG" 'BEGIN{printf "%.17g",-u}')"
+WALL_UX_TOP="$(awk -v u="$WALL_SPEED_MAG" 'BEGIN{printf "%.17g",u}')"
+
+LIQUID_TYPE="${LIQUID_TYPE:-1}"
+GAS_TYPE="${GAS_TYPE:-2}"
+LIQUID_MASS="${LIQUID_MASS:-1.0}"
+GAS_MASS="${GAS_MASS:-0.01}"
+LIQUID_KBT="${LIQUID_KBT:-0.00125}"
+GAS_KBT="${GAS_KBT:-0.000125}"
+
+# x6g reads params.kBT; keep it aligned with the gas target as in x14/x23.
+KBT="${KBT:-$GAS_KBT}"
+THERMOSTAT_TARGET_KBT="${THERMOSTAT_TARGET_KBT:-$GAS_KBT}"
+THERMOSTAT_ENABLE="${THERMOSTAT_ENABLE:-true}"
+THERMOSTAT_MODE="${THERMOSTAT_MODE:-cell_relative_rescale}"
+THERMOSTAT_EVERY="${THERMOSTAT_EVERY:-1}"
+THERMOSTAT_MIN_PARTICLES="${THERMOSTAT_MIN_PARTICLES:-3}"
+
+ROTATION_ANGLE="${ROTATION_ANGLE:-2.0943951023931954923}"
+RANDOM_ROTATION_SIGN="${RANDOM_ROTATION_SIGN:-true}"
+GRID_SHIFT_ENABLE="${GRID_SHIFT_ENABLE:-true}"
+
+LIQUID_Q6_STRENGTH="${LIQUID_Q6_STRENGTH:-1.0}"
+GAS_Q6_STRENGTH="${GAS_Q6_STRENGTH:-0.0}"
+SPECIES_Q6_MIN_FILL_FRACTION="${SPECIES_Q6_MIN_FILL_FRACTION:-0.10}"
+
+Q6_GF_DENSITY_RELAXATION_TIME="${Q6_GF_DENSITY_RELAXATION_TIME:-0.25}"
+Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE="${Q6_GF_DENSITY_COMPRESSION_GATE_ENABLE:-1}"
+Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES="${Q6_GF_DENSITY_COMPRESSION_THRESHOLD_PARTICLES:-3.0}"
+Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES="${Q6_GF_DENSITY_TRACTION_THRESHOLD_PARTICLES:-6.0}"
+Q6_GF_DENSITY_TRACTION_GAIN="${Q6_GF_DENSITY_TRACTION_GAIN:-1.0}"
+PROJECTION_BACKEND="${PROJECTION_BACKEND:-cuda}"
+PROJECTION_MAX_ITERATIONS="${PROJECTION_MAX_ITERATIONS:-800}"
+PROJECTION_TOLERANCE="${PROJECTION_TOLERANCE:-1.0e-5}"
+Q6_PROJECTION_STRENGTH="${Q6_PROJECTION_STRENGTH:-1.0}"
+Q6_STRICT="${Q6_STRICT:-1}"
+
+# Planar benchmark: no capillary forcing is needed.
+SURFACE_TENSION_SIGMA="${SURFACE_TENSION_SIGMA:-2560.0}"
+SURFACE_TENSION_MIN_RADIUS_CELLS="${SURFACE_TENSION_MIN_RADIUS_CELLS:-4}"
+PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION="${PHASE_INTERFACE_KINETIC_REFLECTION_FRACTION:-1.0}"
+PHASE_INTERFACE_EVAPORATION_TARGET_TYPE="${PHASE_INTERFACE_EVAPORATION_TARGET_TYPE:--1}"
+PHASE_INTERFACE_CONTACT_ANGLE_DEG="${PHASE_INTERFACE_CONTACT_ANGLE_DEG:--1}"
+X12A_LOCAL_THERMAL_RADIUS_CELLS="${X12A_LOCAL_THERMAL_RADIUS_CELLS:-25.298221281347036}"
+
+PHASE_INTERFACE_A_SELECTOR="type:${LIQUID_TYPE}"
+PHASE_INTERFACE_B_SELECTOR="type:${GAS_TYPE}"
+
+# Article low-ell transport references.  They are documentary/analysis values;
+# they do not alter the solver.  Because mL=mG and the initial occupancies are
+# equal, the nominal dynamic-viscosity ratio equals nuG/nuL.
+ARTICLE_NU_L="${ARTICLE_NU_L:-0.00071853512255}"
+ARTICLE_NU_G="${ARTICLE_NU_G:-0.0006774787066662}"
+ARTICLE_NU_L_STD="${ARTICLE_NU_L_STD:-0.00007148437368744265}"
+ARTICLE_NU_G_STD="${ARTICLE_NU_G_STD:-0.0000665780874244649}"
+ARTICLE_TRANSPORT_CASE="L036_G08_A120"
+
+# Initial mean profile: expected two-layer Couette using the central article
+# viscosity ratio only to reduce spin-up.  It is NOT an acceptance assumption.
+INIT_PROFILE="${INIT_PROFILE:-theory}"
+INIT_MU_RATIO="${INIT_MU_RATIO:-0.00985}" #$(awk -v ng="$ARTICLE_NU_G" -v nl="$ARTICLE_NU_L" 'BEGIN{printf "%.17g",ng/nl}')}"
+
+# -----------------------------------------------------------------------------
+# Output / diagnostics.
+# -----------------------------------------------------------------------------
+SUMMARY_EVERY="${SUMMARY_EVERY:-100}"
+DUMP_STATE_EVERY="${DUMP_STATE_EVERY:-500}"
+LIVE_PROGRESS="${LIVE_PROGRESS:-1}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+CLEAN_RUN_ROOT="${CLEAN_RUN_ROOT:-1}"
+
+LIVE_VIS_ENABLE="${LIVE_VIS_ENABLE:-1}"
+# LIVE_VIS_CONTROL_FILE is set after RUN_ROOT so this benchmark never shares
+# the repository-global livevis_control.kv with another run.
+LIVE_VIS_FIELD="${LIVE_VIS_FIELD:-velocity}"
+LIVE_VIS_EVERY="${LIVE_VIS_EVERY:-20}"
+LIVE_VIS_NX="${LIVE_VIS_NX:-$NX}"
+LIVE_VIS_NY="${LIVE_VIS_NY:-$NY}"
+LIVE_VIS_COLORMAP="${LIVE_VIS_COLORMAP:-blue_red}"
+LIVE_VIS_CLIP="${LIVE_VIS_CLIP:--1}"
+LIVE_VIS_GAIN="${LIVE_VIS_GAIN:-1.0}"
+LIVE_VIS_SMOOTH_PASSES="${LIVE_VIS_SMOOTH_PASSES:-0}"
+LIVE_VIS_WINDOW_SCALE="${LIVE_VIS_WINDOW_SCALE:-2}"
+LIVE_VIS_HOLD_ON_EXIT="${LIVE_VIS_HOLD_ON_EXIT:-0}"
+
+# Interface-centered metrology: native solver grid, conservative composition
+# fields plus velocity every 20 steps, no spatial smoothing.
+RECORD_ENABLE="${RECORD_ENABLE:-true}"
+RECORD_FIELDS="${RECORD_FIELDS:-rho,rho1,rho2,y1,y2,ux,uy}"
+RECORD_EVERY="${RECORD_EVERY:-20}"
+FILTER_MODE="${FILTER_MODE:-none}"
+FILTER_SAMPLE_EVERY="${FILTER_SAMPLE_EVERY:-20}"
+FILTERED_RECORDING_ENABLE="${FILTERED_RECORDING_ENABLE:-1}"
+PARTICLE_TYPE_FILTER="${PARTICLE_TYPE_FILTER:--1}"
+
+BIN="${BIN:-${SRC_MPCD_DEFAULT_BIN_0434:-build/src_mpcd_base_cuda_q6_resident_livevis_0486}}"
+RUN_ROOT="${RUN_ROOT:-runs/0493x23g_interface_quasi_isoviscous_128x128_ultracolddiffgas_Uw${WALL_SPEED_MAG}_seed${SEED}}"
+LIVE_VIS_CONTROL_FILE="${LIVE_VIS_CONTROL_FILE:-$RUN_ROOT/livevis_control.kv}"
+OVERWRITE_LIVEVIS_CONTROL="${OVERWRITE_LIVEVIS_CONTROL:-1}"
+
+# Keep the production x14/x23 path: no species resampling/reconditioning.
+GEN_CASE="tg"
+U0=0.0
+VELOCITY_MODE="zero"
+PARTICLE_MASS="$GAS_MASS"
+BACKGROUND_TYPE="$GAS_TYPE"
+INACTIVE_TYPE="$GAS_TYPE"
+TG_HOLE_ENABLE=false
+SPECIES_RESAMPLING_ENABLE=false
+SPECIES_RESIDENT_MODE=off
+RESAMPLING_HOST_PATCHBACK_ENABLE=0
+MASS_RECONDITION_ENABLE=0
+RESAMPLING_THERMAL_RENORMALIZATION_ENABLE=false
+RESAMPLING_MASS_GUARD_ENABLE=false
+VIRIAL_DENSITY_KICK_ENABLE=false
+Q6_GF_EXTERNAL_SPECIES=1
+Q6_GF_HAS_GAS_PHASE=1
+Q6_GF_MIN_FILL_FRACTION="$SPECIES_Q6_MIN_FILL_FRACTION"
+RUN_OK_REFERENCE_PARTICLE_MASS="$LIQUID_MASS"
+RUN_OK_GENERATOR_PATH="$ROOT/scripts/$(basename "${BASH_SOURCE[0]}")"
+export RUN_OK_REFERENCE_PARTICLE_MASS RUN_OK_GENERATOR_PATH
+
+suite_defaults_common_0434
+suite_compute_derived_0434
+
+# -----------------------------------------------------------------------------
+# Strict geometry / transport-point checks.
+# -----------------------------------------------------------------------------
+read -r H HL HG P_REF NPART <<<"$(python3 - \
+  "$Lx" "$Ly" "$NX" "$NY" "$LIQUID_CELLS" "$GAMMA" "$GAS_KBT" \
+  "$DT" "$ROTATION_ANGLE" "$X12A_LOCAL_THERMAL_RADIUS_CELLS" \
+  "$LIQUID_MASS" "$GAS_MASS" "$LIQUID_KBT" <<'PY'
+import math,sys
+lx,ly=float(sys.argv[1]),float(sys.argv[2])
+nx,ny=int(sys.argv[3]),int(sys.argv[4])
+nl=int(sys.argv[5]); gamma=int(sys.argv[6]); tg=float(sys.argv[7])
+dt=float(sys.argv[8]); ang=float(sys.argv[9]); rc=float(sys.argv[10])
+mL=float(sys.argv[11]); mG=float(sys.argv[12]); tL=float(sys.argv[13])
+hx=lx/nx; hy=ly/ny
+if nx <= 0 or ny <= 0 or not (0 < nl < ny):
+    raise SystemExit('[0493x23g] invalid grid or LIQUID_CELLS')
+if abs(hx-hy) > 1e-13:
+    raise SystemExit(f'[0493x23g] square cells required: hx={hx:.17g} hy={hy:.17g}')
+if abs(hx-1/256) > 1e-13:
+    raise SystemExit(f'[0493x23g] must preserve characterized h=1/256; got {hx:.17g}')
+if abs(dt-0.0031735664074561293) > 1e-14:
+    raise SystemExit(f'[0493x23g] must preserve article low-ell dt; got {dt:.17g}')
+if abs(ang-2.0*math.pi/3.0) > 1e-13:
+    raise SystemExit(f'[0493x23g] must preserve alphaSRC=120deg; got {ang:.17g}')
+if gamma != 8:
+    raise SystemExit(f'[0493x23g] must preserve article low-ell gamma=8; got {gamma}')
+if abs(mL-1.0)>1e-14 or abs(mG-1.0)>1e-14:
+    raise SystemExit(f'[0493x23g] quasi-isoviscous control requires mL=mG=1; got {mL}, {mG}')
+if abs(tL-0.125)>1e-14 or abs(tg-0.125)>1e-14:
+    raise SystemExit(f'[0493x23g] quasi-isoviscous control requires kBTL=kBTG=0.125; got {tL}, {tg}')
+if nl <= 2.0*rc:
+    raise SystemExit(f'[0493x23g] liquid thickness must exceed 2*Rc: cells={nl}, 2Rc={2*rc:.6g}')
+hl=nl*hy; hg=ly-hl
+area=hx*hy
+pref=gamma*tg/area
+npart=nx*ny*gamma
+print(f'{hx:.17g} {hl:.17g} {hg:.17g} {pref:.17g} {npart}')
+PY
+)"
+
+if [[ "$LIQUID_CELLS" -ne $((NY/2)) ]]; then
+  echo "[0493x23g] WARNING default interface benchmark expects equal liquid/gas thicknesses." >&2
+fi
+
+# -----------------------------------------------------------------------------
+# Run layout.
+# -----------------------------------------------------------------------------
+if suite_truthy_0434 "$CLEAN_RUN_ROOT"; then
+  rm -rf "$RUN_ROOT"
+fi
+suite_prepare_dirs_0434 "$RUN_ROOT"
+mkdir -p "$RUN_ROOT/analysis"
+
+STATE="$RUN_ROOT/init/${CASE_LABEL}.smpcd"
+PARAMS="$RUN_ROOT/params/${CASE_LABEL}.kv"
+OUT="$RUN_ROOT/output"
+LOG="$RUN_ROOT/logs/${CASE_LABEL}.log"
+TF="$RUN_ROOT/logs/${CASE_LABEL}.time"
+
+# -----------------------------------------------------------------------------
+# Exact two-species, equal-microscopic-parameter S|L|G|S state generator.
+#
+# Each cell contains exactly gamma particles. Lower rows are projected liquid,
+# upper rows are compressible gas. Both use the same m and kBT so the only bulk
+# constitutive difference is the liquid particle/field closure.
+#
+# For INIT_PROFILE=theory:
+#   aL/aG = INIT_MU_RATIO
+#   u(0)=Ub, u(Ly)=Ut, continuity at y=HL.
+# This only reduces spin-up and is NOT used as the measured reference.
+# -----------------------------------------------------------------------------
+python3 - "$STATE" "$RUN_ROOT/init/${CASE_LABEL}.json" \
+  "$Lx" "$Ly" "$NX" "$NY" "$GAMMA" "$LIQUID_CELLS" \
+  "$LIQUID_TYPE" "$GAS_TYPE" "$LIQUID_MASS" "$GAS_MASS" \
+  "$LIQUID_KBT" "$GAS_KBT" "$SEED" "$WALL_UX_BOTTOM" "$WALL_UX_TOP" \
+  "$INIT_PROFILE" "$INIT_MU_RATIO" <<'PYGEN'
+import json, math, os, random, struct, sys
+
+(out, meta, Lx, Ly, Nx, Ny, gamma, nliq,
+ lt, gt, mL, mG, tL, tG, seed, Ub, Ut, init_mode, rmu) = sys.argv[1:]
+
+Lx=float(Lx); Ly=float(Ly)
+Nx=int(Nx); Ny=int(Ny); gamma=int(gamma); nliq=int(nliq)
+lt=int(lt); gt=int(gt)
+mL=float(mL); mG=float(mG)
+tL=float(tL); tG=float(tG)
+seed=int(seed); Ub=float(Ub); Ut=float(Ut); rmu=float(rmu)
+
+if init_mode not in ('theory','zero'):
+    raise SystemExit('[0493x23g-generate] INIT_PROFILE must be theory or zero')
+if lt == gt:
+    raise SystemExit('[0493x23g-generate] liquid/gas types must differ')
+if min(mL,mG,tL,tG) <= 0:
+    raise SystemExit('[0493x23g-generate] masses/kBT must be positive')
+
+dx=Lx/Nx; dy=Ly/Ny
+hL=nliq*dy; hG=Ly-hL
+
+if init_mode == 'theory':
+    dU=Ut-Ub
+    aG=dU/(hG+rmu*hL)
+    aL=rmu*aG
+    uI=Ub+aL*hL
+else:
+    aG=aL=uI=0.0
+
+def base_u(y):
+    if init_mode == 'zero':
+        return 0.0
+    if y < hL:
+        return Ub + aL*y
+    return uI + aG*(y-hL)
+
+rng=random.Random(seed)
+x=[]; y=[]; vx=[]; vy=[]; typ=[]; mass=[]; role=[]
+
+def paired_thermal_velocities(count, pmass, pkbt):
+    vals=[]
+    for _ in range(count//2):
+        gx=rng.gauss(0.0,1.0)
+        gy=rng.gauss(0.0,1.0)
+        vals.append((gx,gy))
+        vals.append((-gx,-gy))
+    if count % 2:
+        vals.append((0.0,0.0))
+    s2=sum(tx*tx+ty*ty for tx,ty in vals)
+    if not s2 > 0.0:
+        raise RuntimeError('degenerate thermal draw')
+    scale=math.sqrt((2.0*count*pkbt)/(pmass*s2))
+    return [(scale*tx,scale*ty) for tx,ty in vals]
+
+for j in range(Ny):
+    is_liquid = j < nliq
+    ptype = lt if is_liquid else gt
+    pmass = mL if is_liquid else mG
+    pkbt = tL if is_liquid else tG
+    for i in range(Nx):
+        x0=i*dx; y0=j*dy
+        thermal=paired_thermal_velocities(gamma,pmass,pkbt)
+        for tx,ty in thermal:
+            xp=x0+dx*rng.random()
+            yp=y0+dy*rng.random()
+            x.append(xp); y.append(yp)
+            vx.append(base_u(yp)+tx); vy.append(ty)
+            typ.append(ptype); mass.append(pmass); role.append(1)
+
+# Thermal peculiar velocity has exactly zero mean in every initial cell.
+# Therefore the cell-scale mean shear is the prescribed theory profile
+# rather than a noisy realization whose random cell drift can exceed Uw.
+
+os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+magic=b'SRCMPCD_STATE'+b'\0'*(16-len('SRCMPCD_STATE'))
+reserved=[0]*8
+reserved[0]=1
+reserved[1]=1
+n=len(x)
+
+with open(out,'wb') as f:
+    f.write(magic)
+    f.write(struct.pack('<IIIIQIIII',2,0x01020304,2,1,n,1,1,8,4))
+    f.write(struct.pack('<8Q',*reserved))
+    for arr,fmt in [
+        (x,'d'),(y,'d'),(vx,'d'),(vy,'d'),
+        (typ,'I'),(mass,'d'),(role,'B')]:
+        f.write(struct.pack('<%d%s'%(n,fmt),*arr))
+
+d={
+    'case':'0493x23g_article_interface_quasi_isoviscous_L036_G08_A120',
+    'Lx':Lx,'Ly':Ly,'Nx':Nx,'Ny':Ny,'h':dx,'gamma':gamma,
+    'liquidCells':nliq,'liquidThickness':hL,'gasThickness':hG,
+    'liquidType':lt,'gasType':gt,'liquidMass':mL,'gasMass':mG,
+    'liquidKBT':tL,'gasKBT':tG,'seed':seed,'wallSpeedTop':Ut,
+    'wallSpeedBottom':Ub,'initProfile':init_mode,'initMuRatio':rmu,
+    'init_aL':aL,'init_aG':aG,'init_uInterface':uI,
+    'particleCount':n
+}
+with open(meta,'w',encoding='utf-8') as f:
+    json.dump(d,f,indent=2,sort_keys=True)
+
+print(f'[0493x23g-generate] state={out}')
+print(f'[0493x23g-generate] grid={Nx}x{Ny} h={dx:.12g} gamma={gamma} N={n}')
+print(f'[0493x23g-generate] S|L({nliq}h)|G({Ny-nliq}h)|S, yGamma={hL:.12g}')
+print(f'[0493x23g-generate] mL={mL:g} TL={tL:g} mG={mG:g} TG={tG:g}')
+print(f'[0493x23g-generate] walls=({Ub:.9g},{Ut:.9g}) init={init_mode} aL={aL:.9g} aG={aG:.9g} uI={uI:.9g}')
+PYGEN
+
+LREF="$(awk -v g="$GAMMA" -v m="$LIQUID_MASS" 'BEGIN{printf "%.17g",g*m}')"
+GREF="$(awk -v g="$GAMMA" -v m="$GAS_MASS" 'BEGIN{printf "%.17g",g*m}')"
+
+# -----------------------------------------------------------------------------
+# Parameters: article low-ell quasi-isoviscous liquid/gas point, periodic-x /
+# wall-y, one L/G interface.  Symmetric walls suppress common-mode translation.
+# -----------------------------------------------------------------------------
+cat > "$PARAMS" <<PARAMS_EOF
+inputState = $STATE
+outputDir = $OUT
+Lx = $Lx
+Ly = $Ly
+Nx = $NX
+Ny = $NY
+dt = $DT
+nSteps = $STEPS
+
+bcLeft = periodic
+bcRight = periodic
+bcBottom = solid
+bcTop = solid
+bcX = periodic
+bcY = wall
+
+openBoundarySegmentsEnable = false
+openBoundarySegmentCount = 0
+bodyAccelerationX = 0.0
+bodyAccelerationY = 0.0
+taylorGreenForcingEnable = false
+
+wallVpEnable = false
+wallAccommodation = 1.0
+wallVpGamma = $GAMMA
+wallVpMass = $GAS_MASS
+wallKBT = $GAS_KBT
+wallThermalNoise = 0.0
+wallUxBottom = $WALL_UX_BOTTOM
+wallUyBottom = 0.0
+wallUxTop = $WALL_UX_TOP
+wallUyTop = 0.0
+
+speciesRegistryEnable = true
+speciesCount = 2
+species0 = $LIQUID_TYPE incompressible_liquid liquid $LIQUID_Q6_STRENGTH 1.0 $LREF
+species0ResamplingEnable = false
+species0ThermostatTargetKBT = $LIQUID_KBT
+species1 = $GAS_TYPE compressible_gas gas $GAS_Q6_STRENGTH 0.0 $GREF
+species1ResamplingEnable = false
+species1ThermostatTargetKBT = $GAS_KBT
+speciesRequireRegisteredTypes = true
+speciesThermostatEnable = true
+speciesDiagnosticsEnable = true
+speciesDiagnosticsFilename = species_runtime_0493x23g.csv
+speciesCellDiagnosticsEnable = false
+speciesQ6Enable = true
+speciesQ6Mode = free_surface_masked
+speciesQ6Sensitivity = 1.0
+speciesQ6FallbackMode = common
+speciesQ6ComparisonTolerance = 1.0e-11
+speciesQ6MinOccupancyFraction = $SPECIES_Q6_MIN_FILL_FRACTION
+PARAMS_EOF
+
+suite_write_common_params_0434 "$RUN_MODE" >> "$PARAMS"
+run_ok_surface_append_params_0493x13zi \
+  "$PARAMS" "$PHASE_INTERFACE_A_SELECTOR" "$PHASE_INTERFACE_B_SELECTOR"
+cat >> "$PARAMS" <<'PARAMS_EOF'
+phaseInterfaceKineticBilateralRelocation = true
+PARAMS_EOF
+
+# -----------------------------------------------------------------------------
+# CUDA/physics routing: same liquid/gas production chain used by x14/x23.
+# -----------------------------------------------------------------------------
+suite_export_cuda_flags_0434 "$RUN_MODE" "$TOPOLOGY"
+run_ok_surface_export_off_flags_0493x13zi
+
+export MPCD_Q6_PHASE_GAS_PRESSURE_0493X6G=1
+export MPCD_Q6_PHASE_GAS_PRESSURE_MODE_0493X6G=eos_accessible_volume
+export MPCD_Q6_PHASE_GAS_PRESSURE_REFERENCE_0493X6G="$P_REF"
+export MPCD_Q6_PHASE_GAS_PRESSURE_SCALE_0493X6G=1
+
+export MPCD_X10O_Q6_THERMAL_INTERFACE_WALL=1
+export MPCD_X10O_THERMAL_PARTICLE_MASS="$LIQUID_MASS"
+export MPCD_X10O_THERMAL_SIGMAS="${X10O_THERMAL_SIGMAS:-3.0}"
+export MPCD_X10O_THERMAL_MAX_CELLS="${X10O_THERMAL_MAX_CELLS:-0.75}"
+export MPCD_X10_KINETIC_INTERFACE_CIC=1
+export MPCD_X10_KINETIC_INTERFACE_QUADRATIC=1
+export MPCD_X10P_INITIAL_OVERLAP_RESOLUTION=1
+export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE=1
+export MPCD_X14L_GAS_SPECULAR_REFLECTION=1
+export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_SWAP=1
+export MPCD_X10_KINETIC_INTERFACE_ONE_FOR_ONE_NORMAL_ONLY=0
+export MPCD_X10_KINETIC_INTERFACE_THERMAL_PHASE_LIMITER=0
+export MPCD_X12A_LOCAL_THERMAL_COOLING=1
+export MPCD_X12A_LOCAL_THERMAL_RADIUS_CELLS="$X12A_LOCAL_THERMAL_RADIUS_CELLS"
+
+export MPCD_X14V_GAS_KINETIC_EXCESS_KICK="${MPCD_X14V_GAS_KINETIC_EXCESS_KICK:-1}"
+export MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION="${MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION:-1}"
+export MPCD_X14V_X6G_FACE_THERMO_TRACTION="${MPCD_X14V_X6G_FACE_THERMO_TRACTION:-0}"
+export MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION="${MPCD_X14V_X6G_GAUGE_FACE_THERMO_TRACTION:-0}"
+export MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION="${MPCD_X14V_X6G_GAUGE_RESULTANT_PROJECTION:-0}"
+export MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION="${MPCD_X14V_X6G_LOCAL_FACE_GAUGE_PROJECTION:-0}"
+export MPCD_X14V_SCATTER_LOSS_DIAGNOSTIC="${MPCD_X14V_SCATTER_LOSS_DIAGNOSTIC:-0}"
+export MPCD_X14V_REFERENCE_PRESSURE_GEOMETRIC_CLOSURE="${MPCD_X14V_REFERENCE_PRESSURE_GEOMETRIC_CLOSURE:-0}"
+
+# IMPORTANT: liquid touches the lower domain wall, so do not enable any
+# closed-component/global-resultant closure intended only for isolated liquid.
+export X14_DEVICE_Q6_RESULTANT_CLOSURE=0
+export MPCD_X14AI_DEVICE_Q6_RESULTANT_CLOSURE=0
+
+export MPCD_Q6_STATIC_DROP_DIAGNOSTICS_0493X9E=0
+export MPCD_Q6_ELLIPSE_DIAGNOSTICS_0493X9F=0
+export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9A=0
+export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9B=0
+export MPCD_Q6_PHASE_CURVATURE_DIAGNOSTICS_0493X9C=0
+export MPCD_CUDA_PERSISTENT_SRC_COLLISION_SKIP_WORKSPACE_DOWNLOAD_0272=1
+
+# Local LiveVis/recording control.
+suite_prepare_livevis_control_0434 "$RUN_ROOT" "$RUN_MODE"
+suite_export_livevis_0434
+
+suite_write_env_file_0434 "$RUN_ROOT/logs/environment_0493x23g.env" "$RUN_MODE"
+cat >> "$RUN_ROOT/logs/environment_0493x23g.env" <<META
+BENCHMARK=0493x23g_article_interface_quasi_isoviscous_L036_G08_A120
+GEOMETRY=S|L|G|S
+H=$H
+LIQUID_CELLS=$LIQUID_CELLS
+LIQUID_THICKNESS=$HL
+GAS_THICKNESS=$HG
+WALL_UX_BOTTOM=$WALL_UX_BOTTOM
+WALL_UX_TOP=$WALL_UX_TOP
+INIT_PROFILE=$INIT_PROFILE
+INIT_MU_RATIO=$INIT_MU_RATIO
+GAMMA=$GAMMA
+DT=$DT
+ROTATION_ANGLE=$ROTATION_ANGLE
+LIQUID_MASS=$LIQUID_MASS
+GAS_MASS=$GAS_MASS
+LIQUID_KBT=$LIQUID_KBT
+GAS_KBT=$GAS_KBT
+LIQUID_Q6_STRENGTH=$LIQUID_Q6_STRENGTH
+GAS_Q6_STRENGTH=$GAS_Q6_STRENGTH
+GAS_PRESSURE_REFERENCE=$P_REF
+SURFACE_TENSION_SIGMA=$SURFACE_TENSION_SIGMA
+MPCD_X14L_GAS_SPECULAR_REFLECTION=1
+MPCD_X14V_GAS_KINETIC_EXCESS_KICK=$MPCD_X14V_GAS_KINETIC_EXCESS_KICK
+MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION=$MPCD_X14V_SUBTRACT_X6G_THERMODYNAMIC_TRACTION
+ARTICLE_TRANSPORT_CASE=$ARTICLE_TRANSPORT_CASE
+ARTICLE_NU_L=$ARTICLE_NU_L
+ARTICLE_NU_G=$ARTICLE_NU_G
+ARTICLE_NU_L_STD=$ARTICLE_NU_L_STD
+ARTICLE_NU_G_STD=$ARTICLE_NU_G_STD
+ARTICLE_MU_G_OVER_MU_L_NOMINAL=$INIT_MU_RATIO
+META
+
+# Preflight with exact generated params and active routing.
+suite_preflight_run_ok_0492 "$PARAMS"
+
+echo
+echo "===== 0493x23g L/G INTERFACE QUASI-ISOVISCOUS COUETTE ====="
+echo "runRoot=$RUN_ROOT"
+echo "grid=${NX}x${NY} L=${Lx}x${Ly} h=$H particles=$NPART"
+echo "layout: wall ux=$WALL_UX_BOTTOM | liquid ${LIQUID_CELLS}h | gas $((NY-LIQUID_CELLS))h | wall ux=$WALL_UX_TOP"
+echo "fluid point: gamma=$GAMMA dt=$DT alpha=$ROTATION_ANGLE"
+echo "liquid: m=$LIQUID_MASS kBT=$LIQUID_KBT q6=$LIQUID_Q6_STRENGTH"
+echo "gas:    m=$GAS_MASS kBT=$GAS_KBT q6=$GAS_Q6_STRENGTH"
+echo "record: $RECORD_FIELDS every $RECORD_EVERY steps; smooth=0"
+echo "init: $INIT_PROFILE, muRatioSeed=$INIT_MU_RATIO"
+echo "article transport case: $ARTICLE_TRANSPORT_CASE"
+echo "independent viscosity references: nuL=$ARTICLE_NU_L (PASS) nuG=$ARTICLE_NU_G (PASS) muG/muL~$INIT_MU_RATIO"
+echo "run: steps=$STEPS dt=$DT tEnd=$(awk -v n="$STEPS" -v d="$DT" 'BEGIN{printf "%.9g",n*d}')"
+echo "=================================================="
+
+if suite_truthy_0434 "$PREFLIGHT_ONLY"; then
+  echo "[0493x23g] PREFLIGHT PASS; no simulation launched"
+  exit 0
+fi
+
+suite_run_binary_0434 "$PARAMS" "$LOG" "$TF" "$OUT"
+
+echo
+echo "[0493x23g] DONE"
+echo "[0493x23g] run=$RUN_ROOT"
+echo "[0493x23g] params=$PARAMS"
+echo "[0493x23g] recording=$OUT/recordings"

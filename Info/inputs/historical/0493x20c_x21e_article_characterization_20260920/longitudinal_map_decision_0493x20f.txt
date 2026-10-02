@@ -1,0 +1,14 @@
+0493x20f reduced longitudinal map — factual analysis
+campaign=/mnt/e/SRC_MPCD_DEV/SRC_GPU-SURF/runs/0493x20f_longitudinal_reduced_map
+Criteria for a resolved propagative mode: >=2/3 seeds with >=4 valid signed zero crossings, crossing fit R2>=0.98, window frequency variation <=10% when measurable, and seed CV(c)<=10%.
+Q6 projected-face quantity is the residual to the active divergence constraint; post-applied-cell quantity is absolute reconstructed divergence.
+case=ell_low model=src Ma=0.1 seeds=3 acoustic=PROPAGATIVE_RESOLVED c=0.35351161980676515 AL_tail=0.2794933717203763 Sdiv_initial=NA constraintResidual/pre=NA
+case=ell_low model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.03763857144577657 Sdiv_initial=0.003479968831025179 constraintResidual/pre=0.002434017654771582
+case=ell_high model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.07727233809395133 Sdiv_initial=NA constraintResidual/pre=NA
+case=ell_high model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.039772775395164106 Sdiv_initial=0.0034799688310251844 constraintResidual/pre=0.003709654401675786
+case=gamma6 model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.13716696855798394 Sdiv_initial=NA constraintResidual/pre=NA
+case=gamma6 model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.06255880403873297 Sdiv_initial=0.0030502781757659626 constraintResidual/pre=0.00210059223184544
+case=alpha30 model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.07704325667542812 Sdiv_initial=NA constraintResidual/pre=NA
+case=alpha30 model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.05223583470494526 Sdiv_initial=0.003479968831025183 constraintResidual/pre=0.004121624468760641
+case=alpha175 model=src Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.07704325667542812 Sdiv_initial=NA constraintResidual/pre=NA
+case=alpha175 model=src-q6-g-f Ma=0.1 seeds=3 acoustic=SUPPRESSED_OR_NONRESOLVABLE c=NA AL_tail=0.04355881234874034 Sdiv_initial=0.003479968831025184 constraintResidual/pre=0.0039266406102266916

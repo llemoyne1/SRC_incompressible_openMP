@@ -1,0 +1,59 @@
+0493x24b — Sato H/D=0.8 anchor before corrected-H/D campaign
+=============================================================
+Date: 2026-09-25
+Classification: EXPERIMENTATION (not strict historical reproduction)
+
+Article assertion addressed
+---------------------------
+Establish that the current code, with strongly penalized Brinkman nozzle walls,
+retains the previously observed Stage-A gas-jet/liquid-bath response at H/D=0.8
+before using the corrected fixed-length nozzle to investigate H/D=1.7 and later
+water/air similarity.
+
+Historical validation targeted
+------------------------------
+0493x14at_H0p8_Fr0p90_seed493205, common analysis window 3000:4000.
+Authoritative archived report values:
+  target Fr_m' = 0.9
+  measured Fr_m' = 0.585866384469
+  h/D = 0.686147221146
+  stability = PASS
+  relative drift = 0.00480608905447
+  late/early half delta = 0.00996629669984
+
+Three-column audit
+------------------
+Validation historical | Historical actual configuration | x24b candidate
+H/D                    | 0.8                             | 0.8 IDENTICAL
+D                      | 20 cells                        | 20 cells IDENTICAL
+liquid depth / D       | 10                              | 10 IDENTICAL
+Lx / D                 | 20                              | 20 IDENTICAL
+nozzle length          | 40 cells at H/D=0.8            | 40 cells IDENTICAL
+nozzle wall thickness  | 4 cells                         | 4 cells IDENTICAL
+seed                    | 493205                          | 493205 IDENTICAL
+analysis window         | 3000:4000                      | 3000:4000 IDENTICAL
+gas/liquid x14 family  | x14at runtime chain             | same intended chain; verify runtime artifacts
+Brinkman forcing        | mean, chiVP off                 | mean, chiVP off IDENTICAL in formulation
+alphaMax                | 2500                            | 800000 DIFFERENT intentionally
+runner                  | run_0493x14at_sato_stageA_campaign.sh | run_0493x24b_sato_anchor_H0p8_Fr0p90.sh DIFFERENT
+
+Decision contract
+-----------------
+1. If the measured incident Fr_m', cavity depth and stability remain close to the
+   historical H/D=0.8 anchor, proceed to the corrected H/D=1.7 geometry campaign.
+2. If they differ materially, attribute nothing yet to H/D; first diagnose the
+   effect of the stronger Brinkman wall on nozzle/jet development.
+3. Do not tune or relaunch until a positive result is obtained. REVIEW/negative
+   outcomes are retained and documented.
+
+Run contract
+------------
+steps = 4000
+analysis window = 3000:4000
+livevis_enable = 1
+livevis_every = 1
+livevis control = ./livevis_control.kv (never modified)
+filtered recording every = 100 steps
+dump/restart state every = 1000 steps
+RESTART supported by runner
+No C++/CUDA source modification.

@@ -1,0 +1,46 @@
+0493x24bc — Analyse offline du niveau libre / biais de volume géométrique
+Date: 25/09/2026
+
+But
+---
+Tester si l'élévation globale observée dans x24b/x24c peut être séparée en :
+  (i) excès d'aire géométrique du liquide reconstruit,
+  (ii) remontée physique du far field par redistribution autour de la cavité,
+  (iii) creusement local.
+
+Aucun nouveau run et aucune modification du solveur.
+
+Cas
+---
+- x24b : runs/0493x24b_sato_anchor_H0p8_Fr0p90_seed493205
+- x24c : runs/0493x24c_sato_corrected_H1p7_Fr0p90_seed493205
+- fenêtre de comparaison : steps 3000:4000
+
+Reconstruction
+--------------
+L'analyse reprend la convention de analyze_0493x14at_sato_stageA_recording.py :
+alpha = clip(rho_liquide_enregistre / masse_liquide_nominale_par_cellule,0,1),
+puis lissage cross lambda=0.125 avant extraction de l'isocontour alpha=0.5.
+
+Grandeurs
+---------
+A_L(t)             : aire géométrique de l'occupation liquide reconstruite.
+delta_eta_area     = [A_L(t)-A_L(t0)] / Lx.
+h_raw              = eta0 - etaMin.
+h_areaCorr         = h_raw + delta_eta_area.
+h_local            = etaFar - etaMin.
+etaFarCorr          = etaFar - delta_eta_area.
+
+Critère d'interprétation
+------------------------
+Une correction scalaire du niveau n'est crédible que si :
+1. delta_eta_area suit quantitativement le déplacement de la surface moyenne ;
+2. le mismatch entre les deux reste petit devant D ;
+3. h_areaCorr et/ou etaFarCorr deviennent sensiblement plus stationnaires que les grandeurs brutes.
+Sinon le biais n'est pas assimilable à une translation uniforme et ne doit pas être corrigé ainsi pour l'article.
+
+Attention
+---------
+A_L est une grandeur GEOMETRIQUE issue du champ d'occupation et non la masse particulaire.
+La masse liquide globale doit rester vérifiée séparément par les artefacts du run.
+La profondeur corrigée est un diagnostic de qualification, pas encore une observable article.
